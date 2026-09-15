@@ -12,3 +12,6 @@ Osmia handles the work between them and stops at delivery.
 
 **Under construction.** See the [design](docs/design.md) for the intended product
 and the [milestones](https://github.com/kpenfound/osmia/milestones) for the build order.
+
+The [core adapter boundary](docs/core-adapter.md) maps execution contracts to the
+pinned dependency and records upstream capability gaps.
