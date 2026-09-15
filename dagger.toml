@@ -1,0 +1,16 @@
+# Dagger workspace configuration
+# Install modules with: dagger module install <module>
+# Example:
+#   dagger module install github.com/dagger/dagger/modules/wolfi
+
+[modules]
+
+[modules.go]
+source = "dagger.io/go"
+
+[modules.go.settings]
+# Match the toolchain used by the core dependency and keep factory state out
+# of module discovery, including any go.mod files left in session directories.
+base = "golang:1.26-bookworm"
+test = ["**", "!.bees/**"]
+generate = ["**", "!.bees/**"]
