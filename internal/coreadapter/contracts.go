@@ -116,6 +116,11 @@ type BackendSession struct{ Backend, ID string }
 // History is rendered from the owned log when backend resume is unavailable.
 // AllowedOutcomes is an allowlist: an empty list accepts no reported status.
 type PreparedTurn struct {
+	Execution ExecutionSettings
+	// Cleanup transfers per-turn leases to Run; other leases remain service-owned.
+	Cleanup                                         []Lease
+	WorkspaceLease                                  *WorkspaceLease
+	RetainWorkspace                                 bool
 	Scope                                           Scope
 	Profile                                         Profile
 	Sandbox                                         SandboxLease

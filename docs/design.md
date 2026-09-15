@@ -2,7 +2,7 @@
 
 A personal software factory for long-running feature work on repositories you contribute to but do not own. It is configured at the user level, keeps its factory state outside the repository it works on, is driven by a person through one aide, and shares one pool of agent capacity across several workstreams on several projects.
 
-Status: design v0.2, 2026-09-15. Product implementation has not started. This document is the source of truth for feature proposals and implementation. Milestones phase the work; an issue does not override the design. Osmia uses `github.com/kpenfound/busybees/core` as a Go dependency and supports an optional Hearsay memory integration. Section 17 defines those boundaries and section 18 records the implementation order.
+Status: design v0.2, 2026-09-15. M1 implementation is under construction. This document is the source of truth for feature proposals and implementation. Milestones phase the work; an issue does not override the design. Osmia uses `github.com/kpenfound/busybees/core` as a Go dependency and supports an optional Hearsay memory integration. Section 17 defines those boundaries and section 18 records the implementation order.
 
 ---
 
