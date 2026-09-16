@@ -5,8 +5,8 @@ HTTP/JSON over the configured Unix socket until its context is cancelled.
 `RunSignals` also handles SIGINT and SIGTERM. Both run in the foreground and wait
 for cleanup. Embedders can use `Start`, `Socket`, `Wait` and `Close`; a successful
 `Start` means the stores are loaded and the listener is bound. No models,
-scheduler, TCP listeners or authentication service are started. Agent turns run
-only when an embedder supplies a turn reconciler (see below).
+TCP listeners or authentication service are started. Agent turns run only when
+an embedder supplies a turn reconciler (see below).
 
 The root and its top-level configuration must already exist; a project is not
 required, and one is registered through the API (see below). The service
@@ -100,7 +100,8 @@ to finish. They never include raw file contents or parser output.
 
 Health readiness means the loaded stores can serve requests; disk diagnostics do
 not discard that valid view. Reload application, lifecycle endpoints, streaming,
-web/tailnet access and scheduling effects are outside M1.
+web/tailnet access, and capacity, pause and parking effects on scheduling are
+outside M1.
 
 
 The service opens the active project's existing trace and starts the
@@ -194,3 +195,35 @@ fake engines.
 librarian's extraction turns run in. Without it every extraction fails with a
 recorded reason, so a service without an enforcing engine still registers
 projects and reports the failure in status.
+
+With `Options.Threads` set, the service also runs queued workstream turns on its
+own, and its scheduler replaces any `Schedule` hook in `Options.Reconciliation`.
+At the start of every reconciliation pass, `internal/scheduler` reads each
+workstream's threads and turn operations. For every thread with no turn in
+flight, it publishes a `thread-turn` operation for the oldest unfinished turn,
+and the same pass delivers it through the thread dispatcher. A turn is in flight
+while its thread holds a claim, or while the turn has an operation and has not
+completed. A thread therefore never has two turns in flight, and a message
+queued mid-turn runs as the thread's next turn once the current one completes.
+Turns already covered by a turn operation that the dispatcher accepts, including
+one an embedder published, are left alone; an operation whose input the
+dispatcher refuses covers no turn and is retried by the controller. The pass
+makes no model call.
+
+While the service runs, embedders accept turns with `EnqueueTurn` alone and let
+the scheduler publish the operation. An embedder that publishes its own turn
+operation must do so before the service opens the trace, or while an earlier
+turn of the same thread is in flight. Otherwise the scheduler can publish first
+and the turn gets two operations and two transitions; the dispatcher still runs
+it once.
+
+Each dispatch is a transition on the thread's workflow subject
+`scheduler.Subject(agent)` (`dispatch_` and the first 40 hex digits of the
+SHA-256 of the agent ID). Its ID derives from the agent and turn IDs, its cause
+and depth are the request's, its actor is `service`/`scheduler`, and its target
+state is the turn ID. After a restart, an in-flight turn is recovered through its
+existing operation, as the [turn dispatch](trace.md#turn-dispatch) table
+describes: it is neither dispatched again nor lost. `scheduler.Options.Admit` is
+the single dispatch gate; the service admits every candidate. The scheduler
+never publishes the librarian's `kb-extract` action; the service reconciles
+that itself, as above.
