@@ -341,6 +341,9 @@ func TestHandInStatusCodes(t *testing.T) {
 	if code := handInStatus(t, f.s, body); code != http.StatusOK {
 		t.Fatalf("hand-in status %d", code)
 	}
+	if code := handInStatus(t, f.s, `{"project":"`+string(f.project)+`","key":"k","stdin":"other"}`); code != http.StatusConflict {
+		t.Fatalf("key conflict status %d", code)
+	}
 	if code := handInStatus(t, f.s, `{"project":"`+string(f.project)+`","key":"k","paths":["/tmp/a"]}`); code != http.StatusBadRequest {
 		t.Fatalf("unknown field status %d", code)
 	}

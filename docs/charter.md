@@ -65,5 +65,5 @@ many rules it has, the recorded revision and any numbering diagnostics. The
 same data is `project.charter_state` in the `/v1/config` response.
 
 `osmia handin` checks the charter first. With an empty charter it fails with
-`charter_empty`, naming the project and the path to `charter.md`. See the
-[command line](cli.md) for its current behaviour.
+`charter_empty`, naming the project and the path to `charter.md`, and
+creates nothing. See the [command line](cli.md) for the rest of hand-in.

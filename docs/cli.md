@@ -69,13 +69,22 @@ osmia status --json
   `active_projects` and closes its runtime state. The trace directory and the
   clone are kept. Adding the same upstream again afterwards creates a new
   project ID and a new trace; see [configuration](configuration.md#project-registration).
-- `handin <project-id> [path...]` hands work to the active project. Paths are
-  made absolute by the client. It first checks the charter: with no rules it
-  fails with `charter_empty` (exit 4), naming the project and the path to its
-  `charter.md`. A project ID that is not the active project fails with
-  `not_found` (exit 4). With a charter that has rules it currently fails with
-  `unsupported` (exit 5): the hand-in itself is not implemented yet, and no
-  workstream is created.
+- `handin <project-id> <path|issue-url|->` hands one input to the active
+  project and creates a workstream in state `handed`. The input is a file
+  (made absolute by the client and read by the service), a GitHub issue URL
+  (`https://github.com/OWNER/REPO/issues/NUMBER`, fetched by the service), or
+  `-` for stdin (read by the client, at most 512 KiB). The output names the
+  workstream ID, its state, the path of the copy under the trace's
+  `workstreams/<id>/handed/` and the recorded source. The client sends a new
+  idempotency key with each command, so a request the API retries creates one
+  workstream, and running the command again creates another. A project whose
+  charter has no rules fails with `charter_empty` (exit 4), naming the project
+  and the path to its `charter.md`. A project ID that is not the active project
+  fails with `not_found` (exit 4). An unreadable, empty, non-UTF-8 or oversized
+  input, or a URL of another shape, fails with `validation` (exit 4); an issue
+  the service cannot fetch fails with `internal` (exit 5). A refused hand-in
+  creates nothing. See [service](service.md#hand-in) for what is
+  recorded. The architect is not started.
 - `pause <all|project-id|workstream-id> [--hard] [--reason TEXT]` stores an
   operator pause; the default mode is soft.
 - `resume <all|project-id|workstream-id>` clears that scope's pause. Parent pauses
@@ -141,7 +150,7 @@ never raw file contents.
 | 1 | Invalid API response, local output or unexpected client failure |
 | 2 | Invalid command, flags, arguments or root |
 | 3 | Missing socket, connection failure or unavailable service |
-| 4 | API malformed-input or validation rejection, no project is configured, unknown project or workstream, or empty charter on hand-in |
+| 4 | API malformed-input or validation rejection, no project is configured, unknown project or workstream, empty charter on hand-in, or stdin over the hand-in limit |
 | 5 | API conflict, project already active, unsupported operation, restart required or internal failure |
 | 6 | Foreground startup/service failure, including ownership conflict |
 
@@ -152,7 +161,7 @@ live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
 Detached management, install/upgrade commands, completion, web/tailnet,
-the librarian's knowledge-base extraction on add, hand-in past the charter check, inbox, ratification,
+the architect's drafting after hand-in, inbox, ratification,
 answer, reload and trace navigation are unavailable. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.

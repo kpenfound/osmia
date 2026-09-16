@@ -47,7 +47,7 @@ client to release idle connections. API version 1 uses snake_case JSON fields.
 | GET | `/conversation/<workstream-id>` | `ConversationResponse`: the workstream's conversation with its chief of staff |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
-| POST | `/handin` | `HandInRequest`: project, paths; checks the charter, then returns `unsupported` |
+| POST | `/handin` | `HandInRequest`: project, key, and one of path, url and stdin; returns `HandInResponse` |
 | PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason, source |
 | DELETE | `/runtime/pause` | `ClearPauseRequest`: scope, project, workstream |
 | PUT | `/runtime/priority` | `PriorityRequest`: project, workstreams |
@@ -84,7 +84,7 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 | --- | --- | --- |
 | `malformed_input` | 400 | Malformed, ambiguous, unknown-field or oversized JSON |
 | `validation` | 422 | Invalid override or unavailable reference |
-| `conflict` | 409 | Runtime file changed outside the store |
+| `conflict` | 409 | Runtime file changed outside the store, or a hand-in key reused for other input |
 | `unsupported` | 501 | Unknown path/method or later-milestone operation, including POST `/reload` |
 | `restart_required` | 409 | PUT `/config/root` or `/config/listen` |
 | `unavailable` | 503 | Service shutting down; also the client's code for transport failure |
@@ -140,13 +140,47 @@ the file. A configured project with no trace repository has no charter state
 and no charter diagnostic. The project view returned by `POST` and `DELETE /v1/projects` carries
 no charter state.
 
-`POST /v1/handin` takes a project ID and a list of paths. The service does not
-check the paths; `osmia handin` sends them as absolute paths. A malformed
-project ID returns `validation`. An ID that is not the active project returns
-`not_found`; an active project with no trace repository returns `internal`.
-The charter gate runs next: an empty charter returns `charter_empty` with a
-message naming the project and its `charter.md`. With rules, hand-in returns
-`unsupported`, naming the project and its rule count. See [charter](charter.md).
+## Hand-in
+
+`POST /v1/handin` creates a workstream from one input. The request carries the
+project ID, a `key` that identifies the request, and exactly one of `path` (a
+clean absolute path to a regular file the service reads), `url` (a GitHub issue,
+`https://github.com/OWNER/REPO/issues/NUMBER`) and `stdin` (the input text).
+Checks run in this order, and a refused request writes nothing:
+
+1. A malformed project ID returns `validation`. An ID that is not the active
+   project, including a removed one, returns `not_found`; an active project
+   with no trace repository returns `internal`.
+2. The charter gate: an empty charter returns `charter_empty` with a message
+   naming the project and its `charter.md`. See [charter](charter.md).
+3. A `key` that is not 1 to 128 letters, digits, `_` or `-` (starting with a
+   letter or digit), no input or more than one, a path that is not clean and
+   absolute, or a URL of another shape returns `validation`.
+4. The input is read. A missing or unreadable file, a file that is not regular,
+   and input that is empty, not UTF-8 or larger than 512 KiB return
+   `validation`. An issue the service cannot fetch returns `internal`.
+
+The service fetches issues itself, with the GitHub REST API and the
+`GITHUB_TOKEN` of its own environment when set. The token never reaches a
+session or the trace. An issue is stored as Markdown: its title as a heading,
+then its body.
+
+The workstream ID is derived from the project and the key. The service creates
+the workstream with its chief-of-staff thread, copies the input byte for byte
+to `workstreams/<id>/handed/<name>` with its source (see
+[trace](trace.md#files-and-records)), and records the feature transition `-> handed` in
+`events.jsonl` with the owner as actor and a reason naming the copy and its
+source. The same transaction queues a notice for the chief of staff. `<name>`
+is the file's base name, or `input` when the trace does not accept that name,
+`issue-<number>.md` for an issue and `stdin` for stdin.
+
+The response is a `HandInResponse`: `project`, `workstream`, `state`
+(`handed`), `handed` (the absolute path of the copy) and `source`. A request
+repeating a key returns the same response without reading the input again or
+writing anything; a hand-in interrupted part way is finished by the retry. The
+same key with another source, or other stdin text, returns `conflict` naming
+the key and the workstream. A storage failure returns `internal` and names the
+workstream; retry with the same key.
 
 ## Workstream status
 

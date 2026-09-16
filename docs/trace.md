@@ -35,7 +35,7 @@ does not infer authority, readiness or workflow transitions from them.
 
 | Go record | File relative to the project or workstream | Payload |
 | --- | --- | --- |
-| `Document` | `documents.jsonl` and its document path | Path and complete content of each revision |
+| `Document` | `documents.jsonl` and its document path | Path and complete content of each revision; a handed document also records its source |
 | `Transition` | `events.jsonl` | Subject, prior/resulting state and reason |
 | `Question` | `questions/<id>/question.jsonl` | Asking actor, original question and owner-facing text |
 | `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer and affected references |
@@ -48,6 +48,8 @@ does not infer authority, readiness or workflow transitions from them.
 Only documents can be project-scoped. Project document paths are `charter.md`,
 `kb/entities.json`, `kb/<name>.md` and `notes/<role>.md`; workstream document paths
 are `spec.md`, `plan.json` and `handed/<name>`. Handed inputs are immutable.
+Only a handed document carries a `source`: `file:` and the absolute path it was
+read from, the issue URL, or `stdin`.
 Document paths retain one record identity. Agent role and thread IDs stay stable
 across backend-session revisions. An agent may have no backend session before
 its first turn. Failed execution may have no session identity when it includes
