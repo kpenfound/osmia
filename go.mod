@@ -3,6 +3,7 @@ module github.com/kpenfound/osmia
 go 1.26.6
 
 require (
+	github.com/BurntSushi/toml v1.4.0
 	github.com/kpenfound/busybees/core v0.0.0-20260915214133-94e7a8d3105e
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 )
