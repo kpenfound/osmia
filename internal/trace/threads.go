@@ -189,6 +189,51 @@ func (r *Repository) CreateThread(ctx context.Context, agent Agent) error {
 	return r.saveThread(ctx, agent.Workstream, log, agent)
 }
 
+// ChiefOfStaff is the agent and thread ID of a workstream's chief-of-staff
+// thread.
+const ChiefOfStaff = "chief_of_staff"
+
+// EnsureChiefOfStaff creates the workstream's chief-of-staff thread unless it
+// already exists, and returns the thread. The first creation fixes the identity's
+// timestamp and actor; later calls leave it unchanged.
+func (r *Repository) EnsureChiefOfStaff(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor) (Thread, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ensureChiefOfStaff(ctx, stream, at, actor)
+}
+
+func (r *Repository) ensureChiefOfStaff(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor) (Thread, error) {
+	log, _, err := r.loadWorkflow(stream)
+	if err != nil {
+		return Thread{}, err
+	}
+	if t, ok := log.Threads[ChiefOfStaff]; ok {
+		if t.Identity.Role != ChiefOfStaff || t.Identity.ThreadID != ChiefOfStaff {
+			return Thread{}, fmt.Errorf("%w: agent %s has another role", ErrConflict, ChiefOfStaff)
+		}
+		return r.snapshot(t), nil
+	}
+	agent := Agent{Header: Header{Schema: "osmia.trace.agent", Version: Version, ID: ChiefOfStaff, Revision: 1, Project: r.project, Workstream: stream, At: at, Actor: actor, Cause: "chief-of-staff-create"}, Role: ChiefOfStaff, ThreadID: ChiefOfStaff}
+	if err := validate(agent); err != nil {
+		return Thread{}, err
+	}
+	if log.Threads == nil {
+		log.Threads = map[string]Thread{}
+	}
+	t := Thread{Identity: agent, Status: "idle"}
+	log.Threads[ChiefOfStaff] = t
+	if err := r.saveThread(ctx, stream, log, agent); err != nil {
+		return Thread{}, err
+	}
+	return t, nil
+}
+
+// ChiefOfStaffThread returns a snapshot of the workstream's chief-of-staff
+// thread, or os.ErrNotExist before it is created.
+func (r *Repository) ChiefOfStaffThread(stream config.WorkstreamID) (Thread, error) {
+	return r.Thread(stream, ChiefOfStaff)
+}
+
 // Thread returns a detached snapshot. A claim from a previous service session
 // without a captured result is exposed as interrupted, never eligible for retry.
 func (r *Repository) Thread(stream config.WorkstreamID, agent string) (Thread, error) {
@@ -202,12 +247,16 @@ func (r *Repository) Thread(stream config.WorkstreamID, agent string) (Thread, e
 	if !ok {
 		return Thread{}, os.ErrNotExist
 	}
+	return r.snapshot(t), nil
+}
+
+func (r *Repository) snapshot(t Thread) Thread {
 	for _, q := range t.Turns {
 		if q.Request.TurnID == t.Active && q.Response == nil && q.Claim.ServiceSession != r.session {
 			t.Status = "interrupted"
 		}
 	}
-	return t, nil
+	return t
 }
 
 // EnqueueTurn fixes the request and its profile at acceptance. Sequence numbers

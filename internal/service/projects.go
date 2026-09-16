@@ -25,7 +25,10 @@ type pendingProject struct {
 	Project config.Project `json:"project"`
 }
 
-var registrationActor = trace.Actor{Kind: "owner", ID: "local"}
+var (
+	registrationActor = trace.Actor{Kind: "owner", ID: "local"}
+	serviceActor      = trace.Actor{Kind: "service", ID: "osmia"}
+)
 
 func (s *Service) step(name string) error {
 	if s.boundary != nil {

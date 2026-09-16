@@ -368,6 +368,10 @@ func (r *Repository) manifest(name, schema string, stream config.WorkstreamID) e
 	return nil
 }
 
+// CreateWorkstream commits a new workstream and then creates its
+// chief-of-staff thread. An error from the thread write leaves the workstream
+// committed; EnsureChiefOfStaff creates the missing thread. An existing
+// workstream is refused with ErrConflict.
 func (r *Repository) CreateWorkstream(ctx context.Context, id config.WorkstreamID, at time.Time, actor Actor) error {
 	if err := config.CheckWorkstreamIDs(id); err != nil {
 		return err
@@ -418,7 +422,11 @@ func (r *Repository) CreateWorkstream(ctx context.Context, id config.WorkstreamI
 		}
 		paths = append(paths, name)
 	}
-	return r.commit(ctx, paths, "Create workstream trace")
+	if err := r.commit(ctx, paths, "Create workstream trace"); err != nil {
+		return err
+	}
+	_, err = r.ensureChiefOfStaff(ctx, id, at, actor)
+	return err
 }
 
 func (r *Repository) Workstreams() ([]config.WorkstreamID, error) {
