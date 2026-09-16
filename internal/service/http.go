@@ -71,11 +71,12 @@ func (s *Service) configuration() ConfigResponse {
 	out := ConfigResponse{Root: cfg.Root.String(), Digest: digest(cfg), Effective: cfg, Diagnostics: []Diagnostic{}}
 	if cfg.HasProject() {
 		view := projectView(cfg.Root, cfg.Project)
+		// A project without a trace has no charter to report.
 		state, err := s.charterState()
-		if err != nil {
-			out.Diagnostics = append(out.Diagnostics, Diagnostic{"charter", Internal, "cannot read or record the charter; check " + view.Charter + " and the trace repository"})
-		} else {
+		if err == nil {
 			view.CharterState = &state
+		} else if !errors.Is(err, errNoTrace) {
+			out.Diagnostics = append(out.Diagnostics, Diagnostic{"charter", Internal, "cannot read or record the charter; check " + view.Charter + " and the trace repository"})
 		}
 		out.Project = &view
 	} else {

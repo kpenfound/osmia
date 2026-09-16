@@ -11,7 +11,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-var errNoActiveProject = errors.New("no active project")
+var (
+	errNoActiveProject = errors.New("no active project")
+	errNoTrace         = errors.New("project has no trace")
+)
 
 // loadCharter returns the active project's charter through the trace, which
 // records any owner edit first. Every service reader of the charter goes
@@ -20,8 +23,11 @@ func (s *Service) loadCharter(ctx context.Context, id config.ProjectID) (trace.D
 	s.mu.Lock()
 	active, cfg := s.active, s.cfg
 	s.mu.Unlock()
-	if active == nil || !cfg.HasProject() || cfg.Project.ID != id {
+	if !cfg.HasProject() || cfg.Project.ID != id {
 		return trace.Document{}, charter.Charter{}, errNoActiveProject
+	}
+	if active == nil {
+		return trace.Document{}, charter.Charter{}, errNoTrace
 	}
 	doc, err := active.repository.Charter(ctx, time.Now().UTC())
 	if err != nil {
@@ -50,6 +56,9 @@ func (s *Service) handIn(ctx context.Context, req HandInRequest) *APIError {
 		return &APIError{NotFound, fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
 	path := projectView(cfg.Root, config.Project{ID: req.Project}).Charter
+	if errors.Is(err, errNoTrace) {
+		return &APIError{Internal, fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
+	}
 	if err != nil {
 		return &APIError{Internal, fmt.Sprintf("cannot read or record the charter of project %s; check %s and the trace repository", req.Project, path)}
 	}
