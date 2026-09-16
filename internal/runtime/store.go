@@ -4,6 +4,7 @@ package runtime
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -38,7 +39,13 @@ type State struct {
 	Priorities []Priority        `json:"priorities,omitempty"`
 	Profiles   map[string]string `json:"profiles,omitempty"`
 }
-type Diagnostic struct{ Field, Reason string }
+type Diagnostic struct {
+	Field  string `json:"field"`
+	Reason string `json:"reason"`
+}
+
+var ErrValidation = errors.New("invalid runtime override")
+var ErrConflict = errors.New("runtime changed outside this store")
 
 // Inputs contains a validated config and the active project's persisted keys.
 // Workstreams must come from the record repository, never display names or a
@@ -302,10 +309,10 @@ func (s *Store) mutate(f func(*State, Inputs) error) error {
 	defer s.mu.Unlock()
 	next := clone(s.state)
 	if err := f(&next, s.input); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	if err := validate(next); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	slices.SortFunc(next.Pauses, func(a, b Pause) int {
 		return strings.Compare(a.Target.Scope+string(a.Target.Project)+string(a.Target.Workstream), b.Target.Scope+string(b.Target.Project)+string(b.Target.Workstream))
@@ -429,4 +436,11 @@ func uniqueKeys(d *json.Decoder) error {
 	}
 	_, err = d.Token()
 	return err
+}
+
+// CheckDisk detects external edits without replacing the acknowledged view.
+func (s *Store) CheckDisk() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.checkDisk()
 }

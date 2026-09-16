@@ -2,8 +2,9 @@
 
 `internal/config.Load` reads and validates the entire declarative configuration.
 It returns a configuration only when both files pass. It creates no directories,
-repositories, sockets or state and does not launch agents. Service startup,
-onboarding, reload and migrations are separate work.
+repositories, sockets or state and does not launch agents. The
+[local service](service.md) owns startup and the Unix socket. Onboarding,
+reload and migrations are separate work.
 
 ## Root and identity
 
