@@ -24,7 +24,7 @@ entity map the caller has already validated and commits it as revision 1 of
 the `kb-entities` document. The [local entity map](knowledge-base.md) reference
 describes the file. Workstream creation initializes `handed/`, `shed/`, `amendments/`,
 `questions/`, `units/` and `agents/`, plus the empty document, transition and cost
-logs. Spec and plan files appear when their first document revision is appended.
+logs, and the chief-of-staff thread. Spec and plan files appear when their first document revision is appended.
 Empty directories exist on disk; Git records files.
 
 Every record carries a schema named `osmia.trace.<kind>`, version `1`, record ID,
@@ -250,6 +250,16 @@ thread snapshot retains its current backend-session reference and status.
 claim, captured response and completion time. The initial identity remains in
 `agents/<id>/identity.jsonl`; the latest session is in the thread snapshot and
 its captured responses. Managed identity and turn records cannot use `Append`.
+
+Every workstream has exactly one chief-of-staff thread, with agent, role and
+thread ID `chief_of_staff` (`trace.ChiefOfStaff`). `CreateWorkstream` creates it
+after committing the workstream. `EnsureChiefOfStaff` creates it for a
+workstream that lacks one and otherwise returns the existing thread unchanged,
+so repeated and concurrent calls leave one identity; an existing
+`chief_of_staff` agent with another role or thread ID is refused with
+`ErrConflict`. `ChiefOfStaffThread` looks the thread up. When the service opens
+a project's trace, at startup or on activation, it ensures the thread for every
+workstream.
 
 `EnqueueTurn` atomically appends the request to `agents/<id>/log.jsonl` and the
 thread queue. Acceptance under the repository lock assigns consecutive sequence
