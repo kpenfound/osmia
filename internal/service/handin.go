@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -80,26 +81,59 @@ func (s *Service) handIn(ctx context.Context, req HandInRequest) (HandInResponse
 		return HandInResponse{}, api
 	}
 
-	s.handInMu.Lock()
-	defer s.handInMu.Unlock()
 	repository, err := s.repository(req.Project)
+	if errors.Is(err, errNoTrace) {
+		return HandInResponse{}, &APIError{Internal, fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
+	}
 	if err != nil {
 		return HandInResponse{}, &APIError{NotFound, fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
-	stream := HandInWorkstream(req.Project, req.Key)
-	failed := func(step string) (HandInResponse, *APIError) {
-		return HandInResponse{}, &APIError{Internal, fmt.Sprintf("hand-in to project %s failed while %s workstream %s; retry with the same key, or check %s", req.Project, step, stream, view.Trace)}
+	h := handIn{s: s, repository: repository, req: req, stream: HandInWorkstream(req.Project, req.Key), source: source, name: name, trace: view.Trace}
+	// A key whose input is already copied finishes without reading it again.
+	if out, done, api := h.record(ctx, nil); done || api != nil {
+		return out, api
 	}
+	// The input is read without holding the hand-in lock, so a slow fetch does
+	// not hold up other hand-ins.
+	content, api := s.readHanded(ctx, req)
+	if api != nil {
+		return HandInResponse{}, api
+	}
+	out, _, api := h.record(ctx, &content)
+	return out, api
+}
+
+type handIn struct {
+	s            *Service
+	repository   *trace.Repository
+	req          HandInRequest
+	stream       config.WorkstreamID
+	source, name string
+	trace        string
+}
+
+func (h handIn) failed(step string) (HandInResponse, bool, *APIError) {
+	return HandInResponse{}, false, &APIError{Internal, fmt.Sprintf("hand-in to project %s failed while %s workstream %s; retry with the same key, or check %s", h.req.Project, step, h.stream, h.trace)}
+}
+
+// record finishes the hand-in under the hand-in lock. With the input already
+// copied it checks the copy matches the request and records the transition.
+// Otherwise, with content nil it reports not done; with content it creates
+// the workstream, copies content and records the transition.
+func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bool, *APIError) {
+	h.s.handInMu.Lock()
+	defer h.s.handInMu.Unlock()
+	repository, req, stream := h.repository, h.req, h.stream
 	streams, err := repository.Workstreams()
 	if err != nil {
-		return failed("reading")
+		return h.failed("reading")
 	}
 	exists := slices.Contains(streams, stream)
 	var doc *trace.Document
 	if exists {
 		docs, err := trace.Read[trace.Document](repository, stream)
 		if err != nil {
-			return failed("reading")
+			return h.failed("reading")
 		}
 		for _, d := range docs {
 			if d.ID == handedDocument {
@@ -107,14 +141,13 @@ func (s *Service) handIn(ctx context.Context, req HandInRequest) (HandInResponse
 			}
 		}
 	}
-	if doc != nil && (doc.Source != source || req.Stdin != nil && doc.Content != *req.Stdin) {
-		return HandInResponse{}, &APIError{Conflict, fmt.Sprintf("key %s already handed in other input as workstream %s; use a new key", req.Key, stream)}
+	if doc != nil && (doc.Source != h.source || req.Stdin != nil && doc.Content != *req.Stdin) {
+		return HandInResponse{}, false, &APIError{Conflict, fmt.Sprintf("key %s already handed in other input as workstream %s; use a new key", req.Key, stream)}
+	}
+	if doc == nil && content == nil {
+		return HandInResponse{}, false, nil
 	}
 	if doc == nil {
-		content, api := s.readHanded(ctx, req)
-		if api != nil {
-			return HandInResponse{}, api
-		}
 		now := time.Now().UTC()
 		if exists {
 			_, err = repository.EnsureChiefOfStaff(ctx, stream, now, ownerActor)
@@ -122,23 +155,23 @@ func (s *Service) handIn(ctx context.Context, req HandInRequest) (HandInResponse
 			err = repository.CreateWorkstream(ctx, stream, now, ownerActor)
 		}
 		if err != nil {
-			return failed("creating")
+			return h.failed("creating")
 		}
 		doc = &trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: handedDocument, Revision: 1, Project: req.Project, Workstream: stream, At: now, Actor: ownerActor, Cause: handInTransition},
-			Path: "handed/" + name, Content: content, Source: source}
+			Path: "handed/" + h.name, Content: *content, Source: h.source}
 		if err := repository.Append(ctx, *doc); err != nil {
-			return failed("copying the input into")
+			return h.failed("copying the input into")
 		}
 	}
 	// The transition carries the handed document's timestamp, so a retry
 	// repeats the committed transition exactly.
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: handInTransition, Revision: 1, Project: req.Project, Workstream: stream, At: doc.At, Actor: ownerActor, Cause: handInTransition}
-	state, err := repository.SetFeatureState(ctx, h, HandedState, "the owner handed in "+doc.Path+" from "+source)
+	header := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: handInTransition, Revision: 1, Project: req.Project, Workstream: stream, At: doc.At, Actor: ownerActor, Cause: handInTransition}
+	state, err := repository.SetFeatureState(ctx, header, HandedState, "the owner handed in "+doc.Path+" from "+h.source)
 	if err != nil {
-		return failed("recording the handed state of")
+		return h.failed("recording the handed state of")
 	}
 	return HandInResponse{Project: req.Project, Workstream: stream, State: state.Value,
-		Handed: filepath.Join(view.Trace, "workstreams", string(stream), filepath.FromSlash(doc.Path)), Source: source}, nil
+		Handed: filepath.Join(h.trace, "workstreams", string(stream), filepath.FromSlash(doc.Path)), Source: h.source}, true, nil
 }
 
 // handInSource returns the recorded source of the request's input and the
@@ -178,12 +211,21 @@ func (s *Service) readHanded(ctx context.Context, req HandInRequest) (string, *A
 	var content string
 	switch {
 	case req.Path != "":
-		f, err := os.Open(req.Path)
+		// Only a regular file is opened, and without blocking: opening a FIFO
+		// would wait for a writer.
+		info, err := os.Stat(req.Path)
+		if err != nil {
+			return "", &APIError{Validation, fmt.Sprintf("cannot read %s; check that the file exists and is readable", req.Path)}
+		}
+		if !info.Mode().IsRegular() {
+			return "", &APIError{Validation, fmt.Sprintf("%s is not a regular file", req.Path)}
+		}
+		f, err := os.OpenFile(req.Path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 		if err != nil {
 			return "", &APIError{Validation, fmt.Sprintf("cannot read %s; check that the file exists and is readable", req.Path)}
 		}
 		defer f.Close()
-		info, err := f.Stat()
+		info, err = f.Stat()
 		if err != nil || !info.Mode().IsRegular() {
 			return "", &APIError{Validation, fmt.Sprintf("%s is not a regular file", req.Path)}
 		}

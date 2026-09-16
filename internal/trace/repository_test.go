@@ -201,7 +201,7 @@ func TestProjectDocumentsAndImmutableInput(t *testing.T) {
 	d.Header = header("document", "input1")
 	d.Revision = 1
 	d.Path = "handed/design.jsonl"
-	for _, source := range []string{" ", "file:/a\nb"} {
+	for _, source := range []string{" ", "file:/a\nb", "file:/a\rb", "file:/a\x00b"} {
 		d.Source = source
 		if err := r.Append(context.Background(), d); err == nil {
 			t.Fatalf("source %q accepted", source)

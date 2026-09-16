@@ -73,7 +73,9 @@ osmia status --json
   project and creates a workstream in state `handed`. The input is a file
   (made absolute by the client and read by the service), a GitHub issue URL
   (`https://github.com/OWNER/REPO/issues/NUMBER`, fetched by the service), or
-  `-` for stdin (read by the client, at most 512 KiB). The output names the
+  `-` for stdin (read by the client, at most 512 KiB of UTF-8 text; the client
+  refuses larger or non-UTF-8 stdin itself with exit 4, before sending a
+  request, and that message has no `validation:` prefix). The output names the
   workstream ID, its state, the path of the copy under the trace's
   `workstreams/<id>/handed/` and the recorded source. The client sends a new
   idempotency key with each command, so a request the API retries creates one
@@ -131,7 +133,9 @@ API's conversation response (see [conversation](service.md#conversation)).
 Mutations return `mutation` (the API acknowledgement) and `runtime`
 (the subsequent effective-state response). Project commands return the API's
 project response: the project view (ID, name, upstream, fork, clone, base
-branch, trace and charter paths) and `next_step`. Output is one JSON value plus
+branch, trace and charter paths) and `next_step`. `handin` returns the API's
+hand-in response: `project`, `workstream`, `state`, `handed` (the absolute
+path of the copy) and `source`. Output is one JSON value plus
 newline, without progress text. Profile map keys are sorted in human output and
 JSON. The responses are separate API requests, not an atomic snapshot.
 
@@ -150,7 +154,7 @@ never raw file contents.
 | 1 | Invalid API response, local output or unexpected client failure |
 | 2 | Invalid command, flags, arguments or root |
 | 3 | Missing socket, connection failure or unavailable service |
-| 4 | API malformed-input or validation rejection, no project is configured, unknown project or workstream, empty charter on hand-in, or stdin over the hand-in limit |
+| 4 | API malformed-input or validation rejection, no project is configured, unknown project or workstream, empty charter on hand-in, or stdin over the hand-in limit or not UTF-8 |
 | 5 | API conflict, project already active, unsupported operation, restart required or internal failure |
 | 6 | Foreground startup/service failure, including ownership conflict |
 
@@ -161,7 +165,8 @@ live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
 Detached management, install/upgrade commands, completion, web/tailnet,
-the architect's drafting after hand-in, inbox, ratification,
+the librarian's knowledge-base extraction on add, the architect's drafting after
+hand-in, inbox, ratification,
 answer, reload and trace navigation are unavailable. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.

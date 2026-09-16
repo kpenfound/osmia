@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -26,9 +27,20 @@ type fakeIssues struct {
 	token   string
 	text    map[issues.Ref]string
 	fetches int
+	// block, when set, holds the first fetch until it is closed; started
+	// is signalled when that fetch begins.
+	block, started chan struct{}
 }
 
 func (f *fakeIssues) Fetch(_ context.Context, ref issues.Ref) (string, error) {
+	f.mu.Lock()
+	block, started := f.block, f.started
+	f.block = nil
+	f.mu.Unlock()
+	if block != nil {
+		close(started)
+		<-block
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.fetches++
@@ -379,5 +391,70 @@ func TestHandInCredentialsStayInTheService(t *testing.T) {
 	gh, ok := s.options.Issues.(issues.GitHub)
 	if !ok || gh.Token != "from-environment" || gh.BaseURL != "" || gh.HTTP == nil || gh.HTTP.Timeout == 0 {
 		t.Fatalf("default issue client %#v", s.options.Issues)
+	}
+}
+
+func TestHandInRefusesAFIFOWithoutBlocking(t *testing.T) {
+	f := newHandInFixture(t)
+	fifo := filepath.Join(f.home, "design.fifo")
+	must(t, syscall.Mkfifo(fifo, 0600))
+	done := make(chan *APIError, 1)
+	go func() {
+		done <- handInError(t, f.c, HandInRequest{Project: f.project, Key: "fifo", Path: fifo})
+	}()
+	select {
+	case api := <-done:
+		if api.Code != Validation || !strings.Contains(api.Message, fifo+" is not a regular file") {
+			t.Fatalf("fifo: %+v", api)
+		}
+	case <-time.After(time.Minute):
+		t.Fatal("hand-in of a FIFO blocked")
+	}
+	text := "design"
+	f.handIn(t, HandInRequest{Key: "after", Stdin: &text})
+	if len(f.streams(t)) != 1 {
+		t.Fatal(f.streams(t))
+	}
+}
+
+func TestHandInFetchDoesNotHoldOtherHandIns(t *testing.T) {
+	f := newHandInFixture(t)
+	url := "https://github.com/owner/repo/issues/12"
+	release := make(chan struct{})
+	f.issues.mu.Lock()
+	f.issues.block, f.issues.started = release, make(chan struct{})
+	started := f.issues.started
+	f.issues.mu.Unlock()
+	slow := make(chan HandInResponse, 1)
+	go func() {
+		out, err := f.c.HandIn(context.Background(), HandInRequest{Project: f.project, Key: "issue", URL: url})
+		if err != nil {
+			t.Error(err)
+		}
+		slow <- out
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Minute):
+		t.Fatal("fetch did not start")
+	}
+	// Another hand-in, and the same key handed in again, finish while the
+	// first fetch is held.
+	text := "design"
+	f.handIn(t, HandInRequest{Key: "other", Stdin: &text})
+	fast := f.handIn(t, HandInRequest{Key: "issue", URL: url})
+	close(release)
+	select {
+	case out := <-slow:
+		// The held request finds the copy made meanwhile and returns it.
+		if out != fast {
+			t.Fatalf("held request %+v, retry %+v", out, fast)
+		}
+	case <-time.After(time.Minute):
+		t.Fatal("held hand-in did not finish")
+	}
+	f.checkHanded(t, fast, "issue", "issue-12.md", url, "# Issue title\n\nIssue body\n")
+	if len(f.streams(t)) != 2 {
+		t.Fatal(f.streams(t))
 	}
 }
