@@ -614,12 +614,12 @@ func (r *Repository) append(ctx context.Context, v Record, writeDocument bool) e
 	// The owner edits charter.md directly. Writing over an edit Charter has
 	// not recorded would lose it.
 	if d, ok := v.(Document); ok && writeDocument && d.Workstream == "" && d.Path == "charter.md" {
-		latest, found := latestCharter(records)
+		latest, _ := latestCharter(records)
 		current, err := r.readFile("charter.md")
 		if err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		if !found || err == nil && string(current) != latest.Content {
+		if err == nil && string(current) != latest.Content {
 			return fmt.Errorf("%w: charter.md has an unrecorded owner edit; read the charter first", ErrConflict)
 		}
 	}
