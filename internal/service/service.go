@@ -306,13 +306,21 @@ func (s *Service) unpaused(project config.ProjectID) func(context.Context, sched
 // chiefProfile returns the chief of staff's effective profile for a new turn.
 func (s *Service) chiefProfile(cfg *config.Config) func() (coreadapter.Profile, error) {
 	return func() (coreadapter.Profile, error) {
-		st, _ := s.store.Effective()
-		name := st.Profiles[trace.ChiefOfStaff]
-		if name == "" {
-			name = cfg.Roles[trace.ChiefOfStaff].Profile
-		}
-		return cfg.NamedProfile(name)
+		_, profile, err := s.chiefOverride(cfg)
+		return profile, err
 	}
+}
+
+// chiefOverride resolves the chief of staff's effective profile name, which
+// may be any configured profile, not only one in the role's fallback chain.
+func (s *Service) chiefOverride(cfg *config.Config) (string, coreadapter.Profile, error) {
+	st, _ := s.store.Effective()
+	name := st.Profiles[trace.ChiefOfStaff]
+	if name == "" {
+		name = cfg.Roles[trace.ChiefOfStaff].Profile
+	}
+	profile, err := cfg.NamedProfile(name)
+	return name, profile, err
 }
 
 // ensureChiefsOfStaff gives every workstream in the trace its chief-of-staff

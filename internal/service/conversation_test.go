@@ -275,6 +275,19 @@ func TestConversationUsesProfileOverride(t *testing.T) {
 	}
 }
 
+func TestConversationUsesOverrideOutsideFallbackChain(t *testing.T) {
+	opts, _ := conversationFixture(t, "cf-")
+	s, c := start(t, opts)
+	mutation(t, c, "PUT", "profile", ProfileRequest{trace.ChiefOfStaff, "other"})
+	sent, err := c.Send(context.Background(), stream, "hello")
+	must(t, err)
+	th, err := s.active.repository.ChiefOfStaffThread(stream)
+	must(t, err)
+	if len(th.Turns) != 1 || th.Turns[0].Request.TurnID != sent.Turn || th.Turns[0].Request.Profile.Name != "other" || th.Turns[0].Request.Profile.Backend != "codex" {
+		t.Fatalf("accepted profile: %+v", th.Turns)
+	}
+}
+
 func TestConversationMessageRunsOnceAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "cx-")
@@ -328,7 +341,7 @@ func TestConversationUnusableProfileIsInternal(t *testing.T) {
 	s, c := start(t, opts)
 	s.mu.Lock()
 	cfg := *s.cfg
-	cfg.Roles = map[string]config.Role{}
+	cfg.Profiles = map[string]config.Profile{}
 	s.cfg = &cfg
 	s.mu.Unlock()
 	_, err := c.Send(context.Background(), stream, "hello")
