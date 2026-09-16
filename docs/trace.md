@@ -141,7 +141,12 @@ The transition carries the ordinary trace header, including actor, timestamp,
 cause and causal depth. Its ID identifies the logical transaction in that
 workstream; revision must be one. `EventID(transactionID, eventKey)` derives a
 stable event ID. Event IDs are unique within a workstream, and ordinary notification events contain a
-kind and body for eventual chief-of-staff delivery. Local operation intents also
+kind and body for [chief-of-staff delivery](service.md#event-delivery).
+`Notice(transitionID, key, body)` builds one of kind `notice`, and
+`SetFeatureState(ctx, header, to, reason)` moves the workstream's `feature`
+subject from its current state and records a notice of the change in the same
+transaction; a retry with the same header, state and reason returns the
+committed state. Local operation intents also
 carry the operation described below. Callers retain the complete
 request across retries, including timestamps and event order. An identical retry
 returns its original resulting state even if later transactions exist. Reusing a
@@ -153,7 +158,8 @@ be revised through `Append`.
 and operation histories, plus durable thread queues. `Workflow` derives the
 current subject state from that history. Each transaction also adds its transition to `events.jsonl`; the complete history of
 both files is available in Git. `Outbox` returns all delivery intents with their
-claim, acknowledgement and release history, sorted by event ID.
+claim, acknowledgement and release history, sorted by event ID. Each entry's
+`At` is its transition's timestamp.
 
 The repository serializes calls under its exclusive process lock. Publication
 writes immutable Git objects using a private index, syncs the objects, writes and
@@ -253,8 +259,8 @@ Production capability enforcement remains the execution adapter's responsibility
 
 `reconcile.Options.Schedule` is an optional hook that runs at the start of every
 pass, before operations are read, so the intent it publishes is reconciled in the
-same pass. An error from it stops the loop. The service installs its queued-turn
-scheduler as this hook (see [the service](service.md)). The controller makes no
+same pass. An error from it stops the loop. The service installs event delivery and its
+queued-turn scheduler as this hook (see [the service](service.md)). The controller makes no
 capacity or owner-authorization decisions.
 
 ## Durable threads and queued turns

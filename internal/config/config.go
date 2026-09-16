@@ -25,6 +25,7 @@ type Config struct {
 	Profiles       map[string]Profile `toml:"profiles" json:"profiles"`
 	Roles          map[string]Role    `toml:"roles" json:"roles"`
 	Shed           Shed               `toml:"shed" json:"shed"`
+	Events         Events             `toml:"events" json:"events"`
 	Project        Project            `toml:"-" json:"project"`
 }
 type Listen struct {
@@ -40,6 +41,17 @@ type Shed struct {
 	MaxRounds  int `toml:"max_rounds" json:"max_rounds"`
 	MaxBounces int `toml:"max_bounces" json:"max_bounces"`
 }
+type Events struct {
+	Window string `toml:"window" json:"window"`
+}
+
+// EventWindow is how long the service collects a workstream's events before
+// delivering them to its chief of staff as one turn.
+func (c *Config) EventWindow() time.Duration {
+	d, _ := time.ParseDuration(c.Events.Window)
+	return d
+}
+
 type Profile struct {
 	Agent    string `toml:"agent" json:"agent"`
 	Model    string `toml:"model" json:"model"`
@@ -87,7 +99,7 @@ func Load(options Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}}
+	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Events: Events{"5s"}}
 	md, err := decode(path, c, false)
 	if err != nil {
 		return nil, err
@@ -137,6 +149,9 @@ func Load(options Options) (*Config, error) {
 		if value.n <= 0 {
 			return nil, fieldError(path, value.field, "must be positive")
 		}
+	}
+	if d, err := time.ParseDuration(c.Events.Window); err != nil || d <= 0 {
+		return nil, fieldError(path, "events.window", "must be a positive Go duration")
 	}
 	if err := c.validateProfiles(path, md); err != nil {
 		return nil, err
@@ -271,7 +286,7 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "sandbox", "image"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces"}, path)
+	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "events", "events.window"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {
@@ -381,6 +396,17 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 		c.Roles[name] = r
 	}
 	return nil
+}
+
+// NamedProfile returns the adapter profile of a configured profile, whichever
+// role binds it. Runtime profile overrides may name any such profile.
+func (c *Config) NamedProfile(name string) (coreadapter.Profile, error) {
+	p, ok := c.Profiles[name]
+	if !ok {
+		return coreadapter.Profile{}, fmt.Errorf("unknown profile %q", name)
+	}
+	timeout, err := time.ParseDuration(p.Timeout)
+	return coreadapter.Profile{Name: name, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns}, err
 }
 
 // Execution returns adapter inputs, not verified isolation or permission to run.

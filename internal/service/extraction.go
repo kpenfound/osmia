@@ -147,13 +147,6 @@ func (s *Service) ensureExtraction(ctx context.Context, root config.Root, p conf
 	return requestExtraction(ctx, r, 1, at, registrationActor, "project-add", "Knowledge-base extraction on project registration")
 }
 
-func (s *Service) now() time.Time {
-	if s.options.Reconciliation.Now != nil {
-		return s.options.Reconciliation.Now()
-	}
-	return time.Now().UTC()
-}
-
 // extractionState derives the latest extraction's state from its operation
 // record: running while a live claim has started the effect, pending while it
 // is queued or waiting to retry (with the retry's reason), otherwise the

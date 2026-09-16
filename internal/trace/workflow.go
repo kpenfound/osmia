@@ -57,9 +57,11 @@ type DeliveryAction struct {
 	Until   time.Time `json:"until,omitempty"`
 }
 
+// OutboxEntry is an event's delivery state. At is its transition's timestamp.
 type OutboxEntry struct {
 	Event        Event            `json:"event"`
 	TransitionID string           `json:"transition_id"`
+	At           time.Time        `json:"at"`
 	Claim        *DeliveryAction  `json:"claim,omitempty"`
 	Acknowledged bool             `json:"acknowledged"`
 	History      []DeliveryAction `json:"history,omitempty"`
@@ -121,7 +123,7 @@ func (v *workflowView) transition(tx Transaction, project config.ProjectID, stre
 	v.states[t.Subject] = state
 	v.transactions[t.ID] = tx
 	for _, e := range tx.Events {
-		v.entries[e.ID] = &OutboxEntry{Event: e, TransitionID: t.ID}
+		v.entries[e.ID] = &OutboxEntry{Event: e, TransitionID: t.ID, At: t.At}
 		if e.Operation != nil {
 			v.operations[e.ID] = &OperationRecord{Operation: *e.Operation, EventID: e.ID, Transition: t.Header}
 		}
@@ -242,6 +244,10 @@ func (r *Repository) checkWorkflows(streams []config.WorkstreamID) error {
 func (r *Repository) Transact(ctx context.Context, tx Transaction) (WorkflowState, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.transact(ctx, tx)
+}
+
+func (r *Repository) transact(ctx context.Context, tx Transaction) (WorkflowState, error) {
 	if err := ctx.Err(); err != nil {
 		return WorkflowState{}, err
 	}

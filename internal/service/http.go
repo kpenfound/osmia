@@ -140,6 +140,14 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			respond(w, 200, s.statusList())
 			return
 		}
+		if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/conversation/"); ok {
+			if out, api := s.conversationList(id); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
 		if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/status/"); ok {
 			if out, api := s.workstreamStatus(id); api != nil {
 				failWith(w, api)
@@ -189,6 +197,18 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		respond(w, 200, result)
+		return
+	}
+	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/conversation/"); ok && r.Method == http.MethodPost {
+		var v SendRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		if out, api := s.send(r.Context(), id, v); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
 		return
 	}
 	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/handin" {

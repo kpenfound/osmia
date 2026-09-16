@@ -24,6 +24,8 @@ const usage = `Usage: osmia <command> [--root PATH]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
   handin <project-id> [path...] [--json]
+  send <workstream-id> <message> [--json]
+  conversation <workstream-id> [--json]
   pause <all|project-id|workstream-id> [--hard] [--reason TEXT] [--json]
   resume <all|project-id|workstream-id> [--json]
   priority set <workstream-id>... | priority clear [--json]
@@ -127,6 +129,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		valid = len(a) == 0
 	case "status":
 		valid = len(a) <= 1
+	case "send":
+		valid = len(a) == 2
+	case "conversation":
+		valid = len(a) == 1
 	case "pause", "resume":
 		valid = len(a) == 1
 	case "handin":
@@ -165,7 +171,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "send" || cmd == "conversation" || cmd == "status" && len(a) == 1)
 	}
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
@@ -235,6 +241,32 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintln(stderr, "invalid service response: hand-in reported success without a result")
 		return 1
+	}
+	if cmd == "send" || cmd == "conversation" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		if cmd == "send" {
+			entry, err := c.Send(ctx, id, a[1])
+			if err != nil {
+				return fail(err)
+			}
+			if o.json {
+				return output(stdout, stderr, entry)
+			}
+			fmt.Fprintf(stdout, "Message %s sent to the chief of staff of %s: %s\n", entry.Turn, id, entry.State)
+			return 0
+		}
+		list, err := c.Conversation(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, list)
+		}
+		showConversation(stdout, list)
+		return 0
 	}
 	if cmd == "status" && len(a) == 1 {
 		id, err := config.ParseWorkstreamID(a[0])
@@ -481,6 +513,25 @@ func showStatus(w io.Writer, st service.WorkstreamStatus) {
 		fmt.Fprintf(w, "  %s\n", a)
 	}
 	fmt.Fprintf(w, "Updated: %s (revision %d)\n", s.UpdatedAt.Format(time.RFC3339), s.Revision)
+}
+
+// showConversation prints each entry's time, author, turn and state, then its
+// text indented.
+func showConversation(w io.Writer, list service.ConversationResponse) {
+	fmt.Fprintf(w, "Conversation: %s\n", list.Workstream)
+	if len(list.Entries) == 0 {
+		fmt.Fprintf(w, "  no messages yet; send one with osmia send %s \"...\"\n", list.Workstream)
+	}
+	for _, e := range list.Entries {
+		author := "owner"
+		if e.Kind == "response" {
+			author = "chief of staff"
+		}
+		fmt.Fprintf(w, "%s %s [%s %s]\n", e.At.Format(time.RFC3339), author, e.Turn, e.State)
+		for _, line := range strings.Split(strings.TrimRight(e.Text, "\n"), "\n") {
+			fmt.Fprintf(w, "  %s\n", line)
+		}
+	}
 }
 
 func facts(st service.WorkstreamStatus) string {

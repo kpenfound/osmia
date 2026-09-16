@@ -87,6 +87,9 @@ per_workstream = 2
 max_rounds = 3
 max_bounces = 3
 
+[events]
+window = "5s"
+
 [roles.mason]
 profile = "default"
 sandbox = "none"
@@ -96,7 +99,10 @@ The socket must be a direct child of the resolved root with a `.sock` suffix,
 separate from managed state. Its absolute path may contain at most 103 bytes
 for portability across Unix socket implementations. An existing path must be a
 Unix socket; the loader neither binds nor removes it. All capacity and shed values
-must be positive integers. A workstream cap may exceed global mason capacity:
+must be positive integers. `events.window` is a positive Go duration: how long
+the oldest undelivered event of a workstream waits before the service delivers
+it, with every other ready event, as one
+[chief-of-staff turn](service.md#event-delivery). A workstream cap may exceed global mason capacity:
 the global pool still limits concurrent execution.
 
 Profiles use lowercase names starting with a letter and containing letters,

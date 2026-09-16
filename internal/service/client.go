@@ -117,3 +117,18 @@ func (c *Client) Status(ctx context.Context, id config.WorkstreamID) (Workstream
 	err := c.Do(ctx, "GET", Prefix+"/status/"+url.PathEscape(string(id)), nil, &v)
 	return v, err
 }
+
+// Send sends an owner message to a workstream's chief of staff. It returns
+// once the message is durable.
+func (c *Client) Send(ctx context.Context, id config.WorkstreamID, text string) (ConversationEntry, error) {
+	var v ConversationEntry
+	err := c.Do(ctx, "POST", Prefix+"/conversation/"+url.PathEscape(string(id)), SendRequest{Text: text}, &v)
+	return v, err
+}
+
+// Conversation lists a workstream's conversation with its chief of staff.
+func (c *Client) Conversation(ctx context.Context, id config.WorkstreamID) (ConversationResponse, error) {
+	var v ConversationResponse
+	err := c.Do(ctx, "GET", Prefix+"/conversation/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
+}

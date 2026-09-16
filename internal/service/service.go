@@ -17,6 +17,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
@@ -38,7 +39,8 @@ type Options struct {
 	// on its own, never more than one turn per thread in flight and within the
 	// configured capacity, replacing Reconciliation.Schedule. A runtime pause
 	// holds new turns on the threads it covers, except chief-of-staff turns;
-	// clearing it lets them run.
+	// clearing it lets them run. Outbox events are delivered to each
+	// workstream's chief of staff as queued turns, one per event window.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
 	// Librarian supplies the execution boundary of the librarian's
@@ -311,6 +313,26 @@ func (s *Service) admit(project config.ProjectID) func(context.Context, schedule
 	}
 }
 
+// chiefProfile returns the chief of staff's effective profile for a new turn.
+func (s *Service) chiefProfile(cfg *config.Config) func() (coreadapter.Profile, error) {
+	return func() (coreadapter.Profile, error) {
+		_, profile, err := s.chiefOverride(cfg)
+		return profile, err
+	}
+}
+
+// chiefOverride resolves the chief of staff's effective profile name, which
+// may be any configured profile, not only one in the role's fallback chain.
+func (s *Service) chiefOverride(cfg *config.Config) (string, coreadapter.Profile, error) {
+	st, _ := s.store.Effective()
+	name := st.Profiles[trace.ChiefOfStaff]
+	if name == "" {
+		name = cfg.Roles[trace.ChiefOfStaff].Profile
+	}
+	profile, err := cfg.NamedProfile(name)
+	return name, profile, err
+}
+
 // ensureChiefsOfStaff gives every workstream in the trace its chief-of-staff
 // thread, leaving existing threads untouched.
 func ensureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at time.Time) error {
@@ -366,7 +388,8 @@ func (s *Service) stop(active *activeProject) error {
 // trace must open cleanly before the service can report readiness. The runner
 // boundary is served by the bound thread reconciler for turns and by the
 // service's extractor for knowledge-base extraction; the scheduler's gate holds
-// turns that a runtime pause covers.
+// turns that a runtime pause covers, and outbox events are delivered to each
+// workstream's chief of staff before the scheduler runs.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, error) {
 	options, threads := s.options.Reconciliation, s.options.Threads
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
@@ -407,7 +430,17 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 			repository.Close()
 			return nil, nil, err
 		}
-		options.Schedule = dispatch.Pass
+		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), Profile: s.chiefProfile(cfg)})
+		if err != nil {
+			repository.Close()
+			return nil, nil, err
+		}
+		options.Schedule = func(ctx context.Context) error {
+			if err := deliver.Pass(ctx); err != nil {
+				return err
+			}
+			return dispatch.Pass(ctx)
+		}
 	}
 	adapters[coreadapter.RunnerBoundary] = runner
 	options.Adapters = adapters

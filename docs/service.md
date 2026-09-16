@@ -43,6 +43,8 @@ client to release idle connections. API version 1 uses snake_case JSON fields.
 | GET | `/runtime` | Effective runtime state, each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
 | GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, and diagnostics |
 | GET | `/status/<workstream-id>` | `WorkstreamStatus` for one workstream of the active project |
+| POST | `/conversation/<workstream-id>` | `SendRequest`: text; returns the accepted `ConversationEntry` |
+| GET | `/conversation/<workstream-id>` | `ConversationResponse`: the workstream's conversation with its chief of staff |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
 | POST | `/projects/extract` | `ProjectExtractRequest`: project; returns `ExtractionResponse` |
@@ -183,6 +185,51 @@ configured project returns `no_project`, a workstream the active trace does not
 hold (or no trace at all) returns `not_found`, and an unreadable trace returns
 `internal`; these messages name the workstream or project.
 
+## Conversation
+
+`POST /v1/conversation/<workstream-id>` sends the owner's message to the
+workstream's chief-of-staff thread, and to no other. The body is
+`{"text": "..."}`. The service queues the message on that thread with
+`EnqueueTurn` and answers only once the request is in the trace, so an
+acknowledged message survives a restart and runs exactly once. It runs as the
+thread's next turn; a message sent while a turn is in flight waits for it.
+
+The accepted request fixes, at acceptance:
+
+- the profile the `chief_of_staff` role is bound to, including a runtime
+  override;
+- the prompt, which is the message text as sent;
+- the system prompt, which names the workstream and carries the workstream's
+  [context bundle](context.md) rendered at acceptance.
+
+Its actor is the owner (`owner`/`local`) and its turn ID is `message_`
+followed by 32 random hexadecimal digits.
+
+`GET /v1/conversation/<workstream-id>` returns a `ConversationResponse`:
+`workstream` and `entries`, oldest first. It is read from the chief-of-staff
+thread's turn log in the trace, never from a backend transcript. Each owner
+message is an entry of kind `message`. Once its turn has completed with a
+final response, an entry of kind `response` follows it. Turns on the thread
+that the owner did not send are not listed. Each entry has:
+
+| Field | Value |
+| --- | --- |
+| `turn` | The turn that answers the message |
+| `kind` | `message` or `response` |
+| `text` | The message as sent, or the chief of staff's final response |
+| `at` | When the message was accepted, or the response captured |
+| `state` | The turn's state: `queued` until claimed, `running` until completed, then `failed` for a failed or cancelled turn and `done` otherwise. A turn a restart interrupted before its result was captured is never retried and lists as `failed` |
+
+`POST` returns the message's entry, whose state is `queued`. A malformed
+workstream ID, a workstream the active trace does not hold (or no trace at
+all), the librarian's workstream (which status leaves out too, and whose chief
+of staff never gets a turn), or empty text returns `validation`. No configured project returns
+`no_project`. A trace that cannot be read or written, a `chief_of_staff` profile that cannot be used, or a
+bundle that cannot be assembled, returns `internal`.
+These messages name the workstream or project. A rejected message is not
+recorded. Messages are accepted without a turn reconciler, but only a service
+with `Options.Threads` runs them.
+
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
 opened, each time a project's trace opens: at startup and when a project is
 added. It replaces any runner adapter in `Options.Reconciliation` for every
@@ -198,7 +245,9 @@ recorded reason, so a service without an enforcing engine still registers
 projects and reports the failure in status.
 
 With `Options.Threads` set, the service also runs queued workstream turns on its
-own, and its scheduler replaces any `Schedule` hook in `Options.Reconciliation`.
+own and delivers outbox events to each chief of staff (see
+[event delivery](#event-delivery)). Event delivery followed by the scheduler
+replaces any `Schedule` hook in `Options.Reconciliation`.
 At the start of every reconciliation pass, `internal/scheduler` reads each
 workstream's threads and turn operations. For every thread with no turn in
 flight, it publishes a `thread-turn` operation for the oldest unfinished turn,
@@ -257,3 +306,37 @@ parked thread has no unfinished turn, so the scheduler offers it to no gate and
 dispatches nothing, and recovery has nothing to run: its turn is complete. The
 state is derived from the trace, so it survives a restart. Queuing a new turn
 for the thread unparks it, and the next pass runs that turn.
+
+### Event delivery
+
+A workflow transition can carry notification events for its workstream's chief
+of staff, and no other thread. The transition and its events commit together,
+so a failed transaction leaves no event. `trace.Notice` builds such an event,
+and `Repository.SetFeatureState` records a feature state change with one.
+`internal/events` delivers them.
+
+At the start of every reconciliation pass, before the scheduler, the deliverer
+reads each workstream's ready notification events (events without an
+operation). It waits until the oldest has been ready for `events.window` (see
+[configuration](configuration.md#top-level-configtoml)), then delivers every
+ready event as one chief-of-staff turn. The loop's periodic tick runs the pass
+that closes a window. The turn's prompt starts with `events.Preamble`, which
+frames the events as information: they grant no permission, trigger no
+transition and do not change the chief of staff's tools. It then lists one line
+per event with its transition's timestamp, kind and body, oldest first. The
+turn's actor is `service`/`events`, its cause is the oldest event's transition,
+and its profile is the chief of staff's effective profile: the runtime
+override when one is set, which may name any configured profile, otherwise the
+role binding. The turn is queued
+with `EnqueueTurn`, so a turn in flight on the chief-of-staff thread finishes
+first, and the scheduler dispatches it in the same pass otherwise.
+
+Delivery claims every event with one new attempt token, queues the turn
+`events.TurnID(token)`, then acknowledges the events. A crash or restart at any
+point neither loses nor repeats an event: an event with a claim whose turn is
+already on the chief-of-staff thread is acknowledged without another turn, and
+any other unacknowledged event is delivered in the next window. A claim whose
+lease ran out before its acknowledgement is settled the same way. A
+failing store call or chief-of-staff profile lookup stops the loop, as the
+scheduler's errors do; an event another claim holds is skipped and retried on a
+later pass.
