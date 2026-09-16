@@ -128,6 +128,8 @@ func TestThreadRoundTripAndDuplicateCalls(t *testing.T) {
 	}
 	if got := mustThread(t, r); got.Status != "waiting" || got.Active != "" || len(got.Turns) != 3 {
 		t.Fatalf("complete: %#v", got)
+	} else if got.Parked() {
+		t.Fatal("thread with queued turns is parked")
 	}
 	if _, err := r.ClaimTurn(ctx, streamID, "mason", "claim1", q.Claim.SessionDirectory, at); !errors.Is(err, ErrClaim) {
 		t.Fatalf("completed token reused: %v", err)
@@ -569,5 +571,23 @@ func TestThreadsListsSnapshotsByAgent(t *testing.T) {
 	}
 	if _, err := r.Threads("w_invalid"); err == nil {
 		t.Fatal("invalid workstream accepted")
+	}
+}
+
+func TestThreadParked(t *testing.T) {
+	done := QueuedTurn{CompletedAt: time.Unix(1, 0)}
+	for _, c := range []struct {
+		name   string
+		thread Thread
+		want   bool
+	}{
+		{"waiting, nothing queued", Thread{Status: "waiting", Turns: []QueuedTurn{done}}, true},
+		{"waiting, turn queued", Thread{Status: "waiting", Turns: []QueuedTurn{done, {}}}, false},
+		{"idle", Thread{Status: "idle", Turns: []QueuedTurn{done}}, false},
+		{"failed", Thread{Status: "failed", Turns: []QueuedTurn{done}}, false},
+	} {
+		if got := c.thread.Parked(); got != c.want {
+			t.Errorf("%s: parked %v, want %v", c.name, got, c.want)
+		}
 	}
 }

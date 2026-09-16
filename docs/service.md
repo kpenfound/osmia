@@ -99,9 +99,9 @@ to finish. They never include raw file contents or parser output.
 
 Health readiness means the loaded stores can serve requests; disk diagnostics do
 not discard that valid view. Reload application, lifecycle endpoints, streaming,
-web/tailnet access, and capacity and parking effects on scheduling are
-outside M1. Pauses hold queued turns as described with the queued-turn
-scheduler below.
+web/tailnet access, and capacity effects on scheduling are outside M1. Pauses
+hold queued turns, and a `waiting` turn parks its thread, as described with the
+queued-turn scheduler below.
 
 
 The service opens the active project's existing trace and starts the
@@ -213,3 +213,9 @@ operation and stays queued; a turn already in flight is not interrupted, in
 either pause mode. The gate reads the runtime store on every pass, so after a
 pause is cleared the loop's next periodic pass runs the held turns with no new
 message or operation.
+
+A turn whose outcome is `waiting` parks its thread (`trace.Thread.Parked`). A
+parked thread has no unfinished turn, so the scheduler offers it to no gate and
+dispatches nothing, and recovery has nothing to run: its turn is complete. The
+state is derived from the trace, so it survives a restart. Queuing a new turn
+for the thread unparks it, and the next pass runs that turn.

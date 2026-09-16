@@ -114,7 +114,8 @@ type turnKey struct {
 	turn       string
 }
 
-// next returns the thread's oldest unfinished turn unless it is claimed. Turns
+// next returns the thread's oldest unfinished turn unless it is claimed. A
+// parked thread has no unfinished turn, so it is not offered to Admit. Turns
 // are claimed in sequence, so a claim is always on the oldest unfinished turn
 // and no later turn is eligible.
 func next(t trace.Thread) (trace.QueuedTurn, bool) {
