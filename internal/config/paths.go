@@ -105,6 +105,9 @@ func (r Root) Config() (string, error)  { return r.managed("config.toml") }
 func (r Root) Runtime() (string, error) { return r.managed("runtime.json") }
 func (r Root) Socket() (string, error)  { return r.managed("osmia.sock") }
 
+// PendingProject is the journal of one interrupted project registration.
+func (r Root) PendingProject() (string, error) { return r.managed("project-add.json") }
+
 // ProjectTrace is the project directory and dedicated trace repository.
 func (r Root) ProjectTrace(id ProjectID) (string, error) {
 	if err := CheckProjectIDs(id); err != nil {

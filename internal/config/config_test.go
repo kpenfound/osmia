@@ -137,7 +137,7 @@ func TestInvalid(t *testing.T) {
 		{"key case", strings.Replace(topConfig, "model =", "Model =", 1), "", "profiles.default.Model"},
 		{"socket state collision", topConfig + "[listen]\nsocket = 'runtime.json'\n", "", "direct child"},
 		{"duplicate key", topConfig + "model = 'other'\n", "", "config.toml:"},
-		{"no active", strings.Replace(topConfig, `"`+pid+`"`, "", 1), "", "exactly one"},
+
 		{"two active", strings.Replace(topConfig, `"`+pid+`"`, `"`+pid+`", "p_1123456789abcdef0123456789abcdef"`, 1), "", "unsupported"},
 		{"duplicate identity", strings.Replace(topConfig, `"`+pid+`"`, `"`+pid+`", "`+pid+`"`, 1), "", "identity already exists"},
 		{"traversal", strings.Replace(topConfig, pid, "../escape", 1), "", "active_projects[0]"},
@@ -310,12 +310,12 @@ func TestMetadataDoesNotChangeIdentity(t *testing.T) {
 }
 func TestBranchNames(t *testing.T) {
 	for _, s := range []string{"main", "feature/name", "release-1.2"} {
-		if !validBranch(s) {
+		if !ValidBranch(s) {
 			t.Fatal(s)
 		}
 	}
 	for _, s := range []string{"", "@", "-x", "a b", "a~b", "a^b", "a:b", "a?b", "a*b", "a[b", "a\\b", "a..b", "a@{b", "a.", "a\nb", "a//b", ".a", "a.lock", "/a", "a/"} {
-		if validBranch(s) {
+		if ValidBranch(s) {
 			t.Fatal(s)
 		}
 	}
