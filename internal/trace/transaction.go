@@ -167,11 +167,14 @@ func (r *Repository) recoverPublication(ctx context.Context) error {
 		parts := strings.Split(name, "/")
 		workflowPath := len(parts) == 3 && (parts[2] == "workflow.json" || parts[2] == "events.jsonl")
 		agentPath := len(parts) == 5 && parts[2] == "agents" && key(parts[3]) && (parts[4] == "identity.jsonl" || parts[4] == "log.jsonl")
-		if (!workflowPath && !agentPath) || parts[0] != "workstreams" || seen[name] {
+		notesPath := len(parts) == 2 && parts[0] == "notes" && strings.HasSuffix(parts[1], ".md") && key(strings.TrimSuffix(parts[1], ".md"))
+		if ((!workflowPath && !agentPath) || parts[0] != "workstreams") && !notesPath || seen[name] {
 			return fmt.Errorf("invalid workflow publication path %q", name)
 		}
-		if _, err := config.ParseWorkstreamID(parts[1]); err != nil {
-			return err
+		if !notesPath {
+			if _, err := config.ParseWorkstreamID(parts[1]); err != nil {
+				return err
+			}
 		}
 		if err := r.checked(name); err != nil {
 			return err

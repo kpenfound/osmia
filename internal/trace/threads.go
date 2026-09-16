@@ -24,6 +24,7 @@ type Thread struct {
 	Turns    []QueuedTurn               `json:"turns,omitempty"`
 }
 type QueuedTurn struct {
+	Attempts    []TurnAttempt `json:"attempts,omitempty"`
 	Sequence    uint64        `json:"sequence"`
 	Request     TurnRequest   `json:"request"`
 	Claim       *TurnClaim    `json:"claim,omitempty"`
@@ -73,6 +74,9 @@ func validateThreads(threads map[string]Thread, records []Record, project config
 		pending := false
 		for i, q := range t.Turns {
 			req := q.Request
+			if err := validateAttempts(q); err != nil {
+				return err
+			}
 			if err := validate(req); err != nil {
 				return err
 			}
@@ -101,7 +105,7 @@ func validateThreads(threads map[string]Thread, records []Record, project config
 				if err := validate(res); err != nil {
 					return err
 				}
-				if res.Project != project || res.Workstream != stream || res.Unit != req.Unit || res.AgentID != id || res.ThreadID != a.ThreadID || res.TurnID != req.TurnID || res.RequestID != req.ID || res.RequestRevision != req.Revision || res.Revision != 1 || res.Cause != req.Cause || res.Depth != req.Depth || res.At.Before(c.At) || res.Result.SessionDirectory != c.SessionDirectory || (res.Result.Session.Backend != "" && res.Result.Session.Backend != req.Profile.Backend) {
+				if res.Project != project || res.Workstream != stream || res.Unit != req.Unit || res.AgentID != id || res.ThreadID != a.ThreadID || res.TurnID != req.TurnID || res.RequestID != req.ID || res.RequestRevision != req.Revision || res.Revision != 1 || res.Cause != req.Cause || res.Depth != req.Depth || res.At.Before(c.At) || res.Result.SessionDirectory != c.SessionDirectory || (res.Result.Session.Backend != "" && res.Result.Session.Backend != responseProfile(q).Backend) {
 					return fmt.Errorf("invalid captured response provenance")
 				}
 				if _, ok := expected[recordKey(res)]; ok {
@@ -384,4 +388,11 @@ func (r *Repository) saveThread(ctx context.Context, stream config.WorkstreamID,
 	}
 	_ = r.wake.Notify(context.Background())
 	return nil
+}
+
+func responseProfile(q QueuedTurn) coreadapter.Profile {
+	if len(q.Attempts) > 0 {
+		return q.Attempts[len(q.Attempts)-1].Profile
+	}
+	return q.Request.Profile
 }

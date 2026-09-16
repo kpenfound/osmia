@@ -167,7 +167,7 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 		return agent.Request{}, unsupported("sandbox", err.Error())
 	}
 	if t.Resume != nil {
-		if t.Resume.Backend != p.Backend || p.Backend == agent.AgentCodex || t.Resume.ID == "" {
+		if t.Resume.Backend != p.Backend || p.Backend == agent.AgentCodex || !ValidSession(*t.Resume) {
 			return agent.Request{}, unsupported("resume", "backend/session cannot resume; caller must render history")
 		}
 		req.ResumeID = t.Resume.ID

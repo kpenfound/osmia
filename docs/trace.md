@@ -34,7 +34,7 @@ does not infer authority, readiness or workflow transitions from them.
 | `Question` | `questions/<id>/question.jsonl` | Asking actor, original question and owner-facing text |
 | `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer and affected references |
 | `Agent` | `agents/<id>/identity.jsonl` | Stable role/thread identity and backend session at that revision |
-| `TurnRequest` | `agents/<agent-id>/log.jsonl` | Thread/turn identity, profile, resume identity, system prompt, request and replay context |
+| `TurnRequest` | `agents/<agent-id>/log.jsonl` | Thread/turn identity, accepted profile, system prompt, request and caller-supplied context |
 | `TurnResponse` | `agents/<agent-id>/log.jsonl` | Exact request revision, thread/turn identity, adapter result and any execution failure |
 | `Cost` | `ledger.jsonl` | Adapter ledger entry with attempt, full scope, time and explicit cost knowledge |
 
@@ -248,8 +248,8 @@ second execution; only the dispatcher that made the reservation may launch it.
 A reused token cannot claim another request.
 
 `CaptureTurn` atomically records the final or partial adapter result and appends
-its response to the owned log. The request supplies profile/backend provenance;
-the response references that exact request and preserves its cause, depth and
+its response to the owned log. The request supplies the accepted profile; durable attempts identify any fallback
+profile/backend. The response references that exact request and preserves its cause, depth and
 scope, plus result timestamps, outcome and failure details. Changed responses
 under an existing turn are rejected. `CompleteTurn` requires a captured result
 and atomically releases the reservation, making the oldest successor eligible.
@@ -269,17 +269,77 @@ workers, callers must join turn execution before closing the repository handle.
 
 `internal/thread.Runner` joins the queue to `coreadapter.Turns`. `RunNext` accepts
 caller-prepared execution resources and outcome policy, fills the immutable
-scope/profile/messages from the claimed request, runs once, captures the result,
+scope/profile/messages from the claimed request, selects continuation, captures the result,
 and completes the turn. Its clock is injected. Cancellation still records the
 partial result with a non-cancelled persistence context. After a successful claim,
 a persistence error leaves the turn reserved and returns the available claim and
-response so the caller can reconcile the same identity; it never automatically launches another attempt.
+response or attempt evidence so the caller can reconcile the same identity.
 Per-turn leases belong to the caller until the adapter is invoked, and competing
 calls must not share leases. The runner never reads private backend transcripts
-and does not choose scheduling, resume/replay or isolation policy.
+and does not choose scheduling or isolation policy.
 
 For service-owned runtime isolation, supply `internal/isolation.Turns` as this
 runner's `Turns` dependency. Pass context and outcome policy without pre-created
 workspace, sandbox, MCP or execution overrides. Resource preparation then happens
 inside the claimed turn, and a failed file view or host/container verification is
 captured durably before execution. See [turn isolation](isolation.md).
+
+
+## Continuation and bounded replay
+
+The thread runner selects continuation after claiming the turn. It uses the most
+recent completed turn's actual profile and resulting session reference, including
+a fallback profile. A healthy completed session can resume only when the backend
+matches and the adapter's `ResumeChecker` confirms profile compatibility and
+session availability. Profile name changes alone do not force replay; the checker
+must explicitly accept model and effort changes. An absent checker, unsupported
+backend, malformed reference, missing/corrupt state or incompatible profile
+selects replay. Other inspection errors leave the turn reserved for reconciliation.
+A failed or interrupted predecessor cannot authorize resume.
+
+Fresh attempts receive deterministic JSON built exclusively from successful,
+completed owned request/final-response pairs in queue sequence order. Each pair
+includes request/response record headers, thread and turn identity, cause and
+depth. Accepted caller-supplied `History` and `Resume` fields remain in the
+immutable request for inspection but are not execution authority. Replay excludes
+system prompts, nested history, private backend transcripts and partial failed
+output. The current turn's accepted system prompt and request are supplied
+separately.
+
+`ReplayLimits` defaults to the newest 20 complete exchanges and 65,536 encoded
+bytes, including provenance and the omitted-prefix count. Both bounds apply to
+the chronological suffix; a pair is never truncated or skipped to fit an older
+one. If the newest pair exceeds the byte bound, only the omission marker is
+emitted. A bound too small for that marker fails preparation. The marker counts
+omitted eligible exchanges; incomplete/failed turns are not eligible exchanges.
+
+Each `QueuedTurn.Attempts` entry in `workflow.json` records intent before launch:
+attempt number, actual profile/backend, resume or replay path and reason, source
+session and queue boundary, replay start sequence and omitted-prefix count. The
+result or failure is persisted before another attempt. The final owned response
+must match the final attempt. Request, turn and claim identities remain stable
+across all attempts; only one response is appended to the owned log.
+
+A typed `ErrResumeUnavailable` returned before any work is accepted permits one
+fresh replay attempt. A typed `ErrNotStarted` permits a service-approved fallback
+from `Runner.Fallbacks`, bounded by `MaxRetries` (default zero, maximum ten).
+Fallback always starts fresh. These errors must prove there are no outstanding
+effects; output, outcome, usage or a resulting session prevents automatic retry.
+Ordinary failures and cancellations are recorded without retry. An intent without
+a result remains interrupted and reserved after reopen. Per-turn leases span
+these safe retries and release once.
+
+## Private role notes
+
+`Repository.NotesTools` supplies `notes_read` and `notes_write` handlers bound
+to an accepted project, role, thread and turn. The caller includes them in that
+turn's role-scoped MCP host. Every access verifies the same service's active,
+uncaptured turn; queued, completed and interrupted turns cannot use the handlers.
+Input accepts no project, role or path selector, and unknown fields are rejected.
+
+Notes live at `projects/<project-id>/notes/<role>.md` beneath the Osmia root,
+shared by that role's workstreams in the project. Writes replace at most 65,536
+bytes through the trace's atomic publication/recovery boundary; an empty string
+clears the notes. Missing notes read as empty. Scope mismatches, path escapes,
+symlink aliases and hardlink aliases are rejected. Notes remain private to the
+bound role tools and are not included in replay context.

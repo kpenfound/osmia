@@ -72,7 +72,7 @@ func TestRunnerSerialDeliveryAndProvenance(t *testing.T) {
 	clock := func() time.Time { return timestamp.Add(time.Second) }
 	runner := Runner{Store: repo, Now: clock, Turns: fakeTurns(func(ctx context.Context, got coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		calls.Add(1)
-		if got.Prompt != first.Prompt || got.Profile != first.Profile || got.SystemPrompt != first.SystemPrompt || got.History != first.History || got.Scope.Role != "mason" || got.Scope.Turn != "first" || got.Resume != nil {
+		if got.Prompt != first.Prompt || got.Profile != first.Profile || got.SystemPrompt != first.SystemPrompt || got.History == first.History || got.Scope.Role != "mason" || got.Scope.Turn != "first" || got.Resume != nil {
 			t.Errorf("prepared request: %#v", got)
 		}
 		close(entered)
