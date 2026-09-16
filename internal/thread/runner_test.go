@@ -53,7 +53,12 @@ func setup(t *testing.T) (*trace.Repository, config.Root, config.Project) {
 }
 func queue(t *testing.T, r *trace.Repository, id string) trace.TurnRequest {
 	t.Helper()
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + id, Project: project, Workstream: stream, At: timestamp, Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "owner-message", Depth: 3}, AgentID: "agent", ThreadID: "thread", TurnID: id, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, SystemPrompt: "Role instructions", Prompt: "Message " + id, History: "Owned history"}
+	return queueBackend(t, r, id, "fake")
+}
+
+func queueBackend(t *testing.T, r *trace.Repository, id, backend string) trace.TurnRequest {
+	t.Helper()
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + id, Project: project, Workstream: stream, At: timestamp, Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "owner-message", Depth: 3}, AgentID: "agent", ThreadID: "thread", TurnID: id, Profile: coreadapter.Profile{Name: "default", Backend: backend, Model: "test"}, SystemPrompt: "Role instructions", Prompt: "Message " + id, History: "Owned history"}
 	if _, err := r.EnqueueTurn(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}

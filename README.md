@@ -16,6 +16,9 @@ and the [milestones](https://github.com/kpenfound/osmia/milestones) for the buil
 The [core adapter boundary](docs/core-adapter.md) maps execution contracts to the
 pinned dependency and records upstream capability gaps.
 
+The [turn isolation reference](docs/isolation.md) documents service-owned file
+views, role grants and fail-closed host/container execution requirements.
+
 The [M1 configuration reference](docs/configuration.md) documents the supported
 loader schema, defaults and local root layout.
 

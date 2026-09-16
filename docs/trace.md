@@ -277,3 +277,9 @@ response so the caller can reconcile the same identity; it never automatically l
 Per-turn leases belong to the caller until the adapter is invoked, and competing
 calls must not share leases. The runner never reads private backend transcripts
 and does not choose scheduling, resume/replay or isolation policy.
+
+For service-owned runtime isolation, supply `internal/isolation.Turns` as this
+runner's `Turns` dependency. Pass context and outcome policy without pre-created
+workspace, sandbox, MCP or execution overrides. Resource preparation then happens
+inside the claimed turn, and a failed file view or host/container verification is
+captured durably before execution. See [turn isolation](isolation.md).

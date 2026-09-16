@@ -46,8 +46,10 @@ execution and network capabilities, a complete public environment, and scoped
 provider/MCP credential references. Implementations must deny VCS tools,
 writable VCS metadata, inherited environment and delivery credentials. Read-only
 roles cannot gain write, execution or fetch access through repository tools.
-These are requirements for later enforcement adapters, not security guarantees
-provided by these data types or fixtures.
+`internal/isolation.Turns` prepares fresh views and role grants;
+`BoundaryExecutor` checks a stopped engine's established policy before launch.
+The [turn isolation reference](isolation.md) describes that integration and its
+limitations. Data types and fake engine reports provide no OS security guarantee.
 
 Resource leases are service-owned and can span turns. Release is idempotent;
 a failed release may be retried with a non-cancelled cleanup context. Results may
@@ -102,8 +104,10 @@ a non-cancelled context, preserves execution errors, and reports release failure
 Workspace release is serialized, idempotent on success and retryable on failure.
 
 `MCPHost` builds a fresh core registry for the supplied role, registering only
-supplied tools intersecting the capability allowlist. An absent role or malformed
-approved tool is rejected before hosting; hidden and unknown names cannot reach a
+supplied tools intersecting the capability allowlist and enforcing their declared
+read/write/execute/fetch effects. VCS or unclassified tools, duplicate names,
+missing roles and malformed approved tools are rejected before hosting;
+hidden and unknown names cannot reach a
 handler. `HTTPTransport` serves a caller-bound listener using core's authenticated
 HTTP transport, with a caller-supplied token and endpoint. The service owns address
 selection and credential delivery. Tests use in-memory SDK transports and fake
