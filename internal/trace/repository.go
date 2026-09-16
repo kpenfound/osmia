@@ -105,8 +105,8 @@ func (r *Repository) Close() error {
 func (r *Repository) Project() config.ProjectID { return r.project }
 
 // CharterTemplate is the initial charter.md content of a new project trace,
-// recorded as the charter's first revision. It holds guidance only and no rules, so a new charter is empty until the owner
-// writes one.
+// recorded as the charter's first revision. It holds guidance only and no
+// rules, so a new charter is empty until the owner writes one.
 const CharterTemplate = `# Charter
 
 <!--
@@ -174,20 +174,30 @@ func (r *Repository) Charter(ctx context.Context, at time.Time) (Document, error
 		return Document{}, err
 	}
 	next := charterRevision(r.project, at, ownerActor, "owner-edit", 1, string(data))
-	for _, v := range records {
-		if d, ok := v.(Document); ok && d.Workstream == "" && d.Path == "charter.md" {
-			if d.Content == next.Content {
-				return d, nil
-			}
-			next.ID, next.Revision = d.ID, d.Revision+1
+	if latest, ok := latestCharter(records); ok {
+		if latest.Content == next.Content {
+			return latest, nil
 		}
+		next.ID, next.Revision = latest.ID, latest.Revision+1
 	}
 	// The file already holds this content; rewriting it could overwrite a
-	// newer edit, which the next read then records.
+	// newer edit, which the next read then records. The commit takes the
+	// recorded bytes, not the file.
 	if err := r.append(ctx, next, false); err != nil {
 		return Document{}, err
 	}
 	return next, nil
+}
+
+func latestCharter(records []Record) (Document, bool) {
+	var latest Document
+	found := false
+	for _, v := range records {
+		if d, ok := v.(Document); ok && d.Workstream == "" && d.Path == "charter.md" {
+			latest, found = d, true
+		}
+	}
+	return latest, found
 }
 
 // Create initializes a dedicated local repository in an existing configuration
@@ -520,7 +530,9 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 
 // Append retains every revision in JSONL and commits the affected ordinary files.
 // A file or Git failure is reported without claiming a workflow transaction;
-// records already written remain available for later reconciliation.
+// records already written remain available for later reconciliation. A
+// project charter revision is refused with ErrConflict unless charter.md
+// matches the latest recorded revision; Charter records owner edits.
 func (r *Repository) Append(ctx context.Context, v Record) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -599,6 +611,18 @@ func (r *Repository) append(ctx context.Context, v Record, writeDocument bool) e
 	if err := revision(previous, v); err != nil {
 		return err
 	}
+	// The owner edits charter.md directly. Writing over an edit Charter has
+	// not recorded would lose it.
+	if d, ok := v.(Document); ok && writeDocument && d.Workstream == "" && d.Path == "charter.md" {
+		latest, found := latestCharter(records)
+		current, err := r.readFile("charter.md")
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if !found || err == nil && string(current) != latest.Content {
+			return fmt.Errorf("%w: charter.md has an unrecorded owner edit; read the charter first", ErrConflict)
+		}
+	}
 	name := recordPath(v)
 	paths := []string{name}
 	if d, ok := v.(Document); ok {
@@ -627,7 +651,11 @@ func (r *Repository) append(ctx context.Context, v Record, writeDocument bool) e
 			return err
 		}
 	}
-	return r.commit(ctx, paths, fmt.Sprintf("Record %s %s revision %d", kind(v), v.header().ID, v.header().Revision))
+	content := map[string][]byte{}
+	if d, ok := v.(Document); ok {
+		content[paths[1]] = []byte(d.Content)
+	}
+	return r.commitContent(ctx, paths, content, fmt.Sprintf("Record %s %s revision %d", kind(v), v.header().ID, v.header().Revision))
 }
 
 // Read returns all valid revisions of T in file order, with path/line diagnostics

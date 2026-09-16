@@ -32,8 +32,8 @@ three spaces, under any heading or none:
 
 - A rule is numbered by the number you write, across the whole document. The
   citation form is `charter#<n>`, for example `charter#2`.
-- Lines that follow an item without a blank line continue its text. A blank
-  line, a heading or a bullet ends it.
+- Lines that follow an item continue its text. A blank line, a line holding
+  only an HTML comment, a heading, a bullet or a code fence ends it.
 - Headings, other text, bullets, `N)` items, HTML comments and fenced code
   blocks are not rules. An item with no text is not a rule.
 - Each rule records the nearest heading above it.

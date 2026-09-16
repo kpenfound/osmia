@@ -2,6 +2,7 @@ package trace
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -154,5 +155,106 @@ func TestCharterWithoutRecordedRevision(t *testing.T) {
 	}
 	if docs := charterRevisions(t, r); len(docs) != 1 || docs[0] != want {
 		t.Fatalf("%+v", docs)
+	}
+}
+
+func TestCharterComparesWithLatestRevision(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	path := filepath.Join(root.String(), "projects", string(p.ID), "charter.md")
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.WriteFile(path, []byte("1. Rule.\n"), 0600))
+	if got, err := r.Charter(ctx, at); err != nil || got.Revision != 2 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	// Reverting to the template is an edit of revision 2.
+	must(os.WriteFile(path, []byte(CharterTemplate), 0600))
+	got, err := r.Charter(ctx, at)
+	if err != nil || got.Revision != 3 || got.Content != CharterTemplate || got.Cause != "owner-edit" {
+		t.Fatalf("revert: %+v %v", got, err)
+	}
+	if again, err := r.Charter(ctx, at); err != nil || again != got {
+		t.Fatalf("read after revert: %+v %v", again, err)
+	}
+	if docs := charterRevisions(t, r); len(docs) != 3 {
+		t.Fatalf("%+v", docs)
+	}
+}
+
+func TestAppendRefusesToOverwriteOwnerEdit(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	path := filepath.Join(root.String(), "projects", string(p.ID), "charter.md")
+	if err := os.WriteFile(path, []byte("1. Owner rule.\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	d := charterRevision(p.ID, at, Actor{Kind: "service", ID: "controller"}, "amendment", 2, "1. Amended.\n")
+	if err := r.Append(ctx, d); !errors.Is(err, ErrConflict) {
+		t.Fatalf("owner edit overwritten: %v", err)
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != "1. Owner rule.\n" {
+		t.Fatalf("file: %q %v", data, err)
+	}
+	if docs := charterRevisions(t, r); len(docs) != 1 {
+		t.Fatalf("%+v", docs)
+	}
+	// Once recorded, the next revision follows it.
+	if _, err := r.Charter(ctx, at); err != nil {
+		t.Fatal(err)
+	}
+	d.Revision = 3
+	if err := r.Append(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != "1. Amended.\n" {
+		t.Fatalf("file: %q %v", data, err)
+	}
+}
+
+func TestAppendRefusesCharterWithoutRecordedRevision(t *testing.T) {
+	r, _, p := create(t)
+	ctx := context.Background()
+	if err := r.writeFile("documents.jsonl", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.commit(ctx, []string{"documents.jsonl"}, "Drop charter record"); err != nil {
+		t.Fatal(err)
+	}
+	d := charterRevision(p.ID, at, owner, "amendment", 1, "1. Rule.\n")
+	if err := r.Append(ctx, d); !errors.Is(err, ErrConflict) {
+		t.Fatalf("unrecorded charter overwritten: %v", err)
+	}
+}
+
+// A record commits the bytes it records, even when the file changes before
+// the commit reads the work tree.
+func TestRecordCommitsRecordedBytes(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	path := filepath.Join(root.String(), "projects", string(p.ID), "charter.md")
+	if err := os.WriteFile(path, []byte("1. Recorded.\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	next := charterRevision(p.ID, at, owner, "owner-edit", 2, "1. Recorded.\n")
+	if err := os.WriteFile(path, []byte("1. Later edit.\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := r.append(ctx, next, false)
+	r.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed, err := r.git(ctx, nil, "show", "HEAD:charter.md"); err != nil || committed != "1. Recorded." {
+		t.Fatalf("committed %q %v", committed, err)
+	}
+	got, err := r.Charter(ctx, at)
+	if err != nil || got.Revision != 3 || got.Content != "1. Later edit.\n" {
+		t.Fatalf("later edit: %+v %v", got, err)
 	}
 }

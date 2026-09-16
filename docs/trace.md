@@ -71,7 +71,10 @@ differ from committed history; other appends neither refuse nor commit such an
 edit. `Charter(ctx, at)` is the only way to read the charter: it returns the
 latest recorded revision (document ID `charter`) after recording `charter.md`
 as a new revision by the owner (`owner`/`local`, cause `owner-edit`) when the
-file differs from it. The file itself is not rewritten. A read without an edit
+file differs from the latest revision. The file itself is not rewritten, and
+the commit takes the recorded bytes, so an edit saved meanwhile is recorded by
+the next read. `Append` of a project `charter.md` revision is refused with
+`ErrConflict` unless the file matches the latest recorded revision. A read without an edit
 records nothing. The rule format is described in [charter](charter.md).
 
 ## Failure and ownership boundaries

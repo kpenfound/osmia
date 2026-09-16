@@ -79,3 +79,11 @@ func TestNumberingDiagnostics(t *testing.T) {
 		t.Fatal(r, ok)
 	}
 }
+
+func TestCommentLinesAndFencesEndRules(t *testing.T) {
+	c := Parse("1. First <!-- note --> rule\n<!-- a comment line -->\nnot continued\n2. Second\n```\ncode\n```\nnot continued either\n3. Third\n<!--\nopen\n-->\nnot continued at all\n")
+	want := []Rule{{1, "First  rule", ""}, {2, "Second", ""}, {3, "Third", ""}}
+	if !reflect.DeepEqual(c.Rules, want) || len(c.Diagnostics) != 0 {
+		t.Fatalf("%+v", c)
+	}
+}

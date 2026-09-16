@@ -36,8 +36,8 @@ func (s *Service) loadCharter(ctx context.Context, id config.ProjectID) (trace.D
 	return doc, charter.Parse(doc.Content), nil
 }
 
-func (s *Service) charterState() (CharterState, error) {
-	doc, c, err := s.loadCharter(context.Background(), s.current().Project.ID)
+func (s *Service) charterState(id config.ProjectID) (CharterState, error) {
+	doc, c, err := s.loadCharter(context.Background(), id)
 	if err != nil {
 		return CharterState{}, err
 	}

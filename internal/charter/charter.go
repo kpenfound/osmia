@@ -56,8 +56,9 @@ var (
 
 // Parse returns the rules of a charter and its numbering diagnostics. A rule
 // is a Markdown ordered-list item written as "N. text" at any heading level,
-// numbered by its own list number. Lines that follow an item without a blank
-// line continue its text. Headings, other text, HTML comments and fenced code
+// numbered by its own list number. Lines that follow an item continue its
+// text until a line that is blank once comments are removed, a heading, a
+// bullet or a code fence. Headings, other text, HTML comments and fenced code
 // are not rules. Duplicate numbers, gaps and items without text are reported.
 func Parse(content string) Charter {
 	c := Charter{Rules: []Rule{}, Diagnostics: []Diagnostic{}}

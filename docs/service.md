@@ -134,11 +134,13 @@ the file. A configured project with no trace repository has no charter state
 and no charter diagnostic. The project view returned by `POST` and `DELETE /v1/projects` carries
 no charter state.
 
-`POST /v1/handin` takes the project ID and the absolute paths being handed in.
-An ID that is not the active project returns `not_found`; an active project
-with no trace repository returns `internal`. The charter gate runs next: an empty charter returns `charter_empty` with a message naming the
-project and its `charter.md`. With rules, hand-in returns `unsupported`,
-naming the project and its rule count. See [charter](charter.md).
+`POST /v1/handin` takes a project ID and a list of paths. The service does not
+check the paths; `osmia handin` sends them as absolute paths. A malformed
+project ID returns `validation`. An ID that is not the active project returns
+`not_found`; an active project with no trace repository returns `internal`.
+The charter gate runs next: an empty charter returns `charter_empty` with a
+message naming the project and its `charter.md`. With rules, hand-in returns
+`unsupported`, naming the project and its rule count. See [charter](charter.md).
 
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
 opened, each time a project's trace opens: at startup and when a project is
