@@ -35,7 +35,7 @@ func TestMCPRoleScopedCalls(t *testing.T) {
 	calls := 0
 	handler := func(_ context.Context, input json.RawMessage) (json.RawMessage, error) { calls++; return input, nil }
 	request := HostRequest{Scope: Scope{Role: "mason"}, Capabilities: Capabilities{Tools: []string{"allowed", "unregistered"}}, Tools: []Tool{
-		{Name: "allowed", InputSchema: json.RawMessage(`{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}`), Handle: handler},
+		{Name: "allowed", Effect: ToolRead, InputSchema: json.RawMessage(`{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}`), Handle: handler},
 		{Name: "hidden", InputSchema: json.RawMessage(`{"type":"object"}`), Handle: handler},
 	}}
 	transport := &memoryTransport{}
@@ -72,8 +72,8 @@ func TestMCPRoleScopedCalls(t *testing.T) {
 func TestMCPRejectsInvalidBeforeHosting(t *testing.T) {
 	for _, req := range []HostRequest{
 		{},
-		{Scope: Scope{Role: "mason"}, Capabilities: Capabilities{Tools: []string{"bad"}}, Tools: []Tool{{Name: "bad", InputSchema: json.RawMessage(`{}`)}}},
-		{Scope: Scope{Role: "mason"}, Capabilities: Capabilities{Tools: []string{"bad"}}, Tools: []Tool{{Name: "bad", InputSchema: json.RawMessage(`{`), Handle: func(context.Context, json.RawMessage) (json.RawMessage, error) { return nil, nil }}}},
+		{Scope: Scope{Role: "mason"}, Capabilities: Capabilities{Tools: []string{"bad"}}, Tools: []Tool{{Name: "bad", Effect: ToolRead, InputSchema: json.RawMessage(`{}`)}}},
+		{Scope: Scope{Role: "mason"}, Capabilities: Capabilities{Tools: []string{"bad"}}, Tools: []Tool{{Name: "bad", Effect: ToolRead, InputSchema: json.RawMessage(`{`), Handle: func(context.Context, json.RawMessage) (json.RawMessage, error) { return nil, nil }}}},
 	} {
 		transport := &memoryTransport{}
 		_, err := (&MCPHost{Transport: transport}).Host(context.Background(), req)
@@ -92,6 +92,26 @@ func TestMCPEmptyAllowlistExposesNothing(t *testing.T) {
 	listed, err := transport.client.ListTools(context.Background(), nil)
 	if err != nil || len(listed.Tools) != 0 {
 		t.Fatalf("%+v %v", listed, err)
+	}
+}
+
+func TestMCPRejectsEffectEscalationAndDuplicates(t *testing.T) {
+	for _, effect := range []ToolEffect{ToolWrite, ToolExecute, ToolFetch, ToolVCS, "", "unknown"} {
+		transport := &memoryTransport{}
+		tool := Tool{Name: "apparently_read_only", Effect: effect, InputSchema: json.RawMessage(`{"type":"object"}`), Handle: func(context.Context, json.RawMessage) (json.RawMessage, error) {
+			t.Fatal("denied handler called")
+			return nil, nil
+		}}
+		_, err := (&MCPHost{Transport: transport}).Host(context.Background(), HostRequest{Scope: Scope{Role: "committee"}, Capabilities: Capabilities{Tools: []string{tool.Name}}, Tools: []Tool{tool}})
+		if err == nil || transport.starts != 0 {
+			t.Fatalf("effect %q reached transport: %v", effect, err)
+		}
+	}
+	transport := &memoryTransport{}
+	tool := Tool{Name: "read", Effect: ToolRead, InputSchema: json.RawMessage(`{"type":"object"}`), Handle: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) { return raw, nil }}
+	_, err := (&MCPHost{Transport: transport}).Host(context.Background(), HostRequest{Scope: Scope{Role: "committee"}, Capabilities: Capabilities{Tools: []string{tool.Name}}, Tools: []Tool{tool, tool}})
+	if err == nil || transport.starts != 0 {
+		t.Fatal("duplicate tool accepted")
 	}
 }
 

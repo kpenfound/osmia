@@ -84,9 +84,48 @@ type Sandboxes interface {
 
 type Tool struct {
 	Name, Description string
-	InputSchema       json.RawMessage
-	Handle            func(context.Context, json.RawMessage) (json.RawMessage, error)
+	// Effect is declared by the service registry, never by MCP discovery.
+	Effect      ToolEffect
+	InputSchema json.RawMessage
+	Handle      func(context.Context, json.RawMessage) (json.RawMessage, error)
 }
+
+type ToolEffect string
+
+const (
+	ToolRead    ToolEffect = "read"
+	ToolWrite   ToolEffect = "write"
+	ToolExecute ToolEffect = "execute"
+	ToolFetch   ToolEffect = "fetch"
+	ToolVCS     ToolEffect = "vcs"
+)
+
+// ToolPermitted checks a trusted handler's effect as well as its granted name.
+// Unknown classifications and VCS handlers are never exposed.
+func ToolPermitted(c Capabilities, tool Tool) bool {
+	allowed := false
+	for _, name := range c.Tools {
+		if name == tool.Name {
+			allowed = true
+		}
+	}
+	if !allowed {
+		return false
+	}
+	switch tool.Effect {
+	case ToolRead:
+		return true
+	case ToolWrite:
+		return c.WriteFiles
+	case ToolExecute:
+		return c.Execute
+	case ToolFetch:
+		return c.Network
+	default:
+		return false
+	}
+}
+
 type HostRequest struct {
 	Scope        Scope
 	Capabilities Capabilities

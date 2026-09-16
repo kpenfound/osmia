@@ -53,10 +53,18 @@ func scopedServer(req HostRequest) (server *mcp.Server, err error) {
 		}
 	}()
 	registry := mcphost.NewRegistry([]string{req.Scope.Role}, mcphost.RejectRole, mcphost.RejectRole)
+	seen := map[string]bool{}
 	for _, tool := range req.Tools {
 		if !slices.Contains(req.Capabilities.Tools, tool.Name) {
 			continue
 		}
+		if !ToolPermitted(req.Capabilities, tool) {
+			return nil, fmt.Errorf("MCP tool %q exceeds the role grant", tool.Name)
+		}
+		if seen[tool.Name] {
+			return nil, fmt.Errorf("duplicate MCP tool %q", tool.Name)
+		}
+		seen[tool.Name] = true
 		if tool.Handle == nil {
 			return nil, fmt.Errorf("MCP tool %q has no handler", tool.Name)
 		}

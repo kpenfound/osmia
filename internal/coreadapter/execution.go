@@ -60,6 +60,9 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 	result.Session.Backend = turn.Profile.Backend
 	result.SessionDirectory = turn.SessionDirectory
 	defer func() {
+		if result.Session.ID == "" {
+			result.Session = BackendSession{}
+		}
 		cleanup := context.WithoutCancel(ctx)
 		for i := len(turn.Cleanup) - 1; i >= 0; i-- {
 			if turn.Cleanup[i] != nil {
@@ -68,6 +71,9 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 		}
 		if turn.WorkspaceLease != nil && !turn.RetainWorkspace && turn.WorkspaceLease.Lease != nil {
 			err = errors.Join(err, turn.WorkspaceLease.Lease.Release(cleanup))
+		}
+		if err != nil {
+			result.IsError = true
 		}
 	}()
 	if err = ctx.Err(); err != nil {
@@ -156,6 +162,14 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 		Profile: agent.Profile{Name: t.Scope.Role, Agent: p.Backend, Model: p.Model, Effort: p.Effort, Timeout: p.Timeout, MaxTurns: p.MaxTurns,
 			Sandbox: t.Execution.Mode, SandboxImage: t.Execution.Image, SandboxDomains: slices.Clone(t.Execution.Domains), MCP: map[string]agent.MCPEntry{}, VCSAccess: false},
 	}
+	var servers []string
+	for i := range t.MCP {
+		servers = append(servers, fmt.Sprintf("osmia_%d", i))
+	}
+	if len(t.Sandbox.Verified.Capabilities.Tools) != 0 && len(servers) == 0 {
+		return agent.Request{}, unsupported("tools", "granted tools require a service MCP endpoint")
+	}
+	req.Profile.AllowedTools = AllowedTools(servers, t.Sandbox.Verified.Capabilities.Tools)
 	if err := req.Profile.Validate(); err != nil {
 		return agent.Request{}, unsupported("sandbox", err.Error())
 	}
@@ -172,7 +186,21 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 		if endpoint.URL == "" {
 			return agent.Request{}, errors.New("MCP endpoint URL is empty")
 		}
-		req.Profile.MCP[fmt.Sprintf("osmia_%d", i)] = agent.MCPEntry{Type: "http", URL: endpoint.URL, BearerTokenEnv: endpoint.BearerTokenEnvironment}
+		req.Profile.MCP[servers[i]] = agent.MCPEntry{Type: "http", URL: endpoint.URL, BearerTokenEnv: endpoint.BearerTokenEnvironment}
 	}
 	return req, nil
+}
+
+// AllowedTools names each granted tool the way the backend identifies MCP
+// tools, under every service server, so the allow list pins exactly the hosted
+// tools. Bare names would match nothing. The pinned core forwards this list to
+// Claude only; other backends are bounded by the scoped MCP registry alone.
+func AllowedTools(servers, tools []string) []string {
+	var allowed []string
+	for _, server := range slices.Sorted(slices.Values(servers)) {
+		for _, tool := range tools {
+			allowed = append(allowed, "mcp__"+server+"__"+tool)
+		}
+	}
+	return allowed
 }
