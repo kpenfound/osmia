@@ -82,6 +82,12 @@ func (r *Repository) gitBytes(ctx context.Context, input []byte, index string, a
 // commit hashes supplied bytes without Git attributes, filters or target files.
 // It does not commit configuration or unrelated files from the work tree.
 func (r *Repository) commit(ctx context.Context, paths []string, message string) error {
+	return r.commitContent(ctx, paths, nil, message)
+}
+
+// commitContent commits paths like commit, taking the bytes of any path in
+// content from there instead of from the work tree.
+func (r *Repository) commitContent(ctx context.Context, paths []string, content map[string][]byte, message string) error {
 	parent, err := r.readFile(".git/refs/heads/main")
 	if err != nil && !os.IsNotExist(err) {
 		return err
@@ -95,9 +101,11 @@ func (r *Repository) commit(ctx context.Context, paths []string, message string)
 		return err
 	}
 	for _, name := range paths {
-		data, err := r.readFile(name)
-		if err != nil {
-			return err
+		data, ok := content[name]
+		if !ok {
+			if data, err = r.readFile(name); err != nil {
+				return err
+			}
 		}
 		oid, err := r.git(ctx, data, "hash-object", "-w", "--stdin")
 		if err != nil {
@@ -127,7 +135,9 @@ func (r *Repository) commit(ctx context.Context, paths []string, message string)
 }
 
 // checkHistory finishes journaled workflow publication and reports other
-// uncommitted file changes without guessing how to reconcile them.
+// uncommitted file changes without guessing how to reconcile them. The owner
+// edits charter.md directly; Charter records those edits, so a difference
+// there is expected.
 func (r *Repository) checkHistory(ctx context.Context) error {
 	if err := r.recoverPublication(ctx); err != nil {
 		return err
@@ -150,6 +160,9 @@ func (r *Repository) checkHistory(ctx context.Context) error {
 			return err
 		}
 		tracked[name] = true
+		if name == "charter.md" {
+			continue
+		}
 		data, err := r.readFile(name)
 		if err != nil {
 			return fmt.Errorf("trace history %s: %w", name, err)

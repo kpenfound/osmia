@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	osmiacharter "github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
@@ -146,7 +147,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	}
 	charter, err := os.ReadFile(added.Project.Charter)
 	must(t, err)
-	if string(charter) != trace.CharterTemplate || !strings.Contains(trace.CharterTemplate, "1.") {
+	if string(charter) != trace.CharterTemplate || !osmiacharter.Parse(trace.CharterTemplate).Empty() {
 		t.Fatalf("charter: %q", charter)
 	}
 	if !reflect.DeepEqual(cloneBefore, snapshot(t, clone)) {
@@ -160,9 +161,8 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	if e, ok := seeded.Lookup("internal.trace"); !ok || !reflect.DeepEqual(e.Owners, []string{"@core"}) || !reflect.DeepEqual(e.PartOf, []string{"internal"}) {
 		t.Fatalf("seeded entities:\n%s", entities)
 	}
-	documents, err := trace.Read[trace.Document](s.active.repository, "")
-	must(t, err)
-	if len(documents) != 1 || documents[0].ID != trace.EntitiesDocument || documents[0].Revision != 1 || documents[0].Content != string(entities) {
+	documents := documentRevisions(t, s, trace.EntitiesDocument)
+	if len(documents) != 1 || documents[0].Revision != 1 || documents[0].Content != string(entities) {
 		t.Fatalf("documents: %+v", documents)
 	}
 	if _, err := os.Lstat(filepath.Join(root, "project-add.json")); !os.IsNotExist(err) {
@@ -397,9 +397,8 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				}
 				// The seed is committed with the trace, so recovery never leaves a
 				// trace without its first entity map revision.
-				documents, err := trace.Read[trace.Document](s.active.repository, "")
-				must(t, err)
-				if len(documents) != 1 || documents[0].ID != trace.EntitiesDocument || documents[0].Revision != 1 {
+				documents := documentRevisions(t, s, trace.EntitiesDocument)
+				if len(documents) != 1 || documents[0].Revision != 1 {
 					t.Fatalf("entity map revisions: %+v", documents)
 				}
 				must(t, s.Close())

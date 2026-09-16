@@ -21,6 +21,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   status [--json]
   project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH [--base-branch NAME] [--json]
   project remove <project-id> [--json]
+  handin <project-id> [path...] [--json]
   pause <all|project-id|workstream-id> [--hard] [--reason TEXT] [--json]
   resume <all|project-id|workstream-id> [--json]
   priority set <workstream-id>... | priority clear [--json]
@@ -124,6 +125,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		valid = len(a) == 0
 	case "pause", "resume":
 		valid = len(a) == 1
+	case "handin":
+		valid = len(a) >= 1
 	case "priority":
 		valid = len(a) >= 2 && a[0] == "set" || len(a) == 1 && a[0] == "clear"
 	case "profiles":
@@ -157,7 +160,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	c := service.NewClient(socket)
 	defer c.Close()
-	fail := func(err error) int { return report(stderr, err, cmd == "project") }
+	fail := func(err error) int { return report(stderr, err, cmd == "project" || cmd == "handin") }
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
 		return 4
@@ -192,6 +195,25 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "Project %s (%s) %s\nUpstream: %s fork: %s clone: %s\nTrace: %s\nNext: %s\n", result.Project.ID, result.Project.Name, verb, result.Project.Upstream, result.Project.Fork, result.Project.Clone, result.Project.Trace, result.NextStep)
 		return 0
+	}
+	if cmd == "handin" {
+		id, err := config.ParseProjectID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		paths := []string{}
+		for _, p := range a[1:] {
+			abs, err := filepath.Abs(p)
+			if err != nil {
+				return invalid()
+			}
+			paths = append(paths, abs)
+		}
+		if err := c.HandIn(ctx, service.HandInRequest{Project: id, Paths: paths}); err != nil {
+			return fail(err)
+		}
+		fmt.Fprintln(stderr, "invalid service response: hand-in reported success without a result")
+		return 1
 	}
 	if cmd == "status" {
 		h, err := c.Health(ctx)
@@ -342,6 +364,16 @@ func showProject(w io.Writer, p *service.ProjectView) {
 		return
 	}
 	fmt.Fprintf(w, "Project: %s (%s) upstream=%s fork=%s clone=%s\nTrace: %s\n", p.ID, p.Name, p.Upstream, p.Fork, p.Clone, p.Trace)
+	if c := p.CharterState; c != nil {
+		state := "ready"
+		if !c.Ready {
+			state = "empty; write numbered rules before handing in work"
+		}
+		fmt.Fprintf(w, "Charter: %s (%d rules, revision %d) %s\n", state, c.Rules, c.Revision, p.Charter)
+		for _, d := range c.Diagnostics {
+			fmt.Fprintf(w, "  charter.md:%d: %s\n", d.Line, d.Message)
+		}
+	}
 }
 func diagnostics(w io.Writer, ds []service.Diagnostic) {
 	for _, d := range ds {
@@ -379,6 +411,10 @@ func report(w io.Writer, err error, project bool) int {
 		code, msg = 4, "no project is configured; add one with osmia project add"
 	case service.ProjectActive:
 		msg = "a project is already active; remove it before adding another"
+	case service.NotFound:
+		code, msg = 4, "project not found; check the project ID with status"
+	case service.CharterEmpty:
+		code, msg = 4, "the project's charter has no rules; write the charter before handing in work"
 	case service.Malformed:
 		code, msg = 4, "request rejected; check client and service API versions"
 	case service.Validation:

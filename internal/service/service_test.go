@@ -87,8 +87,13 @@ func TestRoundTrip(t *testing.T) {
 	}
 	cfg, err := c.Configuration(ctx)
 	must(t, err)
-	if cfg.Effective.Project.ID != project || cfg.Root != s.cfg.Root.String() || len(cfg.Digest) != 64 || len(cfg.Diagnostics) != 0 {
+	if cfg.Effective.Project.ID != project || cfg.Root != s.cfg.Root.String() || len(cfg.Digest) != 64 || len(cfg.Diagnostics) != 0 || cfg.Project.CharterState != nil {
 		t.Fatalf("%+v", cfg)
+	}
+	// Without a trace there is no charter to gate on.
+	var api *APIError
+	if err := c.HandIn(ctx, HandInRequest{Project: project}); !errors.As(err, &api) || api.Code != Internal || !strings.Contains(api.Message, "no trace repository") {
+		t.Fatalf("hand-in without a trace: %v", err)
 	}
 	info, err := os.Stat(s.Socket())
 	must(t, err)

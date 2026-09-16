@@ -59,6 +59,19 @@ func entitiesFile(t *testing.T, root config.Root, p config.Project) string {
 	return string(data)
 }
 
+// entityRevisions returns the entity map's revisions, leaving out other
+// project documents such as the charter.
+func entityRevisions(r *trace.Repository) ([]trace.Document, error) {
+	documents, err := trace.Read[trace.Document](r, "")
+	var out []trace.Document
+	for _, d := range documents {
+		if d.ID == trace.EntitiesDocument {
+			out = append(out, d)
+		}
+	}
+	return out, err
+}
+
 func TestStoreRecordsRevisions(t *testing.T) {
 	r, root, p := traceFixture(t, nil)
 	m, err := Load(r)
@@ -72,7 +85,7 @@ func TestStoreRecordsRevisions(t *testing.T) {
 	if err := Store(context.Background(), r, invalid, at, owner, "test"); err == nil {
 		t.Fatal("invalid map stored")
 	}
-	if docs, err := trace.Read[trace.Document](r, ""); err != nil || len(docs) != 0 {
+	if docs, err := entityRevisions(r); err != nil || len(docs) != 0 {
 		t.Fatalf("invalid map wrote documents: %v, %v", docs, err)
 	}
 	if got := entitiesFile(t, root, p); got != "{}\n" {
@@ -85,7 +98,7 @@ func TestStoreRecordsRevisions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	docs, err := trace.Read[trace.Document](r, "")
+	docs, err := entityRevisions(r)
 	if err != nil || len(docs) != 2 {
 		t.Fatalf("documents: %v, %v", docs, err)
 	}
@@ -115,7 +128,7 @@ func TestCreateSeededIsFirstRevision(t *testing.T) {
 	writeTree(t, clone, fixtureFiles)
 	seed := seedBytes(t, clone)
 	r, root, p := traceFixture(t, seed)
-	docs, err := trace.Read[trace.Document](r, "")
+	docs, err := entityRevisions(r)
 	if err != nil || len(docs) != 1 || docs[0].Revision != 1 || docs[0].Content != string(seed) || docs[0].Cause != "project-create" {
 		t.Fatalf("documents: %#v, %v", docs, err)
 	}
@@ -137,7 +150,7 @@ func TestCreateSeededIsFirstRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	docs, err = trace.Read[trace.Document](reopened, "")
+	docs, err = entityRevisions(reopened)
 	if err != nil || len(docs) != 2 || docs[1].Revision != 2 {
 		t.Fatalf("after reopen: %#v, %v", docs, err)
 	}

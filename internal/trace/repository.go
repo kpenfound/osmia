@@ -104,14 +104,47 @@ func (r *Repository) Close() error {
 }
 func (r *Repository) Project() config.ProjectID { return r.project }
 
-// CharterTemplate is the initial charter.md content of a new project trace. The
-// owner replaces it with numbered rules before handing in work.
+// CharterTemplate is the initial charter.md content of a new project trace,
+// recorded as the charter's first revision. It holds guidance only and no
+// rules, so a new charter is empty until the owner writes one.
 const CharterTemplate = `# Charter
 
-Rules you hold as a contributor to this project, one numbered rule per line so
-plans and reviews can cite them. Replace this placeholder before handing in work.
+<!--
+This charter holds your rules as a contributor to this project. Plans, reviews
+and the committee cite them as charter#<n>.
 
-1.
+A rule is a numbered Markdown list item, "1. Rule text", under any heading.
+Rules are cited by the number you write, counted across the whole document, so
+keep each number unique and never reuse a retired one. Headings, plain text and
+comments like this one are guidance, not rules. Osmia refuses hand-in while the
+charter has no rules.
+
+Budgets, capacity, models and other factory settings belong in configuration,
+not here.
+-->
+
+The repository's own contributor documents (CONTRIBUTING, AGENTS.md, CLAUDE.md
+and similar) are binding. Rules here add to them.
+
+## Scope
+
+<!-- What changes belong in this project, and what must be proposed upstream
+first or not at all. -->
+
+## Dependencies
+
+<!-- When a new dependency is acceptable, which ones are preferred or banned,
+and how versions are pinned. -->
+
+## Testing
+
+<!-- How a change must be tested: which suites run, what a new test must show,
+and which checks must pass before a pull request. -->
+
+## Pull requests
+
+<!-- The shape of a pull request: size, commit structure, description,
+changelog and sign-off. -->
 `
 
 // EntitiesPath is the project document holding the local entity map, and
@@ -120,6 +153,59 @@ const (
 	EntitiesPath     = "kb/entities.json"
 	EntitiesDocument = "kb-entities"
 )
+
+// ownerActor records edits the owner made to project documents on disk.
+var ownerActor = Actor{Kind: "owner", ID: "local"}
+
+func charterRevision(project config.ProjectID, at time.Time, actor Actor, cause string, revision int, content string) Document {
+	return Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: "charter", Revision: revision, Project: project, At: at, Actor: actor, Cause: cause}, Path: "charter.md", Content: content}
+}
+
+// Charter returns the latest recorded charter revision. Creation records the
+// template as the first. When charter.md differs from the latest revision, or
+// none is recorded, the file is first recorded as a new revision by the owner,
+// so every owner edit is versioned before it is used. A read with no edit
+// records nothing.
+func (r *Repository) Charter(ctx context.Context, at time.Time) (Document, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return Document{}, err
+	}
+	data, err := r.readFile("charter.md")
+	if err != nil {
+		return Document{}, err
+	}
+	records, _, err := r.scan()
+	if err != nil {
+		return Document{}, err
+	}
+	next := charterRevision(r.project, at, ownerActor, "owner-edit", 1, string(data))
+	if latest, ok := latestCharter(records); ok {
+		if latest.Content == next.Content {
+			return latest, nil
+		}
+		next.ID, next.Revision = latest.ID, latest.Revision+1
+	}
+	// The file already holds this content; rewriting it could overwrite a
+	// newer edit, which the next read then records. The commit takes the
+	// recorded bytes, not the file.
+	if err := r.append(ctx, next, false); err != nil {
+		return Document{}, err
+	}
+	return next, nil
+}
+
+func latestCharter(records []Record) (Document, bool) {
+	var latest Document
+	found := false
+	for _, v := range records {
+		if d, ok := v.(Document); ok && d.Workstream == "" && d.Path == "charter.md" {
+			latest, found = d, true
+		}
+	}
+	return latest, found
+}
 
 // Create initializes a dedicated local repository in an existing configuration
 // directory or a new project directory. It refuses any existing trace or Git
@@ -148,7 +234,11 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 	if err != nil {
 		return nil, err
 	}
-	var documents []byte
+	documents, err := json.Marshal(charterRevision(project.ID, at, actor, "project-create", 1, CharterTemplate))
+	if err != nil {
+		return nil, err
+	}
+	documents = append(documents, '\n')
 	if entities == nil {
 		entities = []byte("{}\n")
 	} else {
@@ -160,7 +250,7 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 		if err != nil {
 			return nil, err
 		}
-		documents = append(line, '\n')
+		documents = append(documents, append(line, '\n')...)
 	}
 	if err := os.MkdirAll(root.String(), 0700); err != nil {
 		return nil, err
@@ -474,16 +564,24 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 
 // Append retains every revision in JSONL and commits the affected ordinary files.
 // A file or Git failure is reported without claiming a workflow transaction;
-// records already written remain available for later reconciliation.
+// records already written remain available for later reconciliation. A
+// project charter revision is refused with ErrConflict unless charter.md
+// matches the latest recorded revision; Charter records owner edits.
 func (r *Repository) Append(ctx context.Context, v Record) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.append(ctx, v, true)
+}
+
+// append requires r.mu. writeDocument false leaves a document's ordinary file
+// as it is on disk.
+func (r *Repository) append(ctx context.Context, v Record, writeDocument bool) error {
 	if err := validate(v); err != nil {
 		return err
 	}
 	if v.header().Project != r.project {
 		return fmt.Errorf("record belongs to a different project")
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -547,6 +645,18 @@ func (r *Repository) Append(ctx context.Context, v Record) error {
 	if err := revision(previous, v); err != nil {
 		return err
 	}
+	// The owner edits charter.md directly. Writing over an edit Charter has
+	// not recorded would lose it.
+	if d, ok := v.(Document); ok && writeDocument && d.Workstream == "" && d.Path == "charter.md" {
+		latest, _ := latestCharter(records)
+		current, err := r.readFile("charter.md")
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err == nil && string(current) != latest.Content {
+			return fmt.Errorf("%w: charter.md has an unrecorded owner edit; read the charter first", ErrConflict)
+		}
+	}
 	name := recordPath(v)
 	paths := []string{name}
 	if d, ok := v.(Document); ok {
@@ -570,12 +680,16 @@ func (r *Repository) Append(ctx context.Context, v Record) error {
 	if err := r.writeFile(name, data); err != nil {
 		return err
 	}
-	if d, ok := v.(Document); ok {
+	if d, ok := v.(Document); ok && writeDocument {
 		if err := r.writeFile(paths[1], []byte(d.Content)); err != nil {
 			return err
 		}
 	}
-	return r.commit(ctx, paths, fmt.Sprintf("Record %s %s revision %d", kind(v), v.header().ID, v.header().Revision))
+	content := map[string][]byte{}
+	if d, ok := v.(Document); ok {
+		content[paths[1]] = []byte(d.Content)
+	}
+	return r.commitContent(ctx, paths, content, fmt.Sprintf("Record %s %s revision %d", kind(v), v.header().ID, v.header().Revision))
 }
 
 // Read returns all valid revisions of T in file order, with path/line diagnostics

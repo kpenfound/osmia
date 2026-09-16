@@ -16,12 +16,13 @@ The package supplies storage APIs; the service's project registration calls
 
 ## Files and records
 
-Creation initializes `charter.md` with `CharterTemplate`, a placeholder the
-owner replaces with numbered rules, plus `kb/entities.json`, `kb/`, `notes/` and
-`workstreams/`. `Create` writes `kb/entities.json` as `{}` without a document
-revision. `CreateSeeded` takes an entity map the caller has already validated
-and commits it as revision 1 of the `kb-entities` document. The
-[local entity map](knowledge-base.md) reference describes the file. Workstream creation initializes `handed/`, `shed/`, `amendments/`,
+Creation initializes `charter.md` with `CharterTemplate`, guidance without
+rules, and records it as revision 1 of the `charter` document, plus
+`kb/entities.json`, `kb/`, `notes/` and `workstreams/`. `Create` writes
+`kb/entities.json` as `{}` without a document revision. `CreateSeeded` takes an
+entity map the caller has already validated and commits it as revision 1 of
+the `kb-entities` document. The [local entity map](knowledge-base.md) reference
+describes the file. Workstream creation initializes `handed/`, `shed/`, `amendments/`,
 `questions/`, `units/` and `agents/`, plus the empty document, transition and cost
 logs. Spec and plan files appear when their first document revision is appended.
 Empty directories exist on disk; Git records files.
@@ -66,6 +67,20 @@ line order, not a global event ordering. Reads use ordinary files, including the
 owned request/final-response log, without backend transcript files, the target
 clone or Hearsay. The execution payloads reuse the core adapter contracts;
 trace accounting does not change the operational ledger adapter's file format.
+
+## Charter
+
+The owner edits `charter.md` directly, so it is the one tracked file allowed to
+differ from committed history; appending any other record neither refuses nor
+commits such an edit. `Charter(ctx, at)` is the only way to read the charter:
+it returns the latest recorded revision (document ID `charter`) after
+recording `charter.md` as a new revision by the owner (`owner`/`local`, cause
+`owner-edit`) when the file differs from the latest revision. A read without an
+edit records nothing. The file itself is not rewritten, and the commit takes
+the recorded bytes, so an edit saved meanwhile is recorded by the next read.
+`Append` of a project `charter.md` revision is refused with `ErrConflict`
+unless the file matches the latest recorded revision. The rule format is
+described in [charter](charter.md).
 
 ## Failure and ownership boundaries
 

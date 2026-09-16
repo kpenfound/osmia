@@ -143,8 +143,8 @@ writing anything, then:
    `landing = "commit-per-unit"`; capacity is inherited from the top level;
 3. seeds the [local entity map](knowledge-base.md#seeding) from the clone's
    CODEOWNERS and directory structure, and creates the trace repository with
-   a charter template in `charter.md` and the seed as the first revision of
-   `kb/entities.json`;
+   a [charter](charter.md) template in `charter.md` and the seed as the first
+   revisions of the charter and `kb/entities.json`;
 4. adds the ID to `active_projects` in the top-level `config.toml` as a text
    edit, so the owner's comments, ordering and formatting survive;
 5. activates the project (opens the trace and starts reconciliation) and

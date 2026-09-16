@@ -10,6 +10,7 @@ osmia serve --root ~/.osmia
 osmia status --root ~/.osmia
 osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
 osmia project remove p_0123456789abcdef0123456789abcdef
+osmia handin p_0123456789abcdef0123456789abcdef design.md
 osmia pause all --reason "Away for the weekend"
 osmia resume all
 osmia profiles
@@ -24,8 +25,10 @@ osmia status --json
   SIGTERM drain requests and release ownership and the socket. A live owner is
   refused; a provably stale socket is recovered automatically.
 - `status` shows health, loaded configuration digest/root, the active project
-  and its trace path (or that none is configured), diagnostics and effective
-  runtime controls.
+  and its trace path (or that none is configured), its charter state (ready or
+  empty, rule count, recorded revision and numbering diagnostics), diagnostics
+  and effective runtime controls. Reading the charter records any edit you made
+  to it; see [charter](charter.md).
 - `project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH
   [--base-branch NAME]` registers a project with the running service: it
   validates the request, generates the project ID, writes
@@ -42,6 +45,13 @@ osmia status --json
   `active_projects` and closes its runtime state. The trace directory and the
   clone are kept. Adding the same upstream again afterwards creates a new
   project ID and a new trace; see [configuration](configuration.md#project-registration).
+- `handin <project-id> [path...]` hands work to the active project. Paths are
+  made absolute by the client. It first checks the charter: with no rules it
+  fails with `charter_empty` (exit 4), naming the project and the path to its
+  `charter.md`. A project ID that is not the active project fails with
+  `not_found` (exit 4). With a charter that has rules it currently fails with
+  `unsupported` (exit 5): the hand-in itself is not implemented yet, and no
+  workstream is created.
 - `pause <all|project-id|workstream-id> [--hard] [--reason TEXT]` stores an
   operator pause; the default mode is soft.
 - `resume <all|project-id|workstream-id>` clears that scope's pause. Parent pauses
@@ -92,8 +102,8 @@ including defaults after clearing overrides. If the mutation succeeds but readin
 the effective state fails, stderr says it was acknowledged; inspect status before
 retrying. Failures leave stdout empty and write actionable diagnostics to stderr.
 Raw configuration/parser and server error text is omitted from failure messages.
-Project command failures print the service's message, which names the field,
-project ID or path at fault and never raw file contents.
+Project and hand-in command failures print the service's message, which names
+the field, project ID or path at fault and never raw file contents.
 
 | Exit | Meaning |
 | --- | --- |
@@ -101,7 +111,7 @@ project ID or path at fault and never raw file contents.
 | 1 | Invalid API response, local output or unexpected client failure |
 | 2 | Invalid command, flags, arguments or root |
 | 3 | Missing socket, connection failure or unavailable service |
-| 4 | API malformed-input or validation rejection, or no project is configured |
+| 4 | API malformed-input or validation rejection, no project is configured, unknown project, or empty charter on hand-in |
 | 5 | API conflict, project already active, unsupported operation, restart required or internal failure |
 | 6 | Foreground startup/service failure, including ownership conflict |
 
@@ -112,7 +122,7 @@ live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
 Detached management, install/upgrade commands, completion, web/tailnet,
-the librarian's knowledge-base extraction on add, hand-in, inbox, conversation, ratification,
+the librarian's knowledge-base extraction on add, hand-in past the charter check, inbox, conversation, ratification,
 answer, reload and trace navigation are unavailable. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.

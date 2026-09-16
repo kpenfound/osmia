@@ -40,6 +40,9 @@ versioned M1 endpoints and the in-process client.
 The [M1 demonstration](docs/m1-demonstration.md) runs a durable role thread
 across a service restart with fake engines and explains how to inspect its trace.
 
+The [charter reference](docs/charter.md) documents the charter template, the
+numbered-rule format and how owner edits are recorded.
+
 The [command line](docs/cli.md) documents the foreground service, project
 registration and thin local operator clients, including JSON output and exit
 codes.

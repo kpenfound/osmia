@@ -2,6 +2,7 @@
 package service
 
 import (
+	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
 )
@@ -20,6 +21,8 @@ const (
 	Internal        Code = "internal"
 	NoProject       Code = "no_project"
 	ProjectActive   Code = "project_active"
+	NotFound        Code = "not_found"
+	CharterEmpty    Code = "charter_empty"
 )
 
 type APIError struct {
@@ -68,6 +71,24 @@ type ProjectView struct {
 	BaseBranch string           `json:"base_branch"`
 	Trace      string           `json:"trace"`
 	Charter    string           `json:"charter"`
+	// CharterState is reported by status only.
+	CharterState *CharterState `json:"charter_state,omitempty"`
+}
+
+// CharterState summarizes the charter as last recorded. Ready means it has at
+// least one rule, which hand-in requires.
+type CharterState struct {
+	Ready       bool                 `json:"ready"`
+	Rules       int                  `json:"rules"`
+	Revision    int                  `json:"revision"`
+	Diagnostics []charter.Diagnostic `json:"diagnostics"`
+}
+
+// HandInRequest hands work to a project. Paths are absolute paths to the
+// design documents being handed in.
+type HandInRequest struct {
+	Project config.ProjectID `json:"project"`
+	Paths   []string         `json:"paths"`
 }
 
 // ProjectAddRequest registers a project. Clone is an absolute path to an

@@ -179,14 +179,16 @@ func TestProjectDocumentsAndImmutableInput(t *testing.T) {
 	r, _, _ := create(t)
 	d := Document{Header: header("document", "charter"), Path: "charter.md", Content: "Owner's charter"}
 	d.Workstream = ""
+	d.Revision = 2
 	if err := r.Append(context.Background(), d); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Get[Document](r, "", "charter", 1)
+	got, err := Get[Document](r, "", "charter", 2)
 	if err != nil || !reflect.DeepEqual(got, d) {
 		t.Fatalf("project doc: %#v %v", got, err)
 	}
 	d.Header = header("document", "input1")
+	d.Revision = 1
 	d.Path = "handed/design.jsonl"
 	if err := r.Append(context.Background(), d); err != nil {
 		t.Fatal(err)
@@ -617,7 +619,7 @@ func TestCreateSeededRecordsEntityMap(t *testing.T) {
 	defer r.Close()
 	docs, err := Read[Document](r, "")
 	want := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: EntitiesDocument, Revision: 1, Project: p.ID, At: at, Actor: owner, Cause: "project-create"}, Path: EntitiesPath, Content: seed}
-	if err != nil || len(docs) != 1 || !reflect.DeepEqual(docs[0], want) {
+	if err != nil || len(docs) != 2 || docs[0].ID != "charter" || !reflect.DeepEqual(docs[1], want) {
 		t.Fatalf("documents: %#v, %v", docs, err)
 	}
 	data, err := os.ReadFile(filepath.Join(r.directory, EntitiesPath))
