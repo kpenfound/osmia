@@ -68,6 +68,9 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	if err := r.Store.CaptureTurn(cleanup, q.Claim.Token, response); err != nil {
 		return q, errors.Join(runErr, err)
 	}
+	if err := r.costs(cleanup, t.Identity.Role, q); err != nil {
+		return q, errors.Join(runErr, err)
+	}
 	completed := r.Now()
 	q.CompletedAt = completed
 	if err := r.Store.CompleteTurn(cleanup, stream, agent, req.TurnID, q.Claim.Token, completed); err != nil {

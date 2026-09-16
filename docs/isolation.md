@@ -45,7 +45,12 @@ fetch permission. The selector's optional `Narrow` request intersects the grant.
 Neither prompts nor profiles grant tools. The full workflow role-tool catalogue
 is outside this M1 implementation.
 
-The service registry classifies each tool as read, write, execute, fetch or VCS.
+The service registry classifies each tool as read, write, memory, execute, fetch
+or VCS. Memory tools change only service-owned private role memory and enforce
+their own scope, so any granted role may use them. `Turns.Scoped` supplies
+trusted handlers bound to the claimed turn's scope, such as the trace's
+[private role notes](trace.md#private-role-notes). They join the same registry,
+duplicate-name and grant checks as `Turns.Tools`; an error fails preparation.
 Registration requires both a granted name and a permitted effect. Unknown effects
 and VCS tools are excluded; unknown granted names and duplicate registered names
 fail preparation. The MCP adapter independently rejects effects exceeding its

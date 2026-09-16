@@ -112,3 +112,98 @@ func TestServiceRejectsLockedTrace(t *testing.T) {
 		t.Fatalf("locked trace was not rejected: %v", err)
 	}
 }
+
+type forbiddenRunner struct{ t *testing.T }
+
+func (f forbiddenRunner) Inspect(context.Context, coreadapter.Operation) (coreadapter.Observation, error) {
+	f.t.Error("replaced runner adapter was inspected")
+	return coreadapter.Observation{}, errors.New("forbidden")
+}
+func (f forbiddenRunner) Apply(context.Context, coreadapter.Operation) (coreadapter.OperationResult, error) {
+	f.t.Error("replaced runner adapter was applied")
+	return coreadapter.OperationResult{}, errors.New("forbidden")
+}
+
+type completedRunner struct{ inspections int }
+
+func (c *completedRunner) Inspect(context.Context, coreadapter.Operation) (coreadapter.Observation, error) {
+	c.inspections++
+	return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "threads", Result: &coreadapter.OperationResult{Outcome: "from-threads", Evidence: "threads"}}, nil
+}
+func (c *completedRunner) Apply(context.Context, coreadapter.Operation) (coreadapter.OperationResult, error) {
+	return coreadapter.OperationResult{}, errors.New("completed operations are not applied")
+}
+
+func runnerIntent(t *testing.T, opts Options) config.Root {
+	t.Helper()
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	actor := trace.Actor{Kind: "service", ID: "test"}
+	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, now, actor)
+	must(t, err)
+	must(t, repository.CreateWorkstream(context.Background(), stream, now, actor))
+	event := trace.Event{ID: "turn", Kind: "local-effect", Body: "authorized turn"}
+	event.Operation = &coreadapter.Operation{ID: trace.OperationID(project, stream, event.ID), Boundary: coreadapter.RunnerBoundary, Action: "run", Input: json.RawMessage(`{}`)}
+	_, err = repository.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "start", Revision: 1, Project: project, Workstream: stream, At: now, Actor: actor, Cause: "owner"}, Subject: "turn", To: "pending", Reason: "owner requested"}, Events: []trace.Event{event}})
+	must(t, err)
+	must(t, repository.Close())
+	return cfg.Root
+}
+
+func TestServiceThreadsErrorReleasesTrace(t *testing.T) {
+	opts := fixture(t)
+	runnerIntent(t, opts)
+	failure := errors.New("threads unavailable")
+	var bound *trace.Repository
+	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) { bound = r; return nil, failure }
+	s, err := Start(context.Background(), opts)
+	if s != nil {
+		s.Close()
+	}
+	if !errors.Is(err, failure) || bound == nil {
+		t.Fatalf("start with failing threads binding: %v", err)
+	}
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	repository, err := trace.Open(cfg.Root, cfg.Project)
+	must(t, err)
+	must(t, repository.Close())
+	opts.Threads = nil
+	s, err = Start(context.Background(), opts)
+	must(t, err)
+	must(t, s.Close())
+}
+
+func TestServiceThreadsReplaceRunnerAdapter(t *testing.T) {
+	opts := fixture(t)
+	runnerIntent(t, opts)
+	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	ticks := make(chan time.Time)
+	forbidden := forbiddenRunner{t}
+	adapters := map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: forbidden}
+	opts.Reconciliation = reconcile.Options{Now: func() time.Time { return now }, Ticks: ticks, Adapters: adapters}
+	threads := &completedRunner{}
+	opts.Threads = func(*trace.Repository) (coreadapter.Reconciler, error) { return threads, nil }
+	s, err := Start(context.Background(), opts)
+	must(t, err)
+	select {
+	case ticks <- now:
+	case <-time.After(5 * time.Minute):
+		t.Fatal("startup pass did not finish")
+	}
+	must(t, s.Close())
+	if len(adapters) != 1 || adapters[coreadapter.RunnerBoundary] != coreadapter.Reconciler(forbidden) {
+		t.Fatalf("caller adapters changed: %v", adapters)
+	}
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	repository, err := trace.Open(cfg.Root, cfg.Project)
+	must(t, err)
+	defer repository.Close()
+	records, err := repository.Operations(stream)
+	must(t, err)
+	if threads.inspections != 1 || len(records) != 1 || !records[0].Acknowledged || records[0].Result == nil || records[0].Result.Outcome != "from-threads" {
+		t.Fatalf("threads adapter did not handle the operation: %d %+v", threads.inspections, records)
+	}
+}

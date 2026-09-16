@@ -18,7 +18,7 @@ func (r *Repository) NotesTools(agent string, scope coreadapter.Scope) ([]coread
 	if err := r.notesScope(agent, scope, false); err != nil {
 		return nil, err
 	}
-	read := coreadapter.Tool{Name: "notes_read", Description: "Read this role's private project notes.",
+	read := coreadapter.Tool{Name: "notes_read", Description: "Read this role's private project notes.", Effect: coreadapter.ToolRead,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}
 	read.Handle = func(ctx context.Context, input json.RawMessage) (json.RawMessage, error) {
 		var args struct{}
@@ -41,7 +41,7 @@ func (r *Repository) NotesTools(agent string, scope coreadapter.Scope) ([]coread
 			Text string `json:"text"`
 		}{string(content)})
 	}
-	write := coreadapter.Tool{Name: "notes_write", Description: "Replace this role's private project notes.",
+	write := coreadapter.Tool{Name: "notes_write", Description: "Replace this role's private project notes.", Effect: coreadapter.ToolMemory,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false}`)}
 	write.Handle = func(ctx context.Context, input json.RawMessage) (json.RawMessage, error) {
 		var args struct {
