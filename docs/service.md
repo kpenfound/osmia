@@ -130,12 +130,13 @@ active project is removed or the journal is inspected.
 `rules`, the recorded `revision` and numbering `diagnostics`. Reading it records
 any owner edit to the charter first; if the charter cannot be read or recorded,
 `charter_state` is absent and a `charter` diagnostic with code `internal` names
-the file. The project view returned by `POST` and `DELETE /v1/projects` carries
+the file. A configured project with no trace repository has no charter state
+and no charter diagnostic. The project view returned by `POST` and `DELETE /v1/projects` carries
 no charter state.
 
 `POST /v1/handin` takes the project ID and the absolute paths being handed in.
-An ID that is not the active project returns `not_found`. The charter gate runs
-next: an empty charter returns `charter_empty` with a message naming the
+An ID that is not the active project returns `not_found`; an active project
+with no trace repository returns `internal`. The charter gate runs next: an empty charter returns `charter_empty` with a message naming the
 project and its `charter.md`. With rules, hand-in returns `unsupported`,
 naming the project and its rule count. See [charter](charter.md).
 
