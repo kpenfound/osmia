@@ -432,6 +432,10 @@ Built for a phone as much as a laptop. Embedded in the binary, one page, fed by 
 
 ### 11.2 Command line
 
+The following is the full design; see the [M1 command line](cli.md) for the
+implemented subset. Detached serving and the later lifecycle commands are
+unavailable in M1.
+
 ```
 osmia serve                          the service, foreground or detached
 osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
