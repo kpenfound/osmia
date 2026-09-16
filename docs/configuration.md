@@ -21,9 +21,10 @@ once; changing a display name, upstream or clone does not change it. Parsing acc
 only the canonical format, so traversal, absolute names and case aliases cannot
 become identities. `CheckProjectIDs`/`CheckWorkstreamIDs` reject duplicates with
 `ErrCollision`; constructors also accept existing IDs to check. Generation does
-not reserve a key: a future persistence caller must reserve it atomically and
-retry generation on collision. Workstream keys are not a configuration list;
-they belong to future persisted workstream records.
+not reserve a key: persistence callers must reserve it atomically and retry
+generation on collision. The [trace repository](trace.md) reserves project and
+workstream identities when creating their directories. Workstream keys are not a
+configuration list; they belong to persisted workstream manifests.
 
 ```text
 <root>/config.toml
