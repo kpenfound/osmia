@@ -108,16 +108,17 @@ policy or grant owner approval.
 The transition carries the ordinary trace header, including actor, timestamp,
 cause and causal depth. Its ID identifies the logical transaction in that
 workstream; revision must be one. `EventID(transactionID, eventKey)` derives a
-stable event ID. Event IDs are unique within a workstream, and events contain a
-kind and body for eventual chief-of-staff delivery. Callers retain the complete
+stable event ID. Event IDs are unique within a workstream, and ordinary notification events contain a
+kind and body for eventual chief-of-staff delivery. Local operation intents also
+carry the operation described below. Callers retain the complete
 request across retries, including timestamps and event order. An identical retry
 returns its original resulting state even if later transactions exist. Reusing a
 transaction ID with changed content, reusing an event ID in another transaction,
 or supplying a stale version returns `ErrConflict`. Managed transitions cannot
 be revised through `Append`.
 
-`workstreams/<id>/workflow.json` holds the versioned transaction and delivery
-histories. `Workflow` derives the current subject state from that history. Each
+`workstreams/<id>/workflow.json` holds the versioned transaction, delivery
+and operation histories. `Workflow` derives the current subject state from that history. Each
 transaction also adds its transition to `events.jsonl`; the complete history of
 both files is available in Git. `Outbox` returns all delivery intents with their
 claim, acknowledgement and release history, sorted by event ID.
@@ -141,8 +142,9 @@ local filesystem supporting atomic rename and file/directory synchronization.
 
 ## Delivery leases and wakeups
 
-`Ready(workstream, now)` scans durable state for unacknowledged entries without an
-active lease. `Claim` takes an event ID, stable attempt token, worker ID, timestamp
+`Ready(workstream, now)` scans durable state for unacknowledged notification
+entries without an active lease. Operation intents use the reconciliation API.
+`Claim` takes an event ID, stable attempt token, worker ID, timestamp
 and positive lease duration. Claims are exclusive within a repository session;
 the timestamp and duration come from the service clock. An identical active
 claim retry returns the original lease without extending it. Changed parameters
@@ -162,5 +164,57 @@ handle ends its session; workers must stop using that handle and its claims.
 transactions and releases signal it after durable publication. Signals are only
 latency hints: controllers scan on startup and after wakes and periodic ticks.
 Lease expiry needs no signal, and reopen deliberately does not replay hints.
-External side-effect inspection, reconciliation and delivery controllers are
-separate from this storage API.
+External inspection is supplied through the reconciliation adapter contract;
+notification delivery policy remains separate from this storage API.
+
+## Durable local operations
+
+An outbox `Event` may carry an immutable `coreadapter.Operation` for a local
+repository, runner or container boundary. Ordinary events remain notifications;
+operation intents are reserved for reconciliation and cannot be claimed or
+acknowledged through the notification delivery API. `OperationID(project,
+workstream, eventID)` derives the required external identity. The operation's
+boundary, action and JSON input are published with the originating state change.
+Input uses the relevant workspace, prepared-turn or sandbox contract and contains
+no secret values. Changing input on retry is an identity conflict.
+
+`Operations(workstream)` returns the operation records derived from
+`workflow.json`. Each retains the originating transition header and the complete
+claim, observation, effect-attempt, retry, terminal-result and acknowledgement
+history. Actions retain a service actor, timestamp, operation cause, causal depth,
+repository session and attempt token. Results include terminal domain outcomes,
+evidence and optional structured data. An infrastructure error leaves the intent
+pending; it does not imply that no effect occurred.
+
+`WithOperation` owns one synchronous reconciliation callback. Reconciliation is
+serialized per trace repository, including across controllers, and `Close` joins
+the current callback before releasing the repository lock. Operation claims use
+execution ownership rather than expiring notification leases: a slow external
+call cannot overlap a replacement worker. A callback must join all its external
+calls before returning; cancellation alone is not proof that a remote process
+stopped. Restart acquires the exclusive repository lock and discovers abandoned
+claims by scanning. Callback handles cannot write after return. Results and
+acknowledgements are immutable; publication errors are resolved by rereading the
+same durable identity.
+
+`internal/reconcile.Controller` scans all persisted workstreams on startup and
+after wakeups and periodic ticks. Before each effect attempt it records an
+adapter inspection by operation ID. A completed inspection supplies the terminal
+result without applying again. Only an absent inspection permits an effect;
+absence must prove that no previous attempt is running or can complete later.
+Running, unreachable or unidentifiable effects are unknown and stay pending.
+Adapter errors and unknown observations record a retry time (one second by
+default). Retries inspect again, using the same operation ID. A persisted result
+needs only acknowledgement after restart. Store/protocol errors stop the loop
+and are returned to its owner. Inspection, effect and result writes all use the
+same journaled publication boundary as workflow transactions.
+
+The local service opens the active project's existing trace before reporting
+readiness and joins its reconciliation loop during shutdown. It does not create
+a trace for an uninitialized project. `service.Options.Reconciliation` supplies
+local adapters and optional clocks, ticks and retry/scan intervals. With no
+adapter for a boundary, its operations remain unknown and retryable; the service
+does not launch work through an adapter lacking identity-based inspection.
+Production capability enforcement remains the execution adapter's responsibility.
+This controller supplies M1 recovery infrastructure, not lifecycle scheduling,
+capacity decisions or owner authorization.

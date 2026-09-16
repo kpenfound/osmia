@@ -15,15 +15,19 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 type Options struct {
 	Config config.Options
 	Build  Identity
-	// Workstreams are supplied by the persisted record repository, never a scan.
+	// Workstreams supplies known identities when no trace exists. An existing
+	// trace supplies its validated workstream manifests.
 	Workstreams     []config.WorkstreamID
 	ShutdownTimeout time.Duration
+	Reconciliation  reconcile.Options
 }
 type Service struct {
 	cfg        *config.Config
@@ -69,6 +73,21 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	cfg, err := config.Load(opts.Config)
 	if err != nil {
 		return nil, err
+	}
+	repository, controller, err := openReconciliation(cfg, opts.Reconciliation)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil && repository != nil {
+			repository.Close()
+		}
+	}()
+	if repository != nil {
+		opts.Workstreams, err = repository.Workstreams()
+		if err != nil {
+			return nil, err
+		}
 	}
 	st, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: opts.Workstreams})
 	if err != nil {
@@ -118,10 +137,20 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		BaseContext: func(net.Listener) context.Context { return lifetime }}
 	s.ready.Store(true)
 	go func() {
+		var reconciled chan error
+		if controller != nil {
+			reconciled = make(chan error, 1)
+			go func() { reconciled <- controller.Run(lifetime) }()
+		}
 		served := make(chan error, 1)
 		go func() { served <- s.server.Serve(listener) }()
 		select {
 		case <-lifetime.Done():
+		case e := <-reconciled:
+			if !errors.Is(e, context.Canceled) {
+				s.err = e
+			}
+			reconciled = nil
 		case e := <-served:
 			if !errors.Is(e, http.ErrServerClosed) {
 				s.err = e
@@ -141,6 +170,14 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			}
 		}
 		s.requests.Wait()
+		if reconciled != nil {
+			if e := <-reconciled; e != nil && !errors.Is(e, context.Canceled) {
+				s.err = errors.Join(s.err, e)
+			}
+		}
+		if repository != nil {
+			s.err = errors.Join(s.err, repository.Close())
+		}
 		s.cleanupSocket()
 		s.store.Close()
 		s.lock.Close()
@@ -200,4 +237,34 @@ func (s *Service) cleanupSocket() {
 	if info, err := os.Lstat(s.cfg.Listen.Socket); err == nil && os.SameFile(info, s.socketInfo) {
 		os.Remove(s.cfg.Listen.Socket)
 	}
+}
+
+// openReconciliation leaves trace creation to onboarding; an existing trace must
+// open cleanly before the service can report readiness.
+func openReconciliation(cfg *config.Config, options reconcile.Options) (*trace.Repository, *reconcile.Controller, error) {
+	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	_, manifestErr := os.Lstat(filepath.Join(directory, "project.json"))
+	_, gitErr := os.Lstat(filepath.Join(directory, ".git"))
+	if os.IsNotExist(manifestErr) && os.IsNotExist(gitErr) {
+		return nil, nil, nil
+	}
+	repository, err := trace.Open(cfg.Root, cfg.Project)
+	if err != nil {
+		if repository != nil {
+			repository.Close()
+		}
+		return nil, nil, err
+	}
+	if options.Worker == "" {
+		options.Worker = "local-operations"
+	}
+	controller, err := reconcile.New(repository, options)
+	if err != nil {
+		repository.Close()
+		return nil, nil, err
+	}
+	return repository, controller, nil
 }
