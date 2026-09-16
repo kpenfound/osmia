@@ -118,6 +118,15 @@ type TurnResponse struct {
 
 func (TurnResponse) traceRecord() {}
 
+// Status is the chief of staff's status for one workstream. Each revision
+// replaces the previous one as a whole; the record ID is always StatusID.
+type Status struct {
+	Header
+	StatusContent
+}
+
+func (Status) traceRecord() {}
+
 type Cost struct {
 	Header
 	Entry coreadapter.LedgerEntry `json:"entry"`
@@ -154,6 +163,8 @@ func kind(r Record) string {
 		return "turn-response"
 	case Cost:
 		return "cost"
+	case Status:
+		return "status"
 	default:
 		return ""
 	}
@@ -196,6 +207,8 @@ func validate(r Record) error {
 		valid = key(v.AgentID) && key(v.ThreadID) && key(v.TurnID) && key(v.Profile.Name) && present(v.Profile.Backend) && present(v.Profile.Model) && present(v.Prompt) && v.Profile.Timeout >= 0 && v.Profile.MaxTurns >= 0 && v.Profile.CostLimitUSD >= 0 && !math.IsNaN(v.Profile.CostLimitUSD) && !math.IsInf(v.Profile.CostLimitUSD, 0) && (v.Resume == nil || validSession(*v.Resume))
 	case TurnResponse:
 		valid = key(v.AgentID) && key(v.ThreadID) && key(v.TurnID) && key(v.RequestID) && v.RequestRevision > 0 && !v.Result.StartedAt.IsZero() && v.Result.Duration >= 0 && validUsage(v.Result.Usage) && (validSession(v.Result.Session) || (v.Result.Session == (coreadapter.BackendSession{}) && present(v.Failure)))
+	case Status:
+		valid = h.ID == StatusID && h.Unit == "" && v.valid()
 	case Cost:
 		s := v.Entry.Scope
 		valid = s.Project == string(h.Project) && s.Workstream == string(h.Workstream) && key(s.Thread) && key(s.Turn) && key(s.Role) && (s.Unit == "" || key(s.Unit)) && key(v.Entry.AttemptID) && !v.Entry.At.IsZero() && validUsage(v.Entry.Usage)
@@ -255,6 +268,8 @@ func recordPath(r Record) string {
 		return prefix + "agents/" + v.AgentID + "/log.jsonl"
 	case Cost:
 		return prefix + "ledger.jsonl"
+	case Status:
+		return prefix + "status.jsonl"
 	}
 	return ""
 }

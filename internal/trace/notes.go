@@ -15,7 +15,7 @@ import (
 func (r *Repository) NotesTools(agent string, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := r.notesScope(agent, scope, false); err != nil {
+	if _, _, err := r.turnScope(agent, scope, false); err != nil {
 		return nil, err
 	}
 	read := coreadapter.Tool{Name: "notes_read", Description: "Read this role's private project notes.", Effect: coreadapter.ToolRead,
@@ -30,7 +30,7 @@ func (r *Repository) NotesTools(agent string, scope coreadapter.Scope) ([]coread
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if err := r.notesScope(agent, scope, true); err != nil {
+		if _, _, err := r.turnScope(agent, scope, true); err != nil {
 			return nil, err
 		}
 		content, err := r.readFile("notes/" + scope.Role + ".md")
@@ -58,7 +58,7 @@ func (r *Repository) NotesTools(agent string, scope coreadapter.Scope) ([]coread
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if err := r.notesScope(agent, scope, true); err != nil {
+		if _, _, err := r.turnScope(agent, scope, true); err != nil {
 			return nil, err
 		}
 		if err := r.checked("notes/" + scope.Role + ".md"); err != nil {
@@ -72,29 +72,31 @@ func (r *Repository) NotesTools(agent string, scope coreadapter.Scope) ([]coread
 	return []coreadapter.Tool{read, write}, nil
 }
 
-func (r *Repository) notesScope(agent string, scope coreadapter.Scope, active bool) error {
+// turnScope requires r.mu. It returns the thread and turn a tool scope names;
+// active also requires this session's uncaptured claim on that turn.
+func (r *Repository) turnScope(agent string, scope coreadapter.Scope, active bool) (Thread, QueuedTurn, error) {
 	if scope.Project != string(r.project) || !key(agent) || !key(scope.Role) || !key(scope.Thread) || !key(scope.Turn) {
-		return fmt.Errorf("notes scope denied")
+		return Thread{}, QueuedTurn{}, fmt.Errorf("turn scope denied")
 	}
 	stream := config.WorkstreamID(scope.Workstream)
 	if err := config.CheckWorkstreamIDs(stream); err != nil {
-		return err
+		return Thread{}, QueuedTurn{}, err
 	}
 	log, _, err := r.loadWorkflow(stream)
 	if err != nil {
-		return err
+		return Thread{}, QueuedTurn{}, err
 	}
 	t, ok := log.Threads[agent]
 	if !ok || t.Identity.Role != scope.Role || t.Identity.ThreadID != scope.Thread || (active && t.Active != scope.Turn) {
-		return fmt.Errorf("notes scope denied")
+		return Thread{}, QueuedTurn{}, fmt.Errorf("turn scope denied")
 	}
 	for _, q := range t.Turns {
 		if q.Request.TurnID == scope.Turn && q.Request.Unit == scope.Unit {
 			if active && (q.Claim == nil || q.Claim.ServiceSession != r.session || q.Response != nil) {
-				return ErrClaim
+				return Thread{}, QueuedTurn{}, ErrClaim
 			}
-			return nil
+			return t, q, nil
 		}
 	}
-	return fmt.Errorf("notes turn not found")
+	return Thread{}, QueuedTurn{}, fmt.Errorf("turn not found")
 }
