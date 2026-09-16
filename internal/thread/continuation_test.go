@@ -316,3 +316,29 @@ func TestNotesIsolationAndReopen(t *testing.T) {
 		t.Fatal("symlink write accepted")
 	}
 }
+
+func TestSafeRetryStopsForUncertainResults(t *testing.T) {
+	for _, mode := range []string{"cancelled", "timeout", "malformed-session"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			repo, _, _ := setup(t)
+			queue(t, repo, "first")
+			calls := 0
+			runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 1, Fallbacks: map[string]coreadapter.Profile{"default": {Name: "fallback", Backend: "other"}}}
+			runner.Turns = fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+				calls++
+				if mode == "malformed-session" {
+					return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: " "}}, coreadapter.ErrNotStarted
+				}
+				if mode == "cancelled" {
+					return coreadapter.SessionResult{}, errors.Join(coreadapter.ErrNotStarted, context.Canceled)
+				}
+				return coreadapter.SessionResult{TimedOut: true}, coreadapter.ErrNotStarted
+			})
+			q, err := runner.RunNext(context.Background(), stream, "agent", coreadapter.PreparedTurn{SessionDirectory: "/owned"})
+			if err == nil || calls != 1 || len(q.Attempts) != 1 || q.CompletedAt.IsZero() {
+				t.Fatalf("retried cancelled/timed out attempt: %d %#v %v", calls, q, err)
+			}
+		})
+	}
+}

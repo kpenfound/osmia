@@ -94,6 +94,7 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		if errors.Is(runErr, context.Canceled) {
 			result.Cancelled = true
 		}
+		hadSession := result.Session.ID != ""
 		// Empty or malformed session references are unavailable, never resume hints.
 		if !coreadapter.ValidSession(result.Session) {
 			result.Session = coreadapter.BackendSession{}
@@ -111,8 +112,8 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 			return result, runErr, err
 		}
 		// Explicit no-work errors must not be accompanied by evidence of execution.
-		unstarted := result.FinalResponse == "" && result.Outcome == nil && result.Usage.Turns == 0 && result.Usage.CostUSD == 0 && result.Session.ID == ""
-		if ctx.Err() != nil || !unstarted {
+		unstarted := result.FinalResponse == "" && result.Outcome == nil && result.Usage.Turns == 0 && result.Usage.CostUSD == 0 && !hadSession
+		if ctx.Err() != nil || result.Cancelled || result.TimedOut || errors.Is(runErr, context.DeadlineExceeded) || !unstarted {
 			break
 		}
 		if path == "resume" && errors.Is(runErr, coreadapter.ErrResumeUnavailable) {
