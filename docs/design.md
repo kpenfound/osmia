@@ -126,7 +126,7 @@ The directed graph of units. For each unit: the criteria it addresses, how each 
 <root>/                          default ~/.osmia
   config.toml                    profiles, capacity, budget, Hearsay, listen addresses
   runtime.json                   profile overrides, pause states, workstream priority
-  projects/<name>/               one git repository per project
+  projects/<project-id>/         one git repository per project
     config.toml                  upstream, fork, clone path, landing style, per-project caps
     charter.md
     kb/<subsystem>.md
@@ -494,6 +494,9 @@ Asserts are the fast path and the connector is the durable one: a ruling is writ
 
 ## 13. Configuration
 
+The supported M1 subset, defaults and stable directory identifiers are documented
+in [M1 configuration](configuration.md). The examples below describe the full design.
+
 ### 13.1 User configuration
 
 ```toml
@@ -556,7 +559,9 @@ max_bounces = 3
 ### 13.2 Project configuration
 
 ```toml
-# ~/.osmia/projects/dagger/config.toml
+# ~/.osmia/projects/<project-id>/config.toml
+version = 1
+name = "dagger"
 upstream = "dagger/dagger"
 fork = "kpenfound/dagger"
 clone = "~/github.com/dagger/dagger"
