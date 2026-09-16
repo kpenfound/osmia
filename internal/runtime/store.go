@@ -170,7 +170,7 @@ func (s *Store) Snapshot() (State, []Diagnostic) {
 
 // Effective includes configured role bindings, valid runtime pauses and the
 // active project's explicit ordering. An absent pause means unpaused; an absent
-// priority means no ordering preference. No scheduling effects are performed.
+// priority means no ordering preference. The store performs no scheduling.
 func (s *Store) Effective() (State, []Diagnostic) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
