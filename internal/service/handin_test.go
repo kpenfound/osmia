@@ -271,7 +271,8 @@ func TestHandInRefusalsWriteNothing(t *testing.T) {
 	// Record the charter edit before taking the baseline.
 	f.handIn(t, HandInRequest{Key: "baseline", Path: design})
 	head := f.head(t)
-	empty, blank, invalid := "", " \n\t", "bad \xff byte"
+	empty, blank := "", " \n\t"
+	must(t, os.WriteFile(filepath.Join(f.home, "latin1.md"), []byte("bad \xff byte"), 0600))
 	large := strings.Repeat("x", MaxHandedBytes+1)
 	unknown := config.ProjectID("p_0123456789abcdef0123456789abcdef")
 	must(t, os.WriteFile(filepath.Join(f.home, "large.md"), []byte(large), 0600))
@@ -296,7 +297,7 @@ func TestHandInRefusalsWriteNothing(t *testing.T) {
 		{HandInRequest{Project: f.project, Key: "k", Path: filepath.Join(f.home, "empty.md")}, Validation, "empty"},
 		{HandInRequest{Project: f.project, Key: "k", Stdin: &empty}, Validation, "empty"},
 		{HandInRequest{Project: f.project, Key: "k", Stdin: &blank}, Validation, "empty"},
-		{HandInRequest{Project: f.project, Key: "k", Stdin: &invalid}, Validation, "UTF-8"},
+		{HandInRequest{Project: f.project, Key: "k", Path: filepath.Join(f.home, "latin1.md")}, Validation, "UTF-8"},
 		{HandInRequest{Project: f.project, Key: "k", URL: "https://example.com/owner/repo/issues/12"}, Validation, "issue URL"},
 		{HandInRequest{Project: f.project, Key: "k", URL: "https://github.com/owner/repo/issues/13"}, Internal, "cannot fetch https://github.com/owner/repo/issues/13"},
 	} {

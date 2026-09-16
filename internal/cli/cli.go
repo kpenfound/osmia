@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
@@ -46,7 +47,7 @@ func parse(args []string) (o options, err error) {
 	seen := map[string]bool{}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		if !strings.HasPrefix(a, "-") {
+		if !strings.HasPrefix(a, "-") || a == "-" {
 			o.args = append(o.args, a)
 			continue
 		}
@@ -230,6 +231,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			}
 			if len(data) > service.MaxHandedBytes {
 				fmt.Fprintf(stderr, "stdin is larger than %d bytes; hand in a smaller input\n", service.MaxHandedBytes)
+				return 4
+			}
+			if !utf8.Valid(data) {
+				fmt.Fprintln(stderr, "stdin is not UTF-8 text; hand in a text input")
 				return 4
 			}
 			text := string(data)

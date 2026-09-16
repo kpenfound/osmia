@@ -125,6 +125,7 @@ func TestHandInCommand(t *testing.T) {
 		diag  string
 	}{
 		{"", []string{"-"}, 4, "validation: handed input is empty\n"},
+		{"bad \xff byte", []string{"-"}, 4, "stdin is not UTF-8 text"},
 		{strings.Repeat("x", service.MaxHandedBytes+1), []string{"-"}, 4, "larger than"},
 		{"", []string{"http://github.com/owner/repo/issues/3"}, 4, "validation: issue URL must be https://github.com/OWNER/REPO/issues/NUMBER\n"},
 		{"", []string{"https://github.com/owner/repo/issues/4"}, 5, "internal: cannot fetch https://github.com/owner/repo/issues/4; check the URL and the service's GitHub access\n"},
