@@ -1,12 +1,15 @@
-# M1 command line
+# Command line
 
 Build with `go build -o osmia ./cmd/osmia`, or install with
-`go install ./cmd/osmia`. Prepare the [M1 configuration](configuration.md) first.
+`go install ./cmd/osmia`. Prepare the [configuration](configuration.md) first;
+a top-level `config.toml` with profiles and no project is enough to start.
 
 ```sh
 osmia serve --root ~/.osmia
 # In another terminal:
 osmia status --root ~/.osmia
+osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
+osmia project remove p_0123456789abcdef0123456789abcdef
 osmia pause all --reason "Away for the weekend"
 osmia resume all
 osmia profiles
@@ -20,14 +23,32 @@ osmia status --json
 - `serve [--root PATH]` validates and starts the foreground service. SIGINT and
   SIGTERM drain requests and release ownership and the socket. A live owner is
   refused; a provably stale socket is recovered automatically.
-- `status` shows health, loaded configuration digest/root, diagnostics and
-  effective runtime controls.
+- `status` shows health, loaded configuration digest/root, the active project
+  and its trace path (or that none is configured), diagnostics and effective
+  runtime controls.
+- `project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH
+  [--base-branch NAME]` registers a project with the running service: it
+  validates the request, generates the project ID, writes
+  `projects/<id>/config.toml`, creates the trace repository with a charter
+  template, lists the ID in `active_projects` and activates the project without
+  a restart. The clone path is made absolute by the client and must be an
+  existing local Git repository outside the Osmia root; nothing is written to
+  it. The output names the project ID, the trace path and the next step:
+  writing the charter in `<trace>/charter.md`. Operation stays single-project:
+  adding another project while one is active is refused and the error names
+  the active project. Repeating the active project's exact registration
+  returns it again.
+- `project remove <project-id>` takes the active project out of
+  `active_projects` and closes its runtime state. The trace directory and the
+  clone are kept. Adding the same upstream again afterwards creates a new
+  project ID and a new trace; see [configuration](configuration.md#project-registration).
 - `pause <all|project-id|workstream-id> [--hard] [--reason TEXT]` stores an
   operator pause; the default mode is soft.
 - `resume <all|project-id|workstream-id>` clears that scope's pause. Parent pauses
   still apply; all effective pauses are displayed.
 - `priority set <workstream-id>...` stores the active project's ordered list.
-  `priority clear` removes that preference.
+  `priority clear` removes that preference. Both, and `pause`/`resume` of a
+  workstream, need an active project and say so otherwise.
 - `profiles` displays effective bindings and runtime diagnostics.
   `profiles set <role> <profile>` overrides a binding.
   `profiles clear <role>` restores its configured default.
@@ -51,24 +72,28 @@ client's `--socket` argument.
 
 Project and workstream arguments are persistent IDs (`p_` or `w_` followed by
 32 lowercase hexadecimal digits), not display names. Workstream IDs must be known
-to the service's record repository. The standalone M1 entry point does not
-discover workstreams or provide onboarding. These commands store controls;
-scheduler effects are unavailable in M1.
+to the service's record repository. The standalone entry point does not
+discover workstreams. The runtime commands store controls; scheduler effects
+are unavailable before M4.
 
 ## Output and exit codes
 
 All client commands accept `--json`. Status returns an object with `health`,
 `configuration` and `runtime` API responses; profiles returns the runtime
 response. Mutations return `mutation` (the API acknowledgement) and `runtime`
-(the subsequent effective-state response). Output is one JSON value plus newline,
-without progress text. Profile map keys are sorted in human output and JSON.
-The responses are separate API requests, not an atomic snapshot.
+(the subsequent effective-state response). Project commands return the API's
+project response: the project view (ID, name, upstream, fork, clone, base
+branch, trace and charter paths) and `next_step`. Output is one JSON value plus
+newline, without progress text. Profile map keys are sorted in human output and
+JSON. The responses are separate API requests, not an atomic snapshot.
 
 Human mutation output identifies the affected scope and prints effective controls,
 including defaults after clearing overrides. If the mutation succeeds but reading
 the effective state fails, stderr says it was acknowledged; inspect status before
 retrying. Failures leave stdout empty and write actionable diagnostics to stderr.
 Raw configuration/parser and server error text is omitted from failure messages.
+Project command failures print the service's message, which names the field,
+project ID or path at fault and never raw file contents.
 
 | Exit | Meaning |
 | --- | --- |
@@ -76,8 +101,8 @@ Raw configuration/parser and server error text is omitted from failure messages.
 | 1 | Invalid API response, local output or unexpected client failure |
 | 2 | Invalid command, flags, arguments or root |
 | 3 | Missing socket, connection failure or unavailable service |
-| 4 | API malformed-input or validation rejection |
-| 5 | API conflict, unsupported operation, restart required or internal failure |
+| 4 | API malformed-input or validation rejection, or no project is configured |
+| 5 | API conflict, project already active, unsupported operation, restart required or internal failure |
 | 6 | Foreground startup/service failure, including ownership conflict |
 
 For exit 3, start the service and verify matching root/socket and permissions.
@@ -87,6 +112,7 @@ live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
 Detached management, install/upgrade commands, completion, web/tailnet,
-onboarding, hand-in, inbox, conversation, ratification, answer, reload and trace
-navigation are unavailable. The command examples in the design describe the
-eventual product; this reference lists the implemented surface.
+knowledge-base extraction on add, hand-in, inbox, conversation, ratification,
+answer, reload and trace navigation are unavailable. The command examples in
+the design describe the eventual product; this reference lists the implemented
+surface.

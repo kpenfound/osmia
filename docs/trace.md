@@ -11,11 +11,13 @@ or provide delivery operations.
 `CreateWorkstream` reserves a supplied `config.WorkstreamID`. Project and
 workstream manifests retain their identity and creation provenance. `Workstreams`
 returns identities validated against those manifests, including terminal streams.
-The package supplies storage APIs; onboarding and lifecycle commands are separate.
+The package supplies storage APIs; the service's project registration calls
+`Create`, and lifecycle commands are separate.
 
 ## Files and records
 
-Creation initializes `charter.md`, `kb/entities.json`, `kb/`, `notes/` and
+Creation initializes `charter.md` with `CharterTemplate`, a placeholder the
+owner replaces with numbered rules, plus `kb/entities.json`, `kb/`, `notes/` and
 `workstreams/`. Workstream creation initializes `handed/`, `shed/`, `amendments/`,
 `questions/`, `units/` and `agents/`, plus the empty document, transition and cost
 logs. Spec and plan files appear when their first document revision is appended.
@@ -210,8 +212,9 @@ and are returned to its owner. Inspection, effect and result writes all use the
 same journaled publication boundary as workflow transactions.
 
 The local service opens the active project's existing trace before reporting
-readiness and joins its reconciliation loop during shutdown. It does not create
-a trace for an uninitialized project. `service.Options.Reconciliation` supplies
+readiness and joins its reconciliation loop during shutdown. Project
+registration through the service API creates the trace and opens it the same
+way without a restart. `service.Options.Reconciliation` supplies
 local adapters and optional clocks, ticks and retry/scan intervals. With no
 adapter for a boundary, its operations remain unknown and retryable; the service
 does not launch work through an adapter lacking identity-based inspection.
