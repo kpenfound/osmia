@@ -135,16 +135,24 @@ func TestEnsureChiefOfStaffBackfillsOnce(t *testing.T) {
 	}
 }
 
-func TestEnsureChiefOfStaffRefusesAnotherRole(t *testing.T) {
-	ctx := context.Background()
-	r, _, _ := create(t)
-	legacyWorkstream(t, r, legacyStream)
-	a := threadAgent()
-	a.Workstream, a.ID = legacyStream, ChiefOfStaff
-	if err := r.CreateThread(ctx, a); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.EnsureChiefOfStaff(ctx, legacyStream, at, owner); !errors.Is(err, ErrConflict) {
-		t.Fatalf("ensure = %v", err)
+func TestEnsureChiefOfStaffRefusesAnotherIdentity(t *testing.T) {
+	for name, change := range map[string]func(*Agent){
+		"role":   func(a *Agent) { a.ThreadID = ChiefOfStaff },
+		"thread": func(a *Agent) { a.Role = ChiefOfStaff },
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			r, _, _ := create(t)
+			legacyWorkstream(t, r, legacyStream)
+			a := threadAgent()
+			a.Workstream, a.ID = legacyStream, ChiefOfStaff
+			change(&a)
+			if err := r.CreateThread(ctx, a); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.EnsureChiefOfStaff(ctx, legacyStream, at, owner); !errors.Is(err, ErrConflict) {
+				t.Fatalf("ensure = %v", err)
+			}
+		})
 	}
 }
