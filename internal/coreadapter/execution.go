@@ -60,6 +60,9 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 	result.Session.Backend = turn.Profile.Backend
 	result.SessionDirectory = turn.SessionDirectory
 	defer func() {
+		if result.Session.ID == "" {
+			result.Session = BackendSession{}
+		}
 		cleanup := context.WithoutCancel(ctx)
 		for i := len(turn.Cleanup) - 1; i >= 0; i-- {
 			if turn.Cleanup[i] != nil {
@@ -68,6 +71,9 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 		}
 		if turn.WorkspaceLease != nil && !turn.RetainWorkspace && turn.WorkspaceLease.Lease != nil {
 			err = errors.Join(err, turn.WorkspaceLease.Lease.Release(cleanup))
+		}
+		if err != nil {
+			result.IsError = true
 		}
 	}()
 	if err = ctx.Err(); err != nil {
@@ -154,7 +160,8 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 		Workspace: vcs.Directory(t.Sandbox.Verified.Workspace.Directory), Env: maps.Clone(t.Sandbox.Verified.Environment),
 		ValidOutcomes: append([]string{}, t.AllowedOutcomes...),
 		Profile: agent.Profile{Name: t.Scope.Role, Agent: p.Backend, Model: p.Model, Effort: p.Effort, Timeout: p.Timeout, MaxTurns: p.MaxTurns,
-			Sandbox: t.Execution.Mode, SandboxImage: t.Execution.Image, SandboxDomains: slices.Clone(t.Execution.Domains), MCP: map[string]agent.MCPEntry{}, VCSAccess: false},
+			AllowedTools: append([]string{}, t.Sandbox.Verified.Capabilities.Tools...),
+			Sandbox:      t.Execution.Mode, SandboxImage: t.Execution.Image, SandboxDomains: slices.Clone(t.Execution.Domains), MCP: map[string]agent.MCPEntry{}, VCSAccess: false},
 	}
 	if err := req.Profile.Validate(); err != nil {
 		return agent.Request{}, unsupported("sandbox", err.Error())

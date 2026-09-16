@@ -194,7 +194,7 @@ func TestCompleteAdapterIntegration(t *testing.T) {
 	req.Turn.Sandbox.Verified.Workspace = workspace.Workspace
 	req.Turn.WorkspaceLease = &workspace
 	transport := &memoryTransport{}
-	hosted, err := (&MCPHost{Transport: transport}).Host(ctx, HostRequest{Scope: scope, Capabilities: Capabilities{Tools: []string{"notes_read"}}, Tools: []Tool{{Name: "notes_read", InputSchema: json.RawMessage(`{"type":"object"}`), Handle: func(context.Context, json.RawMessage) (json.RawMessage, error) {
+	hosted, err := (&MCPHost{Transport: transport}).Host(ctx, HostRequest{Scope: scope, Capabilities: Capabilities{Tools: []string{"notes_read"}}, Tools: []Tool{{Name: "notes_read", Effect: ToolRead, InputSchema: json.RawMessage(`{"type":"object"}`), Handle: func(context.Context, json.RawMessage) (json.RawMessage, error) {
 		return json.RawMessage(`{"notes":"context"}`), nil
 	}}}})
 	if err != nil {
