@@ -24,7 +24,7 @@ entity map the caller has already validated and commits it as revision 1 of
 the `kb-entities` document. The [knowledge base](knowledge-base.md) reference
 describes the file. Workstream creation initializes `handed/`, `shed/`, `amendments/`,
 `questions/`, `units/` and `agents/`, plus the empty document, transition and cost
-logs. Spec and plan files appear when their first document revision is appended.
+logs, and the chief-of-staff thread. Spec and plan files appear when their first document revision is appended.
 Empty directories exist on disk; Git records files.
 
 Every record carries a schema named `osmia.trace.<kind>`, version `1`, record ID,
@@ -43,6 +43,7 @@ does not infer authority, readiness or workflow transitions from them.
 | `TurnRequest` | `agents/<agent-id>/log.jsonl` | Thread/turn identity, accepted profile, system prompt, request and caller-supplied context |
 | `TurnResponse` | `agents/<agent-id>/log.jsonl` | Exact request revision, thread/turn identity, adapter result and any execution failure |
 | `Cost` | `ledger.jsonl` | Adapter ledger entry with attempt, full scope, time and explicit cost knowledge |
+| `Status` | `status.jsonl` | The chief of staff's goal, attention, note and agent lines; see [workstream status](#workstream-status) |
 
 Only documents can be project-scoped. Project document paths are `charter.md`,
 `kb/entities.json`, `kb/<name>.md` and `notes/<role>.md`; workstream document paths
@@ -53,7 +54,8 @@ its first turn. Failed execution may have no session identity when it includes
 an explicit failure. Unknown cost is stored as zero with `CostKnown: false`;
 it is distinguishable from a known zero-cost result.
 
-`Append(ctx, record)` accepts concrete record values. Revisions must begin at one
+`Append(ctx, record)` accepts concrete record values other than `Status`,
+which only `SetStatus` writes. Revisions must begin at one
 and increase consecutively for each kind/ID within its scope. It preserves prior
 JSONL entries, writes the latest document content to its ordinary file and commits
 the affected files. For example, changing a spec retains both full document
@@ -262,6 +264,16 @@ claim, captured response and completion time. The initial identity remains in
 `agents/<id>/identity.jsonl`; the latest session is in the thread snapshot and
 its captured responses. Managed identity and turn records cannot use `Append`.
 
+Every workstream has exactly one chief-of-staff thread, with agent, role and
+thread ID `chief_of_staff` (`trace.ChiefOfStaff`). `CreateWorkstream` creates it
+after committing the workstream. `EnsureChiefOfStaff` creates it for a
+workstream that lacks one and otherwise returns the existing thread unchanged,
+so repeated and concurrent calls leave one identity; an existing
+`chief_of_staff` agent with another role or thread ID is refused with
+`ErrConflict`. `ChiefOfStaffThread` looks the thread up. When the service opens
+a project's trace, at startup or on activation, it ensures the thread for every
+workstream.
+
 `EnqueueTurn` atomically appends the request to `agents/<id>/log.jsonl` and the
 thread queue. Acceptance under the repository lock assigns consecutive sequence
 numbers. This order survives restart even when callers share timestamps or
@@ -413,6 +425,57 @@ bytes through the trace's atomic publication/recovery boundary; an empty string
 clears the notes. Missing notes read as empty. Scope mismatches, path escapes,
 symlink aliases and hardlink aliases are rejected. Notes remain private to the
 bound role tools and are not included in replay context.
+
+## Workstream status
+
+The chief of staff keeps one status per workstream (design §6.4). Each
+`Status` revision replaces the previous one as a whole: `goal` and `note` are
+required, `attention` may be empty, and `agents` is a list, possibly empty, of
+non-blank lines. The record ID is always `status`, and revisions are numbered
+from one in `workstreams/<id>/status.jsonl`. Status records are never
+project-scoped and carry no unit.
+
+`Repository.SetStatus(ctx, agent, scope, content, at, check)` stores the next
+revision. The scope must name this service session's active, uncaptured turn
+of the agent's thread, and that thread's role must be `chief_of_staff`. Before
+anything is written, `check` receives the content and the identifiers the
+trace holds for the workstream: project and workstream IDs, agent, thread and
+turn IDs, backend session IDs and the turn profiles' models. A check error is
+returned as `*StatusRejected` and stores nothing. The actor is the agent, the
+cause is the turn request's ID and the depth is one more than the request's.
+
+`Repository.Statuses()` lists every workstream in manifest order with its
+latest status (nil before the first), its feature state and its open question
+count. The feature state is the current value of the `feature` workflow
+subject (`FeatureSubject`), empty until a transition records one. A question
+is open while no ruling names it. A damaged record fails the whole read.
+
+`internal/status` holds the checks and the tool. `status.Check` is the one
+function that decides whether content is acceptable. Its heuristics reject:
+
+- an empty goal or note, and missing agents;
+- a goal that is more than one sentence or 200 characters, an attention or
+  agent line over 400 or 200 characters, a note over 1,200 characters or six
+  sentences, more than 32 agent lines, and line breaks anywhere but the note;
+- identifiers: known trace identifiers shaped like identifiers (with a digit
+  or underscore, or at least 16 characters) where they appear as a whole token,
+  Osmia-style IDs (`p_`, `w_` or another short prefix followed by hexadecimal
+  digits), UUIDs and other session tokens, commit hashes (7 to 40 hexadecimal
+  characters with both a digit and a letter), model names (`claude-…`, `gpt-5`,
+  `o3-mini`, bare family names such as `Sonnet`), URLs, absolute and relative
+  paths, `a/b` refs other than slashed prose such as `and/or`, and file names
+  with a common source or configuration extension.
+
+Sentences end at `.`, `!` or `?` followed by white space or the end of the
+text. Each message names the field and the identifier found.
+
+`status.Tool(repository, agent, scope, now)` returns the `set_status` memory
+tool for one claimed chief-of-staff turn and refuses any other role. Its input
+is `goal`, `attention`, `note` and `agents`; unknown fields are rejected. A
+status the check refuses is an ordinary tool result,
+`{"stored":false,"reason":"…"}`, so the chief of staff reads why; a stored
+one returns `{"stored":true,"revision":n}`. Turn isolation grants the tool to
+`chief_of_staff` only; see [turn isolation](isolation.md#capabilities).
 
 ## Feature spec and plan
 

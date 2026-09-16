@@ -159,3 +159,33 @@ type ClearProfileRequest struct {
 type MutationResponse struct {
 	Applied bool `json:"applied"`
 }
+
+// StatusResponse lists every workstream of the active project. It is empty
+// without an active project or its trace, and when the trace cannot be read,
+// which a diagnostic reports.
+type StatusResponse struct {
+	Workstreams []WorkstreamStatus `json:"workstreams"`
+	Diagnostics []Diagnostic       `json:"diagnostics"`
+}
+
+// WorkstreamStatus is the chief of staff's status for one workstream, next to
+// the facts the service owns. State is null until a feature state is
+// recorded; Status is null until the chief of staff writes one.
+type WorkstreamStatus struct {
+	Workstream    config.WorkstreamID `json:"workstream"`
+	Project       config.ProjectID    `json:"project"`
+	State         *string             `json:"state"`
+	OpenQuestions int                 `json:"open_questions"`
+	ContextMode   bundle.Mode         `json:"context_mode"`
+	Status        *StatusView         `json:"status"`
+}
+
+// StatusView is one status revision as the chief of staff wrote it.
+type StatusView struct {
+	Goal      string    `json:"goal"`
+	Attention string    `json:"attention"`
+	Note      string    `json:"note"`
+	Agents    []string  `json:"agents"`
+	Revision  int       `json:"revision"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

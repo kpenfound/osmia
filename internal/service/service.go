@@ -282,7 +282,26 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	if err != nil || repository == nil {
 		return nil, err
 	}
+	if err := ensureChiefsOfStaff(context.Background(), repository, time.Now().UTC()); err != nil {
+		repository.Close()
+		return nil, err
+	}
 	return &activeProject{repository: repository, controller: controller, done: make(chan error, 1)}, nil
+}
+
+// ensureChiefsOfStaff gives every workstream in the trace its chief-of-staff
+// thread, leaving existing threads untouched.
+func ensureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at time.Time) error {
+	streams, err := repository.Workstreams()
+	if err != nil {
+		return err
+	}
+	for _, stream := range streams {
+		if _, err := repository.EnsureChiefOfStaff(ctx, stream, at, serviceActor); err != nil {
+			return fmt.Errorf("workstream %s chief-of-staff thread: %w", stream, err)
+		}
+	}
+	return nil
 }
 
 // launch runs the controller for the service's lifetime. A loop failure stops

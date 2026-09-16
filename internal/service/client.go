@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -101,4 +102,18 @@ func (c *Client) ExtractProject(ctx context.Context, id config.ProjectID) (Extra
 // error: the charter gate's, or unsupported once the gate passes.
 func (c *Client) HandIn(ctx context.Context, req HandInRequest) error {
 	return c.Do(ctx, "POST", Prefix+"/handin", req, nil)
+}
+
+// Statuses lists every workstream's status in the active project.
+func (c *Client) Statuses(ctx context.Context) (StatusResponse, error) {
+	var v StatusResponse
+	err := c.Do(ctx, "GET", Prefix+"/status", nil, &v)
+	return v, err
+}
+
+// Status reads one workstream's status.
+func (c *Client) Status(ctx context.Context, id config.WorkstreamID) (WorkstreamStatus, error) {
+	var v WorkstreamStatus
+	err := c.Do(ctx, "GET", Prefix+"/status/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
 }

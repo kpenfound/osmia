@@ -300,6 +300,37 @@ func TestScopedToolsFollowGrantForEachTurn(t *testing.T) {
 	}
 }
 
+func TestStatusToolOnlyReachesChiefOfStaff(t *testing.T) {
+	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason", "librarian"} {
+		t.Run(role, func(t *testing.T) {
+			r, _, h, engine, input := fixture(t, role, "none")
+			// Every role is granted set_status by name; only one may hold it.
+			r.Grants[role] = a.Capabilities{Tools: []string{"file_read", "set_status"}}
+			handle := func(context.Context, json.RawMessage) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }
+			r.Scoped = func(_ context.Context, scope a.Scope) ([]a.Tool, error) {
+				if scope.Role != "chief_of_staff" {
+					return nil, nil
+				}
+				return []a.Tool{{Name: "set_status", Effect: a.ToolMemory, Handle: handle}}, nil
+			}
+			if _, err := r.Run(context.Background(), input); err != nil {
+				t.Fatal(err)
+			}
+			var names []string
+			for _, tool := range h.requests[0].Tools {
+				names = append(names, tool.Name)
+			}
+			want, allowed := []string{"file_read"}, []string{"mcp__osmia_0__file_read"}
+			if role == "chief_of_staff" {
+				want, allowed = append(want, "set_status"), append(allowed, "mcp__osmia_0__set_status")
+			}
+			if !reflect.DeepEqual(names, want) || !reflect.DeepEqual(h.requests[0].Capabilities.Tools, want) || !reflect.DeepEqual(engine.Requests[0].Profile.AllowedTools, allowed) {
+				t.Fatalf("tools %v, grant %v, allow list %v; want %v", names, h.requests[0].Capabilities.Tools, engine.Requests[0].Profile.AllowedTools, want)
+			}
+		})
+	}
+}
+
 type prepareOnlyEngine struct{ a.IsolationEngine }
 
 func TestServiceTurnsForwardResumeChecksToEngine(t *testing.T) {

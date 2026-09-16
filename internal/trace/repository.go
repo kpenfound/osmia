@@ -368,6 +368,10 @@ func (r *Repository) manifest(name, schema string, stream config.WorkstreamID) e
 	return nil
 }
 
+// CreateWorkstream commits a new workstream and then creates its
+// chief-of-staff thread. An error from the thread write leaves the workstream
+// committed; EnsureChiefOfStaff creates the missing thread. An existing
+// workstream is refused with ErrConflict.
 func (r *Repository) CreateWorkstream(ctx context.Context, id config.WorkstreamID, at time.Time, actor Actor) error {
 	if err := config.CheckWorkstreamIDs(id); err != nil {
 		return err
@@ -418,7 +422,11 @@ func (r *Repository) CreateWorkstream(ctx context.Context, id config.WorkstreamI
 		}
 		paths = append(paths, name)
 	}
-	return r.commit(ctx, paths, "Create workstream trace")
+	if err := r.commit(ctx, paths, "Create workstream trace"); err != nil {
+		return err
+	}
+	_, err = r.ensureChiefOfStaff(ctx, id, at, actor)
+	return err
 }
 
 func (r *Repository) Workstreams() ([]config.WorkstreamID, error) {
@@ -566,8 +574,12 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 // A file or Git failure is reported without claiming a workflow transaction;
 // records already written remain available for later reconciliation. A
 // project charter revision is refused with ErrConflict unless charter.md
-// matches the latest recorded revision; Charter records owner edits.
+// matches the latest recorded revision; Charter records owner edits. Status
+// records are refused with ErrConflict: SetStatus is their only writer.
 func (r *Repository) Append(ctx context.Context, v Record) error {
+	if _, ok := v.(Status); ok {
+		return fmt.Errorf("%w: status records require SetStatus", ErrConflict)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.append(ctx, v, true)

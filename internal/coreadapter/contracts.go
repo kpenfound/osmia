@@ -98,8 +98,9 @@ const (
 	ToolExecute ToolEffect = "execute"
 	ToolFetch   ToolEffect = "fetch"
 	ToolVCS     ToolEffect = "vcs"
-	// ToolMemory writes only service-owned private role memory. Its handlers
-	// enforce their own scope, so it needs no workspace permission.
+	// ToolMemory writes only service-owned records bound to the turn, such as
+	// private role memory or the workstream status. Its handlers enforce their
+	// own scope, so it needs no workspace permission.
 	ToolMemory ToolEffect = "memory"
 )
 
