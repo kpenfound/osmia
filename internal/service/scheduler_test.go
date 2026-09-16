@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -359,7 +360,7 @@ func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
 	top := filepath.Join(opts.Config.Root, "config.toml")
 	body, err := os.ReadFile(top)
 	must(t, err)
-	must(t, os.WriteFile(top, append([]byte("[capacity]\nmasons = 4\nper_workstream = 3\n"), body...), 0600))
+	must(t, os.WriteFile(top, []byte(strings.Replace(string(body), "[profiles.default]", "[capacity]\nmasons = 4\nper_workstream = 3\n[profiles.default]", 1)), 0600))
 	proj := filepath.Join(opts.Config.Root, "projects", string(project), "config.toml")
 	body, err = os.ReadFile(proj)
 	must(t, err)
