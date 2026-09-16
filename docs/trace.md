@@ -12,13 +12,16 @@ or provide delivery operations.
 workstream manifests retain their identity and creation provenance. `Workstreams`
 returns identities validated against those manifests, including terminal streams.
 The package supplies storage APIs; the service's project registration calls
-`Create`, and lifecycle commands are separate.
+`CreateSeeded`, and lifecycle commands are separate.
 
 ## Files and records
 
 Creation initializes `charter.md` with `CharterTemplate`, a placeholder the
 owner replaces with numbered rules, plus `kb/entities.json`, `kb/`, `notes/` and
-`workstreams/`. Workstream creation initializes `handed/`, `shed/`, `amendments/`,
+`workstreams/`. `Create` writes `kb/entities.json` as `{}` without a document
+revision. `CreateSeeded` takes an entity map the caller has already validated
+and commits it as revision 1 of the `kb-entities` document. The
+[local entity map](knowledge-base.md) reference describes the file. Workstream creation initializes `handed/`, `shed/`, `amendments/`,
 `questions/`, `units/` and `agents/`, plus the empty document, transition and cost
 logs. Spec and plan files appear when their first document revision is appended.
 Empty directories exist on disk; Git records files.
