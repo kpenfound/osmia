@@ -51,6 +51,12 @@ func TestDispatcherFollowsDurableQueue(t *testing.T) {
 		},
 	}
 	first, second := turnOp(t, "first"), turnOp(t, "second")
+	// A runner that fails before claiming leaves the intent pending.
+	broken := d
+	broken.Runner.MaxRetries = -1
+	if _, err := broken.Apply(ctx, first); err == nil || calls != 0 {
+		t.Fatalf("unclaimed turn reported: %v", err)
+	}
 	observe(t, d, second, coreadapter.EffectUnknown)
 	if _, err := d.Apply(ctx, second); err == nil || calls != 0 {
 		t.Fatalf("successor ran before its predecessor: %v", err)

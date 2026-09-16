@@ -133,6 +133,7 @@ func (d Dispatcher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if r.Now == nil {
 		return coreadapter.OperationResult{}, errors.New("thread runner requires a clock")
 	}
+	var runErr error
 	switch {
 	case !q.CompletedAt.IsZero():
 		return turnResult(q), nil
@@ -154,12 +155,10 @@ func (d Dispatcher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		ran, runErr := r.RunNext(ctx, in.Workstream, in.Agent, prepared)
+		var ran trace.QueuedTurn
+		ran, runErr = r.RunNext(ctx, in.Workstream, in.Agent, prepared)
 		if ran.Request.TurnID != in.Turn {
 			return coreadapter.OperationResult{}, errors.Join(runErr, fmt.Errorf("dispatcher claimed turn %q instead of %q", ran.Request.TurnID, in.Turn))
-		}
-		if ran.CompletedAt.IsZero() {
-			return coreadapter.OperationResult{}, errors.Join(runErr, errors.New("turn did not complete"))
 		}
 	}
 	_, q, _, err = d.find(in)
@@ -167,7 +166,7 @@ func (d Dispatcher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		return coreadapter.OperationResult{}, err
 	}
 	if q.CompletedAt.IsZero() {
-		return coreadapter.OperationResult{}, errors.New("turn did not complete")
+		return coreadapter.OperationResult{}, errors.Join(runErr, errors.New("turn did not complete"))
 	}
 	return turnResult(q), nil
 }
