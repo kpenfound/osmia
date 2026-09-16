@@ -110,12 +110,10 @@ func (s *Scheduler) stream(ctx context.Context, stream config.WorkstreamID) erro
 	return nil
 }
 
-// next returns the thread's oldest unfinished turn unless the thread holds a
-// claim. Turns run in sequence, so no later turn is eligible.
+// next returns the thread's oldest unfinished turn unless it is claimed. Turns
+// are claimed in sequence, so a claim is always on the oldest unfinished turn
+// and no later turn is eligible.
 func next(t trace.Thread) (trace.QueuedTurn, bool) {
-	if t.Active != "" {
-		return trace.QueuedTurn{}, false
-	}
 	for _, q := range t.Turns {
 		if q.CompletedAt.IsZero() {
 			return q, q.Claim == nil
