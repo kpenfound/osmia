@@ -99,6 +99,9 @@ func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (Projec
 		return ProjectResponse{}, &APIError{Internal, "the project registration journal is unreadable; inspect project-add.json under the root"}
 	}
 	if pending != nil {
+		if active := s.current(); active.HasProject() && active.Project.ID != pending.Project.ID {
+			return ProjectResponse{}, journalMismatch(pending.Project.ID, active.Project.ID)
+		}
 		p, err := s.complete(ctx, *pending, true)
 		if err != nil {
 			return ProjectResponse{}, incomplete(pending.Project.ID, err)
@@ -133,6 +136,9 @@ func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (Projec
 	return s.added(p), nil
 }
 
+func journalMismatch(pending, active config.ProjectID) *APIError {
+	return &APIError{Internal, fmt.Sprintf("the registration journal names project %s while %s is active; remove %s or inspect project-add.json under the root", pending, active, active)}
+}
 func activeError(id config.ProjectID) *APIError {
 	return &APIError{ProjectActive, fmt.Sprintf("project %s is already active; single-project operation requires removing it before adding another", id)}
 }
@@ -349,8 +355,9 @@ func (s *Service) activate(id config.ProjectID) (config.Project, error) {
 
 // recoverPending finishes an interrupted registration at startup, leaving the
 // trace to open through the ordinary startup path. Failure keeps the journal
-// for a later retry and starts the service without a project, reporting the
-// problem through configuration diagnostics.
+// for a later retry and starts the service with the configuration as loaded,
+// which has no project unless one is already listed, reporting the problem
+// through configuration diagnostics.
 func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*config.Config, error) {
 	s.cfg = cfg
 	pending, err := s.readPending()
@@ -366,7 +373,11 @@ func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*conf
 	if _, err := s.complete(ctx, *pending, false); err != nil {
 		return cfg, err
 	}
-	return config.Load(s.options.Config)
+	loaded, err := config.Load(s.options.Config)
+	if err != nil {
+		return cfg, err
+	}
+	return loaded, nil
 }
 
 // removeProject takes the active project out of configuration and closes its

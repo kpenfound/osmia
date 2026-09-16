@@ -461,3 +461,86 @@ func TestStartupRecoveryFailureIsDiagnosed(t *testing.T) {
 		t.Fatalf("%+v", cfg)
 	}
 }
+
+func TestJournalForAnotherProjectIsRefused(t *testing.T) {
+	opts, clone := projectFixture(t)
+	root := opts.Config.Root
+	s, c := start(t, opts)
+	ctx := context.Background()
+	added, err := c.AddProject(ctx, request(clone))
+	must(t, err)
+	active := added.Project.ID
+	// A journal left by another registration names a project that is not active.
+	stale := config.Project{ID: "p_ffffffffffffffffffffffffffffffff", Version: 1, Name: "dagger", Upstream: "dagger/dagger", Fork: "owner/dagger", Clone: added.Project.Clone, BaseBranch: "main", Landing: "commit-per-unit"}
+	data, err := json.Marshal(pendingProject{Version: 1, Project: stale})
+	must(t, err)
+	must(t, os.WriteFile(filepath.Join(root, "project-add.json"), data, 0600))
+	before, err := os.ReadFile(filepath.Join(root, "config.toml"))
+	must(t, err)
+	_, err = c.AddProject(ctx, request(clone))
+	assertCode(t, err, Internal)
+	if !strings.Contains(err.Error(), string(stale.ID)) || !strings.Contains(err.Error(), string(active)) {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(filepath.Join(root, "config.toml"))
+	must(t, err)
+	if string(after) != string(before) || !reflect.DeepEqual(activeProjects(t, root), []string{string(active)}) {
+		t.Fatalf("configuration changed:\n%s", after)
+	}
+	if names := projectDirectories(t, root); !reflect.DeepEqual(names, []string{string(active)}) {
+		t.Fatal(names)
+	}
+	// Startup reports the mismatch and keeps the active project running.
+	must(t, s.Close())
+	s, c = start(t, opts)
+	cfg, err := c.Configuration(ctx)
+	must(t, err)
+	if cfg.Project == nil || cfg.Project.ID != active || !hasDiagnostic(cfg.Diagnostics, Internal) || s.active == nil {
+		t.Fatalf("%+v", cfg)
+	}
+	if !reflect.DeepEqual(activeProjects(t, root), []string{string(active)}) {
+		t.Fatal("startup listed the journaled project")
+	}
+	// Removing the active project lets the journaled registration finish.
+	_, err = c.RemoveProject(ctx, active)
+	must(t, err)
+	finished, err := c.AddProject(ctx, request(clone))
+	must(t, err)
+	if finished.Project.ID != stale.ID || !reflect.DeepEqual(activeProjects(t, root), []string{string(stale.ID)}) {
+		t.Fatalf("%+v", finished)
+	}
+}
+
+func TestStartupRecoveryReloadFailureIsDiagnosed(t *testing.T) {
+	opts, clone := projectFixture(t)
+	root := opts.Config.Root
+	s, c := start(t, opts)
+	ctx := context.Background()
+	s.boundary = func(name string) error {
+		if name == "trace-created" {
+			return errors.New("crash")
+		}
+		return nil
+	}
+	_, err := c.AddProject(ctx, request(clone))
+	assertCode(t, err, Internal)
+	must(t, s.Close())
+	// The registration finishes, but the project no longer loads: its clone is a file.
+	must(t, os.RemoveAll(clone))
+	must(t, os.WriteFile(clone, []byte("not a directory"), 0600))
+	s, c = start(t, opts)
+	cfg, err := c.Configuration(ctx)
+	must(t, err)
+	if cfg.Project != nil || !hasDiagnostic(cfg.Diagnostics, NoProject) || !hasDiagnostic(cfg.Diagnostics, Internal) || s.active != nil {
+		t.Fatalf("%+v", cfg)
+	}
+	if names := projectDirectories(t, root); len(names) != 1 {
+		t.Fatal(names)
+	}
+	if _, err := config.Load(config.Options{Root: root}); err == nil {
+		t.Fatal("project configuration loaded with a file as clone")
+	}
+	if _, err := c.Health(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -380,3 +380,46 @@ func TestFilesystemBoundariesAndInputIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestProjectlessInputs(t *testing.T) {
+	in := fixture(t)
+	in.Config = in.Config.WithoutProject()
+	in.Workstreams = nil
+	s := open(t, in)
+	must(t, s.Resolve(in))
+	effective, ds := s.Effective()
+	if len(ds) != 0 || len(effective.Profiles) != 7 || len(effective.Pauses) != 0 {
+		t.Fatalf("%+v %v", effective, ds)
+	}
+	if err := s.SetPriority(Priority{Project: pid, Workstreams: []config.WorkstreamID{}}); err == nil || !errors.Is(err, ErrValidation) {
+		t.Fatal("priority stored without a project")
+	}
+	if err := s.SetPause(Pause{Target: Target{Scope: "project", Project: pid}, Mode: "soft", Source: "operator"}); err == nil || !errors.Is(err, ErrValidation) {
+		t.Fatal("project pause stored without a project")
+	}
+	must(t, s.SetPause(Pause{Target: Target{Scope: "factory"}, Mode: "soft", Source: "operator"}))
+	withWorkstreams := in
+	withWorkstreams.Workstreams = []config.WorkstreamID{w1}
+	if err := s.Resolve(withWorkstreams); err == nil {
+		t.Fatal("workstreams accepted without a project")
+	}
+	if _, _, err := Open(withWorkstreams); err == nil {
+		t.Fatal("workstreams opened without a project")
+	}
+	listed := *in.Config
+	listed.ActiveProjects = []string{string(pid)}
+	withListed := Inputs{Config: &listed}
+	if err := s.Resolve(withListed); err == nil {
+		t.Fatal("active identity accepted without a loaded project")
+	}
+	if _, _, err := Open(withListed); err == nil {
+		t.Fatal("active identity opened without a loaded project")
+	}
+	// Supplying the loaded project restores project-scoped references.
+	full := fixture(t)
+	full.Config.Root = in.Config.Root
+	if err := s.Resolve(full); err != nil {
+		t.Fatal(err)
+	}
+	must(t, s.SetPriority(Priority{Project: pid, Workstreams: []config.WorkstreamID{w1}}))
+}

@@ -116,9 +116,12 @@ registration and the single-project rule are described in
 `/config` and `/runtime` carry a `no_project` diagnostic, project-scoped
 overrides are rejected as validation failures, and `DELETE /v1/projects`
 returns `no_project`. A registration interrupted by a service stop is finished
-at the next start; if that fails, the service starts without a project and
+at the next start; if that fails, the service starts with the configuration as
+loaded (without a project unless the registration had already listed it) and
 reports an `internal` diagnostic on `projects` until `POST /v1/projects` finishes
-it.
+it. A journal naming a project other than the active one is never finished:
+startup reports it, and `POST /v1/projects` refuses with the two IDs until the
+active project is removed or the journal is inspected.
 
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
 opened, each time a project's trace opens: at startup and when a project is

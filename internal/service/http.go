@@ -72,7 +72,7 @@ func (s *Service) configuration() ConfigResponse {
 		out.Diagnostics = append(out.Diagnostics, noProject("active_projects"))
 	}
 	if pending != nil {
-		out.Diagnostics = append(out.Diagnostics, Diagnostic{"projects", Internal, "an interrupted project registration is incomplete; run osmia project add again to finish it"})
+		out.Diagnostics = append(out.Diagnostics, Diagnostic{"projects", Internal, "an interrupted project registration is incomplete; run osmia project add again to finish it, or inspect project-add.json under the root"})
 	}
 	current, err := config.Load(s.options.Config)
 	if err != nil {
