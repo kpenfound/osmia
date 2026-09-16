@@ -3,6 +3,7 @@ package trace
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
 var ErrConflict = errors.New("trace revision or identity conflict")
@@ -24,12 +26,15 @@ var ErrLocked = errors.New("trace repository already open")
 // One process holds its exclusive lock until Close; calls on that handle serialize.
 // External writers must not modify or move the repository while it is open.
 type Repository struct {
-	mu        sync.Mutex
-	root      config.Root
-	project   config.ProjectID
-	directory string
-	dir       *os.Root
-	lock      *os.File
+	mu              sync.Mutex
+	root            config.Root
+	project         config.ProjectID
+	directory       string
+	dir             *os.Root
+	lock            *os.File
+	session         string
+	wake            *coreadapter.WakeAdapter
+	failPublication func(string) error
 }
 
 func location(root config.Root, project config.Project) (string, error) {
@@ -67,7 +72,7 @@ func openDirectory(root config.Root, project config.Project) (*Repository, error
 	if err != nil {
 		return nil, err
 	}
-	return &Repository{root: root, project: project.ID, directory: directory, dir: dir}, nil
+	return &Repository{root: root, project: project.ID, directory: directory, dir: dir, session: rand.Text(), wake: coreadapter.NewWakeups()}, nil
 }
 func (r *Repository) acquire() error {
 	if err := r.checked(".git/osmia.lock"); err != nil {
@@ -184,9 +189,9 @@ func Create(ctx context.Context, root config.Root, project config.Project, at ti
 	return r, nil
 }
 
-// Open never repairs or truncates history. If records are corrupt it returns
-// both a usable handle and a diagnostic error; callers must Close that handle.
-// Read can then retrieve valid records together with the corruption diagnostics.
+// Open finishes journaled workflow publication without rewriting committed history.
+// If records are corrupt it returns both a handle and a diagnostic error; callers
+// must Close that handle. Read returns valid records with corruption diagnostics.
 func Open(root config.Root, project config.Project) (*Repository, error) {
 	r, err := openDirectory(root, project)
 	if err != nil {
@@ -200,8 +205,11 @@ func Open(root config.Root, project config.Project) (*Repository, error) {
 		r.Close()
 		return nil, err
 	}
-	_, _, err = r.scan()
-	return r, errors.Join(err, r.checkHistory(context.Background()))
+	if err := r.recoverPublication(context.Background()); err != nil {
+		return r, err
+	}
+	_, streams, err := r.scan()
+	return r, errors.Join(err, r.checkHistory(context.Background()), r.checkWorkflows(streams))
 }
 func (r *Repository) manifest(name, schema string, stream config.WorkstreamID) error {
 	data, err := r.readFile(name)
@@ -311,6 +319,9 @@ func revision(previous, next Record) error {
 }
 
 func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
+	if err := r.recoverPublication(context.Background()); err != nil {
+		return nil, nil, err
+	}
 	if err := r.manifest("project.json", "osmia.trace.project", ""); err != nil {
 		return nil, nil, err
 	}
@@ -445,6 +456,15 @@ func (r *Repository) Append(ctx context.Context, v Record) error {
 		}
 		if !found {
 			return fmt.Errorf("unknown workstream %s", id)
+		}
+	}
+	if t, ok := v.(Transition); ok {
+		_, view, err := r.loadWorkflow(t.Workstream)
+		if err != nil {
+			return err
+		}
+		if _, managed := view.transactions[t.ID]; managed {
+			return fmt.Errorf("%w: workflow transitions are immutable", ErrConflict)
 		}
 	}
 	var previous Record
