@@ -128,6 +128,17 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		case Prefix + "/runtime":
 			respond(w, 200, s.runtimeView())
 			return
+		case Prefix + "/status":
+			respond(w, 200, s.statusList())
+			return
+		}
+		if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/status/"); ok {
+			if out, api := s.workstreamStatus(id); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
 		}
 	}
 	if r.Method == http.MethodPut && (r.URL.Path == Prefix+"/config/root" || r.URL.Path == Prefix+"/config/listen") {
