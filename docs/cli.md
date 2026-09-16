@@ -10,6 +10,7 @@ osmia serve --root ~/.osmia
 osmia status --root ~/.osmia
 osmia status w_0123456789abcdef0123456789abcdef
 osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
+osmia project extract p_0123456789abcdef0123456789abcdef
 osmia project remove p_0123456789abcdef0123456789abcdef
 osmia handin p_0123456789abcdef0123456789abcdef design.md
 osmia send w_0123456789abcdef0123456789abcdef "Start with the upload API."
@@ -29,12 +30,15 @@ osmia status --json
   refused; a provably stale socket is recovered automatically.
 - `status` shows health, loaded configuration digest/root, the active project
   and its trace path (or that none is configured), its charter state (ready or
-  empty, rule count, recorded revision and numbering diagnostics), diagnostics,
-  effective runtime controls and the project's context mode (`file`, a normal
-  mode; see [context](context.md)), then each workstream with its state, open
-  question count and context mode, and the chief of staff's goal and attention
-  (`Attention: none` when nothing needs you), or `no status yet`. Reading the
-  charter records any edit you made to it; see [charter](charter.md).
+  empty, rule count, recorded revision and numbering diagnostics), its latest
+  knowledge-base extraction (number, `pending`, `running`, `succeeded` or
+  `failed`, the time of its last activity and the reason when it failed or
+  waits to retry), diagnostics, effective runtime controls and the project's
+  context mode (`file`, a normal mode; see [context](context.md)), then each
+  workstream with its state, open question count and context mode, and the
+  chief of staff's goal and attention (`Attention: none` when nothing needs
+  you), or `no status yet`. Reading the charter records any edit you made to
+  it; see [charter](charter.md).
 - `status <workstream-id>` shows one workstream of the active project: the same
   facts, then the full status (goal, attention, note, one line per active
   agent, and when it was written), or `Status: none yet` before the chief of
@@ -58,13 +62,24 @@ osmia status --json
   validates the request, generates the project ID, writes
   `projects/<id>/config.toml`, creates the trace repository with a charter
   template and an entity map seeded from the clone, lists the ID in
-  `active_projects` and activates the project without a restart. The clone path is made absolute by the client and must be an
+  `active_projects`, requests the librarian's first knowledge-base extraction
+  and activates the project without a restart. The clone path is made absolute by the client and must be an
   existing local Git repository outside the Osmia root; nothing is written to
   it. The output names the project ID, the trace path and the next step:
-  writing the charter in `<trace>/charter.md`. Operation stays single-project:
+  writing the charter in `<trace>/charter.md`. The extraction runs in the
+  service after the command returns; `status` shows its state, and the project
+  is usable whether it succeeds or fails. Operation stays single-project:
   adding another project while one is active is refused and the error names
   the active project. Repeating the active project's exact registration
   returns it again.
+- `project extract <project-id>` starts a new
+  [knowledge-base extraction](knowledge-base.md#extraction) of the active
+  project: a librarian turn that rewrites `kb/<subsystem>.md` and
+  `kb/entities.json` from the clone. The command returns once the extraction
+  is recorded as pending; follow it with `status`. A project ID that is not the
+  active project fails with `not_found` (exit 4). While an extraction is still
+  pending or running, another is refused with `conflict` (exit 5) naming the
+  extraction to wait for.
 - `project remove <project-id>` takes the active project out of
   `active_projects` and closes its runtime state. The trace directory and the
   clone are kept. Adding the same upstream again afterwards creates a new
@@ -115,14 +130,16 @@ scheduler effect before M4.
 
 All client commands accept `--json`. Status returns an object with `health`,
 `configuration`, `runtime` and `status` API responses, where `status` lists
-every workstream with its full status (`null` before the first); `status
-<workstream-id>` returns that workstream's status response; profiles returns the runtime
+every workstream except the librarian's with its full status (`null` before
+the first); `status <workstream-id>` returns that workstream's status
+response; profiles returns the runtime
 response. `send` returns the accepted message entry and `conversation` the
 API's conversation response (see [conversation](service.md#conversation)).
 Mutations return `mutation` (the API acknowledgement) and `runtime`
 (the subsequent effective-state response). Project commands return the API's
 project response: the project view (ID, name, upstream, fork, clone, base
-branch, trace and charter paths) and `next_step`. Output is one JSON value plus
+branch, trace and charter paths) and `next_step`; `project extract` returns
+the project view and the pending extraction. Output is one JSON value plus
 newline, without progress text. Profile map keys are sorted in human output and
 JSON. The responses are separate API requests, not an atomic snapshot.
 
@@ -142,7 +159,7 @@ never raw file contents.
 | 2 | Invalid command, flags, arguments or root |
 | 3 | Missing socket, connection failure or unavailable service |
 | 4 | API malformed-input or validation rejection, no project is configured, unknown project or workstream, or empty charter on hand-in |
-| 5 | API conflict, project already active, unsupported operation, restart required or internal failure |
+| 5 | API conflict (including an extraction already running), project already active, unsupported operation, restart required or internal failure |
 | 6 | Foreground startup/service failure, including ownership conflict |
 
 For exit 3, start the service and verify matching root/socket and permissions.
@@ -152,7 +169,7 @@ live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
 Detached management, install/upgrade commands, completion, web/tailnet,
-the librarian's knowledge-base extraction on add, hand-in past the charter check, inbox, ratification,
+hand-in past the charter check, inbox, ratification,
 answer, reload and trace navigation are unavailable. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.

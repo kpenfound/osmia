@@ -91,6 +91,13 @@ func (c *Client) RemoveProject(ctx context.Context, id config.ProjectID) (Projec
 	return v, err
 }
 
+// ExtractProject starts a new knowledge-base extraction of the active project.
+func (c *Client) ExtractProject(ctx context.Context, id config.ProjectID) (ExtractionResponse, error) {
+	var v ExtractionResponse
+	err := c.Do(ctx, "POST", Prefix+"/projects/extract", ProjectExtractRequest{Project: id}, &v)
+	return v, err
+}
+
 // HandIn submits work to a project. The service answers every hand-in with an
 // error: the charter gate's, or unsupported once the gate passes.
 func (c *Client) HandIn(ctx context.Context, req HandInRequest) error {

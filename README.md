@@ -28,9 +28,10 @@ operation recovery, agent queues with owned turn logs, the chief of staff's
 workstream status, and the feature spec and plan formats with their validator
 in the dedicated local Git repository.
 
-The [local entity map reference](docs/knowledge-base.md) documents
-`kb/entities.json`, its seed from CODEOWNERS and directory structure, and
-footprint resolution.
+The [knowledge base reference](docs/knowledge-base.md) documents
+`kb/entities.json`, its seed from CODEOWNERS and directory structure,
+footprint resolution, and the librarian's extraction pass that writes the
+subsystem prose and the refined map.
 
 The [turn context reference](docs/context.md) documents the file-based bundles of
 charter rules, knowledge-base prose, entities and rulings that turns receive.

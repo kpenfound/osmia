@@ -153,8 +153,11 @@ writing anything, then:
    revisions of the charter and `kb/entities.json`;
 4. adds the ID to `active_projects` in the top-level `config.toml` as a text
    edit, so the owner's comments, ordering and formatting survive;
-5. activates the project (opens the trace and starts reconciliation) and
-   removes the journal.
+5. creates the librarian's workstream and thread in the trace and requests
+   the first [knowledge-base extraction](knowledge-base.md#extraction) as a
+   durable operation;
+6. activates the project (opens the trace and starts reconciliation, which
+   runs the extraction) and removes the journal.
 
 Validation refuses, each with its own message: a blank name, an upstream or fork
 that is not `owner/repository`, a fork equal to the upstream, an invalid base
@@ -168,7 +171,8 @@ run again finishes it. A retry never creates a second trace repository and an
 interrupted registration never blocks a retry: the same request returns the
 finished project, a different request while a project is active is refused with
 the active project's ID. A trace initialization that never committed is
-discarded and redone; one with history is kept.
+discarded and redone; one with history is kept. The extraction is requested
+once; a retry finds it in the trace and does not request another.
 
 Operation stays single-project until M7: adding another project while one is
 active is refused, and the error names the active project. Repeating the active

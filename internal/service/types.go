@@ -74,8 +74,28 @@ type ProjectView struct {
 	BaseBranch string           `json:"base_branch"`
 	Trace      string           `json:"trace"`
 	Charter    string           `json:"charter"`
-	// CharterState is reported by status only.
-	CharterState *CharterState `json:"charter_state,omitempty"`
+	// CharterState and Extraction are reported by status only.
+	CharterState *CharterState    `json:"charter_state,omitempty"`
+	Extraction   *ExtractionState `json:"extraction,omitempty"`
+}
+
+// ExtractionState is the latest knowledge-base extraction of a project: its
+// number, whether it is pending, running, succeeded or failed, the time of its
+// last recorded activity and, when it failed or is waiting to retry, why.
+type ExtractionState struct {
+	Extraction int       `json:"extraction"`
+	State      string    `json:"state"`
+	At         time.Time `json:"at"`
+	Reason     string    `json:"reason,omitempty"`
+}
+
+// ProjectExtractRequest starts a new extraction pass of the active project.
+type ProjectExtractRequest struct {
+	Project config.ProjectID `json:"project"`
+}
+type ExtractionResponse struct {
+	Project    ProjectView     `json:"project"`
+	Extraction ExtractionState `json:"extraction"`
 }
 
 // CharterState summarizes the charter as last recorded. Ready means it has at
