@@ -9,7 +9,8 @@ import (
 )
 
 // statuses reports every workstream of the active project, or none when no
-// project or trace is active.
+// project or trace is active. The librarian's workstream carries no feature
+// and is left out.
 func (s *Service) statuses() ([]WorkstreamStatus, *APIError) {
 	s.mu.Lock()
 	active, cfg := s.active, s.cfg
@@ -23,7 +24,11 @@ func (s *Service) statuses() ([]WorkstreamStatus, *APIError) {
 		return nil, &APIError{Internal, fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", cfg.Project.ID)}
 	}
 	mode := s.Context().Mode(cfg.Project.ID)
+	librarian := librarianWorkstream(cfg.Project.ID)
 	for _, w := range list {
+		if w.Workstream == librarian {
+			continue
+		}
 		out = append(out, statusView(cfg.Project.ID, mode, w))
 	}
 	return out, nil

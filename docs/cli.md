@@ -115,8 +115,9 @@ are unavailable before M4.
 
 All client commands accept `--json`. Status returns an object with `health`,
 `configuration`, `runtime` and `status` API responses, where `status` lists
-every workstream with its full status (`null` before the first); `status
-<workstream-id>` returns that workstream's status response; profiles returns the runtime
+every workstream except the librarian's with its full status (`null` before
+the first); `status <workstream-id>` returns that workstream's status
+response; profiles returns the runtime
 response. Mutations return `mutation` (the API acknowledgement) and `runtime`
 (the subsequent effective-state response). Project commands return the API's
 project response: the project view (ID, name, upstream, fork, clone, base

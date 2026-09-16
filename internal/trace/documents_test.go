@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -55,12 +56,16 @@ func TestRecordDocumentsIsOneCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := []Document{projectDocument("subsystem-trace", "kb/trace.md", "# trace\n", 1), projectDocument("subsystem-service", "kb/service.md", "# service\n", 1), projectDocument(EntitiesDocument, EntitiesPath, "{\"version\":1,\"entities\":[]}\n", 1)}
+	created, err := strconv.Atoi(gitOutput(t, r, "rev-list", "--count", "HEAD"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := r.RecordDocuments(ctx, first); err != nil {
 		t.Fatal(err)
 	}
 	before := gitOutput(t, r, "rev-list", "--count", "HEAD")
-	if before != "3" {
-		t.Fatalf("commits after one record: %s", before)
+	if before != strconv.Itoa(created+1) {
+		t.Fatalf("commits after one record: %s, %d before it", before, created)
 	}
 	if got := kbFiles(t, dir); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace\n", "service.md": "# service\n", "entities.json": "{\"version\":1,\"entities\":[]}\n"}) {
 		t.Fatalf("files: %v", got)

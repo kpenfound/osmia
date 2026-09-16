@@ -160,7 +160,9 @@ message naming the project and its `charter.md`. With rules, hand-in returns
 ## Workstream status
 
 `GET /v1/status` lists each workstream of the active project in trace manifest
-order, and `GET /v1/status/<workstream-id>` returns one. Each
+order, except the librarian's, which carries no feature (see
+[extraction](knowledge-base.md#extraction)), and
+`GET /v1/status/<workstream-id>` returns one. Each
 `WorkstreamStatus` carries the chief of staff's latest
 [status](trace.md#workstream-status) next to the facts the service owns:
 

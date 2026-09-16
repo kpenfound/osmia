@@ -173,8 +173,10 @@ the first pass; `osmia project extract <project-id>` (API:
 `POST /v1/projects/extract`) requests another. Each pass is a durable
 `kb-extract` operation in the project's librarian workstream, a workstream
 whose ID is derived from the project ID and which holds the `agent_librarian`
-thread. The service's reconciliation loop runs it; the request returns as soon
-as the operation is recorded, and `osmia status` follows it.
+thread. That workstream carries no feature: workstream status does not list
+it, and `osmia status <workstream-id>` does not find it. The service's
+reconciliation loop runs the operation; the request returns as soon as it is
+recorded, and `osmia status` follows it.
 
 ### The turn
 

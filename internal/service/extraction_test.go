@@ -293,6 +293,13 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 	if notes, err := os.ReadFile(filepath.Join(traceDir, "notes", "librarian.md")); err != nil || string(notes) != "librarian: trace tests are slow" {
 		t.Fatalf("librarian notes: %q %v", notes, err)
 	}
+	// The librarian's workstream carries no feature: workstream status does
+	// not list it.
+	if all, err := c.Statuses(ctx); err != nil || len(all.Workstreams) != 0 || len(all.Diagnostics) != 0 {
+		t.Fatalf("workstream status lists the librarian's workstream: %+v %v", all, err)
+	}
+	_, err = c.Status(ctx, librarianWorkstream(id))
+	assertCode(t, err, NotFound)
 	if !reflect.DeepEqual(cloneBefore, snapshot(t, f.clone)) {
 		t.Fatal("the extraction changed the clone")
 	}

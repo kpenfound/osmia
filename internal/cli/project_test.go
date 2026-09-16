@@ -100,7 +100,7 @@ func TestProjectCommands(t *testing.T) {
 		t.Fatalf("extraction after add: %+v", extraction)
 	}
 	status = successful(t, root, "status")
-	if !strings.Contains(status, "Knowledge base: extraction 1 failed at "+extraction.At.UTC().Format("2006-01-02T15:04:05Z")+": "+extraction.Reason) {
+	if !strings.Contains(status, "Knowledge base: extraction 1 failed at "+extraction.At.UTC().Format("2006-01-02T15:04:05Z")+": "+extraction.Reason) || !strings.Contains(status, "Workstreams:\n  none\n") {
 		t.Fatalf("status with a failed extraction:\n%s", status)
 	}
 	extracted := successful(t, root, "project", "extract", string(id))
