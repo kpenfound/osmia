@@ -43,6 +43,8 @@ client to release idle connections. API version 1 uses snake_case JSON fields.
 | GET | `/runtime` | Effective runtime state, each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
 | GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, and diagnostics |
 | GET | `/status/<workstream-id>` | `WorkstreamStatus` for one workstream of the active project |
+| POST | `/conversation/<workstream-id>` | `SendRequest`: text; returns the accepted `ConversationEntry` |
+| GET | `/conversation/<workstream-id>` | `ConversationResponse`: the workstream's conversation with its chief of staff |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
 | POST | `/handin` | `HandInRequest`: project, paths; checks the charter, then returns `unsupported` |
@@ -167,6 +169,50 @@ code `internal`. For one workstream, a malformed ID returns `validation`, no
 configured project returns `no_project`, a workstream the active trace does not
 hold (or no trace at all) returns `not_found`, and an unreadable trace returns
 `internal`; these messages name the workstream or project.
+
+## Conversation
+
+`POST /v1/conversation/<workstream-id>` sends the owner's message to the
+workstream's chief-of-staff thread, and to no other. The body is
+`{"text": "..."}`. The service queues the message on that thread with
+`EnqueueTurn` and answers only once the request is in the trace, so an
+acknowledged message survives a restart and runs exactly once. It runs as the
+thread's next turn; a message sent while a turn is in flight waits for it.
+
+The accepted request fixes, at acceptance:
+
+- the profile the `chief_of_staff` role is bound to, including a runtime
+  override;
+- the prompt, which is the message text as sent;
+- the system prompt, which names the workstream and carries the workstream's
+  [context bundle](context.md) rendered at acceptance.
+
+Its actor is the owner (`owner`/`local`) and its turn ID is `message_`
+followed by 32 random hexadecimal digits.
+
+`GET /v1/conversation/<workstream-id>` returns a `ConversationResponse`:
+`workstream` and `entries`, oldest first. It is read from the chief-of-staff
+thread's turn log in the trace, never from a backend transcript. Each owner
+message is an entry of kind `message`. Once its turn has completed with a
+final response, an entry of kind `response` follows it. Turns on the thread
+that the owner did not send are not listed. Each entry has:
+
+| Field | Value |
+| --- | --- |
+| `turn` | The turn that answers the message |
+| `kind` | `message` or `response` |
+| `text` | The message as sent, or the chief of staff's final response |
+| `at` | When the message was accepted, or the response captured |
+| `state` | The turn's state: `queued` until claimed, `running` until completed, then `failed` for a failed or interrupted turn and `done` otherwise |
+
+`POST` returns the message's entry, whose state is `queued`. A malformed
+workstream ID, a workstream the active trace does not hold (or no trace at
+all), empty text, or no usable profile for the `chief_of_staff` role returns
+`validation`. No configured project returns `no_project`. A trace that cannot
+be read or written, or a bundle that cannot be assembled, returns `internal`.
+These messages name the workstream or project. A rejected message is not
+recorded. Messages are accepted without a turn reconciler, but only a service
+with `Options.Threads` runs them.
 
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
 opened, each time a project's trace opens: at startup and when a project is
