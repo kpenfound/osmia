@@ -125,12 +125,16 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	}
 	entries, err := repo.Outbox(stream)
 	must(t, err)
-	if len(entries) != 2 {
-		t.Fatalf("outbox %+v", entries)
-	}
+	notices := 0
 	for _, e := range entries {
+		if e.Event.Kind == trace.NoticeKind {
+			notices++
+		}
 		if !e.Acknowledged {
 			t.Fatalf("unacknowledged %+v", e)
 		}
+	}
+	if notices != 2 {
+		t.Fatalf("outbox %+v", entries)
 	}
 }
