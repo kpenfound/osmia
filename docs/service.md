@@ -176,7 +176,9 @@ must not close. The [M1 demonstration](m1-demonstration.md) uses this path with
 fake engines.
 
 With `Options.Threads` set, the service also runs queued workstream turns on its
-own, and its scheduler replaces any `Schedule` hook in `Options.Reconciliation`.
+own and delivers outbox events to each chief of staff (see
+[event delivery](#event-delivery)). Event delivery followed by the scheduler
+replaces any `Schedule` hook in `Options.Reconciliation`.
 At the start of every reconciliation pass, `internal/scheduler` reads each
 workstream's threads and turn operations. For every thread with no turn in
 flight, it publishes a `thread-turn` operation for the oldest unfinished turn,
@@ -232,3 +234,33 @@ parked thread has no unfinished turn, so the scheduler offers it to no gate and
 dispatches nothing, and recovery has nothing to run: its turn is complete. The
 state is derived from the trace, so it survives a restart. Queuing a new turn
 for the thread unparks it, and the next pass runs that turn.
+
+### Event delivery
+
+When the service changes workflow state, it tells that workstream's chief of
+staff, and no other thread. The change and its event commit together in one
+`trace.Transact` call, so a failed transaction leaves no event;
+`trace.Notice` builds such an event and `Repository.SetFeatureState` records a
+feature state change with one. `internal/events` delivers them.
+
+At the start of every reconciliation pass, before the scheduler, the deliverer
+reads each workstream's ready notification events (events without an
+operation). It waits until the oldest has been ready for `events.window` (see
+[configuration](configuration.md#top-level-configtoml)), then delivers every
+ready event as one chief-of-staff turn. The loop's periodic tick runs the pass
+that closes a window. The turn's prompt starts with `events.Preamble`, which
+frames the events as information: they grant no permission, trigger no
+transition and do not change the chief of staff's tools. It then lists one line
+per event with its transition's timestamp, kind and body, oldest first. The
+turn's actor is `service`/`events`, its cause is the oldest event's transition,
+and its profile is the chief of staff's effective profile. The turn is queued
+with `EnqueueTurn`, so a turn in flight on the chief-of-staff thread finishes
+first, and the scheduler dispatches it in the same pass otherwise.
+
+Delivery claims every event with one new attempt token, queues the turn
+`events.TurnID(token)`, then acknowledges the events. A crash or restart at any
+point neither loses nor repeats an event: an event with a claim whose turn is
+already on the chief-of-staff thread is acknowledged without another turn, and
+any other unacknowledged event is delivered in the next window. A claim whose
+lease ran out before its acknowledgement is settled the same way. A
+failing store call stops the loop, as the scheduler's do.

@@ -17,6 +17,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
@@ -38,7 +39,8 @@ type Options struct {
 	// on its own, never more than one turn per thread in flight and within the
 	// configured capacity, replacing Reconciliation.Schedule. A runtime pause
 	// holds new turns on the threads it covers, except chief-of-staff turns;
-	// clearing it lets them run.
+	// clearing it lets them run. Outbox events are delivered to each
+	// workstream's chief of staff as queued turns, one per event window.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
 }
@@ -280,7 +282,7 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	if !cfg.HasProject() {
 		return nil, nil
 	}
-	repository, controller, err := openReconciliation(cfg, s.options.Reconciliation, s.options.Threads, s.unpaused(cfg.Project.ID))
+	repository, controller, err := openReconciliation(cfg, s.options.Reconciliation, s.options.Threads, s.unpaused(cfg.Project.ID), s.chiefProfile(cfg))
 	if err != nil || repository == nil {
 		return nil, err
 	}
@@ -298,6 +300,19 @@ func (s *Service) unpaused(project config.ProjectID) func(context.Context, sched
 	return func(_ context.Context, c scheduler.Candidate) (bool, error) {
 		st, _ := s.store.Effective()
 		return !scheduler.Held(st.Pauses, project, c), nil
+	}
+}
+
+// chiefProfile returns the chief of staff's effective profile for a new turn.
+func (s *Service) chiefProfile(cfg *config.Config) func() (coreadapter.Profile, error) {
+	return func() (coreadapter.Profile, error) {
+		st, _ := s.store.Effective()
+		name := st.Profiles[trace.ChiefOfStaff]
+		if name == "" {
+			name = cfg.Roles[trace.ChiefOfStaff].Profile
+		}
+		p, _, err := cfg.Execution(trace.ChiefOfStaff, name)
+		return p, err
 	}
 }
 
@@ -354,7 +369,7 @@ func (s *Service) stop(active *activeProject) error {
 
 // openReconciliation leaves trace creation to project registration; an existing
 // trace must open cleanly before the service can report readiness.
-func openReconciliation(cfg *config.Config, options reconcile.Options, threads func(*trace.Repository) (coreadapter.Reconciler, error), admit func(context.Context, scheduler.Candidate) (bool, error)) (*trace.Repository, *reconcile.Controller, error) {
+func openReconciliation(cfg *config.Config, options reconcile.Options, threads func(*trace.Repository) (coreadapter.Reconciler, error), admit func(context.Context, scheduler.Candidate) (bool, error), profile func() (coreadapter.Profile, error)) (*trace.Repository, *reconcile.Controller, error) {
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
 	if err != nil {
 		return nil, nil, err
@@ -393,7 +408,17 @@ func openReconciliation(cfg *config.Config, options reconcile.Options, threads f
 			repository.Close()
 			return nil, nil, err
 		}
-		options.Schedule = dispatch.Pass
+		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), Profile: profile})
+		if err != nil {
+			repository.Close()
+			return nil, nil, err
+		}
+		options.Schedule = func(ctx context.Context) error {
+			if err := deliver.Pass(ctx); err != nil {
+				return err
+			}
+			return dispatch.Pass(ctx)
+		}
 	}
 	controller, err := reconcile.New(repository, options)
 	if err != nil {

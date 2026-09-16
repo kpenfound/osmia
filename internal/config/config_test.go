@@ -62,6 +62,9 @@ func TestDefaults(t *testing.T) {
 	if c.Project.ID != pid || c.Project.BaseBranch != "main" || c.Project.Landing != "commit-per-unit" || c.Project.Capacity.PerWorkstream != 2 {
 		t.Fatalf("project: %+v", c.Project)
 	}
+	if c.EventWindow() != 5*time.Second {
+		t.Fatalf("event window default: %v", c.EventWindow())
+	}
 	if c.Profiles["default"].Timeout != "45m" || c.Profiles["default"].Effort != "medium" || len(c.Roles) != 7 {
 		t.Fatalf("profile defaults: %+v", c)
 	}
@@ -94,6 +97,8 @@ per_workstream = 5
 [shed]
 max_rounds = 1
 max_bounces = 2
+[events]
+window = "250ms"
 [roles.mason]
 profile = "default"
 sandbox = "container"
@@ -111,6 +116,9 @@ per_workstream = 3
 	}
 	if c.Capacity != (Capacity{1, 1, 1, 5}) || c.Shed != (Shed{1, 2}) || c.Project.Capacity.PerWorkstream != 3 || c.Project.Landing != "squash" || c.Project.BaseBranch != "release/next" || c.Project.Name != "A display name" {
 		t.Fatalf("overrides: %+v", c)
+	}
+	if c.EventWindow() != 250*time.Millisecond {
+		t.Fatalf("event window: %v", c.EventWindow())
 	}
 	p, settings, err := c.Execution("mason", "backup")
 	if err != nil || p.Backend != "codex" || settings.Mode != "container" || settings.Image != "test-image:1" {
@@ -147,6 +155,9 @@ func TestInvalid(t *testing.T) {
 		{"zero wip", topConfig + "[capacity]\nper_workstream = 0\n", "", "capacity.per_workstream"},
 		{"negative rounds", topConfig + "[shed]\nmax_rounds = -1\n", "", "shed.max_rounds"},
 		{"zero bounces", topConfig + "[shed]\nmax_bounces = 0\n", "", "shed.max_bounces"},
+		{"zero event window", topConfig + "[events]\nwindow = \"0s\"\n", "", "events.window"},
+		{"malformed event window", topConfig + "[events]\nwindow = \"soon\"\n", "", "events.window"},
+		{"unknown events key", topConfig + "[events]\nlimit = 1\n", "", "events.limit"},
 		{"wrong type", topConfig + "[capacity]\nmasons = 'many'\n", "", "config.toml:"},
 		{"backend", strings.Replace(topConfig, "claude", "unknown", 1), "", "profiles.default.agent"},
 		{"model", strings.Replace(topConfig, "test-model", " ", 1), "", "profiles.default.model"},
