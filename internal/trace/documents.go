@@ -77,6 +77,9 @@ func (r *Repository) RecordDocuments(ctx context.Context, docs []Document) error
 		if err := revision(previous[recordKey(d)], d); err != nil {
 			return err
 		}
+		if err := publicationPath(d.Path); err != nil {
+			return err
+		}
 		if err := r.checked(d.Path); err != nil {
 			return err
 		}

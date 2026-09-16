@@ -225,10 +225,12 @@ and depth are the request's, its actor is `service`/`scheduler`, and its target
 state is the turn ID. After a restart, an in-flight turn is recovered through its
 existing operation, as the [turn dispatch](trace.md#turn-dispatch) table
 describes: it is neither dispatched again nor lost. `scheduler.Options.Admit` is
-the single dispatch gate. The scheduler never publishes the librarian's
-`kb-extract` action; the service reconciles that itself, as above.
+the single dispatch gate.
 
-The service's gate holds a turn that a pause in `runtime.Effective` covers:
+The service's gate declines every turn of the librarian's workstream: the
+service's own `kb-extract` reconciler runs those, staged in the librarian's
+view, and a librarian turn the scheduler found queued gets no turn operation.
+The gate holds a turn that a pause in `runtime.Effective` covers:
 a `factory` pause, a `project` pause on the active project, or a `workstream`
 pause on the turn's workstream. Chief-of-staff turns are never held, so the
 chief of staff stays reachable while everything is paused. A held turn gets no

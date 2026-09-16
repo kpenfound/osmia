@@ -189,7 +189,7 @@ copy of it:
 | --- | --- |
 | `repo/` | The clone's tracked regular files, listed with `git ls-files`. Untracked files, symlinks and `.git` are never copied, and the clone is never written. Changes the librarian makes there are discarded. |
 | `kb/` | The current knowledge base: the latest recorded `entities.json` and every recorded `<subsystem>.md`. |
-| `seed/entities.json` | `kb.Seed` of the clone, canonically encoded. |
+| `seed/entities.json` | `kb.Seed` of `repo/`, canonically encoded: untracked directories of the clone seed nothing here. |
 | `output/` | Empty. The librarian writes the complete knowledge base here. |
 
 The librarian gets `file_read`, `file_write`, `notes_read` and `notes_write`

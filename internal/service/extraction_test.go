@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -20,6 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
+	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -61,6 +64,8 @@ func newLibrarianFixture(t *testing.T) *librarianFixture {
 	must(t, os.WriteFile(filepath.Join(clone, "CODEOWNERS"), []byte("/internal/ @core\n"), 0600))
 	must(t, os.WriteFile(filepath.Join(clone, "AGENTS.md"), []byte("# Agents\n"), 0600))
 	must(t, os.WriteFile(filepath.Join(clone, "secret.env"), []byte("TOKEN="+demoSecret+"\n"), 0600))
+	must(t, os.MkdirAll(filepath.Join(clone, "scratch"), 0700))
+	must(t, os.WriteFile(filepath.Join(clone, "scratch", "notes.txt"), []byte("untracked\n"), 0600))
 	demoGit(t, home, "-C", clone, "add", "internal", "CODEOWNERS", "AGENTS.md")
 	demoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
 	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
@@ -96,6 +101,64 @@ func (f *librarianFixture) script(turn string, files map[string]string, check fu
 		}
 		return &agent.Result{ClaudeID: "session-" + turn, ResultText: "Knowledge base written", SessionDir: req.SessionDir, NumTurns: 2}, nil
 	}
+}
+
+// trackedSeed is the entity seed of the clone's tracked files alone: the
+// untracked scratch directory seeds an entity from the clone on disk but not
+// from the librarian's copy.
+func (f *librarianFixture) trackedSeed(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	must(t, copyTracked(context.Background(), f.clone, dir))
+	seed, err := kb.Seed(dir)
+	must(t, err)
+	full, err := kb.Seed(f.clone)
+	must(t, err)
+	has := func(m kb.Map, id string) bool {
+		return slices.ContainsFunc(m.Entities, func(e kb.Entity) bool { return e.ID == id })
+	}
+	if !has(full, "scratch") || has(seed, "scratch") {
+		t.Fatalf("fixture seeds: clone %v, tracked %v", full, seed)
+	}
+	data, err := kb.Encode(seed)
+	must(t, err)
+	return string(data)
+}
+
+// queueLibrarianTurn accepts a librarian turn of extraction n the way the
+// extractor does, without claiming it.
+func queueLibrarianTurn(t *testing.T, repo *trace.Repository, cfg *config.Config, n, attempt int, at time.Time) trace.TurnRequest {
+	t.Helper()
+	name := cfg.Roles[librarianRole].Profile
+	p := cfg.Profiles[name]
+	timeout, err := time.ParseDuration(p.Timeout)
+	must(t, err)
+	stream := librarianWorkstream(repo.Project())
+	_, event := extractionIDs(n)
+	turn := turnID(n, attempt)
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: repo.Project(), Workstream: stream, At: at, Actor: trace.Actor{Kind: "service", ID: "librarian-extraction"}, Cause: trace.OperationID(repo.Project(), stream, event), Depth: 1},
+		AgentID: librarianAgent, ThreadID: librarianThread, TurnID: turn, Profile: coreadapter.Profile{Name: name, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns}, SystemPrompt: librarianSystemPrompt(cfg.Project), Prompt: librarianPrompt(cfg.Project)}
+	_, err = repo.EnqueueTurn(context.Background(), req)
+	must(t, err)
+	return req
+}
+
+// reopen opens the registered project's trace while the service is stopped.
+func (f *librarianFixture) reopen(t *testing.T, added ProjectResponse) (*trace.Repository, *config.Config) {
+	t.Helper()
+	cfg, err := config.Load(f.opts.Config)
+	must(t, err)
+	repo, err := trace.Open(cfg.Root, config.Project{ID: added.Project.ID, Clone: added.Project.Clone})
+	must(t, err)
+	return repo, cfg
+}
+
+// extractStatus posts an extraction request and returns the HTTP status.
+func extractStatus(t *testing.T, s *Service, body string) int {
+	t.Helper()
+	w := httptest.NewRecorder()
+	s.handle(w, httptest.NewRequest(http.MethodPost, Prefix+"/projects/extract", strings.NewReader(body)))
+	return w.Code
 }
 
 func (f *librarianFixture) runs() []string {
@@ -223,11 +286,12 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 	must(t, err)
 	seeded, err := kb.Encode(seed)
 	must(t, err)
+	tracked := f.trackedSeed(t)
 	refined := entitiesWith(t, seed, "history")
 	cloneBefore := snapshot(t, f.clone)
 	f.script("extract-1-1", map[string]string{"output/kb/trace.md": "# trace\n\nRun go test ./internal/trace.\n", "output/kb/service.md": "# service\n\nOne process.\n", "output/kb/entities.json": refined},
 		func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
-			err := checkLibrarianBoundary(ctx, req, policy, tools, f.clone, string(seeded), string(seeded))
+			err := checkLibrarianBoundary(ctx, req, policy, tools, f.clone, string(seeded), tracked)
 			if req.ResumeID != "" || strings.Contains(req.Prompt, "Knowledge base written") {
 				err = errors.Join(err, fmt.Errorf("first turn carries history: %q", req.ResumeID))
 			}
@@ -322,7 +386,7 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 	// subsystem it no longer produces.
 	f.script("extract-2-1", map[string]string{"output/kb/trace.md": "# trace\n\nRevised.\n", "output/kb/entities.json": refined},
 		func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
-			err := checkLibrarianBoundary(ctx, req, policy, tools, f.clone, refined, string(seeded))
+			err := checkLibrarianBoundary(ctx, req, policy, tools, f.clone, refined, tracked)
 			got, e := callTool(ctx, tools, "file_read", map[string]any{"path": "kb/service.md"})
 			if e != nil || got != `"# service\n\nOne process.\n"` {
 				err = errors.Join(err, fmt.Errorf("previous prose: %q %v", got, e))
@@ -398,14 +462,21 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 	if !strings.Contains(err.Error(), "extraction 3") || !strings.Contains(err.Error(), "running") {
 		t.Fatal(err)
 	}
+	if code := extractStatus(t, s, `{"project":"`+string(id)+`"}`); code != http.StatusConflict {
+		t.Fatalf("running extraction status %d", code)
+	}
 	close(release)
 	if x := awaitExtraction(t, c); x.Extraction != 3 || x.State != "succeeded" {
 		t.Fatalf("third extraction: %+v", x)
 	}
 	_, err = c.ExtractProject(ctx, "p_ffffffffffffffffffffffffffffffff")
 	assertCode(t, err, NotFound)
-	if err := c.Do(ctx, "POST", Prefix+"/projects/extract", ProjectExtractRequest{Project: "bad"}, nil); err == nil {
-		t.Fatal("malformed project ID accepted")
+	assertCode(t, c.Do(ctx, "POST", Prefix+"/projects/extract", ProjectExtractRequest{Project: "bad"}, nil), Validation)
+	if code := extractStatus(t, s, `{"project":"bad"}`); code != http.StatusUnprocessableEntity {
+		t.Fatalf("malformed project ID status %d", code)
+	}
+	if code := extractStatus(t, s, `{"project":"p_ffffffffffffffffffffffffffffffff"}`); code != http.StatusNotFound {
+		t.Fatalf("unknown project status %d", code)
 	}
 	must(t, s.Close())
 }
@@ -582,4 +653,202 @@ func TestExtractionSurvivesRestart(t *testing.T) {
 		t.Fatalf("attempts %v", runs)
 	}
 	must(t, s2.Close())
+}
+
+func TestExtractionStateWhileRetrying(t *testing.T) {
+	ctx := context.Background()
+	home, err := os.MkdirTemp("", "xs-")
+	must(t, err)
+	t.Cleanup(func() { os.RemoveAll(home) })
+	opts := fixtureAt(t, home)
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	clock := &demoClock{now: demoStart}
+	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), registrationActor)
+	must(t, err)
+	defer repo.Close()
+	if x, err := extractionState(repo); err != nil || x != nil {
+		t.Fatalf("without a librarian workstream: %+v %v", x, err)
+	}
+	stream, err := ensureLibrarianThread(ctx, repo, clock.Now(), registrationActor)
+	must(t, err)
+	must(t, requestExtraction(ctx, repo, 1, clock.Now(), registrationActor, "project-add", "requested"))
+	_, event := extractionIDs(1)
+	expect := func(step, state, reason string) {
+		t.Helper()
+		x, err := extractionState(repo)
+		must(t, err)
+		if x == nil || x.Extraction != 1 || x.State != state || x.Reason != reason {
+			t.Fatalf("%s: %+v, want %s %q", step, x, state, reason)
+		}
+	}
+	expect("requested", "pending", "")
+	// The effect starts and fails: the controller records the effect, then a
+	// retry that releases the claim.
+	now := clock.Now()
+	must(t, repo.WithOperation(ctx, stream, event, serviceActor, func() time.Time { return now }, func(a *trace.OperationAttempt, _ trace.OperationRecord) error {
+		expect("claimed", "pending", "")
+		observe := a.Action("observe", now)
+		observe.Observation = &coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "no librarian turn has run"}
+		must(t, a.Record(ctx, observe))
+		must(t, a.Record(ctx, a.Action("effect", now)))
+		expect("effect started", "running", "")
+		retry := a.Action("retry", now)
+		retry.Failure, retry.RetryAt = "Effect returned error: trace unavailable", now.Add(time.Minute)
+		must(t, a.Record(ctx, retry))
+		return nil
+	}))
+	expect("waiting to retry", "pending", "Effect returned error: trace unavailable")
+	// The next attempt claims the operation again.
+	later := now.Add(2 * time.Minute)
+	must(t, repo.WithOperation(ctx, stream, event, serviceActor, func() time.Time { return later }, func(a *trace.OperationAttempt, _ trace.OperationRecord) error {
+		expect("claimed again", "pending", "")
+		observe := a.Action("observe", later)
+		observe.Observation = &coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "no librarian turn has run"}
+		must(t, a.Record(ctx, observe))
+		must(t, a.Record(ctx, a.Action("effect", later)))
+		expect("running again", "running", "")
+		result := a.Action("result", later)
+		result.Result = &coreadapter.OperationResult{Outcome: "failed", Evidence: "invalid librarian output: kb/ is missing"}
+		must(t, a.Record(ctx, result))
+		return nil
+	}))
+	expect("failed", "failed", "invalid librarian output: kb/ is missing")
+}
+
+func TestSchedulerLeavesLibrarianTurnsToTheExtractor(t *testing.T) {
+	f := newLibrarianFixture(t)
+	ctx := context.Background()
+	seed, err := kb.Seed(f.clone)
+	must(t, err)
+	refined := entitiesWith(t, seed, "history")
+	// The bound thread reconciler would complete any turn operation the
+	// scheduler published for the librarian without running the librarian's
+	// isolated turn path.
+	f.opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+		return &completedRunner{}, nil
+	}
+	f.script("extract-1-1", map[string]string{"output/kb/trace.md": "# trace\n", "output/kb/entities.json": refined}, nil)
+	s, c := start(t, f.opts)
+	added, err := c.AddProject(ctx, request(f.clone))
+	must(t, err)
+	id := added.Project.ID
+	if x := awaitExtraction(t, c); x.Extraction != 1 || x.State != "succeeded" {
+		t.Fatalf("first extraction: %+v", x)
+	}
+	gate := s.admit(id)
+	if admitted, err := gate(ctx, scheduler.Candidate{Workstream: librarianWorkstream(id)}); err != nil || admitted {
+		t.Fatalf("librarian workstream admitted: %t %v", admitted, err)
+	}
+	if admitted, err := gate(ctx, scheduler.Candidate{Workstream: stream}); err != nil || !admitted {
+		t.Fatalf("other workstream declined: %t %v", admitted, err)
+	}
+	must(t, s.Close())
+	c.Close()
+
+	// A librarian turn queued and unclaimed when the service starts, as an
+	// attempt stopped between accepting and reserving the turn leaves it, is
+	// the extractor's to run: the scheduler publishes no operation for it.
+	repo, cfg := f.reopen(t, added)
+	must(t, requestExtraction(ctx, repo, 2, f.clock.Now(), registrationActor, "owner-request", "requested"))
+	queueLibrarianTurn(t, repo, cfg, 2, 1, f.clock.Now())
+	must(t, repo.Close())
+	tracked := f.trackedSeed(t)
+	f.script("extract-2-1", map[string]string{"output/kb/trace.md": "# trace\n\nRevised.\n", "output/kb/entities.json": refined},
+		func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
+			return checkLibrarianBoundary(ctx, req, policy, tools, f.clone, refined, tracked)
+		})
+	s, c = start(t, f.opts)
+	defer c.Close()
+	if x := awaitExtraction(t, c); x.Extraction != 2 || x.State != "succeeded" {
+		t.Fatalf("second extraction: %+v", x)
+	}
+	if runs := f.runs(); !slices.Equal(runs, []string{"extract-1-1", "extract-2-1"}) {
+		t.Fatalf("backend runs %v", runs)
+	}
+	ops, err := s.active.repository.Operations(librarianWorkstream(id))
+	must(t, err)
+	for _, o := range ops {
+		if o.Operation.Action != ExtractAction {
+			t.Fatalf("the scheduler published %s for the librarian's turn", o.Operation.Action)
+		}
+	}
+	if docs := documentRevisions(t, s, "subsystem-trace"); len(docs) != 2 || docs[1].Content != "# trace\n\nRevised.\n" {
+		t.Fatalf("trace prose: %+v", docs)
+	}
+	must(t, s.Close())
+}
+
+func TestExtractionRecordsPersistedOutputAfterRestart(t *testing.T) {
+	for _, completed := range []bool{true, false} {
+		name := "captured"
+		if completed {
+			name = "completed"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newLibrarianFixture(t)
+			ctx := context.Background()
+			seed, err := kb.Seed(f.clone)
+			must(t, err)
+			refined := entitiesWith(t, seed, "history")
+			f.script("extract-1-1", map[string]string{"output/kb/trace.md": "# trace\n", "output/kb/entities.json": refined}, nil)
+			s, c := start(t, f.opts)
+			added, err := c.AddProject(ctx, request(f.clone))
+			must(t, err)
+			id := added.Project.ID
+			if x := awaitExtraction(t, c); x.Extraction != 1 || x.State != "succeeded" {
+				t.Fatalf("first extraction: %+v", x)
+			}
+			must(t, s.Close())
+			c.Close()
+
+			// The stopped service ran extraction 2's turn and captured its
+			// output, but did not record the knowledge base before it stopped.
+			repo, cfg := f.reopen(t, added)
+			stream := librarianWorkstream(id)
+			must(t, requestExtraction(ctx, repo, 2, f.clock.Now(), registrationActor, "owner-request", "requested"))
+			req := queueLibrarianTurn(t, repo, cfg, 2, 1, f.clock.Now())
+			directory := filepath.Join(cfg.Root.String(), "librarian", string(id), req.TurnID)
+			claimed, err := repo.ClaimTurn(ctx, stream, librarianAgent, "earlier-session", filepath.Join(directory, "session"), f.clock.Now())
+			must(t, err)
+			h := req.Header
+			h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", trace.EventID(req.ID, "response"), f.clock.Now(), trace.Actor{Kind: "service", ID: "thread-runner"}
+			response := trace.TurnResponse{Header: h, AgentID: librarianAgent, ThreadID: req.ThreadID, TurnID: req.TurnID, RequestID: req.ID, RequestRevision: req.Revision,
+				Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: req.Profile.Backend, ID: "session-" + req.TurnID}, SessionDirectory: claimed.Claim.SessionDirectory, StartedAt: claimed.Claim.At, Duration: time.Second, FinalResponse: "Knowledge base written"}}
+			must(t, repo.CaptureTurn(ctx, "earlier-session", response))
+			if completed {
+				must(t, repo.CompleteTurn(ctx, stream, librarianAgent, req.TurnID, "earlier-session", f.clock.Now()))
+			}
+			must(t, repo.Close())
+			output := filepath.Join(directory, kb.OutputDirectory, "kb")
+			must(t, os.MkdirAll(output, 0700))
+			must(t, os.WriteFile(filepath.Join(output, "trace.md"), []byte("# trace\n\nPersisted.\n"), 0600))
+			must(t, os.WriteFile(filepath.Join(output, "entities.json"), []byte(refined), 0600))
+
+			// The turn is not run again: the persisted output is recorded.
+			s, c = start(t, f.opts)
+			defer c.Close()
+			if x := awaitExtraction(t, c); x.Extraction != 2 || x.State != "succeeded" {
+				t.Fatalf("after restart: %+v", x)
+			}
+			if runs := f.runs(); !slices.Equal(runs, []string{"extract-1-1"}) {
+				t.Fatalf("backend runs %v", runs)
+			}
+			th, err := s.active.repository.Thread(stream, librarianAgent)
+			must(t, err)
+			if len(th.Turns) != 2 || th.Turns[1].Status() != "idle" || th.Active != "" {
+				t.Fatalf("thread after recovery: %+v", th)
+			}
+			if docs := documentRevisions(t, s, "subsystem-trace"); len(docs) != 2 || docs[1].Content != "# trace\n\nPersisted.\n" {
+				t.Fatalf("trace prose: %+v", docs)
+			}
+			if docs := documentRevisions(t, s, trace.EntitiesDocument); len(docs) != 3 || docs[2].Content != refined {
+				t.Fatalf("entity revisions: %+v", docs)
+			}
+			if ops := operationsOf(t, s, id); len(ops) != 2 || ops[1].Result == nil || ops[1].Result.Outcome != "succeeded" {
+				t.Fatalf("operations: %+v", ops)
+			}
+			must(t, s.Close())
+		})
+	}
 }

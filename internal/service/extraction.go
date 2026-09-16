@@ -155,7 +155,9 @@ func (s *Service) now() time.Time {
 }
 
 // extractionState derives the latest extraction's state from its operation
-// record. A trace without a librarian workstream has no extraction.
+// record: running while a live claim has started the effect, pending while it
+// is queued or waiting to retry (with the retry's reason), otherwise the
+// result. A trace without a librarian workstream has no extraction.
 func extractionState(r *trace.Repository) (*ExtractionState, error) {
 	stream := librarianWorkstream(r.Project())
 	streams, err := r.Workstreams()
@@ -189,8 +191,11 @@ func extractionState(r *trace.Repository) (*ExtractionState, error) {
 	state := &ExtractionState{Extraction: n, State: "pending", At: latest.Transition.At}
 	for _, a := range latest.History {
 		state.At = a.At
-		if a.Kind == "retry" {
+		switch a.Kind {
+		case "retry":
 			state.Reason = a.Failure
+		case "claim":
+			state.Reason = ""
 		}
 	}
 	switch {
@@ -199,7 +204,7 @@ func extractionState(r *trace.Repository) (*ExtractionState, error) {
 		if state.State == "failed" {
 			state.Reason = latest.Result.Evidence
 		}
-	case latest.EffectStarted:
+	case latest.EffectStarted && latest.Claim != nil:
 		state.State, state.Reason = "running", ""
 	}
 	return state, nil
@@ -392,6 +397,8 @@ func (e *extractor) Inspect(_ context.Context, op coreadapter.Operation) (coread
 		return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "librarian turn " + last.Request.TurnID + " is running"}, nil
 	case last.Claim != nil && last.Response == nil:
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "librarian turn " + last.Request.TurnID + " was interrupted by a service stop"}, nil
+	case last.Claim == nil:
+		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "librarian turn " + last.Request.TurnID + " is queued and unclaimed"}, nil
 	case last.CompletedAt.IsZero():
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "librarian turn " + last.Request.TurnID + " is captured and not completed"}, nil
 	}
@@ -586,8 +593,8 @@ func (e *extractor) selectView(ctx context.Context, scope coreadapter.Scope) (is
 }
 
 // stage builds the workspace: the clone's tracked files under repo/, the
-// current knowledge base under kb/, the deterministic entity seed under seed/
-// and an empty output/.
+// current knowledge base under kb/, the deterministic entity seed of those
+// tracked files under seed/ and an empty output/.
 func (e *extractor) stage(ctx context.Context, clone, workspace string) error {
 	if err := os.RemoveAll(workspace); err != nil {
 		return err
@@ -622,7 +629,7 @@ func (e *extractor) stage(ctx context.Context, clone, workspace string) error {
 			}
 		}
 	}
-	seed, err := kb.Seed(clone)
+	seed, err := kb.Seed(filepath.Join(workspace, "repo"))
 	if err != nil {
 		return err
 	}

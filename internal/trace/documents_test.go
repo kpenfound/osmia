@@ -253,3 +253,78 @@ func TestAbandonTurnRecordsInterruption(t *testing.T) {
 		t.Fatalf("session changed by the interruption: %+v", th.Session)
 	}
 }
+
+func TestAbandonTurnRefusesCapturedTurn(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	if err := r.CreateThread(ctx, threadAgent()); err != nil {
+		t.Fatal(err)
+	}
+	enqueue(t, r, "one")
+	claimed := claimTurn(t, r, "token")
+	captured := threadResponse(claimed)
+	if err := r.CaptureTurn(ctx, "token", captured); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(root, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	// The captured result outlives the session that reserved the turn: only
+	// completion may close the turn.
+	if err := r.AbandonTurn(ctx, streamID, "mason", "one", at.Add(time.Minute)); !errors.Is(err, ErrClaim) {
+		t.Fatalf("captured turn abandoned: %v", err)
+	}
+	th := mustThread(t, r)
+	q := th.Turns[0]
+	if th.Active != "one" || th.Status != "captured" || q.Status() != "captured" || !q.CompletedAt.IsZero() || q.Response == nil || !reflect.DeepEqual(*q.Response, captured) {
+		t.Fatalf("captured turn changed: %+v", th)
+	}
+	if responses, err := Read[TurnResponse](r, streamID); err != nil || len(responses) != 1 || !reflect.DeepEqual(responses[0], captured) {
+		t.Fatalf("owned log: %+v %v", responses, err)
+	}
+}
+
+func TestRecordDocumentsRefusesUnpublishablePaths(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	dir, err := root.ProjectTrace(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RecordDocuments(ctx, []Document{projectDocument("subsystem-trace", "kb/trace.md", "# trace\n", 1)}); err != nil {
+		t.Fatal(err)
+	}
+	commits := gitOutput(t, r, "rev-list", "--count", "HEAD")
+	for _, path := range []string{"kb/foo.bar.md", "kb/nested/foo.md", "kb/foo.txt", "docs/foo.md", "charter.md"} {
+		batch := []Document{projectDocument("subsystem-trace", "kb/trace.md", "# trace 2\n", 2), projectDocument("subsystem-foo", path, "# foo\n", 1)}
+		if err := r.RecordDocuments(ctx, batch); err == nil {
+			t.Fatalf("%s recorded", path)
+		}
+		if got := gitOutput(t, r, "rev-list", "--count", "HEAD"); got != commits {
+			t.Fatalf("%s: commits %s, want %s", path, got, commits)
+		}
+		if _, err := r.dir.Stat(publicationFile); !os.IsNotExist(err) {
+			t.Fatalf("%s: journal left behind: %v", path, err)
+		}
+		if got := projectDocuments(t, r, "subsystem-trace"); len(got) != 1 {
+			t.Fatalf("%s: revisions recorded: %+v", path, got)
+		}
+		if got := kbFiles(t, dir); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace\n", "entities.json": "{}\n"}) {
+			t.Fatalf("%s: files: %v", path, got)
+		}
+	}
+	// The trace reopens cleanly: nothing partial was published.
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(root, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened.Close()
+}

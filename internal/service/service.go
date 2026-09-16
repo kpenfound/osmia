@@ -294,11 +294,17 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	return &activeProject{repository: repository, controller: controller, done: make(chan error, 1)}, nil
 }
 
-// unpaused admits the project's queued turns that no runtime pause in force
-// holds. The store is read on every pass, so a cleared pause lets held turns
-// run on the loop's next periodic pass.
-func (s *Service) unpaused(project config.ProjectID) func(context.Context, scheduler.Candidate) (bool, error) {
+// admit is the scheduler's gate. It declines every turn of the librarian's
+// workstream, which the service's extractor runs itself in the librarian's
+// staged view, and holds the project's other queued turns that a runtime
+// pause in force covers. The store is read on every pass, so a cleared pause
+// lets held turns run on the loop's next periodic pass.
+func (s *Service) admit(project config.ProjectID) func(context.Context, scheduler.Candidate) (bool, error) {
+	librarian := librarianWorkstream(project)
 	return func(_ context.Context, c scheduler.Candidate) (bool, error) {
+		if c.Workstream == librarian {
+			return false, nil
+		}
 		st, _ := s.store.Effective()
 		return !scheduler.Held(st.Pauses, project, c), nil
 	}
@@ -393,7 +399,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 			return nil, nil, err
 		}
 		runner.turns = bound
-		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.unpaused(cfg.Project.ID)})
+		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg.Project.ID)})
 		if err != nil {
 			repository.Close()
 			return nil, nil, err
