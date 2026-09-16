@@ -777,7 +777,7 @@ func (e *extractor) record(ctx context.Context, operation string, last trace.Que
 	}
 	var records []trace.Document
 	for _, name := range out.Subsystems() {
-		records = append(records, trace.Document{Header: header(kb.ProseDocument(name)), Path: kb.ProsePath(name), Content: out.Prose[name]})
+		records = append(records, trace.Document{Header: header(kb.ProseDocument(name)), Path: trace.ProsePath(name), Content: out.Prose[name]})
 	}
 	for _, d := range latestDocuments(docs) {
 		if name, ok := kb.Subsystem(d.Path); ok && d.Content != "" && out.Prose[name] == "" {

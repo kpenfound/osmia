@@ -40,7 +40,7 @@ client to release idle connections. API version 1 uses snake_case JSON fields.
 | --- | --- | --- |
 | GET | `/health` | Readiness, service name, API version, supplied build version and commit |
 | GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics |
-| GET | `/runtime` | Effective runtime state and diagnostics |
+| GET | `/runtime` | Effective runtime state, each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
 | POST | `/projects/extract` | `ProjectExtractRequest`: project; returns `ExtractionResponse` |

@@ -32,9 +32,6 @@ func CheckSubsystem(name string) error {
 	return nil
 }
 
-// ProsePath is the project document path of a subsystem's prose.
-func ProsePath(subsystem string) string { return "kb/" + subsystem + ".md" }
-
 // ProseDocument is the record ID of a subsystem's prose revisions.
 func ProseDocument(subsystem string) string { return "subsystem-" + subsystem }
 

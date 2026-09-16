@@ -34,8 +34,8 @@ func TestCheckSubsystem(t *testing.T) {
 			t.Errorf("%q accepted", name)
 		}
 	}
-	if ProsePath("trace") != "kb/trace.md" || ProseDocument("trace") != "subsystem-trace" {
-		t.Fatal(ProsePath("trace"), ProseDocument("trace"))
+	if ProseDocument("trace") != "subsystem-trace" {
+		t.Fatal(ProseDocument("trace"))
 	}
 	for path, want := range map[string]string{"kb/trace.md": "trace", "kb/entities.json": "", "kb/Trace.md": "", "kb/a/b.md": "", "trace.md": "", "kb/entities.md": "entities"} {
 		if got, ok := Subsystem(path); got != want || ok != (want != "") {

@@ -102,8 +102,10 @@ func (s *Service) configuration() ConfigResponse {
 }
 func (s *Service) runtimeView() RuntimeResponse {
 	state, ds := s.store.Effective()
-	out := RuntimeResponse{Effective: state, Diagnostics: []Diagnostic{}}
-	if !s.current().HasProject() {
+	out := RuntimeResponse{Effective: state, Projects: []ProjectRuntime{}, Diagnostics: []Diagnostic{}}
+	if cfg := s.current(); cfg.HasProject() {
+		out.Projects = append(out.Projects, ProjectRuntime{cfg.Project.ID, s.Context().Mode(cfg.Project.ID)})
+	} else {
 		out.Diagnostics = append(out.Diagnostics, noProject("project"))
 	}
 	for _, d := range ds {

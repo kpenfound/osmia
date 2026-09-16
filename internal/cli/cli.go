@@ -254,6 +254,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "Service: %s ready=%t API=%d\nConfiguration: %s (%s)\n", h.Service, h.Ready, h.APIVersion, cfg.Digest, cfg.Root)
 		showProject(stdout, cfg.Project)
+		for _, p := range rt.Projects {
+			fmt.Fprintf(stdout, "Context: %s context_mode=%s\n", p.Project, p.ContextMode)
+		}
 		diagnostics(stdout, cfg.Diagnostics)
 		showRuntime(stdout, rt)
 		return 0
