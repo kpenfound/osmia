@@ -528,3 +528,46 @@ func TestThreadOwnedRecordValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestThreadsListsSnapshotsByAgent(t *testing.T) {
+	ctx := context.Background()
+	r, root, p := create(t)
+	for _, id := range []string{"zeta", "mason", "alpha"} {
+		a := threadAgent()
+		if id != "mason" {
+			a.ID, a.ThreadID = id, "thread_"+id
+		}
+		if err := r.CreateThread(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	enqueue(t, r, "one")
+	claimTurn(t, r, "token")
+	r.Close()
+	r, err := Open(root, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	threads, err := r.Threads(streamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, th := range threads {
+		ids = append(ids, th.Identity.ID)
+		one, err := r.Thread(streamID, th.Identity.ID)
+		if err != nil || !reflect.DeepEqual(one, th) {
+			t.Fatalf("thread %s: %+v, want %+v (%v)", th.Identity.ID, th, one, err)
+		}
+	}
+	if want := []string{"alpha", ChiefOfStaff, "mason", "zeta"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("threads %v, want %v", ids, want)
+	}
+	if th := threads[2]; th.Status != "interrupted" || th.Active != "one" {
+		t.Fatalf("interrupted thread: %+v", th)
+	}
+	if _, err := r.Threads("w_invalid"); err == nil {
+		t.Fatal("invalid workstream accepted")
+	}
+}

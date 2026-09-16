@@ -94,9 +94,9 @@ func dispatched(t *testing.T, repo *trace.Repository) []string {
 	must(t, err)
 	var got []string
 	for _, op := range ops {
-		var in thread.TurnInput
-		must(t, json.Unmarshal(op.Operation.Input, &in))
-		got = append(got, in.Agent+"/"+in.Turn)
+		if in, err := thread.DecodeTurn(op.Operation); err == nil {
+			got = append(got, in.Agent+"/"+in.Turn)
+		}
 	}
 	slices.Sort(got)
 	return got
@@ -199,6 +199,54 @@ func TestPassLeavesThreadsWithATurnInFlight(t *testing.T) {
 	must(t, s.Pass(ctx))
 	if got, want := dispatched(t, repo), []string{"operated/one"}; !slices.Equal(got, want) {
 		t.Fatalf("dispatched %v, want %v", got, want)
+	}
+}
+
+// publish stores a turn operation with raw input, as any trace writer may.
+func (f *fixture) publish(t *testing.T, repo *trace.Repository, name, input string) {
+	t.Helper()
+	event := trace.EventID(name, "turn")
+	op := coreadapter.Operation{ID: trace.OperationID(project, stream, event), Boundary: coreadapter.RunnerBoundary, Action: thread.TurnAction, Input: json.RawMessage(input)}
+	_, err := repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: name, Project: project, Workstream: stream, At: f.clock.Now(), Actor: owner, Cause: "test"}, Subject: name, To: "delivering", Reason: "Raw intent"},
+		Events: []trace.Event{{ID: event, Kind: "turn", Body: "Deliver", Operation: &op}}})
+	must(t, err)
+}
+
+func TestUndecodableTurnOperationsDoNotStopDispatch(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t, "alpha", "beta")
+	defer repo.Close()
+	f.queue(t, repo, "alpha", "one")
+	f.queue(t, repo, "beta", "one")
+	f.publish(t, repo, "array", `[]`)
+	f.publish(t, repo, "typed", `{"agent":1}`)
+	// The dispatcher refuses unknown fields, so this does not dispatch alpha/one.
+	f.publish(t, repo, "extra", `{"workstream":"`+string(stream)+`","agent":"alpha","turn":"one","extra":true}`)
+	turns := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](result("one"), result("one"))}
+	c := f.controller(t, repo, turns, nil)
+	must(t, c.Pass(ctx))
+	must(t, c.Pass(ctx))
+	if got, want := dispatched(t, repo), []string{"alpha/one", "beta/one"}; !slices.Equal(got, want) {
+		t.Fatalf("dispatched %v, want %v", got, want)
+	}
+	if calls := turns.Calls(); len(calls) != 2 {
+		t.Fatalf("turns run %+v", calls)
+	}
+	ops, err := repo.Operations(stream)
+	must(t, err)
+	retried := 0
+	for _, op := range ops {
+		if _, err := thread.DecodeTurn(op.Operation); err != nil {
+			if op.Acknowledged || op.RetryAt.IsZero() {
+				t.Fatalf("undecodable operation %+v", op)
+			}
+			retried++
+		} else if !op.Acknowledged {
+			t.Fatalf("turn operation %+v", op)
+		}
+	}
+	if retried != 3 {
+		t.Fatalf("retried operations %d", retried)
 	}
 }
 

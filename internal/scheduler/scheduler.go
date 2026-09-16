@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -35,6 +34,12 @@ type Options struct {
 // Scheduler publishes the intent to run each thread's next queued turn. The
 // reconciliation controller delivers that intent through the thread
 // dispatcher, so a turn in flight at shutdown is recovered, not repeated.
+//
+// While the scheduler runs, callers accept turns with EnqueueTurn alone. A
+// caller that publishes its own turn operation must do so before the service
+// opens the trace or while an earlier turn of the same thread is in flight;
+// otherwise the turn can end up with two operations, which the dispatcher
+// still runs once.
 type Scheduler struct {
 	repository *trace.Repository
 	options    Options
@@ -50,64 +55,63 @@ func New(repository *trace.Repository, options Options) (*Scheduler, error) {
 	return &Scheduler{repository: repository, options: options}, nil
 }
 
-// Pass reads every workstream's threads and turn operations and dispatches the
-// next turn of each thread that has none in flight. A thread's turn is in
-// flight while it is claimed or while its operation exists and the turn has
-// not completed. Pass makes no model call.
+// Pass reads every workstream's threads, then its turn operations, and
+// dispatches the next turn of each thread that has none in flight. A thread's
+// turn is in flight while it is claimed or while a turn operation names it and
+// the turn has not completed. Pass makes no model call.
 func (s *Scheduler) Pass(ctx context.Context) error {
 	streams, err := s.repository.Workstreams()
 	if err != nil {
 		return err
 	}
+	threads := map[config.WorkstreamID][]trace.Thread{}
 	for _, stream := range streams {
-		if err := s.stream(ctx, stream); err != nil {
+		if threads[stream], err = s.repository.Threads(stream); err != nil {
 			return fmt.Errorf("workstream %s: %w", stream, err)
+		}
+	}
+	dispatched := map[turnKey]bool{}
+	for _, stream := range streams {
+		records, err := s.repository.Operations(stream)
+		if err != nil {
+			return fmt.Errorf("workstream %s: %w", stream, err)
+		}
+		for _, record := range records {
+			// The dispatcher refuses input it cannot decode, and the controller
+			// records that refusal as a retry, so such an operation runs no turn.
+			if in, err := thread.DecodeTurn(record.Operation); err == nil {
+				dispatched[turnKey{in.Workstream, in.Agent, in.Turn}] = true
+			}
+		}
+	}
+	for _, stream := range streams {
+		for _, t := range threads[stream] {
+			q, ok := next(t)
+			if !ok || dispatched[turnKey{stream, t.Identity.ID, q.Request.TurnID}] {
+				continue
+			}
+			c := Candidate{Workstream: stream, Thread: t, Turn: q}
+			if s.options.Admit != nil {
+				admitted, err := s.options.Admit(ctx, c)
+				if err != nil {
+					return err
+				}
+				if !admitted {
+					continue
+				}
+			}
+			if err := s.dispatch(ctx, c); err != nil {
+				return fmt.Errorf("workstream %s: %w", stream, err)
+			}
 		}
 	}
 	return nil
 }
 
-func (s *Scheduler) stream(ctx context.Context, stream config.WorkstreamID) error {
-	threads, err := s.repository.Threads(stream)
-	if err != nil {
-		return err
-	}
-	records, err := s.repository.Operations(stream)
-	if err != nil {
-		return err
-	}
-	dispatched := map[[2]string]bool{}
-	for _, record := range records {
-		op := record.Operation
-		if op.Boundary != coreadapter.RunnerBoundary || op.Action != thread.TurnAction {
-			continue
-		}
-		var in thread.TurnInput
-		if err := json.Unmarshal(op.Input, &in); err != nil {
-			return fmt.Errorf("turn operation %s: %w", record.EventID, err)
-		}
-		dispatched[[2]string{in.Agent, in.Turn}] = true
-	}
-	for _, t := range threads {
-		q, ok := next(t)
-		if !ok || dispatched[[2]string{t.Identity.ID, q.Request.TurnID}] {
-			continue
-		}
-		c := Candidate{Workstream: stream, Thread: t, Turn: q}
-		if s.options.Admit != nil {
-			admitted, err := s.options.Admit(ctx, c)
-			if err != nil {
-				return err
-			}
-			if !admitted {
-				continue
-			}
-		}
-		if err := s.dispatch(ctx, c); err != nil {
-			return err
-		}
-	}
-	return nil
+type turnKey struct {
+	workstream config.WorkstreamID
+	agent      string
+	turn       string
 }
 
 // next returns the thread's oldest unfinished turn unless it is claimed. Turns
