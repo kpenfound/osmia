@@ -46,9 +46,8 @@ osmia status --json
   before answering, and the output names the message's turn ID and its state
   (`queued`). The chief of staff answers it as its next turn, after any turn
   already running. An empty message, or a workstream the active project does
-  not hold, fails with `validation` (exit 4), as does a configuration with no
-  profile for the `chief_of_staff` role; with no project configured it fails
-  with `no_project` (exit 4). See [conversation](service.md#conversation).
+  not hold, fails with `validation` (exit 4); with no project configured it
+  fails with `no_project` (exit 4). See [conversation](service.md#conversation).
 - `conversation <workstream-id>` lists the owner's messages to that
   workstream's chief of staff and its final responses, oldest first. Each
   entry shows when it was sent or answered, who wrote it, its turn ID and the

@@ -38,16 +38,12 @@ func ticking() func() time.Time {
 	}
 }
 
-// withConversation creates the project trace with two workstreams, binds the
-// chief_of_staff role and runs its turns with the fake chief of staff.
+// withConversation creates the project trace with two workstreams and runs
+// chief-of-staff turns with the fake chief of staff.
 func withConversation(t *testing.T) service.Options {
 	t.Helper()
 	ctx := context.Background()
 	opts := fixture(t)
-	file := filepath.Join(opts.Config.Root, "config.toml")
-	data, err := os.ReadFile(file)
-	must(t, err)
-	must(t, os.WriteFile(file, append(data, "[roles.chief_of_staff]\nprofile=\"default\"\n"...), 0600))
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
 	cmd := exec.Command("git", "init", "--quiet", cfg.Project.Clone)

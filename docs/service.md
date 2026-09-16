@@ -207,8 +207,7 @@ that the owner did not send are not listed. Each entry has:
 
 `POST` returns the message's entry, whose state is `queued`. A malformed
 workstream ID, a workstream the active trace does not hold (or no trace at
-all), empty text, or no usable profile for the `chief_of_staff` role returns
-`validation`. No configured project returns `no_project`. A trace that cannot
+all), or empty text returns `validation`. No configured project returns `no_project`. A trace that cannot
 be read or written, or a bundle that cannot be assembled, returns `internal`.
 These messages name the workstream or project. A rejected message is not
 recorded. Messages are accepted without a turn reconciler, but only a service

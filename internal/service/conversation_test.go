@@ -51,8 +51,8 @@ func (c *chiefTurns) Calls() []coreadapter.PreparedTurn {
 	return append([]coreadapter.PreparedTurn(nil), c.calls...)
 }
 
-// conversationFixture creates a project whose chief_of_staff role is bound to
-// the default profile, with a trace holding two workstreams and a charter rule.
+// conversationFixture creates a project with a trace holding two workstreams
+// and a charter rule.
 func conversationFixture(t *testing.T, prefix string) (Options, *config.Config) {
 	t.Helper()
 	ctx := context.Background()
@@ -60,10 +60,6 @@ func conversationFixture(t *testing.T, prefix string) (Options, *config.Config) 
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	file := filepath.Join(opts.Config.Root, "config.toml")
-	data, err := os.ReadFile(file)
-	must(t, err)
-	must(t, os.WriteFile(file, append(data, "[roles.chief_of_staff]\nprofile = \"default\"\n"...), 0600))
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
 	must(t, os.MkdirAll(cfg.Project.Clone, 0700))
@@ -180,7 +176,7 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 		if p.Prompt != prompt || p.Scope.Role != trace.ChiefOfStaff || p.Scope.Thread != trace.ChiefOfStaff || p.Profile.Name != "default" {
 			t.Fatalf("turn %d: %+v", i, p)
 		}
-		for _, part := range []string{"You are the chief of staff for workstream " + string(stream), "# Project context", "workstream: " + string(stream), "charter#1: Keep the upload API stable."} {
+		for _, part := range []string{"You are the chief of staff for workstream " + string(stream), "# Project context", "workstream: " + string(stream), "charter#1 [Rules]: Keep the upload API stable."} {
 			if !strings.Contains(p.SystemPrompt, part) {
 				t.Fatalf("turn %d system prompt lacks %q:\n%s", i, part, p.SystemPrompt)
 			}
@@ -246,26 +242,6 @@ func TestConversationRejections(t *testing.T) {
 	expect(err, NoProject, "no project is configured")
 	_, err = c.Conversation(ctx, stream)
 	expect(err, NoProject, "no project is configured")
-}
-
-func TestConversationRequiresChiefOfStaffProfile(t *testing.T) {
-	ctx := context.Background()
-	opts, _ := conversationFixture(t, "cp-")
-	file := filepath.Join(opts.Config.Root, "config.toml")
-	data, err := os.ReadFile(file)
-	must(t, err)
-	must(t, os.WriteFile(file, []byte(strings.Replace(string(data), "[roles.chief_of_staff]\nprofile = \"default\"\n", "", 1)), 0600))
-	s, c := start(t, opts)
-	_, err = c.Send(ctx, stream, "hello")
-	var api *APIError
-	if !errors.As(err, &api) || api.Code != Validation || !strings.Contains(api.Message, "role chief_of_staff has no usable profile") {
-		t.Fatalf("unbound role: %v", err)
-	}
-	th, err := s.active.repository.ChiefOfStaffThread(stream)
-	must(t, err)
-	if len(th.Turns) != 0 {
-		t.Fatalf("message recorded without a profile: %+v", th.Turns)
-	}
 }
 
 func TestConversationUsesProfileOverride(t *testing.T) {

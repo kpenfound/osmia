@@ -72,8 +72,8 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 	st, _ := s.store.Effective()
 	name := st.Profiles[trace.ChiefOfStaff]
 	profile, _, err := cfg.Execution(trace.ChiefOfStaff, name)
-	if name == "" || err != nil {
-		return ConversationEntry{}, &APIError{Validation, "role chief_of_staff has no usable profile; bind one under [roles.chief_of_staff] in the configuration or with osmia profiles set"}
+	if err != nil {
+		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("role %s has no usable profile %q; check osmia profiles", trace.ChiefOfStaff, name)}
 	}
 	b, err := s.Context().Assemble(ctx, project, bundle.Scope{Workstream: stream})
 	if err != nil {
