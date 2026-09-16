@@ -16,6 +16,20 @@ type IsolationEngine struct {
 	Mutate                                     func(*a.BoundaryPolicy)
 	OnRun                                      func() error
 	Released                                   int
+	// Resume answers CheckResume when set; otherwise the saved session is unavailable.
+	Resume       func(previous, next a.Profile, session a.BackendSession) error
+	ResumeChecks int
+}
+
+func (f *IsolationEngine) CheckResume(ctx context.Context, previous, next a.Profile, session a.BackendSession) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.ResumeChecks++
+	if f.Resume == nil {
+		return a.ErrResumeUnavailable
+	}
+	return f.Resume(previous, next, session)
 }
 
 func (f *IsolationEngine) Prepare(ctx context.Context, p a.BoundaryPolicy) (a.IsolatedSession, error) {

@@ -41,6 +41,16 @@ type Turns struct {
 }
 
 var _ coreadapter.Turns = (*Turns)(nil)
+var _ coreadapter.ResumeChecker = (*Turns)(nil)
+
+// CheckResume defers to the enforcing engine through the same boundary executor
+// that runs the turn, so continuation never bypasses service isolation.
+func (r *Turns) CheckResume(ctx context.Context, previous, next coreadapter.Profile, session coreadapter.BackendSession) error {
+	if r.Engine == nil {
+		return errors.New("no enforcing host or container engine supplied")
+	}
+	return (&coreadapter.TurnRunner{Executor: coreadapter.BoundaryExecutor{Engine: r.Engine}}).CheckResume(ctx, previous, next, session)
+}
 
 func narrow(grant coreadapter.Capabilities, request *coreadapter.Capabilities) coreadapter.Capabilities {
 	grant.Tools = slices.Clone(grant.Tools)

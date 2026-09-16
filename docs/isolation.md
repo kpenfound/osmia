@@ -32,7 +32,9 @@ There is no automatic copy-back, commit, branch landing or delivery.
 The service closes the execution boundary, MCP host, view and provider lease, in
 that order, using a non-cancelled cleanup context. Cleanup errors accompany the
 turn result. Views and MCP credentials are fresh on every turn, including resumed
-threads; backend state is not an authority to reuse a prior grant.
+threads; backend state is not an authority to reuse a prior grant. The thread
+runner's resume check is forwarded to the enforcing engine through the same
+boundary executor; an engine that cannot verify a saved session selects replay.
 
 ## Capabilities
 

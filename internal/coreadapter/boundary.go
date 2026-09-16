@@ -193,6 +193,17 @@ func (e BoundaryExecutor) Run(ctx context.Context, req agent.Request, settings E
 	return session.Run(ctx, req)
 }
 
+// CheckResume asks the enforcing engine whether the saved session is available
+// and compatible. It reads no transcript and launches nothing. An engine without
+// this capability selects owned-log replay.
+func (e BoundaryExecutor) CheckResume(ctx context.Context, previous, next Profile, session BackendSession) error {
+	checker, ok := e.Engine.(ResumeChecker)
+	if !ok {
+		return unsupported("resume", "isolation engine cannot verify saved session compatibility and availability")
+	}
+	return checker.CheckResume(ctx, previous, next, session)
+}
+
 func cloneIsolation(iso Isolation) Isolation {
 	iso.Environment = maps.Clone(iso.Environment)
 	iso.Credentials = slices.Clone(iso.Credentials)

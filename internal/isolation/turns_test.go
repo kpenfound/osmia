@@ -234,3 +234,45 @@ func TestPreparedInputCannotInjectBoundary(t *testing.T) {
 		}
 	}
 }
+
+type prepareOnlyEngine struct{ a.IsolationEngine }
+
+func TestServiceTurnsForwardResumeChecksToEngine(t *testing.T) {
+	r, p, _, engine, _ := fixture(t, "mason", "none")
+	previous := a.Profile{Name: "a", Backend: "claude", Model: "model"}
+	next := previous
+	next.Name = "b"
+	session := a.BackendSession{Backend: "claude", ID: "saved"}
+	var checks [][2]a.Profile
+	engine.Resume = func(previous, next a.Profile, got a.BackendSession) error {
+		checks = append(checks, [2]a.Profile{previous, next})
+		if got != session {
+			t.Fatalf("session %#v", got)
+		}
+		if previous.Model != next.Model {
+			return a.ErrResumeUnavailable
+		}
+		return nil
+	}
+	if err := r.CheckResume(context.Background(), previous, next, session); err != nil || len(checks) != 1 || checks[0] != [2]a.Profile{previous, next} {
+		t.Fatalf("engine decision not forwarded: %v %v", err, checks)
+	}
+	next.Model = "changed"
+	if err := r.CheckResume(context.Background(), previous, next, session); !errors.Is(err, a.ErrResumeUnavailable) {
+		t.Fatal(err)
+	}
+	if err := r.CheckResume(context.Background(), previous, previous, a.BackendSession{Backend: "claude", ID: ""}); err == nil || len(checks) != 2 {
+		t.Fatal("malformed session reached the engine")
+	}
+	if p.acquired != 0 || len(engine.Policies) != 0 || len(engine.Requests) != 0 {
+		t.Fatal("resume check touched workspace or launched a session")
+	}
+	r.Engine = prepareOnlyEngine{engine}
+	if err := r.CheckResume(context.Background(), previous, previous, session); !errors.Is(err, a.ErrUnsupported) {
+		t.Fatal(err)
+	}
+	r.Engine = nil
+	if err := r.CheckResume(context.Background(), previous, previous, session); err == nil {
+		t.Fatal("missing engine authorized resume")
+	}
+}
