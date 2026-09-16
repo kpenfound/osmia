@@ -283,11 +283,10 @@ func decisions(repo *trace.Repository, stream config.WorkstreamID) ([]Decision, 
 		if err != nil {
 			return nil, err
 		}
+		// Revisions of one ruling are read in increasing order.
 		latest := map[string]trace.Ruling{}
 		for _, r := range rulings {
-			if r.Revision > latest[r.ID].Revision {
-				latest[r.ID] = r
-			}
+			latest[r.ID] = r
 		}
 		for _, r := range latest {
 			out = append(out, Decision{Source: trace.RecordPath(r), Workstream: ws, Record: r.ID, Revision: r.Revision, QuestionID: r.QuestionID, QuestionRevision: r.QuestionRevision, At: r.At, Decision: r.Decision, ReturnedAnswer: r.ReturnedAnswer})
