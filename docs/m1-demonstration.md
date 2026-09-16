@@ -106,5 +106,6 @@ The fake container engine reports the requested policy as the policy it
 established. It shows that the service builds and checks the boundary, but it
 is not evidence of OS enforcement; see [turn isolation](isolation.md). The
 local HTTP API does not yet accept messages or start turns. The test publishes
-intents through the trace repository handle that the service passes to
+the first intent through its own trace repository before the service starts,
+and the second through the repository handle that the service passes to
 `Options.Threads`.
