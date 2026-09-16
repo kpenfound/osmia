@@ -104,10 +104,10 @@ example, `internal/trace` becomes `internal.trace` and `Docs/API_v2` becomes
 keeps it and the others get `-2`, `-3` and so on, in path order.
 
 A path whose derived ID would not start with a letter or digit, such as
-`_site`, `@types` or `élan`, gets no entity in the seed. Its files resolve
-through the nearest seeded entity that covers them, or come back unresolved. A
-nested path such as `packages/@types` is kept, because its ID
-(`packages.-types`) starts with the parent's name.
+`_site`, `@types` or `élan`, gets no entity in the seed, and paths below it
+resolve as unresolved until someone adds an entity for it by hand. A nested
+path such as `packages/@types` is kept, because its ID (`packages.-types`)
+starts with the parent's name.
 
 `kb.Merge(existing, seed)` regenerates a map without changing identities.
 
