@@ -1,0 +1,153 @@
+# Local entity map
+
+`internal/kb` owns `kb/entities.json` in a project trace: the map from how
+people talk about the code to where it is. Footprints resolve through this file
+alone, with or without Hearsay.
+
+## Schema
+
+```json
+{
+  "version": 1,
+  "entities": [
+    {
+      "id": "internal.trace",
+      "name": "internal/trace",
+      "aliases": ["trace"],
+      "paths": ["internal/trace"],
+      "owners": ["@org/core"],
+      "part_of": ["internal"]
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `version` | Always `1`. |
+| `id` | Stable identifier: lowercase letters, digits, `.` and `-`. |
+| `name` | One-line display name. |
+| `aliases` | Other names for the entity. |
+| `paths` | Repository-relative glob patterns. The first is the primary path. |
+| `owners` | Owners as CODEOWNERS writes them (`@user`, `@org/team`, email). |
+| `part_of` | IDs of the entities this one belongs to. |
+
+`kb.Parse` and `kb.LoadFile` read the file. Empty content, `{}` and a missing
+file are an empty version-1 map. Unknown fields are rejected.
+
+### Path patterns
+
+A pattern is a list of `/`-separated segments. Each segment is a
+[`path.Match`](https://pkg.go.dev/path#Match) pattern, or `**` for any number
+of segments. A pattern matches a path when it matches the path itself or one of
+its parent directories, so `internal/trace` covers `internal/trace/git.go`.
+Patterns must not be empty, absolute, or contain empty, `.` or `..` segments.
+
+### Validation
+
+`kb.Validate` returns every problem at once, each as a `kb.Problem` naming the
+entity:
+
+- a malformed or duplicate ID;
+- a missing name, or a blank alias or owner;
+- an alias that matches another entity's ID or alias, ignoring case;
+- a `part_of` target that does not exist;
+- a `part_of` cycle, reported at its smallest ID;
+- a pattern that is invalid, absolute or escapes the repository.
+
+`kb.Encode` refuses an invalid map. Otherwise it writes the canonical form:
+fields in schema order, entities sorted by ID, `aliases`, `owners` and `part_of`
+sorted, absent lists as `[]`, two-space indentation and a trailing newline.
+`paths` keeps its order because the first entry is the primary path.
+
+## Seeding
+
+`kb.Seed(clone)` builds a map from the clone, without any agent. The clone is
+opened through `os.Root` and only read. Symlinks are never followed out of the
+clone.
+
+1. **CODEOWNERS.** The first regular file among `.github/CODEOWNERS`,
+   `CODEOWNERS` and `docs/CODEOWNERS` is read, the order GitHub uses. Each rule
+   becomes an entity path pattern. A pattern with a leading or inner `/` is
+   anchored at the root; any other pattern gets a `**/` prefix. A trailing `/`
+   or `/**` is dropped. A rule whose pattern cannot be expressed is skipped.
+   Because a pattern covers everything below what it matches, `docs/*` also
+   covers files in subdirectories of `docs`. For a footprint, that errs on the
+   wide side.
+2. **Structure.** Every visible top-level directory becomes an entity. So does
+   every visible directory directly below one of the containers `apps`, `cmd`,
+   `crates`, `internal`, `libs`, `packages`, `pkg` and `services`. Hidden
+   directories (including `.git`), symlinks and names containing glob
+   characters are skipped.
+3. **Literal rules.** A CODEOWNERS rule without wildcards that names an
+   existing, visible path adds that path as an entity.
+
+For each entity:
+
+- `name` and the only `paths` entry are its path.
+- `owners` come from the last CODEOWNERS rule that matches the path, as on
+  GitHub. A matching rule without owners leaves the entity unowned.
+- `part_of` is the nearest entity whose path is a parent directory.
+- A nested entity gets its last path segment as an alias. The alias is dropped
+  when another nested entity has the same last segment (ignoring case) or when
+  it equals an ID.
+
+The same files always produce byte-identical `kb.Encode` output.
+
+### ID rule
+
+An entity's ID is derived from its primary path: lowercase it, turn `/` into
+`.`, and replace every other character outside `[a-z0-9.-]` with `-`. For
+example, `internal/trace` becomes `internal.trace` and `Docs/API_v2` becomes
+`docs.api-v2`. When two paths derive the same ID, the one that sorts first
+keeps it and the others get `-2`, `-3` and so on, in path order.
+
+`kb.Merge(existing, seed)` regenerates a map without changing identities.
+
+- An existing entity whose primary path the seed also produces is kept exactly
+  as it is, including a hand-edited ID, name, aliases, owners and `part_of`.
+- A seeded entity with a new primary path is added. If its ID is already in use
+  it gets the next free `-N` suffix. Its `part_of` edges point at the IDs the
+  merged map uses. Any alias that would collide is dropped.
+- Existing entities the seed no longer produces are kept.
+
+An entity that still exists therefore keeps its ID across regenerations. Seed
+suffixes depend on which colliding paths exist, so regenerate through `Merge`
+rather than by replacing the map with a fresh seed.
+
+## Resolution
+
+`Map.ResolveEntities(names)` accepts IDs or aliases, ignoring case. It returns
+the named entities, every entity that is transitively `part_of` one of them, and
+all their path patterns, sorted.
+
+`Map.ResolvePaths(paths)` returns, for each repository path, the entities whose
+patterns match it most specifically. Specificity is the length of a pattern's
+literal prefix (the text before its first `*`, `?`, `[` or `\`), and an entity
+scores its most specific matching pattern. Every entity with the top score is
+returned.
+
+Both calls return an explicit `Unresolved` list, in input order, and never drop
+an input. It holds:
+
+- names that match no entity, or that resolve to no path pattern at all;
+- paths that are empty, `.`, absolute, unclean or escape the repository, or
+  that no pattern matches.
+
+## Storage
+
+The map is a project `Document` in the trace with record ID `kb-entities` and
+path `kb/entities.json` (`trace.EntitiesDocument` and `trace.EntitiesPath`).
+
+- `trace.Create` writes `{}` and records no revision.
+- `trace.CreateSeeded` records the given map as revision 1 in the trace's first
+  commit.
+- `kb.Store` validates and encodes a map before anything is written, then
+  appends it as the next revision.
+- `kb.Load` returns the latest recorded revision, or an empty map when none
+  exists.
+
+`osmia project add` seeds the map from the clone and creates the trace with
+`CreateSeeded`. A registration that is interrupted before the trace's first
+commit seeds again when it is finished. The librarian's extraction pass is
+separate.

@@ -27,6 +27,10 @@ revision history, atomic workflow transactions, durable outbox leases, local
 operation recovery, and agent queues with owned turn logs in the
 dedicated local Git repository.
 
+The [local entity map reference](docs/knowledge-base.md) documents
+`kb/entities.json`, its seed from CODEOWNERS and directory structure, and
+footprint resolution.
+
 The [runtime override reference](docs/runtime.md) documents persisted operator
 choices and their resolution against configuration.
 
