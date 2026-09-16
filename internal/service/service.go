@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -28,6 +30,10 @@ type Options struct {
 	Workstreams     []config.WorkstreamID
 	ShutdownTimeout time.Duration
 	Reconciliation  reconcile.Options
+	// Threads binds the runner-boundary reconciler to the trace this service
+	// owns. It is called on each start after the trace opens, and replaces any
+	// runner adapter in Reconciliation. Callers must not close the repository.
+	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
 }
 type Service struct {
 	cfg        *config.Config
@@ -74,7 +80,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	repository, controller, err := openReconciliation(cfg, opts.Reconciliation)
+	repository, controller, err := openReconciliation(cfg, opts.Reconciliation, opts.Threads)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +247,7 @@ func (s *Service) cleanupSocket() {
 
 // openReconciliation leaves trace creation to onboarding; an existing trace must
 // open cleanly before the service can report readiness.
-func openReconciliation(cfg *config.Config, options reconcile.Options) (*trace.Repository, *reconcile.Controller, error) {
+func openReconciliation(cfg *config.Config, options reconcile.Options, threads func(*trace.Repository) (coreadapter.Reconciler, error)) (*trace.Repository, *reconcile.Controller, error) {
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
 	if err != nil {
 		return nil, nil, err
@@ -260,6 +266,19 @@ func openReconciliation(cfg *config.Config, options reconcile.Options) (*trace.R
 	}
 	if options.Worker == "" {
 		options.Worker = "local-operations"
+	}
+	if threads != nil {
+		runner, err := threads(repository)
+		if err != nil {
+			repository.Close()
+			return nil, nil, err
+		}
+		adapters := maps.Clone(options.Adapters)
+		if adapters == nil {
+			adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{}
+		}
+		adapters[coreadapter.RunnerBoundary] = runner
+		options.Adapters = adapters
 	}
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
