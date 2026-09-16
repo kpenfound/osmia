@@ -45,9 +45,18 @@ func TestCapacityBoundsDispatch(t *testing.T) {
 	f, repo := crowd(t)
 	defer repo.Close()
 	limits := &config.Capacity{Masons: 3, Reviewers: 1, Committee: 5, PerWorkstream: 3}
-	s, err := New(repo, Options{Now: f.clock.Now, Capacity: limits})
+	var offered []string
+	admit := func(_ context.Context, c Candidate) (bool, error) {
+		offered = append(offered, c.Thread.Identity.ID)
+		return true, nil
+	}
+	s, err := New(repo, Options{Now: f.clock.Now, Capacity: limits, Admit: admit})
 	must(t, err)
 	must(t, s.Pass(ctx))
+	// Admit sees only candidates with a free slot.
+	if want := []string{"architect1", "committee1", "mason1", "architect1", "committee1", "mason1"}; !slices.Equal(offered, want) {
+		t.Fatalf("offered %v, want %v", offered, want)
+	}
 	// In workstream and agent ID order, each workstream takes one architect
 	// (architects run one at a time per workstream), the committee member and
 	// one mason, and then its per-workstream cap is reached.
@@ -139,6 +148,9 @@ func TestSlotsAreReleasedWhateverTheOutcome(t *testing.T) {
 			must(t, err)
 			if want := map[string]string{"success": "idle", "failure": "failed", "waiting": "waiting", "cancellation": "interrupted"}[name]; th.Status != want || th.Turns[0].CompletedAt.IsZero() {
 				t.Fatalf("mason1 thread %+v, want status %s", th, want)
+			}
+			if name == "waiting" && !th.Parked() {
+				t.Fatalf("mason1 thread is not parked: %+v", th)
 			}
 			must(t, c.Pass(ctx))
 			if got := dispatched(t, repo); !slices.Equal(got, []string{"mason1/one", "mason2/one"}) {
