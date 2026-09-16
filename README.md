@@ -32,6 +32,9 @@ The [local entity map reference](docs/knowledge-base.md) documents
 `kb/entities.json`, its seed from CODEOWNERS and directory structure, and
 footprint resolution.
 
+The [turn context reference](docs/context.md) documents the file-based bundles of
+charter rules, knowledge-base prose, entities and rulings that turns receive.
+
 The [runtime override reference](docs/runtime.md) documents persisted operator
 choices and their resolution against configuration.
 

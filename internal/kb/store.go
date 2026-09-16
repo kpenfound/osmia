@@ -68,11 +68,19 @@ func Merge(existing, seed Map) Map {
 // Load returns the latest entity map revision recorded in the trace, or an
 // empty map when none is recorded.
 func Load(r *trace.Repository) (Map, error) {
-	content, _, err := latest(r)
+	m, _, err := LoadRevision(r)
+	return m, err
+}
+
+// LoadRevision is Load that also returns the revision it read, 0 when none is
+// recorded.
+func LoadRevision(r *trace.Repository) (Map, int, error) {
+	content, revision, err := latest(r)
 	if err != nil {
-		return Map{}, err
+		return Map{}, 0, err
 	}
-	return Parse([]byte(content))
+	m, err := Parse([]byte(content))
+	return m, revision, err
 }
 
 // Store validates m and records it as the next Document revision of

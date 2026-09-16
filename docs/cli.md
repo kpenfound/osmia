@@ -27,8 +27,9 @@ osmia status --json
   refused; a provably stale socket is recovered automatically.
 - `status` shows health, loaded configuration digest/root, the active project
   and its trace path (or that none is configured), its charter state (ready or
-  empty, rule count, recorded revision and numbering diagnostics), diagnostics
-  and effective runtime controls, then each workstream with its state, open
+  empty, rule count, recorded revision and numbering diagnostics), diagnostics,
+  effective runtime controls and the project's context mode (`file`, a normal
+  mode; see [context](context.md)), then each workstream with its state, open
   question count and context mode, and the chief of staff's goal and attention
   (`Attention: none` when nothing needs you), or `no status yet`. Reading the
   charter records any edit you made to it; see [charter](charter.md).

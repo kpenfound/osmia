@@ -4,6 +4,7 @@ package service
 import (
 	"time"
 
+	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -110,8 +111,17 @@ type ProjectResponse struct {
 	NextStep string      `json:"next_step"`
 }
 type RuntimeResponse struct {
-	Effective   runtime.State `json:"effective"`
-	Diagnostics []Diagnostic  `json:"diagnostics"`
+	Effective runtime.State `json:"effective"`
+	// Projects lists each active project's context mode.
+	Projects    []ProjectRuntime `json:"projects"`
+	Diagnostics []Diagnostic     `json:"diagnostics"`
+}
+
+// ProjectRuntime reports where a project's turn context comes from. "file"
+// is the supported local mode, not a degraded one.
+type ProjectRuntime struct {
+	Project     config.ProjectID `json:"project"`
+	ContextMode bundle.Mode      `json:"context_mode"`
 }
 type PauseRequest = runtime.Pause
 type ClearPauseRequest = runtime.Target
@@ -130,9 +140,6 @@ type MutationResponse struct {
 	Applied bool `json:"applied"`
 }
 
-// ContextMode is the context source every active project uses: local files.
-const ContextMode = "file"
-
 // StatusResponse lists every workstream of the active project. It is empty
 // without an active project or its trace, and when the trace cannot be read,
 // which a diagnostic reports.
@@ -149,7 +156,7 @@ type WorkstreamStatus struct {
 	Project       config.ProjectID    `json:"project"`
 	State         *string             `json:"state"`
 	OpenQuestions int                 `json:"open_questions"`
-	ContextMode   string              `json:"context_mode"`
+	ContextMode   bundle.Mode         `json:"context_mode"`
 	Status        *StatusView         `json:"status"`
 }
 

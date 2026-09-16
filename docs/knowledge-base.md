@@ -152,7 +152,12 @@ path `kb/entities.json` (`trace.EntitiesDocument` and `trace.EntitiesPath`).
 - `kb.Store` validates and encodes a map before anything is written, then
   appends it as the next revision.
 - `kb.Load` returns the latest recorded revision, or an empty map when none
+  exists. `kb.LoadRevision` also returns that revision number, 0 when none
   exists.
+
+Subsystem prose lives beside the map as `kb/<subsystem>.md`.
+`trace.Repository.Prose` reads one file as it is on disk and
+`trace.Repository.Subsystems` lists them; [context bundles](context.md) use both.
 
 `osmia project add` seeds the map from the clone and creates the trace with
 `CreateSeeded`. A registration that is interrupted before the trace's first

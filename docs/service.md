@@ -40,7 +40,7 @@ client to release idle connections. API version 1 uses snake_case JSON fields.
 | --- | --- | --- |
 | GET | `/health` | Readiness, service name, API version, supplied build version and commit |
 | GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics |
-| GET | `/runtime` | Effective runtime state and diagnostics |
+| GET | `/runtime` | Effective runtime state, each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
 | GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, and diagnostics |
 | GET | `/status/<workstream-id>` | `WorkstreamStatus` for one workstream of the active project |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
@@ -156,7 +156,7 @@ order, and `GET /v1/status/<workstream-id>` returns one. Each
 | `workstream`, `project` | The workstream and its project |
 | `state` | The feature workflow state, or `null` before one is recorded |
 | `open_questions` | Questions in the workstream without a ruling |
-| `context_mode` | `file`: context comes from local files |
+| `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
 | `status` | `null` until the chief of staff writes one; otherwise `goal`, `attention` (empty when nothing needs the owner), `note`, `agents`, `revision` and `updated_at` |
 
 Without an active project or its trace, the list is empty. If the trace

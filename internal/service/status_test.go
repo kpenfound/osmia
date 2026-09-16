@@ -17,6 +17,7 @@ import (
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
@@ -288,7 +289,7 @@ func TestStatusViewCarriesTraceFacts(t *testing.T) {
 	at := demoStart
 	stored := &trace.Status{Header: trace.Header{Revision: 4, At: at}, StatusContent: trace.StatusContent{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}}}
 	state := "building"
-	got := statusView(project, trace.WorkstreamStatus{Workstream: stream, State: state, OpenQuestions: 2, Status: stored})
+	got := statusView(project, bundle.ModeFile, trace.WorkstreamStatus{Workstream: stream, State: state, OpenQuestions: 2, Status: stored})
 	want := WorkstreamStatus{Workstream: stream, Project: project, State: &state, OpenQuestions: 2, ContextMode: "file",
 		Status: &StatusView{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}, Revision: 4, UpdatedAt: at}}
 	if !reflect.DeepEqual(got, want) {

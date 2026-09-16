@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -139,5 +141,40 @@ func TestHandInCharterGate(t *testing.T) {
 	must(t, err)
 	if api := handInError(t, c, HandInRequest{Project: id}); api.Code != NotFound {
 		t.Fatalf("inactive project: %+v", api)
+	}
+}
+
+func TestContextProviderReadsActiveProject(t *testing.T) {
+	opts, clone := projectFixture(t)
+	s, c := start(t, opts)
+	ctx := context.Background()
+	provider := s.Context()
+	if provider.Mode("") != bundle.ModeFile {
+		t.Fatal(provider.Mode(""))
+	}
+	unknown := config.ProjectID("p_0123456789abcdef0123456789abcdef")
+	if _, err := provider.Assemble(ctx, unknown, bundle.Scope{}); !errors.Is(err, errNoActiveProject) {
+		t.Fatalf("idle service: %v", err)
+	}
+	added, err := c.AddProject(ctx, request(clone))
+	must(t, err)
+	id, path := added.Project.ID, added.Project.Charter
+	must(t, os.WriteFile(path, []byte("1. Keep changes small.\n"), 0600))
+	must(t, os.WriteFile(filepath.Join(added.Project.Trace, "kb", "service.md"), []byte("Service notes\n"), 0600))
+	b, err := provider.Assemble(ctx, id, bundle.Scope{})
+	must(t, err)
+	if b.Charter.Revision != 2 || len(b.Charter.Rules) != 1 || len(b.Knowledge) != 1 || b.Knowledge[0].Content != "Service notes\n" || b.Entities.Revision != 1 {
+		t.Fatalf("bundle: %+v", b)
+	}
+	if n := charterRevisionCount(t, s); n != 2 {
+		t.Fatalf("assembly recorded %d charter revisions", n)
+	}
+	if _, err := provider.Assemble(ctx, unknown, bundle.Scope{}); !errors.Is(err, errNoActiveProject) {
+		t.Fatalf("other project: %v", err)
+	}
+	_, err = c.RemoveProject(ctx, id)
+	must(t, err)
+	if _, err := provider.Assemble(ctx, id, bundle.Scope{}); !errors.Is(err, errNoActiveProject) {
+		t.Fatalf("removed project: %v", err)
 	}
 }

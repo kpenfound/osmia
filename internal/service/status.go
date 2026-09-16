@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 
+	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -21,8 +22,9 @@ func (s *Service) statuses() ([]WorkstreamStatus, *APIError) {
 	if err != nil {
 		return nil, &APIError{Internal, fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", cfg.Project.ID)}
 	}
+	mode := s.Context().Mode(cfg.Project.ID)
 	for _, w := range list {
-		out = append(out, statusView(cfg.Project.ID, w))
+		out = append(out, statusView(cfg.Project.ID, mode, w))
 	}
 	return out, nil
 }
@@ -56,8 +58,8 @@ func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 	return WorkstreamStatus{}, &APIError{NotFound, fmt.Sprintf("workstream %s is not in the active project; list workstreams with osmia status", id)}
 }
 
-func statusView(project config.ProjectID, w trace.WorkstreamStatus) WorkstreamStatus {
-	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, OpenQuestions: w.OpenQuestions, ContextMode: ContextMode}
+func statusView(project config.ProjectID, mode bundle.Mode, w trace.WorkstreamStatus) WorkstreamStatus {
+	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, OpenQuestions: w.OpenQuestions, ContextMode: mode}
 	if w.State != "" {
 		state := w.State
 		out.State = &state
