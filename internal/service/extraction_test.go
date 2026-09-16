@@ -120,7 +120,7 @@ func (f *librarianFixture) trackedSeed(t *testing.T) string {
 	has := func(m kb.Map, id string) bool {
 		return slices.ContainsFunc(m.Entities, func(e kb.Entity) bool { return e.ID == id })
 	}
-	if !has(full, "scratch") || !has(full, "node_modules") || has(seed, "scratch") || has(seed, "node_modules") {
+	if !has(full, "scratch") || !has(full, "node-modules") || has(seed, "scratch") || has(seed, "node-modules") {
 		t.Fatalf("fixture seeds: clone %v, tracked %v", full, seed)
 	}
 	data, err := kb.Encode(seed)
