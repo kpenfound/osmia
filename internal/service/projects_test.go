@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/bundle"
 	osmiacharter "github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -90,7 +91,7 @@ func TestZeroProjectStart(t *testing.T) {
 	}
 	rt, err := c.Runtime(ctx)
 	must(t, err)
-	if !hasDiagnostic(rt.Diagnostics, NoProject) || len(rt.Effective.Profiles) != 7 {
+	if !hasDiagnostic(rt.Diagnostics, NoProject) || len(rt.Effective.Profiles) != 7 || rt.Projects == nil || len(rt.Projects) != 0 {
 		t.Fatalf("%+v", rt)
 	}
 	if s.active != nil {
@@ -181,7 +182,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	mutation(t, c, "PUT", "priority", PriorityRequest{Project: id, Workstreams: []config.WorkstreamID{}})
 	rt, err := c.Runtime(ctx)
 	must(t, err)
-	if len(rt.Effective.Pauses) != 1 || len(rt.Effective.Priorities) != 1 || len(rt.Diagnostics) != 0 {
+	if len(rt.Effective.Pauses) != 1 || len(rt.Effective.Priorities) != 1 || len(rt.Diagnostics) != 0 || !reflect.DeepEqual(rt.Projects, []ProjectRuntime{{id, bundle.ModeFile}}) {
 		t.Fatalf("%+v", rt)
 	}
 	// Repeating the same registration returns the project; another is refused.
@@ -226,7 +227,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	}
 	rt, err = c.Runtime(ctx)
 	must(t, err)
-	if len(rt.Effective.Pauses) != 0 || len(rt.Effective.Priorities) != 0 || len(rt.Diagnostics) != 3 {
+	if len(rt.Effective.Pauses) != 0 || len(rt.Effective.Priorities) != 0 || len(rt.Diagnostics) != 3 || len(rt.Projects) != 0 {
 		t.Fatalf("%+v", rt)
 	}
 	// The released trace can be opened by another owner.
