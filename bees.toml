@@ -18,8 +18,6 @@ branch_prefix = "bees/"
 # The factory's label; also the base name of the workflow labels
 # (bees:triage, bees:ready, bees:in-progress, ...).
 label = "bees"
-# Advance this only after the milestone's exit condition is demonstrated.
-milestone = "M1 — A durable local service"
 # Only see items opened by this GitHub login. What the factory opens itself
 # is visible too, whoever it acts as.
 creator = "kpenfound"
@@ -46,21 +44,16 @@ git_email = "penfoundapps@gmail.com"
 [scheduler]
 # How often GitHub is polled for work. Each poll costs two API calls; keep it
 # infrequent. Sessions make their own gh calls on top of this.
-poll_interval = "5m"
+poll_interval = "2m"
 # Concurrent developer workers. Each runs a sequential developer <-> reviewer
 # loop for one issue; reviewer concurrency follows developer concurrency.
-max_developers = 2
+max_developers = 3
 # Minimum time between QA runs. QA only runs when something was merged.
 qa_interval = "4h"
 # GitHub logins and/or org/team slugs the factory turns to when it needs a
 # person: mentioned in the needs-human comment and in the product manager's
 # questions, and asked to review an approved pull request. No leading @.
 notify = ["kpenfound"]
-# The first poll of the work day happens the moment the window opens, whatever
-# off_hours_poll_interval is.
-#work_hours = "11:00-23:59"
-# Default: 1h, or poll_interval when that is longer.
-off_hours_poll_interval = "2h"
 work_days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 # Whole factory, rolling 24 hours. At or over it no new session starts; the
 # sessions already running finish.
@@ -74,7 +67,7 @@ notes_max_bytes = 18768
 stacked_prs = false
 
 #===============================================================================
-# Profiles
+# Codex Profiles
 #===============================================================================
 
 [profiles.default]
@@ -87,7 +80,6 @@ sandbox = "none"
 [profiles.review_fast]
 agent = "codex"
 model = "gpt-5.6-luna"
-fallback_model = "gpt-5.6-luna"
 effort = "medium"
 sandbox = "none"
 
@@ -116,6 +108,48 @@ agent = "codex"
 model = "gpt-5.6-sol"
 effort = "low"
 
+#===============================================================================
+# Claude Profiles
+#===============================================================================
+
+# [profiles.default]
+# agent = "claude"
+# model = "opus"
+# fallback_model = "sonnet"
+# effort = "medium"
+# sandbox = "none"
+
+#[profiles.review_fast]
+#agent = "claude"
+#model = "opus"
+#effort = "medium"
+#sandbox = "none"
+
+#[profiles.coder_smart]
+#agent = "claude"
+#model = "fable"
+#effort = "high"
+
+#[profiles.coder_medium]
+#agent = "claude"
+#model = "opus"
+#ffort = "high"
+
+#[profiles.coder_dumb]
+#agent = "claude"
+#model = "opus"
+#effort = "medium"
+
+#[profiles.manager_smart]
+#agent = "claude"
+#model = "opus"
+#effort = "high"
+
+#[profiles.manager_dumb]
+#agent = "claude"
+#model = "opus"
+#effort = "low"
+
 
 #===============================================================================
 # Global role settings
@@ -124,8 +158,9 @@ effort = "low"
 profile = "default"
 # Text appended to every role's base prompt.
 prompt = """
-Read AGENTS.md and docs/design.md before planning or implementing Osmia.
+Read AGENTS.md before planning or implementing Osmia.
 docs/design.md is the source of truth for feature scope and behavior.
+docs/design.md is large and you should search for keywords rather than using cat.
 Work only within the configured milestone; do not bring later milestones forward.
 Repository bootstrap and initial CI are already complete and need no work items.
 Validate changes with dagger check using DAGGER_X_RELEASE from this configuration.
@@ -153,14 +188,6 @@ disallowed_tools = ["Artifact"]
 [global.env]
 DAGGER_X_RELEASE = "v1.0.0-beta.13"
 
-# MCP servers available to every role, one table per server. stdio servers
-# use command/args/env; remote servers use url (+ type = "http" | "sse",
-# headers). $VARS in env and headers are expanded from the bees environment.
-#[global.mcp.github]
-#command = "npx"
-#args = ["-y", "@modelcontextprotocol/server-github"]
-#env = { GITHUB_PERSONAL_ACCESS_TOKEN = "$GITHUB_TOKEN" }
-
 
 #===============================================================================
 # Per-role settings.
@@ -180,7 +207,7 @@ profile = "coder_medium"
 profile_by_size = { l = "coder_smart", m = "coder_medium", s = "coder_dumb", xs = "coder_dumb" }
 # Largest size a developer takes: xs, s, m, l or xl. Anything bigger is sent
 # back to triage for the project manager to split.
-#max_size = "l"
+max_size = "l"
 # Skills by git URL: <url>[@ref][#sub/dir], cloned and exposed to claude as
 # plugins. Skills in the repository's .claude/skills/ and in ~/.claude/skills/
 # are available automatically and need not be listed.
@@ -196,6 +223,8 @@ skills = [
 # green. Off: humans merge. When checks fail the reviewer diagnoses the main
 # error and hands it to the developer to fix (up to max_check_fix_rounds).
 auto_merge = true
+# Wait after approval before polling checks; some take a moment to start.
+checks_wait = "30s"
 # Skills by git URL: <url>[@ref][#sub/dir], cloned and exposed to claude as
 # plugins. Skills in the repository's .claude/skills/ and in ~/.claude/skills/
 # are available automatically and need not be listed.
