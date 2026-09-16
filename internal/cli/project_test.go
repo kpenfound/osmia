@@ -89,6 +89,33 @@ func TestProjectCommands(t *testing.T) {
 	if !strings.Contains(status, "Project: "+string(id)+" (dagger)") || !strings.Contains(status, "Trace: "+added.Project.Trace) || strings.Contains(status, "Diagnostic") {
 		t.Fatalf("status with a project:\n%s", status)
 	}
+	if !strings.Contains(status, "Charter: empty; write numbered rules before handing in work (0 rules, revision 1) "+added.Project.Charter) {
+		t.Fatalf("status without charter rules:\n%s", status)
+	}
+	code, out, diag = invoke(t, root, "handin", string(id), "design.md")
+	if code != 4 || out != "" || diag != "charter_empty: project "+string(id)+" cannot take work: its charter has no rules; write numbered rules (\"1. ...\") in "+added.Project.Charter+"\n" {
+		t.Fatalf("empty charter hand-in: %d %s %s", code, out, diag)
+	}
+	code, out, diag = invoke(t, root, "handin", project)
+	if code != 4 || out != "" || !strings.Contains(diag, "not_found: project "+project+" is not an active project") {
+		t.Fatalf("unknown project hand-in: %d %s %s", code, out, diag)
+	}
+	must(t, os.WriteFile(added.Project.Charter, []byte("# Charter\n1. Keep changes small.\n1. Test every fix.\n"), 0600))
+	status = successful(t, root, "status")
+	if !strings.Contains(status, "Charter: ready (2 rules, revision 2) "+added.Project.Charter+"\n  charter.md:3: rule 1 is numbered 2 times") {
+		t.Fatalf("status with charter rules:\n%s", status)
+	}
+	var st2 struct {
+		Configuration service.ConfigResponse
+	}
+	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &st2))
+	if cs := st2.Configuration.Project.CharterState; cs == nil || !cs.Ready || cs.Rules != 2 || cs.Revision != 2 || len(cs.Diagnostics) != 1 {
+		t.Fatalf("status JSON: %+v", cs)
+	}
+	code, out, diag = invoke(t, root, "handin", string(id), "--json")
+	if code != 5 || out != "" || !strings.Contains(diag, "unsupported: project "+string(id)+" has a charter with 2 rules, but hand-in is not implemented yet") {
+		t.Fatalf("ready charter hand-in: %d %s %s", code, out, diag)
+	}
 	if !strings.Contains(successful(t, root, "priority", "clear"), "applied=true") {
 		t.Fatal("priority without restart")
 	}
@@ -118,6 +145,7 @@ func TestProjectUsage(t *testing.T) {
 		{"project"}, {"project", "add"}, {"project", "add", "name"}, {"project", "add", "name", "--upstream", "a/b", "--fork", "c/d"},
 		{"project", "add", "name", "--upstream", "a/b", "--fork", "c/d", "--clone", ""}, {"project", "remove"}, {"project", "remove", "not-an-id"},
 		{"project", "remove", project, "--clone", "x"}, {"status", "--upstream", "a/b"}, {"project", "list"},
+		{"handin"}, {"handin", "not-an-id"}, {"handin", project, "--clone", "x"},
 	} {
 		code, out, diag := invoke(t, root, args...)
 		if code != 2 || out != "" || !strings.Contains(diag, "invalid arguments") {

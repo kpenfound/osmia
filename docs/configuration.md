@@ -141,7 +141,8 @@ writing anything, then:
 2. writes `projects/<id>/config.toml` with `name`, `upstream`, `fork`, the
    absolute `clone`, `base_branch` (default `main`) and
    `landing = "commit-per-unit"`; capacity is inherited from the top level;
-3. creates the trace repository with a charter template in `charter.md`;
+3. creates the trace repository with a [charter](charter.md) template in
+   `charter.md`, recorded as its first revision;
 4. adds the ID to `active_projects` in the top-level `config.toml` as a text
    edit, so the owner's comments, ordering and formatting survive;
 5. activates the project (opens the trace and starts reconciliation) and

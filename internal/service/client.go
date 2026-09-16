@@ -89,3 +89,9 @@ func (c *Client) RemoveProject(ctx context.Context, id config.ProjectID) (Projec
 	err := c.Do(ctx, "DELETE", Prefix+"/projects", ProjectRemoveRequest{Project: id}, &v)
 	return v, err
 }
+
+// HandIn submits work to a project. The service answers every hand-in with an
+// error: the charter gate's, or unsupported once the gate passes.
+func (c *Client) HandIn(ctx context.Context, req HandInRequest) error {
+	return c.Do(ctx, "POST", Prefix+"/handin", req, nil)
+}

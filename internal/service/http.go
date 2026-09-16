@@ -48,8 +48,12 @@ func failWith(w http.ResponseWriter, api *APIError) {
 	switch api.Code {
 	case Validation:
 		status = 422
-	case NoProject, ProjectActive:
+	case NoProject, ProjectActive, CharterEmpty:
 		status = 409
+	case NotFound:
+		status = 404
+	case Unsupported:
+		status = 501
 	}
 	respond(w, status, ErrorResponse{*api})
 }
@@ -67,6 +71,12 @@ func (s *Service) configuration() ConfigResponse {
 	out := ConfigResponse{Root: cfg.Root.String(), Digest: digest(cfg), Effective: cfg, Diagnostics: []Diagnostic{}}
 	if cfg.HasProject() {
 		view := projectView(cfg.Root, cfg.Project)
+		state, err := s.charterState()
+		if err != nil {
+			out.Diagnostics = append(out.Diagnostics, Diagnostic{"charter", Internal, "cannot read or record the charter; check " + view.Charter + " and the trace repository"})
+		} else {
+			view.CharterState = &state
+		}
 		out.Project = &view
 	} else {
 		out.Diagnostics = append(out.Diagnostics, noProject("active_projects"))
@@ -145,6 +155,14 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		respond(w, 200, result)
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/handin" {
+		var v HandInRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		failWith(w, s.handIn(r.Context(), v))
 		return
 	}
 	var err error

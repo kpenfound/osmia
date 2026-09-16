@@ -43,6 +43,7 @@ client to release idle connections. API version 1 uses snake_case JSON fields.
 | GET | `/runtime` | Effective runtime state and diagnostics |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
+| POST | `/handin` | `HandInRequest`: project, paths; checks the charter, then returns `unsupported` |
 | PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason, source |
 | DELETE | `/runtime/pause` | `ClearPauseRequest`: scope, project, workstream |
 | PUT | `/runtime/priority` | `PriorityRequest`: project, workstreams |
@@ -86,6 +87,8 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 | `internal` | 500 | Storage or other internal failure, including an interrupted project registration |
 | `no_project` | 409 | The operation needs an active project and none is configured |
 | `project_active` | 409 | A project is active and single-project operation refuses another |
+| `not_found` | 404 | The project ID is not the active project |
+| `charter_empty` | 409 | Hand-in refused: the project's charter has no rules |
 
 Project operations compose their messages from the request's fields and
 identities: a validation failure names the field at fault, `project_active`
@@ -122,6 +125,19 @@ reports an `internal` diagnostic on `projects` until `POST /v1/projects` finishe
 it. A journal naming a project other than the active one is never finished:
 startup reports it, and `POST /v1/projects` refuses with the two IDs until the
 active project is removed or the journal is inspected.
+
+`/config` reports the active project's `charter_state`: `ready`, the number of
+`rules`, the recorded `revision` and numbering `diagnostics`. Reading it records
+any owner edit to the charter first; if the charter cannot be read or recorded,
+`charter_state` is absent and a `charter` diagnostic with code `internal` names
+the file. The project view returned by `POST` and `DELETE /v1/projects` carries
+no charter state.
+
+`POST /v1/handin` takes the project ID and the absolute paths being handed in.
+An ID that is not the active project returns `not_found`. The charter gate runs
+next: an empty charter returns `charter_empty` with a message naming the
+project and its `charter.md`. With rules, hand-in returns `unsupported`,
+naming the project and its rule count. See [charter](charter.md).
 
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
 opened, each time a project's trace opens: at startup and when a project is

@@ -179,14 +179,16 @@ func TestProjectDocumentsAndImmutableInput(t *testing.T) {
 	r, _, _ := create(t)
 	d := Document{Header: header("document", "charter"), Path: "charter.md", Content: "Owner's charter"}
 	d.Workstream = ""
+	d.Revision = 2
 	if err := r.Append(context.Background(), d); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Get[Document](r, "", "charter", 1)
+	got, err := Get[Document](r, "", "charter", 2)
 	if err != nil || !reflect.DeepEqual(got, d) {
 		t.Fatalf("project doc: %#v %v", got, err)
 	}
 	d.Header = header("document", "input1")
+	d.Revision = 1
 	d.Path = "handed/design.jsonl"
 	if err := r.Append(context.Background(), d); err != nil {
 		t.Fatal(err)

@@ -127,7 +127,9 @@ func (r *Repository) commit(ctx context.Context, paths []string, message string)
 }
 
 // checkHistory finishes journaled workflow publication and reports other
-// uncommitted file changes without guessing how to reconcile them.
+// uncommitted file changes without guessing how to reconcile them. The owner
+// edits charter.md directly; Charter records those edits, so a difference
+// there is expected.
 func (r *Repository) checkHistory(ctx context.Context) error {
 	if err := r.recoverPublication(ctx); err != nil {
 		return err
@@ -150,6 +152,9 @@ func (r *Repository) checkHistory(ctx context.Context) error {
 			return err
 		}
 		tracked[name] = true
+		if name == "charter.md" {
+			continue
+		}
 		data, err := r.readFile(name)
 		if err != nil {
 			return fmt.Errorf("trace history %s: %w", name, err)

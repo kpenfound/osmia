@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	osmiacharter "github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -143,7 +144,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	}
 	charter, err := os.ReadFile(added.Project.Charter)
 	must(t, err)
-	if string(charter) != trace.CharterTemplate || !strings.Contains(trace.CharterTemplate, "1.") {
+	if string(charter) != trace.CharterTemplate || !osmiacharter.Parse(trace.CharterTemplate).Empty() {
 		t.Fatalf("charter: %q", charter)
 	}
 	if !reflect.DeepEqual(cloneBefore, snapshot(t, clone)) {
