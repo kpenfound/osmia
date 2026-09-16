@@ -18,6 +18,8 @@ const (
 	RestartRequired Code = "restart_required"
 	Unavailable     Code = "unavailable"
 	Internal        Code = "internal"
+	NoProject       Code = "no_project"
+	ProjectActive   Code = "project_active"
 )
 
 type APIError struct {
@@ -47,11 +49,42 @@ type Diagnostic struct {
 }
 
 // ConfigResponse contains validated fields only, never raw configuration text.
+// Project is null until a project is registered.
 type ConfigResponse struct {
 	Root        string         `json:"root"`
 	Digest      string         `json:"digest"`
 	Effective   *config.Config `json:"effective"`
+	Project     *ProjectView   `json:"project"`
 	Diagnostics []Diagnostic   `json:"diagnostics"`
+}
+
+// ProjectView names a registered project, its trace and its charter file.
+type ProjectView struct {
+	ID         config.ProjectID `json:"id"`
+	Name       string           `json:"name"`
+	Upstream   string           `json:"upstream"`
+	Fork       string           `json:"fork"`
+	Clone      string           `json:"clone"`
+	BaseBranch string           `json:"base_branch"`
+	Trace      string           `json:"trace"`
+	Charter    string           `json:"charter"`
+}
+
+// ProjectAddRequest registers a project. Clone is an absolute path to an
+// existing local Git repository; base_branch defaults to main.
+type ProjectAddRequest struct {
+	Name       string `json:"name"`
+	Upstream   string `json:"upstream"`
+	Fork       string `json:"fork"`
+	Clone      string `json:"clone"`
+	BaseBranch string `json:"base_branch,omitempty"`
+}
+type ProjectRemoveRequest struct {
+	Project config.ProjectID `json:"project"`
+}
+type ProjectResponse struct {
+	Project  ProjectView `json:"project"`
+	NextStep string      `json:"next_step"`
 }
 type RuntimeResponse struct {
 	Effective   runtime.State `json:"effective"`
