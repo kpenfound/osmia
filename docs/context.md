@@ -45,7 +45,9 @@ without a scope.
 
 ## Rendering
 
-`Bundle.Render` returns the text form placed in a turn request's prompt. Each
+`Bundle.Render` returns the text form a turn request carries. An owner message
+to the chief of staff carries it in the request's system prompt; see
+[conversation](service.md#conversation). Each
 section header names the path and record it came from, so an agent can cite
 `charter#2`, `kb/internal.md` or a ruling's record and revision. Knowledge-base
 prose is included verbatim between a

@@ -12,6 +12,8 @@ osmia status w_0123456789abcdef0123456789abcdef
 osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
 osmia project remove p_0123456789abcdef0123456789abcdef
 osmia handin p_0123456789abcdef0123456789abcdef design.md
+osmia send w_0123456789abcdef0123456789abcdef "Start with the upload API."
+osmia conversation w_0123456789abcdef0123456789abcdef
 osmia pause all --reason "Away for the weekend"
 osmia resume all
 osmia profiles
@@ -39,6 +41,18 @@ osmia status --json
   staff writes one. A workstream the project does not hold fails with
   `not_found` (exit 4); with no project configured it fails with `no_project`
   (exit 4). See [workstream status](service.md#workstream-status).
+- `send <workstream-id> <message>` sends a message to the workstream's chief
+  of staff. The message is one argument; quote it. The service records it
+  before answering, and the output names the message's turn ID and its state
+  (`queued`). The chief of staff answers it as its next turn, after any turn
+  already running. An empty message, or a workstream the active project does
+  not hold, fails with `validation` (exit 4); with no project configured it
+  fails with `no_project` (exit 4). See [conversation](service.md#conversation).
+- `conversation <workstream-id>` lists the owner's messages to that
+  workstream's chief of staff and its final responses, oldest first. Each
+  entry shows when it was sent or answered, who wrote it, its turn ID and the
+  turn's state (`queued`, `running`, `done` or `failed`), then its text
+  indented. It fails like `send`.
 - `project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH
   [--base-branch NAME]` registers a project with the running service: it
   validates the request, generates the project ID, writes
@@ -103,7 +117,9 @@ All client commands accept `--json`. Status returns an object with `health`,
 `configuration`, `runtime` and `status` API responses, where `status` lists
 every workstream with its full status (`null` before the first); `status
 <workstream-id>` returns that workstream's status response; profiles returns the runtime
-response. Mutations return `mutation` (the API acknowledgement) and `runtime`
+response. `send` returns the accepted message entry and `conversation` the
+API's conversation response (see [conversation](service.md#conversation)).
+Mutations return `mutation` (the API acknowledgement) and `runtime`
 (the subsequent effective-state response). Project commands return the API's
 project response: the project view (ID, name, upstream, fork, clone, base
 branch, trace and charter paths) and `next_step`. Output is one JSON value plus
@@ -115,7 +131,7 @@ including defaults after clearing overrides. If the mutation succeeds but readin
 the effective state fails, stderr says it was acknowledged; inspect status before
 retrying. Failures leave stdout empty and write actionable diagnostics to stderr.
 Raw configuration/parser and server error text is omitted from failure messages.
-Project, hand-in and single-workstream status failures print the service's
+Project, hand-in, single-workstream status, send and conversation failures print the service's
 message, which names the field, project or workstream ID or path at fault and
 never raw file contents.
 
@@ -136,7 +152,7 @@ live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
 Detached management, install/upgrade commands, completion, web/tailnet,
-the librarian's knowledge-base extraction on add, hand-in past the charter check, inbox, conversation, ratification,
+the librarian's knowledge-base extraction on add, hand-in past the charter check, inbox, ratification,
 answer, reload and trace navigation are unavailable. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.
