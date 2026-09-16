@@ -69,6 +69,10 @@ func TestParseAndEncode(t *testing.T) {
 	if got := p.Addressing(3); len(got) != 0 {
 		t.Fatalf("addressing absent: %#v", got)
 	}
+	p.Units[1].Addresses = append(p.Units[1].Addresses, p.Units[1].Addresses[0])
+	if got := p.Addressing(2); len(got) != 1 {
+		t.Fatalf("addressing a criterion twice: %#v", got)
+	}
 	twice := Plan{Version: 1, Units: []Unit{{ID: "a"}, {ID: "a"}}}
 	if _, ok := twice.Unit("a"); ok {
 		t.Fatal("duplicate unit id found")
