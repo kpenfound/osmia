@@ -16,6 +16,12 @@
 - Preserve the trace, durable threads and explicit owner decisions through restarts and retries. Reconcile side effects before retrying them.
 - Reuse `github.com/kpenfound/busybees/core` through a pinned dependency. Do not require a sibling checkout or copy its internals into this repository.
 
+## Missing busybees/core functionality
+
+- When an Osmia feature needs functionality missing from busybees/core, open an upstream feature request in `kpenfound/busybees`.
+- If the needed logic can be implemented in Osmia while awaiting upstream support, a temporary local implementation is allowed. Leave a `TODO` comment beside that code describing the capability needed and stating that the extra code must be removed when busybees/core provides it.
+- If the Osmia feature is blocked until upstream implements the capability, comment on the blocked Osmia issue explaining the dependency and linking the upstream feature request, and ensure it receives the needs-human label (`bees:needs-human` in this factory) so the upstream request can be prioritized. Use the factory's escalation mechanism when it owns label changes.
+
 ## Validation
 
 - Run `dagger check` before declaring a change complete. Use the pinned experimental release:
