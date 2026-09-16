@@ -25,6 +25,22 @@ type Thread struct {
 	Active   string                     `json:"active,omitempty"`
 	Turns    []QueuedTurn               `json:"turns,omitempty"`
 }
+
+// Parked reports whether the thread's last turn ended waiting and no turn has
+// been queued since. A parked thread holds no turn and is not scheduled; the
+// next queued turn unparks it.
+func (t Thread) Parked() bool {
+	if t.Status != "waiting" {
+		return false
+	}
+	for _, q := range t.Turns {
+		if q.CompletedAt.IsZero() {
+			return false
+		}
+	}
+	return true
+}
+
 type QueuedTurn struct {
 	Attempts    []TurnAttempt `json:"attempts,omitempty"`
 	Sequence    uint64        `json:"sequence"`

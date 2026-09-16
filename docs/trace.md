@@ -303,6 +303,8 @@ under an existing turn are rejected. `CompleteTurn` requires a captured result
 and atomically releases the reservation, making the oldest successor eligible.
 It retains a status of `idle`, `waiting`, `failed` or `interrupted` based on the
 result. These are thread execution states, not feature or unit transitions.
+A thread whose status is `waiting` and that has no unfinished turn is parked
+(`Thread.Parked`); queuing a turn unparks it.
 All mutations use the state/outbox publication boundary and signal its wakeup
 hint. Pending turns are inspected through `Thread` and reserved with `ClaimTurn`;
 they do not use the notification `Ready`/`Claim` lease API.
