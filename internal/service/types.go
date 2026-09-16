@@ -2,6 +2,7 @@
 package service
 
 import (
+	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -108,8 +109,17 @@ type ProjectResponse struct {
 	NextStep string      `json:"next_step"`
 }
 type RuntimeResponse struct {
-	Effective   runtime.State `json:"effective"`
-	Diagnostics []Diagnostic  `json:"diagnostics"`
+	Effective runtime.State `json:"effective"`
+	// Projects lists each active project's context mode.
+	Projects    []ProjectRuntime `json:"projects"`
+	Diagnostics []Diagnostic     `json:"diagnostics"`
+}
+
+// ProjectRuntime reports where a project's turn context comes from. "file"
+// is the supported local mode, not a degraded one.
+type ProjectRuntime struct {
+	Project     config.ProjectID `json:"project"`
+	ContextMode bundle.Mode      `json:"context_mode"`
 }
 type PauseRequest = runtime.Pause
 type ClearPauseRequest = runtime.Target

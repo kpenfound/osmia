@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -79,8 +80,15 @@ func TestCommandsAndRestart(t *testing.T) {
 	if !st.Health.Ready || st.Configuration.Effective.Project.ID != project || len(st.Configuration.Digest) != 64 {
 		t.Fatal(status)
 	}
-	if !strings.Contains(successful(t, root, "status"), "ready=true") {
+	if want := []service.ProjectRuntime{{Project: project, ContextMode: "file"}}; !reflect.DeepEqual(st.Runtime.Projects, want) {
+		t.Fatal(status)
+	}
+	text := successful(t, root, "status")
+	if !strings.Contains(text, "ready=true") {
 		t.Fatal("missing health")
+	}
+	if !strings.Contains(text, "Context: "+project+" context_mode=file\n") {
+		t.Fatal(text)
 	}
 	cases := [][]string{
 		{"pause", "all", "--hard", "--reason", "travel"},
