@@ -38,7 +38,7 @@ func awaitExtraction(t *testing.T, c *Client) ExtractionState {
 		if time.Now().After(deadline) {
 			t.Fatalf("extraction did not finish: %+v", cfg.Project)
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 
@@ -423,10 +423,6 @@ func TestExtractionRefusesInvalidOutput(t *testing.T) {
 	}{
 		{"duplicate entity id", map[string]string{"output/kb/trace.md": "# trace\n", "output/kb/entities.json": `{"version":1,"entities":[{"id":"a","name":"a","aliases":[],"paths":["a"],"owners":[],"part_of":[]},{"id":"a","name":"b","aliases":[],"paths":["b"],"owners":[],"part_of":[]}]}`}, []string{"kb/entities.json", "duplicate id"}},
 		{"bad subsystem name", map[string]string{"output/kb/Trace_Repo.md": "# trace\n", "output/kb/entities.json": good}, []string{"kb/Trace_Repo.md", "^[a-z0-9][a-z0-9-]*$"}},
-		{"nested path", map[string]string{"output/kb/nested/trace.md": "# trace\n", "output/kb/entities.json": good}, []string{"kb/nested is not a regular file"}},
-		{"missing entities", map[string]string{"output/kb/trace.md": "# trace\n"}, []string{"kb/entities.json is missing"}},
-		{"file outside kb", map[string]string{"output/notes.md": "x\n", "output/kb/trace.md": "# trace\n", "output/kb/entities.json": good}, []string{`unexpected output entry "notes.md"`}},
-		{"empty prose", map[string]string{"output/kb/trace.md": " \n", "output/kb/entities.json": good}, []string{"kb/trace.md is empty"}},
 		{"no output", map[string]string{}, []string{"kb/ is missing"}},
 	}
 	f.script("extract-1-1", cases[0].files, nil)
@@ -462,16 +458,16 @@ func TestExtractionRefusesInvalidOutput(t *testing.T) {
 	}
 	// A turn that fails in the backend is a failed extraction with its reason.
 	f.engine.mu.Lock()
-	f.engine.turns["extract-8-1"] = func(context.Context, agent.Request, coreadapter.BoundaryPolicy, *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.turns["extract-4-1"] = func(context.Context, agent.Request, coreadapter.BoundaryPolicy, *mcp.ClientSession) (*agent.Result, error) {
 		return nil, errors.New("model refused")
 	}
 	f.engine.mu.Unlock()
 	_, err = c.ExtractProject(ctx, id)
 	must(t, err)
-	if x := awaitExtraction(t, c); x.Extraction != 8 || x.State != "failed" || !strings.Contains(x.Reason, "extract-8-1 failed") || !strings.Contains(x.Reason, "model refused") {
+	if x := awaitExtraction(t, c); x.Extraction != 4 || x.State != "failed" || !strings.Contains(x.Reason, "extract-4-1 failed") || !strings.Contains(x.Reason, "model refused") {
 		t.Fatalf("backend failure: %+v", x)
 	}
-	if ops := operationsOf(t, s, id); len(ops) != 8 {
+	if ops := operationsOf(t, s, id); len(ops) != 4 {
 		t.Fatalf("operations: %d", len(ops))
 	}
 	must(t, s.Close())

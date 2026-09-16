@@ -182,7 +182,7 @@ func awaitExtraction(t *testing.T, root string) service.ExtractionState {
 		if time.Now().After(deadline) {
 			t.Fatal("extraction did not finish")
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 
