@@ -153,13 +153,14 @@ and landing preferences as declarative inputs. It does not implement automatic
 fallback, debate, review scheduling, landing or multi-project dispatch. Review slot
 configuration is `capacity.reviewers`; no separate review-policy schema is defined.
 Runtime profile overrides, pauses and priorities belong in `runtime.json`, never
-these files. Nothing here performs a live reload: changed settings require a new
+these files; see [runtime overrides](runtime.md) for M1 persistence and resolution.
+Nothing here performs a live reload: changed settings require a new
 load/service start in M1. Root and listen changes will still require a service
 restart when live reload arrives.
 
 The full design's `listen.tailnet`, `listen.web`, `budget`, `notify`, `hearsay`,
 project `upstream_rebase` and `hearsay_scope` settings are rejected as unsupported
-in M1, even if supplied empty. Budget, pause, priority and reload behavior belongs
+in M1, even if supplied empty. Budget, pause/priority scheduling effects and live reload belong
 to M4, tailnet/web and notifications to M5, multi-project operation to M7, and
 Hearsay to M8. Unsupported keys do not silently enable later behavior.
 
