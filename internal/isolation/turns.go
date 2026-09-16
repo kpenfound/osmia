@@ -33,8 +33,11 @@ type Turns struct {
 	Select     func(context.Context, coreadapter.Scope) (Selection, error)
 	Grants     map[string]coreadapter.Capabilities
 	Tools      []coreadapter.Tool
-	Hosts      func(token string) coreadapter.MCPHosts
-	Engine     coreadapter.IsolationEngine
+	// Scoped supplies trusted handlers bound to one claimed turn, such as private
+	// role notes. They join the same registry and grant checks as Tools.
+	Scoped func(context.Context, coreadapter.Scope) ([]coreadapter.Tool, error)
+	Hosts  func(token string) coreadapter.MCPHosts
+	Engine coreadapter.IsolationEngine
 	// Capture may snapshot selected output through the service before cleanup.
 	// It runs even on execution errors, but never grants an agent VCS access.
 	Capture func(context.Context, coreadapter.Scope, *FileView, coreadapter.SessionResult) error
@@ -140,6 +143,13 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	}
 	defer func() { err = errors.Join(err, view.Release(context.WithoutCancel(ctx))) }()
 	tools := append(fileTools(view), r.Tools...)
+	if r.Scoped != nil {
+		scoped, scopedErr := r.Scoped(ctx, input.Scope)
+		if scopedErr != nil {
+			return result, scopedErr
+		}
+		tools = append(tools, scoped...)
+	}
 	registry := map[string]coreadapter.Tool{}
 	for _, tool := range tools {
 		if _, exists := registry[tool.Name]; exists {

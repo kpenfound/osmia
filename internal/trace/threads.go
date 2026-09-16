@@ -38,7 +38,9 @@ type TurnClaim struct {
 	At               time.Time `json:"at"`
 }
 
-func turnStatus(t QueuedTurn) string {
+// Status reports one turn's execution state: running, captured, or the thread
+// status its completion retains.
+func (t QueuedTurn) Status() string {
 	if t.Response == nil {
 		return "running"
 	}
@@ -121,7 +123,7 @@ func validateThreads(threads map[string]Thread, records []Record, project config
 			} else if q.Response == nil || q.CompletedAt.Before(q.Response.At) {
 				return fmt.Errorf("invalid turn completion")
 			}
-			status = turnStatus(q)
+			status = q.Status()
 		}
 		if t.Active != active || t.Status != status || t.Session != session {
 			return fmt.Errorf("thread state differs from turn history")
@@ -347,7 +349,7 @@ func (r *Repository) CompleteTurn(ctx context.Context, stream config.WorkstreamI
 			return ErrConflict
 		}
 		q.CompletedAt = at
-		t.Turns[i], t.Active, t.Status = q, "", turnStatus(q)
+		t.Turns[i], t.Active, t.Status = q, "", q.Status()
 		log.Threads[agent] = t
 		return r.saveThread(ctx, stream, log)
 	}

@@ -170,7 +170,7 @@ func TestTurnConfigurationCanOnlyNarrow(t *testing.T) {
 }
 
 func TestServiceTurnFailureCleanup(t *testing.T) {
-	for _, mode := range []string{"no engine", "prepare", "inspect", "execute", "cleanup", "cancel", "capture", "mount", "metadata", "credential", "duplicate tool", "unregistered tool"} {
+	for _, mode := range []string{"no engine", "prepare", "inspect", "execute", "cleanup", "cancel", "capture", "mount", "metadata", "credential", "duplicate tool", "unregistered tool", "scoped tools", "duplicate scoped tool"} {
 		t.Run(mode, func(t *testing.T) {
 			r, p, h, engine, input := fixture(t, "committee", "container")
 			failure := errors.New("fixture failure")
@@ -204,6 +204,12 @@ func TestServiceTurnFailureCleanup(t *testing.T) {
 				r.Tools = append(r.Tools, a.Tool{Name: "file_read", Effect: a.ToolExecute})
 			case "unregistered tool":
 				r.Grants["committee"] = a.Capabilities{Tools: []string{"discovered"}}
+			case "scoped tools":
+				r.Scoped = func(context.Context, a.Scope) ([]a.Tool, error) { return nil, failure }
+			case "duplicate scoped tool":
+				r.Scoped = func(context.Context, a.Scope) ([]a.Tool, error) {
+					return []a.Tool{{Name: "file_read", Effect: a.ToolRead}}, nil
+				}
 			default:
 				base := r.Select
 				r.Select = func(ctx context.Context, scope a.Scope) (Selection, error) {
@@ -260,6 +266,36 @@ func TestPreparedInputCannotInjectBoundary(t *testing.T) {
 		}
 		if p.acquired != 0 || len(engine.Policies) != 0 {
 			t.Fatal("injection reached setup")
+		}
+	}
+}
+
+func TestScopedToolsFollowGrantForEachTurn(t *testing.T) {
+	r, _, h, engine, input := fixture(t, "committee", "none")
+	r.Grants["committee"] = a.Capabilities{Tools: []string{"file_read", "notes_write", "scoped_write"}, WriteFiles: true}
+	var scopes []a.Scope
+	r.Scoped = func(_ context.Context, scope a.Scope) ([]a.Tool, error) {
+		scopes = append(scopes, scope)
+		handle := func(context.Context, json.RawMessage) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }
+		return []a.Tool{{Name: "notes_write", Effect: a.ToolMemory, Handle: handle}, {Name: "scoped_write", Effect: a.ToolWrite, Handle: handle}}, nil
+	}
+	for _, turn := range []string{"first", "second"} {
+		input.Scope.Turn = turn
+		if _, err := r.Run(context.Background(), input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(scopes) != 2 || scopes[0].Turn != "first" || scopes[1].Turn != "second" {
+		t.Fatalf("scoped tools not bound per turn: %+v", scopes)
+	}
+	// A read-only role keeps memory tools but loses workspace writes.
+	for i, req := range h.requests {
+		var names []string
+		for _, tool := range req.Tools {
+			names = append(names, tool.Name)
+		}
+		if !reflect.DeepEqual(names, []string{"file_read", "notes_write"}) || engine.Policies[i].Isolation.Capabilities.WriteFiles {
+			t.Fatalf("scoped tools exceeded role ceiling: %v", names)
 		}
 	}
 }

@@ -98,6 +98,9 @@ const (
 	ToolExecute ToolEffect = "execute"
 	ToolFetch   ToolEffect = "fetch"
 	ToolVCS     ToolEffect = "vcs"
+	// ToolMemory writes only service-owned private role memory. Its handlers
+	// enforce their own scope, so it needs no workspace permission.
+	ToolMemory ToolEffect = "memory"
 )
 
 // ToolPermitted checks a trusted handler's effect as well as its granted name.
@@ -113,7 +116,7 @@ func ToolPermitted(c Capabilities, tool Tool) bool {
 		return false
 	}
 	switch tool.Effect {
-	case ToolRead:
+	case ToolRead, ToolMemory:
 		return true
 	case ToolWrite:
 		return c.WriteFiles
