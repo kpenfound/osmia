@@ -183,6 +183,14 @@ func (r *Repository) recoverPublication(ctx context.Context) error {
 	switch strings.TrimSpace(string(current)) {
 	case p.Parent: // No ordinary files are changed before publication.
 	case p.Commit:
+		// Publication may have stopped after rename but before directory sync.
+		// Make the observed ref durable before clearing its recovery journal.
+		if err := syncDir(r.dir, ".git/refs/heads"); err != nil {
+			return err
+		}
+		if err := r.boundary("recovery-ref-synced"); err != nil {
+			return err
+		}
 		for _, name := range p.Paths {
 			data, err := r.gitBytes(ctx, nil, "", "cat-file", "blob", p.Commit+":"+name)
 			if err != nil {

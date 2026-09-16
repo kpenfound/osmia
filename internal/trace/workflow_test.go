@@ -113,7 +113,7 @@ func TestWorkflowPublicationFailures(t *testing.T) {
 		pre = append(pre, "file:"+publicationFile+":"+phase)
 	}
 	pre = append(pre, "file:.git/refs/heads/main:written", "file:.git/refs/heads/main:synced")
-	post := []string{"file:.git/refs/heads/main:renamed", "file:.git/refs/heads/main:directory-synced", "ref-published", "materialized:events.jsonl", "materialized:workflow.json", "before-journal-removal"}
+	post := []string{"file:.git/refs/heads/main:renamed", "file:.git/refs/heads/main:directory-synced", "ref-published", "recovery-ref-synced", "materialized:events.jsonl", "materialized:workflow.json", "before-journal-removal"}
 	for _, name := range []string{"events.jsonl", "workflow.json"} {
 		for _, phase := range []string{"written", "synced", "renamed", "directory-synced"} {
 			post = append(post, "file:workstreams/"+string(streamID)+"/"+name+":"+phase)
