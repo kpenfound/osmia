@@ -27,18 +27,12 @@ osmia status --json
   refused; a provably stale socket is recovered automatically.
 - `status` shows health, loaded configuration digest/root, the active project
   and its trace path (or that none is configured), its charter state (ready or
-<<<<<<< HEAD
   empty, rule count, recorded revision and numbering diagnostics), its latest
   knowledge-base extraction (number, `pending`, `running`, `succeeded` or
   `failed`, the time of its last activity and the reason when it failed or
-  waits to retry), diagnostics and effective runtime controls. Reading the
+  waits to retry), diagnostics, effective runtime controls and the project's
+  context mode (`file`, a normal mode; see [context](context.md)). Reading the
   charter records any edit you made to it; see [charter](charter.md).
-=======
-  empty, rule count, recorded revision and numbering diagnostics), diagnostics,
-  effective runtime controls and the project's context mode (`file`, a normal
-  mode; see [context](context.md)). Reading the charter records any edit you made
-  to it; see [charter](charter.md).
->>>>>>> origin/main
 - `project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH
   [--base-branch NAME]` registers a project with the running service: it
   validates the request, generates the project ID, writes
