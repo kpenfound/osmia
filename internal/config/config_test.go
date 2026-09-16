@@ -130,6 +130,15 @@ per_workstream = 3
 	if _, _, err := c.Execution("bogus", "default"); err == nil {
 		t.Fatal("unknown role accepted")
 	}
+	if p, err := c.NamedProfile("backup"); err != nil || p.Name != "backup" || p.Backend != "codex" || p.Model != "other-model" || p.Effort != "medium" || p.Timeout != 45*time.Minute {
+		t.Fatalf("named profile: %+v %v", p, err)
+	}
+	if p, err := c.NamedProfile("default"); err != nil || p.Effort != "high" || p.Timeout != 2*time.Minute || p.MaxTurns != 8 {
+		t.Fatalf("named default profile: %+v %v", p, err)
+	}
+	if _, err := c.NamedProfile("missing"); err == nil {
+		t.Fatal("unknown named profile accepted")
+	}
 	if _, _, err := c.Execution("mason", "missing"); err == nil {
 		t.Fatal("unknown profile accepted")
 	}

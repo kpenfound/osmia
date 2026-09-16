@@ -17,6 +17,12 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
+type turnsFunc func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error)
+
+func (f turnsFunc) Run(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	return f(ctx, p)
+}
+
 type fixedClock struct {
 	mu  sync.Mutex
 	now time.Time
@@ -49,8 +55,16 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	}
 	must(t, repo.Close())
 
-	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "claude", ID: "session"}, FinalResponse: "Noted"}}
-	turns := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply)}
+	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "codex", ID: "session"}, FinalResponse: "Noted"}}
+	fake := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply)}
+	ran := make(chan struct{}, 1)
+	turns := turnsFunc(func(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+		select {
+		case ran <- struct{}{}:
+		default:
+		}
+		return fake.Run(ctx, p)
+	})
 	var bound sync.Mutex
 	var live *trace.Repository
 	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
@@ -88,9 +102,17 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	if len(th.Turns) != 0 {
 		t.Fatalf("event turn inside the window: %+v", th.Turns)
 	}
+	// "other" is a configured profile outside the chief of staff's fallback chain.
+	must(t, s.store.SetProfile(trace.ChiefOfStaff, "other"))
 	clock.Advance(3 * time.Second)
+	// The pass that closes the window also runs the turn: no later tick is sent.
 	pass(s)
-	pass(s)
+	select {
+	case <-ran:
+	case <-time.After(demoTimeout):
+		s.Close()
+		t.Fatal("event turn did not run in the pass that queued it")
+	}
 	must(t, s.Close())
 
 	s, err = Start(ctx, opts)
@@ -103,7 +125,7 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	repo, err = trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
 	defer repo.Close()
-	calls := turns.Calls()
+	calls := fake.Calls()
 	if len(calls) != 1 {
 		t.Fatalf("backend runs %+v", calls)
 	}
@@ -115,7 +137,7 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	}
 	th, err = repo.ChiefOfStaffThread(stream)
 	must(t, err)
-	if len(th.Turns) != 1 || th.Turns[0].CompletedAt.IsZero() || th.Turns[0].Request.Profile.Name != "default" || th.Turns[0].Request.Profile.Backend != "claude" {
+	if len(th.Turns) != 1 || th.Turns[0].CompletedAt.IsZero() || th.Turns[0].Request.Profile.Name != "other" || th.Turns[0].Request.Profile.Backend != "codex" {
 		t.Fatalf("chief-of-staff thread %+v", th)
 	}
 	worker, err := repo.Thread(stream, demoAgent)

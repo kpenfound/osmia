@@ -398,6 +398,17 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 	return nil
 }
 
+// NamedProfile returns the adapter profile of a configured profile, whichever
+// role binds it. Runtime profile overrides may name any such profile.
+func (c *Config) NamedProfile(name string) (coreadapter.Profile, error) {
+	p, ok := c.Profiles[name]
+	if !ok {
+		return coreadapter.Profile{}, fmt.Errorf("unknown profile %q", name)
+	}
+	timeout, err := time.ParseDuration(p.Timeout)
+	return coreadapter.Profile{Name: name, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns}, err
+}
+
 // Execution returns adapter inputs, not verified isolation or permission to run.
 // profile may be a validated fallback selected by the service for this role.
 func (c *Config) Execution(role, profile string) (coreadapter.Profile, coreadapter.ExecutionSettings, error) {

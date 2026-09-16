@@ -283,11 +283,11 @@ for the thread unparks it, and the next pass runs that turn.
 
 ### Event delivery
 
-When the service changes workflow state, it tells that workstream's chief of
-staff, and no other thread. The change and its event commit together in one
-`trace.Transact` call, so a failed transaction leaves no event;
-`trace.Notice` builds such an event and `Repository.SetFeatureState` records a
-feature state change with one. `internal/events` delivers them.
+A workflow transition can carry notification events for its workstream's chief
+of staff, and no other thread. The transition and its events commit together,
+so a failed transaction leaves no event. `trace.Notice` builds such an event,
+and `Repository.SetFeatureState` records a feature state change with one.
+`internal/events` delivers them.
 
 At the start of every reconciliation pass, before the scheduler, the deliverer
 reads each workstream's ready notification events (events without an
@@ -299,7 +299,9 @@ frames the events as information: they grant no permission, trigger no
 transition and do not change the chief of staff's tools. It then lists one line
 per event with its transition's timestamp, kind and body, oldest first. The
 turn's actor is `service`/`events`, its cause is the oldest event's transition,
-and its profile is the chief of staff's effective profile. The turn is queued
+and its profile is the chief of staff's effective profile: the runtime
+override when one is set, which may name any configured profile, otherwise the
+role binding. The turn is queued
 with `EnqueueTurn`, so a turn in flight on the chief-of-staff thread finishes
 first, and the scheduler dispatches it in the same pass otherwise.
 
@@ -309,4 +311,6 @@ point neither loses nor repeats an event: an event with a claim whose turn is
 already on the chief-of-staff thread is acknowledged without another turn, and
 any other unacknowledged event is delivered in the next window. A claim whose
 lease ran out before its acknowledgement is settled the same way. A
-failing store call stops the loop, as the scheduler's do.
+failing store call or chief-of-staff profile lookup stops the loop, as the
+scheduler's errors do; an event another claim holds is skipped and retried on a
+later pass.

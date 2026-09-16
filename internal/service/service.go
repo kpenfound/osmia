@@ -311,8 +311,7 @@ func (s *Service) chiefProfile(cfg *config.Config) func() (coreadapter.Profile, 
 		if name == "" {
 			name = cfg.Roles[trace.ChiefOfStaff].Profile
 		}
-		p, _, err := cfg.Execution(trace.ChiefOfStaff, name)
-		return p, err
+		return cfg.NamedProfile(name)
 	}
 }
 
