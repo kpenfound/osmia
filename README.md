@@ -18,3 +18,6 @@ pinned dependency and records upstream capability gaps.
 
 The [M1 configuration reference](docs/configuration.md) documents the supported
 loader schema, defaults and local root layout.
+
+The [runtime override reference](docs/runtime.md) documents persisted operator
+choices and their resolution against configuration.
