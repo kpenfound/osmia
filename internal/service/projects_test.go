@@ -399,13 +399,14 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 					t.Fatalf("charter: %q", charter)
 				}
 				// Recovery repeats no commit: the creation, the librarian's
-				// workstream and thread, the extraction request and its five
-				// reconciliation actions (claim, observe, effect, result and
-				// acknowledgement) are each recorded once.
+				// workstream, its chief-of-staff thread, the librarian thread,
+				// the extraction request and its five reconciliation actions
+				// (claim, observe, effect, result and acknowledgement) are each
+				// recorded once.
 				if x := awaitExtraction(t, c); x.State != "failed" {
 					t.Fatalf("extraction: %+v", x)
 				}
-				if out := demoGit(t, filepath.Dir(root), "--git-dir="+filepath.Join(root, "projects", string(id), ".git"), "rev-list", "--count", "HEAD"); strings.TrimSpace(out) != "9" {
+				if out := demoGit(t, filepath.Dir(root), "--git-dir="+filepath.Join(root, "projects", string(id), ".git"), "rev-list", "--count", "HEAD"); strings.TrimSpace(out) != "10" {
 					t.Fatalf("trace history: %s", out)
 				}
 				// The seed is committed with the trace, so recovery never leaves a
