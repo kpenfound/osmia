@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -75,6 +76,11 @@ func checkTyped[T Record](t *testing.T, r *Repository, want Record) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Every workstream carries its chief-of-staff identity alongside the specimen.
+	list = slices.DeleteFunc(list, func(v T) bool {
+		a, ok := any(v).(Agent)
+		return ok && a.ID == ChiefOfStaff
+	})
 	if len(list) != 1 || !reflect.DeepEqual(list[0], want) {
 		t.Fatalf("read: got %#v, want %#v", list, want)
 	}
