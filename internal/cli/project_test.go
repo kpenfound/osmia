@@ -1,0 +1,127 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/service"
+)
+
+// emptyFixture writes a root without a project and a local Git clone.
+func emptyFixture(t *testing.T) (service.Options, string) {
+	t.Helper()
+	home, err := os.MkdirTemp("", "ocp-")
+	must(t, err)
+	t.Cleanup(func() { os.RemoveAll(home) })
+	root := filepath.Join(home, ".osmia")
+	must(t, os.MkdirAll(root, 0700))
+	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(`# owner comment
+version=1
+active_projects=[]
+[profiles.default]
+agent="claude"
+model="test"
+`), 0600))
+	clone := filepath.Join(home, "clone")
+	must(t, os.Mkdir(clone, 0700))
+	cmd := exec.Command("git", "init", "--quiet", clone)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	return service.Options{Config: config.Options{Root: root}}, clone
+}
+
+func TestProjectCommands(t *testing.T) {
+	opts, clone := emptyFixture(t)
+	s, err := service.Start(context.Background(), opts)
+	must(t, err)
+	t.Cleanup(func() { s.Close() })
+	root := opts.Config.Root
+	status := successful(t, root, "status")
+	if !strings.Contains(status, "Project: none configured") || !strings.Contains(status, "no_project") {
+		t.Fatalf("status without a project:\n%s", status)
+	}
+	var st struct {
+		Configuration service.ConfigResponse
+	}
+	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &st))
+	if st.Configuration.Project != nil {
+		t.Fatal(st.Configuration)
+	}
+	for _, args := range [][]string{{"priority", "set", stream}, {"priority", "clear"}, {"pause", stream}} {
+		code, out, diag := invoke(t, root, args...)
+		if code != 4 || out != "" || !strings.Contains(diag, "osmia project add") {
+			t.Fatalf("%v: %d %s %s", args, code, out, diag)
+		}
+	}
+	code, out, diag := invoke(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", filepath.Join(clone, "missing"))
+	if code != 4 || out != "" || !strings.Contains(diag, "validation: clone does not exist") {
+		t.Fatalf("%d %s %s", code, out, diag)
+	}
+	code, out, diag = invoke(t, root, "project", "remove", project)
+	if code != 4 || out != "" || !strings.Contains(diag, "no_project") {
+		t.Fatalf("%d %s %s", code, out, diag)
+	}
+	// A relative clone resolves against the client's working directory.
+	wd, err := os.Getwd()
+	must(t, err)
+	relative, err := filepath.Rel(wd, clone)
+	must(t, err)
+	var added service.ProjectResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", relative, "--base-branch", "develop", "--json")), &added))
+	id := added.Project.ID
+	if err := config.CheckProjectIDs(id); err != nil || added.Project.BaseBranch != "develop" || !strings.HasSuffix(added.Project.Clone, "clone") || !strings.Contains(added.NextStep, "charter.md") {
+		t.Fatalf("%+v %v", added, err)
+	}
+	text, err := os.ReadFile(filepath.Join(root, "config.toml"))
+	must(t, err)
+	if !strings.HasPrefix(string(text), "# owner comment\n") || !strings.Contains(string(text), `active_projects=["`+string(id)+`"]`) {
+		t.Fatalf("configuration:\n%s", text)
+	}
+	status = successful(t, root, "status")
+	if !strings.Contains(status, "Project: "+string(id)+" (dagger)") || !strings.Contains(status, "Trace: "+added.Project.Trace) || strings.Contains(status, "Diagnostic") {
+		t.Fatalf("status with a project:\n%s", status)
+	}
+	if !strings.Contains(successful(t, root, "priority", "clear"), "applied=true") {
+		t.Fatal("priority without restart")
+	}
+	code, out, diag = invoke(t, root, "project", "add", "other", "--upstream", "other/repo", "--fork", "owner/repo", "--clone", clone)
+	if code != 5 || out != "" || !strings.Contains(diag, "project_active: project "+string(id)) {
+		t.Fatalf("%d %s %s", code, out, diag)
+	}
+	removed := successful(t, root, "project", "remove", string(id))
+	if !strings.Contains(removed, "Project "+string(id)+" (dagger) removed") || !strings.Contains(removed, "Trace: "+added.Project.Trace) || !strings.Contains(removed, "retained") {
+		t.Fatalf("remove output:\n%s", removed)
+	}
+	if _, err := os.Stat(added.Project.Charter); err != nil {
+		t.Fatal("trace deleted", err)
+	}
+	if !strings.Contains(successful(t, root, "status"), "Project: none configured") {
+		t.Fatal("project still shown")
+	}
+	readded := successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", clone)
+	if !strings.Contains(readded, "added") || strings.Contains(readded, string(id)) {
+		t.Fatalf("re-add reused the identity:\n%s", readded)
+	}
+}
+
+func TestProjectUsage(t *testing.T) {
+	root := fixture(t).Config.Root
+	for _, args := range [][]string{
+		{"project"}, {"project", "add"}, {"project", "add", "name"}, {"project", "add", "name", "--upstream", "a/b", "--fork", "c/d"},
+		{"project", "add", "name", "--upstream", "a/b", "--fork", "c/d", "--clone", ""}, {"project", "remove"}, {"project", "remove", "not-an-id"},
+		{"project", "remove", project, "--clone", "x"}, {"status", "--upstream", "a/b"}, {"project", "list"},
+	} {
+		code, out, diag := invoke(t, root, args...)
+		if code != 2 || out != "" || !strings.Contains(diag, "invalid arguments") {
+			t.Fatalf("%v: %d %s %s", args, code, out, diag)
+		}
+	}
+}

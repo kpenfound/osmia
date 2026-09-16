@@ -19,18 +19,21 @@ import (
 const usage = `Usage: osmia <command> [--root PATH]
   serve
   status [--json]
+  project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH [--base-branch NAME] [--json]
+  project remove <project-id> [--json]
   pause <all|project-id|workstream-id> [--hard] [--reason TEXT] [--json]
   resume <all|project-id|workstream-id> [--json]
   priority set <workstream-id>... | priority clear [--json]
   profiles [set <role> <profile>|clear <role>] [--json]
 Client commands also accept --socket PATH (relative to root).
-Only these M1 commands are available; serve runs in the foreground.
+Only these commands are available; serve runs in the foreground.
 `
 
 type options struct {
-	root, socket, reason        string
-	json, hard, reasonSet, help bool
-	args                        []string
+	root, socket, reason                string
+	upstream, fork, clone, baseBranch   string
+	json, hard, reasonSet, help, target bool
+	args                                []string
 }
 
 func parse(args []string) (o options, err error) {
@@ -47,7 +50,7 @@ func parse(args []string) (o options, err error) {
 		}
 		seen[key] = true
 		switch key {
-		case "--root", "--socket", "--reason":
+		case "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -56,7 +59,7 @@ func parse(args []string) (o options, err error) {
 				value = args[i]
 			}
 			if value == "" && key != "--reason" {
-				return o, errors.New("empty path")
+				return o, errors.New("empty value")
 			}
 			switch key {
 			case "--root":
@@ -66,6 +69,18 @@ func parse(args []string) (o options, err error) {
 			case "--reason":
 				o.reason = value
 				o.reasonSet = true
+			case "--upstream":
+				o.upstream = value
+				o.target = true
+			case "--fork":
+				o.fork = value
+				o.target = true
+			case "--clone":
+				o.clone = value
+				o.target = true
+			case "--base-branch":
+				o.baseBranch = value
+				o.target = true
 			}
 		case "--json", "--hard", "--help", "-h":
 			if has {
@@ -113,8 +128,11 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		valid = len(a) >= 2 && a[0] == "set" || len(a) == 1 && a[0] == "clear"
 	case "profiles":
 		valid = len(a) == 0 || len(a) == 3 && a[0] == "set" || len(a) == 2 && a[0] == "clear"
+	case "project":
+		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove")
 	}
-	if !valid || cmd != "pause" && (o.hard || o.reasonSet) || cmd == "serve" && (o.json || o.socket != "") {
+	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
+	if !valid || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd == "serve" && (o.json || o.socket != "") {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -139,7 +157,42 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	c := service.NewClient(socket)
 	defer c.Close()
-	fail := func(err error) int { return report(stderr, err) }
+	fail := func(err error) int { return report(stderr, err, cmd == "project") }
+	noProject := func() int {
+		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
+		return 4
+	}
+	if cmd == "project" {
+		var result service.ProjectResponse
+		if a[0] == "add" {
+			clone, err := filepath.Abs(o.clone)
+			if err != nil {
+				return invalid()
+			}
+			result, err = c.AddProject(ctx, service.ProjectAddRequest{Name: a[1], Upstream: o.upstream, Fork: o.fork, Clone: clone, BaseBranch: o.baseBranch})
+			if err != nil {
+				return fail(err)
+			}
+		} else {
+			id, err := config.ParseProjectID(a[1])
+			if err != nil {
+				return invalid()
+			}
+			result, err = c.RemoveProject(ctx, id)
+			if err != nil {
+				return fail(err)
+			}
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		verb := "added"
+		if a[0] == "remove" {
+			verb = "removed"
+		}
+		fmt.Fprintf(stdout, "Project %s (%s) %s\nUpstream: %s fork: %s clone: %s\nTrace: %s\nNext: %s\n", result.Project.ID, result.Project.Name, verb, result.Project.Upstream, result.Project.Fork, result.Project.Clone, result.Project.Trace, result.NextStep)
+		return 0
+	}
 	if cmd == "status" {
 		h, err := c.Health(ctx)
 		if err != nil {
@@ -161,6 +214,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			}{h, cfg, rt})
 		}
 		fmt.Fprintf(stdout, "Service: %s ready=%t API=%d\nConfiguration: %s (%s)\n", h.Service, h.Ready, h.APIVersion, cfg.Digest, cfg.Root)
+		showProject(stdout, cfg.Project)
 		diagnostics(stdout, cfg.Diagnostics)
 		showRuntime(stdout, rt)
 		return 0
@@ -192,6 +246,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				}
 				if cfg.Effective == nil {
 					return fail(errors.New("missing configuration"))
+				}
+				if cfg.Project == nil {
+					return noProject()
 				}
 				target.Scope = "workstream"
 				target.Project = cfg.Effective.Project.ID
@@ -229,6 +286,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		if cfg.Effective == nil {
 			return fail(errors.New("missing configuration"))
+		}
+		if cfg.Project == nil {
+			return noProject()
 		}
 		project := cfg.Effective.Project.ID
 		scope = string(project)
@@ -276,6 +336,13 @@ func output(w, stderr io.Writer, v any) int {
 	}
 	return 0
 }
+func showProject(w io.Writer, p *service.ProjectView) {
+	if p == nil {
+		fmt.Fprintln(w, "Project: none configured; add one with osmia project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH")
+		return
+	}
+	fmt.Fprintf(w, "Project: %s (%s) upstream=%s fork=%s clone=%s\nTrace: %s\n", p.ID, p.Name, p.Upstream, p.Fork, p.Clone, p.Trace)
+}
 func diagnostics(w io.Writer, ds []service.Diagnostic) {
 	for _, d := range ds {
 		fmt.Fprintf(w, "Diagnostic: %s: %s: %s\n", d.Field, d.Code, d.Message)
@@ -296,7 +363,11 @@ func showRuntime(w io.Writer, rt service.RuntimeResponse) {
 	}
 	diagnostics(w, rt.Diagnostics)
 }
-func report(w io.Writer, err error) int {
+
+// report maps an API error to exit code and guidance. Project operations
+// compose their own messages from the caller's fields and identities, so those
+// are shown; other messages are fixed to keep raw file and parser text out.
+func report(w io.Writer, err error, project bool) int {
 	var api *service.APIError
 	if !errors.As(err, &api) {
 		fmt.Fprintln(w, "invalid service response or internal failure; check service and client versions")
@@ -304,6 +375,10 @@ func report(w io.Writer, err error) int {
 	}
 	code, msg := 5, "service operation failed; check service status"
 	switch api.Code {
+	case service.NoProject:
+		code, msg = 4, "no project is configured; add one with osmia project add"
+	case service.ProjectActive:
+		msg = "a project is already active; remove it before adding another"
 	case service.Malformed:
 		code, msg = 4, "request rejected; check client and service API versions"
 	case service.Validation:
@@ -316,6 +391,9 @@ func report(w io.Writer, err error) int {
 		msg = "restart required; stop the service and run osmia serve again"
 	case service.Unavailable:
 		code, msg = 3, "cannot reach service; run osmia serve with the same --root and check --socket and permissions"
+	}
+	if project && api.Code != service.Unavailable && api.Code != service.Malformed && api.Message != "" {
+		msg = api.Message
 	}
 	fmt.Fprintf(w, "%s: %s\n", api.Code, msg)
 	return code
