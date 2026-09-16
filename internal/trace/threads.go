@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -248,6 +250,22 @@ func (r *Repository) Thread(stream config.WorkstreamID, agent string) (Thread, e
 		return Thread{}, os.ErrNotExist
 	}
 	return r.snapshot(t), nil
+}
+
+// Threads returns detached snapshots of every thread in the workstream, ordered
+// by agent ID, with the same interruption view as Thread.
+func (r *Repository) Threads(stream config.WorkstreamID) ([]Thread, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	log, _, err := r.loadWorkflow(stream)
+	if err != nil {
+		return nil, err
+	}
+	threads := make([]Thread, 0, len(log.Threads))
+	for _, id := range slices.Sorted(maps.Keys(log.Threads)) {
+		threads = append(threads, r.snapshot(log.Threads[id]))
+	}
+	return threads, nil
 }
 
 func (r *Repository) snapshot(t Thread) Thread {

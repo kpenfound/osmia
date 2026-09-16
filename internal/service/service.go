@@ -19,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -33,6 +34,9 @@ type Options struct {
 	// Threads binds the runner-boundary reconciler to the trace this service
 	// owns. It is called each time a project's trace opens, at startup and when
 	// a project is added, and replaces any runner adapter in Reconciliation.
+	// With Threads set, the service also dispatches every queued workstream turn
+	// on its own, never more than one turn per thread in flight, replacing
+	// Reconciliation.Schedule.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
 }
@@ -370,6 +374,12 @@ func openReconciliation(cfg *config.Config, options reconcile.Options, threads f
 		}
 		adapters[coreadapter.RunnerBoundary] = runner
 		options.Adapters = adapters
+		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now})
+		if err != nil {
+			repository.Close()
+			return nil, nil, err
+		}
+		options.Schedule = dispatch.Pass
 	}
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
