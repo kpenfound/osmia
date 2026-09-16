@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -284,7 +285,15 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 				return p, err
 			}
 		}
-		repository, err := trace.Create(ctx, root, p, time.Now().UTC(), registrationActor)
+		seed, err := kb.Seed(p.Clone)
+		if err != nil {
+			return p, err
+		}
+		entities, err := kb.Encode(seed)
+		if err != nil {
+			return p, err
+		}
+		repository, err := trace.CreateSeeded(ctx, root, p, time.Now().UTC(), registrationActor, entities)
 		if err != nil {
 			return p, err
 		}

@@ -32,11 +32,23 @@ func handInStatus(t *testing.T, s *Service, body string) int {
 	return w.Code
 }
 
-func charterRevisionCount(t *testing.T, s *Service) int {
+// documentRevisions returns the active project's revisions of one document.
+func documentRevisions(t *testing.T, s *Service, id string) []trace.Document {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](s.active.repository, "")
 	must(t, err)
-	return len(docs)
+	var out []trace.Document
+	for _, d := range docs {
+		if d.ID == id {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func charterRevisionCount(t *testing.T, s *Service) int {
+	t.Helper()
+	return len(documentRevisions(t, s, "charter"))
 }
 
 func TestHandInCharterGate(t *testing.T) {
@@ -98,8 +110,7 @@ func TestHandInCharterGate(t *testing.T) {
 	if n := charterRevisionCount(t, s); n != 2 {
 		t.Fatalf("one edit recorded %d revisions in total", n)
 	}
-	docs, err := trace.Read[trace.Document](s.active.repository, "")
-	must(t, err)
+	docs := documentRevisions(t, s, "charter")
 	if docs[1].Actor != (trace.Actor{Kind: "owner", ID: "local"}) || docs[1].Cause != "owner-edit" {
 		t.Fatalf("edit provenance: %+v", docs[1].Header)
 	}

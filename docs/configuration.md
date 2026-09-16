@@ -141,8 +141,10 @@ writing anything, then:
 2. writes `projects/<id>/config.toml` with `name`, `upstream`, `fork`, the
    absolute `clone`, `base_branch` (default `main`) and
    `landing = "commit-per-unit"`; capacity is inherited from the top level;
-3. creates the trace repository with a [charter](charter.md) template in
-   `charter.md`, recorded as its first revision;
+3. seeds the [local entity map](knowledge-base.md#seeding) from the clone's
+   CODEOWNERS and directory structure, and creates the trace repository with
+   a [charter](charter.md) template in `charter.md` and the seed as the first
+   revisions of the charter and `kb/entities.json`;
 4. adds the ID to `active_projects` in the top-level `config.toml` as a text
    edit, so the owner's comments, ordering and formatting survive;
 5. activates the project (opens the trace and starts reconciliation) and
@@ -152,7 +154,7 @@ Validation refuses, each with its own message: a blank name, an upstream or fork
 that is not `owner/repository`, a fork equal to the upstream, an invalid base
 branch, a relative clone path, a clone that does not exist, is not a directory
 or has no `.git` entry, and a clone nested with the root either way. Nothing is
-ever written to the clone.
+ever written to the clone; seeding only reads it.
 
 Registration is recoverable. If the service stops at any step, the journal makes
 the next start finish the registration with the same ID, or `osmia project add`

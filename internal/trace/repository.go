@@ -147,6 +147,13 @@ and which checks must pass before a pull request. -->
 changelog and sign-off. -->
 `
 
+// EntitiesPath is the project document holding the local entity map, and
+// EntitiesDocument the record ID of its revisions.
+const (
+	EntitiesPath     = "kb/entities.json"
+	EntitiesDocument = "kb-entities"
+)
+
 // ownerActor records edits the owner made to project documents on disk.
 var ownerActor = Actor{Kind: "owner", ID: "local"}
 
@@ -201,8 +208,22 @@ func latestCharter(records []Record) (Document, bool) {
 }
 
 // Create initializes a dedicated local repository in an existing configuration
-// directory or a new project directory. It refuses any existing trace or Git metadata.
+// directory or a new project directory. It refuses any existing trace or Git
+// metadata. The entity map file starts as "{}" with no document revision.
 func Create(ctx context.Context, root config.Root, project config.Project, at time.Time, actor Actor) (*Repository, error) {
+	return createTrace(ctx, root, project, at, actor, nil)
+}
+
+// CreateSeeded is Create with entities, already validated by the caller, as
+// revision 1 of the entity map document, committed with the rest of the trace.
+func CreateSeeded(ctx context.Context, root config.Root, project config.Project, at time.Time, actor Actor, entities []byte) (*Repository, error) {
+	if len(entities) == 0 {
+		return nil, fmt.Errorf("entity map seed required")
+	}
+	return createTrace(ctx, root, project, at, actor, entities)
+}
+
+func createTrace(ctx context.Context, root config.Root, project config.Project, at time.Time, actor Actor, entities []byte) (*Repository, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -212,6 +233,24 @@ func Create(ctx context.Context, root config.Root, project config.Project, at ti
 	directory, err := location(root, project)
 	if err != nil {
 		return nil, err
+	}
+	documents, err := json.Marshal(charterRevision(project.ID, at, actor, "project-create", 1, CharterTemplate))
+	if err != nil {
+		return nil, err
+	}
+	documents = append(documents, '\n')
+	if entities == nil {
+		entities = []byte("{}\n")
+	} else {
+		d := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: EntitiesDocument, Revision: 1, Project: project.ID, At: at, Actor: actor, Cause: "project-create"}, Path: EntitiesPath, Content: string(entities)}
+		if err := validate(d); err != nil {
+			return nil, err
+		}
+		line, err := json.Marshal(d)
+		if err != nil {
+			return nil, err
+		}
+		documents = append(documents, append(line, '\n')...)
 	}
 	if err := os.MkdirAll(root.String(), 0700); err != nil {
 		return nil, err
@@ -273,20 +312,15 @@ func Create(ctx context.Context, root config.Root, project config.Project, at ti
 	if err != nil {
 		return nil, err
 	}
-	charter := charterRevision(project.ID, at, actor, "project-create", 1, CharterTemplate)
-	documents, err := json.Marshal(charter)
-	if err != nil {
-		return nil, err
-	}
 	for _, f := range []struct {
 		name string
 		data []byte
-	}{{"project.json", append(data, '\n')}, {"charter.md", []byte(CharterTemplate)}, {"kb/entities.json", []byte("{}\n")}, {"documents.jsonl", append(documents, '\n')}} {
+	}{{"project.json", append(data, '\n')}, {"charter.md", []byte(CharterTemplate)}, {EntitiesPath, entities}, {"documents.jsonl", documents}} {
 		if err := r.writeFile(f.name, f.data); err != nil {
 			return nil, err
 		}
 	}
-	if err := r.commit(ctx, []string{"project.json", "charter.md", "kb/entities.json", "documents.jsonl"}, "Create project trace"); err != nil {
+	if err := r.commit(ctx, []string{"project.json", "charter.md", EntitiesPath, "documents.jsonl"}, "Create project trace"); err != nil {
 		return nil, err
 	}
 	ok = true

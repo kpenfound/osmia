@@ -15,6 +15,7 @@ import (
 	osmiacharter "github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -120,6 +121,8 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	s, c := start(t, opts)
 	ctx := context.Background()
 	root := opts.Config.Root
+	must(t, os.MkdirAll(filepath.Join(clone, "internal", "trace"), 0700))
+	must(t, os.WriteFile(filepath.Join(clone, "CODEOWNERS"), []byte("/internal/ @core\n"), 0600))
 	cloneBefore := snapshot(t, clone)
 	added, err := c.AddProject(ctx, request(clone))
 	must(t, err)
@@ -149,6 +152,18 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cloneBefore, snapshot(t, clone)) {
 		t.Fatal("clone changed")
+	}
+	// The seeded entity map is the first revision of kb/entities.json.
+	entities, err := os.ReadFile(filepath.Join(traceDir, trace.EntitiesPath))
+	must(t, err)
+	seeded, err := kb.Parse(entities)
+	must(t, err)
+	if e, ok := seeded.Lookup("internal.trace"); !ok || !reflect.DeepEqual(e.Owners, []string{"@core"}) || !reflect.DeepEqual(e.PartOf, []string{"internal"}) {
+		t.Fatalf("seeded entities:\n%s", entities)
+	}
+	documents := documentRevisions(t, s, trace.EntitiesDocument)
+	if len(documents) != 1 || documents[0].Revision != 1 || documents[0].Content != string(entities) {
+		t.Fatalf("documents: %+v", documents)
 	}
 	if _, err := os.Lstat(filepath.Join(root, "project-add.json")); !os.IsNotExist(err) {
 		t.Fatal("journal retained")
@@ -379,6 +394,12 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				}
 				if out := demoGit(t, filepath.Dir(root), "--git-dir="+filepath.Join(root, "projects", string(id), ".git"), "rev-list", "--count", "HEAD"); strings.TrimSpace(out) != "1" {
 					t.Fatalf("trace history: %s", out)
+				}
+				// The seed is committed with the trace, so recovery never leaves a
+				// trace without its first entity map revision.
+				documents := documentRevisions(t, s, trace.EntitiesDocument)
+				if len(documents) != 1 || documents[0].Revision != 1 {
+					t.Fatalf("entity map revisions: %+v", documents)
 				}
 				must(t, s.Close())
 				s, c = start(t, opts)

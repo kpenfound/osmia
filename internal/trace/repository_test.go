@@ -602,3 +602,31 @@ func TestExistingConfigurationIsNotCommitted(t *testing.T) {
 		t.Fatal("configuration included in trace commit")
 	}
 }
+
+func TestCreateSeededRecordsEntityMap(t *testing.T) {
+	root, p := fixture(t)
+	if _, err := CreateSeeded(context.Background(), root, p, at, owner, nil); err == nil {
+		t.Fatal("empty seed accepted")
+	}
+	if _, err := os.Lstat(filepath.Join(root.String(), "projects", string(p.ID))); !os.IsNotExist(err) {
+		t.Fatalf("empty seed created a trace: %v", err)
+	}
+	seed := "{\"version\": 1, \"entities\": []}\n"
+	r, err := CreateSeeded(context.Background(), root, p, at, owner, []byte(seed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	docs, err := Read[Document](r, "")
+	want := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: EntitiesDocument, Revision: 1, Project: p.ID, At: at, Actor: owner, Cause: "project-create"}, Path: EntitiesPath, Content: seed}
+	if err != nil || len(docs) != 2 || docs[0].ID != "charter" || !reflect.DeepEqual(docs[1], want) {
+		t.Fatalf("documents: %#v, %v", docs, err)
+	}
+	data, err := os.ReadFile(filepath.Join(r.directory, EntitiesPath))
+	if err != nil || string(data) != seed {
+		t.Fatalf("file: %q, %v", data, err)
+	}
+	if err := r.checkHistory(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -15,7 +15,13 @@ func charterRevisions(t *testing.T, r *Repository) []Document {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return docs
+	var charter []Document
+	for _, d := range docs {
+		if d.ID == "charter" {
+			charter = append(charter, d)
+		}
+	}
+	return charter
 }
 
 func TestCharterRecordsOwnerEdits(t *testing.T) {

@@ -33,8 +33,8 @@ osmia status --json
   [--base-branch NAME]` registers a project with the running service: it
   validates the request, generates the project ID, writes
   `projects/<id>/config.toml`, creates the trace repository with a charter
-  template, lists the ID in `active_projects` and activates the project without
-  a restart. The clone path is made absolute by the client and must be an
+  template and an entity map seeded from the clone, lists the ID in
+  `active_projects` and activates the project without a restart. The clone path is made absolute by the client and must be an
   existing local Git repository outside the Osmia root; nothing is written to
   it. The output names the project ID, the trace path and the next step:
   writing the charter in `<trace>/charter.md`. Operation stays single-project:
@@ -122,7 +122,7 @@ live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
 Detached management, install/upgrade commands, completion, web/tailnet,
-knowledge-base extraction on add, hand-in past the charter check, inbox, conversation, ratification,
+the librarian's knowledge-base extraction on add, hand-in past the charter check, inbox, conversation, ratification,
 answer, reload and trace navigation are unavailable. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.
