@@ -178,3 +178,20 @@ No queue membership persists to impose core's FIFO ordering on later calls.
 nonblocking and `Wait` returns on a hint, caller tick or cancellation. Controllers
 must reconcile authoritative state on startup, each wake and periodic ticks;
 a hint is neither durable delivery nor the state that needs processing.
+
+## Local reconciliation contract
+
+`Reconciler` adds identity-based inspection and application around the existing
+workspace, turn and sandbox contracts. Repository, runner and container adapters
+receive the same immutable `Operation.ID` and input on every attempt. They must
+make that identity discoverable in external resources or owned session records.
+Inspection distinguishes completed (with terminal result), absent (no previous
+attempt can still complete), and unknown (including running work). An adapter
+that cannot establish identity or inspect must return unknown or an error before
+launching work. There is no blind replay wrapper around `Acquire`, `Run` or
+`Prepare`; these contracts alone do not prove a retry safe.
+
+Osmia's trace store retains observations, attempts and results, and its Go
+controller owns retry timing. These are workflow responsibilities rather than
+core scheduling extensions. Tests use fake local resource systems and clocks;
+they never launch providers, model sessions or container engines.

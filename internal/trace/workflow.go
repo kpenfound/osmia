@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
 var ErrClaimed = errors.New("outbox entry has an active claim")
@@ -28,9 +29,10 @@ type Transaction struct {
 }
 
 type Event struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
-	Body string `json:"body"`
+	ID        string                 `json:"id"`
+	Kind      string                 `json:"kind"`
+	Body      string                 `json:"body"`
+	Operation *coreadapter.Operation `json:"operation,omitempty"`
 }
 
 // EventID derives a stable identity from a logical transaction and event key.
@@ -64,16 +66,18 @@ type OutboxEntry struct {
 }
 
 type workflowLog struct {
-	Schema       string           `json:"schema"`
-	Version      int              `json:"version"`
-	Transactions []Transaction    `json:"transactions"`
-	Deliveries   []DeliveryAction `json:"deliveries"`
+	Schema       string            `json:"schema"`
+	Version      int               `json:"version"`
+	Transactions []Transaction     `json:"transactions"`
+	Deliveries   []DeliveryAction  `json:"deliveries"`
+	Operations   []OperationAction `json:"operations,omitempty"`
 }
 
 type workflowView struct {
 	states       map[string]WorkflowState
 	transactions map[string]Transaction
 	entries      map[string]*OutboxEntry
+	operations   map[string]*OperationRecord
 }
 
 func equalJSON(a, b any) bool {
@@ -105,6 +109,11 @@ func (v *workflowView) transition(tx Transaction, project config.ProjectID, stre
 		if seen[e.ID] || v.entries[e.ID] != nil {
 			return WorkflowState{}, ErrConflict
 		}
+		if e.Operation != nil {
+			if err := validateOperation(*e.Operation, project, stream, e.ID); err != nil {
+				return WorkflowState{}, err
+			}
+		}
 		seen[e.ID] = true
 	}
 	state = WorkflowState{Version: state.Version + 1, Value: t.To}
@@ -112,13 +121,16 @@ func (v *workflowView) transition(tx Transaction, project config.ProjectID, stre
 	v.transactions[t.ID] = tx
 	for _, e := range tx.Events {
 		v.entries[e.ID] = &OutboxEntry{Event: e, TransitionID: t.ID}
+		if e.Operation != nil {
+			v.operations[e.ID] = &OperationRecord{Operation: *e.Operation, EventID: e.ID, Transition: t.Header}
+		}
 	}
 	return state, nil
 }
 
 func (v *workflowView) delivery(a DeliveryAction) error {
 	e := v.entries[a.EventID]
-	if e == nil || !key(a.Token) || a.At.IsZero() {
+	if e == nil || e.Event.Operation != nil || !key(a.Token) || a.At.IsZero() {
 		return ErrClaim
 	}
 	switch a.Kind {
@@ -176,7 +188,7 @@ func (r *Repository) loadWorkflow(stream config.WorkstreamID) (workflowLog, *wor
 	if log.Schema != "osmia.workflow" || log.Version != 1 {
 		return log, nil, fmt.Errorf("unsupported workflow schema/version")
 	}
-	v := &workflowView{states: map[string]WorkflowState{}, transactions: map[string]Transaction{}, entries: map[string]*OutboxEntry{}}
+	v := &workflowView{states: map[string]WorkflowState{}, transactions: map[string]Transaction{}, entries: map[string]*OutboxEntry{}, operations: map[string]*OperationRecord{}}
 	for _, tx := range log.Transactions {
 		if _, err := v.transition(tx, r.project, stream); err != nil {
 			return log, nil, fmt.Errorf("workflow transaction %s: %w", tx.Transition.ID, err)
@@ -185,6 +197,11 @@ func (r *Repository) loadWorkflow(stream config.WorkstreamID) (workflowLog, *wor
 	for _, a := range log.Deliveries {
 		if err := v.delivery(a); err != nil {
 			return log, nil, fmt.Errorf("workflow delivery %s: %w", a.EventID, err)
+		}
+	}
+	for _, a := range log.Operations {
+		if err := v.operation(a); err != nil {
+			return log, nil, fmt.Errorf("workflow operation %s: %w", a.EventID, err)
 		}
 	}
 	// Every managed transition has one identical record in the inspectable trace.
@@ -292,7 +309,8 @@ func (r *Repository) Outbox(stream config.WorkstreamID) ([]OutboxEntry, error) {
 	return r.outbox(stream, time.Time{})
 }
 
-// Ready scans durable state. Claims from another repository session are abandoned.
+// Ready scans durable notification intent; operations use Operations instead.
+// Claims from another repository session are abandoned.
 // A newly opened handle needs no wakeup signal to discover pending work.
 func (r *Repository) Ready(stream config.WorkstreamID, now time.Time) ([]OutboxEntry, error) {
 	r.mu.Lock()
@@ -310,7 +328,7 @@ func (r *Repository) outbox(stream config.WorkstreamID, now time.Time) ([]Outbox
 	}
 	var entries []OutboxEntry
 	for _, e := range v.entries {
-		if !now.IsZero() && (e.Acknowledged || (e.Claim != nil && e.Claim.Session == r.session && e.Claim.Until.After(now))) {
+		if !now.IsZero() && (e.Event.Operation != nil || e.Acknowledged || (e.Claim != nil && e.Claim.Session == r.session && e.Claim.Until.After(now))) {
 			continue
 		}
 		entries = append(entries, *e)

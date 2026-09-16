@@ -27,6 +27,7 @@ var ErrLocked = errors.New("trace repository already open")
 // External writers must not modify or move the repository while it is open.
 type Repository struct {
 	mu              sync.Mutex
+	operationMu     sync.Mutex
 	root            config.Root
 	project         config.ProjectID
 	directory       string
@@ -90,6 +91,8 @@ func (r *Repository) acquire() error {
 	return nil
 }
 func (r *Repository) Close() error {
+	r.operationMu.Lock()
+	defer r.operationMu.Unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var err error

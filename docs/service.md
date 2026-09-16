@@ -50,8 +50,9 @@ Mutation bodies are one JSON object, at most 1 MiB; unknown or duplicate fields 
 trailing values are rejected. Successful mutations return `{"applied":true}` only
 after the runtime store acknowledges persistence. DELETE requests carry JSON bodies.
 See [runtime overrides](runtime.md) for target, mode and reference rules. The service
-accepts known workstream IDs only from its embedding record repository; the default
-list is empty. It does not scan directories or create workstream identities.
+accepts workstream IDs from the active trace repository’s validated manifests.
+Without an initialized trace, embedding callers may supply known IDs; the default
+list is empty. The service does not create workstream identities.
 
 The configuration digest hashes the canonical JSON of the effective loaded
 configuration, including defaults and the resolved socket/project paths, not TOML
@@ -83,3 +84,11 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 Health readiness means the loaded stores can serve requests; disk diagnostics do
 not discard that valid view. Reload application, lifecycle endpoints, streaming,
 web/tailnet access and scheduling effects are outside M1.
+
+
+The service opens the active project's existing trace and starts the
+[local operation reconciliation loop](trace.md#durable-local-operations).
+Startup scans durable intent even without wakeups. Missing reconciliation
+adapters leave work pending; corrupt or locked traces prevent startup. Shutdown
+cancels and joins the loop before releasing trace ownership. Project trace
+creation remains separate from service startup.
