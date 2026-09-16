@@ -120,9 +120,18 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 		return ConversationResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the conversation of workstream %s; check the trace repository", stream)}
 	}
 	for _, q := range t.Turns {
-		if q.Request.Actor == ownerActor {
-			out.Entries = append(out.Entries, conversation(q)...)
+		if q.Request.Actor != ownerActor {
+			continue
 		}
+		entries := conversation(q)
+		// A claim an earlier service session left without a result never
+		// completes and is never retried.
+		if t.Status == "interrupted" && t.Active == q.Request.TurnID {
+			for i := range entries {
+				entries[i].State = TurnFailed
+			}
+		}
+		out.Entries = append(out.Entries, entries...)
 	}
 	return out, nil
 }

@@ -203,12 +203,13 @@ that the owner did not send are not listed. Each entry has:
 | `kind` | `message` or `response` |
 | `text` | The message as sent, or the chief of staff's final response |
 | `at` | When the message was accepted, or the response captured |
-| `state` | The turn's state: `queued` until claimed, `running` until completed, then `failed` for a failed or interrupted turn and `done` otherwise |
+| `state` | The turn's state: `queued` until claimed, `running` until completed, then `failed` for a failed or cancelled turn and `done` otherwise. A turn a restart interrupted before its result was captured is never retried and lists as `failed` |
 
 `POST` returns the message's entry, whose state is `queued`. A malformed
 workstream ID, a workstream the active trace does not hold (or no trace at
-all), or empty text returns `validation`. No configured project returns `no_project`. A trace that cannot
-be read or written, or a bundle that cannot be assembled, returns `internal`.
+all), or empty text returns `validation`. No configured project returns
+`no_project`. A trace that cannot be read or written, a `chief_of_staff` profile that cannot be used, or a
+bundle that cannot be assembled, returns `internal`.
 These messages name the workstream or project. A rejected message is not
 recorded. Messages are accepted without a turn reconciler, but only a service
 with `Options.Threads` runs them.

@@ -39,8 +39,14 @@ func (c *chiefTurns) Run(ctx context.Context, p coreadapter.PreparedTurn) (corea
 			return coreadapter.SessionResult{}, ctx.Err()
 		}
 	}
-	if p.Prompt == "fail" {
-		return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "claude", ID: "session"}, FinalResponse: "partial", IsError: true}, nil
+	session := coreadapter.BackendSession{Backend: "claude", ID: "session"}
+	switch p.Prompt {
+	case "fail":
+		return coreadapter.SessionResult{Session: session, FinalResponse: "partial", IsError: true}, nil
+	case "cancel":
+		return coreadapter.SessionResult{Session: session, FinalResponse: "stopped", Cancelled: true}, nil
+	case "silent":
+		return coreadapter.SessionResult{Session: session}, nil
 	}
 	return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "claude", ID: "session"}, FinalResponse: "Answer to " + p.Prompt}, nil
 }
@@ -137,21 +143,28 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 	}
 	second, err := c.Send(ctx, stream, "fail")
 	must(t, err)
+	cancelled, err := c.Send(ctx, stream, "cancel")
+	must(t, err)
+	silent, err := c.Send(ctx, stream, "silent")
+	must(t, err)
 	third, err := c.Send(ctx, stream, "Ship it")
 	must(t, err)
 	list, err := c.Conversation(ctx, stream)
 	must(t, err)
-	if got := states(list); !reflect.DeepEqual(got, []string{"message:running", "message:queued", "message:queued"}) {
+	if got := states(list); !reflect.DeepEqual(got, []string{"message:running", "message:queued", "message:queued", "message:queued", "message:queued"}) {
 		t.Fatalf("mid-turn listing: %v", got)
 	}
 	close(turns.hold)
 
-	list = awaitConversation(t, c, func(l ConversationResponse) bool { return len(l.Entries) == 6 })
+	list = awaitConversation(t, c, func(l ConversationResponse) bool { return len(l.Entries) == 9 })
 	want := []ConversationEntry{
 		{Turn: first.Turn, Kind: "message", Text: "Where is the plan?", At: first.At, State: TurnDone},
 		{Turn: first.Turn, Kind: "response", Text: "Answer to Where is the plan?", State: TurnDone},
 		{Turn: second.Turn, Kind: "message", Text: "fail", At: second.At, State: TurnFailed},
 		{Turn: second.Turn, Kind: "response", Text: "partial", State: TurnFailed},
+		{Turn: cancelled.Turn, Kind: "message", Text: "cancel", At: cancelled.At, State: TurnFailed},
+		{Turn: cancelled.Turn, Kind: "response", Text: "stopped", State: TurnFailed},
+		{Turn: silent.Turn, Kind: "message", Text: "silent", At: silent.At, State: TurnDone},
 		{Turn: third.Turn, Kind: "message", Text: "Ship it", At: third.At, State: TurnDone},
 		{Turn: third.Turn, Kind: "response", Text: "Answer to Ship it", State: TurnDone},
 	}
@@ -168,10 +181,10 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 	}
 
 	calls := turns.Calls()
-	if len(calls) != 3 {
+	if len(calls) != 5 {
 		t.Fatalf("turns run: %d", len(calls))
 	}
-	for i, prompt := range []string{"Where is the plan?", "fail", "Ship it"} {
+	for i, prompt := range []string{"Where is the plan?", "fail", "cancel", "silent", "Ship it"} {
 		p := calls[i]
 		if p.Prompt != prompt || p.Scope.Role != trace.ChiefOfStaff || p.Scope.Thread != trace.ChiefOfStaff || p.Profile.Name != "default" {
 			t.Fatalf("turn %d: %+v", i, p)
@@ -187,7 +200,7 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 	h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_question", Project: project, Workstream: stream, At: demoStart, Actor: trace.Actor{Kind: "agent", ID: "mason"}, Cause: "ask"}
 	_, err = s.active.repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "question", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, Prompt: "A mason asks"})
 	must(t, err)
-	if again, err := c.Conversation(ctx, stream); err != nil || len(again.Entries) != 6 {
+	if again, err := c.Conversation(ctx, stream); err != nil || len(again.Entries) != 9 {
 		t.Fatalf("listing with an agent turn: %+v %v", again, err)
 	}
 
@@ -307,5 +320,56 @@ func TestConversationMessageRunsOnceAcrossRestart(t *testing.T) {
 	must(t, err)
 	if len(ops) != 1 {
 		t.Fatalf("turn operations: %+v", ops)
+	}
+}
+
+func TestConversationUnusableProfileIsInternal(t *testing.T) {
+	opts, _ := conversationFixture(t, "cu-")
+	s, c := start(t, opts)
+	s.mu.Lock()
+	cfg := *s.cfg
+	cfg.Roles = map[string]config.Role{}
+	s.cfg = &cfg
+	s.mu.Unlock()
+	_, err := c.Send(context.Background(), stream, "hello")
+	var api *APIError
+	if !errors.As(err, &api) || api.Code != Internal || !strings.Contains(api.Message, "role chief_of_staff has no usable profile \"default\"") {
+		t.Fatalf("unusable profile: %v", err)
+	}
+	th, err := s.active.repository.ChiefOfStaffThread(stream)
+	must(t, err)
+	if len(th.Turns) != 0 {
+		t.Fatalf("message recorded without a profile: %+v", th.Turns)
+	}
+}
+
+func TestConversationListsInterruptedTurnAsFailed(t *testing.T) {
+	ctx := context.Background()
+	opts, cfg := conversationFixture(t, "ci-")
+	s, c := start(t, opts)
+	sent, err := c.Send(ctx, stream, "Plan the upload work")
+	must(t, err)
+	queued, err := c.Send(ctx, stream, "And the docs")
+	must(t, err)
+	c.Close()
+	must(t, s.Close())
+
+	// An earlier service session claimed the turn and stopped before
+	// capturing a result.
+	repo, err := trace.Open(cfg.Root, cfg.Project)
+	must(t, err)
+	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token", filepath.Join(cfg.Root.String(), "sessions", "lost"), demoStart.Add(time.Hour))
+	must(t, err)
+	must(t, repo.Close())
+
+	_, c = start(t, opts)
+	list, err := c.Conversation(ctx, stream)
+	must(t, err)
+	want := []ConversationEntry{
+		{Turn: sent.Turn, Kind: "message", Text: "Plan the upload work", At: sent.At, State: TurnFailed},
+		{Turn: queued.Turn, Kind: "message", Text: "And the docs", At: queued.At, State: TurnQueued},
+	}
+	if !reflect.DeepEqual(list.Entries, want) {
+		t.Fatalf("listing after restart:\n%+v\nwant:\n%+v", list.Entries, want)
 	}
 }
