@@ -36,7 +36,8 @@ type Options struct {
 	// a project is added, and replaces any runner adapter in Reconciliation.
 	// With Threads set, the service also dispatches every queued workstream turn
 	// on its own, never more than one turn per thread in flight, replacing
-	// Reconciliation.Schedule.
+	// Reconciliation.Schedule. A runtime pause holds new turns on the threads it
+	// covers, except chief-of-staff turns; clearing it lets them run.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
 	// Librarian supplies the execution boundary of the librarian's
@@ -293,6 +294,16 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	return &activeProject{repository: repository, controller: controller, done: make(chan error, 1)}, nil
 }
 
+// unpaused admits the project's queued turns that no runtime pause in force
+// holds. The store is read on every pass, so a cleared pause lets held turns
+// run on the loop's next periodic pass.
+func (s *Service) unpaused(project config.ProjectID) func(context.Context, scheduler.Candidate) (bool, error) {
+	return func(_ context.Context, c scheduler.Candidate) (bool, error) {
+		st, _ := s.store.Effective()
+		return !scheduler.Held(st.Pauses, project, c), nil
+	}
+}
+
 // ensureChiefsOfStaff gives every workstream in the trace its chief-of-staff
 // thread, leaving existing threads untouched.
 func ensureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at time.Time) error {
@@ -347,7 +358,8 @@ func (s *Service) stop(active *activeProject) error {
 // openReconciliation leaves trace creation to project registration; an existing
 // trace must open cleanly before the service can report readiness. The runner
 // boundary is served by the bound thread reconciler for turns and by the
-// service's extractor for knowledge-base extraction.
+// service's extractor for knowledge-base extraction; the scheduler's gate holds
+// turns that a runtime pause covers.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, error) {
 	options, threads := s.options.Reconciliation, s.options.Threads
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
@@ -381,7 +393,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 			return nil, nil, err
 		}
 		runner.turns = bound
-		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now})
+		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.unpaused(cfg.Project.ID)})
 		if err != nil {
 			repository.Close()
 			return nil, nil, err

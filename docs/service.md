@@ -100,8 +100,9 @@ to finish. They never include raw file contents or parser output.
 
 Health readiness means the loaded stores can serve requests; disk diagnostics do
 not discard that valid view. Reload application, lifecycle endpoints, streaming,
-web/tailnet access, and capacity, pause and parking effects on scheduling are
-outside M1.
+web/tailnet access, and capacity and parking effects on scheduling are
+outside M1. Pauses hold queued turns as described with the queued-turn
+scheduler below.
 
 
 The service opens the active project's existing trace and starts the
@@ -224,6 +225,14 @@ and depth are the request's, its actor is `service`/`scheduler`, and its target
 state is the turn ID. After a restart, an in-flight turn is recovered through its
 existing operation, as the [turn dispatch](trace.md#turn-dispatch) table
 describes: it is neither dispatched again nor lost. `scheduler.Options.Admit` is
-the single dispatch gate; the service admits every candidate. The scheduler
-never publishes the librarian's `kb-extract` action; the service reconciles
-that itself, as above.
+the single dispatch gate. The scheduler never publishes the librarian's
+`kb-extract` action; the service reconciles that itself, as above.
+
+The service's gate holds a turn that a pause in `runtime.Effective` covers:
+a `factory` pause, a `project` pause on the active project, or a `workstream`
+pause on the turn's workstream. Chief-of-staff turns are never held, so the
+chief of staff stays reachable while everything is paused. A held turn gets no
+operation and stays queued; a turn already in flight is not interrupted, in
+either pause mode. The gate reads the runtime store on every pass, so after a
+pause is cleared the loop's next periodic pass runs the held turns with no new
+message or operation.
