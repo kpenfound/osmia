@@ -35,9 +35,10 @@ type Options struct {
 	// owns. It is called each time a project's trace opens, at startup and when
 	// a project is added, and replaces any runner adapter in Reconciliation.
 	// With Threads set, the service also dispatches every queued workstream turn
-	// on its own, never more than one turn per thread in flight, replacing
-	// Reconciliation.Schedule. A runtime pause holds new turns on the threads it
-	// covers, except chief-of-staff turns; clearing it lets them run.
+	// on its own, never more than one turn per thread in flight and within the
+	// configured capacity, replacing Reconciliation.Schedule. A runtime pause
+	// holds new turns on the threads it covers, except chief-of-staff turns;
+	// clearing it lets them run.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
 	// Librarian supplies the execution boundary of the librarian's
@@ -399,7 +400,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 			return nil, nil, err
 		}
 		runner.turns = bound
-		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg.Project.ID)})
+		limits := cfg.Capacity
+		limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
+		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg.Project.ID), Capacity: &limits})
 		if err != nil {
 			repository.Close()
 			return nil, nil, err

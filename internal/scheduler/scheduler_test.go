@@ -80,22 +80,42 @@ func must(t *testing.T, err error) {
 
 func (f *fixture) queue(t *testing.T, repo *trace.Repository, agent, turn string) trace.TurnRequest {
 	t.Helper()
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + agent + "_" + turn, Project: project, Workstream: stream, Unit: "unit", At: f.clock.Now(), Actor: owner, Cause: "message_" + turn, Depth: 2},
-		AgentID: agent, ThreadID: "thread_" + agent, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Message " + turn}
-	_, err := repo.EnqueueTurn(context.Background(), req)
+	return f.queueOn(t, repo, stream, agent, turn)
+}
+
+func (f *fixture) queueOn(t *testing.T, repo *trace.Repository, ws config.WorkstreamID, agent, turn string) trace.TurnRequest {
+	t.Helper()
+	th, err := repo.Thread(ws, agent)
+	must(t, err)
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + agent + "_" + turn, Project: project, Workstream: ws, Unit: "unit", At: f.clock.Now(), Actor: owner, Cause: "message_" + turn, Depth: 2},
+		AgentID: agent, ThreadID: th.Identity.ThreadID, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Message " + turn}
+	_, err = repo.EnqueueTurn(context.Background(), req)
 	must(t, err)
 	return req
 }
 
-// dispatched lists the turn operations as agent/turn pairs in event order.
-func dispatched(t *testing.T, repo *trace.Repository) []string {
+// thread creates an agent thread with the given role in ws.
+func (f *fixture) thread(t *testing.T, repo *trace.Repository, ws config.WorkstreamID, id, role string) {
 	t.Helper()
-	ops, err := repo.Operations(stream)
-	must(t, err)
+	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: id, Project: project, Workstream: ws, At: f.clock.Now(), Actor: owner, Cause: "created"}
+	must(t, repo.CreateThread(context.Background(), trace.Agent{Header: h, Role: role, ThreadID: "thread_" + id}))
+}
+
+// dispatched lists the turn operations of the given workstreams, by default
+// the fixture's, as sorted agent/turn pairs.
+func dispatched(t *testing.T, repo *trace.Repository, streams ...config.WorkstreamID) []string {
+	t.Helper()
+	if len(streams) == 0 {
+		streams = []config.WorkstreamID{stream}
+	}
 	var got []string
-	for _, op := range ops {
-		if in, err := thread.DecodeTurn(op.Operation); err == nil {
-			got = append(got, in.Agent+"/"+in.Turn)
+	for _, ws := range streams {
+		ops, err := repo.Operations(ws)
+		must(t, err)
+		for _, op := range ops {
+			if in, err := thread.DecodeTurn(op.Operation); err == nil {
+				got = append(got, in.Agent+"/"+in.Turn)
+			}
 		}
 	}
 	slices.Sort(got)
@@ -116,7 +136,13 @@ func (f turnsFunc) Run(ctx context.Context, p coreadapter.PreparedTurn) (coreada
 // controller, as the service does.
 func (f *fixture) controller(t *testing.T, repo *trace.Repository, turns coreadapter.Turns, admit func(context.Context, Candidate) (bool, error)) *reconcile.Controller {
 	t.Helper()
-	s, err := New(repo, Options{Now: f.clock.Now, Admit: admit})
+	return f.controllerWith(t, repo, turns, Options{Admit: admit})
+}
+
+func (f *fixture) controllerWith(t *testing.T, repo *trace.Repository, turns coreadapter.Turns, options Options) *reconcile.Controller {
+	t.Helper()
+	options.Now = f.clock.Now
+	s, err := New(repo, options)
 	must(t, err)
 	sessions := t.TempDir()
 	d := thread.Dispatcher{Runner: thread.Runner{Store: repo, Turns: turns, Now: f.clock.Now},

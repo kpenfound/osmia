@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -26,9 +27,16 @@ type Candidate struct {
 
 type Options struct {
 	Now func() time.Time
-	// Admit is the single dispatch gate: a candidate it declines stays queued
-	// and is offered again on a later pass. Nil admits every candidate.
+	// Admit is the dispatch gate after Capacity: a candidate it declines, or one
+	// without a free slot, stays queued and is offered again on a later pass.
+	// Nil admits every candidate that fits.
 	Admit func(context.Context, Candidate) (bool, error)
+	// Capacity bounds the turns in flight. Masons, reviewers and committee
+	// members share their role kind's slots across workstreams; every other
+	// role runs one turn at a time per workstream. Each workstream also runs at
+	// most PerWorkstream turns. Chief-of-staff turns take no slot. Nil leaves
+	// dispatch unbounded.
+	Capacity *config.Capacity
 }
 
 // Scheduler publishes the intent to run each thread's next queued turn. The
@@ -40,7 +48,14 @@ type Options struct {
 // opens the trace or while an earlier turn of the same thread is in flight;
 // otherwise the turn can end up with two operations, which the dispatcher
 // still runs once.
+//
+// A turn holds its slots while it is in flight, so a slot is free again once
+// the turn completes, whatever its outcome, and once the turn is interrupted
+// by a restart. Slots are counted from the trace on each pass, and passes of
+// one Scheduler run one at a time; passes of a second scheduler on the same
+// trace can run concurrently with them and overbook.
 type Scheduler struct {
+	mu         sync.Mutex
 	repository *trace.Repository
 	options    Options
 }
@@ -60,6 +75,8 @@ func New(repository *trace.Repository, options Options) (*Scheduler, error) {
 // turn is in flight while it is claimed or while a turn operation names it and
 // the turn has not completed. Pass makes no model call.
 func (s *Scheduler) Pass(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	streams, err := s.repository.Workstreams()
 	if err != nil {
 		return err
@@ -84,10 +101,22 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 			}
 		}
 	}
+	used := usage{roles: map[string]int{}, streams: map[config.WorkstreamID]int{}, local: map[localKey]int{}}
+	for _, stream := range streams {
+		for _, t := range threads[stream] {
+			if inFlight(t, stream, dispatched) {
+				used.add(stream, t.Identity.Role)
+			}
+		}
+	}
 	for _, stream := range streams {
 		for _, t := range threads[stream] {
 			q, ok := next(t)
 			if !ok || dispatched[turnKey{stream, t.Identity.ID, q.Request.TurnID}] {
+				continue
+			}
+			role := t.Identity.Role
+			if !s.fits(used, stream, role) {
 				continue
 			}
 			c := Candidate{Workstream: stream, Thread: t, Turn: q}
@@ -103,9 +132,64 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 			if err := s.dispatch(ctx, c); err != nil {
 				return fmt.Errorf("workstream %s: %w", stream, err)
 			}
+			used.add(stream, role)
 		}
 	}
 	return nil
+}
+
+type usage struct {
+	roles   map[string]int
+	streams map[config.WorkstreamID]int
+	local   map[localKey]int
+}
+
+type localKey struct {
+	workstream config.WorkstreamID
+	role       string
+}
+
+func (u usage) add(stream config.WorkstreamID, role string) {
+	if role == trace.ChiefOfStaff {
+		return
+	}
+	u.roles[role]++
+	u.streams[stream]++
+	u.local[localKey{stream, role}]++
+}
+
+// fits reports whether a turn of role in stream has a free slot.
+func (s *Scheduler) fits(used usage, stream config.WorkstreamID, role string) bool {
+	limits := s.options.Capacity
+	if limits == nil || role == trace.ChiefOfStaff {
+		return true
+	}
+	if used.streams[stream] >= limits.PerWorkstream {
+		return false
+	}
+	switch role {
+	case "mason":
+		return used.roles[role] < limits.Masons
+	case "reviewer":
+		return used.roles[role] < limits.Reviewers
+	case "committee":
+		return used.roles[role] < limits.Committee
+	}
+	return used.local[localKey{stream, role}] < 1
+}
+
+// inFlight reports whether the thread's oldest unfinished turn is claimed or
+// named by a turn operation. A claim a restart interrupted runs nowhere.
+func inFlight(t trace.Thread, stream config.WorkstreamID, dispatched map[turnKey]bool) bool {
+	for _, q := range t.Turns {
+		if q.CompletedAt.IsZero() {
+			if q.Claim != nil {
+				return t.Status != "interrupted"
+			}
+			return dispatched[turnKey{stream, t.Identity.ID, q.Request.TurnID}]
+		}
+	}
+	return false
 }
 
 type turnKey struct {
