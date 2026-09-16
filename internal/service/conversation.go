@@ -69,9 +69,7 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 		return ConversationEntry{}, &APIError{Validation, "text must not be empty"}
 	}
 	cfg := s.current()
-	st, _ := s.store.Effective()
-	name := st.Profiles[trace.ChiefOfStaff]
-	profile, _, err := cfg.Execution(trace.ChiefOfStaff, name)
+	name, profile, err := s.chiefOverride(cfg)
 	if err != nil {
 		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("role %s has no usable profile %q; check osmia profiles", trace.ChiefOfStaff, name)}
 	}
