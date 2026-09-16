@@ -71,7 +71,10 @@ func Seed(clone string) (Map, error) {
 func build(set map[string]bool, rules []rule) Map {
 	var paths []string
 	for p := range set {
-		paths = append(paths, p)
+		// A path whose ID cannot start with a letter or digit has no valid ID.
+		if idPattern.MatchString(ID(p)) {
+			paths = append(paths, p)
+		}
 	}
 	sort.Strings(paths)
 	ids := map[string]string{}

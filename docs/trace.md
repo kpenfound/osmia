@@ -12,7 +12,7 @@ or provide delivery operations.
 workstream manifests retain their identity and creation provenance. `Workstreams`
 returns identities validated against those manifests, including terminal streams.
 The package supplies storage APIs; the service's project registration calls
-`Create`, and lifecycle commands are separate.
+`CreateSeeded`, and lifecycle commands are separate.
 
 ## Files and records
 

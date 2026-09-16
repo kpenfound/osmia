@@ -31,6 +31,7 @@ func TestResolveEntities(t *testing.T) {
 		want  Footprint
 	}{
 		{[]string{"internal.trace.git"}, Footprint{Entities: []string{"internal.trace.git"}, Paths: []string{"internal/trace/git.go"}, Unresolved: []string{}}},
+		{[]string{"INTERNAL.Trace.Git"}, Footprint{Entities: []string{"internal.trace.git"}, Paths: []string{"internal/trace/git.go"}, Unresolved: []string{}}},
 		{[]string{"TRACE"}, Footprint{Entities: []string{"internal.trace", "internal.trace.git", "trace-tests"}, Paths: []string{"internal/trace", "internal/trace/*_test.go", "internal/trace/git.go"}, Unresolved: []string{}}},
 		{[]string{"internal"}, Footprint{Entities: []string{"internal", "internal.trace", "internal.trace.git", "trace-tests"}, Paths: []string{"internal", "internal/trace", "internal/trace/*_test.go", "internal/trace/git.go"}, Unresolved: []string{}}},
 		{[]string{"Documentation", "nope", "go-tests", "team", "missing"}, Footprint{Entities: []string{"docs", "go-tests"}, Paths: []string{"**/*_test.go", "README.md", "docs"}, Unresolved: []string{"nope", "team", "missing"}}},

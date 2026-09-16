@@ -390,3 +390,56 @@ func TestSeedIDCollisionsAndAliases(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestSeedSkipsPathsWithoutValidID(t *testing.T) {
+	clone := t.TempDir()
+	writeTree(t, clone, map[string]string{
+		"CODEOWNERS":         "/_config/ @cfg\n/src/_gen/ @gen\n",
+		"_site/":             "",
+		"__tests__/":         "",
+		"@types/":            "",
+		"élan/":              "",
+		"-dash/":             "",
+		"_config/":           "",
+		"packages/@types/":   "",
+		"packages/_private/": "",
+		"src/_gen/":          "",
+		"src/ok/":            "",
+	})
+	m, err := Seed(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Encode(m); err != nil {
+		t.Fatalf("seed does not encode: %v", err)
+	}
+	var got []string
+	for _, e := range m.Entities {
+		got = append(got, e.ID+"="+e.Primary())
+	}
+	want := []string{"packages=packages", "packages.-types=packages/@types", "packages.-private=packages/_private", "src=src", "src.-gen=src/_gen"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestSeedIgnoresCodeownersOutsideClone(t *testing.T) {
+	base := t.TempDir()
+	outside := filepath.Join(base, "CODEOWNERS")
+	if err := os.WriteFile(outside, []byte("* @outside\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	clone := filepath.Join(base, "clone")
+	writeTree(t, clone, map[string]string{".github/": "", "CODEOWNERS": "* @root\n", "docs/": ""})
+	if err := os.Symlink(outside, filepath.Join(clone, ".github", "CODEOWNERS")); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Seed(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs, ok := m.Lookup("docs")
+	if !ok || !reflect.DeepEqual(docs.Owners, []string{"@root"}) {
+		t.Fatalf("docs: %#v", m)
+	}
+}

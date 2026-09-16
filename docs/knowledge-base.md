@@ -79,8 +79,9 @@ clone.
    `crates`, `internal`, `libs`, `packages`, `pkg` and `services`. Hidden
    directories (including `.git`), symlinks and names containing glob
    characters are skipped.
-3. **Literal rules.** A CODEOWNERS rule without wildcards that names an
-   existing, visible path adds that path as an entity.
+3. **Literal rules.** An anchored CODEOWNERS rule (one with a leading or inner
+   `/`) without wildcards that names an existing, visible path adds that path
+   as an entity. Unanchored rules only set owners.
 
 For each entity:
 
@@ -101,6 +102,12 @@ An entity's ID is derived from its primary path: lowercase it, turn `/` into
 example, `internal/trace` becomes `internal.trace` and `Docs/API_v2` becomes
 `docs.api-v2`. When two paths derive the same ID, the one that sorts first
 keeps it and the others get `-2`, `-3` and so on, in path order.
+
+A path whose derived ID would not start with a letter or digit, such as
+`_site`, `@types` or `élan`, gets no entity in the seed. Its files resolve
+through the nearest seeded entity that covers them, or come back unresolved. A
+nested path such as `packages/@types` is kept, because its ID
+(`packages.-types`) starts with the parent's name.
 
 `kb.Merge(existing, seed)` regenerates a map without changing identities.
 
