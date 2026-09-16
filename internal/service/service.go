@@ -35,6 +35,10 @@ type Options struct {
 	// a project is added, and replaces any runner adapter in Reconciliation.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
+	// Librarian supplies the execution boundary of the librarian's
+	// knowledge-base extraction turns. Without it every extraction fails with
+	// a recorded reason and the project stays usable.
+	Librarian *Librarian
 }
 
 // activeProject is the runtime state of the configured project: its open trace
@@ -274,7 +278,7 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	if !cfg.HasProject() {
 		return nil, nil
 	}
-	repository, controller, err := openReconciliation(cfg, s.options.Reconciliation, s.options.Threads)
+	repository, controller, err := s.openReconciliation(cfg)
 	if err != nil || repository == nil {
 		return nil, err
 	}
@@ -318,8 +322,11 @@ func (s *Service) stop(active *activeProject) error {
 }
 
 // openReconciliation leaves trace creation to project registration; an existing
-// trace must open cleanly before the service can report readiness.
-func openReconciliation(cfg *config.Config, options reconcile.Options, threads func(*trace.Repository) (coreadapter.Reconciler, error)) (*trace.Repository, *reconcile.Controller, error) {
+// trace must open cleanly before the service can report readiness. The runner
+// boundary is served by the bound thread reconciler for turns and by the
+// service's extractor for knowledge-base extraction.
+func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, error) {
+	options, threads := s.options.Reconciliation, s.options.Threads
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
 	if err != nil {
 		return nil, nil, err
@@ -339,19 +346,21 @@ func openReconciliation(cfg *config.Config, options reconcile.Options, threads f
 	if options.Worker == "" {
 		options.Worker = "local-operations"
 	}
+	adapters := maps.Clone(options.Adapters)
+	if adapters == nil {
+		adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{}
+	}
+	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: &extractor{s: s, repository: repository}}
 	if threads != nil {
-		runner, err := threads(repository)
+		bound, err := threads(repository)
 		if err != nil {
 			repository.Close()
 			return nil, nil, err
 		}
-		adapters := maps.Clone(options.Adapters)
-		if adapters == nil {
-			adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{}
-		}
-		adapters[coreadapter.RunnerBoundary] = runner
-		options.Adapters = adapters
+		runner.turns = bound
 	}
+	adapters[coreadapter.RunnerBoundary] = runner
+	options.Adapters = adapters
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
 		repository.Close()

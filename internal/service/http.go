@@ -48,7 +48,7 @@ func failWith(w http.ResponseWriter, api *APIError) {
 	switch api.Code {
 	case Validation:
 		status = 422
-	case NoProject, ProjectActive, CharterEmpty:
+	case NoProject, ProjectActive, CharterEmpty, Conflict:
 		status = 409
 	case NotFound:
 		status = 404
@@ -78,6 +78,12 @@ func (s *Service) configuration() ConfigResponse {
 			view.CharterState = &state
 		} else if !errors.Is(err, errNoTrace) && !errors.Is(err, errNoActiveProject) {
 			out.Diagnostics = append(out.Diagnostics, Diagnostic{"charter", Internal, "cannot read or record the charter; check " + view.Charter + " and the trace repository"})
+		}
+		extraction, err := s.projectExtraction(cfg.Project.ID)
+		if err == nil {
+			view.Extraction = extraction
+		} else if !errors.Is(err, errNoTrace) && !errors.Is(err, errNoActiveProject) {
+			out.Diagnostics = append(out.Diagnostics, Diagnostic{"extraction", Internal, "cannot read the knowledge-base extraction state; check the trace repository at " + view.Trace})
 		}
 		out.Project = &view
 	} else {
@@ -152,6 +158,19 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			result, api = s.removeProject(v)
 		}
+		if api != nil {
+			failWith(w, api)
+			return
+		}
+		respond(w, 200, result)
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/projects/extract" {
+		var v ProjectExtractRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		result, api := s.extractProject(r.Context(), v)
 		if api != nil {
 			failWith(w, api)
 			return

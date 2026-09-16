@@ -1,8 +1,10 @@
-# Local entity map
+# Knowledge base
 
-`internal/kb` owns `kb/entities.json` in a project trace: the map from how
-people talk about the code to where it is. Footprints resolve through this file
-alone, with or without Hearsay.
+`internal/kb` owns the local knowledge base of a project trace: the entity map
+in `kb/entities.json`, the map from how people talk about the code to where it
+is, and the prose the librarian writes per subsystem in `kb/<subsystem>.md`.
+Footprints resolve through the entity map alone, with or without Hearsay. The
+[extraction](#extraction) pass writes both.
 
 ## Schema
 
@@ -156,5 +158,73 @@ path `kb/entities.json` (`trace.EntitiesDocument` and `trace.EntitiesPath`).
 
 `osmia project add` seeds the map from the clone and creates the trace with
 `CreateSeeded`. A registration that is interrupted before the trace's first
-commit seeds again when it is finished. The librarian's extraction pass is
-separate.
+commit seeds again when it is finished.
+
+## Extraction
+
+The librarian's extraction pass writes the knowledge base from the clone:
+prose per subsystem and a refined entity map. `osmia project add` requests
+the first pass; `osmia project extract <project-id>` (API:
+`POST /v1/projects/extract`) requests another. Each pass is a durable
+`kb-extract` operation in the project's librarian workstream, a workstream
+whose ID is derived from the project ID and which holds the `agent_librarian`
+thread. The service's reconciliation loop runs it; the request returns as soon
+as the operation is recorded, and `osmia status` follows it.
+
+### The turn
+
+A pass is one turn of the librarian thread, run through the thread runner and
+the [turn isolation](isolation.md) path. The service stages a workspace under
+`<root>/librarian/<project-id>/<turn>/workspace` and gives the turn a private
+copy of it:
+
+| Path in the view | Content |
+| --- | --- |
+| `repo/` | The clone's tracked regular files, listed with `git ls-files`. Untracked files, symlinks and `.git` are never copied, and the clone is never written. Changes the librarian makes there are discarded. |
+| `kb/` | The current knowledge base: the latest recorded `entities.json` and every recorded `<subsystem>.md`. |
+| `seed/entities.json` | `kb.Seed` of the clone, canonically encoded. |
+| `output/` | Empty. The librarian writes the complete knowledge base here. |
+
+The librarian gets `file_read`, `file_write`, `notes_read` and `notes_write`
+and nothing else: no execute, network or VCS capability. The prompt asks for
+`output/kb/<subsystem>.md` per subsystem (how it is built, the tests that
+matter, what breaks when you touch what, and the decisions behind it) and
+`output/kb/entities.json`, the entity map refined from the seed with stable
+IDs, and says that `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md` are inputs
+it must not repeat. The turn's profile is the librarian's effective binding at
+the time the turn is accepted; its sandbox settings come from the role's
+configuration.
+
+### Output and recording
+
+When the turn ends, the service copies `output/` from the view to
+`<root>/librarian/<project-id>/<turn>/output` and validates it with
+`kb.ReadOutput`. Subsystem names match `^[a-z0-9][a-z0-9-]*$` and are at most
+64 characters, every prose file lies directly in `output/kb/`, prose is not
+empty, `output/kb/entities.json` is present and passes `kb.Validate`, and
+nothing else is in `output/`. Every problem is reported at once.
+
+Valid output is recorded with `trace.RecordDocuments` as one commit of
+librarian-authored `Document` revisions (actor `agent`/`agent_librarian`,
+cause the operation ID): a revision of `subsystem-<name>` at
+`kb/<subsystem>.md` for every produced subsystem, an empty revision for every
+recorded subsystem the pass no longer produced, which deletes its file, and a
+revision of `kb-entities` in canonical form. Either every file lands or none
+does, and the files under `kb/` match the latest pass while history keeps
+every earlier revision. The write is keyed by the operation ID: a retry after
+an interruption finds the recorded revisions and records nothing again.
+
+Invalid output, a failed turn and a service without a librarian runner are
+recorded as a failed extraction with the reason; the previous knowledge base
+stays in place. A service stop during the turn leaves it interrupted; the next
+start abandons that turn and starts another, up to three per extraction, after
+which the extraction fails with the count. Storage failures leave the
+operation pending for the reconciliation loop to retry.
+
+### Status and re-runs
+
+`osmia status` shows the latest extraction: its number, `pending`, `running`,
+`succeeded` or `failed`, the time of its last recorded activity and the reason
+when it failed or is waiting to retry. A new extraction is refused while the
+latest is pending or running. Each re-run is a new turn of the same librarian
+thread, so it continues the thread's owned log.

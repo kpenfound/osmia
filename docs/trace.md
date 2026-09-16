@@ -21,7 +21,7 @@ rules, and records it as revision 1 of the `charter` document, plus
 `kb/entities.json`, `kb/`, `notes/` and `workstreams/`. `Create` writes
 `kb/entities.json` as `{}` without a document revision. `CreateSeeded` takes an
 entity map the caller has already validated and commits it as revision 1 of
-the `kb-entities` document. The [local entity map](knowledge-base.md) reference
+the `kb-entities` document. The [knowledge base](knowledge-base.md) reference
 describes the file. Workstream creation initializes `handed/`, `shed/`, `amendments/`,
 `questions/`, `units/` and `agents/`, plus the empty document, transition and cost
 logs. Spec and plan files appear when their first document revision is appended.
@@ -59,6 +59,16 @@ JSONL entries, writes the latest document content to its ordinary file and commi
 the affected files. For example, changing a spec retains both full document
 revisions in `documents.jsonl` and both versions of `spec.md` in Git history.
 There is no terminal-history deletion operation.
+
+`RecordDocuments(ctx, documents)` records several project document revisions
+as one commit through the journaled publication boundary, so after a failure
+or an interruption either all of them are recorded or none is. Every revision
+is checked against the recorded history before anything is written; the
+charter is refused because the owner edits it. A `kb/<subsystem>.md` revision
+with empty content records the subsystem's removal: the revision is kept in
+`documents.jsonl` and the file is deleted from the tree and from disk. The
+[knowledge-base extraction](knowledge-base.md#extraction) records each pass
+this way.
 
 `Read[trace.Document](repository, workstreamID)` enumerates typed revisions;
 `Get[trace.Document](repository, workstreamID, id, revision)` retrieves one.
@@ -156,8 +166,9 @@ unfinished materialization. Unreferenced preparation objects are never state.
 
 An error after ref publication can mean the transaction committed. Retry its
 original identity to discover the result, rather than inventing a new identity.
-The journal only authorizes recovery of workflow, transition, agent identity and
-owned turn-log files; unrelated append failures and corrupt files remain diagnostic errors. Durability assumes a
+The journal only authorizes recovery of workflow, transition, agent identity,
+owned turn-log and private notes files, and of project documents other than
+the charter; unrelated append failures and corrupt files remain diagnostic errors. Durability assumes a
 local filesystem supporting atomic rename and file/directory synchronization.
 
 ## Delivery leases and wakeups
@@ -285,7 +296,12 @@ service session with no durable response is exposed as `interrupted`, with its
 reservation, session directory and queued successors intact. It cannot be stolen
 or blindly rerun, and stale service sessions cannot submit a new result. A
 captured result remains `captured` and can be completed after restart without a
-backend call. The interruption recovery policy is separate. As with operation
+backend call. `AbandonTurn` is the recovery for a reservation a previous
+service session never captured a result for: the exclusive repository lock
+proves that session is gone, so the turn is completed with an `interrupted`
+response carrying the claim's start time and session directory, and the
+thread's next request becomes eligible. It refuses the current session's own
+reservation, a captured turn and an unreserved one. As with operation
 workers, callers must join turn execution before closing the repository handle.
 
 `internal/thread.Runner` joins the queue to `coreadapter.Turns`. `RunNext` accepts

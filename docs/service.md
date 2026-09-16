@@ -43,6 +43,7 @@ client to release idle connections. API version 1 uses snake_case JSON fields.
 | GET | `/runtime` | Effective runtime state and diagnostics |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
+| POST | `/projects/extract` | `ProjectExtractRequest`: project; returns `ExtractionResponse` |
 | POST | `/handin` | `HandInRequest`: project, paths; checks the charter, then returns `unsupported` |
 | PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason, source |
 | DELETE | `/runtime/pause` | `ClearPauseRequest`: scope, project, workstream |
@@ -80,7 +81,7 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 | --- | --- | --- |
 | `malformed_input` | 400 | Malformed, ambiguous, unknown-field or oversized JSON |
 | `validation` | 422 | Invalid override or unavailable reference |
-| `conflict` | 409 | Runtime file changed outside the store |
+| `conflict` | 409 | Runtime file changed outside the store, or an extraction is requested while one is pending or running |
 | `unsupported` | 501 | Unknown path/method or later-milestone operation, including POST `/reload` |
 | `restart_required` | 409 | PUT `/config/root` or `/config/listen` |
 | `unavailable` | 503 | Service shutting down; also the client's code for transport failure |
@@ -134,6 +135,18 @@ the file. A configured project with no trace repository has no charter state
 and no charter diagnostic. The project view returned by `POST` and `DELETE /v1/projects` carries
 no charter state.
 
+`/config` also reports the project's latest
+[knowledge-base extraction](knowledge-base.md#extraction) as `extraction`:
+its number, its `state` (`pending`, `running`, `succeeded` or `failed`), the
+time of its last recorded activity and, when it failed or is waiting to
+retry, the `reason`. It is absent for a project whose trace has no librarian
+workstream, and an unreadable state adds an `extraction` diagnostic with code
+`internal`. Registration requests extraction 1; `POST /v1/projects/extract`
+requests the next one and returns it as `pending`. A malformed project ID
+returns `validation`, an ID that is not the active project `not_found`, a
+project without a trace `internal`, and a request while an extraction is
+pending or running `conflict`, naming the extraction to wait for.
+
 `POST /v1/handin` takes a project ID and a list of paths. The service does not
 check the paths; `osmia handin` sends them as absolute paths. A malformed
 project ID returns `validation`. An ID that is not the active project returns
@@ -144,7 +157,14 @@ message naming the project and its `charter.md`. With rules, hand-in returns
 
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
 opened, each time a project's trace opens: at startup and when a project is
-added. It replaces any runner adapter in `Options.Reconciliation`. The [thread dispatcher](trace.md#turn-dispatch) is the
+added. It replaces any runner adapter in `Options.Reconciliation` for every
+runner operation except the librarian's `kb-extract` action, which the service
+reconciles itself. The [thread dispatcher](trace.md#turn-dispatch) is the
 intended binding; it receives the service-owned repository handle, which callers
 must not close. The [M1 demonstration](m1-demonstration.md) uses this path with
 fake engines.
+
+`Options.Librarian` supplies the isolation engine and MCP host factory the
+librarian's extraction turns run in. Without it every extraction fails with a
+recorded reason, so a service without an enforcing engine still registers
+projects and reports the failure in status.

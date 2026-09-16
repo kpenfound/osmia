@@ -322,6 +322,53 @@ func (r *Repository) CaptureTurn(ctx context.Context, token string, response Tur
 	return ErrClaim
 }
 
+// AbandonTurn completes a turn that a previous service session reserved and
+// never captured a result for. The exclusive repository lock proves that
+// session is gone, so the turn is recorded as interrupted with the claim's
+// start time and session directory, and the thread becomes eligible for its
+// next request. A turn reserved by this session, one with a captured result,
+// and one that is not reserved are refused with ErrClaim.
+func (r *Repository) AbandonTurn(ctx context.Context, stream config.WorkstreamID, agent, turn string, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if at.IsZero() {
+		return fmt.Errorf("timestamp required")
+	}
+	log, _, err := r.loadWorkflow(stream)
+	if err != nil {
+		return err
+	}
+	t, ok := log.Threads[agent]
+	if !ok {
+		return os.ErrNotExist
+	}
+	for i, q := range t.Turns {
+		if q.Request.TurnID != turn {
+			continue
+		}
+		if q.Claim == nil || q.Response != nil || q.Claim.ServiceSession == r.session || t.Active != turn {
+			return ErrClaim
+		}
+		if at.Before(q.Claim.At) {
+			at = q.Claim.At
+		}
+		req := q.Request
+		h := req.Header
+		h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", EventID(req.ID, "response"), at, Actor{Kind: "service", ID: "thread-recovery"}
+		response := TurnResponse{Header: h, AgentID: agent, ThreadID: req.ThreadID, TurnID: turn, RequestID: req.ID, RequestRevision: req.Revision,
+			Result:  coreadapter.SessionResult{SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, Cancelled: true, IsError: true, ErrorSubtype: "interrupted"},
+			Failure: "the service stopped before the turn captured a result"}
+		q.Response, q.CompletedAt = &response, at
+		t.Turns[i], t.Active, t.Status = q, "", q.Status()
+		log.Threads[agent] = t
+		return r.saveThread(ctx, stream, log, response)
+	}
+	return ErrClaim
+}
+
 // CompleteTurn releases the reservation only after result capture. It can finish
 // a captured turn after restart without running the backend again.
 func (r *Repository) CompleteTurn(ctx context.Context, stream config.WorkstreamID, agent, turn, token string, at time.Time) error {

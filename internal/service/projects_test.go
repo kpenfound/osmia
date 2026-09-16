@@ -176,6 +176,11 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	if len(bound) != 1 || bound[0] != id || s.active == nil || s.active.repository.Project() != id {
 		t.Fatalf("activation: bound=%v active=%v", bound, s.active)
 	}
+	// Registration starts the librarian's extraction; without a runner it
+	// fails, is reported, and leaves the project usable.
+	if x := awaitExtraction(t, c); x.Extraction != 1 || x.State != "failed" || !strings.Contains(x.Reason, "no agent runner") {
+		t.Fatalf("extraction without a runner: %+v", x)
+	}
 	// The runtime store resolves against the new project without a restart.
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: id}, Mode: "soft", Source: "operator"})
 	mutation(t, c, "PUT", "priority", PriorityRequest{Project: id, Workstreams: []config.WorkstreamID{}})
@@ -392,7 +397,14 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				if string(charter) != trace.CharterTemplate {
 					t.Fatalf("charter: %q", charter)
 				}
-				if out := demoGit(t, filepath.Dir(root), "--git-dir="+filepath.Join(root, "projects", string(id), ".git"), "rev-list", "--count", "HEAD"); strings.TrimSpace(out) != "1" {
+				// Recovery repeats no commit: the creation, the librarian's
+				// workstream and thread, the extraction request and its five
+				// reconciliation actions (claim, observe, effect, result and
+				// acknowledgement) are each recorded once.
+				if x := awaitExtraction(t, c); x.State != "failed" {
+					t.Fatalf("extraction: %+v", x)
+				}
+				if out := demoGit(t, filepath.Dir(root), "--git-dir="+filepath.Join(root, "projects", string(id), ".git"), "rev-list", "--count", "HEAD"); strings.TrimSpace(out) != "9" {
 					t.Fatalf("trace history: %s", out)
 				}
 				// The seed is committed with the trace, so recovery never leaves a
