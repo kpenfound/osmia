@@ -71,6 +71,7 @@ type workflowLog struct {
 	Transactions []Transaction     `json:"transactions"`
 	Deliveries   []DeliveryAction  `json:"deliveries"`
 	Operations   []OperationAction `json:"operations,omitempty"`
+	Threads      map[string]Thread `json:"threads,omitempty"`
 }
 
 type workflowView struct {
@@ -220,6 +221,9 @@ func (r *Repository) loadWorkflow(stream config.WorkstreamID) (workflowLog, *wor
 	}
 	if len(found) != len(v.transactions) {
 		return log, nil, fmt.Errorf("workflow transition missing from trace")
+	}
+	if err := validateThreads(log.Threads, records, r.project, stream); err != nil {
+		return log, nil, err
 	}
 	return log, v, nil
 }

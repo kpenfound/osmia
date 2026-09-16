@@ -461,6 +461,24 @@ func (r *Repository) Append(ctx context.Context, v Record) error {
 			return fmt.Errorf("unknown workstream %s", id)
 		}
 	}
+	var agentID string
+	switch rec := v.(type) {
+	case Agent:
+		agentID = rec.ID
+	case TurnRequest:
+		agentID = rec.AgentID
+	case TurnResponse:
+		agentID = rec.AgentID
+	}
+	if agentID != "" {
+		log, _, err := r.loadWorkflow(v.header().Workstream)
+		if err != nil {
+			return err
+		}
+		if _, managed := log.Threads[agentID]; managed {
+			return fmt.Errorf("%w: thread records require queue transactions", ErrConflict)
+		}
+	}
 	if t, ok := v.(Transition); ok {
 		_, view, err := r.loadWorkflow(t.Workstream)
 		if err != nil {

@@ -165,7 +165,9 @@ func (r *Repository) recoverPublication(ctx context.Context) error {
 	seen := map[string]bool{}
 	for _, name := range p.Paths {
 		parts := strings.Split(name, "/")
-		if len(parts) != 3 || parts[0] != "workstreams" || (parts[2] != "workflow.json" && parts[2] != "events.jsonl") || seen[name] {
+		workflowPath := len(parts) == 3 && (parts[2] == "workflow.json" || parts[2] == "events.jsonl")
+		agentPath := len(parts) == 5 && parts[2] == "agents" && key(parts[3]) && (parts[4] == "identity.jsonl" || parts[4] == "log.jsonl")
+		if (!workflowPath && !agentPath) || parts[0] != "workstreams" || seen[name] {
 			return fmt.Errorf("invalid workflow publication path %q", name)
 		}
 		if _, err := config.ParseWorkstreamID(parts[1]); err != nil {
