@@ -600,6 +600,10 @@ func (e *extractor) stage(ctx context.Context, clone, workspace string) error {
 	if err := copyTracked(ctx, clone, filepath.Join(workspace, "repo")); err != nil {
 		return err
 	}
+	seed, err := kb.Seed(filepath.Join(workspace, "repo"))
+	if err != nil {
+		return err
+	}
 	current, err := kb.Load(e.repository)
 	if err != nil {
 		return err
@@ -621,10 +625,6 @@ func (e *extractor) stage(ctx context.Context, clone, workspace string) error {
 				return err
 			}
 		}
-	}
-	seed, err := kb.Seed(filepath.Join(workspace, "repo"))
-	if err != nil {
-		return err
 	}
 	data, err := kb.Encode(seed)
 	if err != nil {
@@ -649,6 +649,20 @@ func latestDocuments(docs []trace.Document) []trace.Document {
 		out = append(out, latest[id])
 	}
 	return out
+}
+
+// seedTracked seeds the entity map from the clone's tracked files alone, the
+// same input the librarian's staged copy holds.
+func seedTracked(ctx context.Context, clone string) (kb.Map, error) {
+	dir, err := os.MkdirTemp("", "osmia-seed-")
+	if err != nil {
+		return kb.Map{}, err
+	}
+	defer os.RemoveAll(dir)
+	if err := copyTracked(ctx, clone, dir); err != nil {
+		return kb.Map{}, err
+	}
+	return kb.Seed(dir)
 }
 
 // copyTracked copies the clone's tracked regular files into dst. Git only
