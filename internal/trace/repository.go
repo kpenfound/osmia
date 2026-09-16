@@ -104,6 +104,16 @@ func (r *Repository) Close() error {
 }
 func (r *Repository) Project() config.ProjectID { return r.project }
 
+// CharterTemplate is the initial charter.md content of a new project trace. The
+// owner replaces it with numbered rules before handing in work.
+const CharterTemplate = `# Charter
+
+Rules you hold as a contributor to this project, one numbered rule per line so
+plans and reviews can cite them. Replace this placeholder before handing in work.
+
+1.
+`
+
 // Create initializes a dedicated local repository in an existing configuration
 // directory or a new project directory. It refuses any existing trace or Git metadata.
 func Create(ctx context.Context, root config.Root, project config.Project, at time.Time, actor Actor) (*Repository, error) {
@@ -180,7 +190,7 @@ func Create(ctx context.Context, root config.Root, project config.Project, at ti
 	for _, f := range []struct {
 		name string
 		data []byte
-	}{{"project.json", append(data, '\n')}, {"charter.md", nil}, {"kb/entities.json", []byte("{}\n")}, {"documents.jsonl", nil}} {
+	}{{"project.json", append(data, '\n')}, {"charter.md", []byte(CharterTemplate)}, {"kb/entities.json", []byte("{}\n")}, {"documents.jsonl", nil}} {
 		if err := r.writeFile(f.name, f.data); err != nil {
 			return nil, err
 		}

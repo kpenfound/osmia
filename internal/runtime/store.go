@@ -50,6 +50,8 @@ var ErrConflict = errors.New("runtime changed outside this store")
 // Inputs contains a validated config and the active project's persisted keys.
 // Workstreams must come from the record repository, never display names or a
 // directory scan. The store copies inputs so callers can safely replace them.
+// Without an active project every project reference is stale and no
+// project-scoped override can be stored.
 type Inputs struct {
 	Config      *config.Config
 	Workstreams []config.WorkstreamID
@@ -116,11 +118,15 @@ func copyInputs(in Inputs) (Inputs, error) {
 		return Inputs{}, fmt.Errorf("configuration required")
 	}
 	c := *in.Config
-	if err := config.CheckProjectIDs(c.Project.ID); err != nil {
-		return Inputs{}, err
-	}
-	if len(c.ActiveProjects) != 1 || c.ActiveProjects[0] != string(c.Project.ID) {
-		return Inputs{}, fmt.Errorf("one matching active project required")
+	if c.HasProject() {
+		if err := config.CheckProjectIDs(c.Project.ID); err != nil {
+			return Inputs{}, err
+		}
+		if len(c.ActiveProjects) != 1 || c.ActiveProjects[0] != string(c.Project.ID) {
+			return Inputs{}, fmt.Errorf("one matching active project required")
+		}
+	} else if len(c.ActiveProjects) != 0 || len(in.Workstreams) != 0 {
+		return Inputs{}, fmt.Errorf("workstreams and active identities require a loaded project")
 	}
 	if err := config.CheckWorkstreamIDs(in.Workstreams...); err != nil {
 		return Inputs{}, err

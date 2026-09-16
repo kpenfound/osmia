@@ -22,6 +22,8 @@ func respond(w http.ResponseWriter, status int, value any) {
 func fail(w http.ResponseWriter, code Code) {
 	status, message := http.StatusInternalServerError, "operation failed"
 	switch code {
+	case NoProject:
+		status, message = 409, "no project is configured; add one with osmia project add"
 	case Malformed:
 		status, message = 400, "expected one JSON object with known, unique fields"
 	case Validation:
@@ -37,12 +39,41 @@ func fail(w http.ResponseWriter, code Code) {
 	}
 	respond(w, status, ErrorResponse{APIError{code, message}})
 }
+
+// failWith reports a project operation error with the message the operation
+// composed: field names, identities and paths the caller supplied, never raw
+// file contents or parser output.
+func failWith(w http.ResponseWriter, api *APIError) {
+	status := http.StatusInternalServerError
+	switch api.Code {
+	case Validation:
+		status = 422
+	case NoProject, ProjectActive:
+		status = 409
+	}
+	respond(w, status, ErrorResponse{*api})
+}
+func noProject(field string) Diagnostic {
+	return Diagnostic{field, NoProject, "no project is configured; add one with osmia project add"}
+}
 func digest(c *config.Config) string {
 	b, _ := json.Marshal(c)
 	return fmt.Sprintf("%x", sha256.Sum256(b))
 }
 func (s *Service) configuration() ConfigResponse {
-	out := ConfigResponse{Root: s.cfg.Root.String(), Digest: digest(s.cfg), Effective: s.cfg, Diagnostics: []Diagnostic{}}
+	s.mu.Lock()
+	cfg, pending := s.cfg, s.pending
+	s.mu.Unlock()
+	out := ConfigResponse{Root: cfg.Root.String(), Digest: digest(cfg), Effective: cfg, Diagnostics: []Diagnostic{}}
+	if cfg.HasProject() {
+		view := projectView(cfg.Root, cfg.Project)
+		out.Project = &view
+	} else {
+		out.Diagnostics = append(out.Diagnostics, noProject("active_projects"))
+	}
+	if pending != nil {
+		out.Diagnostics = append(out.Diagnostics, Diagnostic{"projects", Internal, "an interrupted project registration is incomplete; run osmia project add again to finish it, or inspect project-add.json under the root"})
+	}
 	current, err := config.Load(s.options.Config)
 	if err != nil {
 		out.Diagnostics = append(out.Diagnostics, Diagnostic{"configuration", Validation, "disk configuration is invalid or unreadable; loaded configuration retained"})
@@ -54,6 +85,9 @@ func (s *Service) configuration() ConfigResponse {
 func (s *Service) runtimeView() RuntimeResponse {
 	state, ds := s.store.Effective()
 	out := RuntimeResponse{Effective: state, Diagnostics: []Diagnostic{}}
+	if !s.current().HasProject() {
+		out.Diagnostics = append(out.Diagnostics, noProject("project"))
+	}
 	for _, d := range ds {
 		field := d.Field
 		if strings.HasPrefix(field, "profiles.") {
@@ -86,6 +120,31 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPut && (r.URL.Path == Prefix+"/config/root" || r.URL.Path == Prefix+"/config/listen") {
 		fail(w, RestartRequired)
+		return
+	}
+	if r.URL.Path == Prefix+"/projects" && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {
+		var (
+			result ProjectResponse
+			api    *APIError
+		)
+		if r.Method == http.MethodPost {
+			var v ProjectAddRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			result, api = s.addProject(r.Context(), v)
+		} else {
+			var v ProjectRemoveRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			result, api = s.removeProject(v)
+		}
+		if api != nil {
+			failWith(w, api)
+			return
+		}
+		respond(w, 200, result)
 		return
 	}
 	var err error

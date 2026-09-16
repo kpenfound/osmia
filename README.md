@@ -19,8 +19,8 @@ pinned dependency and records upstream capability gaps.
 The [turn isolation reference](docs/isolation.md) documents service-owned file
 views, role grants and fail-closed host/container execution requirements.
 
-The [M1 configuration reference](docs/configuration.md) documents the supported
-loader schema, defaults and local root layout.
+The [configuration reference](docs/configuration.md) documents the supported
+loader schema, defaults, local root layout and project registration.
 
 The [trace repository reference](docs/trace.md) documents typed M1 records,
 revision history, atomic workflow transactions, durable outbox leases, local
@@ -36,5 +36,6 @@ versioned M1 endpoints and the in-process client.
 The [M1 demonstration](docs/m1-demonstration.md) runs a durable role thread
 across a service restart with fake engines and explains how to inspect its trace.
 
-The [M1 command line](docs/cli.md) documents the foreground service and thin local
-operator clients, including JSON output and exit codes.
+The [command line](docs/cli.md) documents the foreground service, project
+registration and thin local operator clients, including JSON output and exit
+codes.

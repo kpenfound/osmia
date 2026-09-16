@@ -1,7 +1,9 @@
 # M1 runtime overrides
 
 `internal/runtime.Open` takes a configuration from `config.Load` and the active
-project's known persisted workstream IDs. It opens `runtime.json` under that
+project's known persisted workstream IDs. Without an active project the list is
+empty, every project reference is stale, and project-scoped overrides are
+rejected until `Resolve` supplies the registered project. It opens `runtime.json` under that
 configuration's resolved root. The record repository supplies workstream IDs;
 names and directory discovery are not identity authorities. An absent file means
 empty overrides and is not created until the first successful mutation. The root

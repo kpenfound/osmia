@@ -163,7 +163,7 @@ func TestUsageAndFailures(t *testing.T) {
 	if code != 3 || out != "" || !strings.Contains(diag, "osmia serve") {
 		t.Fatalf("%d %s %s", code, out, diag)
 	}
-	if !strings.Contains(successful(t, root, "--help"), "M1") {
+	if !strings.Contains(successful(t, root, "--help"), "project add") {
 		t.Fatal("help")
 	}
 }

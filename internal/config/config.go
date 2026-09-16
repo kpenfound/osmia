@@ -76,8 +76,8 @@ func fieldError(path, field, reason string) error {
 	return fmt.Errorf("%s: %s: %s", path, field, reason)
 }
 
-// Load returns nil on every failure. Both files are required, and only the
-// explicitly active project is read; archived directories are not activated.
+// Load returns nil on every failure. The top-level file is required, and only
+// the explicitly active project is read; archived directories are not activated.
 func Load(options Options) (*Config, error) {
 	root, err := ResolveRoot(options.Root, options.Home)
 	if err != nil {
@@ -106,8 +106,8 @@ func Load(options Options) (*Config, error) {
 	if err := CheckProjectIDs(ids...); err != nil {
 		return nil, fieldError(path, "active_projects", err.Error())
 	}
-	if len(ids) != 1 {
-		return nil, fieldError(path, "active_projects", "M1 requires exactly one active project; multi-project operation is unsupported")
+	if len(ids) > 1 {
+		return nil, fieldError(path, "active_projects", "at most one active project is supported; multi-project operation is unsupported")
 	}
 	if !md.IsDefined("listen", "socket") {
 		c.Listen.Socket, err = root.Socket()
@@ -141,47 +141,98 @@ func Load(options Options) (*Config, error) {
 	if err := c.validateProfiles(path, md); err != nil {
 		return nil, err
 	}
-	projectPath, err := root.ProjectConfig(ids[0])
+	if len(ids) == 0 {
+		return c, nil
+	}
+	p, err := loadProject(root, ids[0], options.Home, c.Capacity.PerWorkstream)
 	if err != nil {
 		return nil, err
-	}
-	p := Project{BaseBranch: "main", Landing: "commit-per-unit", Capacity: ProjectCapacity{c.Capacity.PerWorkstream}}
-	if _, err := decode(projectPath, &p, true); err != nil {
-		return nil, err
-	}
-	p.ID = ids[0]
-	if p.Version != 1 {
-		return nil, fieldError(projectPath, "version", "must be 1 (no migrations supported)")
-	}
-	for _, value := range []struct{ field, s string }{{"upstream", p.Upstream}, {"fork", p.Fork}} {
-		if !repositoryName.MatchString(value.s) || strings.HasSuffix(value.s, ".git") {
-			return nil, fieldError(projectPath, value.field, "expected owner/repository without a URL or .git suffix")
-		}
-	}
-	if strings.EqualFold(p.Upstream, p.Fork) {
-		return nil, fieldError(projectPath, "fork", "must differ from upstream")
-	}
-	p.Clone, err = resolvePath(p.Clone, options.Home, filepath.Dir(projectPath))
-	if err != nil {
-		return nil, fieldError(projectPath, "clone", err.Error())
-	}
-	if beneath(p.Clone, root.String()) || beneath(root.String(), p.Clone) {
-		return nil, fieldError(projectPath, "clone", "clone and Osmia root must be separate, non-nested directories")
-	}
-	if info, err := os.Stat(p.Clone); err == nil && !info.IsDir() {
-		return nil, fieldError(projectPath, "clone", "must be a directory")
-	}
-	if !validBranch(p.BaseBranch) {
-		return nil, fieldError(projectPath, "base_branch", "invalid Git branch name")
-	}
-	if !slices.Contains([]string{"commit-per-unit", "squash"}, p.Landing) {
-		return nil, fieldError(projectPath, "landing", "expected commit-per-unit or squash")
-	}
-	if p.Capacity.PerWorkstream <= 0 {
-		return nil, fieldError(projectPath, "capacity.per_workstream", "must be positive")
 	}
 	c.Project = p
 	return c, nil
+}
+
+// HasProject reports whether an active project is configured. Without one the
+// Project field is zero and project-scoped operations are unavailable.
+func (c *Config) HasProject() bool { return c.Project.ID != "" }
+
+// WithProject returns a copy of c whose only active project is id, loaded and
+// validated from its configuration file. The receiver is unchanged.
+func (c *Config) WithProject(id ProjectID, home string) (*Config, error) {
+	p, err := loadProject(c.Root, id, home, c.Capacity.PerWorkstream)
+	if err != nil {
+		return nil, err
+	}
+	out := *c
+	out.ActiveProjects = []string{string(id)}
+	out.Project = p
+	return &out, nil
+}
+
+// WithoutProject returns a copy of c with no active project.
+func (c *Config) WithoutProject() *Config {
+	out := *c
+	out.ActiveProjects = []string{}
+	out.Project = Project{}
+	return &out
+}
+
+func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Project, error) {
+	projectPath, err := root.ProjectConfig(id)
+	if err != nil {
+		return Project{}, err
+	}
+	p := Project{BaseBranch: "main", Landing: "commit-per-unit", Capacity: ProjectCapacity{perWorkstream}}
+	if _, err := decode(projectPath, &p, true); err != nil {
+		return Project{}, err
+	}
+	p.ID = id
+	if p.Version != 1 {
+		return Project{}, fieldError(projectPath, "version", "must be 1 (no migrations supported)")
+	}
+	for _, value := range []struct{ field, s string }{{"upstream", p.Upstream}, {"fork", p.Fork}} {
+		if !ValidRepository(value.s) {
+			return Project{}, fieldError(projectPath, value.field, "expected owner/repository without a URL or .git suffix")
+		}
+	}
+	if strings.EqualFold(p.Upstream, p.Fork) {
+		return Project{}, fieldError(projectPath, "fork", "must differ from upstream")
+	}
+	p.Clone, err = resolvePath(p.Clone, home, filepath.Dir(projectPath))
+	if err != nil {
+		return Project{}, fieldError(projectPath, "clone", err.Error())
+	}
+	if root.Overlaps(p.Clone) {
+		return Project{}, fieldError(projectPath, "clone", "clone and Osmia root must be separate, non-nested directories")
+	}
+	if info, err := os.Stat(p.Clone); err == nil && !info.IsDir() {
+		return Project{}, fieldError(projectPath, "clone", "must be a directory")
+	}
+	if !ValidBranch(p.BaseBranch) {
+		return Project{}, fieldError(projectPath, "base_branch", "invalid Git branch name")
+	}
+	if !slices.Contains([]string{"commit-per-unit", "squash"}, p.Landing) {
+		return Project{}, fieldError(projectPath, "landing", "expected commit-per-unit or squash")
+	}
+	if p.Capacity.PerWorkstream <= 0 {
+		return Project{}, fieldError(projectPath, "capacity.per_workstream", "must be positive")
+	}
+	return p, nil
+}
+
+// ValidRepository accepts owner/repository references without a URL or .git suffix.
+func ValidRepository(s string) bool {
+	return repositoryName.MatchString(s) && !strings.HasSuffix(s, ".git")
+}
+
+// ResolveClone resolves a clone path the way project configuration does, without
+// requiring it to exist. Relative paths resolve against the process working
+// directory, so callers pass absolute paths from a client.
+func ResolveClone(clone, home string) (string, error) { return resolvePath(clone, home, "") }
+
+// Overlaps reports whether path is the root, inside it, or contains it.
+func (r Root) Overlaps(path string) bool {
+	return beneath(path, r.directory) || beneath(r.directory, path)
 }
 
 func decode(path string, dest any, project bool) (toml.MetaData, error) {
@@ -362,7 +413,9 @@ func validateSocket(path string) error {
 	}
 	return nil
 }
-func validBranch(s string) bool {
+
+// ValidBranch applies Git branch-name constraints.
+func ValidBranch(s string) bool {
 	if s == "" || s == "@" || strings.HasPrefix(s, "-") || strings.ContainsAny(s, " ~^:?*[\\") || strings.Contains(s, "..") || strings.Contains(s, "@{") || strings.HasSuffix(s, ".") {
 		return false
 	}

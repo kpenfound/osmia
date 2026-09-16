@@ -8,9 +8,10 @@ for cleanup. Embedders can use `Start`, `Socket`, `Wait` and `Close`; a successf
 scheduler, TCP listeners or authentication service are started. Agent turns run
 only when an embedder supplies a turn reconciler (see below).
 
-The root and its configuration must already exist. The service acquires an
-exclusive advisory lock on `<root>/.service.lock` before loading state or touching
-the socket. Root aliases resolve to the same lock. The lock file remains on disk:
+The root and its top-level configuration must already exist; a project is not
+required, and one is registered through the API (see below). The service
+acquires an exclusive advisory lock on `<root>/.service.lock` before loading
+state or touching the socket. Root aliases resolve to the same lock. The lock file remains on disk:
 closing its descriptor releases ownership, including after process termination;
 unlinking it would allow competing owners to lock different inodes. Operators must
 not remove it while the service is running. A second owner fails with an actionable
@@ -38,8 +39,10 @@ client to release idle connections. API version 1 uses snake_case JSON fields.
 | Method | Path after `/v1` | Input / response |
 | --- | --- | --- |
 | GET | `/health` | Readiness, service name, API version, supplied build version and commit |
-| GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, diagnostics |
+| GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics |
 | GET | `/runtime` | Effective runtime state and diagnostics |
+| POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
+| DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
 | PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason, source |
 | DELETE | `/runtime/pause` | `ClearPauseRequest`: scope, project, workstream |
 | PUT | `/runtime/priority` | `PriorityRequest`: project, workstreams |
@@ -80,7 +83,14 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 | `unsupported` | 501 | Unknown path/method or later-milestone operation, including POST `/reload` |
 | `restart_required` | 409 | PUT `/config/root` or `/config/listen` |
 | `unavailable` | 503 | Service shutting down; also the client's code for transport failure |
-| `internal` | 500 | Storage or other internal failure |
+| `internal` | 500 | Storage or other internal failure, including an interrupted project registration |
+| `no_project` | 409 | The operation needs an active project and none is configured |
+| `project_active` | 409 | A project is active and single-project operation refuses another |
+
+Project operations compose their messages from the request's fields and
+identities: a validation failure names the field at fault, `project_active`
+names the active project, and an incomplete registration names the project ID
+to finish. They never include raw file contents or parser output.
 
 Health readiness means the loaded stores can serve requests; disk diagnostics do
 not discard that valid view. Reload application, lifecycle endpoints, streaming,
@@ -91,12 +101,31 @@ The service opens the active project's existing trace and starts the
 [local operation reconciliation loop](trace.md#durable-local-operations).
 Startup scans durable intent even without wakeups. Missing reconciliation
 adapters leave work pending; corrupt or locked traces prevent startup. Shutdown
-cancels and joins the loop before releasing trace ownership. Project trace
-creation remains separate from service startup.
+cancels and joins the loop before releasing trace ownership.
+
+## Projects
+
+`POST /v1/projects` registers a project and activates it in the running
+service, opening its new trace and reconciliation loop exactly as startup does.
+`DELETE /v1/projects` removes the active project from configuration, stops its
+loop and releases its trace; the trace and the clone stay on disk. Both edit
+`config.toml` as text and replace the loaded configuration's project only, so
+`/config` keeps matching the disk. Validation, recovery after an interrupted
+registration and the single-project rule are described in
+[configuration](configuration.md#project-registration). Without a project,
+`/config` and `/runtime` carry a `no_project` diagnostic, project-scoped
+overrides are rejected as validation failures, and `DELETE /v1/projects`
+returns `no_project`. A registration interrupted by a service stop is finished
+at the next start; if that fails, the service starts with the configuration as
+loaded (without a project unless the registration had already listed it) and
+reports an `internal` diagnostic on `projects` until `POST /v1/projects` finishes
+it. A journal naming a project other than the active one is never finished:
+startup reports it, and `POST /v1/projects` refuses with the two IDs until the
+active project is removed or the journal is inspected.
 
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
-opened, on every start. It replaces any runner adapter in
-`Options.Reconciliation`. The [thread dispatcher](trace.md#turn-dispatch) is the
+opened, each time a project's trace opens: at startup and when a project is
+added. It replaces any runner adapter in `Options.Reconciliation`. The [thread dispatcher](trace.md#turn-dispatch) is the
 intended binding; it receives the service-owned repository handle, which callers
 must not close. The [M1 demonstration](m1-demonstration.md) uses this path with
 fake engines.

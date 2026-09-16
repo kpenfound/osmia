@@ -31,26 +31,46 @@ type Options struct {
 	ShutdownTimeout time.Duration
 	Reconciliation  reconcile.Options
 	// Threads binds the runner-boundary reconciler to the trace this service
-	// owns. It is called on each start after the trace opens, and replaces any
-	// runner adapter in Reconciliation. Callers must not close the repository.
+	// owns. It is called each time a project's trace opens, at startup and when
+	// a project is added, and replaces any runner adapter in Reconciliation.
+	// Callers must not close the repository.
 	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
 }
+
+// activeProject is the runtime state of the configured project: its open trace
+// and the reconciliation loop running against it.
+type activeProject struct {
+	repository *trace.Repository
+	controller *reconcile.Controller
+	cancel     context.CancelFunc
+	done       chan error
+}
+
 type Service struct {
+	mu         sync.Mutex // guards cfg, active and pending
 	cfg        *config.Config
+	active     *activeProject
+	pending    error
+	projectMu  sync.Mutex // serializes project registration and removal
 	options    Options
 	store      *runtime.Store
 	lock       *os.File
 	listener   *net.UnixListener
 	socketInfo os.FileInfo
 	server     *http.Server
+	lifetime   context.Context
 	cancel     context.CancelFunc
+	failures   chan error
 	done       chan struct{}
 	err        error
 	ready      atomic.Bool
 	requests   sync.WaitGroup
+	boundary   func(string) error
 }
 
 // Start loads state and binds before returning. Wait joins shutdown and cleanup.
+// A configuration without an active project starts an idle service that accepts
+// project registration; an interrupted registration is completed first.
 func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	root, err := config.ResolveRoot(opts.Config.Root, opts.Config.Home)
 	if err != nil {
@@ -80,22 +100,28 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	repository, controller, err := openReconciliation(cfg, opts.Reconciliation, opts.Threads)
+	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{})}
+	cfg, s.pending = s.recoverPending(ctx, cfg)
+	active, err := s.open(cfg)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if err != nil && repository != nil {
-			repository.Close()
+		if err != nil && active != nil {
+			active.repository.Close()
 		}
 	}()
-	if repository != nil {
-		opts.Workstreams, err = repository.Workstreams()
+	workstreams := opts.Workstreams
+	if active != nil {
+		workstreams, err = active.repository.Workstreams()
 		if err != nil {
 			return nil, err
 		}
 	}
-	st, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: opts.Workstreams})
+	if !cfg.HasProject() {
+		workstreams = nil
+	}
+	st, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: workstreams})
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +147,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		listener.Close()
 		return nil, err
 	}
-	s := &Service{cfg: cfg, options: opts, store: st, lock: lock, listener: listener, socketInfo: info, done: make(chan struct{})}
+	s.cfg, s.active, s.store, s.listener, s.socketInfo = cfg, active, st, listener, info
 	if err = os.Chmod(cfg.Listen.Socket, 0600); err != nil {
 		s.cleanupSocket()
 		return nil, err
@@ -129,8 +155,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if opts.ShutdownTimeout <= 0 {
 		opts.ShutdownTimeout = 5 * time.Second
 	}
-	lifetime, cancel := context.WithCancel(ctx)
-	s.cancel = cancel
+	s.lifetime, s.cancel = context.WithCancel(ctx)
 	s.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.requests.Add(1)
 		defer s.requests.Done()
@@ -140,23 +165,16 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 		s.handle(w, r)
 	}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second,
-		BaseContext: func(net.Listener) context.Context { return lifetime }}
+		BaseContext: func(net.Listener) context.Context { return s.lifetime }}
 	s.ready.Store(true)
+	s.launch(active)
 	go func() {
-		var reconciled chan error
-		if controller != nil {
-			reconciled = make(chan error, 1)
-			go func() { reconciled <- controller.Run(lifetime) }()
-		}
 		served := make(chan error, 1)
 		go func() { served <- s.server.Serve(listener) }()
 		select {
-		case <-lifetime.Done():
-		case e := <-reconciled:
-			if !errors.Is(e, context.Canceled) {
-				s.err = e
-			}
-			reconciled = nil
+		case <-s.lifetime.Done():
+		case e := <-s.failures:
+			s.err = e
 		case e := <-served:
 			if !errors.Is(e, http.ErrServerClosed) {
 				s.err = e
@@ -169,21 +187,18 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			s.server.Close()
 		}
 		stop()
-		cancel()
+		s.cancel()
 		if served != nil {
 			if e := <-served; !errors.Is(e, http.ErrServerClosed) {
 				s.err = e
 			}
 		}
 		s.requests.Wait()
-		if reconciled != nil {
-			if e := <-reconciled; e != nil && !errors.Is(e, context.Canceled) {
-				s.err = errors.Join(s.err, e)
-			}
-		}
-		if repository != nil {
-			s.err = errors.Join(s.err, repository.Close())
-		}
+		s.mu.Lock()
+		active := s.active
+		s.active = nil
+		s.mu.Unlock()
+		s.err = errors.Join(s.err, s.stop(active))
 		s.cleanupSocket()
 		s.store.Close()
 		s.lock.Close()
@@ -194,6 +209,13 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 func (s *Service) Socket() string { return s.cfg.Listen.Socket }
 func (s *Service) Wait() error    { <-s.done; return s.err }
 func (s *Service) Close() error   { s.cancel(); return s.Wait() }
+
+// current returns the loaded configuration; project registration replaces it.
+func (s *Service) current() *config.Config {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg
+}
 
 // Run serves in the foreground until cancellation, including full cleanup.
 func Run(ctx context.Context, opts Options) error {
@@ -245,8 +267,58 @@ func (s *Service) cleanupSocket() {
 	}
 }
 
-// openReconciliation leaves trace creation to onboarding; an existing trace must
-// open cleanly before the service can report readiness.
+// open opens the configured project's existing trace and its reconciliation
+// controller. Without a configured project, or without a trace for it, the
+// service runs idle: trace creation belongs to project registration.
+func (s *Service) open(cfg *config.Config) (*activeProject, error) {
+	if !cfg.HasProject() {
+		return nil, nil
+	}
+	repository, controller, err := openReconciliation(cfg, s.options.Reconciliation, s.options.Threads)
+	if err != nil || repository == nil {
+		return nil, err
+	}
+	return &activeProject{repository: repository, controller: controller, done: make(chan error, 1)}, nil
+}
+
+// launch runs the controller for the service's lifetime. A loop failure stops
+// the service; cancellation from stop or shutdown does not.
+func (s *Service) launch(active *activeProject) {
+	if active == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(s.lifetime)
+	active.cancel = cancel
+	go func() {
+		err := active.controller.Run(ctx)
+		active.done <- err
+		if err != nil && !errors.Is(err, context.Canceled) {
+			select {
+			case s.failures <- err:
+			default:
+			}
+		}
+	}()
+}
+
+// stop joins the controller and releases the trace. It reports loop failures
+// other than cancellation.
+func (s *Service) stop(active *activeProject) error {
+	if active == nil {
+		return nil
+	}
+	var err error
+	if active.cancel != nil {
+		active.cancel()
+		if e := <-active.done; e != nil && !errors.Is(e, context.Canceled) {
+			err = e
+		}
+	}
+	return errors.Join(err, active.repository.Close())
+}
+
+// openReconciliation leaves trace creation to project registration; an existing
+// trace must open cleanly before the service can report readiness.
 func openReconciliation(cfg *config.Config, options reconcile.Options, threads func(*trace.Repository) (coreadapter.Reconciler, error)) (*trace.Repository, *reconcile.Controller, error) {
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
 	if err != nil {

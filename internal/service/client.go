@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/config"
 )
 
 type Client struct {
@@ -75,5 +77,15 @@ func (c *Client) Configuration(ctx context.Context) (ConfigResponse, error) {
 func (c *Client) Runtime(ctx context.Context) (RuntimeResponse, error) {
 	var v RuntimeResponse
 	err := c.Do(ctx, "GET", Prefix+"/runtime", nil, &v)
+	return v, err
+}
+func (c *Client) AddProject(ctx context.Context, req ProjectAddRequest) (ProjectResponse, error) {
+	var v ProjectResponse
+	err := c.Do(ctx, "POST", Prefix+"/projects", req, &v)
+	return v, err
+}
+func (c *Client) RemoveProject(ctx context.Context, id config.ProjectID) (ProjectResponse, error) {
+	var v ProjectResponse
+	err := c.Do(ctx, "DELETE", Prefix+"/projects", ProjectRemoveRequest{Project: id}, &v)
 	return v, err
 }

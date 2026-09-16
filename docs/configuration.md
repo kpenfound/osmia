@@ -1,10 +1,12 @@
-# M1 configuration
+# Configuration
 
 `internal/config.Load` reads and validates the entire declarative configuration.
-It returns a configuration only when both files pass. It creates no directories,
-repositories, sockets or state and does not launch agents. The
-[local service](service.md) owns startup and the Unix socket. Onboarding,
-reload and migrations are separate work.
+It returns a configuration only when the top-level file and the active project's
+file pass. It creates no directories, repositories, sockets or state and does
+not launch agents. The [local service](service.md) owns startup and the Unix
+socket. Project registration through `osmia project add` writes the project
+file and edits `active_projects`; see [project registration](#project-registration).
+Reload and migrations are separate work.
 
 ## Root and identity
 
@@ -30,6 +32,7 @@ configuration list; they belong to persisted workstream manifests.
 <root>/config.toml
 <root>/runtime.json
 <root>/osmia.sock
+<root>/project-add.json                       journal of one interrupted project registration
 <root>/projects/<project-id>/config.toml
 <root>/projects/<project-id>/                  dedicated project trace repository
 <root>/projects/<project-id>/workstreams/<workstream-id>/
@@ -45,23 +48,26 @@ state writers must protect against concurrent symlink replacement.
 
 ## Top-level config.toml
 
-This minimal configuration selects one project and supplies its agent model:
+This minimal configuration supplies an agent model and no project yet:
 
 ```toml
 version = 1
-active_projects = ["p_0123456789abcdef0123456789abcdef"]
+active_projects = []
 
 [profiles.default]
 agent = "claude"
 model = "your-model-name"
 ```
 
-Only IDs in `active_projects` are loaded. Exactly one is required. Additional
-project directories may hold archived traces and are not scanned or activated.
-Duplicate IDs are errors; two distinct active IDs report unsupported multi-project
-operation. Both configuration files must exist and specify `version = 1`.
-Unknown versions, keys (including empty unknown tables and case variants), duplicate
-TOML keys, malformed TOML and incorrect types are errors.
+Only IDs in `active_projects` are loaded; the list may be empty or absent, and
+the service then starts without a project until `osmia project add` registers
+one. At most one ID is accepted until multi-project operation arrives in M7.
+Additional project directories may hold archived traces and are not scanned or
+activated. Duplicate IDs are errors; two distinct active IDs report unsupported
+multi-project operation. The top-level file, and the active project's file, must
+exist and specify `version = 1`. Unknown versions, keys (including empty unknown
+tables and case variants), duplicate TOML keys, malformed TOML and incorrect
+types are errors.
 
 The following optional settings show their defaults:
 
@@ -123,10 +129,59 @@ runner cannot enforce that contract and rejects execution until an enforcing
 boundary is supplied; see [the adapter boundary](core-adapter.md). Successful
 configuration loading does not imply that execution is available.
 
+## Project registration
+
+`osmia project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH`
+(API: `POST /v1/projects`) registers a project with the running service. The
+client never writes configuration; the service validates the request before
+writing anything, then:
+
+1. generates a fresh project ID and journals the registration in
+   `<root>/project-add.json`;
+2. writes `projects/<id>/config.toml` with `name`, `upstream`, `fork`, the
+   absolute `clone`, `base_branch` (default `main`) and
+   `landing = "commit-per-unit"`; capacity is inherited from the top level;
+3. creates the trace repository with a charter template in `charter.md`;
+4. adds the ID to `active_projects` in the top-level `config.toml` as a text
+   edit, so the owner's comments, ordering and formatting survive;
+5. activates the project (opens the trace and starts reconciliation) and
+   removes the journal.
+
+Validation refuses, each with its own message: a blank name, an upstream or fork
+that is not `owner/repository`, a fork equal to the upstream, an invalid base
+branch, a relative clone path, a clone that does not exist, is not a directory
+or has no `.git` entry, and a clone nested with the root either way. Nothing is
+ever written to the clone.
+
+Registration is recoverable. If the service stops at any step, the journal makes
+the next start finish the registration with the same ID, or `osmia project add`
+run again finishes it. A retry never creates a second trace repository and an
+interrupted registration never blocks a retry: the same request returns the
+finished project, a different request while a project is active is refused with
+the active project's ID. A trace initialization that never committed is
+discarded and redone; one with history is kept.
+
+Operation stays single-project until M7: adding another project while one is
+active is refused, and the error names the active project. Repeating the active
+project's exact registration returns it without change.
+
+`osmia project remove <project-id>` (API: `DELETE /v1/projects`) removes the
+active ID from `active_projects` as a text edit and closes the project's runtime
+state. The trace directory and the owner's clone are not deleted. Adding the
+same upstream again afterwards generates a new project ID and a new trace
+repository; the archived trace stays untouched under `projects/<old-id>/` and is
+never reused, so archived history is immutable and every add is a fresh start.
+
+The service's loaded configuration changes only in its project after add and
+remove: `/config` reports no `restart_required` diagnostic for these edits.
+Without a project, `/config` and `/runtime` carry a `no_project` diagnostic and
+project-scoped overrides are rejected as referencing an inactive project.
+
 ## Project config.toml
 
-Store this file at `projects/<project-id>/config.toml`. The directory ID is the
-identity; there is no second configurable ID to disagree with it.
+Store this file at `projects/<project-id>/config.toml`; `osmia project add`
+writes it. The directory ID is the identity; there is no second configurable ID
+to disagree with it.
 
 ```toml
 version = 1
@@ -150,15 +205,15 @@ global default.
 
 ## Milestone and restart behavior
 
-M1 loading accepts profiles, bindings, capacity, shed limits, repository identity
+Loading accepts profiles, bindings, capacity, shed limits, repository identity
 and landing preferences as declarative inputs. It does not implement automatic
 fallback, debate, review scheduling, landing or multi-project dispatch. Review slot
 configuration is `capacity.reviewers`; no separate review-policy schema is defined.
 Runtime profile overrides, pauses and priorities belong in `runtime.json`, never
 these files; see [runtime overrides](runtime.md) for M1 persistence and resolution.
-Nothing here performs a live reload: changed settings require a new
-load/service start in M1. Root and listen changes will still require a service
-restart when live reload arrives.
+Nothing here performs a live reload: changed settings other than project
+registration and removal require a new load/service start. Root and listen
+changes will still require a service restart when live reload arrives.
 
 The full design's `listen.tailnet`, `listen.web`, `budget`, `notify`, `hearsay`,
 project `upstream_rebase` and `hearsay_scope` settings are rejected as unsupported
@@ -171,7 +226,7 @@ Representative errors include the file and offending field:
 ```text
 <root>/config.toml: profiles.default.fallback: unknown profile backup
 <root>/config.toml: roles.mason.image: container requires an explicit image
-<root>/config.toml: active_projects: M1 requires exactly one active project; multi-project operation is unsupported
+<root>/config.toml: active_projects: at most one active project is supported; multi-project operation is unsupported
 <root>/projects/<id>/config.toml: clone: clone and Osmia root must be separate, non-nested directories
 ```
 
