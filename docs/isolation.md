@@ -41,13 +41,16 @@ boundary executor; an engine that cannot verify a saved session selects replay.
 The service must explicitly grant a role its tool names and write/execute/network
 permissions. A missing role grant fails. The M1 workspace-write ceiling permits
 `mason` and `librarian`; other known roles are read-only and have no execute or
-fetch permission. The selector's optional `Narrow` request intersects the grant.
-Neither prompts nor profiles grant tools. The full workflow role-tool catalogue
-is outside this M1 implementation.
+fetch permission. Some tools belong to one role: `set_status` is removed from
+every other role's grant, so only `chief_of_staff` can see it. The selector's
+optional `Narrow` request intersects the grant. Neither prompts nor profiles
+grant tools. The full workflow role-tool catalogue is outside this M1
+implementation.
 
 The service registry classifies each tool as read, write, memory, execute, fetch
-or VCS. Memory tools change only service-owned private role memory and enforce
-their own scope, so any granted role may use them. `Turns.Scoped` supplies
+or VCS. Memory tools change only service-owned records bound to the turn, such as
+private role memory or the [workstream status](trace.md#workstream-status), and
+enforce their own scope, so any granted role may use them. `Turns.Scoped` supplies
 trusted handlers bound to the claimed turn's scope, such as the trace's
 [private role notes](trace.md#private-role-notes). They join the same registry,
 duplicate-name and grant checks as `Turns.Tools`; an error fails preparation.

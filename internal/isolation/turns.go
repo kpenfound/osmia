@@ -67,6 +67,9 @@ func narrow(grant coreadapter.Capabilities, request *coreadapter.Capabilities) c
 	return grant
 }
 
+// roleTools names tools only one role may hold, whatever the service grant says.
+var roleTools = map[string]string{"set_status": "chief_of_staff"}
+
 func roleGrant(role string, grant coreadapter.Capabilities) (coreadapter.Capabilities, error) {
 	switch role {
 	case "mason", "librarian":
@@ -75,6 +78,10 @@ func roleGrant(role string, grant coreadapter.Capabilities) (coreadapter.Capabil
 	default:
 		return coreadapter.Capabilities{}, errors.New("unknown Osmia role")
 	}
+	grant.Tools = slices.DeleteFunc(slices.Clone(grant.Tools), func(name string) bool {
+		owner, reserved := roleTools[name]
+		return reserved && owner != role
+	})
 	return grant, nil
 }
 

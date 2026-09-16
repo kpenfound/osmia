@@ -56,4 +56,6 @@ end with one.
 ## Status
 
 `GET /v1/runtime` lists each active project with `context_mode`, and
-`osmia status` prints it as `Context: <project> context_mode=file`.
+`osmia status` prints it as `Context: <project> context_mode=file`. Each
+[workstream status](service.md#workstream-status) carries the same
+`context_mode`.

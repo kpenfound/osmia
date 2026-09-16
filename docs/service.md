@@ -41,6 +41,8 @@ client to release idle connections. API version 1 uses snake_case JSON fields.
 | GET | `/health` | Readiness, service name, API version, supplied build version and commit |
 | GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics |
 | GET | `/runtime` | Effective runtime state, each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
+| GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, and diagnostics |
+| GET | `/status/<workstream-id>` | `WorkstreamStatus` for one workstream of the active project |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
 | POST | `/handin` | `HandInRequest`: project, paths; checks the charter, then returns `unsupported` |
@@ -87,7 +89,7 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 | `internal` | 500 | Storage or other internal failure, including an interrupted project registration |
 | `no_project` | 409 | The operation needs an active project and none is configured |
 | `project_active` | 409 | A project is active and single-project operation refuses another |
-| `not_found` | 404 | The project ID is not the active project |
+| `not_found` | 404 | The project ID is not the active project, or the workstream is not in it |
 | `charter_empty` | 409 | Hand-in refused: the project's charter has no rules |
 
 Project operations compose their messages from the request's fields and
@@ -141,6 +143,28 @@ project ID returns `validation`. An ID that is not the active project returns
 The charter gate runs next: an empty charter returns `charter_empty` with a
 message naming the project and its `charter.md`. With rules, hand-in returns
 `unsupported`, naming the project and its rule count. See [charter](charter.md).
+
+## Workstream status
+
+`GET /v1/status` lists each workstream of the active project in trace manifest
+order, and `GET /v1/status/<workstream-id>` returns one. Each
+`WorkstreamStatus` carries the chief of staff's latest
+[status](trace.md#workstream-status) next to the facts the service owns:
+
+| Field | Value |
+| --- | --- |
+| `workstream`, `project` | The workstream and its project |
+| `state` | The feature workflow state, or `null` before one is recorded |
+| `open_questions` | Questions in the workstream without a ruling |
+| `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
+| `status` | `null` until the chief of staff writes one; otherwise `goal`, `attention` (empty when nothing needs the owner), `note`, `agents`, `revision` and `updated_at` |
+
+Without an active project or its trace, the list is empty. If the trace
+cannot be read, the list is empty and carries a `workstreams` diagnostic with
+code `internal`. For one workstream, a malformed ID returns `validation`, no
+configured project returns `no_project`, a workstream the active trace does not
+hold (or no trace at all) returns `not_found`, and an unreadable trace returns
+`internal`; these messages name the workstream or project.
 
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
 opened, each time a project's trace opens: at startup and when a project is

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
@@ -18,7 +19,7 @@ import (
 
 const usage = `Usage: osmia <command> [--root PATH]
   serve
-  status [--json]
+  status [workstream-id] [--json]
   project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH [--base-branch NAME] [--json]
   project remove <project-id> [--json]
   handin <project-id> [path...] [--json]
@@ -121,8 +122,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	a := o.args[1:]
 	valid := false
 	switch cmd {
-	case "serve", "status":
+	case "serve":
 		valid = len(a) == 0
+	case "status":
+		valid = len(a) <= 1
 	case "pause", "resume":
 		valid = len(a) == 1
 	case "handin":
@@ -160,7 +163,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	c := service.NewClient(socket)
 	defer c.Close()
-	fail := func(err error) int { return report(stderr, err, cmd == "project" || cmd == "handin") }
+	fail := func(err error) int {
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "status" && len(a) == 1)
+	}
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
 		return 4
@@ -215,6 +220,21 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "invalid service response: hand-in reported success without a result")
 		return 1
 	}
+	if cmd == "status" && len(a) == 1 {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		st, err := c.Status(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, st)
+		}
+		showStatus(stdout, st)
+		return 0
+	}
 	if cmd == "status" {
 		h, err := c.Health(ctx)
 		if err != nil {
@@ -228,12 +248,17 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return fail(err)
 		}
+		all, err := c.Statuses(ctx)
+		if err != nil {
+			return fail(err)
+		}
 		if o.json {
 			return output(stdout, stderr, struct {
 				Health        service.HealthResponse  `json:"health"`
 				Configuration service.ConfigResponse  `json:"configuration"`
 				Runtime       service.RuntimeResponse `json:"runtime"`
-			}{h, cfg, rt})
+				Status        service.StatusResponse  `json:"status"`
+			}{h, cfg, rt, all})
 		}
 		fmt.Fprintf(stdout, "Service: %s ready=%t API=%d\nConfiguration: %s (%s)\n", h.Service, h.Ready, h.APIVersion, cfg.Digest, cfg.Root)
 		showProject(stdout, cfg.Project)
@@ -242,6 +267,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		diagnostics(stdout, cfg.Diagnostics)
 		showRuntime(stdout, rt)
+		showWorkstreams(stdout, all)
 		return 0
 	}
 	if cmd == "profiles" && len(a) == 0 {
@@ -397,6 +423,56 @@ func showRuntime(w io.Writer, rt service.RuntimeResponse) {
 		fmt.Fprintf(w, "  %s: %s\n", r, rt.Effective.Profiles[r])
 	}
 	diagnostics(w, rt.Diagnostics)
+}
+
+// showWorkstreams prints each workstream's goal and attention.
+func showWorkstreams(w io.Writer, all service.StatusResponse) {
+	fmt.Fprintln(w, "Workstreams:")
+	if len(all.Workstreams) == 0 && len(all.Diagnostics) == 0 {
+		fmt.Fprintln(w, "  none")
+	}
+	defer diagnostics(w, all.Diagnostics)
+	for _, st := range all.Workstreams {
+		fmt.Fprintf(w, "  %s %s\n", st.Workstream, facts(st))
+		if st.Status == nil {
+			fmt.Fprintln(w, "    no status yet")
+			continue
+		}
+		fmt.Fprintf(w, "    Goal: %s\n    Attention: %s\n", st.Status.Goal, attention(st.Status.Attention))
+	}
+}
+
+// showStatus prints one workstream's full status.
+func showStatus(w io.Writer, st service.WorkstreamStatus) {
+	fmt.Fprintf(w, "Workstream: %s %s\n", st.Workstream, facts(st))
+	if st.Status == nil {
+		fmt.Fprintln(w, "Status: none yet; the chief of staff has not written one")
+		return
+	}
+	s := st.Status
+	fmt.Fprintf(w, "Goal: %s\nAttention: %s\nNote: %s\nAgents:\n", s.Goal, attention(s.Attention), s.Note)
+	if len(s.Agents) == 0 {
+		fmt.Fprintln(w, "  none active")
+	}
+	for _, a := range s.Agents {
+		fmt.Fprintf(w, "  %s\n", a)
+	}
+	fmt.Fprintf(w, "Updated: %s (revision %d)\n", s.UpdatedAt.Format(time.RFC3339), s.Revision)
+}
+
+func facts(st service.WorkstreamStatus) string {
+	state := "not recorded"
+	if st.State != nil {
+		state = *st.State
+	}
+	return fmt.Sprintf("state=%s open_questions=%d context_mode=%s", state, st.OpenQuestions, st.ContextMode)
+}
+
+func attention(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
 }
 
 // report maps an API error to exit code and guidance. Project operations
