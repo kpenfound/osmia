@@ -24,3 +24,6 @@ choices and their resolution against configuration.
 
 The [local service API](docs/service.md) documents Unix-socket ownership, the
 versioned M1 endpoints and the in-process client.
+
+The [M1 command line](docs/cli.md) documents the foreground service and thin local
+operator clients, including JSON output and exit codes.
