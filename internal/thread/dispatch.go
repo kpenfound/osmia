@@ -50,7 +50,9 @@ type Dispatcher struct {
 
 var _ coreadapter.Reconciler = Dispatcher{}
 
-func decodeTurn(op coreadapter.Operation) (TurnInput, error) {
+// DecodeTurn returns the input of a turn operation, refusing other operations,
+// unknown fields, invalid workstream IDs and missing agent or turn IDs.
+func DecodeTurn(op coreadapter.Operation) (TurnInput, error) {
 	var in TurnInput
 	if op.Boundary != coreadapter.RunnerBoundary || op.Action != TurnAction {
 		return in, fmt.Errorf("unsupported runner operation %q", op.Action)
@@ -96,7 +98,7 @@ func turnResult(q trace.QueuedTurn) coreadapter.OperationResult {
 // Inspect reads only the durable queue. A reservation without a captured result
 // may still be running or was interrupted, so it is never reported absent.
 func (d Dispatcher) Inspect(_ context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
-	in, err := decodeTurn(op)
+	in, err := DecodeTurn(op)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -121,7 +123,7 @@ func (d Dispatcher) Inspect(_ context.Context, op coreadapter.Operation) (coread
 // Apply completes a captured turn without a backend call, or runs the queued
 // turn. A captured execution failure is a terminal result, not a retry.
 func (d Dispatcher) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
-	in, err := decodeTurn(op)
+	in, err := DecodeTurn(op)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}

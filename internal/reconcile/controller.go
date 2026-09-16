@@ -18,6 +18,10 @@ type Options struct {
 	Ticks      <-chan time.Time
 	Interval   time.Duration
 	RetryDelay time.Duration
+	// Schedule runs at the start of every pass, before operations are read, so
+	// the intent it publishes is reconciled in the same pass. Its failure stops
+	// the loop.
+	Schedule func(context.Context) error
 }
 
 type Controller struct {
@@ -80,6 +84,11 @@ func (c *Controller) step(ctx context.Context, name string) error {
 func (c *Controller) Pass(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if c.options.Schedule != nil {
+		if err := c.options.Schedule(ctx); err != nil {
+			return err
+		}
 	}
 	streams, err := c.repository.Workstreams()
 	if err != nil {

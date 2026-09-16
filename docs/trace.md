@@ -239,8 +239,12 @@ local adapters and optional clocks, ticks and retry/scan intervals. With no
 adapter for a boundary, its operations remain unknown and retryable; the service
 does not launch work through an adapter lacking identity-based inspection.
 Production capability enforcement remains the execution adapter's responsibility.
-This controller supplies M1 recovery infrastructure, not lifecycle scheduling,
-capacity decisions or owner authorization.
+
+`reconcile.Options.Schedule` is an optional hook that runs at the start of every
+pass, before operations are read, so the intent it publishes is reconciled in the
+same pass. An error from it stops the loop. The service installs its queued-turn
+scheduler as this hook (see [the service](service.md)). The controller makes no
+capacity or owner-authorization decisions.
 
 ## Durable threads and queued turns
 

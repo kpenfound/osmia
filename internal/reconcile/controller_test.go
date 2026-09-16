@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -383,5 +384,45 @@ func TestMissingAdapterRemainsRetryable(t *testing.T) {
 	inspections, applications := f.system.counts()
 	if inspections != 0 || applications != 0 {
 		t.Fatal("used an unconfigured adapter")
+	}
+}
+
+func TestScheduleRunsBeforeOperationsAreRead(t *testing.T) {
+	ctx := context.Background()
+	f := setup(t, coreadapter.RepositoryBoundary)
+	c := f.controller(t)
+	failure := errors.New("schedule failed")
+	c.options.Schedule = func(context.Context) error { return failure }
+	if err := c.Pass(ctx); !errors.Is(err, failure) {
+		t.Fatalf("pass with failing schedule: %v", err)
+	}
+	if inspections, applies := f.system.counts(); inspections != 0 || applies != 0 {
+		t.Fatalf("operations touched after schedule failure: %d inspections, %d applications", inspections, applies)
+	}
+
+	event := trace.Event{ID: trace.EventID("scheduled", "effect"), Kind: "local-effect", Body: "Scheduled local work"}
+	event.Operation = &coreadapter.Operation{ID: trace.OperationID(projectID, streamID, event.ID), Boundary: coreadapter.RepositoryBoundary, Action: "prepare", Input: json.RawMessage(`{}`)}
+	scheduled := 0
+	c.options.Schedule = func(ctx context.Context) error {
+		scheduled++
+		tx := trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "scheduled", Revision: 1, Project: projectID, Workstream: streamID, At: epoch, Actor: trace.Actor{Kind: "service", ID: "scheduler"}, Cause: "schedule", Depth: 2}, Subject: "scheduled", To: "pending", Reason: "Scheduled work"}, Events: []trace.Event{event}}
+		_, err := f.repository.Transact(ctx, tx)
+		return err
+	}
+	must(t, c.Pass(ctx))
+	records, err := f.repository.Operations(streamID)
+	must(t, err)
+	if scheduled != 1 || len(records) != 2 {
+		t.Fatalf("scheduled %d, records %+v", scheduled, records)
+	}
+	for _, record := range records {
+		if !record.Acknowledged || record.Result == nil {
+			t.Fatalf("operation not applied in the scheduling pass: %+v", record)
+		}
+	}
+	f.system.mu.Lock()
+	defer f.system.mu.Unlock()
+	if len(f.system.applications) != 2 || !slices.Contains(f.system.applications, event.Operation.ID) {
+		t.Fatalf("applications %v", f.system.applications)
 	}
 }
