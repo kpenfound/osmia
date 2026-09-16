@@ -104,7 +104,13 @@ func (r *Repository) writeFile(name string, data []byte) error {
 		err = io.ErrShortWrite
 	}
 	if err == nil {
+		err = r.boundary("file:" + name + ":written")
+	}
+	if err == nil {
 		err = f.Sync()
+	}
+	if err == nil {
+		err = r.boundary("file:" + name + ":synced")
 	}
 	err = errors.Join(err, f.Close())
 	if err != nil {
@@ -116,7 +122,13 @@ func (r *Repository) writeFile(name string, data []byte) error {
 	if err := r.dir.Rename(tmp, name); err != nil {
 		return err
 	}
-	return syncDir(r.dir, path.Dir(name))
+	if err := r.boundary("file:" + name + ":renamed"); err != nil {
+		return err
+	}
+	if err := syncDir(r.dir, path.Dir(name)); err != nil {
+		return err
+	}
+	return r.boundary("file:" + name + ":directory-synced")
 }
 
 func decode(data []byte, v any) error {

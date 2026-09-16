@@ -56,19 +56,27 @@ func (r *Repository) checkGit() error {
 	return nil
 }
 func (r *Repository) git(ctx context.Context, input []byte, args ...string) (string, error) {
+	out, err := r.gitBytes(ctx, input, "", args...)
+	return strings.TrimSpace(string(out)), err
+}
+
+func (r *Repository) gitBytes(ctx context.Context, input []byte, index string, args ...string) ([]byte, error) {
 	if err := r.checkGit(); err != nil {
-		return "", err
+		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, "git", append([]string{"--git-dir=" + r.directory + "/.git", "--work-tree=" + r.directory, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "gc.auto=0"}, args...)...)
 	cmd.Dir = r.directory
 	// No inherited Git routing, credentials, config includes, hooks or signing.
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_AUTHOR_NAME=Osmia", "GIT_AUTHOR_EMAIL=osmia@localhost", "GIT_COMMITTER_NAME=Osmia", "GIT_COMMITTER_EMAIL=osmia@localhost", "LC_ALL=C"}
+	if index != "" {
+		cmd.Env = append(cmd.Env, "GIT_INDEX_FILE="+index)
+	}
 	cmd.Stdin = bytes.NewReader(input)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("trace git %s: %w: %s", args[0], err, out)
+		return nil, fmt.Errorf("trace git %s: %w: %s", args[0], err, out)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return out, nil
 }
 
 // commit hashes supplied bytes without Git attributes, filters or target files.
@@ -118,9 +126,12 @@ func (r *Repository) commit(ctx context.Context, paths []string, message string)
 	return err
 }
 
-// checkHistory reports interrupted file/commit updates without attempting to
-// repair them. The later recovery layer decides how to reconcile those writes.
+// checkHistory finishes journaled workflow publication and reports other
+// uncommitted file changes without guessing how to reconcile them.
 func (r *Repository) checkHistory(ctx context.Context) error {
+	if err := r.recoverPublication(ctx); err != nil {
+		return err
+	}
 	tree, err := r.git(ctx, nil, "ls-tree", "-rz", "HEAD")
 	if err != nil {
 		return err
@@ -151,7 +162,7 @@ func (r *Repository) checkHistory(ctx context.Context) error {
 		}
 	}
 	return r.walk(func(name string, entry fs.DirEntry) error {
-		if !entry.IsDir() && !tracked[name] && (strings.HasSuffix(name, ".jsonl") || strings.HasSuffix(name, "/workstream.json") || name == "project.json") {
+		if !entry.IsDir() && !tracked[name] && (strings.HasSuffix(name, ".jsonl") || strings.HasSuffix(name, "/workstream.json") || name == "project.json" || strings.HasSuffix(name, "/workflow.json")) {
 			return fmt.Errorf("%s: trace file is not committed; reconciliation required", name)
 		}
 		return nil

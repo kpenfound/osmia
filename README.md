@@ -20,7 +20,8 @@ The [M1 configuration reference](docs/configuration.md) documents the supported
 loader schema, defaults and local root layout.
 
 The [trace repository reference](docs/trace.md) documents typed M1 records,
-revision history and corruption diagnostics in the dedicated local Git repository.
+revision history, atomic workflow transactions and durable outbox leases in the
+dedicated local Git repository.
 
 The [runtime override reference](docs/runtime.md) documents persisted operator
 choices and their resolution against configuration.

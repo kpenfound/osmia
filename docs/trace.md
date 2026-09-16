@@ -77,10 +77,11 @@ no global/system configuration, and disabled hooks. It hashes supplied bytes usi
 plumbing commands, bypassing attributes and filters. Only trace-owned files enter
 its commits; project configuration is left in place. Linked worktrees, redirected
 object stores, Git symlinks and changes to the isolated `.git/config` are rejected.
-A local Git executable is required for create, append and reopen. The service owns
+A local Git executable is required for trace and workflow operations. The service owns
 this executable access; runtime agents receive no trace-repository handle.
 
-`Open` checks manifests, every record and the committed file contents. For damaged
+`Open` completes journaled workflow-file publication, then checks manifests,
+every record, workflow history and the committed file contents. For damaged
 records or uncommitted files it returns a non-nil handle **and an error**; callers
 must close that handle. Typed reads return valid records together with any
 path/line corruption diagnostics. They never skip a damaged line silently or
@@ -90,6 +91,76 @@ pending records even when a prior Git commit failed.
 
 An append is not an atomic workflow-state/outbox transaction. A write or Git
 failure can leave inspectable, uncommitted files; the error does not claim rollback
-or successful delivery. This package reports that condition without repairing,
+or successful delivery. The append API reports that condition without repairing,
 retrying or reconciling side effects. Controllers remain responsible for owner
 gates and workflow policy.
+
+
+## Atomic workflow state and outbox
+
+`Transact(ctx, Transaction)` validates an expected state version for a workstream
+and subject, and publishes a transition and zero or more outbox events together.
+An absent subject has version zero and an empty state. Each transaction increments
+that subject's version once; its `From` must match the current value. Subjects and
+state names are supplied by Go controllers. The store does not implement lifecycle
+policy or grant owner approval.
+
+The transition carries the ordinary trace header, including actor, timestamp,
+cause and causal depth. Its ID identifies the logical transaction in that
+workstream; revision must be one. `EventID(transactionID, eventKey)` derives a
+stable event ID. Event IDs are unique within a workstream, and events contain a
+kind and body for eventual chief-of-staff delivery. Callers retain the complete
+request across retries, including timestamps and event order. An identical retry
+returns its original resulting state even if later transactions exist. Reusing a
+transaction ID with changed content, reusing an event ID in another transaction,
+or supplying a stale version returns `ErrConflict`. Managed transitions cannot
+be revised through `Append`.
+
+`workstreams/<id>/workflow.json` holds the versioned transaction and delivery
+histories. `Workflow` derives the current subject state from that history. Each
+transaction also adds its transition to `events.jsonl`; the complete history of
+both files is available in Git. `Outbox` returns all delivery intents with their
+claim, acknowledgement and release history, sorted by event ID.
+
+The repository serializes calls under its exclusive process lock. Publication
+writes immutable Git objects using a private index, syncs the objects, writes and
+syncs a recovery journal under `.git`, then atomically replaces and syncs the
+branch ref. That ref is the visibility boundary. Ordinary workflow and transition
+files are materialized from the committed objects before the journal is removed.
+Before publication, recovery retains the prior state; after publication, recovery
+finishes materializing the complete new state. Store reads and writes finish any
+pending publication before inspecting the files. Direct filesystem readers must
+open through the store first after an interruption; they may otherwise see
+unfinished materialization. Unreferenced preparation objects are never state.
+
+An error after ref publication can mean the transaction committed. Retry its
+original identity to discover the result, rather than inventing a new identity.
+The journal only authorizes recovery of workflow and transition files; unrelated
+append failures and corrupt files remain diagnostic errors. Durability assumes a
+local filesystem supporting atomic rename and file/directory synchronization.
+
+## Delivery leases and wakeups
+
+`Ready(workstream, now)` scans durable state for unacknowledged entries without an
+active lease. `Claim` takes an event ID, stable attempt token, worker ID, timestamp
+and positive lease duration. Claims are exclusive within a repository session;
+the timestamp and duration come from the service clock. An identical active
+claim retry returns the original lease without extending it. Changed parameters
+for the same token return `ErrConflict`; a superseded or restart-interrupted token
+returns `ErrClaim`. Workers must respect the returned expiry. Each redelivery uses
+a new attempt token.
+
+`Acknowledge` and `Release` require the current session's active, unexpired token.
+They fence out older attempts. Repeating a completed acknowledgement or release
+is a no-op, even after reopen or a subsequent claim, and does not append duplicate
+history. Acknowledged entries never become ready. Released and expired entries
+become ready, as do claims from a previous repository session: acquiring the
+exclusive repository lock establishes that the previous owner is gone. Closing a
+handle ends its session; workers must stop using that handle and its claims.
+
+`WaitWorkflow` uses the pinned core adapter's coalescing wakeup primitive. Successful
+transactions and releases signal it after durable publication. Signals are only
+latency hints: controllers scan on startup and after wakes and periodic ticks.
+Lease expiry needs no signal, and reopen deliberately does not replay hints.
+External side-effect inspection, reconciliation and delivery controllers are
+separate from this storage API.
