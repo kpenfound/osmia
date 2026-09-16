@@ -160,6 +160,7 @@ type Turns interface {
 
 type Candidate struct{ Revision, BaseRevision, SpecRevision, PlanRevision string }
 type ReviewRequest struct {
+	Subject                 string
 	Turn                    PreparedTurn
 	Candidate               Candidate
 	Diff, ArtifactDirectory string
@@ -173,12 +174,13 @@ type Finding struct {
 }
 type Artifact struct{ Kind, Path string }
 type ReviewResult struct {
-	Candidate Candidate
-	Verdict   string
-	Findings  []Finding
-	Artifacts []Artifact
-	Sessions  []SessionResult
-	Partial   bool
+	Subject, DiffSHA256 string
+	Candidate           Candidate
+	Verdict             string
+	Findings            []Finding
+	Artifacts           []Artifact
+	Sessions            []SessionResult
+	Partial             bool
 }
 
 // Reviews produces evidence tied to an exact candidate; approval and landing
