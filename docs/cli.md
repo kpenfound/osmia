@@ -93,8 +93,9 @@ client's `--socket` argument.
 Project and workstream arguments are persistent IDs (`p_` or `w_` followed by
 32 lowercase hexadecimal digits), not display names. Workstream IDs must be known
 to the service's record repository. The standalone entry point does not
-discover workstreams. The runtime commands store controls; scheduler effects
-are unavailable before M4.
+discover workstreams. The runtime commands store controls. A pause holds new
+worker turns in its scope while chief-of-staff turns still run; priority has no
+scheduler effect before M4.
 
 ## Output and exit codes
 

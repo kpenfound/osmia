@@ -36,7 +36,9 @@ type Options struct {
 	// a project is added, and replaces any runner adapter in Reconciliation.
 	// With Threads set, the service also dispatches every queued workstream turn
 	// on its own, never more than one turn per thread in flight and within the
-	// configured capacity, replacing Reconciliation.Schedule.
+	// configured capacity, replacing Reconciliation.Schedule. A runtime pause
+	// holds new turns on the threads it covers, except chief-of-staff turns;
+	// clearing it lets them run.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
 }
@@ -278,7 +280,7 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	if !cfg.HasProject() {
 		return nil, nil
 	}
-	repository, controller, err := openReconciliation(cfg, s.options.Reconciliation, s.options.Threads)
+	repository, controller, err := openReconciliation(cfg, s.options.Reconciliation, s.options.Threads, s.unpaused(cfg.Project.ID))
 	if err != nil || repository == nil {
 		return nil, err
 	}
@@ -287,6 +289,16 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 		return nil, err
 	}
 	return &activeProject{repository: repository, controller: controller, done: make(chan error, 1)}, nil
+}
+
+// unpaused admits the project's queued turns that no runtime pause in force
+// holds. The store is read on every pass, so a cleared pause lets held turns
+// run on the loop's next periodic pass.
+func (s *Service) unpaused(project config.ProjectID) func(context.Context, scheduler.Candidate) (bool, error) {
+	return func(_ context.Context, c scheduler.Candidate) (bool, error) {
+		st, _ := s.store.Effective()
+		return !scheduler.Held(st.Pauses, project, c), nil
+	}
 }
 
 // ensureChiefsOfStaff gives every workstream in the trace its chief-of-staff
@@ -342,7 +354,7 @@ func (s *Service) stop(active *activeProject) error {
 
 // openReconciliation leaves trace creation to project registration; an existing
 // trace must open cleanly before the service can report readiness.
-func openReconciliation(cfg *config.Config, options reconcile.Options, threads func(*trace.Repository) (coreadapter.Reconciler, error)) (*trace.Repository, *reconcile.Controller, error) {
+func openReconciliation(cfg *config.Config, options reconcile.Options, threads func(*trace.Repository) (coreadapter.Reconciler, error), admit func(context.Context, scheduler.Candidate) (bool, error)) (*trace.Repository, *reconcile.Controller, error) {
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
 	if err != nil {
 		return nil, nil, err
@@ -376,7 +388,7 @@ func openReconciliation(cfg *config.Config, options reconcile.Options, threads f
 		options.Adapters = adapters
 		limits := cfg.Capacity
 		limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
-		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Capacity: &limits})
+		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: admit, Capacity: &limits})
 		if err != nil {
 			repository.Close()
 			return nil, nil, err
