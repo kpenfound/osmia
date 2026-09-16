@@ -155,11 +155,7 @@ func (d Dispatcher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		var ran trace.QueuedTurn
-		ran, runErr = r.RunNext(ctx, in.Workstream, in.Agent, prepared)
-		if ran.Request.TurnID != in.Turn {
-			return coreadapter.OperationResult{}, errors.Join(runErr, fmt.Errorf("dispatcher claimed turn %q instead of %q", ran.Request.TurnID, in.Turn))
-		}
+		_, runErr = r.RunNext(ctx, in.Workstream, in.Agent, prepared)
 	}
 	_, q, _, err = d.find(in)
 	if err != nil {
