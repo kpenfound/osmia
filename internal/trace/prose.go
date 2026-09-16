@@ -31,7 +31,8 @@ func (r *Repository) Prose(subsystem string) (string, error) {
 }
 
 // Subsystems returns the sorted subsystem names of the kb/<subsystem>.md files
-// on disk. Hidden files and anything that is not a regular file are skipped.
+// on disk, whatever their file type, so Prose refuses a symlinked or irregular
+// one. Hidden files and names that are not valid document paths are skipped.
 func (r *Repository) Subsystems() ([]string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -48,7 +49,7 @@ func (r *Repository) Subsystems() ([]string, error) {
 	names := []string{}
 	for _, e := range entries {
 		name, ok := strings.CutSuffix(e.Name(), ".md")
-		if !ok || name == "" || !e.Type().IsRegular() || documentPath(ProsePath(name), false) != nil {
+		if !ok || name == "" || documentPath(ProsePath(name), false) != nil {
 			continue
 		}
 		names = append(names, name)

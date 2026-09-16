@@ -39,16 +39,19 @@ Knowledge-base files are ordered by subsystem name, entities by ID, and decision
 by workstream, time and record ID. The same files and records always produce the
 same bundle.
 
-A symlinked or otherwise irregular knowledge-base file, damaged trace history or
-an unreadable charter fails assembly.
+A symlinked or otherwise irregular `kb/<subsystem>.md` entry the bundle would
+include, damaged trace history or an unreadable charter fails assembly, with or
+without a scope.
 
 ## Rendering
 
 `Bundle.Render` returns the text form placed in a turn request's prompt. Each
 section header names the path and record it came from, so an agent can cite
 `charter#2`, `kb/internal.md` or a ruling's record and revision. Knowledge-base
-prose is included verbatim between `### kb/<subsystem>.md` and
-`### end of kb/<subsystem>.md` lines.
+prose is included verbatim between a
+`### kb/<subsystem>.md (subsystem <subsystem>)` line and a
+`### end of kb/<subsystem>.md` line; a newline is added when the prose does not
+end with one.
 
 ## Status
 

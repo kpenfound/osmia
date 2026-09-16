@@ -350,8 +350,19 @@ func TestBundleFailures(t *testing.T) {
 	if err := os.Symlink("internal.md", filepath.Join(f.dir, "kb/cmd.md")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.provider.Assemble(context.Background(), project, bundle.Scope{Entities: []string{"cmd"}}); err == nil {
-		t.Fatal("symlinked prose was read")
+	for _, scope := range []bundle.Scope{{Entities: []string{"cmd"}}, {}} {
+		if _, err := f.provider.Assemble(context.Background(), project, scope); err == nil || !strings.Contains(err.Error(), "kb/cmd.md") {
+			t.Fatalf("symlinked prose with scope %v: %v", scope, err)
+		}
+	}
+	if err := os.Remove(filepath.Join(f.dir, "kb/cmd.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(f.dir, "kb/cmd.md"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.provider.Assemble(context.Background(), project, bundle.Scope{}); err == nil {
+		t.Fatal("directory named like prose was skipped")
 	}
 }
 
