@@ -33,7 +33,7 @@ does not infer authority, readiness or workflow transitions from them.
 | `Transition` | `events.jsonl` | Subject, prior/resulting state and reason |
 | `Question` | `questions/<id>/question.jsonl` | Asking actor, original question and owner-facing text |
 | `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer and affected references |
-| `Agent` | `agents/<id>/identity.jsonl` | Stable role/thread identity and current backend session |
+| `Agent` | `agents/<id>/identity.jsonl` | Stable role/thread identity and backend session at that revision |
 | `TurnRequest` | `agents/<agent-id>/log.jsonl` | Thread/turn identity, profile, resume identity, system prompt, request and replay context |
 | `TurnResponse` | `agents/<agent-id>/log.jsonl` | Exact request revision, thread/turn identity, adapter result and any execution failure |
 | `Cost` | `ledger.jsonl` | Adapter ledger entry with attempt, full scope, time and explicit cost knowledge |
@@ -118,16 +118,16 @@ or supplying a stale version returns `ErrConflict`. Managed transitions cannot
 be revised through `Append`.
 
 `workstreams/<id>/workflow.json` holds the versioned transaction, delivery
-and operation histories. `Workflow` derives the current subject state from that history. Each
-transaction also adds its transition to `events.jsonl`; the complete history of
+and operation histories, plus durable thread queues. `Workflow` derives the
+current subject state from that history. Each transaction also adds its transition to `events.jsonl`; the complete history of
 both files is available in Git. `Outbox` returns all delivery intents with their
 claim, acknowledgement and release history, sorted by event ID.
 
 The repository serializes calls under its exclusive process lock. Publication
 writes immutable Git objects using a private index, syncs the objects, writes and
 syncs a recovery journal under `.git`, then atomically replaces and syncs the
-branch ref. That ref is the visibility boundary. Ordinary workflow and transition
-files are materialized from the committed objects before the journal is removed.
+branch ref. That ref is the visibility boundary. Ordinary workflow, transition
+and owned agent files are materialized from the committed objects before the journal is removed.
 Before publication, recovery retains the prior state; after publication, recovery
 finishes materializing the complete new state. Store reads and writes finish any
 pending publication before inspecting the files. Direct filesystem readers must
@@ -136,8 +136,8 @@ unfinished materialization. Unreferenced preparation objects are never state.
 
 An error after ref publication can mean the transaction committed. Retry its
 original identity to discover the result, rather than inventing a new identity.
-The journal only authorizes recovery of workflow and transition files; unrelated
-append failures and corrupt files remain diagnostic errors. Durability assumes a
+The journal only authorizes recovery of workflow, transition, agent identity and
+owned turn-log files; unrelated append failures and corrupt files remain diagnostic errors. Durability assumes a
 local filesystem supporting atomic rename and file/directory synchronization.
 
 ## Delivery leases and wakeups
@@ -218,3 +218,62 @@ does not launch work through an adapter lacking identity-based inspection.
 Production capability enforcement remains the execution adapter's responsibility.
 This controller supplies M1 recovery infrastructure, not lifecycle scheduling,
 capacity decisions or owner authorization.
+
+## Durable threads and queued turns
+
+`CreateThread` publishes an immutable `Agent` identity and an empty thread in the
+workstream's `workflow.json`, using the same transaction journal as state/outbox
+updates. The identity contains the role, stable thread ID and workstream; the
+thread snapshot retains its current backend-session reference and status.
+`Thread` returns a detached snapshot with every accepted request, its sequence,
+claim, captured response and completion time. The initial identity remains in
+`agents/<id>/identity.jsonl`; the latest session is in the thread snapshot and
+its captured responses. Managed identity and turn records cannot use `Append`.
+
+`EnqueueTurn` atomically appends the request to `agents/<id>/log.jsonl` and the
+thread queue. Acceptance under the repository lock assigns consecutive sequence
+numbers. This order survives restart even when callers share timestamps or
+submit concurrently. A turn ID identifies one immutable request within its
+agent; duplicate requests return their existing sequence. Changed content under
+that ID is rejected. A queued request fixes its profile, prompts and supplied
+resume/history context at acceptance. Backend continuation and replay preparation
+are separate from this storage API.
+
+`ClaimTurn` reserves the oldest pending request with a caller-retained token,
+service-session identity, session directory and start timestamp. There is at most
+one active turn per agent. Messages accepted while it runs stay separate pending
+requests. Unlike notification leases, turn claims never expire: elapsed time is
+not evidence that a backend stopped. Duplicate claim calls do not authorize a
+second execution; only the dispatcher that made the reservation may launch it.
+A reused token cannot claim another request.
+
+`CaptureTurn` atomically records the final or partial adapter result and appends
+its response to the owned log. The request supplies profile/backend provenance;
+the response references that exact request and preserves its cause, depth and
+scope, plus result timestamps, outcome and failure details. Changed responses
+under an existing turn are rejected. `CompleteTurn` requires a captured result
+and atomically releases the reservation, making the oldest successor eligible.
+It retains a status of `idle`, `waiting`, `failed` or `interrupted` based on the
+result. These are thread execution states, not feature or unit transitions.
+All mutations use the state/outbox publication boundary and signal its wakeup
+hint. Pending turns are inspected through `Thread` and reserved with `ClaimTurn`;
+they do not use the notification `Ready`/`Claim` lease API.
+
+Exact mutation retries are idempotent. On reopen, an active claim from a previous
+service session with no durable response is exposed as `interrupted`, with its
+reservation, session directory and queued successors intact. It cannot be stolen
+or blindly rerun, and stale service sessions cannot submit a new result. A
+captured result remains `captured` and can be completed after restart without a
+backend call. The interruption recovery policy is separate. As with operation
+workers, callers must join turn execution before closing the repository handle.
+
+`internal/thread.Runner` joins the queue to `coreadapter.Turns`. `RunNext` accepts
+caller-prepared execution resources and outcome policy, fills the immutable
+scope/profile/messages from the claimed request, runs once, captures the result,
+and completes the turn. Its clock is injected. Cancellation still records the
+partial result with a non-cancelled persistence context. After a successful claim,
+a persistence error leaves the turn reserved and returns the available claim and
+response so the caller can reconcile the same identity; it never automatically launches another attempt.
+Per-turn leases belong to the caller until the adapter is invoked, and competing
+calls must not share leases. The runner never reads private backend transcripts
+and does not choose scheduling, resume/replay or isolation policy.
