@@ -169,3 +169,37 @@ type StatusView struct {
 	Revision  int       `json:"revision"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// SendRequest is an owner message to a workstream's chief of staff.
+type SendRequest struct {
+	Text string `json:"text"`
+}
+
+// TurnState is the execution state of the turn a conversation entry belongs to.
+type TurnState string
+
+const (
+	TurnQueued  TurnState = "queued"
+	TurnRunning TurnState = "running"
+	TurnDone    TurnState = "done"
+	TurnFailed  TurnState = "failed"
+)
+
+// ConversationResponse lists a workstream's conversation with its chief of
+// staff, oldest first.
+type ConversationResponse struct {
+	Workstream config.WorkstreamID `json:"workstream"`
+	Entries    []ConversationEntry `json:"entries"`
+}
+
+// ConversationEntry is an owner message (kind "message") or the chief of
+// staff's final response to it (kind "response"). Both carry the state of the
+// turn that answers the message, and At is when the message was accepted or
+// the response captured.
+type ConversationEntry struct {
+	Turn  string    `json:"turn"`
+	Kind  string    `json:"kind"`
+	Text  string    `json:"text"`
+	At    time.Time `json:"at"`
+	State TurnState `json:"state"`
+}
