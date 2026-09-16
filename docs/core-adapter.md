@@ -1,7 +1,8 @@
 # Core adapter boundary
 
-`internal/coreadapter` is the service-facing contract. It implements prepared-turn translation, role-scoped MCP hosting and provider
-workspace leases. It contains no controller or delivery implementation. `adaptertest` supplies scripted,
+`internal/coreadapter` is the service-facing contract. It implements prepared-turn translation, role-scoped MCP hosting, provider
+workspace leases, review evidence, retry advice, accounting, capacity claims and
+coalescing wakeups. It contains no controller or delivery implementation. `adaptertest` supplies scripted,
 process-free fixtures for every port, including resource cleanup. Each script
 returns configured results/errors, records calls, honours pre-cancellation and
 fails when exhausted. It does not emulate an enforcing sandbox or durable store.
@@ -27,10 +28,10 @@ Capabilities describe this pinned version, based on its public API and README.
 | `Workspaces` | `vcs.Provider`, `Workspace`, `Directory` | Caller owns acquisition and lifetime across turns. Core exposes the provider interface but **no reusable concrete git-worktree provider** in the public module; that implementation is an upstream gap. The lease port neither commits nor rebases nor delivers. |
 | `Reviews` | `review.Runner`, `Bundle`, `ReadArtifact`, findings | Accepts supplied context and diff; retains partial artifacts, findings and session accounting. Core does not bind approval to spec/plan/candidate revisions: Osmia carries that identity and owns approval checks. Interactive review threads belong to Osmia. |
 | `Retries` | `ops.ClassifyFailure`, `RetryPolicy.Decide`, `SelectModel` | Classification and bounded retry advice only; no sleeping or dispatch. **Upstream gap:** model fallback selection does not resolve named profiles across agent binaries. Osmia resolves its profile graph and supplies the selected profile. |
-| `Ledger` | `ops.Ledger`, `Spend` | Accounting storage and totals only. Core append is not an idempotent transaction with workflow state. Attempt reconciliation and durable trace integration belong to Osmia; unknown costs remain visible. |
-| `Budgets` | `ops.OverBudget`, `EvaluateWindow`, `Streaks`, `CapacityPause`, `Degraded` | Numeric threshold/window primitives; pauses, scope selection and degradation responses belong to Osmia. `BudgetRequest` receives already-selected spend. Episode tracking can remain private to implementations; this contract adds no controller state. |
-| `Capacity` | `ops.SharedPool` | All-or-none slot claims. Core's queued-member FIFO order is not Osmia's stage/workstream scheduling policy. The adapter must preserve caller ordering and return unavailable claims without blocking; it must not delegate scheduling to core. |
-| `Wakeups` | `ops.Bus`, `NewWake`, `Wake.Wait` | Coalescing hints plus caller ticks. Bus delivery is lossy; it never substitutes for the durable outbox or authoritative state reconciliation. |
+| `Ledger` | `ops.Ledger`, `Spend` | Accounting storage and totals only. Core append is not an idempotent transaction with workflow state. **Upstream gaps:** strict reads (core skips malformed lines) and explicit cost knowledge. A temporary strict reader fails closed; cost knowledge is encoded in opaque work tags. Attempt reconciliation and durable trace integration belong to Osmia. |
+| `Budgets` | `ops.EvaluateWindow` | Numeric threshold/window primitives; pauses, scope selection and degradation responses belong to Osmia. `BudgetRequest` receives already-selected spend. The adapter retains no episode state; the caller supplies the previous threshold state. |
+| `Capacity` | `ops.SharedPool` | All-or-none slot claims. Core's queued-member FIFO order is not Osmia's stage/workstream scheduling policy. The adapter serializes multi-pool claims and rolls back on refusal. Members leave immediately, retaining no FIFO reservation; caller ordering remains authoritative. |
+| `Wakeups` | `ops.NewWake`, `Wake.Signal`, `Wake.Drain` | Coalescing hints plus caller ticks. Signals coalesce in a one-element channel. The adapter returns after one hint or tick; core’s callback-loop `Wake.Wait` is not this port’s contract. Neither this hint nor core’s lossy bus substitutes for the durable outbox or authoritative state reconciliation. |
 
 ## Contract choices
 
@@ -107,3 +108,73 @@ handler. `HTTPTransport` serves a caller-bound listener using core's authenticat
 HTTP transport, with a caller-supplied token and endpoint. The service owns address
 selection and credential delivery. Tests use in-memory SDK transports and fake
 execution/providers; they launch no agents, container engines or VCS processes.
+
+## Review evidence
+
+`ReviewAdapter` uses core's distiller, angle fan-out and finding judge. The caller
+supplies an opaque subject, candidate revisions, ordered context and an explicit,
+nonempty list of built-in angles. Every configured angle runs regardless of the
+model's size estimate, in core's canonical angle order. Custom angles and shared
+resume sessions return `UnsupportedError`; interactive review remains outside
+this adapter. The result's verdict is empty: findings confer no approval.
+
+Every phase runs through the supplied concurrency-safe `Turns` implementation,
+with its own turn suffix and session directory. The template must describe a
+verified read-only workspace, denying execution, writes, network and VCS access.
+The enforcing executor still owns tool-level isolation; `CoreExecutor` remains
+unsupported. Core's generic review agent does not bypass the execution boundary.
+Transferred leases are released once after every phase finishes, including on
+failure, with cancellation removed from the cleanup context.
+
+The artifact directory must be new and have an existing parent. Core may remove
+its directory on an early failure, so it never receives an existing directory.
+`input.json` retains context and skipped reasons in their original order, angle
+configuration, subject and candidate. `diff.patch` retains exact diff bytes,
+including non-UTF-8 content that JSON cannot preserve. The reference embedded in
+core's brief includes a SHA-256 of the diff. Exact diff bytes are also appended to
+every phase prompt: core does not write diff files into caller-owned checkouts.
+Partial results include available core artifacts, findings and full session
+accounting; a failed or unparseable angle marks the result partial even if core
+returns a successful result from the other angles. The service owns durable
+storage and reconciliation of these records.
+
+## Operational adapters
+
+`RetryAdapter` translates session results for `ops.ClassifyFailure` and passes
+one-based attempt counts, limits and delay to `RetryPolicy.Decide`. Any nonempty
+reported outcome takes precedence over infrastructure flags. Clean exits without
+an outcome are behavioural; transport errors, signals and provider limits are
+infrastructure. Cancellation and unsupported capabilities do not receive retry
+advice. A supplied fallback profile is returned only with an eligible retry;
+resolving that profile and choosing when to offer it belong to the caller. The
+adapter neither waits nor starts work.
+
+`NewLedger` accepts a directory and clock. Share one adapter per file; external
+writers are unsupported. Core appends accounting entries, using the complete
+JSON-encoded Osmia scope as an opaque work key, the attempt ID as the session,
+and tags for workstream and cost knowledge. Unknown costs contribute zero to the
+numeric total and remain separately counted. `Read` returns the decoded scope
+and attempts. `Spend` selects workstreams and an inclusive lower time bound,
+then uses core's sum. Missing files represent no entries; malformed records,
+invalid metadata, file/scan errors and numeric overflow return errors without
+partial totals. A temporary strict scan is required until core exposes a
+fail-closed read mode; its permissive `ReadLedger` cannot meet this contract.
+
+`BudgetAdapter` uses `EvaluateWindow` on caller-selected spend. It reaches a
+positive limit at equality and releases strictly below the supplied resume
+percentage. Zero disables the limit. It propagates unknown-cost counts without
+inventing their cost. Previous threshold state, clock/window selection and any
+pause decision remain with the caller. Invalid negative or nonfinite accounting
+values and percentages outside 0–100 are rejected.
+
+`NewCapacity` creates private core pools for caller-supplied slot kinds. Zero
+limits disable claims; unknown kinds are typed unsupported errors. A claim is
+atomic across all named pools, with rollback on refusal or cancellation. Release
+is idempotent and retryable after cancellation. Claim ownership remains with the
+service until explicit release; no watcher implicitly releases in-flight work.
+No queue membership persists to impose core's FIFO ordering on later calls.
+
+`NewWakeups` creates one coalescing hint channel per controller. Notification is
+nonblocking and `Wait` returns on a hint, caller tick or cancellation. Controllers
+must reconcile authoritative state on startup, each wake and periodic ticks;
+a hint is neither durable delivery nor the state that needs processing.
