@@ -1,4 +1,4 @@
-# M1 trace repository
+# Trace repository
 
 `internal/trace` persists the service's typed records in the dedicated local Git
 repository at `<root>/projects/<project-id>`. `Create` accepts a resolved
@@ -397,3 +397,93 @@ bytes through the trace's atomic publication/recovery boundary; an empty string
 clears the notes. Missing notes read as empty. Scope mismatches, path escapes,
 symlink aliases and hardlink aliases are rejected. Notes remain private to the
 bound role tools and are not included in replay context.
+
+## Feature spec and plan
+
+A workstream's `spec.md` and `plan.json` are ordinary `Document` records with
+IDs `spec` and `plan`. Every change is a new revision; `internal/plan` parses
+and validates their content and never writes the trace itself.
+
+### spec.md
+
+The spec is free Markdown. Only its acceptance criteria are parsed: the
+ordered-list items written as `N. text` in the section headed
+`Acceptance criteria` (any heading level, any case). The section ends at the
+next heading of the same or a higher level, so subheadings inside it are
+allowed. Numbered lists elsewhere, fenced code and HTML comments are ignored.
+Lines that follow an item without a blank line continue its text.
+
+```markdown
+## Acceptance criteria
+
+1. A plan with a dependency cycle is refused.
+2. Every error names the unit or criterion at fault.
+```
+
+A criterion is cited as `spec#<n>` with its own list number. `plan.ParseSpec`
+returns the criteria and these diagnostics, which never stop parsing:
+
+- no `Acceptance criteria` section, or more than one;
+- a section without numbered criteria;
+- an item without text;
+- a number used more than once, which makes that criterion uncitable;
+- a gap in the numbering, starting from 1.
+
+### plan.json
+
+```json
+{
+  "version": 1,
+  "units": [
+    {
+      "id": "parse-spec",
+      "title": "Parse the acceptance criteria",
+      "addresses": [
+        {
+          "criterion": "spec#1",
+          "proof": {"kind": "new-test", "name": "TestParseSpec"}
+        }
+      ],
+      "depends_on": [],
+      "footprint": ["internal.plan", "trace"]
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `version` | Always `1`. A missing or other version is refused as `plan.ErrUnsupportedVersion` before anything else is read. |
+| `units[].id` | Stable unit ID: 1-128 letters, digits, `_` or `-`, starting with a letter or digit. |
+| `units[].title` | Optional short description. |
+| `units[].addresses` | The criteria the unit addresses, each with its proof. |
+| `units[].addresses[].proof.kind` | `new-test`, `existing-test`, `scripted-check` or `reviewer-judgement`. |
+| `units[].addresses[].proof.name` | The test, the check, or what the reviewer will judge. |
+| `units[].depends_on` | IDs of the units this one waits for. |
+| `units[].footprint` | IDs or aliases of [local entity map](knowledge-base.md) entities. |
+
+`plan.Parse` rejects unknown fields. `plan.Encode` writes absent lists as `[]`
+with two-space indentation and a trailing newline, keeping unit order.
+`Plan.Unit` and `Spec.Criterion` look up a unit or criterion, and refuse an ID
+or number that is used more than once. `Plan.Addressing` lists the units that
+address a criterion.
+
+### Validation
+
+`plan.Validate(spec, plan, entities)` is a pure function over the parsed spec,
+the parsed plan and `kb/entities.json`. It returns every problem in one list,
+each a `plan.Problem` with a kind and the unit, the criterion or both:
+
+| Kind | Problem |
+| --- | --- |
+| `spec` | A spec diagnostic. |
+| `unit` | A malformed or duplicate unit ID, or a criterion one unit addresses twice. |
+| `unknown-dependency` | `depends_on` names a unit the plan does not have. |
+| `dependency-cycle` | The dependencies form a cycle, reported once, starting at its smallest unit ID. |
+| `uncovered-criterion` | No unit addresses a spec criterion. |
+| `unknown-criterion` | A unit addresses a citation that is malformed, absent from the spec or numbered twice there. |
+| `missing-proof` | An addressed criterion has no proof, an unknown proof kind or an unnamed proof. |
+| `unresolved-footprint` | A unit declares no footprint, or a footprint name matches no entity with a path pattern. |
+
+An empty list means the plan can be presented. The validator does not judge
+whether a unit is too large.

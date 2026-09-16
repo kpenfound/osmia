@@ -24,8 +24,8 @@ loader schema, defaults, local root layout and project registration.
 
 The [trace repository reference](docs/trace.md) documents typed M1 records,
 revision history, atomic workflow transactions, durable outbox leases, local
-operation recovery, and agent queues with owned turn logs in the
-dedicated local Git repository.
+operation recovery, agent queues with owned turn logs, and the feature spec
+and plan formats with their validator in the dedicated local Git repository.
 
 The [local entity map reference](docs/knowledge-base.md) documents
 `kb/entities.json`, its seed from CODEOWNERS and directory structure, and
