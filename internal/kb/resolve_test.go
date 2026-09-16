@@ -15,6 +15,7 @@ func resolutionMap() Map {
 		{ID: "trace-tests", Name: "trace tests", Paths: []string{"internal/trace/*_test.go"}, PartOf: []string{"internal.trace"}},
 		{ID: "trace-docs", Name: "trace docs", Paths: []string{"docs/trace.md"}},
 		{ID: "trace-doc-owners", Name: "trace doc owners", Paths: []string{"docs/trace.md"}},
+		{ID: "guide", Name: "guide", Paths: []string{"**/*.md", "docs/guide"}},
 		{ID: "team", Name: "team"},
 		{ID: "team.member", Name: "member", PartOf: []string{"team"}},
 	}}
@@ -51,6 +52,7 @@ func TestResolvePaths(t *testing.T) {
 		"internal/kb/kb_test.go",
 		"internal/kb/kb.go",
 		"docs/trace.md",
+		"docs/guide/intro.md",
 		"README.md",
 		"cmd/osmia/main.go",
 		"/etc/passwd",
@@ -68,6 +70,7 @@ func TestResolvePaths(t *testing.T) {
 			{"internal/kb/kb_test.go", []string{"internal"}},
 			{"internal/kb/kb.go", []string{"internal"}},
 			{"docs/trace.md", []string{"trace-doc-owners", "trace-docs"}},
+			{"docs/guide/intro.md", []string{"guide"}},
 			{"README.md", []string{"docs"}},
 			{"internal", []string{"internal"}},
 		},
@@ -78,6 +81,10 @@ func TestResolvePaths(t *testing.T) {
 	}
 	if got := (Map{Version: Version}).ResolvePaths([]string{"a"}); !reflect.DeepEqual(got, Location{Matches: []PathMatch{}, Unresolved: []string{"a"}}) {
 		t.Fatalf("empty map: %#v", got)
+	}
+	everything := Map{Version: Version, Entities: []Entity{{ID: "all", Name: "all", Paths: []string{"**"}}}}
+	if got := everything.ResolvePaths([]string{".", "a"}); !reflect.DeepEqual(got, Location{Matches: []PathMatch{{"a", []string{"all"}}}, Unresolved: []string{"."}}) {
+		t.Fatalf("repository root: %#v", got)
 	}
 }
 
