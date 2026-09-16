@@ -112,6 +112,15 @@ func TestServiceTurnsApplyRoleCeilingAndFreshViews(t *testing.T) {
 				if engine.Policies[0].Mounts[0].Source == engine.Policies[1].Mounts[0].Source {
 					t.Fatal("workspace view reused")
 				}
+				for _, req := range engine.Requests {
+					want := []string{"mcp__osmia_0__file_read"}
+					if writable {
+						want = append(want, "mcp__osmia_0__file_write", "mcp__osmia_0__shell", "mcp__osmia_0__fetch")
+					}
+					if !reflect.DeepEqual(req.Profile.AllowedTools, want) || len(req.Profile.MCP) != 1 {
+						t.Fatalf("backend allow list %v, want %v", req.Profile.AllowedTools, want)
+					}
+				}
 				if p.acquired != 2 || p.released != 2 || h.released != 2 || engine.Released != 2 {
 					t.Fatal("service lifecycle incomplete")
 				}
@@ -161,12 +170,23 @@ func TestTurnConfigurationCanOnlyNarrow(t *testing.T) {
 }
 
 func TestServiceTurnFailureCleanup(t *testing.T) {
-	for _, mode := range []string{"no engine", "prepare", "inspect", "execute", "cleanup", "cancel", "mount", "metadata", "credential", "duplicate tool", "unregistered tool"} {
+	for _, mode := range []string{"no engine", "prepare", "inspect", "execute", "cleanup", "cancel", "capture", "mount", "metadata", "credential", "duplicate tool", "unregistered tool"} {
 		t.Run(mode, func(t *testing.T) {
 			r, p, h, engine, input := fixture(t, "committee", "container")
 			failure := errors.New("fixture failure")
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+			captures := 0
+			r.Capture = func(_ context.Context, _ a.Scope, view *FileView, result a.SessionResult) error {
+				captures++
+				if data, err := view.Read("src/file"); err != nil || string(data) != "original" {
+					t.Fatalf("capture cannot read failed output: %s %v", data, err)
+				}
+				if mode == "capture" {
+					return failure
+				}
+				return nil
+			}
 			switch mode {
 			case "no engine":
 				r.Engine = nil
@@ -203,6 +223,15 @@ func TestServiceTurnFailureCleanup(t *testing.T) {
 			if err == nil || !result.IsError {
 				t.Fatalf("failure lost: %+v %v", result, err)
 			}
+			// Capture retains output from any attempt that reached the runner,
+			// including boundary construction failures, but never from setup.
+			attempted := map[string]bool{"prepare": true, "inspect": true, "execute": true, "cleanup": true, "cancel": true, "capture": true}[mode]
+			if want := map[bool]int{true: 1}[attempted]; captures != want {
+				t.Fatalf("capture ran %d times after %s, want %d", captures, mode, want)
+			}
+			if (mode == "execute" || mode == "capture") && !errors.Is(err, failure) {
+				t.Fatalf("%s failure not reported: %v", mode, err)
+			}
 			if p.acquired != p.released || len(h.requests) != h.released {
 				t.Fatal("resources not released")
 			}
@@ -210,7 +239,7 @@ func TestServiceTurnFailureCleanup(t *testing.T) {
 			if len(entries) != 0 {
 				t.Fatal("file view leaked")
 			}
-			if mode != "execute" && mode != "cleanup" && mode != "cancel" && len(engine.Requests) != 0 {
+			if mode != "execute" && mode != "cleanup" && mode != "cancel" && mode != "capture" && len(engine.Requests) != 0 {
 				t.Fatal("failed setup launched turn")
 			}
 		})

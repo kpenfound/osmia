@@ -160,7 +160,7 @@ func (e BoundaryExecutor) Run(ctx context.Context, req agent.Request, settings E
 		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.ContainerEnv) != 0 || req.HostMCP != nil ||
 		len(req.Profile.Env) != 0 || len(req.Profile.Skills) != 0 || req.Profile.Shell != "" || req.Profile.ContainerUseEnvironment != "" ||
 		len(req.Profile.SandboxDomains) != 0 || req.Profile.Sandbox != settings.Mode || req.Profile.SandboxImage != settings.Image ||
-		!maps.Equal(req.Env, iso.Environment) || !slices.Equal(req.Profile.AllowedTools, iso.Capabilities.Tools) {
+		!maps.Equal(req.Env, iso.Environment) || !slices.Equal(req.Profile.AllowedTools, AllowedTools(slices.Collect(maps.Keys(req.Profile.MCP)), iso.Capabilities.Tools)) {
 		return nil, unsupported("execution request", "request widens the service boundary")
 	}
 	for _, endpoint := range req.Profile.MCP {

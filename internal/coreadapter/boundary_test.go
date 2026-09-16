@@ -25,6 +25,7 @@ func TestRawExecutionRequestCannotWidenBoundary(t *testing.T) {
 		"shell":              func(r *agent.Request) { r.Profile.Shell = "/bin/sh" },
 		"container override": func(r *agent.Request) { r.Profile.ContainerUseEnvironment = "other" },
 		"tools":              func(r *agent.Request) { r.Profile.AllowedTools = []string{"Bash"} },
+		"server-wide tools":  func(r *agent.Request) { r.Profile.AllowedTools = []string{"mcp__osmia_0"} },
 		"environment":        func(r *agent.Request) { r.Env["SSH_AUTH_SOCK"] = "/agent" },
 		"MCP command":        func(r *agent.Request) { r.Profile.MCP = map[string]agent.MCPEntry{"rogue": {Command: "git"}} },
 		"MCP headers": func(r *agent.Request) {
@@ -154,9 +155,12 @@ func TestBoundaryRejectsUnsafeInputs(t *testing.T) {
 			turn := boundaryTurn(t, "container")
 			mutate(t, &turn)
 			engine := &adaptertest.IsolationEngine{}
-			_, err := (&a.TurnRunner{Executor: a.BoundaryExecutor{Required: turn.Sandbox.Verified, Engine: engine}}).Run(context.Background(), turn)
+			result, err := (&a.TurnRunner{Executor: a.BoundaryExecutor{Required: turn.Sandbox.Verified, Engine: engine}}).Run(context.Background(), turn)
 			if err == nil || len(engine.Policies) != 0 || len(engine.Requests) != 0 {
 				t.Fatalf("unsafe construction: %v", err)
+			}
+			if !result.IsError || result.Session != (a.BackendSession{}) {
+				t.Fatalf("rejection is not a valid failure record: %+v", result)
 			}
 		})
 	}

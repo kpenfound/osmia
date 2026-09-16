@@ -42,6 +42,9 @@ func TestIsolationFailureIsDurableBeforeExecution(t *testing.T) {
 			if runErr == nil || q.Response == nil || q.Response.Failure == "" || !q.Response.Result.IsError || q.CompletedAt.IsZero() {
 				t.Fatalf("failure not captured: %+v %v", q, runErr)
 			}
+			if q.Response.Result.Session != (a.BackendSession{}) {
+				t.Fatalf("rejected launch recorded a partial session identity: %+v", q.Response.Result.Session)
+			}
 			if failure != "workspace" && !errors.Is(runErr, a.ErrUnsupported) {
 				t.Fatal(runErr)
 			}

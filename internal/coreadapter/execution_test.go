@@ -42,6 +42,7 @@ func TestTurnTranslationAndProvenance(t *testing.T) {
 	turn := prepared(t)
 	at := time.Unix(123, 0)
 	turn.Resume = &BackendSession{Backend: "claude", ID: "previous"}
+	turn.Sandbox.Verified.Capabilities.Tools = []string{"file_read", "file_write"}
 	fake := &fakeExecutor{run: func(context.Context) (*agent.Result, error) {
 		return &agent.Result{ClaudeID: "session", SessionDir: turn.SessionDirectory, StartedAt: at, Duration: time.Second, CostUSD: 1.25, CostKnown: true, NumTurns: 3, ResultText: "response", HasOutcome: true, Outcome: agent.Outcome{Status: "done", Note: "report"}, RateLimit: &agent.RateLimit{Status: "allowed", Type: "daily", ResetsAt: at}}, nil
 	}}
@@ -64,6 +65,15 @@ func TestTurnTranslationAndProvenance(t *testing.T) {
 	}
 	if req.Profile.MCP["osmia_0"].BearerTokenEnv != "MCP_TOKEN" || len(req.Profile.MCP) != 1 || !reflect.DeepEqual(fake.settings, turn.Execution) || req.Profile.SandboxImage != "prepared-image" {
 		t.Fatalf("settings: %+v", req.Profile)
+	}
+	// Claude matches MCP tools by server-qualified name; bare names pin nothing.
+	if !reflect.DeepEqual(req.Profile.AllowedTools, []string{"mcp__osmia_0__file_read", "mcp__osmia_0__file_write"}) {
+		t.Fatalf("allowed tools: %v", req.Profile.AllowedTools)
+	}
+	unhosted := prepared(t)
+	unhosted.MCP, unhosted.Sandbox.Verified.Capabilities.Tools = nil, []string{"file_read"}
+	if _, err := (&TurnRunner{Executor: fake}).Run(context.Background(), unhosted); !errors.Is(err, ErrUnsupported) || fake.calls != 1 {
+		t.Fatalf("granted tools without a service host: %v", err)
 	}
 	if result.Session.ID != "session" || result.Session.Backend != "claude" || result.Outcome.Report != "report" || result.Usage != (Usage{1.25, true, 3}) || result.StartedAt != at || result.Duration != time.Second || result.FinalResponse != "response" || result.Limit.Kind != "daily" {
 		t.Fatalf("result: %+v", result)
@@ -272,8 +282,8 @@ func TestCleanupFailureRetriable(t *testing.T) {
 	turn.Cleanup = []Lease{l}
 	f := &fakeExecutor{run: func(context.Context) (*agent.Result, error) { return &agent.Result{ClaudeID: "kept"}, nil }}
 	result, err := (&TurnRunner{Executor: f}).Run(context.Background(), turn)
-	if err == nil || result.Session.ID != "kept" {
-		t.Fatal("lost cleanup error or result")
+	if err == nil || result.Session.ID != "kept" || !result.IsError {
+		t.Fatalf("lost cleanup error or result: %+v %v", result, err)
 	}
 	if err = l.Release(context.Background()); err != nil {
 		t.Fatal(err)

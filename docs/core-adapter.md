@@ -66,9 +66,12 @@ priority, owner gates, durable queues/logs/outbox and VCS delivery outside core.
 `TurnRunner` translates a prepared turn into core's `agent.Request` and maps its
 `Result` back to Osmia, retaining partial results alongside errors. The role is
 core's profile name; the selected backend/model/effort and limits remain explicit.
-MCP endpoints receive deterministic names. History is prepended as supplied by the
-caller, and resume requests are rejected for incompatible backends or malformed
-references. `TurnRunner.CheckResume` also requires the enforcing executor to
+MCP endpoints receive deterministic names, and granted tools are allow-listed
+under those server names (`mcp__<server>__<tool>`), the form the backend matches;
+granted tools without a service endpoint fail translation. The pinned core
+forwards the allow list to Claude only, so other backends are bounded by the
+scoped MCP registry alone. History is prepended as supplied by the caller, and
+resume requests are rejected for incompatible backends or malformed references. `TurnRunner.CheckResume` also requires the enforcing executor to
 implement `ResumeChecker`: it verifies saved-session availability and the exact
 previous/next profile capabilities. An executor without this capability selects
 owned-log replay. The pinned Codex backend always selects replay. Empty outcome

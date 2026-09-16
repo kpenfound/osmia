@@ -200,14 +200,17 @@ func (v *FileView) Write(name string, data []byte) error {
 	return v.root.WriteFile(name, data, 0600)
 }
 
+// Release closes the view and removes its directory. A close failure never
+// leaves the copied files behind; the directory is removed regardless.
 func (v *FileView) Release(context.Context) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	var closeErr error
 	if !v.closed {
-		if err := v.root.Close(); err != nil {
-			return fmt.Errorf("close file view: %w", err)
-		}
 		v.closed = true
+		if err := v.root.Close(); err != nil {
+			closeErr = fmt.Errorf("close file view: %w", err)
+		}
 	}
-	return os.RemoveAll(v.workspace.Directory)
+	return errors.Join(closeErr, os.RemoveAll(v.workspace.Directory))
 }
