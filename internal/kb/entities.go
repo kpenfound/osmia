@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"regexp"
@@ -217,9 +216,6 @@ func Parse(data []byte) (Map, error) {
 	d.DisallowUnknownFields()
 	if err := d.Decode(&m); err != nil {
 		return Map{}, fmt.Errorf("entity map: %w", err)
-	}
-	if _, err := d.Token(); err != io.EOF {
-		return Map{}, fmt.Errorf("entity map: trailing data")
 	}
 	if m.Entities == nil {
 		m.Entities = []Entity{}

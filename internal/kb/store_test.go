@@ -213,7 +213,7 @@ func TestMergeKeepsIDs(t *testing.T) {
 	}
 	// Seeded entities below a renamed one point at its kept ID.
 	fp := merged.ResolveEntities([]string{"trace-store"})
-	if !reflect.DeepEqual(fp.Paths, []string{"internal/trace", "internal/trace/store"}) || got["internal/trace/store"].PartOf[0] != "trace-store" {
+	if !reflect.DeepEqual(fp.Paths, []string{"internal/trace", "internal/trace/store"}) || !reflect.DeepEqual(got["internal/trace/store"].PartOf, []string{"trace-store"}) {
 		t.Fatalf("renamed entity footprint: %#v", fp)
 	}
 	// Regenerating the regenerated map changes nothing.
