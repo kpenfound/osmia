@@ -8,6 +8,7 @@ a top-level `config.toml` with profiles and no project is enough to start.
 osmia serve --root ~/.osmia
 # In another terminal:
 osmia status --root ~/.osmia
+osmia status w_0123456789abcdef0123456789abcdef
 osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
 osmia project remove p_0123456789abcdef0123456789abcdef
 osmia handin p_0123456789abcdef0123456789abcdef design.md
@@ -27,8 +28,16 @@ osmia status --json
 - `status` shows health, loaded configuration digest/root, the active project
   and its trace path (or that none is configured), its charter state (ready or
   empty, rule count, recorded revision and numbering diagnostics), diagnostics
-  and effective runtime controls. Reading the charter records any edit you made
-  to it; see [charter](charter.md).
+  and effective runtime controls, then each workstream with its state, open
+  question count and context mode, and the chief of staff's goal and attention
+  (`Attention: none` when nothing needs you), or `no status yet`. Reading the
+  charter records any edit you made to it; see [charter](charter.md).
+- `status <workstream-id>` shows one workstream of the active project: the same
+  facts, then the full status (goal, attention, note, one line per active
+  agent, and when it was written), or `Status: none yet` before the chief of
+  staff writes one. A workstream the project does not hold fails with
+  `not_found` (exit 4); with no project configured it fails with `no_project`
+  (exit 4). See [workstream status](service.md#workstream-status).
 - `project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH
   [--base-branch NAME]` registers a project with the running service: it
   validates the request, generates the project ID, writes
@@ -89,7 +98,9 @@ are unavailable before M4.
 ## Output and exit codes
 
 All client commands accept `--json`. Status returns an object with `health`,
-`configuration` and `runtime` API responses; profiles returns the runtime
+`configuration`, `runtime` and `status` API responses, where `status` lists
+every workstream with its full status (`null` before the first); `status
+<workstream-id>` returns that workstream's status response; profiles returns the runtime
 response. Mutations return `mutation` (the API acknowledgement) and `runtime`
 (the subsequent effective-state response). Project commands return the API's
 project response: the project view (ID, name, upstream, fork, clone, base
@@ -102,8 +113,9 @@ including defaults after clearing overrides. If the mutation succeeds but readin
 the effective state fails, stderr says it was acknowledged; inspect status before
 retrying. Failures leave stdout empty and write actionable diagnostics to stderr.
 Raw configuration/parser and server error text is omitted from failure messages.
-Project and hand-in command failures print the service's message, which names
-the field, project ID or path at fault and never raw file contents.
+Project, hand-in and single-workstream status failures print the service's
+message, which names the field, project or workstream ID or path at fault and
+never raw file contents.
 
 | Exit | Meaning |
 | --- | --- |
@@ -111,7 +123,7 @@ the field, project ID or path at fault and never raw file contents.
 | 1 | Invalid API response, local output or unexpected client failure |
 | 2 | Invalid command, flags, arguments or root |
 | 3 | Missing socket, connection failure or unavailable service |
-| 4 | API malformed-input or validation rejection, no project is configured, unknown project, or empty charter on hand-in |
+| 4 | API malformed-input or validation rejection, no project is configured, unknown project or workstream, or empty charter on hand-in |
 | 5 | API conflict, project already active, unsupported operation, restart required or internal failure |
 | 6 | Foreground startup/service failure, including ownership conflict |
 
