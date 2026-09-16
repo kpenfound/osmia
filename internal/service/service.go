@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/events"
+	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
@@ -43,6 +44,10 @@ type Options struct {
 	// workstream's chief of staff as queued turns, one per event window.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
+	// Issues fetches issue URLs handed in. It defaults to the GitHub REST API
+	// with the service's GITHUB_TOKEN environment variable, which no session
+	// receives.
+	Issues issues.Client
 }
 
 // activeProject is the runtime state of the configured project: its open trace
@@ -60,6 +65,7 @@ type Service struct {
 	active     *activeProject
 	pending    error
 	projectMu  sync.Mutex // serializes project registration and removal
+	handInMu   sync.Mutex // serializes hand-ins
 	options    Options
 	store      *runtime.Store
 	lock       *os.File
@@ -104,6 +110,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, fmt.Errorf("Osmia root is already owned or cannot be locked; stop its service before starting another: %w", err)
 	}
 	opts.Config.Root = root.String()
+	if opts.Issues == nil {
+		opts.Issues = issues.GitHub{Token: os.Getenv("GITHUB_TOKEN"), HTTP: &http.Client{Timeout: 30 * time.Second}}
+	}
 	cfg, err := config.Load(opts.Config)
 	if err != nil {
 		return nil, err

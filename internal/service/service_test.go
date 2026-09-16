@@ -92,7 +92,7 @@ func TestRoundTrip(t *testing.T) {
 	}
 	// Without a trace there is no charter to gate on.
 	var api *APIError
-	if err := c.HandIn(ctx, HandInRequest{Project: project}); !errors.As(err, &api) || api.Code != Internal || !strings.Contains(api.Message, "no trace repository") {
+	if _, err := c.HandIn(ctx, HandInRequest{Project: project}); !errors.As(err, &api) || api.Code != Internal || !strings.Contains(api.Message, "no trace repository") {
 		t.Fatalf("hand-in without a trace: %v", err)
 	}
 	info, err := os.Stat(s.Socket())

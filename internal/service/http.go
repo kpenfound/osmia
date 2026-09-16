@@ -197,7 +197,11 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		if !decode(w, r, &v) {
 			return
 		}
-		failWith(w, s.handIn(r.Context(), v))
+		if out, api := s.handIn(r.Context(), v); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
 		return
 	}
 	var err error

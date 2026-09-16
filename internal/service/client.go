@@ -91,10 +91,11 @@ func (c *Client) RemoveProject(ctx context.Context, id config.ProjectID) (Projec
 	return v, err
 }
 
-// HandIn submits work to a project. The service answers every hand-in with an
-// error: the charter gate's, or unsupported once the gate passes.
-func (c *Client) HandIn(ctx context.Context, req HandInRequest) error {
-	return c.Do(ctx, "POST", Prefix+"/handin", req, nil)
+// HandIn hands work to a project and returns the workstream it created.
+func (c *Client) HandIn(ctx context.Context, req HandInRequest) (HandInResponse, error) {
+	var v HandInResponse
+	err := c.Do(ctx, "POST", Prefix+"/handin", req, &v)
+	return v, err
 }
 
 // Statuses lists every workstream's status in the active project.

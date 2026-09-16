@@ -193,11 +193,26 @@ func TestProjectDocumentsAndImmutableInput(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, d) {
 		t.Fatalf("project doc: %#v %v", got, err)
 	}
+	d.Revision = 3
+	d.Source = "stdin"
+	if err := r.Append(context.Background(), d); err == nil {
+		t.Fatal("source accepted on a document that was not handed in")
+	}
 	d.Header = header("document", "input1")
 	d.Revision = 1
 	d.Path = "handed/design.jsonl"
+	for _, source := range []string{" ", "file:/a\nb"} {
+		d.Source = source
+		if err := r.Append(context.Background(), d); err == nil {
+			t.Fatalf("source %q accepted", source)
+		}
+	}
+	d.Source = "file:/home/owner/design.jsonl"
 	if err := r.Append(context.Background(), d); err != nil {
 		t.Fatal(err)
+	}
+	if got, err := Get[Document](r, streamID, "input1", 1); err != nil || !reflect.DeepEqual(got, d) {
+		t.Fatalf("handed doc: %#v %v", got, err)
 	}
 	d.Revision = 2
 	if err := r.Append(context.Background(), d); !errors.Is(err, ErrConflict) {
