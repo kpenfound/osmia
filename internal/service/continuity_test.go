@@ -42,6 +42,10 @@ const (
 
 var demoStart = time.Date(2026, 9, 16, 9, 0, 0, 0, time.UTC)
 
+// demoTimeout only guards against a hang; trace publication runs Git and is
+// slow under the race detector on a loaded machine.
+const demoTimeout = 5 * time.Minute
+
 type demoClock struct {
 	mu  sync.Mutex
 	now time.Time
@@ -403,7 +407,7 @@ func demonstrate(t *testing.T, mode string) {
 	must(t, err)
 	select {
 	case <-entered:
-	case <-time.After(20 * time.Second):
+	case <-time.After(demoTimeout):
 		s.Close()
 		t.Fatal("first turn did not start from durable intent")
 	}
@@ -498,7 +502,7 @@ func demonstrate(t *testing.T, mode string) {
 	// The loop reads its first tick only after the startup pass finishes.
 	select {
 	case ticks <- clock.Now():
-	case <-time.After(20 * time.Second):
+	case <-time.After(demoTimeout):
 		s.Close()
 		t.Fatal("restarted controller did not finish its startup pass")
 	}
