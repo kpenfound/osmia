@@ -36,6 +36,12 @@ func fixture(t *testing.T) Options {
 	home, err := os.MkdirTemp("", "os-")
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
+	return fixtureAt(t, home)
+}
+
+// fixtureAt writes a minimal root and project configuration under home.
+func fixtureAt(t *testing.T, home string) Options {
+	t.Helper()
 	root := filepath.Join(home, "root")
 	must(t, os.MkdirAll(filepath.Join(root, "projects", string(project)), 0700))
 	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(fmt.Sprintf(`version = 1
