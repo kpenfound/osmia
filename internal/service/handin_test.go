@@ -348,7 +348,7 @@ func TestHandInStatusCodes(t *testing.T) {
 	if code := handInStatus(t, f.s, `{"project":"`+string(f.project)+`","key":"k","paths":["/tmp/a"]}`); code != http.StatusBadRequest {
 		t.Fatalf("unknown field status %d", code)
 	}
-	if code := handInStatus(t, f.s, `{"project":"`+string(f.project)+`","key":"k","url":"https://github.com/owner/repo/issues/99"}`); code != http.StatusInternalServerError {
+	if code := handInStatus(t, f.s, `{"project":"`+string(f.project)+`","key":"fetch","url":"https://github.com/owner/repo/issues/99"}`); code != http.StatusInternalServerError {
 		t.Fatalf("fetch failure status %d", code)
 	}
 }
