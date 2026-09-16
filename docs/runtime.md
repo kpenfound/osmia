@@ -101,7 +101,7 @@ supported durability operations.
 The store pins a root directory handle and opens runtime files without following
 symlinks. Replacing a parent path cannot redirect writes outside that root. External
 file changes cause subsequent mutations to fail until the store is reopened.
-Cross-process mutation and multiple writable stores are unsupported: the service
-must enforce sole ownership. Temporary rollback files are not an event log or a
+Cross-process mutation and multiple writable stores are unsupported by the store:
+the [local service](service.md) enforces sole ownership with a lifetime root lock. Temporary rollback files are not an event log or a
 record/outbox transaction. M4 scheduling, provider/budget pauses and lifecycle
 controls are separate work.

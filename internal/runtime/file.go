@@ -76,14 +76,21 @@ func (s *Store) stage(data []byte) (string, error) {
 	ok = true
 	return name, nil
 }
-func (s *Store) persist(data []byte) error {
+func (s *Store) checkDisk() error {
 	previous, err := readRuntime(s.root)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	if (err == nil) != (s.disk != nil) || !bytes.Equal(previous, s.disk) {
-		return fmt.Errorf("runtime.json changed outside this store; reopen before mutation")
+		return ErrConflict
 	}
+	return nil
+}
+func (s *Store) persist(data []byte) error {
+	if err := s.checkDisk(); err != nil {
+		return err
+	}
+
 	next, err := s.stage(data)
 	if err != nil {
 		return err

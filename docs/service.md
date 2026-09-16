@@ -1,0 +1,85 @@
+# M1 local service API
+
+`internal/service.Run` loads the M1 configuration and runtime store, then serves
+HTTP/JSON over the configured Unix socket until its context is cancelled.
+`RunSignals` also handles SIGINT and SIGTERM. Both run in the foreground and wait
+for cleanup. Embedders can use `Start`, `Socket`, `Wait` and `Close`; a successful
+`Start` means the stores are loaded and the listener is bound. No models,
+scheduler, containers, TCP listeners or authentication service are started.
+
+The root and its configuration must already exist. The service acquires an
+exclusive advisory lock on `<root>/.service.lock` before loading state or touching
+the socket. Root aliases resolve to the same lock. The lock file remains on disk:
+closing its descriptor releases ownership, including after process termination;
+unlinking it would allow competing owners to lock different inodes. Operators must
+not remove it while the service is running. A second owner fails with an actionable
+startup error and leaves the first owner's state alone.
+
+The root is restricted to mode 0700 before binding and the socket to mode 0600.
+A live socket is never removed, even if its listener does not hold the Osmia lock.
+A socket is considered stale only when connecting returns connection-refused;
+other probe failures are not proof of staleness. Replacement happens under root
+ownership. Regular files and symlinks are not deleted to make room for a socket.
+Shutdown stops accepting work and gives accepted requests five seconds to finish
+(configurable for embedding); it then closes remaining connections, joins handlers,
+closes the store and releases the lock. Cleanup removes only the socket inode it
+created. An acknowledged mutation is durable; an interrupted client must read the
+runtime view to reconcile whether its request committed.
+
+## Contract
+
+All paths start with `/v1`. Shared request, response and error types and a Unix-only
+`Client` live in `internal/service`. `NewClient(socket)` accepts an explicit socket
+path; it never reads configuration or runtime files. `Do` supports all operations,
+and `Health`, `Configuration` and `Runtime` provide typed read helpers. Close the
+client to release idle connections. API version 1 uses snake_case JSON fields.
+
+| Method | Path after `/v1` | Input / response |
+| --- | --- | --- |
+| GET | `/health` | Readiness, service name, API version, supplied build version and commit |
+| GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, diagnostics |
+| GET | `/runtime` | Effective runtime state and diagnostics |
+| PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason, source |
+| DELETE | `/runtime/pause` | `ClearPauseRequest`: scope, project, workstream |
+| PUT | `/runtime/priority` | `PriorityRequest`: project, workstreams |
+| DELETE | `/runtime/priority` | `ClearPriorityRequest`: project |
+| PUT | `/runtime/profile` | `ProfileRequest`: role, profile |
+| DELETE | `/runtime/profile` | `ClearProfileRequest`: role |
+
+Mutation bodies are one JSON object, at most 1 MiB; unknown or duplicate fields and
+trailing values are rejected. Successful mutations return `{"applied":true}` only
+after the runtime store acknowledges persistence. DELETE requests carry JSON bodies.
+See [runtime overrides](runtime.md) for target, mode and reference rules. The service
+accepts known workstream IDs only from its embedding record repository; the default
+list is empty. It does not scan directories or create workstream identities.
+
+The configuration digest hashes the canonical JSON of the effective loaded
+configuration, including defaults and the resolved socket/project paths, not TOML
+comments or formatting. Configuration reads validate current disk input for
+comparison but never apply it. Invalid/unreadable configuration yields a diagnostic
+and retains the loaded digest and view. Valid changes report `restart_required`.
+Runtime reads report external edits or unreadable input while retaining the last
+acknowledged view; further mutations reject changed disk state. Restore the exact
+runtime file or restart with valid state to reconcile it. No partial configuration
+or runtime load is applied. Startup rejects invalid files because no previous valid
+view exists. Stale runtime references remain diagnostic and are excluded from the
+effective view according to the runtime store's rules.
+
+Errors use `{"error":{"code":"validation","message":"..."}}`. Codes are stable;
+messages are fixed operator guidance, never raw filesystem errors, parser input,
+credentials or arbitrary file contents. Configuration responses contain only
+validated schema fields. Diagnostics identify the affected field and a stable code.
+
+| Code | HTTP status | Meaning |
+| --- | --- | --- |
+| `malformed_input` | 400 | Malformed, ambiguous, unknown-field or oversized JSON |
+| `validation` | 422 | Invalid override or unavailable reference |
+| `conflict` | 409 | Runtime file changed outside the store |
+| `unsupported` | 501 | Unknown path/method or later-milestone operation, including POST `/reload` |
+| `restart_required` | 409 | PUT `/config/root` or `/config/listen` |
+| `unavailable` | 503 | Service shutting down; also the client's code for transport failure |
+| `internal` | 500 | Storage or other internal failure |
+
+Health readiness means the loaded stores can serve requests; disk diagnostics do
+not discard that valid view. Reload application, lifecycle endpoints, streaming,
+web/tailnet access and scheduling effects are outside M1.

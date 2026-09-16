@@ -17,55 +17,55 @@ import (
 
 type Options struct{ Root, Home string }
 type Config struct {
-	Root           Root               `toml:"-"`
-	Version        int                `toml:"version"`
-	ActiveProjects []string           `toml:"active_projects"`
-	Listen         Listen             `toml:"listen"`
-	Capacity       Capacity           `toml:"capacity"`
-	Profiles       map[string]Profile `toml:"profiles"`
-	Roles          map[string]Role    `toml:"roles"`
-	Shed           Shed               `toml:"shed"`
-	Project        Project            `toml:"-"`
+	Root           Root               `toml:"-" json:"-"`
+	Version        int                `toml:"version" json:"version"`
+	ActiveProjects []string           `toml:"active_projects" json:"active_projects"`
+	Listen         Listen             `toml:"listen" json:"listen"`
+	Capacity       Capacity           `toml:"capacity" json:"capacity"`
+	Profiles       map[string]Profile `toml:"profiles" json:"profiles"`
+	Roles          map[string]Role    `toml:"roles" json:"roles"`
+	Shed           Shed               `toml:"shed" json:"shed"`
+	Project        Project            `toml:"-" json:"project"`
 }
 type Listen struct {
-	Socket string `toml:"socket"`
+	Socket string `toml:"socket" json:"socket"`
 }
 type Capacity struct {
-	Masons        int `toml:"masons"`
-	Reviewers     int `toml:"reviewers"`
-	Committee     int `toml:"committee"`
-	PerWorkstream int `toml:"per_workstream"`
+	Masons        int `toml:"masons" json:"masons"`
+	Reviewers     int `toml:"reviewers" json:"reviewers"`
+	Committee     int `toml:"committee" json:"committee"`
+	PerWorkstream int `toml:"per_workstream" json:"per_workstream"`
 }
 type Shed struct {
-	MaxRounds  int `toml:"max_rounds"`
-	MaxBounces int `toml:"max_bounces"`
+	MaxRounds  int `toml:"max_rounds" json:"max_rounds"`
+	MaxBounces int `toml:"max_bounces" json:"max_bounces"`
 }
 type Profile struct {
-	Agent    string `toml:"agent"`
-	Model    string `toml:"model"`
-	Effort   string `toml:"effort"`
-	Fallback string `toml:"fallback"`
-	Timeout  string `toml:"timeout"`
-	MaxTurns int    `toml:"max_turns"`
+	Agent    string `toml:"agent" json:"agent"`
+	Model    string `toml:"model" json:"model"`
+	Effort   string `toml:"effort" json:"effort"`
+	Fallback string `toml:"fallback" json:"fallback"`
+	Timeout  string `toml:"timeout" json:"timeout"`
+	MaxTurns int    `toml:"max_turns" json:"max_turns"`
 }
 type Role struct {
-	Profile string `toml:"profile"`
-	Sandbox string `toml:"sandbox"`
-	Image   string `toml:"image"`
+	Profile string `toml:"profile" json:"profile"`
+	Sandbox string `toml:"sandbox" json:"sandbox"`
+	Image   string `toml:"image" json:"image"`
 }
 type Project struct {
-	ID         ProjectID       `toml:"-"`
-	Version    int             `toml:"version"`
-	Name       string          `toml:"name"`
-	Upstream   string          `toml:"upstream"`
-	Fork       string          `toml:"fork"`
-	Clone      string          `toml:"clone"`
-	BaseBranch string          `toml:"base_branch"`
-	Landing    string          `toml:"landing"`
-	Capacity   ProjectCapacity `toml:"capacity"`
+	ID         ProjectID       `toml:"-" json:"id"`
+	Version    int             `toml:"version" json:"version"`
+	Name       string          `toml:"name" json:"name"`
+	Upstream   string          `toml:"upstream" json:"upstream"`
+	Fork       string          `toml:"fork" json:"fork"`
+	Clone      string          `toml:"clone" json:"clone"`
+	BaseBranch string          `toml:"base_branch" json:"base_branch"`
+	Landing    string          `toml:"landing" json:"landing"`
+	Capacity   ProjectCapacity `toml:"capacity" json:"capacity"`
 }
 type ProjectCapacity struct {
-	PerWorkstream int `toml:"per_workstream"`
+	PerWorkstream int `toml:"per_workstream" json:"per_workstream"`
 }
 
 var roleNames = []string{"architect", "chief_of_staff", "committee", "foreman", "librarian", "mason", "reviewer"}

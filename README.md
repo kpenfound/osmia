@@ -21,3 +21,6 @@ loader schema, defaults and local root layout.
 
 The [runtime override reference](docs/runtime.md) documents persisted operator
 choices and their resolution against configuration.
+
+The [local service API](docs/service.md) documents Unix-socket ownership, the
+versioned M1 endpoints and the in-process client.
