@@ -148,6 +148,7 @@ func (a *ReviewAdapter) Review(ctx context.Context, req ReviewRequest) (out Revi
 	if marshalErr == nil {
 		err = errors.Join(err, os.WriteFile(filepath.Join(req.ArtifactDirectory, "input.json"), data, 0o600))
 	}
+	err = errors.Join(err, os.WriteFile(filepath.Join(req.ArtifactDirectory, review.DiffFile), []byte(req.Diff), 0o600))
 	walkErr := filepath.WalkDir(req.ArtifactDirectory, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr

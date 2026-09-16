@@ -129,7 +129,8 @@ failure, with cancellation removed from the cleanup context.
 The artifact directory must be new and have an existing parent. Core may remove
 its directory on an early failure, so it never receives an existing directory.
 `input.json` retains context and skipped reasons in their original order, angle
-configuration, the exact diff, subject and candidate. The reference embedded in
+configuration, subject and candidate. `diff.patch` retains exact diff bytes,
+including non-UTF-8 content that JSON cannot preserve. The reference embedded in
 core's brief includes a SHA-256 of the diff. Exact diff bytes are also appended to
 every phase prompt: core does not write diff files into caller-owned checkouts.
 Partial results include available core artifacts, findings and full session

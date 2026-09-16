@@ -251,3 +251,20 @@ func TestCompleteAdapterIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestReviewPreservesNonUTF8Diff(t *testing.T) {
+	req := reviewRequest(t)
+	req.Diff = "diff --git a/raw b/raw\n+" + string([]byte{0xff, 0xfe})
+	out, err := (&ReviewAdapter{Turns: &TurnRunner{Executor: &pipelineExecutor{}}}).Review(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(req.ArtifactDirectory, review.DiffFile))
+	if err != nil || string(raw) != req.Diff {
+		t.Fatalf("diff bytes changed: %x %v", raw, err)
+	}
+	sum := sha256.Sum256(raw)
+	if out.DiffSHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatal("diff identity mismatch")
+	}
+}
