@@ -265,6 +265,24 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 	if docs[0].Cause != ops[0].Operation.ID {
 		t.Fatalf("revision cause %q, want the operation %q", docs[0].Cause, ops[0].Operation.ID)
 	}
+	// The write is keyed by the operation: applying the operation again, as a
+	// retry after a stop between recording and the result would, records
+	// nothing and reports the recorded result.
+	again := &extractor{s: s, repository: s.active.repository}
+	sameResult := func(got *coreadapter.OperationResult) bool {
+		var a, b struct{ Subsystems, Removed []string }
+		return got != nil && got.Outcome == ops[0].Result.Outcome && got.Evidence == ops[0].Result.Evidence &&
+			json.Unmarshal(got.Data, &a) == nil && json.Unmarshal(ops[0].Result.Data, &b) == nil && reflect.DeepEqual(a, b) && len(a.Subsystems) == 2
+	}
+	if observed, err := again.Inspect(ctx, ops[0].Operation); err != nil || observed.State != coreadapter.EffectCompleted || !sameResult(observed.Result) {
+		t.Fatalf("inspect after completion: %+v %v", observed, err)
+	}
+	if result, err := again.Apply(ctx, ops[0].Operation); err != nil || !sameResult(&result) {
+		t.Fatalf("apply after completion: %+v %v", result, err)
+	}
+	if docs := documentRevisions(t, s, trace.EntitiesDocument); len(docs) != 2 {
+		t.Fatalf("retry duplicated revisions: %d", len(docs))
+	}
 	commit := demoGit(t, filepath.Dir(f.clone), "-C", traceDir, "log", "-1", "--format=%H", "--", "kb/trace.md")
 	if other := demoGit(t, filepath.Dir(f.clone), "-C", traceDir, "log", "-1", "--format=%H", "--", "kb/entities.json"); other != commit {
 		t.Fatalf("revisions landed in separate commits: %s %s", commit, other)
