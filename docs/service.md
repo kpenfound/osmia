@@ -5,7 +5,8 @@ HTTP/JSON over the configured Unix socket until its context is cancelled.
 `RunSignals` also handles SIGINT and SIGTERM. Both run in the foreground and wait
 for cleanup. Embedders can use `Start`, `Socket`, `Wait` and `Close`; a successful
 `Start` means the stores are loaded and the listener is bound. No models,
-scheduler, containers, TCP listeners or authentication service are started.
+scheduler, TCP listeners or authentication service are started. Agent turns run
+only when an embedder supplies a turn reconciler (see below).
 
 The root and its configuration must already exist. The service acquires an
 exclusive advisory lock on `<root>/.service.lock` before loading state or touching
@@ -92,3 +93,10 @@ Startup scans durable intent even without wakeups. Missing reconciliation
 adapters leave work pending; corrupt or locked traces prevent startup. Shutdown
 cancels and joins the loop before releasing trace ownership. Project trace
 creation remains separate from service startup.
+
+`Options.Threads` binds a runner-boundary reconciler to the trace the service
+opened, on every start. It replaces any runner adapter in
+`Options.Reconciliation`. The [thread dispatcher](trace.md#turn-dispatch) is the
+intended binding; it receives the service-owned repository handle, which callers
+must not close. The [M1 demonstration](m1-demonstration.md) uses this path with
+fake engines.

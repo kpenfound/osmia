@@ -278,12 +278,43 @@ Per-turn leases belong to the caller until the adapter is invoked, and competing
 calls must not share leases. The runner never reads private backend transcripts
 and does not choose scheduling or isolation policy.
 
+Between capturing and completing a turn, the runner appends one `Cost` record
+per attempt that returned a result. Its ID derives from the request ID and
+attempt number, `Entry.AttemptID` is `thread.AttemptID(requestID, attempt)`, and
+the entry carries the full turn scope and the attempt's start time and usage.
+The header keeps the request's cause and depth. Existing cost IDs are skipped,
+so completing a captured turn again after restart adds only missing entries.
+
 For service-owned runtime isolation, supply `internal/isolation.Turns` as this
 runner's `Turns` dependency. Pass context and outcome policy without pre-created
 workspace, sandbox, MCP or execution overrides. Resource preparation then happens
 inside the claimed turn, and a failed file view or host/container verification is
 captured durably before execution. See [turn isolation](isolation.md).
 
+
+## Turn dispatch
+
+`thread.Dispatcher` is a `coreadapter.Reconciler` for runner-boundary operations
+with action `thread-turn`. `thread.TurnOperation` builds the intent from a
+`TurnInput` naming the workstream, agent and accepted turn ID; publish it with
+the transition that authorizes the turn. Input with unknown fields is rejected.
+The request content comes from the durable queue, not the operation.
+
+Inspection reads only the thread snapshot:
+
+| Durable turn state | Observation |
+| --- | --- |
+| Completed | Completed. The result outcome is the turn's status; data holds its sequence, request ID, response ID and attempt count |
+| Captured, not completed | Absent. Apply records any missing cost entries and completes the turn without a backend call |
+| Reserved without a captured result | Unknown. It may still be running or was interrupted; it is never relaunched |
+| Queued behind an unfinished turn | Unknown, so the controller retries later |
+| Queued and next | Absent. Apply calls `Prepare` for per-turn resources, then `Runner.RunNext` |
+
+A captured backend or isolation failure is a terminal result with outcome
+`failed` or `interrupted`, not an infrastructure retry. A turn that is still not
+complete after Apply returns an error and stays pending. A restarted controller
+finds this work by scanning operations, so no wakeup from before shutdown is
+needed.
 
 ## Continuation and bounded replay
 
@@ -333,8 +364,10 @@ these safe retries and release once.
 
 `Repository.NotesTools` supplies `notes_read` and `notes_write` handlers bound
 to an accepted project, role, thread and turn. The caller includes them in that
-turn's role-scoped MCP host. Every access verifies the same service's active,
-uncaptured turn; queued, completed and interrupted turns cannot use the handlers.
+turn's role-scoped MCP host, for example through `isolation.Turns.Scoped`.
+`notes_read` is a read tool and `notes_write` a memory tool. Every access
+verifies the same service's active, uncaptured turn; queued, completed and
+interrupted turns cannot use the handlers.
 Input accepts no project, role or path selector, and unknown fields are rejected.
 
 Notes live at `projects/<project-id>/notes/<role>.md` beneath the Osmia root,
