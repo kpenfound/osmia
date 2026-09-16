@@ -99,8 +99,7 @@ to finish. They never include raw file contents or parser output.
 
 Health readiness means the loaded stores can serve requests; disk diagnostics do
 not discard that valid view. Reload application, lifecycle endpoints, streaming,
-web/tailnet access, and capacity, pause and parking effects on scheduling are
-outside M1.
+web/tailnet access, and pause and parking effects on scheduling are outside M1.
 
 
 The service opens the active project's existing trace and starts the
@@ -203,3 +202,14 @@ state is the turn ID. After a restart, an in-flight turn is recovered through it
 existing operation, as the [turn dispatch](trace.md#turn-dispatch) table
 describes: it is neither dispatched again nor lost. `scheduler.Options.Admit` is
 the single dispatch gate; the service admits every candidate.
+
+The scheduler also dispatches within the configured `[capacity]`. Mason,
+reviewer and committee turns share `capacity.masons`, `capacity.reviewers` and
+`capacity.committee` across workstreams. Every other role runs one turn at a
+time per workstream. Each workstream runs at most the project's
+`capacity.per_workstream` turns at once. Chief-of-staff turns take no slot and
+run even when every slot is taken. A turn holds its slots while it is in
+flight, so they are free again once it completes, whether it succeeded, failed,
+is waiting or was cancelled. A claim a restart interrupted holds no slot,
+although its thread stays reserved. A candidate without a free slot stays
+queued and is offered again on a later pass, in workstream and agent ID order.
