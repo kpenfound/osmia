@@ -262,3 +262,89 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 	}
 	must(t, s.Close())
 }
+
+func TestServiceParksWaitingThreadAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	home, err := os.MkdirTemp("", "sw-")
+	must(t, err)
+	t.Cleanup(func() { os.RemoveAll(home) })
+	opts := fixtureAt(t, home)
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	root := cfg.Root.String()
+
+	clock := &demoClock{now: demoStart}
+	owner := trace.Actor{Kind: "owner", ID: "local"}
+	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
+	must(t, err)
+	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}
+	must(t, repo.CreateThread(ctx, identity))
+	queueTurn(t, repo, "ask", clock.Now())
+	must(t, repo.Close())
+
+	waiting := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Question", Outcome: &coreadapter.Outcome{Status: "waiting", Report: "Owner answer needed"}}}
+	answered := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Thanks"}}
+	turns := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](waiting, answered)}
+	lives := make(chan *trace.Repository, 1)
+	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+		lives <- r
+		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
+			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
+				return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(root, "sessions", in.Agent, in.Turn)}, nil
+			}}, nil
+	}
+	ticks := make(chan time.Time)
+	opts.Reconciliation.Now, opts.Reconciliation.Ticks = clock.Now, ticks
+	tick := func() {
+		t.Helper()
+		select {
+		case ticks <- clock.Now():
+		case <-time.After(demoTimeout):
+			t.Fatal("reconciliation pass did not finish")
+		}
+	}
+	ran := func() []string {
+		var out []string
+		for _, call := range turns.Calls() {
+			out = append(out, call.Scope.Turn)
+		}
+		return out
+	}
+	parked := func(r *trace.Repository) bool {
+		t.Helper()
+		th, err := r.Thread(stream, demoAgent)
+		must(t, err)
+		return th.Parked()
+	}
+
+	s, err := Start(ctx, opts)
+	must(t, err)
+	repo = <-lives
+	tick()
+	tick()
+	if got := ran(); !slices.Equal(got, []string{"ask"}) || !parked(repo) {
+		t.Fatalf("first lifetime ran %v, parked %v", got, parked(repo))
+	}
+	must(t, s.Close())
+
+	s, err = Start(ctx, opts)
+	must(t, err)
+	repo = <-lives
+	tick()
+	tick()
+	if got := ran(); !slices.Equal(got, []string{"ask"}) || !parked(repo) {
+		t.Fatalf("after restart ran %v, parked %v", got, parked(repo))
+	}
+
+	queueTurn(t, repo, "answer", clock.Now())
+	if parked(repo) {
+		t.Fatal("queued turn left the thread parked")
+	}
+	tick()
+	tick()
+	if got := ran(); !slices.Equal(got, []string{"ask", "answer"}) || parked(repo) {
+		t.Fatalf("unparked runs %v, parked %v", got, parked(repo))
+	}
+	must(t, s.Close())
+}

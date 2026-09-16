@@ -27,8 +27,9 @@ type Candidate struct {
 
 type Options struct {
 	Now func() time.Time
-	// Admit is the single dispatch gate: a candidate it declines stays queued
-	// and is offered again on a later pass. Nil admits every candidate.
+	// Admit is the dispatch gate after Capacity: a candidate it declines, or one
+	// without a free slot, stays queued and is offered again on a later pass.
+	// Nil admits every candidate that fits.
 	Admit func(context.Context, Candidate) (bool, error)
 	// Capacity bounds the turns in flight. Masons, reviewers and committee
 	// members share their role kind's slots across workstreams; every other
@@ -50,8 +51,9 @@ type Options struct {
 //
 // A turn holds its slots while it is in flight, so a slot is free again once
 // the turn completes, whatever its outcome, and once the turn is interrupted
-// by a restart. One Scheduler admits against its own passes only: a second
-// scheduler on the same trace does not share its slots.
+// by a restart. Slots are counted from the trace on each pass, and passes of
+// one Scheduler run one at a time; passes of a second scheduler on the same
+// trace can run concurrently with them and overbook.
 type Scheduler struct {
 	mu         sync.Mutex
 	repository *trace.Repository
@@ -196,7 +198,8 @@ type turnKey struct {
 	turn       string
 }
 
-// next returns the thread's oldest unfinished turn unless it is claimed. Turns
+// next returns the thread's oldest unfinished turn unless it is claimed. A
+// parked thread has no unfinished turn, so it is not offered to Admit. Turns
 // are claimed in sequence, so a claim is always on the oldest unfinished turn
 // and no later turn is eligible.
 func next(t trace.Thread) (trace.QueuedTurn, bool) {
