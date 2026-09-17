@@ -510,7 +510,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 		{"draft-1", "", "drafting-1", "the workstream was handed in; the architect is asked for draft 1"},
 		{"draft-1-invalid", "drafting-1", "invalid-1", "draft 1 of the spec and plan is invalid:\n- plan.json was not delivered"},
 		{"draft-2", "invalid-1", "drafting-2", "draft 1 was invalid; the architect is asked for draft 2"},
-		{"draft-2-invalid", "drafting-2", "invalid-2", "draft 2 of the spec and plan is invalid:\n- unit \"dedupe\": dependency cycle dedupe -> resume -> dedupe\n- spec#2: no unit addresses this criterion"},
+		{"draft-2-invalid", "drafting-2", "invalid-2", "draft 2 of the spec and plan is invalid:\n- spec#2: no unit addresses this criterion\n- unit \"dedupe\": dependency cycle dedupe -> resume -> dedupe"},
 		{"draft-3", "invalid-2", "drafting-3", "draft 2 was invalid; the architect is asked for draft 3"},
 	} {
 		tr, ok := byID[want.id]
@@ -573,7 +573,7 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 		}
 	}
 	if len(notices) != 1 || notices[0].Event.Kind != trace.NoticeKind || notices[0].Event.Operation != nil ||
-		!strings.Contains(notices[0].Event.Body, "failed 3 times and drafting has stopped; the workstream stays handed. Last failure: draft 3 of the spec and plan is invalid:\n- unit \"dedupe\": dependency cycle") {
+		!strings.Contains(notices[0].Event.Body, "failed 3 times and drafting has stopped; the workstream stays handed. Last failure: draft 3 of the spec and plan is invalid:\n- spec#2: no unit addresses this criterion\n- unit \"dedupe\": dependency cycle") {
 		t.Fatalf("outbox: %+v", outbox)
 	}
 	var last trace.Transition
