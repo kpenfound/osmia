@@ -30,7 +30,19 @@
   DAGGER_X_RELEASE=v1.0.0-beta.13 dagger check
   ```
 
-- The factory exports `DAGGER_X_RELEASE` for its sessions. Direct `go test` or `go build` runs are useful during iteration but do not replace the Dagger checks.
+- The factory exports `DAGGER_X_RELEASE` for its sessions.
+- Never run `go test` on the host, in any role and for any purpose: iterating, a single test, a mutation check and reproducing a flake included. Tests start processes that leak onto the machine they run on, so they run only inside Dagger. `gofmt`, `go build` and `go vet` are fine on the host; `go vet ./...` type-checks test files without running them.
+- Run one package or one test inside a Dagger container:
+
+  ```sh
+  DAGGER_X_RELEASE=v1.0.0-beta.13 dagger core container from --address golang:1.26-bookworm \
+    with-directory --path /src --source . --exclude .git,.bees \
+    with-workdir --path /src \
+    with-exec --args=go,test,-count=1,-run,'TestA|TestB',-v,./internal/service \
+    combined-output
+  ```
+
+  The arguments after `--args=` are the `go test` command line, separated by commas. Add `-count=5` there to reproduce a flake and `-race` to match the race detector.
 - Add meaningful tests for changed behavior and regressions, especially state transitions, recovery, owner gates and execution boundaries. Use temporary directories and local repositories for filesystem and VCS tests.
 - Tests must use fake agents, GitHub clients, providers and container engines. Never launch real model sessions, the live factory, remote pushes or pull requests from tests.
 - Report the checks actually run and their results. If validation is blocked, state the exact blocker; do not report success.

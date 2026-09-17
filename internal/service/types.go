@@ -129,6 +129,19 @@ type HandInResponse struct {
 	Source     string              `json:"source"`
 }
 
+// AbandonRequest abandons a workstream for the owner's reason.
+type AbandonRequest struct {
+	Reason string `json:"reason"`
+}
+
+// AbandonResponse reports an abandoned workstream and the recorded reason.
+type AbandonResponse struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	State      string              `json:"state"`
+	Reason     string              `json:"reason"`
+}
+
 // ProjectAddRequest registers a project. Clone is an absolute path to an
 // existing local Git repository; base_branch defaults to main.
 type ProjectAddRequest struct {

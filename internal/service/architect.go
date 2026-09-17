@@ -313,6 +313,8 @@ func (d *drafter) Inspect(_ context.Context, op coreadapter.Operation) (coreadap
 // Apply drives the draft to a terminal result: it abandons a turn a previous
 // service stop interrupted, starts a new turn while attempts remain, runs the
 // pending turn through the dispatcher, and records a completed turn's draft.
+// Abandoning the workstream cancels the running turn, and the draft of an
+// abandoned workstream fails without starting another.
 // A failed turn and an invalid draft are terminal failures recorded as draft
 // transitions; storage errors leave the operation pending for another
 // attempt.
@@ -336,6 +338,11 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 		return coreadapter.OperationResult{}, errors.New("the project is not active")
 	}
 	n := in.Draft
+	// Abandoning the workstream cancels the running turn, not the recording
+	// of what it left.
+	running, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer d.s.turns.add(stream, cancel)()
 	for {
 		if err := ctx.Err(); err != nil {
 			return coreadapter.OperationResult{}, err
@@ -358,6 +365,12 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 				return coreadapter.OperationResult{}, err
 			}
 		case last == nil || last.Status() == "interrupted":
+			if gone, err := abandoned(d.repository, stream); err != nil || gone {
+				if err != nil {
+					return coreadapter.OperationResult{}, err
+				}
+				return d.terminal(ctx, op.ID, stream, n, "failed", fmt.Sprintf("draft %d failed: the workstream was abandoned, so the architect runs no turn for it", n))
+			}
 			if len(turns) >= maxDraftAttempts {
 				return d.terminal(ctx, op.ID, stream, n, "failed", fmt.Sprintf("draft %d failed: the architect turn was interrupted %d times by service stops", n, len(turns)))
 			}
@@ -365,7 +378,25 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 				return coreadapter.OperationResult{}, err
 			}
 		case last.CompletedAt.IsZero():
-			if _, err := d.dispatch(ctx, stream, last.Request.TurnID); err != nil {
+			gone, err := abandoned(d.repository, stream)
+			if err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			if gone && last.Response == nil {
+				if _, err := d.repository.CancelTurns(ctx, stream, d.s.now(), abandonActor, cancelReason); err != nil {
+					return coreadapter.OperationResult{}, err
+				}
+				continue
+			}
+			// Completing a captured turn runs no architect.
+			turnCtx := running
+			if last.Response != nil {
+				turnCtx = ctx
+			}
+			if _, err := d.dispatch(turnCtx, stream, last.Request.TurnID); err != nil {
+				if gone, _ := abandoned(d.repository, stream); gone && last.Response == nil && ctx.Err() == nil {
+					continue
+				}
 				return coreadapter.OperationResult{}, err
 			}
 			if err := os.RemoveAll(filepath.Join(d.turnDirectory(stream, last.Request.TurnID), "workspace")); err != nil {

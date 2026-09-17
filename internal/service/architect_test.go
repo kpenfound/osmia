@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -824,16 +825,105 @@ func TestArchitectDraftSurvivesRestart(t *testing.T) {
 	}
 }
 
+func TestAbandonStopsTheArchitectDraft(t *testing.T) {
+	const evidence = "draft 1 failed: the workstream was abandoned, so the architect runs no turn for it"
+	// blocked scripts the first turn to run until its context is cancelled.
+	blocked := func(f *architectFixture) chan struct{} {
+		entered := make(chan struct{})
+		var once sync.Once
+		f.engine.mu.Lock()
+		f.engine.turns["draft-1-1"] = func(ctx context.Context, _ agent.Request, _ coreadapter.BoundaryPolicy, _ *mcp.ClientSession) (*agent.Result, error) {
+			once.Do(func() { close(entered) })
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(30 * time.Second):
+				return nil, errors.New("the turn was not cancelled")
+			}
+		}
+		f.engine.mu.Unlock()
+		return entered
+	}
+	check := func(t *testing.T, f *architectFixture, stream config.WorkstreamID) {
+		t.Helper()
+		f.await(t, stream, draftAt("failed-1"))
+		ops := f.draftOperations(t, stream)
+		if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" || ops[0].Result.Evidence != evidence {
+			t.Fatalf("operations: %+v", ops)
+		}
+		if got := f.runs(); !slices.Equal(got, []string{"draft-1-1"}) {
+			t.Fatalf("backend runs %v", got)
+		}
+		th := f.architectThread(t, stream)
+		if len(th.Turns) != 1 || th.Turns[0].Status() != "interrupted" || !th.Turns[0].Response.Result.Cancelled || th.Active != "" {
+			t.Fatalf("thread: %+v", th)
+		}
+		if state, err := f.repository().Workflow(stream, trace.FeatureSubject); err != nil || state.Value != AbandonedState {
+			t.Fatalf("feature state %+v %v", state, err)
+		}
+		must(t, (&drafter{s: f.s, repository: f.repository()}).Pass(context.Background()))
+		if ops := f.draftOperations(t, stream); len(ops) != 1 {
+			t.Fatalf("another draft was requested: %+v", ops)
+		}
+		if docs := f.documents(t, stream, plan.SpecDocument); len(docs) != 0 {
+			t.Fatalf("spec revisions: %+v", docs)
+		}
+	}
+
+	t.Run("running turn", func(t *testing.T) {
+		f := newArchitectFixture(t)
+		defer f.stop(t)
+		entered := blocked(f)
+		stream := f.handIn(t, "design", handedDesign)
+		select {
+		case <-entered:
+		case <-time.After(demoTimeout):
+			t.Fatal("the draft did not start")
+		}
+		if code, body := abandonCall(t, f.s, stream, `{"reason":"Superseded"}`); code != http.StatusOK {
+			t.Fatalf("abandon: %d %s", code, body)
+		}
+		check(t, f, stream)
+	})
+
+	t.Run("after a restart", func(t *testing.T) {
+		f := newArchitectFixture(t)
+		entered := blocked(f)
+		stream := f.handIn(t, "design", handedDesign)
+		select {
+		case <-entered:
+		case <-time.After(demoTimeout):
+			t.Fatal("the draft did not start")
+		}
+		f.stop(t)
+		// The owner's abandonment was recorded and the service stopped
+		// before it cancelled the interrupted turn.
+		cfg, err := config.Load(f.opts.Config)
+		must(t, err)
+		repo, err := trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
+		must(t, err)
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: abandonTransition}
+		_, err = repo.SetFeatureStateUnless(context.Background(), h, AbandonedState, "Superseded", AbandonedState, DeliveredState)
+		must(t, err)
+		must(t, repo.Close())
+		f.start(t)
+		defer f.stop(t)
+		check(t, f, stream)
+	})
+}
+
 func TestSchedulerLeavesArchitectTurnsToTheDrafter(t *testing.T) {
 	f := newArchitectFixture(t)
 	defer f.stop(t)
 	ctx := context.Background()
-	gate := f.s.admit(f.project)
-	architect := scheduler.Candidate{Workstream: "w_00000000000000000000000000000001", Thread: trace.Thread{Identity: trace.Agent{Role: architectRole}}}
+	const created = config.WorkstreamID("w_00000000000000000000000000000001")
+	must(t, f.repository().CreateWorkstream(ctx, created, f.clock.Now(), ownerActor))
+	gate := f.s.admit(f.project, f.repository())
+	architect := scheduler.Candidate{Workstream: created, Thread: trace.Thread{Identity: trace.Agent{Role: architectRole}}}
 	if admitted, err := gate(ctx, architect); err != nil || admitted {
 		t.Fatalf("architect turn admitted: %t %v", admitted, err)
 	}
-	other := scheduler.Candidate{Workstream: "w_00000000000000000000000000000001", Thread: trace.Thread{Identity: trace.Agent{Role: "mason"}}}
+	other := scheduler.Candidate{Workstream: created, Thread: trace.Thread{Identity: trace.Agent{Role: "mason"}}}
 	if admitted, err := gate(ctx, other); err != nil || !admitted {
 		t.Fatalf("mason turn declined: %t %v", admitted, err)
 	}
