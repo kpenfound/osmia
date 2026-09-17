@@ -199,8 +199,8 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 			return result, errors.New("service MCP host returned no lease")
 		}
 		defer func() { err = errors.Join(err, hosted.Lease.Release(context.WithoutCancel(ctx))) }()
-		if hosted.Endpoint.BearerTokenEnvironment != coreadapter.TokenEnvironment || hosted.Endpoint.Token == "" {
-			return result, errors.New("MCP host must hand the turn a token in the service token environment")
+		if hosted.Endpoint.BearerTokenEnvironment != coreadapter.TokenEnvironment {
+			return result, errors.New("MCP host must use the service token environment")
 		}
 		env[coreadapter.TokenEnvironment] = hosted.Endpoint.Token
 		prepared.MCP = []coreadapter.Endpoint{hosted.Endpoint}
