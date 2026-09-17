@@ -304,8 +304,8 @@ The shed controller runs in every reconciliation pass after the architect
 controller, before event delivery and the scheduler. It moves a `sketched`
 workstream into the shed and runs its debate to a conclusion: a round of the
 committee, the architect's one reply to it, and the next round against what
-the architect redrafted, until no dissent stands or `shed.max_rounds` rounds
-have run. The committee's contributions to a round are validated as they are
+the architect redrafted, until no dissent stands or the debate reaches its
+[round limit](#concluding-the-debate). The committee's contributions to a round are validated as they are
 made and recorded once the round ends. The package `internal/shed` holds the
 records, the tools and the dissent computation.
 
@@ -325,8 +325,9 @@ the trace says it is:
 | `round-<n>`, `reply-<n>`, `failed-<n>` | | Nothing. |
 
 Open dissent here is the dissent record without what the owner dismissed. The
-round limit is `shed.max_rounds`, or the last round the owner asked for beyond
-it. Only a workstream in feature state `in-shed` takes a step, so an abandoned
+round limit is `shed.max_rounds` until the owner asks for
+[further rounds](#more-debate), and the last round they asked for from then
+on. Only a workstream in feature state `in-shed` takes a step, so an abandoned
 workstream's debate stays where it stopped. A debate the owner skipped takes no
 step at all. A step that runs turns waits for
 the runner of those turns: entering the shed and every round for
@@ -529,6 +530,10 @@ anything is recorded:
   `redraft/`. Only what that turn delivers counts, and delivering nothing
   leaves the revision as it is. After three redrafts the last one is given up:
   the reply records its `problems` and the revision stays.
+- A valid redraft of a file the owner has edited, whose edit no revision
+  records yet, is given up the same way rather than written over the owner's
+  file: the reply records the `problems` that say so, and the revision stays.
+  See [the owner in the shed](#edit).
 
 The reply is one document, `shed/round-<n>/reply.json` (record ID
 `shed-round-<n>-reply`, actor `agent`/`agent_architect`, cause the operation
@@ -567,11 +572,14 @@ turns of the round failed the reason adds `; the turns of <f> of <m> members
 failed`, and when all of them failed nothing was reviewed and the reason is
 `debate concluded after round <n> without a review: the turns of all <m>
 members failed, so no objection stands and nobody agreed`. Otherwise it ends
-at the cap, once the reply to round
-`shed.max_rounds` is recorded: caused by `shed-reply-<n>-replied`, with the
-reason `debate stopped after round <n>, at the shed.max_rounds cap of <max>,
-with <k> objections standing, <b> of them blocking; the cap approves nothing`.
-The cap is the loaded configuration's when the step is taken.
+at the cap, once the reply to the round limit is recorded: caused by
+`shed-reply-<n>-replied`, with the reason `debate stopped after round <n>, at
+the shed.max_rounds cap of <max>, with <k> objections standing, <b> of them
+blocking; the cap approves nothing`. The round limit is `shed.max_rounds`, read
+from the loaded configuration when the step is taken, until the owner asks for
+[further rounds](#more-debate); from then on it is the last round they asked
+for, and the reason names it instead: `at round <n>, the last of the further
+rounds the owner asked for`.
 
 Either way the workstream stays `in-shed`, the dissent that stands keeps
 standing, and no later pass starts a round. The conclusion commits with a
@@ -603,9 +611,14 @@ an owner action never races a running round:
 | `invalid-edit` | An owner edit was read, found invalid and not recorded. |
 
 The round an action is recorded under is the round the `shed` state has
-reached, or round 1 before the first round runs. Each of the owner's files of
-a round keeps the revision it was opened against, as a member's record keeps
-the revision its round was pinned to.
+reached, or round 1 before the first round runs. The owner's objections and
+rulings of a round keep the revision the file was opened against, as a
+member's record keeps the revision its round was pinned to; a request for
+further rounds is about rounds, not revisions, and records none.
+
+`skipped` is the value of the action alone: a later objection, ruling or
+reported edit moves the subject on, and none of them un-skips the debate,
+which stands on its recorded `shed-owner-skip` transition.
 
 ### Object
 
@@ -635,10 +648,17 @@ the trace; no command records them. Every shed pass reads both files first: a
 file that differs from the latest recorded revision is recorded as the next
 revision, actor `owner`/`local`, cause `owner-edit`, before any turn reads it,
 and the next round debates it. An edited `plan.json` is validated exactly as
-the architect's draft is; an invalid edit is not recorded, the recorded
-revision stays the one under debate, and the problems are reported once to the
-chief of staff as a notice (transition `shed-owner-invalid-<digest>`, state
-`invalid-edit`). Reading records nothing when nothing was edited.
+the architect's draft is, against the other document as the file leaves it:
+the two are one draft, so an edit that does not validate records neither file,
+the recorded revisions stay the ones under debate, and the problems are
+reported once to the chief of staff as a notice (transition
+`shed-owner-invalid-<digest>`, state `invalid-edit`). Reading records nothing
+when nothing was edited.
+
+While a file holds an edit no revision records, a redraft of it by the
+architect is [given up](#the-architects-reply) rather than written over the
+owner's file, so the reply is recorded and the debate goes on with the revision
+it debated.
 
 ### Skip debate
 
@@ -652,9 +672,11 @@ refused while a round or a reply is running, and on a debate already skipped.
 
 `POST /v1/shed/more/<workstream-id>` with `{"rounds": <k>}` asks for `k`
 further rounds once debate has concluded. The request is recorded in
-`shed/round-<n>/more.json` against the round it concluded at, and raises the
-round limit to `n+k`; the controller resumes from `concluded-<n>` with round
-`n+1`. `k` must be between 1 and `shed.max_rounds`. It is refused while debate
+`shed/round-<n>/more.json` against the round it concluded at, and makes the
+round limit `n+k`; the controller resumes from `concluded-<n>` with round
+`n+1`. A request replaces `shed.max_rounds` rather than adding to it, so the
+rounds the owner asked for are the rounds that run, whether that is beyond the
+configured cap or short of it. `k` must be between 1 and `shed.max_rounds`. It is refused while debate
 is still running, on a debate that never concluded, and on a skipped one. A
 conclusion the owner did not follow with a request stays a conclusion.
 

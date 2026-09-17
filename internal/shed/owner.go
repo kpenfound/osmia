@@ -278,10 +278,15 @@ func Requests(repository *trace.Repository, stream config.WorkstreamID) ([]More,
 	return out, nil
 }
 
-// Limit is how many rounds of debate the workstream may run: the configured
-// cap, or the last round the owner asked for beyond it.
+// Limit is the last round of debate the workstream may run: the configured
+// cap until the owner asks for further rounds, and from then on the last
+// round asked for. A request replaces the cap rather than adding to it, so
+// debate the owner resumed runs the rounds asked for and no more.
 func Limit(configured int, requests []More) int {
-	limit := configured
+	if len(requests) == 0 {
+		return configured
+	}
+	limit := 0
 	for _, m := range requests {
 		if m.Round+m.Rounds > limit {
 			limit = m.Round + m.Rounds

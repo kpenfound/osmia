@@ -115,19 +115,23 @@ described in [charter](charter.md).
 ## Owner-edited workstream documents
 
 A workstream's `spec.md` and `plan.json` are the owner's to edit in place too.
-`OwnerDocument(ctx, stream, id, at, check)` returns the latest recorded
-revision of one of them after recording the file as a new revision by the
-owner (`owner`/`local`, cause `owner-edit`) when it differs. A read without an
-edit records nothing, the file itself is not rewritten, and the commit takes
-the recorded bytes, as for the charter. `check` reads the edited content and
-may refuse it: nothing is recorded, the latest recorded revision stays
-current, and the error wraps `ErrOwnerEdit`. It runs while the repository is
-held, so it must not read the trace. A document with no recorded revision is
-not the owner's to create and is reported as missing.
+`OwnerDocuments(ctx, stream, at, check)` returns the latest recorded revision
+of both, by record ID, after recording each file that differs as a new
+revision by the owner (`owner`/`local`, cause `owner-edit`, depth 0). A read
+without an edit records nothing, the files themselves are not rewritten, and
+the commits take the recorded bytes, as for the charter.
 
-`RecordDocuments` refuses a revision of either file with `ErrConflict` while
-the file holds an edit no revision records, so an agent's draft never writes
-over an owner edit that has not been read yet. Which reads happen when is in
+The two are one draft, so they are refused and recorded together: `check` is
+given the content of both as the files leave them, by record ID, and may
+refuse the edit, in which case neither file is recorded, both latest recorded
+revisions stay current, and the error wraps `ErrOwnerEdit`. It runs while the
+repository is held, so it must not read the trace. A workstream that records
+neither document has nothing the owner may edit, and is reported as missing.
+
+`OwnerEdits(stream)` names the files that hold an edit no revision records.
+`RecordDocuments` refuses a revision of one of them with `ErrConflict` and
+`ErrOwnerEdit` while its file does, so an agent's draft never writes over an
+owner edit that has not been read yet. Which reads happen when is in
 [the owner in the shed](service.md#the-owner-in-the-shed).
 
 ## Failure and ownership boundaries

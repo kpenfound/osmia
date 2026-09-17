@@ -326,8 +326,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		case "skip":
 			result, err = c.ShedSkip(ctx, id)
 		case "more":
+			// A count that is not a number is a usage error; one out of range
+			// is the service's to refuse, naming shed.max_rounds.
 			n, convErr := strconv.Atoi(a[2])
-			if convErr != nil || n < 1 {
+			if convErr != nil {
 				return invalid()
 			}
 			result, err = c.ShedMore(ctx, id, n)

@@ -493,7 +493,7 @@ func TestRedraftGivenUpLeavesTheRevision(t *testing.T) {
 		t.Fatalf("plan revisions: %+v", plans)
 	}
 	told := f.transition(t, stream, "shed-reply-1-replied")
-	if !strings.HasPrefix(told.Reason, "the architect answered 0 objections after round 1; its redraft was given up as invalid and spec.md revision 1 and plan.json revision 1 stays:\n- ") || !strings.Contains(told.Reason, cycleProblem) {
+	if !strings.HasPrefix(told.Reason, "the architect answered 0 objections after round 1; its redraft was given up and spec.md revision 1 and plan.json revision 1 stays:\n- ") || !strings.Contains(told.Reason, cycleProblem) {
 		t.Fatalf("replied reason %q", told.Reason)
 	}
 	if ran := f.ran(); ran[replyTurnID(1, maxRedrafts)] != 1 || ran[replyTurnID(1, maxRedrafts+1)] != 0 {

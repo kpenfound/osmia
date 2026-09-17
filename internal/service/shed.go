@@ -41,14 +41,20 @@ const (
 	// and failed-<n> when round n ended without a record or a reply.
 	shedSubject = "shed"
 	// ownerSubject is the workflow subject that tracks the owner's own part
-	// in the shed: objected-<n>, ruled-<n>, more-<n>, plan-invalid and
-	// skipped. The debate controller reads it and writes it only to report
-	// an invalid owner edit, so an owner action never races a round for the
-	// shed subject.
+	// in the shed, one value per action: objected-<n>, ruled-<n>, more-<n>,
+	// skipped and invalid-edit. The debate controller reads it and writes it
+	// only to report an invalid owner edit, so an owner action never races a
+	// round for the shed subject.
 	ownerSubject = "shed-owner"
-	// skippedValue is the owner-subject value of a debate the owner skipped:
-	// no further committee turn starts.
-	skippedValue = "skipped"
+	// skippedValue is the owner-subject value of the action that skips
+	// debate, and skipTransition the transition that records it. A later
+	// action moves the subject on; the skip itself is the transition, and it
+	// stands as long as the workstream is in the shed.
+	skippedValue   = "skipped"
+	skipTransition = "shed-owner-skip"
+	// invalidEditValue is the owner-subject value of an owner edit that was
+	// read, found invalid and not recorded.
+	invalidEditValue = "invalid-edit"
 	// maxRoundAttempts bounds the turns one member may start in one round
 	// after service stops interrupt earlier ones: the librarian's bound.
 	maxRoundAttempts = maxExtractionAttempts
@@ -139,7 +145,7 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 	if feature.Value != SketchedState && feature.Value != InShedState {
 		return nil
 	}
-	owner, err := d.repository.Workflow(stream, ownerSubject)
+	skipped, err := skippedDebate(d.repository, stream)
 	if err != nil {
 		return err
 	}
@@ -150,7 +156,7 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 	// A skipped debate runs no committee turn, so the workstream needs
 	// neither a committee nor a round; it waits in the shed for the owner to
 	// ratify both documents.
-	if owner.Value == skippedValue {
+	if skipped {
 		return nil
 	}
 	if feature.Value == SketchedState {
@@ -206,7 +212,8 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 	if err != nil {
 		return err
 	}
-	limit := shed.Limit(d.s.current().Shed.MaxRounds, requests)
+	configured := d.s.current().Shed.MaxRounds
+	limit := shed.Limit(configured, requests)
 	if kind == "concluded" {
 		// Debate resumes only where the owner asked for further rounds after
 		// this conclusion; the cap bounds how many of them run.
@@ -244,13 +251,22 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 		return d.requestReply(ctx, stream, state, roundInput{Round: n, Spec: records[i].Revision.Spec, Plan: records[i].Revision.Plan}, len(open))
 	case n >= limit:
 		reply, _ := replyIDs(n)
-		return d.conclude(ctx, stream, state, n, reply+"-replied", fmt.Sprintf("debate stopped after round %d, at the shed.max_rounds cap of %d, with %s; the cap approves nothing", n, limit, standing(open)), open)
+		return d.conclude(ctx, stream, state, n, reply+"-replied", fmt.Sprintf("debate stopped after round %d, %s, with %s; the cap approves nothing", n, bound(configured, requests, limit), standing(open)), open)
 	}
 	if d.s.options.Committee == nil {
 		return nil
 	}
 	reply, _ := replyIDs(n)
 	return d.request(ctx, stream, state, roundInput{Round: n + 1, Spec: latest.Spec, Plan: latest.Plan}, reply+"-replied")
+}
+
+// bound names what stopped the debate at its last round: the configured cap,
+// or the rounds the owner asked for once they have, which replace it.
+func bound(configured int, requests []shed.More, limit int) string {
+	if len(requests) == 0 {
+		return fmt.Sprintf("at the shed.max_rounds cap of %d", configured)
+	}
+	return fmt.Sprintf("at round %d, the last of the further rounds the owner asked for", limit)
 }
 
 // unopposed is why a debate with nothing standing concludes after round n. It

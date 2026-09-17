@@ -93,8 +93,10 @@ func TestOwnerObjectionIsAnsweredLikeAMembers(t *testing.T) {
 	f.member(1, 1, 1, held(started, release))
 	var answered []string
 	f.script(replyTurnID(1, 1), nil, func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		if !strings.Contains(req.Prompt, "owner-r1-1") || !strings.Contains(req.Prompt, "The plan never names the retry budget.") {
-			p.report("the reply prompt lacks the owner's objection:\n%s", req.Prompt)
+		// The owner's objection names no part and cites nothing: the line
+		// carries neither, and the kind tells the architect what it is.
+		if want := "- owner-r1-1 (owner, blocking, by owner in round 1): The plan never names the retry budget.\n"; !strings.Contains(req.Prompt, want) {
+			p.report("the reply prompt lacks %q:\n%s", want, req.Prompt)
 		}
 		if recorded, reason, err := shedTool(ctx, tools, shed.ReplyTool, map[string]any{"objection": "owner-r1-1", "answer": "Named in unit resume."}); err != nil || !recorded {
 			p.report("answer to the owner: %q %v", reason, err)
@@ -314,8 +316,9 @@ func TestDismissingEveryObjectionConcludesTheDebate(t *testing.T) {
 	if len(entries) != 1 || entries[0].ID != objection || entries[0].Blocking || entries[0].Disposition != shed.Dismissed {
 		t.Fatalf("dissent %+v", entries)
 	}
-	if notice := f.concluded(t, stream, 1); !strings.Contains(notice.Event.Body, "dismissed") {
-		t.Fatalf("notice %q", notice.Event.Body)
+	line := fmt.Sprintf("\n- %s (size, dismissed, advisory, by %s in round 1 on plan#resume, against %s): It does not hold.", objection, committeeAgent(1), shed.Pin{Spec: 1, Plan: 1})
+	if notice := f.concluded(t, stream, 1); !strings.Contains(notice.Event.Body, "Open dissent:"+line) {
+		t.Fatalf("notice %q, want a line %q", notice.Event.Body, line)
 	}
 	if ran := f.ran(); ran[roundTurnID(2, committeeAgent(1), 1)] != 0 {
 		t.Fatalf("round 2 ran: %v", ran)
@@ -395,6 +398,11 @@ func TestSkipIsRefusedWhileARoundRunsAndOutsideTheShed(t *testing.T) {
 	if _, err := f.c.ShedSkip(ctx, stream); !failed(err, Conflict) {
 		t.Fatalf("skipping a running round: %v", err)
 	}
+	// Further rounds are the owner's to ask for only once debate concluded.
+	_, err := f.c.ShedMore(ctx, stream, 1)
+	if !failed(err, Conflict) || !strings.Contains(err.Error(), "has not concluded") {
+		t.Fatalf("more while round 1 runs: %v", err)
+	}
 	close(release)
 	f.awaitShed(t, stream, "concluded-1")
 	// Abandoning takes the workstream out of the shed.
@@ -411,6 +419,114 @@ func TestSkipIsRefusedWhileARoundRunsAndOutsideTheShed(t *testing.T) {
 			t.Fatalf("%s on an abandoned workstream: %v", name, err)
 		}
 	}
+}
+
+// The skip is the recorded transition, not the owner subject's latest value:
+// a ruling and a reported invalid edit both move the subject on, and neither
+// resumes the debate.
+func TestALaterOwnerActionDoesNotResumeASkippedDebate(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 1)
+	ctx := context.Background()
+	runner := f.opts.Committee
+	f.stop(t)
+	f.opts.Committee = nil
+	f.start(t)
+	stream := f.handIn(t, "design", handedDesign)
+	f.await(t, stream, sketched)
+	if _, err := f.c.ShedSkip(ctx, stream); err != nil {
+		t.Fatal(err)
+	}
+
+	// An objection a stopped service recorded before the skip is still the
+	// owner's to dispose of.
+	objection := shed.ObjectionID(1, committeeAgent(1), 1)
+	record := shed.Record{Version: shed.Version, Round: 1, Member: committeeAgent(1), Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: roundTurnID(1, committeeAgent(1), 1),
+		Objections: []shed.Objection{{ID: objection, Kind: shed.Size, Part: "plan#resume", Argument: "It does too much.", Citations: []string{"spec#1"}}}}
+	content, err := shed.Encode(record)
+	must(t, err)
+	must(t, f.repository().RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.DocumentID(1, committeeAgent(1)), Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: trace.Actor{Kind: "agent", ID: committeeAgent(1)}, Cause: "planted"}, Path: shed.Path(1, committeeAgent(1)), Content: string(content)}}))
+	if _, err := f.c.ShedRule(ctx, stream, objection, "dismiss", "Small enough."); err != nil {
+		t.Fatal(err)
+	}
+	// An invalid owner edit is reported, which moves the subject again.
+	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.PlanPath), []byte(cyclicPlan), 0600))
+	f.awaitOwnerState(t, stream, "invalid-edit")
+	if moves, want := f.ownerMoves(t, stream), []string{skippedValue, "ruled-1", "invalid-edit"}; !slices.Equal(moves, want) {
+		t.Fatalf("owner subject went %v, want %v", moves, want)
+	}
+	f.stop(t)
+
+	// The next service still runs no round: the skip stands.
+	f.opts.Committee = runner
+	f.start(t)
+	defer f.stop(t)
+	must(t, (&debate{s: f.s, repository: f.repository()}).Pass(ctx))
+	if moves := f.shedMoves(t, stream); len(moves) != 0 || len(f.roundOperations(t, stream)) != 0 {
+		t.Fatalf("a skipped debate ran %v", moves)
+	}
+	threads, err := f.repository().Threads(stream)
+	must(t, err)
+	if slices.ContainsFunc(threads, func(th trace.Thread) bool { return th.Identity.Role == committeeRole }) {
+		t.Fatalf("a committee was created for a skipped debate: %+v", threads)
+	}
+}
+
+// A redraft is given up rather than written over an owner edit no revision
+// records, and the architect's reply is recorded all the same.
+func TestARedraftIsGivenUpOverAnUnrecordedOwnerEdit(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 2)
+	defer f.stop(t)
+	p := &faults{}
+	objection := shed.ObjectionID(1, committeeAgent(1), 1)
+	f.member(1, 1, 1, objects(p, shed.Size, "plan#resume", "spec#1"))
+	replying, release := make(chan struct{}), make(chan struct{})
+	f.script(replyTurnID(1, 1), map[string]string{plan.PlanPath: splitPlan}, func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
+		close(replying)
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if recorded, reason, err := shedTool(ctx, tools, shed.ReplyTool, map[string]any{"objection": objection, "answer": "Split in two."}); err != nil || !recorded {
+			p.report("answer: %q %v", reason, err)
+		}
+		return nil
+	})
+	stream := f.handIn(t, "design", handedDesign)
+	select {
+	case <-replying:
+	case <-time.After(demoTimeout):
+		t.Fatal("the reply did not start")
+	}
+	// The owner edits plan.json while the architect replies. The edit is not
+	// recorded yet, so the redraft must not be written over it.
+	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.PlanPath), []byte(cyclicPlan), 0600))
+	close(release)
+
+	f.awaitReplied(t, stream, 1)
+	f.settledReplies(t, stream)
+	reply := f.reply(t, stream, 1)
+	if reply.Redraft != nil || len(reply.Answers) != 1 {
+		t.Fatalf("reply %+v", reply)
+	}
+	if len(reply.Problems) != 1 || !strings.Contains(reply.Problems[0], plan.PlanPath) || !strings.Contains(reply.Problems[0], "the owner has edited") {
+		t.Fatalf("problems %+v", reply.Problems)
+	}
+	if docs := f.documents(t, stream, plan.PlanDocument); len(docs) != 1 {
+		t.Fatalf("the redraft was recorded over the edit: %+v", docs)
+	}
+	if told := f.transition(t, stream, "shed-reply-1-replied"); !strings.Contains(told.Reason, "its redraft was given up") {
+		t.Fatalf("reply transition %q", told.Reason)
+	}
+	// The owner's file is untouched, so nothing of the edit is lost.
+	data, err := os.ReadFile(filepath.Join(f.trace, "workstreams", string(stream), plan.PlanPath))
+	must(t, err)
+	if string(data) != cyclicPlan {
+		t.Fatalf("plan.json %q", data)
+	}
+	p.check(t)
 }
 
 // A request for further rounds survives a restart and resumes the debate from
@@ -542,6 +658,30 @@ func TestOwnerEditsAreRecordedBeforeTheNextRound(t *testing.T) {
 	round := f.transition(t, stream, "shed-round-1")
 	if !strings.Contains(round.Reason, "spec.md revision 2 and plan.json revision 2") {
 		t.Fatalf("round 1 pin %q", round.Reason)
+	}
+}
+
+// awaitReplied waits until the architect's reply to round n is recorded. An
+// attempt of the reply operation that failed says at once that it never will,
+// with what the trace recorded as the reason.
+func (f *shedFixture) awaitReplied(t *testing.T, stream config.WorkstreamID, n int) {
+	t.Helper()
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		if slices.Contains(f.shedMoves(t, stream), fmt.Sprintf("replied-%d", n)) {
+			return
+		}
+		for _, op := range f.replyOperations(t, stream) {
+			for _, a := range op.History {
+				if a.Failure != "" {
+					t.Fatalf("an attempt of the reply to round %d failed: %s", n, a.Failure)
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("workstream %s shed went %v, want replied-%d", stream, f.shedMoves(t, stream), n)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

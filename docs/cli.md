@@ -117,16 +117,19 @@ a service restart.
   still needs your ratification of the spec and the plan. A running round, or a
   debate already skipped, fails with `conflict` (exit 5).
 - `shed more <workstream-id> <rounds>` asks for that many further rounds once
-  debate has concluded, between 1 and `shed.max_rounds`. Debate resumes from
-  the conclusion. A debate still running or never concluded fails with
-  `conflict` (exit 5), a count out of range with `validation` (exit 4).
-
-  You edit `spec.md` and `plan.json` in the workstream's directory under the
-  trace yourself; no command records them. The service records what you changed
-  as a new revision of yours before any turn reads it, and the next round
-  debates it. An edited `plan.json` that does not validate is not recorded and
-  not debated: your chief of staff reports the problems and the recorded
-  revision stays. See [the owner in the shed](service.md#the-owner-in-the-shed).
+  debate has concluded, between 1 and `shed.max_rounds`; what you ask for is
+  what runs, and it replaces the cap. Debate resumes from the conclusion. A
+  debate still running or never concluded fails with `conflict` (exit 5), a
+  count out of range with `validation` (exit 4), and a count that is not a
+  number is a usage error (exit 2).
+- Editing the documents needs no command. You edit `spec.md` and `plan.json` in
+  the workstream's directory under the trace yourself. The service records what
+  you changed as a new revision of yours before any turn reads it, and the next
+  round debates it. The two are one draft: if what you leave does not validate,
+  neither file is recorded and neither is debated, your chief of staff reports
+  the problems, and the recorded revisions stay. Until you correct them, a
+  redraft by the architect of a file you edited is given up rather than written
+  over your edit. See [the owner in the shed](service.md#the-owner-in-the-shed).
 - `project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH
   [--base-branch NAME]` registers a project with the running service: it
   validates the request, generates the project ID, writes

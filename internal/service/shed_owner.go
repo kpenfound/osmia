@@ -19,22 +19,19 @@ import (
 
 // ownerEdits records the owner's edits to spec.md and plan.json as new owner
 // revisions before any turn reads them, and returns the latest recorded
-// revisions of both. An edited plan.json that does not validate is not
-// recorded: the latest recorded revision stays the one under debate, and the
-// problems are reported once to the workstream's chief of staff.
+// revisions of both. The two are one draft: an edit that leaves them invalid
+// is not recorded, neither file included, the latest recorded revisions stay
+// the ones under debate, and the problems are reported once to the
+// workstream's chief of staff.
 func (d *debate) ownerEdits(ctx context.Context, stream config.WorkstreamID) (shed.Pin, error) {
-	specDoc, err := d.repository.OwnerDocument(ctx, stream, plan.SpecDocument, d.s.now(), nil)
-	if err != nil {
-		return shed.Pin{}, err
-	}
 	// The check runs while the trace is held, so the entity map it validates
 	// against is loaded before the read.
 	entities, err := kb.Load(d.repository)
 	if err != nil {
 		return shed.Pin{}, err
 	}
-	planDoc, err := d.repository.OwnerDocument(ctx, stream, plan.PlanDocument, d.s.now(), func(content string) error {
-		if problems := validateDraft(specDoc.Content, content, entities); len(problems) > 0 {
+	docs, err := d.repository.OwnerDocuments(ctx, stream, d.s.now(), func(content map[string]string) error {
+		if problems := validateDraft(content[plan.SpecDocument], content[plan.PlanDocument], entities); len(problems) > 0 {
 			return errors.New(strings.Join(problems, "; "))
 		}
 		return nil
@@ -47,7 +44,7 @@ func (d *debate) ownerEdits(ctx context.Context, stream config.WorkstreamID) (sh
 			return shed.Pin{}, err
 		}
 	}
-	return shed.Pin{Spec: specDoc.Revision, Plan: planDoc.Revision}, nil
+	return shed.Pin{Spec: docs[plan.SpecDocument].Revision, Plan: docs[plan.PlanDocument].Revision}, nil
 }
 
 // reportInvalidEdit tells the chief of staff why an owner edit is not
@@ -68,8 +65,9 @@ func (d *debate) reportInvalidEdit(ctx context.Context, stream config.Workstream
 	}
 	reason := "an owner edit is not recorded and not debated: " + problems
 	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: ownerHeader(id, d.repository.Project(), stream, "owner-edit", d.s.now()), Subject: ownerSubject, From: state.Value, To: "invalid-edit", Reason: reason},
-		Events:     []trace.Event{trace.Notice(id, "invalid-edit", "The owner's edit is not recorded and the recorded revision stays under debate: "+problems)}}
+		Transition: trace.Transition{Header: ownerHeader(id, d.repository.Project(), stream, "owner-edit", d.s.now()), Subject: ownerSubject, From: state.Value, To: invalidEditValue, Reason: reason},
+		Events: []trace.Event{trace.Notice(id, invalidEditValue, "Your edit of the spec or the plan is not recorded, and the committee keeps debating the revisions that are: "+problems+
+			"\nCorrect the file to have it debated. Until then the architect gives up a redraft of what you edited rather than write over it.")}}
 	// Another writer of the subject moved it; the next pass reports the edit.
 	if _, err := d.repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return err
@@ -90,6 +88,7 @@ type shedOwner struct {
 	feature    string
 	shed       trace.WorkflowState
 	owner      trace.WorkflowState
+	skipped    bool
 	round      int
 	pin        shed.Pin
 	now        func() time.Time
@@ -120,6 +119,10 @@ func (s *Service) shedAction(raw string, states ...string) (*shedOwner, *APIErro
 	if err != nil {
 		return nil, failed
 	}
+	skipped, err := skippedDebate(repository, stream)
+	if err != nil {
+		return nil, failed
+	}
 	round := 1
 	if _, n, ok := shedState(state.Value); ok {
 		round = n
@@ -128,7 +131,19 @@ func (s *Service) shedAction(raw string, states ...string) (*shedOwner, *APIErro
 	if err != nil {
 		return nil, &APIError{Conflict, fmt.Sprintf("workstream %s has no recorded spec and plan yet", stream)}
 	}
-	return &shedOwner{project: project, stream: stream, repository: repository, feature: feature.Value, shed: state, owner: owner, round: round, pin: pin, now: s.now}, nil
+	return &shedOwner{project: project, stream: stream, repository: repository, feature: feature.Value, shed: state, owner: owner, skipped: skipped, round: round, pin: pin, now: s.now}, nil
+}
+
+// skippedDebate reports whether the owner has skipped debate on the
+// workstream. The skip is the recorded transition, not the owner subject's
+// current value: the subject shows the owner's latest action, and a later
+// objection, ruling or reported edit moves it without un-skipping anything.
+func skippedDebate(repository *trace.Repository, stream config.WorkstreamID) (bool, error) {
+	transitions, err := trace.Read[trace.Transition](repository, stream)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == skipTransition }), nil
 }
 
 // featureState names a feature state for a message, including the state of a
@@ -201,7 +216,7 @@ func (s *Service) shedObject(ctx context.Context, raw string, req ShedObjectRequ
 	if argument == "" {
 		return ShedResponse{}, &APIError{Validation, "an objection requires an argument"}
 	}
-	if o.owner.Value == skippedValue {
+	if o.skipped {
 		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("the owner skipped debate on workstream %s; nothing answers a new objection", o.stream)}
 	}
 	records, err := shed.Records(o.repository, o.stream)
@@ -283,7 +298,7 @@ func (s *Service) shedSkip(ctx context.Context, raw string) (ShedResponse, *APIE
 	if api != nil {
 		return ShedResponse{}, api
 	}
-	if o.owner.Value == skippedValue {
+	if o.skipped {
 		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("debate on workstream %s is already skipped", o.stream)}
 	}
 	if kind, n, ok := shedState(o.shed.Value); ok && (kind == "round" || kind == "reply") {
@@ -291,8 +306,8 @@ func (s *Service) shedSkip(ctx context.Context, raw string) (ShedResponse, *APIE
 	}
 	reason := "the owner skipped debate; the workstream still needs the owner's ratification of the spec and the plan"
 	tx := trace.Transaction{ExpectedVersion: o.owner.Version,
-		Transition: trace.Transition{Header: ownerHeader("shed-owner-skip", o.project, o.stream, "owner-shed", o.now()), Subject: ownerSubject, From: o.owner.Value, To: skippedValue, Reason: reason},
-		Events:     []trace.Event{trace.Notice("shed-owner-skip", "owner", reason)}}
+		Transition: trace.Transition{Header: ownerHeader(skipTransition, o.project, o.stream, "owner-shed", o.now()), Subject: ownerSubject, From: o.owner.Value, To: skippedValue, Reason: reason},
+		Events:     []trace.Event{trace.Notice(skipTransition, "owner", reason)}}
 	if _, err := o.repository.Transact(ctx, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s changed while skipping debate; check osmia status and retry", o.stream)}
@@ -302,7 +317,7 @@ func (s *Service) shedSkip(ctx context.Context, raw string) (ShedResponse, *APIE
 	// A sketched workstream enters the shed without a committee: a skipped
 	// debate runs no round, and ratification happens in the shed.
 	if o.feature == SketchedState {
-		h := ownerHeader("shed-owner-skip-"+InShedState, o.project, o.stream, "owner-shed", o.now())
+		h := ownerHeader(skipTransition+"-"+InShedState, o.project, o.stream, "owner-shed", o.now())
 		if _, err := o.repository.MoveFeatureState(ctx, h, SketchedState, InShedState, reason); err != nil && !errors.Is(err, trace.ErrConflict) {
 			return ShedResponse{}, &APIError{Internal, fmt.Sprintf("debate on workstream %s is skipped but it did not enter the shed; check the trace repository", o.stream)}
 		}
@@ -321,7 +336,7 @@ func (s *Service) shedMore(ctx context.Context, raw string, req ShedMoreRequest)
 	if req.Rounds < 1 || req.Rounds > limit {
 		return ShedResponse{}, &APIError{Validation, fmt.Sprintf("ask for between 1 and shed.max_rounds (%d) further rounds", limit)}
 	}
-	if o.owner.Value == skippedValue {
+	if o.skipped {
 		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("the owner skipped debate on workstream %s; no further round runs", o.stream)}
 	}
 	kind, n, ok := shedState(o.shed.Value)

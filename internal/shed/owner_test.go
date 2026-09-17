@@ -197,6 +197,8 @@ func TestRequestForFurtherRoundsRoundTripsAndBoundsTheLimit(t *testing.T) {
 	if _, err := shed.ParseMore([]byte(`{"version":1,"round":1,"rounds":1,"extra":1}`)); err == nil {
 		t.Fatal("an unknown field was parsed")
 	}
+	// A request replaces the cap: what the owner asked for is what runs,
+	// whether that is beyond the configured cap or short of it.
 	for name, tc := range map[string]struct {
 		configured int
 		requests   []shed.More
@@ -204,7 +206,7 @@ func TestRequestForFurtherRoundsRoundTripsAndBoundsTheLimit(t *testing.T) {
 	}{
 		"no request":         {3, nil, 3},
 		"beyond the cap":     {3, []shed.More{{Round: 3, Rounds: 2}}, 5},
-		"within the cap":     {5, []shed.More{{Round: 1, Rounds: 1}}, 5},
+		"short of the cap":   {5, []shed.More{{Round: 1, Rounds: 1}}, 2},
 		"the last one wins":  {3, []shed.More{{Round: 3, Rounds: 2}, {Round: 5, Rounds: 1}}, 6},
 		"the highest counts": {3, []shed.More{{Round: 5, Rounds: 1}, {Round: 3, Rounds: 2}}, 6},
 	} {

@@ -406,11 +406,38 @@ func (d *debate) recordReply(ctx context.Context, operation string, stream confi
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	docs = append(docs, trace.Document{Header: header(shed.ReplyDocumentID(reply.Round), 1), Path: shed.ReplyPath(reply.Round), Content: string(data)})
-	if err := d.repository.RecordDocuments(ctx, docs); err != nil {
+	replyDoc := trace.Document{Header: header(shed.ReplyDocumentID(reply.Round), 1), Path: shed.ReplyPath(reply.Round), Content: string(data)}
+	err = d.repository.RecordDocuments(ctx, append(docs, replyDoc))
+	if errors.Is(err, trace.ErrOwnerEdit) && reply.Redraft != nil {
+		// The owner has edited a file the redraft changes and the edit is not
+		// recorded yet. The redraft must not write over it, so it is given up
+		// like an invalid one and the reply is recorded on its own.
+		if reply, replyDoc, err = d.withoutRedraft(stream, reply, header); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		err = d.repository.RecordDocuments(ctx, []trace.Document{replyDoc})
+	}
+	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	return d.replied(ctx, operation, stream, reply)
+}
+
+// withoutRedraft gives up a redraft the owner's own unrecorded edit stands in
+// the way of: the reply keeps its answers, records why the redraft was given
+// up, and the revision the round debated stays.
+func (d *debate) withoutRedraft(stream config.WorkstreamID, reply shed.Reply, header func(string, int) trace.Header) (shed.Reply, trace.Document, error) {
+	edited, err := d.repository.OwnerEdits(stream)
+	if err != nil {
+		return reply, trace.Document{}, err
+	}
+	reply.Redraft = nil
+	reply.Problems = append(reply.Problems, fmt.Sprintf("the redraft is not recorded: the owner has edited %s and the edit is not recorded yet, so the redraft would write over it", strings.Join(edited, " and ")))
+	data, err := shed.EncodeReply(reply)
+	if err != nil {
+		return reply, trace.Document{}, err
+	}
+	return reply, trace.Document{Header: header(shed.ReplyDocumentID(reply.Round), 1), Path: shed.ReplyPath(reply.Round), Content: string(data)}, nil
 }
 
 // replied moves the shed to replied-<n> for a recorded reply, with a reason
@@ -423,7 +450,7 @@ func (d *debate) replied(ctx context.Context, operation string, stream config.Wo
 	case reply.Redraft != nil:
 		reason += " and redrafted: " + reply.Redraft.String()
 	case len(reply.Problems) > 0:
-		reason += fmt.Sprintf("; its redraft was given up as invalid and %s stays:\n- %s", reply.Revision, strings.Join(reply.Problems, "\n- "))
+		reason += fmt.Sprintf("; its redraft was given up and %s stays:\n- %s", reply.Revision, strings.Join(reply.Problems, "\n- "))
 	default:
 		reason += " and left " + reply.Revision.String() + " as it is"
 	}

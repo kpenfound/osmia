@@ -84,6 +84,10 @@ func TestShedCommands(t *testing.T) {
 	if code != 5 || out != "" || !strings.Contains(diag, "already skipped") {
 		t.Fatalf("skipping twice: %d %q %q", code, out, diag)
 	}
+	code, out, diag = invoke(t, root, "shed", "more", stream, "0")
+	if code != 4 || out != "" || !strings.Contains(diag, "shed.max_rounds") {
+		t.Fatalf("no rounds: %d %q %q", code, out, diag)
+	}
 	code, out, diag = invoke(t, root, "shed", "rule", stream, "agent_committee_9-r1-1", "dismiss")
 	if code != 4 || out != "" || !strings.Contains(diag, "no objection") {
 		t.Fatalf("unknown objection: %d %q %q", code, out, diag)
@@ -110,7 +114,6 @@ func TestShedCommandArguments(t *testing.T) {
 		{"shed", "skip"},
 		{"shed", "skip", stream, "extra"},
 		{"shed", "more", stream},
-		{"shed", "more", stream, "0"},
 		{"shed", "more", stream, "two"},
 		{"shed", "more", stream, "-1"},
 		{"shed", "ratify", stream},

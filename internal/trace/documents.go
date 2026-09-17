@@ -87,14 +87,14 @@ func (r *Repository) RecordDocuments(ctx context.Context, docs []Document) error
 			return err
 		}
 		// The owner edits spec.md and plan.json directly. Writing over an
-		// edit OwnerDocument has not recorded would lose it.
+		// edit OwnerDocuments has not recorded would lose it.
 		if prev, ok := previous[recordKey(d)].(Document); ok && ownerEditable[d.ID] == d.Path {
 			current, err := r.readFile(prefix + d.Path)
 			if err != nil && !os.IsNotExist(err) {
 				return err
 			}
 			if err == nil && string(current) != prev.Content {
-				return fmt.Errorf("%w: %s has an unrecorded owner edit; read it first", ErrConflict, d.Path)
+				return fmt.Errorf("%w: %w: %s has an unrecorded owner edit; read it first", ErrConflict, ErrOwnerEdit, d.Path)
 			}
 		}
 		if err := publicationPath(prefix + d.Path); err != nil {

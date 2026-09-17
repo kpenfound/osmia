@@ -111,7 +111,8 @@ plan for on its own. Debate that reaches it
 approves nothing. The service reads it when a round's reply is recorded, so a
 changed value applies to debates still running. It also bounds how many
 [further rounds](service.md#more-debate) the owner may ask for after a
-conclusion, which are the only rounds run beyond the cap.
+conclusion; from the first such request the rounds the owner asked for replace
+the cap as the debate's round limit.
 
 `capacity.committee` is the size of each workstream's committee, not a pool
 shared across workstreams: a workstream that

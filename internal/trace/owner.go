@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,73 +40,116 @@ func ownerEdited(name string) bool {
 	return false
 }
 
-// OwnerDocument returns the latest recorded revision of a workstream document
-// the owner edits on disk, spec.md or plan.json. When the file differs from
-// that revision, the file is first recorded as a new revision by the owner,
-// so every owner edit is versioned before anything reads it. A read with no
-// edit records nothing.
-//
-// check reads the edited content and refuses it: nothing is recorded, and the
-// latest recorded revision is returned with an error wrapping ErrOwnerEdit
-// and check's own. It runs while the repository is held, so it must not read
-// the trace. A document with no recorded revision is not the owner's to
-// create, and is reported as missing.
-func (r *Repository) OwnerDocument(ctx context.Context, stream config.WorkstreamID, id string, at time.Time, check func(string) error) (Document, error) {
-	path, ok := ownerEditable[id]
-	if !ok {
-		return Document{}, fmt.Errorf("document %s is not owner-edited", id)
+// OwnerEdits returns the paths of the workstream's owner-edited documents
+// whose file differs from the latest revision recorded for it: the edits no
+// revision holds yet.
+func (r *Repository) OwnerEdits(stream config.WorkstreamID) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	records, _, err := r.scan()
+	if err != nil {
+		return nil, err
 	}
+	latest := map[string]Document{}
+	for _, v := range records {
+		if d, ok := v.(Document); ok && d.Workstream == stream && ownerEditable[d.ID] == d.Path {
+			latest[d.ID] = d
+		}
+	}
+	var edited []string
+	for _, id := range slices.Sorted(maps.Keys(ownerEditable)) {
+		doc, ok := latest[id]
+		if !ok {
+			continue
+		}
+		data, err := r.readFile(scopePath(doc.Header) + doc.Path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if string(data) != doc.Content {
+			edited = append(edited, doc.Path)
+		}
+	}
+	return edited, nil
+}
+
+// OwnerDocuments returns the latest recorded revision of every workstream
+// document the owner edits on disk, spec.md and plan.json, by record ID. A
+// file that differs from its latest revision is first recorded as a new
+// revision by the owner, so every owner edit is versioned before anything
+// reads it. A read with no edit records nothing.
+//
+// The two documents are one draft, so they are refused and recorded together.
+// check is given the content of both as the files leave them, by record ID,
+// and refuses the edit: nothing is recorded, the latest recorded revisions are
+// returned, and the error wraps ErrOwnerEdit and check's own. It runs while
+// the repository is held, so it must not read the trace. A document with no
+// recorded revision is not the owner's to create, and is reported as missing.
+func (r *Repository) OwnerDocuments(ctx context.Context, stream config.WorkstreamID, at time.Time, check func(map[string]string) error) (map[string]Document, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return Document{}, err
+		return nil, err
 	}
 	if err := config.CheckWorkstreamIDs(stream); err != nil {
-		return Document{}, err
+		return nil, err
 	}
 	records, streams, err := r.scan()
 	if err != nil {
-		return Document{}, err
+		return nil, err
 	}
-	found := false
-	for _, s := range streams {
-		found = found || s == stream
+	if !slices.Contains(streams, stream) {
+		return nil, fmt.Errorf("unknown workstream %s", stream)
 	}
-	if !found {
-		return Document{}, fmt.Errorf("unknown workstream %s", stream)
-	}
-	var latest Document
+	latest := map[string]Document{}
 	for _, v := range records {
-		if d, ok := v.(Document); ok && d.Workstream == stream && d.Path == path {
-			latest = d
+		if d, ok := v.(Document); ok && d.Workstream == stream && ownerEditable[d.ID] == d.Path {
+			latest[d.ID] = d
 		}
 	}
-	if latest.Revision == 0 {
-		return Document{}, fmt.Errorf("workstream %s records no %s: %w", stream, path, os.ErrNotExist)
+	content := map[string]string{}
+	var edited []string
+	for _, id := range slices.Sorted(maps.Keys(ownerEditable)) {
+		doc, ok := latest[id]
+		if !ok {
+			return nil, fmt.Errorf("workstream %s records no %s: %w", stream, ownerEditable[id], os.ErrNotExist)
+		}
+		content[id] = doc.Content
+		data, err := r.readFile(scopePath(doc.Header) + doc.Path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if string(data) != doc.Content {
+			content[id] = string(data)
+			edited = append(edited, id)
+		}
 	}
-	data, err := r.readFile(scopePath(latest.Header) + path)
-	if os.IsNotExist(err) {
-		return latest, nil
-	}
-	if err != nil {
-		return Document{}, err
-	}
-	if string(data) == latest.Content {
+	if len(edited) == 0 {
 		return latest, nil
 	}
 	if check != nil {
-		if err := check(string(data)); err != nil {
-			return latest, fmt.Errorf("%w: %s: %w", ErrOwnerEdit, path, err)
+		if err := check(content); err != nil {
+			return latest, fmt.Errorf("%w: %w", ErrOwnerEdit, err)
 		}
 	}
-	next := latest
-	next.Header.Revision, next.Header.At, next.Header.Actor, next.Header.Cause = latest.Revision+1, at, ownerActor, "owner-edit"
-	next.Content = string(data)
-	// The file already holds this content; rewriting it could overwrite a
-	// newer edit, which the next read then records. The commit takes the
-	// recorded bytes, not the file.
-	if err := r.append(ctx, next, false); err != nil {
-		return Document{}, err
+	recorded := maps.Clone(latest)
+	for _, id := range edited {
+		next := latest[id]
+		next.Header.Revision, next.Header.At, next.Header.Actor, next.Header.Cause, next.Header.Depth = next.Revision+1, at, ownerActor, "owner-edit", 0
+		next.Content = content[id]
+		// The file already holds this content; rewriting it could overwrite a
+		// newer edit, which the next read then records. The commit takes the
+		// recorded bytes, not the file.
+		if err := r.append(ctx, next, false); err != nil {
+			return nil, err
+		}
+		recorded[id] = next
 	}
-	return next, nil
+	return recorded, nil
 }
