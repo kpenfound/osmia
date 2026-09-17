@@ -168,6 +168,12 @@ func Parse(data []byte) (Record, error) {
 	if err := d.Decode(new(any)); err != io.EOF {
 		return Record{}, errors.New("shed record must be one object")
 	}
+	if len(r.Objections) == 0 {
+		r.Objections = nil
+	}
+	if len(r.Concessions) == 0 {
+		r.Concessions = nil
+	}
 	return r, r.check()
 }
 

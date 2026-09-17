@@ -426,3 +426,58 @@ func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
 		t.Fatalf("reopen: %d %v", len(docs), err)
 	}
 }
+
+// A shed record is a workstream document under shed/round-<n>/: a batch is one
+// commit through RecordDocuments, Append records one too, a project-scoped
+// shed path is refused, and the trace reopens with the files on disk.
+func TestShedRecordsAreWorkstreamDocuments(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	dir, err := root.ProjectTrace(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := gitOutput(t, r, "rev-list", "--count", "HEAD")
+	batch := []Document{streamDocument("shed-round-1-agent_committee_1", "shed/round-1/agent_committee_1.json", "{\"round\":1}\n", 1), streamDocument("shed-round-1-agent_committee_2", "shed/round-1/agent_committee_2.json", "{\"round\":1}\n", 1)}
+	if err := r.RecordDocuments(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	n, err := strconv.Atoi(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gitOutput(t, r, "rev-list", "--count", "HEAD"); got != strconv.Itoa(n+1) {
+		t.Fatalf("commits %s after one batch, %s before it", got, before)
+	}
+	if err := r.Append(ctx, streamDocument("shed-round-12-agent_committee_1", "shed/round-12/agent_committee_1.json", "{\"round\":12}\n", 1)); err != nil {
+		t.Fatal(err)
+	}
+	project := projectDocument("shed-round-1-m", "shed/round-1/m.json", "{}\n", 1)
+	if err := r.RecordDocuments(ctx, []Document{project}); err == nil {
+		t.Fatal("project-scoped shed record accepted")
+	}
+	if err := r.Append(ctx, project); err == nil {
+		t.Fatal("project-scoped shed record appended")
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(root, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	docs, err := Read[Document](reopened, streamID)
+	if err != nil || len(docs) != 3 {
+		t.Fatalf("documents: %+v %v", docs, err)
+	}
+	for _, d := range docs {
+		data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), filepath.FromSlash(d.Path)))
+		if err != nil || string(data) != d.Content {
+			t.Fatalf("%s on disk: %q %v", d.Path, data, err)
+		}
+		if got := gitOutput(t, reopened, "cat-file", "blob", "HEAD:workstreams/"+string(streamID)+"/"+d.Path); got != strings.TrimSpace(d.Content) {
+			t.Fatalf("%s committed as %q", d.Path, got)
+		}
+	}
+}
