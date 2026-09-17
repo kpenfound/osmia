@@ -242,7 +242,9 @@ func TestInvalidRecordsDoNotWrite(t *testing.T) {
 			t.Fatalf("invalid header accepted: %#v", d)
 		}
 	}
-	for _, p := range []string{"/tmp/trace-escape", "../outside", "handed/../../outside", "handed//file", "handed/./file", "handed/.git", ".git/config", "kb/../../../outside", "spec.md/child", "handed/a\\b", "handed/a\x00b"} {
+	for _, p := range []string{"/tmp/trace-escape", "../outside", "handed/../../outside", "handed//file", "handed/./file", "handed/.git", ".git/config", "kb/../../../outside", "spec.md/child", "handed/a\\b", "handed/a\x00b",
+		"shed/round-1/../../../outside.json", "shed/round-1/../spec.md", "shed/../round-1/m.json", "shed/round-1/.git.json", "shed/round-1/m/../n.json", "shed/round-1/nested/m.json", "shed/round-1/m.md", "shed/round-1/m",
+		"shed/round-0/m.json", "shed/round-01/m.json", "shed/round-x/m.json", "shed/round-1", "shed/m.json", "shed/round-1/ m.json", "shed/round-1/a b.json", "shed/round-1/m.json/child", "shed/round-1/a\\b.json"} {
 		d := specimens()[0].(Document)
 		d.Path = p
 		if err := r.Append(context.Background(), d); err == nil {

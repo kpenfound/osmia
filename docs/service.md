@@ -298,6 +298,137 @@ drafts it. A draft already requested stays pending: applying it returns
 run a turn, the operation is retried, and no draft is spent. A captured turn is
 still completed and its draft recorded, since that runs no architect.
 
+## The shed: committee rounds
+
+The committee controller runs in every reconciliation pass after the
+architect controller, before event delivery and the scheduler. It moves a
+`sketched` workstream into the shed and asks its committee for round 1; the
+committee's contributions to a round are validated as they are made and
+recorded once the round ends. The package `internal/shed` holds the record,
+the tools and the open-dissent computation.
+
+### Entering the shed
+
+For every workstream in feature state `sketched`, except the librarian's, the
+controller creates the workstream's committee and moves it `sketched ->
+in-shed`: transition `in-shed`, actor `service`/`shed`, cause `sketched`, with
+the reason `spec.md revision <s> and plan.json revision <p> enter the shed with
+a committee of <N>` and the usual state notice for the chief of staff.
+
+The committee is a fixed set of durable threads of the workstream:
+`agent_committee_1` to `agent_committee_<N>` (role `committee`, threads
+`thread_committee_<i>`), where `N` is
+[`capacity.committee`](configuration.md) when the workstream enters the shed.
+Every round runs the threads that exist, and the transition's reason counts
+them; a changed configuration does not resize a committee.
+
+The workflow subject `shed` tracks the rounds, with transitions by
+`service`/`shed` in `events.jsonl`:
+
+| `shed` state | Meaning |
+| --- | --- |
+| `round-<n>` | Round `n` is requested: transition `shed-round-<n>` published a `shed-round` operation whose input pins the round to one revision of `spec.md` and one of `plan.json`. Round 1 pins the latest revisions when it is requested. |
+| `heard-<n>` | Every member's turn of round `n` has ended and its record is committed. Transition `shed-round-<n>-heard` and the operation's result carry the same summary: members heard, objections, concessions, failed turns and how many objections stand. |
+| `failed-<n>` | The round ended without a record because the workstream was abandoned. Transition `shed-round-<n>-failed` holds the reason. |
+
+### A member's turn
+
+The round operation runs one turn per member, all at the same time, through
+the thread runner and the [turn isolation](isolation.md) path, by the
+service's own reconciler: the scheduler's gate declines every committee
+thread. Turn `shed-<n>-<agent>-<attempt>` carries the operation ID as cause
+and the committee's effective profile. The operation waits for every member
+before it records anything.
+
+Each turn gets a read-only private copy of a view staged under
+`<root>/shed/<project-id>/<workstream-id>/<turn>/workspace`:
+
+| Path in the view | Content |
+| --- | --- |
+| `spec.md`, `plan.json` | The pinned revisions, whatever was recorded since. |
+| `handed/<name>` | The handed input, unchanged. |
+| `charter.md` | The charter as recorded, after any owner edit is recorded. |
+| `context.md` | The rendered [context bundle](context.md) for the whole project, with the workstream's decisions. |
+| `repo/` | The tracked files of the owner's clone. |
+| `shed/round-<k>/` | The records of the earlier rounds. |
+
+A member gets `file_read`, `object` and `concede` and nothing else: no notes,
+no write, execute, network or VCS capability. `object` and `concede` are
+memory tools that only the `committee` role can hold. The prompt names the
+round, the pinned revision, the view, the two tests and the judgement, and the
+citation forms; from round 2 on it lists the member's own objections that
+still stand, with their IDs.
+
+`object` takes `kind`, `part`, `argument` and `citations`:
+
+| `kind` | Meaning | `part` |
+| --- | --- | --- |
+| `charter` | The part violates a charter rule: a veto. It must cite the rule as `charter#<n>`. | `spec#<n>`, `plan#<unit>`, `spec` or `plan` |
+| `fit` | The plan does not realise the handed design, or works against a recorded decision: advice. | `spec#<n>`, `plan#<unit>`, `spec` or `plan` |
+| `size` | A unit addresses too much and must be split. | `plan#<unit>` |
+| `proof` | The plan names no proof that can show a criterion holds. | `spec#<n>` |
+
+`spec` and `plan` name a whole document. A `part` that names a criterion or a
+unit must exist in the pinned revision. Every objection needs a non-empty
+argument and at least one citation, and every citation must exist:
+
+| Citation | Must name |
+| --- | --- |
+| `charter#<n>` | A rule of the latest charter, numbered exactly once. |
+| `spec#<n>` | An acceptance criterion of the pinned `spec.md` revision. |
+| `plan#<unit>` | A unit of the pinned `plan.json` revision. |
+| `kb/<subsystem>.md` | An existing knowledge-base file. |
+| `kb/entities.json#<entity>` | An entity of the recorded entity map, by ID or alias. |
+
+An accepted objection returns `{"recorded":true,"objection":"<id>"}` with the
+ID `<agent>-r<round>-<k>`. `concede` takes `objection` and `reason` and
+withdraws or settles one of the member's own objections that still stands,
+from an earlier round or from this turn. A contribution that is invalid is an
+ordinary result, `{"recorded":false,"reason":...}`, so the member reads why
+and can correct it within the turn; it takes no ID and is not kept.
+
+### The record
+
+The tools keep a turn's contributions in the turn's service-owned directory.
+Once every member's turn has ended, the operation records one document per
+member with `RecordDocuments`, all in one commit:
+`shed/round-<n>/<agent>.json`, record ID `shed-round-<n>-<agent>`, actor
+`agent`/`<agent>`, cause the operation ID. The file holds the round, the
+member, the pinned `revision` (`spec` and `plan`), the turn, the `objections`
+and the `concessions`. A member whose turn ended without `object` or `concede`
+has a file with neither: no new dissent. A member whose turn failed, or was
+interrupted by three service stops, has a file with the `failure` and whatever
+the failed turn contributed before it; contributions of an interrupted attempt
+that was retried are dropped.
+
+`shed.OpenDissent` computes the dissent that stands from the records alone. An
+objection stands until its member concedes it, or until its member accepts a
+later revision of the documents: a turn against the later revision that ends
+normally without a new objection. A silent turn against the revision the
+objection was made on settles nothing. A failed turn accepts nothing. A new
+objection against the later revision accepts nothing either, so the member's
+earlier objections stand until it concedes them.
+
+Recovery keys on the trace: a restart during the round finds the turns that
+ended in their threads and runs only the members that had not finished, each
+up to three attempts; one between the record and the transition finds the
+round's files and records nothing again; a recorded outcome completes the
+operation without running a member.
+
+[Abandoning](#abandoning) the workstream cancels the members' running turns.
+The round of an abandoned workstream records no file and ends `failed-<n>`
+with the reason `round <n> failed: the workstream was abandoned, so the
+committee is not heard`. A round whose files were committed before the
+workstream was abandoned still ends `heard-<n>`, so the shed state never
+contradicts the record.
+
+`Options.Committee` supplies the execution engine and MCP host factory the
+committee's turns run in. Without it no workstream enters the shed, so a
+sketched workstream stays `sketched` until a service with a runner starts. A
+round already requested stays pending: applying it returns `this service has
+no agent runner for the committee` wherever it would start or run a turn, the
+operation is retried, and no member's attempt is spent.
+
 ## Abandoning
 
 `POST /v1/abandon/<workstream-id>` abandons a workstream of the active project
@@ -452,9 +583,10 @@ with `Options.Threads` runs them.
 
 `osmia serve` starts the service with `service.Enforce(opts,
 service.CoreEnforcement())`, which sets `Options.Librarian`,
-`Options.Architect` and `Options.Threads`, so a served project runs real role
-turns: extraction after `project add`, drafting after a hand-in, and every
-queued chief-of-staff turn. All three use one `Enforcement`:
+`Options.Architect`, `Options.Committee` and `Options.Threads`, so a served
+project runs real role turns: extraction after `project add`, drafting after a
+hand-in, committee rounds once a draft is sketched, and every queued
+chief-of-staff turn. All four use one `Enforcement`:
 
 | Part | Production value |
 |---|---|
@@ -495,7 +627,8 @@ own and delivers outbox events to each chief of staff (see
 [event delivery](#event-delivery)). Event delivery followed by the scheduler
 replaces any `Schedule` hook in `Options.Reconciliation`; without
 `Options.Threads` that hook runs. In both cases the
-[architect controller](#architect-drafting) runs first.
+[architect controller](#architect-drafting) and then the
+[committee controller](#the-shed-committee-rounds) run first.
 At the start of every reconciliation pass, `internal/scheduler` reads each
 workstream's threads and turn operations. For every thread with no turn in
 flight, it publishes a `thread-turn` operation for the oldest unfinished turn,
@@ -525,9 +658,9 @@ describes: it is neither dispatched again nor lost. `scheduler.Options.Admit` is
 the dispatch gate after capacity.
 
 The service's gate declines every turn of the librarian's workstream and of
-every `architect` thread: the service's own `kb-extract` and `architect-draft`
-reconcilers run those, staged in their own views, and such a turn the
-scheduler found queued gets no turn operation.
+every `architect` and `committee` thread: the service's own `kb-extract`,
+`architect-draft` and `shed-round` reconcilers run those, staged in their own
+views, and such a turn the scheduler found queued gets no turn operation.
 The gate holds a turn that a pause in `runtime.Effective` covers:
 a `factory` pause, a `project` pause on the active project, or a `workstream`
 pause on the turn's workstream. Chief-of-staff turns are never held, so the
@@ -537,11 +670,16 @@ either pause mode. The gate reads the runtime store on every pass, so after a
 pause is cleared the loop's next periodic pass runs the held turns with no new
 message or operation.
 
-The scheduler also dispatches within the configured `[capacity]`. Mason,
-reviewer and committee turns share `capacity.masons`, `capacity.reviewers` and
-`capacity.committee` across workstreams. Every other role runs one turn at a
-time per workstream. Each workstream runs at most the project's
-`capacity.per_workstream` turns at once. Chief-of-staff turns take no slot and
+The scheduler also dispatches within the configured `[capacity]`. Mason and
+reviewer turns share `capacity.masons` and `capacity.reviewers` across
+workstreams. Committee turns are not dispatched by the scheduler: a
+[shed round](#a-members-turn) runs every member of its workstream's committee
+at once, outside `capacity.per_workstream`, so two workstreams in the shed run
+two committees at the same time. Every other role runs one turn at a time per
+workstream. Each workstream runs at most the project's
+`capacity.per_workstream` of the turns the scheduler dispatches at once; a
+round's turns in flight count toward that number, so they hold the
+workstream's slots against other roles while the round runs. Chief-of-staff turns take no slot and
 run even when every slot is taken. A turn holds its slots while it is in
 flight, so they are free again once it completes, whether it succeeded, failed,
 is waiting or was cancelled. A claim a restart interrupted holds no slot,
@@ -564,8 +702,8 @@ so a failed transaction leaves no event. `trace.Notice` builds such an event,
 and `Repository.SetFeatureState` records a feature state change with one.
 `internal/events` delivers them.
 
-At the start of every reconciliation pass, after the architect controller and
-before the scheduler, the deliverer
+At the start of every reconciliation pass, after the architect and committee
+controllers and before the scheduler, the deliverer
 reads each workstream's ready notification events (events without an
 operation). It waits until the oldest has been ready for `events.window` (see
 [configuration](configuration.md#top-level-configtoml)), then delivers every

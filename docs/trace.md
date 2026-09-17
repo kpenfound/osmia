@@ -47,7 +47,10 @@ does not infer authority, readiness or workflow transitions from them.
 
 Only documents can be project-scoped. Project document paths are `charter.md`,
 `kb/entities.json`, `kb/<name>.md` and `notes/<role>.md`; workstream document paths
-are `spec.md`, `plan.json` and `handed/<name>`. Handed inputs are immutable.
+are `spec.md`, `plan.json`, `handed/<name>` and the shed records
+`shed/round-<n>/<agent>.json`, where `<n>` is a positive round number without
+leading zeros and `<agent>` is the committee member's agent ID. Handed inputs
+are immutable.
 Only a handed document carries a `source`: `file:` and the absolute path it was
 read from, the issue URL, or `stdin`.
 Document paths retain one record identity. Agent role and thread IDs stay stable
@@ -73,8 +76,9 @@ edits it, and handed input because it is immutable. A `kb/<subsystem>.md`
 revision with empty content records the subsystem's removal: the revision is
 kept in `documents.jsonl` and the file is deleted from the tree and from
 disk. The [knowledge-base extraction](knowledge-base.md#extraction) records
-each pass this way, and [architect drafting](service.md#architect-drafting)
-records each draft's `spec.md` and `plan.json`.
+each pass this way, [architect drafting](service.md#architect-drafting)
+records each draft's `spec.md` and `plan.json`, and a
+[committee round](service.md#the-record) records one file per member.
 
 `Read[trace.Document](repository, workstreamID)` enumerates typed revisions;
 `Get[trace.Document](repository, workstreamID, id, revision)` retrieves one.

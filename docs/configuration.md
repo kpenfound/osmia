@@ -105,6 +105,14 @@ it, with every other ready event, as one
 [chief-of-staff turn](service.md#event-delivery). A workstream cap may exceed global mason capacity:
 the global pool still limits concurrent execution.
 
+`capacity.committee` is the size of each workstream's committee, not a pool
+shared across workstreams: a workstream that
+[enters the shed](service.md#entering-the-shed) gets that many committee
+members, and all of them run at the same time in every round, whatever other
+workstreams run and outside `capacity.per_workstream`. Two workstreams in the
+shed run two committees at once. The committee is fixed when the workstream
+enters the shed, so a later change applies to workstreams that enter after it.
+
 Profiles use lowercase names starting with a letter and containing letters,
 digits, `_` or `-`, at most 64 characters. Each profile requires `agent` (`claude`,
 `codex` or `opencode`) and a nonblank `model`. Model availability is checked by the

@@ -263,12 +263,13 @@ func (s *Service) extractProject(ctx context.Context, req ProjectExtractRequest)
 }
 
 // runnerAdapter routes runner-boundary operations: extraction passes to the
-// service's extractor, architect drafts to its drafter, everything else to
-// the bound thread reconciler.
+// service's extractor, architect drafts to its drafter, committee rounds to
+// its debate, everything else to the bound thread reconciler.
 type runnerAdapter struct {
 	turns   coreadapter.Reconciler
 	extract *extractor
 	draft   *drafter
+	rounds  *debate
 }
 
 func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
@@ -277,6 +278,9 @@ func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (c
 	}
 	if op.Action == DraftAction {
 		return a.draft.Inspect(ctx, op)
+	}
+	if op.Action == RoundAction {
+		return a.rounds.Inspect(ctx, op)
 	}
 	if a.turns == nil {
 		return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "No reconciliation adapter configured"}, nil
@@ -289,6 +293,9 @@ func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (cor
 	}
 	if op.Action == DraftAction {
 		return a.draft.Apply(ctx, op)
+	}
+	if op.Action == RoundAction {
+		return a.rounds.Apply(ctx, op)
 	}
 	if a.turns == nil {
 		return coreadapter.OperationResult{}, errors.New("no runner adapter is configured")
