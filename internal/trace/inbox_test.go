@@ -76,8 +76,13 @@ func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 	if _, err := r.Rule(ctx, 9, "Resume.", owner, when); !errors.Is(err, ErrInboxEntry) {
 		t.Fatalf("unknown entry: %v", err)
 	}
-	if _, err := r.Rule(ctx, 1, " \n", owner, when); err == nil || errors.Is(err, ErrInboxEntry) || errors.Is(err, ErrRuled) {
-		t.Fatalf("blank ruling: %v", err)
+	for name, call := range map[string]func() error{
+		"blank ruling": func() error { return second(r.Rule(ctx, 1, " \n", owner, when)) },
+		"no timestamp": func() error { return second(r.Rule(ctx, 1, "Resume uploads.", owner, time.Time{})) },
+	} {
+		if err := call(); err == nil || err.Error() != "a ruling needs text and a timestamp" {
+			t.Fatalf("%s: %v", name, err)
+		}
 	}
 	r.failPublication = func(step string) error {
 		if step == "before-ref" {
@@ -204,4 +209,37 @@ func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 	}
 	defer reopened.Close()
 	check(reopened)
+}
+
+// An escalation carries its inbox number, and a ruling holds what the owner
+// said, what went back or both, with a scope only on what went back.
+func TestEscalationAndRulingValidation(t *testing.T) {
+	ctx := context.Background()
+	r, _, _ := create(t)
+	question := Question{Header: header("question", "q1"), AskedBy: Actor{Kind: "agent", ID: "mason1"}, Question: "Which store?", SentToOwner: "Which store should uploads use?",
+		Escalation: &Escalation{Batch: "escalation_q1", Questions: []string{"q1"}, Blocked: "The unit.", Recommendation: "Files."}}
+	if err := r.Append(ctx, question); err == nil {
+		t.Fatal("an escalation without an inbox number was recorded")
+	}
+	question.Escalation.Inbox = 1
+	if err := r.Append(ctx, question); err != nil {
+		t.Fatal(err)
+	}
+	ruling := func(id, owner, answer, scope string) Ruling {
+		return Ruling{Header: header("ruling", id), QuestionID: "q1", QuestionRevision: 1, Decision: DecisionRuling, OwnerResponse: owner, ReturnedAnswer: answer, Scope: scope}
+	}
+	for name, bad := range map[string]Ruling{
+		"neither response nor answer": ruling("r1", "", " ", ""),
+		"unknown scope":               ruling("r1", "Files.", "Use files.", "everyone"),
+		"scope without an answer":     ruling("r1", "Files.", "", ScopeNotify),
+	} {
+		if err := r.Append(ctx, bad); err == nil {
+			t.Fatalf("%s was recorded", name)
+		}
+	}
+	for _, good := range []Ruling{ruling("r1", "Files.", "", ""), ruling("r2", "", "Use files.", ""), ruling("r3", "Files.", "Use files.", ScopeLocal), ruling("r4", "Files.", "Use files.", ScopeNotify)} {
+		if err := r.Append(ctx, good); err != nil {
+			t.Fatalf("ruling %s: %v", good.ID, err)
+		}
+	}
 }
