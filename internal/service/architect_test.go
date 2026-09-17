@@ -85,9 +85,7 @@ func newArchitectOptions(t *testing.T) (Options, string, *demoEngine, *demoSessi
 	clock := &demoClock{now: demoStart}
 	opts.Reconciliation.Now = clock.Now
 	opts.Issues = &fakeIssues{token: "ghp_architect_secret"}
-	opts.Architect = &Architect{Engine: engine, Hosts: func(token string) coreadapter.MCPHosts {
-		return &coreadapter.MCPHost{Transport: &demoTransport{token: token, sessions: sessions}}
-	}}
+	opts.Architect = &Architect{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}}}
 	return opts, clone, engine, sessions, clock
 }
 

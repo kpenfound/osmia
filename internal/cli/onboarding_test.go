@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/busybees/core/agent"
+	"github.com/kpenfound/busybees/core/agent/agenttest/enforcertest"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/kpenfound/osmia/internal/bundle"
@@ -61,7 +63,8 @@ const onboardingCharter = `# Charter
 2. Every change ships with a test.
 `
 
-// fakeLibrarian is the execution engine the librarian's turns run in. Its
+// fakeLibrarian is the execution engine the librarian's turns run in, behind
+// core's fake enforcer. Its
 // first turn waits until the service stops it; later turns write the scripted
 // knowledge base through the turn's file tools.
 type fakeLibrarian struct {
@@ -69,6 +72,12 @@ type fakeLibrarian struct {
 	clients map[string]*mcp.ClientSession
 	runs    []string
 	entered chan struct{}
+}
+
+func (f *fakeLibrarian) Enforcer(s coreadapter.ExecutionSettings) (agent.Enforcer, error) {
+	return &enforcertest.Enforcer{Sandbox: s.Mode, Image: s.Image, Agent: func(ctx context.Context, turn *enforcertest.Turn) (*agent.Result, error) {
+		return f.Run(ctx, turn.Request)
+	}}, nil
 }
 
 func (f *fakeLibrarian) Verify(req agent.Request) (*agent.Turn, error) {
@@ -119,8 +128,7 @@ func (f *fakeLibrarian) ranTurns() []string {
 // fakeMCP serves a turn's scoped MCP server in memory and hands the client
 // side to the fake engine under the turn's token.
 type fakeMCP struct {
-	f     *fakeLibrarian
-	token string
+	f *fakeLibrarian
 }
 
 type releaseFunc func(context.Context) error
@@ -139,15 +147,16 @@ func (m *fakeMCP) Start(ctx context.Context, server *mcp.Server) (coreadapter.En
 		return coreadapter.Endpoint{}, nil, err
 	}
 	m.f.mu.Lock()
-	m.f.clients[m.token] = client
+	token := rand.Text()
+	m.f.clients[token] = client
 	m.f.mu.Unlock()
 	release := releaseFunc(func(context.Context) error {
 		m.f.mu.Lock()
-		delete(m.f.clients, m.token)
+		delete(m.f.clients, token)
 		m.f.mu.Unlock()
 		return errors.Join(client.Close(), served.Wait())
 	})
-	return coreadapter.Endpoint{URL: "http://osmia-mcp.invalid/turn", BearerTokenEnvironment: "OSMIA_MCP_TOKEN"}, release, nil
+	return coreadapter.Endpoint{URL: "http://osmia-mcp.invalid/turn", BearerTokenEnvironment: "OSMIA_MCP_TOKEN", Token: token}, release, nil
 }
 
 // onboardingGit runs git with no user or system configuration.
@@ -244,9 +253,7 @@ func TestM2ProjectOnboarding(t *testing.T) {
 	onboardingGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
 	cloneBefore := treeHash(t, clone)
 	librarian := &fakeLibrarian{clients: map[string]*mcp.ClientSession{}, entered: make(chan struct{})}
-	opts.Librarian = &service.Librarian{Engine: librarian, Hosts: func(token string) coreadapter.MCPHosts {
-		return &coreadapter.MCPHost{Transport: &fakeMCP{f: librarian, token: token}}
-	}}
+	opts.Librarian = &service.Librarian{Engine: librarian, Hosts: &coreadapter.MCPHost{Transport: &fakeMCP{f: librarian}}}
 	opts.ShutdownTimeout = 100 * time.Millisecond
 	root := opts.Config.Root
 	s, err := service.Start(ctx, opts)

@@ -135,7 +135,10 @@ type HostRequest struct {
 	Capabilities Capabilities
 	Tools        []Tool
 }
-type Endpoint struct{ URL, BearerTokenEnvironment string }
+
+// Endpoint is where a turn reaches its MCP server. Token is the bearer
+// credential, handed to the turn in the BearerTokenEnvironment variable.
+type Endpoint struct{ URL, BearerTokenEnvironment, Token string }
 type HostedMCP struct {
 	Endpoint Endpoint
 	Lease    Lease

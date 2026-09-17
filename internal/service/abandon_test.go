@@ -130,6 +130,13 @@ func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
+	// The demo clock advances on every read, so a short event window would
+	// close after a timing-dependent number of passes and run a chief-of-staff
+	// turn for the hand-in notice. This test covers the owner's thread only.
+	global := filepath.Join(opts.Config.Root, "config.toml")
+	data, err := os.ReadFile(global)
+	must(t, err)
+	must(t, os.WriteFile(global, append(data, []byte("[events]\nwindow = \"1000h\"\n")...), 0600))
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
 	root := cfg.Root.String()

@@ -328,16 +328,22 @@ or blindly rerun, and stale service sessions cannot submit a new result. A
 captured result remains `captured` and can be completed after restart without a
 backend call. `AbandonTurn` is the recovery for a reservation a previous
 service session never captured a result for: the exclusive repository lock
-proves that session is gone, so the turn is completed with an `interrupted`
-response carrying the claim's start time and session directory, and the
-thread's next request becomes eligible. It refuses the current session's own
-reservation, a captured turn and an unreserved one. `CancelTurns` completes
-the unfinished turns of a workstream with a cancelled response carrying the
-given actor and reason: queued turns and turns a previous session reserved
+proves that session is gone, the turn is completed, and the thread's next
+request becomes eligible. It refuses the current session's own reservation, a
+captured turn and an unreserved one. `CancelTurns` completes the unfinished
+turns of a workstream: queued turns and turns a previous session reserved
 without a captured result. In each thread it stops at the first turn the
 current session reserved or that has a captured result, whichever session
 captured it, and leaves that turn and the thread's later turns to a later
-call. As with operation
+call. The response each of them writes depends on the turn's final attempt,
+so that the response always equals it:
+
+| Final attempt | Response |
+|---|---|
+| none, or without a result | `AbandonTurn`: an `interrupted` result with the claim's start time and session directory; `CancelTurns`: a `cancelled` result with the given actor and reason. The final attempt receives the same result and failure |
+| with a recorded result | the attempt's result and failure; the turn's status follows them, and a `CancelTurns` reason is not recorded |
+
+As with operation
 workers, callers must join turn execution before closing the repository handle.
 
 `internal/thread.Runner` joins the queue to `coreadapter.Turns`. `RunNext` accepts

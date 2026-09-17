@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net"
-	"sync"
+	"net/http"
+	"net/url"
 	"testing"
 
+	"github.com/kpenfound/busybees/core/mcphost"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -115,50 +117,92 @@ func TestMCPRejectsEffectEscalationAndDuplicates(t *testing.T) {
 	}
 }
 
-type blockedListener struct {
-	closed chan struct{}
-	once   sync.Once
-}
-
-func (l *blockedListener) Accept() (net.Conn, error) { <-l.closed; return nil, net.ErrClosed }
-func (l *blockedListener) Close() error              { l.once.Do(func() { close(l.closed) }); return nil }
-func (l *blockedListener) Addr() net.Addr {
-	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1234}
-}
-func TestHTTPTransportCleanup(t *testing.T) {
-	for _, mode := range []string{"release", "cancel", "invalid"} {
-		t.Run(mode, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			listener := &blockedListener{closed: make(chan struct{})}
-			transport := &HTTPTransport{Listener: listener, Endpoint: Endpoint{URL: "http://127.0.0.1:1234/mcp", BearerTokenEnvironment: "MCP_TOKEN"}, Token: "scoped-token"}
-			if mode == "invalid" {
-				transport.Token = ""
-			}
-			_, lease, err := transport.Start(ctx, mcp.NewServer(&mcp.Implementation{Name: "test", Version: "1"}, nil))
-			if mode == "invalid" {
-				if err == nil {
-					t.Fatal("missing credential accepted")
-				}
-			} else {
-				if err != nil {
-					t.Fatal(err)
-				}
-				if mode == "cancel" {
-					cancel()
-				}
-				if err := lease.Release(context.Background()); err != nil {
-					t.Fatal(err)
-				}
-				if err := lease.Release(context.Background()); err != nil {
-					t.Fatal(err)
-				}
-			}
-			select {
-			case <-listener.closed:
-			default:
-				t.Fatal("listener leaked")
-			}
-		})
+// A role-scoped server hosted on core's loopback transport is reached through
+// the returned endpoint with its token, and only with it, until the lease is
+// released.
+func TestCoreTransportServesUntilReleased(t *testing.T) {
+	ctx := context.Background()
+	tool := Tool{Name: "notes_read", Effect: ToolRead, InputSchema: json.RawMessage(`{"type":"object"}`),
+		Handle: func(context.Context, json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`"notes"`), nil
+		}}
+	hosted, err := (&MCPHost{Transport: CoreTransport{}}).Host(ctx, HostRequest{Scope: Scope{Role: "architect"}, Capabilities: Capabilities{Tools: []string{"notes_read"}}, Tools: []Tool{tool}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := hosted.Endpoint
+	parsed, err := url.Parse(endpoint.URL)
+	if err != nil || parsed.Scheme != "http" || parsed.Hostname() != "127.0.0.1" || endpoint.Token == "" || endpoint.BearerTokenEnvironment != TokenEnvironment {
+		t.Fatalf("endpoint: %+v", endpoint)
+	}
+	connect := func(token string) (*mcp.ClientSession, error) {
+		return mcp.NewClient(&mcp.Implementation{Name: "agent", Version: "1"}, nil).Connect(ctx, &mcp.StreamableClientTransport{
+			Endpoint: endpoint.URL, HTTPClient: &http.Client{Transport: mcphost.BearerTransport(token, nil)}, MaxRetries: -1}, nil)
+	}
+	client, err := connect(endpoint.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := client.ListTools(ctx, nil)
+	if err != nil || len(listed.Tools) != 1 || listed.Tools[0].Name != "notes_read" {
+		t.Fatalf("tools: %+v %v", listed, err)
+	}
+	result, err := client.CallTool(ctx, &mcp.CallToolParams{Name: "notes_read", Arguments: map[string]any{}})
+	if err != nil || result.IsError || result.Content[0].(*mcp.TextContent).Text != `"notes"` {
+		t.Fatalf("call: %+v %v", result, err)
+	}
+	_ = client.Close()
+	if _, err := connect("other-token"); err == nil {
+		t.Fatal("another token reached the server")
+	}
+	if err := hosted.Lease.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := hosted.Lease.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if conn, err := net.Dial("tcp", parsed.Host); err == nil {
+		conn.Close()
+		t.Fatal("server still listens after release")
 	}
 }
+
+func TestCoreTransportAdvertisesVia(t *testing.T) {
+	ctx := context.Background()
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	endpoint, lease, err := (CoreTransport{Via: "host.docker.internal"}).Start(ctx, server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release(ctx)
+	parsed, err := url.Parse(endpoint.URL)
+	if err != nil || parsed.Scheme != "http" || parsed.Hostname() != "host.docker.internal" || parsed.Port() == "" || parsed.Path != mcphost.EndpointPath {
+		t.Fatalf("endpoint: %+v", endpoint)
+	}
+	// The server listens on the loopback port the URL names.
+	conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", parsed.Port()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+}
+
+func TestCoreTransportRejectsAnEndpointWithoutToken(t *testing.T) {
+	closed := false
+	start := func(ctx context.Context, srv *mcp.Server) (mcphost.Endpoint, mcphost.Lease, error) {
+		endpoint, lease, err := mcphost.StartMemory(ctx, srv)
+		endpoint.Token = ""
+		return endpoint, closeTracker{lease, &closed}, err
+	}
+	_, lease, err := (CoreTransport{Serve: start}).Start(context.Background(), mcp.NewServer(&mcp.Implementation{Name: "test", Version: "1"}, nil))
+	if err == nil || lease != nil || !closed {
+		t.Fatalf("lease=%v err=%v closed=%v", lease, err, closed)
+	}
+}
+
+type closeTracker struct {
+	mcphost.Lease
+	closed *bool
+}
+
+func (c closeTracker) Close() error { *c.closed = true; return c.Lease.Close() }
