@@ -66,6 +66,9 @@ func newLibrarianFixture(t *testing.T) *librarianFixture {
 	must(t, os.WriteFile(filepath.Join(clone, "secret.env"), []byte("TOKEN="+demoSecret+"\n"), 0600))
 	must(t, os.MkdirAll(filepath.Join(clone, "scratch"), 0700))
 	must(t, os.WriteFile(filepath.Join(clone, "scratch", "notes.txt"), []byte("untracked\n"), 0600))
+	must(t, os.MkdirAll(filepath.Join(clone, "node_modules", "left-pad"), 0700))
+	must(t, os.WriteFile(filepath.Join(clone, "node_modules", "left-pad", "index.js"), []byte("ignored\n"), 0600))
+	must(t, os.WriteFile(filepath.Join(clone, ".git", "info", "exclude"), []byte("node_modules/\n"), 0600))
 	demoGit(t, home, "-C", clone, "add", "internal", "CODEOWNERS", "AGENTS.md")
 	demoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
 	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
@@ -117,7 +120,7 @@ func (f *librarianFixture) trackedSeed(t *testing.T) string {
 	has := func(m kb.Map, id string) bool {
 		return slices.ContainsFunc(m.Entities, func(e kb.Entity) bool { return e.ID == id })
 	}
-	if !has(full, "scratch") || has(seed, "scratch") {
+	if !has(full, "scratch") || !has(full, "node-modules") || has(seed, "scratch") || has(seed, "node-modules") {
 		t.Fatalf("fixture seeds: clone %v, tracked %v", full, seed)
 	}
 	data, err := kb.Encode(seed)
@@ -284,14 +287,12 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 	ctx := context.Background()
 	seed, err := kb.Seed(f.clone)
 	must(t, err)
-	seeded, err := kb.Encode(seed)
-	must(t, err)
 	tracked := f.trackedSeed(t)
 	refined := entitiesWith(t, seed, "history")
 	cloneBefore := snapshot(t, f.clone)
 	f.script("extract-1-1", map[string]string{"output/kb/trace.md": "# trace\n\nRun go test ./internal/trace.\n", "output/kb/service.md": "# service\n\nOne process.\n", "output/kb/entities.json": refined},
 		func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
-			err := checkLibrarianBoundary(ctx, req, policy, tools, f.clone, string(seeded), tracked)
+			err := checkLibrarianBoundary(ctx, req, policy, tools, f.clone, tracked, tracked)
 			if req.ResumeID != "" || strings.Contains(req.Prompt, "Knowledge base written") {
 				err = errors.Join(err, fmt.Errorf("first turn carries history: %q", req.ResumeID))
 			}
@@ -479,6 +480,40 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 		t.Fatalf("unknown project status %d", code)
 	}
 	must(t, s.Close())
+}
+
+func TestProjectAddSeedsTrackedFiles(t *testing.T) {
+	f := newLibrarianFixture(t)
+	ctx := context.Background()
+	tracked := f.trackedSeed(t)
+	s, c := start(t, f.opts)
+	added, err := c.AddProject(ctx, request(f.clone))
+	must(t, err)
+	must(t, s.Close())
+	c.Close()
+	repo, _ := f.reopen(t, added)
+	defer repo.Close()
+	docs, err := trace.Read[trace.Document](repo, "")
+	must(t, err)
+	var seeded []trace.Document
+	for _, d := range docs {
+		if d.ID == "kb-entities" && d.Revision == 1 {
+			seeded = append(seeded, d)
+		}
+	}
+	if len(seeded) != 1 || seeded[0].Content != tracked {
+		t.Fatalf("revision 1 kb-entities = %+v, want %s", seeded, tracked)
+	}
+	for _, id := range []string{`"scratch"`, `"node_modules"`} {
+		if strings.Contains(seeded[0].Content, id) {
+			t.Fatalf("seed contains %s: %s", id, seeded[0].Content)
+		}
+	}
+	for _, id := range []string{`"internal"`, `"trace"`} {
+		if !strings.Contains(seeded[0].Content, id) {
+			t.Fatalf("seed lacks %s: %s", id, seeded[0].Content)
+		}
+	}
 }
 
 func TestExtractionRefusesInvalidOutput(t *testing.T) {

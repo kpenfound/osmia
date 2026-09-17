@@ -290,7 +290,7 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 				return p, err
 			}
 		}
-		seed, err := kb.Seed(p.Clone)
+		seed, err := seedTracked(ctx, p.Clone)
 		if err != nil {
 			return p, err
 		}

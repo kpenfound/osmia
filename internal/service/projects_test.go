@@ -124,6 +124,8 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	root := opts.Config.Root
 	must(t, os.MkdirAll(filepath.Join(clone, "internal", "trace"), 0700))
 	must(t, os.WriteFile(filepath.Join(clone, "CODEOWNERS"), []byte("/internal/ @core\n"), 0600))
+	must(t, os.WriteFile(filepath.Join(clone, "internal", "trace", "git.go"), []byte("package trace\n"), 0600))
+	demoGit(t, filepath.Dir(clone), "-C", clone, "add", "internal", "CODEOWNERS")
 	cloneBefore := snapshot(t, clone)
 	added, err := c.AddProject(ctx, request(clone))
 	must(t, err)
