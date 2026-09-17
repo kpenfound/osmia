@@ -45,6 +45,38 @@ func awaitExtraction(t *testing.T, c *Client) ExtractionState {
 	}
 }
 
+// awaitExtractionAcknowledged polls the librarian workstream until the latest
+// extraction operation is acknowledged. The reconcile controller records the
+// acknowledgement as a commit after the one carrying the result, so a terminal
+// extraction state is not yet the operation's last commit.
+func awaitExtractionAcknowledged(t *testing.T, s *Service) {
+	t.Helper()
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		if s.active != nil {
+			ops, err := s.active.repository.Operations(librarianWorkstream(s.active.repository.Project()))
+			must(t, err)
+			extractions, acknowledged := 0, 0
+			for _, o := range ops {
+				if o.Operation.Action != ExtractAction {
+					continue
+				}
+				extractions++
+				if o.Acknowledged {
+					acknowledged++
+				}
+			}
+			if extractions > 0 && extractions == acknowledged {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("extraction was not acknowledged")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // librarianFixture is a project root, a clone with tracked and untracked files
 // and the fake engine the librarian's turns run in.
 type librarianFixture struct {
