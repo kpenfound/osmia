@@ -753,6 +753,15 @@ func TestExtractionStateWhileRetrying(t *testing.T) {
 		return nil
 	}))
 	expect("failed", "failed", "invalid librarian output: kb/ is missing")
+	// Acknowledging the result later does not move the extraction's time.
+	acked := later.Add(90 * time.Second)
+	must(t, repo.WithOperation(ctx, stream, event, serviceActor, func() time.Time { return acked }, func(a *trace.OperationAttempt, _ trace.OperationRecord) error {
+		return a.Record(ctx, a.Action("acknowledge", acked))
+	}))
+	expect("acknowledged", "failed", "invalid librarian output: kb/ is missing")
+	if x, err := extractionState(repo); err != nil || !x.At.Equal(later) {
+		t.Fatalf("acknowledged: at %v %v, want the result time %v", x.At, err, later)
+	}
 }
 
 func TestSchedulerLeavesLibrarianTurnsToTheExtractor(t *testing.T) {
