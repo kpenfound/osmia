@@ -51,12 +51,15 @@ type Options struct {
 	// a recorded reason and the project stays usable.
 	Librarian *Librarian
 	// Architect supplies the execution boundary of the architect's drafting
-	// turns. Without it no draft is requested, a draft already requested
-	// stays pending, and handed workstreams wait.
+	// turns and of its replies to shed rounds. Without it no draft and no
+	// reply is requested, one already requested stays pending, and handed
+	// workstreams and heard rounds wait.
 	Architect *Architect
 	// Committee supplies the execution boundary of the committee's shed
-	// turns. Without it no workstream enters the shed, a round already
-	// requested stays pending, and sketched workstreams wait.
+	// turns. Without it no workstream enters the shed and no round is
+	// requested, a round already requested stays pending, and sketched
+	// workstreams and replied rounds wait. The architect's replies and the
+	// debate's conclusion need no committee runner.
 	Committee *Committee
 	// Issues fetches issue URLs handed in. It defaults to the GitHub REST API
 	// with the service's GITHUB_TOKEN environment variable, which no session
@@ -415,9 +418,10 @@ func (s *Service) stop(active *activeProject) error {
 // openReconciliation leaves trace creation to project registration; an existing
 // trace must open cleanly before the service can report readiness. The runner
 // boundary is served by the bound thread reconciler for turns and by the
-// service's own reconcilers for knowledge-base extraction, architect drafts
-// and committee rounds; the architect controller and then the committee
-// controller run at the start of every pass. With
+// service's own reconcilers for knowledge-base extraction, architect drafts,
+// committee rounds and the architect's replies to them; the architect
+// controller and then the shed controller run at the start of every pass,
+// and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
 // chief of staff, recorded answers are queued on their askers' threads, and
 // the scheduler runs, whose gate holds turns that a runtime pause covers;
@@ -486,12 +490,28 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	}
 	adapters[coreadapter.RunnerBoundary] = runner
 	options.Adapters = adapters
+	if options.Priority == nil {
+		options.Priority = stagePriority
+	}
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
 		repository.Close()
 		return nil, nil, err
 	}
 	return repository, controller, nil
+}
+
+// stagePriority orders the operations of a pass so that the factory finishes
+// work before it widens it: the turns the scheduler dispatched and everything
+// else first, then the shed's rounds and replies, then architect drafts.
+func stagePriority(op coreadapter.Operation) int {
+	switch op.Action {
+	case RoundAction, ReplyAction:
+		return 1
+	case DraftAction:
+		return 2
+	}
+	return 0
 }
 
 // unlock releases the root ownership lock before closing its file. A child

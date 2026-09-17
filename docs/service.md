@@ -298,14 +298,37 @@ drafts it. A draft already requested stays pending: applying it returns
 run a turn, the operation is retried, and no draft is spent. A captured turn is
 still completed and its draft recorded, since that runs no architect.
 
-## The shed: committee rounds
+## The shed: debate
 
-The committee controller runs in every reconciliation pass after the
-architect controller, before event delivery and the scheduler. It moves a
-`sketched` workstream into the shed and asks its committee for round 1; the
-committee's contributions to a round are validated as they are made and
-recorded once the round ends. The package `internal/shed` holds the record,
-the tools and the open-dissent computation.
+The shed controller runs in every reconciliation pass after the architect
+controller, before event delivery and the scheduler. It moves a `sketched`
+workstream into the shed and runs its debate to a conclusion: a round of the
+committee, the architect's one reply to it, and the next round against what
+the architect redrafted, until no dissent stands or `shed.max_rounds` rounds
+have run. The committee's contributions to a round are validated as they are
+made and recorded once the round ends. The package `internal/shed` holds the
+records, the tools and the dissent computation.
+
+The controller is level-triggered. Every pass derives the next step of each
+workstream in the shed from the `shed` state and the recorded rounds, and
+keeps nothing in memory between passes, so a restart resumes the debate where
+the trace says it is:
+
+| `shed` state | Open dissent | Next step |
+| --- | --- | --- |
+| none | | Round 1, against the latest revisions. |
+| `heard-<n>` | none | [Conclude](#concluding-the-debate) by consensus. |
+| `heard-<n>` | some | Ask the architect for [its reply](#the-architects-reply) to round `n`. |
+| `replied-<n>` | some, `n` below `shed.max_rounds` | Round `n+1`, against the latest revisions. |
+| `replied-<n>` | some, `n` at `shed.max_rounds` or above | Conclude at the cap. |
+| `round-<n>`, `reply-<n>`, `concluded-<n>`, `failed-<n>` | | Nothing. |
+
+Only a workstream in feature state `in-shed` takes a step, so an abandoned
+workstream's debate stays where it stopped. A step that runs turns waits for
+the runner of those turns: entering the shed and every round for
+`Options.Committee`, the reply for `Options.Architect`. Concluding runs no
+turn and waits for neither, so a service with an architect runner and no
+committee runner still answers a heard round and still concludes a debate.
 
 ### Entering the shed
 
@@ -322,14 +345,17 @@ The committee is a fixed set of durable threads of the workstream:
 Every round runs the threads that exist, and the transition's reason counts
 them; a changed configuration does not resize a committee.
 
-The workflow subject `shed` tracks the rounds, with transitions by
+The workflow subject `shed` tracks the debate, with transitions by
 `service`/`shed` in `events.jsonl`:
 
 | `shed` state | Meaning |
 | --- | --- |
-| `round-<n>` | Round `n` is requested: transition `shed-round-<n>` published a `shed-round` operation whose input pins the round to one revision of `spec.md` and one of `plan.json`. Round 1 pins the latest revisions when it is requested. |
+| `round-<n>` | Round `n` is requested: transition `shed-round-<n>` published a `shed-round` operation whose input pins the round to one revision of `spec.md` and one of `plan.json`. Every round pins the latest revisions when it is requested. |
 | `heard-<n>` | Every member's turn of round `n` has ended and its record is committed. Transition `shed-round-<n>-heard` and the operation's result carry the same summary: members heard, objections, concessions, failed turns and how many objections stand. |
-| `failed-<n>` | The round ended without a record because the workstream was abandoned. Transition `shed-round-<n>-failed` holds the reason. |
+| `reply-<n>` | The architect's reply to round `n` is requested: transition `shed-reply-<n>`, caused by `shed-round-<n>-heard`, published a `shed-reply` operation pinned to the revision the round debated. Its reason counts the objections that stand. |
+| `replied-<n>` | The architect's reply to round `n` is recorded. Transition `shed-reply-<n>-replied` and the operation's result carry the same summary: how many objections it answered, and whether it redrafted, left the revision as it is, gave up an invalid redraft or failed. |
+| `concluded-<n>` | Debate ended after round `n`. Transition `shed-concluded-<n>` holds why. |
+| `failed-<n>` | Round `n` ended without a record, or its reply without one, because the workstream was abandoned. Transition `shed-round-<n>-failed` or `shed-reply-<n>-failed` holds the reason. |
 
 ### A member's turn
 
@@ -350,7 +376,7 @@ Each turn gets a read-only private copy of a view staged under
 | `charter.md` | The charter as recorded, after any owner edit is recorded. |
 | `context.md` | The rendered [context bundle](context.md) for the whole project, with the workstream's decisions. |
 | `repo/` | The tracked files of the owner's clone. |
-| `shed/round-<k>/` | The records of the earlier rounds. |
+| `shed/round-<k>/` | The records of the earlier rounds, and the architect's reply to each as `reply.json`. |
 
 A member gets `file_read`, `object` and `concede` and nothing else: no notes,
 no write, execute, network or VCS capability. `object` and `concede` are
@@ -409,6 +435,21 @@ objection was made on settles nothing. A failed turn accepts nothing. A new
 objection against the later revision accepts nothing either, so the member's
 earlier objections stand until it concedes them.
 
+`service.Dissent` returns a workstream's dissent record from the trace alone:
+every objection that stands (`shed.Entry`), with its ID, kind, member, round,
+part, argument, citations, the revision it was made against, and whether it
+is `blocking`. What an objection's kind means for the debate:
+
+| `kind` | Blocking | Outcome |
+| --- | --- | --- |
+| `charter` | yes | A veto on the part it names. It stands until its member concedes it after a redraft. |
+| `size` | yes | The draft goes back to the architect for a split. It stands until conceded. |
+| `proof` | yes | The draft goes back to the architect for a proof. It stands until conceded. |
+| `fit` | no | Advice to the owner, carried in the dissent record. It never blocks. |
+
+Consensus is a dissent record with no entry, advice included. It is never a
+vote, and no member reports a confidence.
+
 Recovery keys on the trace: a restart during the round finds the turns that
 ended in their threads and runs only the members that had not finished, each
 up to three attempts; one between the record and the transition finds the
@@ -423,11 +464,111 @@ workstream was abandoned still ends `heard-<n>`, so the shed state never
 contradicts the record.
 
 `Options.Committee` supplies the execution engine and MCP host factory the
-committee's turns run in. Without it no workstream enters the shed, so a
-sketched workstream stays `sketched` until a service with a runner starts. A
-round already requested stays pending: applying it returns `this service has
+committee's turns run in. Without it no workstream enters the shed and no
+round is requested, so a sketched workstream stays `sketched`, and a debate
+whose next step is a round stays `replied-<n>`, until a service with a runner
+starts. A round already requested stays pending: applying it returns `this service has
 no agent runner for the committee` wherever it would start or run a turn, the
 operation is retried, and no member's attempt is spent.
+
+### The architect's reply
+
+A heard round with open dissent gets one reply from the architect: one
+`shed-reply` operation, run by the service's own reconciler on the
+workstream's `agent_architect` thread. A round that ends with no dissent gets
+none. Turn `reply-<n>-<k>` carries the operation ID as cause and the
+architect's effective profile. Every committee turn of the round has ended by
+then, so the committee holds no slot while the architect answers, nor between
+rounds.
+
+The turn gets a read-only private copy of a view staged under
+`<root>/architect/<project-id>/<workstream-id>/<turn>/workspace`:
+
+| Path in the view | Content |
+| --- | --- |
+| `spec.md`, `plan.json` | The latest recorded revisions. |
+| `handed/<name>`, `charter.md`, `context.md` | As for [drafting](#the-turn). |
+| `shed/round-<k>/` | Every member's record of every round so far, and the architect's earlier replies. |
+| `redraft/spec.md`, `redraft/plan.json` | After an invalid redraft, the files of it the architect delivered. |
+
+The architect gets `file_read`, `reply` and `draft_write` and nothing else.
+`reply` is a memory tool only the `architect` role can hold. It takes
+`objection`, the ID of an objection that stood once the round was heard, and
+`answer`; answering an objection again replaces the earlier answer, and an
+answer that is refused is an ordinary result, `{"recorded":false,"reason":...}`.
+The prompt lists every objection that stands with its ID, kind, whether it
+blocks, member, round, part, citations and argument, and says what each kind
+asks of the architect.
+
+The architect redrafts by delivering a changed `spec.md`, `plan.json` or both
+with `draft_write`; a delivered file equal to the latest revision is no
+change. The redraft is validated as a [draft](#recording-and-validation) is,
+together with the latest revision of the file that was not delivered, before
+anything is recorded:
+
+- A valid redraft is recorded as the next revision of each file it changed
+  (actor `agent`/`agent_architect`, cause the operation ID), in one commit with
+  the reply; a file it left alone keeps its revision. The reply's `redraft`
+  names both revisions, and the next round is pinned to them.
+- An invalid redraft is never recorded, so it is never the revision the
+  committee debates. It goes back to the architect: the next turn of the same
+  operation opens with `Your redraft was not accepted, and the committee will
+  not read it:` and every problem, and finds what it delivered under
+  `redraft/`. Only what that turn delivers counts, and delivering nothing
+  leaves the revision as it is. After three redrafts the last one is given up:
+  the reply records its `problems` and the revision stays.
+
+The reply is one document, `shed/round-<n>/reply.json` (record ID
+`shed-round-<n>-reply`, actor `agent`/`agent_architect`, cause the operation
+ID). It holds the round, the `revision` the round debated, the last turn, the
+`answers`, the `redraft` revisions when a redraft was recorded, the `problems`
+of a redraft that was given up, and the `failure` of a turn that did not end
+normally. A failed turn, and one interrupted by three service stops, is the
+round's reply all the same: it is recorded with the failure, its redraft is
+dropped, and the debate goes on. Answers are merged over the operation's
+turns; an interrupted turn contributes none.
+
+Recovery keys on the trace: a restart during the turn finds it interrupted and
+starts the next one; one between the record and the transition finds
+`reply.json` and records nothing again; a recorded outcome completes the
+operation without running the architect. [Abandoning](#abandoning) the
+workstream cancels the running turn, and the reply of an abandoned workstream
+records no file, whether its turn was cancelled, never started or ended while
+the owner abandoned the workstream, and ends `failed-<n>` with the reason `the
+reply to round <n> failed: the workstream was abandoned, so the architect's
+reply is not recorded`. A reply whose file was committed before the workstream
+was abandoned still ends `replied-<n>`.
+
+Without `Options.Architect` the controller asks for no reply, so the shed
+stays `heard-<n>` until a service with a runner starts. A reply already
+requested stays pending: applying it returns `this service has no agent runner
+for the architect` wherever it would start or run a turn, and no attempt is
+spent.
+
+### Concluding the debate
+
+Debate ends early by consensus, as soon as a heard round leaves no dissent
+open: transition `shed-concluded-<n>`, caused by `shed-round-<n>-heard`, with
+the reason `debate concluded by consensus after round <n>: no objection
+stands`. Consensus is among the members whose turns ended normally: when some
+turns of the round failed the reason adds `; the turns of <f> of <m> members
+failed`, and when all of them failed nothing was reviewed and the reason is
+`debate concluded after round <n> without a review: the turns of all <m>
+members failed, so no objection stands and nobody agreed`. Otherwise it ends
+at the cap, once the reply to round
+`shed.max_rounds` is recorded: caused by `shed-reply-<n>-replied`, with the
+reason `debate stopped after round <n>, at the shed.max_rounds cap of <max>,
+with <k> objections standing, <b> of them blocking; the cap approves nothing`.
+The cap is the loaded configuration's when the step is taken.
+
+Either way the workstream stays `in-shed`, the dissent that stands keeps
+standing, and no later pass starts a round. The conclusion commits with a
+notice for the chief of staff (event key `concluded`), delivered through the
+[outbox](#event-delivery): `Debate concluded: <reason>. The workstream stays
+in-shed until the owner rules.` When dissent stands, that is followed by
+`Open dissent:` and one line per entry of the dissent record with its ID,
+kind, `blocking` or `advisory`, member, round, part, revision and argument;
+a conclusion by consensus has no such line.
 
 ## Abandoning
 
@@ -585,8 +726,8 @@ with `Options.Threads` runs them.
 service.CoreEnforcement())`, which sets `Options.Librarian`,
 `Options.Architect`, `Options.Committee` and `Options.Threads`, so a served
 project runs real role turns: extraction after `project add`, drafting after a
-hand-in, committee rounds once a draft is sketched, and every queued
-chief-of-staff turn. All four use one `Enforcement`:
+hand-in, the committee's rounds and the architect's replies once a draft is
+sketched, and every queued chief-of-staff turn. All four use one `Enforcement`:
 
 | Part | Production value |
 |---|---|
@@ -611,8 +752,9 @@ service keeps running and the other roles' turns still run.
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
 opened and the configuration it loaded, each time a project's trace opens: at startup and when a project is
 added. It replaces any runner adapter in `Options.Reconciliation` for every
-runner operation except the librarian's `kb-extract` action and the
-architect's `architect-draft` action, which the service reconciles itself. The [thread dispatcher](trace.md#turn-dispatch) is the
+runner operation except the librarian's `kb-extract`, the architect's
+`architect-draft` and the shed's `shed-round` and `shed-reply` actions, which
+the service reconciles itself. The [thread dispatcher](trace.md#turn-dispatch) is the
 intended binding; it receives the service-owned repository handle, which callers
 must not close. The [M1 demonstration](m1-demonstration.md) uses this path with
 fake engines.
@@ -628,7 +770,14 @@ own and delivers outbox events to each chief of staff (see
 replaces any `Schedule` hook in `Options.Reconciliation`; without
 `Options.Threads` that hook runs. In both cases the
 [architect controller](#architect-drafting) and then the
-[committee controller](#the-shed-committee-rounds) run first.
+[shed controller](#the-shed-debate) run first.
+
+A pass reconciles its pending operations in stage order, across workstreams,
+so the factory finishes work before it widens it: the turns the scheduler
+dispatched and every other operation first, then the shed's `shed-round` and
+`shed-reply` operations, then `architect-draft` operations. Within a stage
+they keep workstream order.
+
 At the start of every reconciliation pass, `internal/scheduler` reads each
 workstream's threads and turn operations. For every thread with no turn in
 flight, it publishes a `thread-turn` operation for the oldest unfinished turn,
@@ -659,8 +808,8 @@ the dispatch gate after capacity.
 
 The service's gate declines every turn of the librarian's workstream and of
 every `architect` and `committee` thread: the service's own `kb-extract`,
-`architect-draft` and `shed-round` reconcilers run those, staged in their own
-views, and such a turn the scheduler found queued gets no turn operation.
+`architect-draft`, `shed-round` and `shed-reply` reconcilers run those, staged
+in their own views, and such a turn the scheduler found queued gets no turn operation.
 The gate holds a turn that a pause in `runtime.Effective` covers:
 a `factory` pause, a `project` pause on the active project, or a `workstream`
 pause on the turn's workstream. Chief-of-staff turns are never held, so the
@@ -679,7 +828,8 @@ two committees at the same time. Every other role runs one turn at a time per
 workstream. Each workstream runs at most the project's
 `capacity.per_workstream` of the turns the scheduler dispatches at once; a
 round's turns in flight count toward that number, so they hold the
-workstream's slots against other roles while the round runs. Chief-of-staff turns take no slot and
+workstream's slots against other roles while the round runs, and hold none
+between rounds. Chief-of-staff turns take no slot and
 run even when every slot is taken. A turn holds its slots while it is in
 flight, so they are free again once it completes, whether it succeeded, failed,
 is waiting or was cancelled. A claim a restart interrupted holds no slot,
@@ -702,7 +852,7 @@ so a failed transaction leaves no event. `trace.Notice` builds such an event,
 and `Repository.SetFeatureState` records a feature state change with one.
 `internal/events` delivers them.
 
-At the start of every reconciliation pass, after the architect and committee
+At the start of every reconciliation pass, after the architect and shed
 controllers and before the scheduler, the deliverer
 reads each workstream's ready notification events (events without an
 operation). It waits until the oldest has been ready for `events.window` (see

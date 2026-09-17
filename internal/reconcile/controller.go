@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -22,6 +24,10 @@ type Options struct {
 	// the intent it publishes is reconciled in the same pass. Its failure stops
 	// the loop.
 	Schedule func(context.Context) error
+	// Priority orders the pending operations of a pass across workstreams: every
+	// operation of a lower value is reconciled before any of a higher one.
+	// Without it a pass goes workstream by workstream.
+	Priority func(coreadapter.Operation) int
 }
 
 type Controller struct {
@@ -94,24 +100,36 @@ func (c *Controller) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	type pending struct {
+		stream config.WorkstreamID
+		record trace.OperationRecord
+	}
+	var due []pending
 	for _, stream := range streams {
 		records, err := c.repository.Operations(stream)
 		if err != nil {
 			return err
 		}
 		for _, record := range records {
-			if record.Acknowledged || c.options.Now().Before(record.RetryAt) {
-				continue
+			if !record.Acknowledged && !c.options.Now().Before(record.RetryAt) {
+				due = append(due, pending{stream, record})
 			}
-			if err := c.step(ctx, "before-claim"); err != nil {
-				return err
-			}
-			err := c.repository.WithOperation(ctx, stream, record.EventID, trace.Actor{Kind: "service", ID: c.options.Worker}, c.options.Now, func(attempt *trace.OperationAttempt, current trace.OperationRecord) error {
-				return c.reconcile(ctx, attempt, current)
-			})
-			if err != nil {
-				return err
-			}
+		}
+	}
+	if c.options.Priority != nil {
+		slices.SortStableFunc(due, func(a, b pending) int {
+			return c.options.Priority(a.record.Operation) - c.options.Priority(b.record.Operation)
+		})
+	}
+	for _, p := range due {
+		if err := c.step(ctx, "before-claim"); err != nil {
+			return err
+		}
+		err := c.repository.WithOperation(ctx, p.stream, p.record.EventID, trace.Actor{Kind: "service", ID: c.options.Worker}, c.options.Now, func(attempt *trace.OperationAttempt, current trace.OperationRecord) error {
+			return c.reconcile(ctx, attempt, current)
+		})
+		if err != nil {
+			return err
 		}
 	}
 	return nil

@@ -34,12 +34,21 @@ type shedFixture struct {
 	members int
 }
 
+// newShedFixture debates for one round, so a test of a round finds the shed
+// at rest once the round's debate concluded.
 func newShedFixture(t *testing.T, members int) *shedFixture {
+	t.Helper()
+	return newDebateFixture(t, members, 1)
+}
+
+// newDebateFixture debates for at most the given number of rounds. The
+// architect's replies are silent unless a test scripts them.
+func newDebateFixture(t *testing.T, members, rounds int) *shedFixture {
 	t.Helper()
 	opts, clone, engine, sessions, clock := newArchitectOptions(t)
 	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 	must(t, err)
-	_, err = fmt.Fprintf(configFile, "[roles.committee]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[capacity]\ncommittee = %d\n", members)
+	_, err = fmt.Fprintf(configFile, "[roles.committee]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[capacity]\ncommittee = %d\n[shed]\nmax_rounds = %d\n", members, rounds)
 	must(t, errors.Join(err, configFile.Close()))
 	opts.Committee = &Committee{Engine: engine, Hosts: opts.Architect.Hosts}
 	f := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
@@ -49,6 +58,9 @@ func newShedFixture(t *testing.T, members int) *shedFixture {
 	f.project, f.trace = added.Project.ID, added.Project.Trace
 	must(t, os.WriteFile(added.Project.Charter, []byte(shedCharter), 0600))
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
+	for round := 1; round <= rounds; round++ {
+		f.script(replyTurnID(round, 1), nil, nil)
+	}
 	return &shedFixture{architectFixture: f, members: members}
 }
 
@@ -67,23 +79,34 @@ func (f *shedFixture) member(round, i, attempt int, run func(ctx context.Context
 	return turn
 }
 
-func (f *shedFixture) awaitShed(t *testing.T, stream config.WorkstreamID, want string) {
+// awaitShed waits until the workstream's shed has reached the wanted state,
+// whatever it moved to since. It fails at once when the shed reaches a state
+// in never, after which the wanted one cannot come: by default, for a heard
+// round, its failure, and for a conclusion, the next round.
+func (f *shedFixture) awaitShed(t *testing.T, stream config.WorkstreamID, want string, never ...string) {
 	t.Helper()
 	deadline := time.Now().Add(demoTimeout)
+	if kind, n, ok := shedState(want); ok && kind == "heard" && len(never) == 0 {
+		never = []string{fmt.Sprintf("failed-%d", n)}
+	} else if ok && kind == "concluded" && len(never) == 0 {
+		never = []string{fmt.Sprintf("round-%d", n+1)}
+	}
 	for {
-		state, err := f.repository().Workflow(stream, shedSubject)
-		must(t, err)
-		if state.Value == want {
+		var reached []string
+		for _, tr := range f.transitions(t, stream) {
+			if tr.Subject == shedSubject {
+				reached = append(reached, tr.To)
+			}
+		}
+		if slices.Contains(reached, want) {
 			return
 		}
-		// A round ends once: another ending never becomes the wanted one.
-		round := func(value string) string { return value[strings.LastIndexByte(value, '-')+1:] }
-		if (strings.HasPrefix(state.Value, "heard-") || strings.HasPrefix(state.Value, "failed-")) && round(state.Value) == round(want) {
-			t.Fatalf("workstream %s shed ended %q, want %q", stream, state.Value, want)
+		if slices.ContainsFunc(never, func(state string) bool { return slices.Contains(reached, state) }) {
+			t.Fatalf("workstream %s shed went %v, want %q", stream, reached, want)
 		}
 		if time.Now().After(deadline) {
 			feature, _ := f.repository().Workflow(stream, trace.FeatureSubject)
-			t.Fatalf("workstream %s stayed %q with shed %q, want %q", stream, feature.Value, state.Value, want)
+			t.Fatalf("workstream %s stayed %q with shed %v, want %q", stream, feature.Value, reached, want)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -287,7 +310,7 @@ func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T
 		return read(ctx, 3, req, tools)
 	}))
 	stream := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, stream, "heard-1")
+	f.awaitShed(t, stream, "concluded-1")
 	if err := errors.Join(append(problems, architectProblems...)...); err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +412,7 @@ func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T
 			shedMoves = append(shedMoves, tr)
 		}
 	}
-	if len(shedMoves) != 2 || shedMoves[0].ID != "shed-round-1" || shedMoves[0].To != "round-1" || shedMoves[0].Cause != InShedState || shedMoves[0].Actor != shedActor ||
+	if len(shedMoves) != 5 || shedMoves[0].ID != "shed-round-1" || shedMoves[0].To != "round-1" || shedMoves[0].Cause != InShedState || shedMoves[0].Actor != shedActor ||
 		shedMoves[1].ID != "shed-round-1-heard" || shedMoves[1].From != "round-1" || shedMoves[1].To != "heard-1" || shedMoves[1].Cause != ops[0].Operation.ID || shedMoves[1].Reason != ops[0].Result.Evidence {
 		t.Fatalf("shed transitions: %+v", shedMoves)
 	}
@@ -606,7 +629,9 @@ func TestLaterRoundPinsItsRevisionAndCarriesStandingObjections(t *testing.T) {
 	})
 	f.member(1, 2, 1, func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error { return nil })
 	stream := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, stream, "heard-1")
+	// The debate is at rest, so the round this test asks for is the only
+	// writer of the shed.
+	f.awaitShed(t, stream, "concluded-1")
 	// Revision 2 of the spec drops criterion 2; revision 3 is the latest and
 	// is not what round 2 is pinned to.
 	revised := strings.Replace(validSpec, "2. Acknowledged chunks are never sent again.\n", "", 1)
@@ -646,7 +671,7 @@ func TestLaterRoundPinsItsRevisionAndCarriesStandingObjections(t *testing.T) {
 	d := &debate{s: f.s, repository: f.repository()}
 	state, err := f.repository().Workflow(stream, shedSubject)
 	must(t, err)
-	must(t, d.request(ctx, stream, state, roundInput{Round: 2, Spec: 2, Plan: 1}, "shed-round-1-heard"))
+	must(t, d.request(ctx, stream, state, roundInput{Round: 2, Spec: 2, Plan: 1}, "shed-concluded-1"))
 	f.awaitShed(t, stream, "heard-2")
 	if err := errors.Join(problems...); err != nil {
 		t.Fatal(err)
@@ -690,7 +715,7 @@ func TestAbandonFailsARunningRound(t *testing.T) {
 	}
 	_, err := f.c.Abandon(context.Background(), stream, "no longer needed")
 	must(t, err)
-	f.awaitShed(t, stream, "failed-1")
+	f.awaitShed(t, stream, "failed-1", "heard-1")
 	if records, err := shed.Records(f.repository(), stream); err != nil || len(records) != 0 {
 		t.Fatalf("records of an abandoned round: %+v %v", records, err)
 	}
@@ -867,7 +892,7 @@ func TestCapacityChangeLeavesAnExistingCommitteeAlone(t *testing.T) {
 		}
 	}
 	stream := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, stream, "heard-1")
+	f.awaitShed(t, stream, "concluded-1")
 	f.stop(t)
 	f.setCommittee(t, 3)
 	f.start(t)
@@ -879,7 +904,7 @@ func TestCapacityChangeLeavesAnExistingCommitteeAlone(t *testing.T) {
 	must(t, d.Pass(ctx))
 	state, err := f.repository().Workflow(stream, shedSubject)
 	must(t, err)
-	must(t, d.request(ctx, stream, state, roundInput{Round: 2, Spec: 1, Plan: 1}, "shed-round-1-heard"))
+	must(t, d.request(ctx, stream, state, roundInput{Round: 2, Spec: 1, Plan: 1}, "shed-concluded-1"))
 	f.awaitShed(t, stream, "heard-2")
 	if _, err := f.repository().Thread(stream, committeeAgent(3)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the committee grew: %v", err)
