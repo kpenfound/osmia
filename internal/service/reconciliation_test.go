@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/reconcile"
+	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -212,5 +214,73 @@ func TestServiceThreadsReplaceRunnerAdapter(t *testing.T) {
 	must(t, err)
 	if threads.inspections != 1 || len(records) != 1 || !records[0].Acknowledged || records[0].Result == nil || records[0].Result.Outcome != "from-threads" {
 		t.Fatalf("threads adapter did not handle the operation: %d %+v", threads.inspections, records)
+	}
+}
+
+// orderedAdapter records the actions it applied, in order.
+type orderedAdapter struct {
+	mu      sync.Mutex
+	applied []string
+}
+
+func (a *orderedAdapter) Inspect(context.Context, coreadapter.Operation) (coreadapter.Observation, error) {
+	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "not applied"}, nil
+}
+func (a *orderedAdapter) Apply(_ context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.applied = append(a.applied, op.Action)
+	return coreadapter.OperationResult{Outcome: "finished", Evidence: "applied"}, nil
+}
+
+// A pass finishes work before it widens it, whichever workstream the work is
+// in: everything else first, then the shed's rounds and replies, then drafts.
+func TestServiceReconcilesOperationsInStageOrder(t *testing.T) {
+	t.Parallel()
+	opts := fixture(t)
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	actor := trace.Actor{Kind: "service", ID: "test"}
+	repository, err := trace.Create(ctx, cfg.Root, cfg.Project, now, actor)
+	must(t, err)
+	streams := []config.WorkstreamID{stream, "w_fedcba9876543210fedcba9876543210"}
+	for i, id := range streams {
+		must(t, repository.CreateWorkstream(ctx, id, now, actor))
+		// Each workstream holds a draft, a reply, a round and a turn, so the
+		// order workstreams are read in cannot produce the stage order.
+		var events []trace.Event
+		for _, action := range []string{DraftAction, ReplyAction, RoundAction, thread.TurnAction} {
+			event := trace.Event{ID: fmt.Sprintf("%s-%d", action, i), Kind: "local-effect", Body: action}
+			event.Operation = &coreadapter.Operation{ID: trace.OperationID(project, id, event.ID), Boundary: coreadapter.ContainerBoundary, Action: action, Input: json.RawMessage(`{}`)}
+			events = append(events, event)
+		}
+		_, err = repository.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "start", Revision: 1, Project: project, Workstream: id, At: now, Actor: actor, Cause: "owner"}, Subject: "work", To: "pending", Reason: "owner requested"}, Events: events})
+		must(t, err)
+	}
+	must(t, repository.Close())
+	adapter := &orderedAdapter{}
+	ticks := make(chan time.Time)
+	opts.Reconciliation = reconcile.Options{Now: func() time.Time { return now }, Ticks: ticks, Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.ContainerBoundary: adapter}}
+	s, err := Start(ctx, opts)
+	must(t, err)
+	// The loop accepts its first tick only after finishing the startup pass.
+	select {
+	case ticks <- now:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the startup pass did not finish")
+	}
+	must(t, s.Close())
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.applied) != 8 {
+		t.Fatalf("applied %v", adapter.applied)
+	}
+	for i, action := range adapter.applied {
+		stage := map[string]int{thread.TurnAction: 0, RoundAction: 1, ReplyAction: 1, DraftAction: 2}[action]
+		if want := []int{0, 0, 1, 1, 1, 1, 2, 2}[i]; stage != want {
+			t.Fatalf("operation %d is %s: %v", i+1, action, adapter.applied)
+		}
 	}
 }

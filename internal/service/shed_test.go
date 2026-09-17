@@ -80,16 +80,14 @@ func (f *shedFixture) member(round, i, attempt int, run func(ctx context.Context
 }
 
 // awaitShed waits until the workstream's shed has reached the wanted state,
-// whatever it moved to since.
-func (f *shedFixture) awaitShed(t *testing.T, stream config.WorkstreamID, want string) {
+// whatever it moved to since. It fails at once when the shed reaches a state
+// in never, after which the wanted one cannot come: by default, for a heard
+// round, its failure.
+func (f *shedFixture) awaitShed(t *testing.T, stream config.WorkstreamID, want string, never ...string) {
 	t.Helper()
 	deadline := time.Now().Add(demoTimeout)
-	// A round ends once: another ending never becomes the wanted one.
-	other := ""
-	if kind, n, ok := shedState(want); ok && kind == "heard" {
-		other = fmt.Sprintf("failed-%d", n)
-	} else if ok && kind == "failed" {
-		other = fmt.Sprintf("heard-%d", n)
+	if kind, n, ok := shedState(want); ok && kind == "heard" && len(never) == 0 {
+		never = []string{fmt.Sprintf("failed-%d", n)}
 	}
 	for {
 		var reached []string
@@ -101,7 +99,7 @@ func (f *shedFixture) awaitShed(t *testing.T, stream config.WorkstreamID, want s
 		if slices.Contains(reached, want) {
 			return
 		}
-		if other != "" && slices.Contains(reached, other) {
+		if slices.ContainsFunc(never, func(state string) bool { return slices.Contains(reached, state) }) {
 			t.Fatalf("workstream %s shed went %v, want %q", stream, reached, want)
 		}
 		if time.Now().After(deadline) {
@@ -715,7 +713,7 @@ func TestAbandonFailsARunningRound(t *testing.T) {
 	}
 	_, err := f.c.Abandon(context.Background(), stream, "no longer needed")
 	must(t, err)
-	f.awaitShed(t, stream, "failed-1")
+	f.awaitShed(t, stream, "failed-1", "heard-1")
 	if records, err := shed.Records(f.repository(), stream); err != nil || len(records) != 0 {
 		t.Fatalf("records of an abandoned round: %+v %v", records, err)
 	}

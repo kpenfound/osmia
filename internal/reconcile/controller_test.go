@@ -426,3 +426,39 @@ func TestScheduleRunsBeforeOperationsAreRead(t *testing.T) {
 		t.Fatalf("applications %v", f.system.applications)
 	}
 }
+
+// Priority orders a pass across workstreams; equal priorities keep the order
+// the workstreams hold them in, and without it a pass goes workstream by
+// workstream.
+func TestPriorityOrdersAPassAcrossWorkstreams(t *testing.T) {
+	ctx := context.Background()
+	f := setup(t, coreadapter.RepositoryBoundary)
+	other := config.WorkstreamID("w_fedcba9876543210fedcba9876543210")
+	must(t, f.repository.CreateWorkstream(ctx, other, epoch, trace.Actor{Kind: "owner", ID: "local"}))
+	action := map[string]string{f.event.Operation.ID: "prepare"}
+	for _, stream := range []config.WorkstreamID{streamID, other} {
+		var events []trace.Event
+		for _, name := range []string{"late", "early"} {
+			event := trace.Event{ID: trace.EventID("ordered", name), Kind: "local-effect", Body: name}
+			event.Operation = &coreadapter.Operation{ID: trace.OperationID(projectID, stream, event.ID), Boundary: coreadapter.RepositoryBoundary, Action: name, Input: json.RawMessage(`{}`)}
+			events, action[event.Operation.ID] = append(events, event), name
+		}
+		tx := trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "ordered", Revision: 1, Project: projectID, Workstream: stream, At: epoch, Actor: trace.Actor{Kind: "service", ID: "scheduler"}, Cause: "owner-request", Depth: 2}, Subject: "ordered", To: "pending", Reason: "Ordered work"}, Events: events}
+		_, err := f.repository.Transact(ctx, tx)
+		must(t, err)
+	}
+	c := f.controller(t)
+	c.options.Priority = func(op coreadapter.Operation) int {
+		return map[string]int{"early": 0, "prepare": 1, "late": 2}[op.Action]
+	}
+	must(t, c.Pass(ctx))
+	f.system.mu.Lock()
+	defer f.system.mu.Unlock()
+	var got []string
+	for _, id := range f.system.applications {
+		got = append(got, action[id])
+	}
+	if want := []string{"early", "early", "prepare", "late", "late"}; !slices.Equal(got, want) {
+		t.Fatalf("applied %v, want %v", got, want)
+	}
+}

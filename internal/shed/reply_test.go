@@ -44,7 +44,7 @@ func TestDissentRecordMarksWhatBlocks(t *testing.T) {
 func TestReplyRoundTripsAndRefusesInvalidContent(t *testing.T) {
 	r := shed.Reply{Version: shed.Version, Round: 2, Revision: one, Turn: "reply-2-1", Answers: []shed.Answer{{Objection: shed.ObjectionID(1, alice, 1), Answer: "Split as charter#<1> asks."}}, Redraft: &two}
 	data, err := shed.EncodeReply(r)
-	if err != nil || !strings.Contains(string(data), `"charter#<1>`) || !strings.Contains(string(data), `"redraft": {`) || !strings.HasSuffix(string(data), "}\n") {
+	if err != nil || !strings.Contains(string(data), "charter#<1> asks") || !strings.Contains(string(data), `"redraft": {`) || !strings.HasSuffix(string(data), "}\n") {
 		t.Fatalf("encoded:\n%s %v", data, err)
 	}
 	if got, err := shed.ParseReply(data); err != nil || !reflect.DeepEqual(got, r) {

@@ -208,6 +208,17 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 	return d.request(ctx, stream, state, roundInput{Round: n + 1, Spec: latest.Spec, Plan: latest.Plan}, reply+"-replied")
 }
 
+// Dissent returns the workstream's dissent record, computed from the recorded
+// rounds alone: every objection that stands, with its kind, its member, the
+// part it names and whether it blocks.
+func Dissent(repository *trace.Repository, stream config.WorkstreamID) ([]shed.Entry, error) {
+	records, err := shed.Records(repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	return shed.DissentRecord(records), nil
+}
+
 // standing counts the open dissent and how much of it blocks.
 func standing(open []shed.Entry) string {
 	blocking := 0
