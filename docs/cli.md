@@ -124,8 +124,10 @@ a service restart.
   `not_found` (exit 4).
 - `shed skip <workstream-id>` skips debate for a `sketched` or `in-shed`
   workstream. No further committee or architect turn starts; the workstream
-  still needs your ratification of the spec and the plan. A running round, or a
-  debate already skipped, fails with `conflict` (exit 5).
+  still needs your ratification of the spec and the plan. A running round,
+  reply or redraft, and a debate already skipped, fail with `conflict`
+  (exit 5): a turn already dispatched runs to its record, so the skip waits for
+  it.
 - `shed more <workstream-id> <rounds>` asks for that many further rounds once
   debate has concluded, between 1 and `shed.max_rounds`; what you ask for is
   what runs, and it replaces the cap. Debate resumes from the conclusion. A
@@ -145,8 +147,11 @@ a service restart.
   blocks and you have not overruled it, when the plan does not validate, when
   the revisions are not the current ones, and when the workstream is not in the
   shed: all `conflict` (exit 5). What passes records your approval of those
-  revisions and triggers the sealing of the workstream. A workstream with no
-  packet yet fails with `not_found` (exit 4). See
+  revisions, and asks a service that can seal to seal them; the command says
+  whether the sealing started. Ratifying revisions you have ratified already
+  records nothing again and asks for the sealing again, which is how a sealing
+  that failed is retried. A workstream with no packet yet fails with
+  `not_found` (exit 4). See
   [the ratification gate](service.md#the-ratification-gate).
 - Editing the documents needs no command. You edit `spec.md` and `plan.json` in
   the workstream's directory under the trace yourself. The service records what

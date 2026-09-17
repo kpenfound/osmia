@@ -135,7 +135,8 @@ func (d *debate) requestReply(ctx context.Context, stream config.WorkstreamID, s
 }
 
 // requestRedraft publishes the redraft the owner asked for after round n as a
-// durable operation pinned to the revisions the request was made against.
+// durable operation pinned to the latest recorded revisions, which are what
+// the architect redrafts and what the owner may have edited since the request.
 func (d *debate) requestRedraft(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, in roundInput, note string) error {
 	reason := fmt.Sprintf("the owner asked for a redraft after round %d: %s", in.Round, note)
 	return d.requestAnswer(ctx, stream, state, in, shed.RedraftDocumentID(in.Round), reason, fmt.Sprintf("Architect's redraft after round %d, at the owner's request", in.Round))

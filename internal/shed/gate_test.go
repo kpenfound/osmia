@@ -222,9 +222,9 @@ func TestGateFilesAreReadBackByRoundAndAreNotMemberRecords(t *testing.T) {
 	if err != nil || len(records) != 1 || records[0].Member != alice {
 		t.Fatalf("records %+v %v", records, err)
 	}
-	packets, err := shed.Packets(f.repo, stream)
-	if err != nil || len(packets) != 1 || packets[0].Round != 1 {
-		t.Fatalf("packets %+v %v", packets, err)
+	presented, doc, found, err := shed.LatestPacket(f.repo, stream)
+	if err != nil || !found || presented.Round != 1 || doc.Path != shed.PacketPath(1) || doc.Revision != 1 {
+		t.Fatalf("packet %+v %+v %v %v", presented, doc, found, err)
 	}
 	ratified, err := shed.Ratifications(f.repo, stream)
 	if err != nil || len(ratified) != 1 || ratified[0].Revision != one {
@@ -253,7 +253,7 @@ func TestGateFilesAreReadBackByRoundAndAreNotMemberRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.documents(t, stream, document(stream, shed.PacketDocumentID(1), shed.PacketPath(1), string(elsewhere), 2))
-	if _, err := shed.Packets(f.repo, stream); err == nil || !strings.Contains(err.Error(), shed.PacketPath(1)) {
+	if _, _, _, err := shed.LatestPacket(f.repo, stream); err == nil || !strings.Contains(err.Error(), shed.PacketPath(1)) {
 		t.Fatalf("a misplaced packet: %v", err)
 	}
 }

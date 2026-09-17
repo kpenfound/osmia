@@ -207,27 +207,32 @@ func ParsePacket(data []byte) (Packet, error) {
 	return p, p.check()
 }
 
-// Packets returns the workstream's recorded ratification packets, ordered by
-// the round they were presented after. A packet whose content disagrees with
-// its path is an error.
-func Packets(repository *trace.Repository, stream config.WorkstreamID) ([]Packet, error) {
-	latest, err := shedFiles(repository, stream, packetName)
+// LatestPacket returns the workstream's latest recorded ratification packet,
+// of the latest round it was presented after, and the document that holds it.
+// A packet whose content disagrees with its path is an error.
+func LatestPacket(repository *trace.Repository, stream config.WorkstreamID) (Packet, trace.Document, bool, error) {
+	documents, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
-		return nil, err
+		return Packet{}, trace.Document{}, false, err
 	}
-	var out []Packet
-	for path, d := range latest {
-		p, err := ParsePacket([]byte(d.Content))
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+	var latest trace.Document
+	round := 0
+	for _, d := range documents {
+		if at, ok := PacketRound(d.Path); ok && at >= round {
+			latest, round = d, at
 		}
-		if PacketPath(p.Round) != path {
-			return nil, fmt.Errorf("%s: records the packet of round %d", path, p.Round)
-		}
-		out = append(out, p)
 	}
-	slices.SortFunc(out, func(a, b Packet) int { return a.Round - b.Round })
-	return out, nil
+	if round == 0 {
+		return Packet{}, trace.Document{}, false, nil
+	}
+	p, err := ParsePacket([]byte(latest.Content))
+	if err != nil {
+		return Packet{}, trace.Document{}, false, fmt.Errorf("%s: %w", latest.Path, err)
+	}
+	if PacketPath(p.Round) != latest.Path {
+		return Packet{}, trace.Document{}, false, fmt.Errorf("%s: records the packet of round %d", latest.Path, p.Round)
+	}
+	return p, latest, true, nil
 }
 
 // Ratification is the owner's approval of one revision of the spec and one of

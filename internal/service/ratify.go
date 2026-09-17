@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -17,6 +16,8 @@ import (
 // Sealing is what a recorded ratification triggers: the seal of the ratified
 // spec and plan, and everything the workstream needs to start building. The
 // gate records the owner's approval and calls it; it owns no state of its own.
+// Sealing the same revisions again is what a retry does, so an implementation
+// makes the seal idempotent.
 type Sealing interface {
 	Seal(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, revision shed.Pin) error
 }
@@ -41,16 +42,19 @@ func (d *debate) presentPacket(ctx context.Context, stream config.WorkstreamID, 
 		return err
 	}
 	path := shed.PacketPath(packet.Round)
-	revision := 0
+	var recorded trace.Document
 	for _, doc := range documents {
 		if doc.Path == path {
-			if doc.Content == string(content) {
-				return nil
-			}
-			revision = doc.Revision
+			recorded = doc
 		}
 	}
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.PacketDocumentID(packet.Round), Revision: revision + 1,
+	// The comparison is against the latest revision alone, which is the one
+	// the API serves: a packet that says again what an earlier revision said
+	// is recorded, or the owner would read a stale decision.
+	if recorded.Content == string(content) {
+		return nil
+	}
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.PacketDocumentID(packet.Round), Revision: recorded.Revision + 1,
 		Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: shedActor, Cause: "ratification-packet"}, Path: path, Content: string(content)}
 	return d.repository.RecordDocuments(ctx, []trace.Document{doc})
 }
@@ -105,25 +109,14 @@ func (s *Service) packet(raw string) (PacketResponse, *APIError) {
 	if api != nil {
 		return PacketResponse{}, api
 	}
-	documents, err := trace.Read[trace.Document](repository, stream)
+	packet, doc, found, err := shed.LatestPacket(repository, stream)
 	if err != nil {
 		return PacketResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the ratification packet of workstream %s; check the trace repository", stream)}
 	}
-	var latest trace.Document
-	round := 0
-	for _, doc := range documents {
-		if at, ok := shed.PacketRound(doc.Path); ok && at >= round {
-			latest, round = doc, at
-		}
-	}
-	if latest.Path == "" {
+	if !found {
 		return PacketResponse{}, &APIError{NotFound, fmt.Sprintf("workstream %s has no ratification packet; the chief of staff presents one once debate concludes or the owner skips it", stream)}
 	}
-	packet, err := shed.ParsePacket([]byte(latest.Content))
-	if err != nil {
-		return PacketResponse{}, &APIError{Internal, fmt.Sprintf("the ratification packet of workstream %s is not readable; check the trace repository", stream)}
-	}
-	return PacketResponse{Project: project, Workstream: stream, Packet: packet, Revision: latest.Revision, At: latest.At}, nil
+	return PacketResponse{Project: project, Workstream: stream, Packet: packet, Revision: doc.Revision, At: doc.At}, nil
 }
 
 // ratify records the owner's approval of the exact revisions of the spec and
@@ -143,8 +136,11 @@ func (s *Service) ratify(ctx context.Context, raw string, req RatifyRequest) (Ra
 		return RatifyResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the ratifications of workstream %s; check the trace repository", o.stream)}
 	}
 	asked := shed.Pin{Spec: req.Spec, Plan: req.Plan}
-	if slices.ContainsFunc(ratified, func(r shed.Ratification) bool { return r.Revision == asked }) {
-		return RatifyResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s is already ratified at %s", o.stream, asked)}
+	if i := slices.IndexFunc(ratified, func(r shed.Ratification) bool { return r.Revision == asked }); i >= 0 {
+		// The revisions are approved already, so the gate records nothing
+		// again and asks for the sealing: that is how a sealing that failed,
+		// and a service stop between the record and the call, is retried.
+		return s.seal(ctx, o, ratified[i], fmt.Sprintf("workstream %s is ratified at %s already; the sealing is asked for again", o.stream, asked))
 	}
 	entries, err := Dissent(o.repository, o.stream)
 	if err != nil {
@@ -169,12 +165,20 @@ func (s *Service) ratify(ctx context.Context, raw string, req RatifyRequest) (Ra
 	if api := o.record(ctx, shed.RatificationDocumentID(o.round), shed.RatificationPath(o.round), string(content), fmt.Sprintf("ratified-%d", o.round), reason); api != nil {
 		return RatifyResponse{}, api
 	}
-	out := RatifyResponse{Project: o.project, Workstream: o.stream, Round: o.round, Spec: asked.Spec, Plan: asked.Plan, Detail: reason}
+	return s.seal(ctx, o, record, reason)
+}
+
+// seal triggers the sealing of a recorded ratification and reports whether it
+// started. The ratification is on the record whatever the sealing does, so a
+// sealing that fails is answered as a failure of the sealing alone and the
+// owner asks for it again by ratifying the same revisions again.
+func (s *Service) seal(ctx context.Context, o *shedOwner, record shed.Ratification, detail string) (RatifyResponse, *APIError) {
+	out := RatifyResponse{Project: o.project, Workstream: o.stream, Round: record.Round, Spec: record.Revision.Spec, Plan: record.Revision.Plan, Detail: detail}
 	if s.options.Sealing == nil {
 		return out, nil
 	}
-	if err := s.options.Sealing.Seal(ctx, o.project, o.stream, asked); err != nil {
-		return out, &APIError{Internal, fmt.Sprintf("%s is ratified for workstream %s and the sealing did not start; check osmia status", asked, o.stream)}
+	if err := s.options.Sealing.Seal(ctx, o.project, o.stream, record.Revision); err != nil {
+		return out, &APIError{Internal, fmt.Sprintf("%s is ratified for workstream %s and the sealing did not start; ratify again to ask for it", record.Revision, o.stream)}
 	}
 	out.Sealed = true
 	return out, nil
@@ -215,24 +219,18 @@ func (s *Service) refusals(o *shedOwner, asked shed.Pin, entries []shed.Entry) (
 }
 
 // planProblems validates the workstream's latest recorded spec and plan, the
-// revisions a ratification approves.
+// revisions a ratification approves, exactly as the architect's draft is
+// validated.
 func (s *Service) planProblems(o *shedOwner) ([]string, error) {
-	documents, err := trace.Read[trace.Document](o.repository, o.stream)
+	dr := &drafter{s: s, repository: o.repository}
+	latest, err := dr.latest(o.stream)
 	if err != nil {
 		return nil, err
 	}
-	latest := map[string]trace.Document{}
-	for _, doc := range documents {
-		latest[doc.ID] = doc
-	}
-	spec, ok := latest[plan.SpecDocument]
-	graph, drafted := latest[plan.PlanDocument]
-	if !ok || !drafted {
+	spec, drafted := latest[plan.SpecDocument]
+	graph, planned := latest[plan.PlanDocument]
+	if !drafted || !planned {
 		return nil, errors.New("the workstream has no recorded spec and plan")
 	}
-	entities, err := kb.Load(o.repository)
-	if err != nil {
-		return nil, err
-	}
-	return validateDraft(spec.Content, graph.Content, entities), nil
+	return dr.validate(spec, graph)
 }

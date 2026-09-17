@@ -275,14 +275,13 @@ func (s *Service) shedOverrule(ctx context.Context, raw string, req ShedOverrule
 // rulings of the current round. Disposing of the same objection again replaces
 // the earlier disposition.
 func (s *Service) dispose(ctx context.Context, o *shedOwner, objection string, disposition shed.Disposition, note, action string) (ShedResponse, *APIError) {
-	req := ShedRuleRequest{Objection: objection, Note: note}
 	entries, err := Dissent(o.repository, o.stream)
 	if err != nil {
 		return ShedResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the dissent record of workstream %s; check the trace repository", o.stream)}
 	}
-	i := slices.IndexFunc(entries, func(e shed.Entry) bool { return e.ID == req.Objection })
+	i := slices.IndexFunc(entries, func(e shed.Entry) bool { return e.ID == objection })
 	if i < 0 {
-		return ShedResponse{}, &APIError{NotFound, fmt.Sprintf("no objection %s stands in workstream %s; read the dissent record with osmia status", req.Objection, o.stream)}
+		return ShedResponse{}, &APIError{NotFound, fmt.Sprintf("no objection %s stands in workstream %s; read the dissent record with osmia status", objection, o.stream)}
 	}
 	rounds, err := shed.AllRulings(o.repository, o.stream)
 	if err != nil {
@@ -294,7 +293,7 @@ func (s *Service) dispose(ctx context.Context, o *shedOwner, objection string, d
 			rulings = r
 		}
 	}
-	ruling := shed.Ruling{Objection: req.Objection, Disposition: disposition, Note: strings.TrimSpace(req.Note)}
+	ruling := shed.Ruling{Objection: objection, Disposition: disposition, Note: strings.TrimSpace(note)}
 	rulings.Rulings = append(slices.DeleteFunc(slices.Clone(rulings.Rulings), func(r shed.Ruling) bool { return r.Objection == ruling.Objection }), ruling)
 	content, err := shed.EncodeRulings(rulings)
 	if err != nil {
@@ -359,8 +358,15 @@ func (s *Service) shedSkip(ctx context.Context, raw string) (ShedResponse, *APIE
 	if o.skipped {
 		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("debate on workstream %s is already skipped", o.stream)}
 	}
-	if kind, n, ok := shedState(o.shed.Value); ok && (kind == "round" || kind == "reply") {
-		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s is running round %d; skip debate once the round is recorded", o.stream, n)}
+	// A turn already dispatched runs to its record whatever the owner does
+	// next, and a skipped debate runs no round for what it wrote, so the skip
+	// waits for it.
+	if kind, n, ok := shedState(o.shed.Value); ok && slices.Contains([]string{"round", "reply", "redraft"}, kind) {
+		running := fmt.Sprintf("round %d", n)
+		if kind != "round" {
+			running = (roundInput{Round: n, Redraft: kind == "redraft"}).about()
+		}
+		return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s is running %s; skip debate once it is recorded", o.stream, running)}
 	}
 	entries, err := Dissent(o.repository, o.stream)
 	if err != nil {

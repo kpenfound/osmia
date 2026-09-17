@@ -113,12 +113,15 @@ func TestShedCommands(t *testing.T) {
 	if ratified.Spec != 1 || ratified.Plan != 1 || ratified.Round != 1 || ratified.Sealed || ratified.Workstream != stream {
 		t.Fatalf("ratify --json %+v", ratified)
 	}
+	// Ratifying the same revisions again asks for the sealing, and the
+	// command says whether it started.
+	want := "Workstream " + stream + " ratified: spec.md revision 1 and plan.json revision 1\nworkstream " + stream +
+		" is ratified at spec.md revision 1 and plan.json revision 1 already; the sealing is asked for again\nsealing did not start\n"
+	if out := successful(t, root, "ratify", stream); out != want {
+		t.Fatalf("ratify output %q, want %q", out, want)
+	}
 
 	// Refusals reach the owner with the service's own message.
-	code, out, diag = invoke(t, root, "ratify", stream)
-	if code != 5 || out != "" || !strings.Contains(diag, "already ratified") {
-		t.Fatalf("ratifying twice: %d %q %q", code, out, diag)
-	}
 	code, out, diag = invoke(t, root, "shed", "skip", stream)
 	if code != 5 || out != "" || !strings.Contains(diag, "already skipped") {
 		t.Fatalf("skipping twice: %d %q %q", code, out, diag)

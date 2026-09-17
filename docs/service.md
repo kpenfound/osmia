@@ -515,7 +515,7 @@ The architect gets `file_read`, `reply` and `draft_write` and nothing else.
 `objection`, the ID of an objection that stood once the round was heard, and
 `answer`; answering an objection again replaces the earlier answer, and an
 answer that is refused is an ordinary result, `{"recorded":false,"reason":...}`.
-The prompt lists every objection the owner has not dismissed with its ID,
+The prompt lists every objection the owner has not disposed of with its ID,
 kind, whether it blocks, member, round, and the part and citations it has, and
 says what each kind asks of the architect.
 
@@ -587,9 +587,11 @@ at the cap, once the reply to the round limit is recorded: caused by
 the shed.max_rounds cap of <max>, with <k> objections standing, <b> of them
 blocking; the cap approves nothing`. The round limit is `shed.max_rounds`, read
 from the loaded configuration when the step is taken, until the owner asks for
-[further rounds](#more-debate); from then on it is the last round they asked
-for, and the reason names it instead: `at round <n>, the last of the further
-rounds the owner asked for`.
+[further rounds](#more-debate) or for a [redraft](#redraft); from then on it is
+the last round they asked for, and the reason names it instead: `at round <n>,
+the last of the further rounds the owner asked for` where a request for further
+rounds reaches the limit, and `at round <n>, the round that debated the redraft
+the owner asked for` where the redraft does.
 
 Either way the workstream stays `in-shed`, the dissent that stands keeps
 standing, and no later pass starts a round. The conclusion commits with a
@@ -792,22 +794,30 @@ listed in the one refusal:
 
 A workstream that is neither `in-shed` nor `sketched` is refused by the state
 check every owner action of the shed makes, and revisions below 1 with
-`validation`. A ratification of revisions already ratified is refused with
-`conflict`.
+`validation`. Revisions already ratified are not recorded again: that call asks
+for the [sealing](#sealing) of the ratification on the record instead, and
+answers with the detail `workstream <id> is ratified at <revisions> already;
+the sealing is asked for again`.
 
 What passes is recorded in `shed/round-<n>/ratification.json` (actor
 `owner`/`local`, cause `owner-shed`) with the revisions it approves, the
 dissent record it was given over and the dispositions in force, and the owner
 subject moves to `ratified-<n>`; the reason is `the owner ratified <revisions>
 after round <n>`, followed by `, over <k> objections the owner disposed of`
-where there were any. The gate then triggers `Options.Sealing`, which seals the
-ratified revisions and moves the workstream on. The gate itself changes no
-state beyond its record: without a sealing the ratification stands and the
-response reports `sealed: false`, and a sealing that fails leaves the
+where there were any. The gate itself changes no state beyond that record. The
+response is a `RatifyResponse`: `project`, `workstream`, `round`, `spec`,
+`plan`, `sealed` and the recorded `detail`.
+
+### Sealing
+
+A recorded ratification triggers `Options.Sealing`, which seals the ratified
+revisions and moves the workstream on. Without one the ratification stands and
+the response reports `sealed: false`. A sealing that fails leaves the
 ratification recorded and answers `internal` with `<revisions> is ratified for
-workstream <id> and the sealing did not start`. The response is a
-`RatifyResponse`: `project`, `workstream`, `round`, `spec`, `plan`, `sealed`
-and the recorded `detail`.
+workstream <id> and the sealing did not start; ratify again to ask for it`, and
+a service stop between the record and the call leaves the same thing owed:
+ratifying the same revisions again records nothing and asks for the sealing
+again, which is why a sealing seals the same revisions twice without harm.
 
 ## Abandoning
 

@@ -382,6 +382,10 @@ func TestOwnerSkipsDebateAcrossARestart(t *testing.T) {
 	if _, err := f.c.ShedMore(ctx, stream, 1); !failed(err, Conflict) {
 		t.Fatalf("more after a skip: %v", err)
 	}
+	_, err = f.c.ShedRedraft(ctx, stream, "Split it.")
+	if !failed(err, Conflict) || !strings.Contains(err.Error(), "skipped debate") {
+		t.Fatalf("a redraft after a skip: %v", err)
+	}
 }
 
 // Skip is refused while a round is running, and on a workstream that is not
@@ -398,10 +402,15 @@ func TestSkipIsRefusedWhileARoundRunsAndOutsideTheShed(t *testing.T) {
 	if _, err := f.c.ShedSkip(ctx, stream); !failed(err, Conflict) {
 		t.Fatalf("skipping a running round: %v", err)
 	}
-	// Further rounds are the owner's to ask for only once debate concluded.
+	// Further rounds and a redraft are the owner's to ask for only once
+	// debate concluded.
 	_, err := f.c.ShedMore(ctx, stream, 1)
 	if !failed(err, Conflict) || !strings.Contains(err.Error(), "has not concluded") {
 		t.Fatalf("more while round 1 runs: %v", err)
+	}
+	_, err = f.c.ShedRedraft(ctx, stream, "Split it.")
+	if !failed(err, Conflict) || !strings.Contains(err.Error(), "has not concluded") {
+		t.Fatalf("a redraft while round 1 runs: %v", err)
 	}
 	close(release)
 	f.awaitShed(t, stream, "concluded-1")

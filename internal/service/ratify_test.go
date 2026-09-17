@@ -77,6 +77,21 @@ func (f *shedFixture) awaitPacket(t *testing.T, stream config.WorkstreamID, reco
 	}
 }
 
+// skipNotice returns the notice the skipped debate told the chief of staff
+// with.
+func (f *shedFixture) skipNotice(t *testing.T, stream config.WorkstreamID) trace.OutboxEntry {
+	t.Helper()
+	outbox, err := f.repository().Outbox(stream)
+	must(t, err)
+	for _, entry := range outbox {
+		if entry.TransitionID == skipTransition {
+			return entry
+		}
+	}
+	t.Fatalf("workstream %s has no notice of its skipped debate", stream)
+	return trace.OutboxEntry{}
+}
+
 func (f *shedFixture) ratification(t *testing.T, stream config.WorkstreamID, round int) shed.Ratification {
 	t.Helper()
 	docs := f.documents(t, stream, shed.RatificationDocumentID(round))
@@ -151,6 +166,21 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 	if docs := f.documents(t, stream, shed.PacketDocumentID(1)); len(docs) != 2 || docs[1].Revision != 2 {
 		t.Fatalf("packet documents after the overrule %+v", docs)
 	}
+	// A disposition the owner takes back, and then takes again, leaves the
+	// packet saying what an earlier revision said. It is recorded all the
+	// same, because the revision the API serves is the decision in force.
+	if _, err := f.c.ShedRule(ctx, stream, veto, "sustain", "On reflection, no."); err != nil {
+		t.Fatal(err)
+	}
+	f.awaitPacket(t, stream, blocked)
+	if _, err := f.c.ShedOverrule(ctx, stream, veto, "I accept the risk."); err != nil {
+		t.Fatal(err)
+	}
+	f.awaitPacket(t, stream, ratifiable)
+	docs = f.documents(t, stream, shed.PacketDocumentID(1))
+	if len(docs) != 4 || docs[3].Revision != 4 || docs[3].Content != docs[1].Content {
+		t.Fatalf("packet documents after the owner changed their mind twice %+v", docs)
+	}
 
 	ratified, err := f.c.Ratify(ctx, stream, 1, 1)
 	must(t, err)
@@ -165,13 +195,23 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 		record.Dispositions[0] != (shed.Ruling{Objection: veto, Disposition: shed.Overruled, Note: "I accept the risk."}) || len(record.Dissent) != 2 {
 		t.Fatalf("the recorded ratification %+v", record)
 	}
-	if moves := f.ownerMoves(t, stream); !slices.Equal(moves, []string{"overruled-1", "ratified-1"}) {
+	if moves := f.ownerMoves(t, stream); !slices.Equal(moves, []string{"overruled-1", "ruled-1", "overruled-1", "ratified-1"}) {
 		t.Fatalf("owner subject went %v", moves)
 	}
 	// The gate changes no state of its own: sealing moves the workstream on.
 	f.stillInShed(t, stream)
-	if _, err := f.c.Ratify(ctx, stream, 1, 1); !failed(err, Conflict) || !strings.Contains(err.Error(), "already ratified") {
-		t.Fatalf("ratifying twice: %v", err)
+	// Ratifying the same revisions again records nothing again and asks for
+	// the sealing, which this service does not have.
+	again, err := f.c.Ratify(ctx, stream, 1, 1)
+	must(t, err)
+	if again.Sealed || again.Round != 1 || again.Detail != fmt.Sprintf("workstream %s is ratified at %s already; the sealing is asked for again", stream, shed.Pin{Spec: 1, Plan: 1}) {
+		t.Fatalf("ratifying twice %+v", again)
+	}
+	if docs := f.documents(t, stream, shed.RatificationDocumentID(1)); len(docs) != 1 {
+		t.Fatalf("ratifying twice recorded %+v", docs)
+	}
+	if moves := f.ownerMoves(t, stream); !slices.Equal(moves, []string{"overruled-1", "ruled-1", "overruled-1", "ratified-1"}) {
+		t.Fatalf("owner subject went %v", moves)
 	}
 	p.check(t)
 }
@@ -381,6 +421,10 @@ func TestSkippedDebateIsRatifiedAndSeals(t *testing.T) {
 	if want := f.transition(t, stream, skipTransition).Reason; packet.Conclusion != want {
 		t.Fatalf("conclusion %q, want %q", packet.Conclusion, want)
 	}
+	// The chief of staff is asked to present it, as it is at a conclusion.
+	if notice := f.skipNotice(t, stream).Event.Body; !strings.Contains(notice, presentation("ratify: no objection stands")) {
+		t.Fatalf("the notice of the skipped debate %q", notice)
+	}
 
 	// The sealing that fails leaves the ratification recorded and says so.
 	sealing.fail(errors.New("the seal was not written"))
@@ -394,9 +438,25 @@ func TestSkippedDebateIsRatifiedAndSeals(t *testing.T) {
 	if calls := sealing.sealed(); len(calls) != 1 || calls[0] != (sealed{f.project, stream, shed.Pin{Spec: 1, Plan: 1}}) {
 		t.Fatalf("sealing was asked for %+v", calls)
 	}
+	// Ratifying the same revisions again is how the owner asks for the
+	// sealing that failed, and it is reported once it starts.
+	if _, err := f.c.Ratify(ctx, stream, 1, 1); !failed(err, Internal) {
+		t.Fatalf("a sealing that failed again: %v", err)
+	}
+	sealing.fail(nil)
+	retried, err := f.c.Ratify(ctx, stream, 1, 1)
+	must(t, err)
+	if !retried.Sealed || retried.Round != 1 || retried.Spec != 1 || retried.Plan != 1 {
+		t.Fatalf("the retried sealing %+v", retried)
+	}
+	if calls := sealing.sealed(); len(calls) != 3 || calls[2] != (sealed{f.project, stream, shed.Pin{Spec: 1, Plan: 1}}) {
+		t.Fatalf("sealing was asked for %+v", calls)
+	}
+	if docs := f.documents(t, stream, shed.RatificationDocumentID(1)); len(docs) != 1 {
+		t.Fatalf("the retries recorded %+v", docs)
+	}
 
 	// The next workstream's ratification triggers the sealing it reports.
-	sealing.fail(nil)
 	other := f.handIn(t, "second", handedDesign)
 	f.await(t, other, sketched)
 	if _, err := f.c.ShedSkip(ctx, other); err != nil {
@@ -408,8 +468,49 @@ func TestSkippedDebateIsRatifiedAndSeals(t *testing.T) {
 	if !ratified.Sealed {
 		t.Fatalf("ratification %+v", ratified)
 	}
-	if calls := sealing.sealed(); len(calls) != 2 || calls[1].stream != other {
+	if calls := sealing.sealed(); len(calls) != 4 || calls[3].stream != other {
 		t.Fatalf("sealing was asked for %+v", calls)
+	}
+}
+
+// A skip waits for the architect's redraft: the turn is dispatched and runs to
+// its record, and no skipped debate leaves it unrecorded.
+func TestSkipIsRefusedWhileTheRedraftRuns(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 1)
+	defer f.stop(t)
+	ctx := context.Background()
+	p := &faults{}
+	size := shed.ObjectionID(1, committeeAgent(1), 1)
+	f.member(1, 1, 1, objects(p, shed.Size, "plan#resume", "spec#1"))
+	f.script(replyTurnID(1, 1), nil, answers(p, "The unit is one change.", size))
+	started, release := make(chan struct{}), make(chan struct{})
+	redraft := roundInput{Round: 1, Redraft: true}
+	f.script(redraft.turnID(1), map[string]string{plan.PlanPath: splitPlan}, held(started, release))
+	stream := f.handIn(t, "design", handedDesign)
+	f.awaitShed(t, stream, "concluded-1")
+	if _, err := f.c.ShedRedraft(ctx, stream, "Split the resume unit."); err != nil {
+		t.Fatal(err)
+	}
+	awaitStart(t, started)
+
+	_, err := f.c.ShedSkip(ctx, stream)
+	if !failed(err, Conflict) || !strings.Contains(err.Error(), "is running the redraft after round 1; skip debate once it is recorded") {
+		t.Fatalf("skipping a running redraft: %v", err)
+	}
+	close(release)
+	f.awaitShed(t, stream, "redrafted-1")
+	p.check(t)
+	// The redraft the skip waited for is on the record, with the revision it
+	// wrote.
+	docs := f.documents(t, stream, shed.RedraftedDocumentID(1))
+	if len(docs) != 1 {
+		t.Fatalf("redraft documents %+v", docs)
+	}
+	report, err := shed.ParseReply([]byte(docs[0].Content))
+	must(t, err)
+	if report.Redraft == nil || *report.Redraft != (shed.Pin{Spec: 1, Plan: 2}) {
+		t.Fatalf("the architect's redraft %+v", report)
 	}
 }
 
