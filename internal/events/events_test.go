@@ -310,12 +310,14 @@ var steps = []struct {
 	{"before-settle", 1}, {"before-settle", 2}, {"before-release", 1}, {"before-release", 2},
 }
 
-func crashAt(name string, n int) func(string) error {
+// crashAt fails the nth occurrence of step name and sets *fired when it does.
+func crashAt(name string, n int, fired *bool) func(string) error {
 	seen := 0
 	return func(step string) error {
 		if step == name {
 			seen++
 			if seen == n {
+				*fired = true
 				return errors.New("crash at " + step)
 			}
 		}
@@ -324,6 +326,21 @@ func crashAt(name string, n int) func(string) error {
 }
 
 func TestCrashAndRestartNeitherLoseNorRepeatEvents(t *testing.T) {
+	// Every crash point fires as the first crash of some cell, and the
+	// release points fire once the first turn failed.
+	var mu sync.Mutex
+	fired := map[string]bool{}
+	t.Cleanup(func() {
+		if t.Failed() {
+			return
+		}
+		for _, step := range steps {
+			key := fmt.Sprintf("%s%d", step.name, step.n)
+			if !fired[key] {
+				t.Errorf("crash point %s never fired", key)
+			}
+		}
+	})
 	for _, failed := range []bool{false, true} {
 		for _, first := range steps {
 			for _, second := range append(steps, struct {
@@ -332,7 +349,11 @@ func TestCrashAndRestartNeitherLoseNorRepeatEvents(t *testing.T) {
 			}{"none", 1}) {
 				t.Run(fmt.Sprintf("failed=%v/%s%d_then_%s%d", failed, first.name, first.n, second.name, second.n), func(t *testing.T) {
 					t.Parallel()
-					crashAndRestart(t, failed, first.name, first.n, second.name, second.n)
+					if crashAndRestart(t, failed, first.name, first.n, second.name, second.n) {
+						mu.Lock()
+						fired[fmt.Sprintf("%s%d", first.name, first.n)] = true
+						mu.Unlock()
+					}
 				})
 			}
 		}
@@ -341,8 +362,9 @@ func TestCrashAndRestartNeitherLoseNorRepeatEvents(t *testing.T) {
 
 // crashAndRestart delivers three events across two crashing passes and a
 // clean one, restarting after each and running the queued turns between
-// passes. When failed is set, the first turn to run fails.
-func crashAndRestart(t *testing.T, failed bool, first string, firstN int, second string, secondN int) {
+// passes. When failed is set, the first turn to run fails. It reports whether
+// the first crash point fired.
+func crashAndRestart(t *testing.T, failed bool, first string, firstN int, second string, secondN int) bool {
 	ctx := context.Background()
 	f, repo := setup(t)
 	defer func() { repo.Close() }()
@@ -351,7 +373,8 @@ func crashAndRestart(t *testing.T, failed bool, first string, firstN int, second
 	f.notify(t, repo, "second")
 	f.clock.Advance(time.Minute)
 	d := f.deliverer(t, repo, time.Second)
-	d.boundary = crashAt(first, firstN)
+	var fired, ignored bool
+	d.boundary = crashAt(first, firstN, &fired)
 	for range 2 {
 		_ = d.Pass(ctx)
 		f.runAll(t, repo)
@@ -363,7 +386,7 @@ func crashAndRestart(t *testing.T, failed bool, first string, firstN int, second
 	f.notify(t, repo, "third")
 	f.clock.Advance(time.Minute)
 	d = f.deliverer(t, repo, time.Second)
-	d.boundary = crashAt(second, secondN)
+	d.boundary = crashAt(second, secondN, &ignored)
 	for range 2 {
 		_ = d.Pass(ctx)
 		f.runAll(t, repo)
@@ -391,6 +414,7 @@ func crashAndRestart(t *testing.T, failed bool, first string, firstN int, second
 			t.Fatalf("event %s delivered %d times, want %d", id, n, want)
 		}
 	}
+	return fired
 }
 
 func TestEventOfACompletedTurnIsNeverDeliveredAgain(t *testing.T) {
@@ -488,7 +512,7 @@ func TestEventOfAFailedTurnIsDeliveredInOneNewTurn(t *testing.T) {
 			d := f.deliverer(t, repo, time.Second)
 			must(t, d.Pass(ctx))
 			if c.cancelled {
-				n, err := repo.CancelTurns(ctx, stream, f.clock.Now(), owner, "Workstream abandoned")
+				n, err := repo.CancelTurns(ctx, stream, f.clock.Now(), owner, "The owner cancelled the turn")
 				must(t, err)
 				if th, err := repo.ChiefOfStaffThread(stream); err != nil || n != 1 || th.Turns[0].Status() != "interrupted" {
 					t.Fatalf("cancelled %d: %+v, %v", n, th, err)
@@ -628,5 +652,43 @@ func TestTurnIDIsAValidKey(t *testing.T) {
 	id := TurnID(token)
 	if id != TurnID(token) || id == TurnID(token+"x") || !strings.HasPrefix(id, "events_") || len(id) != 47 {
 		t.Fatalf("turn id %q", id)
+	}
+}
+
+func TestSkippedWorkstreamKeepsItsEvents(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t)
+	defer repo.Close()
+	fail := errors.New("no state")
+	var skip bool
+	var skipErr error
+	var asked []config.WorkstreamID
+	d, err := New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil },
+		Skip: func(s config.WorkstreamID) (bool, error) {
+			asked = append(asked, s)
+			return skip, skipErr
+		}})
+	must(t, err)
+	f.notify(t, repo, "first")
+	f.clock.Advance(time.Minute)
+	// A failed turn leaves a claim this session holds; a skipped workstream
+	// keeps it and gets no new turn.
+	must(t, d.Pass(ctx))
+	f.finish(t, repo, f.claimNext(t, repo), false)
+	skip = true
+	must(t, d.Pass(ctx))
+	skipErr = fail
+	if err := d.Pass(ctx); !errors.Is(err, fail) {
+		t.Fatalf("skip error not reported: %v", err)
+	}
+	entries, err := repo.Outbox(stream)
+	must(t, err)
+	if len(eventTurns(t, repo)) != 1 || len(entries) != 1 || entries[0].Acknowledged || len(entries[0].History) != 1 || !slices.Equal(asked, []config.WorkstreamID{stream, stream, stream}) {
+		t.Fatalf("turns %+v, outbox %+v, asked %v", eventTurns(t, repo), entries, asked)
+	}
+	skip, skipErr = false, nil
+	must(t, d.Pass(ctx))
+	if deliveries(t, repo, "first") != 2 {
+		t.Fatalf("turns %+v", eventTurns(t, repo))
 	}
 }

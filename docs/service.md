@@ -522,8 +522,9 @@ So an event reaches the chief of staff until a turn carrying it succeeds: a
 turn that fails or that a stop interrupts is not retried, but its events go
 out once more in one new turn, and a restart at any point neither loses an
 event nor delivers it twice alongside a turn still in flight. An event
-claimed by this session with no turn yet waits for its claim's lease to run
-out. A failing store call, chief-of-staff profile lookup or bundle assembly
+claimed by this session with no turn yet, left by a pass that stopped before
+queueing it, is released and delivered in the next turn. An abandoned
+workstream's events are not delivered and stay unacknowledged. A failing store call, chief-of-staff profile lookup or bundle assembly
 stops the loop, as the scheduler's errors do; an event another claim holds is
 skipped and retried on a later pass.
 

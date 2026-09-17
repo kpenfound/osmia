@@ -37,6 +37,9 @@ type Options struct {
 	// System returns the system prompt of a new event turn of the workstream.
 	// Without it the turn has none.
 	System func(context.Context, config.WorkstreamID) (string, error)
+	// Skip reports a workstream whose events stay undelivered and
+	// unacknowledged. Without it no workstream is skipped.
+	Skip func(config.WorkstreamID) (bool, error)
 }
 
 // Deliverer turns a workstream's ready outbox events into one chief-of-staff
@@ -100,6 +103,12 @@ func (d *Deliverer) Pass(ctx context.Context) error {
 func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if d.options.Skip != nil {
+		skip, err := d.options.Skip(stream)
+		if err != nil || skip {
+			return err
+		}
 	}
 	chief, err := d.repository.ChiefOfStaffThread(stream)
 	if errors.Is(err, os.ErrNotExist) {
