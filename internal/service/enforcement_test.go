@@ -19,6 +19,7 @@ import (
 // service hands them, not from the disk, select views of their own project
 // only and record UTC times.
 func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	runnerIntent(t, opts)
 	cfg, err := config.Load(opts.Config)
