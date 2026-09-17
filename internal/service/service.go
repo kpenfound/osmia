@@ -41,7 +41,8 @@ type Options struct {
 	// configured capacity, replacing Reconciliation.Schedule. A runtime pause
 	// holds new turns on the threads it covers, except chief-of-staff turns;
 	// clearing it lets them run. Outbox events are delivered to each
-	// workstream's chief of staff as queued turns, one per event window.
+	// workstream's chief of staff as queued turns, one per event window, and
+	// each recorded answer to a question is queued on its asker's thread.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
 	// Librarian supplies the execution boundary of the librarian's

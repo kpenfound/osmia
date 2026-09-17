@@ -19,6 +19,8 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/reconcile"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -433,5 +435,65 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	}
 	if len(problems) != 0 {
 		t.Fatalf("fake agents saw:\n%s", strings.Join(problems, "\n"))
+	}
+}
+
+// An answer recorded in an abandoned workstream stays undelivered, while
+// another workstream's answer is queued with its asker's role profile.
+func TestAnswersAreNotDeliveredToAbandonedWorkstreams(t *testing.T) {
+	ctx := context.Background()
+	home, err := os.MkdirTemp("", "qb-")
+	must(t, err)
+	t.Cleanup(func() { os.RemoveAll(home) })
+	opts := fixtureAt(t, home)
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	clock := &fixedClock{now: demoStart}
+	owner := trace.Actor{Kind: "owner", ID: "local"}
+	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
+	must(t, err)
+	defer repo.Close()
+	traceDir, err := cfg.Root.ProjectTrace(project)
+	must(t, err)
+	must(t, os.WriteFile(filepath.Join(traceDir, "charter.md"), []byte("# Charter\n\n1. Keep state in files.\n"), 0600))
+	claim := func(ws config.WorkstreamID, agent, thread, turn string) coreadapter.Scope {
+		t.Helper()
+		h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: project, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "message_" + turn}
+		_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: agent, ThreadID: thread, TurnID: turn, Profile: coreadapter.Profile{Name: "other", Backend: "codex", Model: "other"}, Prompt: "Work"})
+		must(t, err)
+		_, err = repo.ClaimTurn(ctx, ws, agent, "token_"+turn, filepath.Join(home, turn), clock.Now())
+		must(t, err)
+		th, err := repo.Thread(ws, agent)
+		must(t, err)
+		return coreadapter.Scope{Project: string(project), Workstream: string(ws), Thread: thread, Turn: turn, Role: th.Identity.Role}
+	}
+	for _, ws := range []config.WorkstreamID{stream, quiet} {
+		must(t, repo.CreateWorkstream(ctx, ws, clock.Now(), owner))
+		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}
+		must(t, repo.CreateThread(ctx, identity))
+		_, err := repo.Ask(ctx, demoAgent, claim(ws, demoAgent, demoThread, "build"), "Where does state live?", clock.Now())
+		must(t, err)
+		_, err = repo.AnswerQuestion(ctx, trace.ChiefOfStaff, claim(ws, trace.ChiefOfStaff, trace.ChiefOfStaff, "events"), "1", "In files.", []string{"charter#1"}, clock.Now())
+		must(t, err)
+	}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: abandonTransition}
+	_, err = repo.SetFeatureState(ctx, h, AbandonedState, "gone")
+	must(t, err)
+
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: []config.WorkstreamID{stream, quiet}})
+	must(t, err)
+	defer store.Close()
+	s := &Service{options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}, store: store}
+	must(t, s.answers(cfg, repo).Pass(ctx))
+	abandonedThread, err := repo.Thread(stream, demoAgent)
+	must(t, err)
+	live, err := repo.Thread(quiet, demoAgent)
+	must(t, err)
+	if len(abandonedThread.Turns) != 1 || len(live.Turns) != 2 {
+		t.Fatalf("abandoned workstream has %d turns, live one %d", len(abandonedThread.Turns), len(live.Turns))
+	}
+	// The answer runs on the mason's bound profile, not the asking turn's.
+	if req := live.Turns[1].Request; req.TurnID != "answer_1" || req.Profile.Name != "default" || req.Profile.Backend != "claude" || req.Profile.Model != "test" || !req.At.Equal(clock.Now()) {
+		t.Fatalf("answer turn: %+v", req)
 	}
 }
