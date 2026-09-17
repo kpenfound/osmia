@@ -89,6 +89,15 @@ func (in roundInput) documentID() string {
 	return shed.ReplyDocumentID(in.Round)
 }
 
+// about names the architect's answer for a message: its reply is to the round,
+// and the redraft the owner asked for comes after it.
+func (in roundInput) about() string {
+	if in.Redraft {
+		return fmt.Sprintf("the redraft after round %d", in.Round)
+	}
+	return fmt.Sprintf("the reply to round %d", in.Round)
+}
+
 // turnPrefix is what every turn of the operation is named with, and turnID
 // the name of its k-th turn.
 func (in roundInput) turnPrefix() string { return fmt.Sprintf("%s-%d-", in.answering(), in.Round) }
@@ -211,7 +220,7 @@ func (r replier) Inspect(_ context.Context, op coreadapter.Operation) (coreadapt
 			return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "architect turn " + last.Request.TurnID + " is running"}, nil
 		}
 	}
-	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("the %s after round %d is not recorded", in.answering(), in.Round)}, nil
+	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: in.about() + " is not recorded"}, nil
 }
 
 // Apply drives the architect's reply to a round, or the redraft the owner
@@ -542,7 +551,7 @@ func (d *debate) replied(ctx context.Context, operation string, stream config.Wo
 // abandonedReply is why the architect's answer of an abandoned workstream
 // failed.
 func abandonedReply(in roundInput) string {
-	return fmt.Sprintf("the %s after round %d failed: the workstream was abandoned, so the architect's %s is not recorded", in.answering(), in.Round, in.answering())
+	return fmt.Sprintf("%s failed: the workstream was abandoned, so the architect's %s is not recorded", in.about(), in.answering())
 }
 
 func (d *debate) replyFailed(ctx context.Context, operation string, stream config.WorkstreamID, in roundInput, reason string) (coreadapter.OperationResult, error) {
@@ -564,7 +573,7 @@ func (d *debate) endReply(ctx context.Context, operation string, stream config.W
 	if state.Value != in.running() {
 		result, err := d.replyOutcome(stream, in)
 		if err != nil || result == nil {
-			return coreadapter.OperationResult{}, errors.Join(err, fmt.Errorf("the %s after round %d is %q, not in progress", in.answering(), in.Round, state.Value))
+			return coreadapter.OperationResult{}, errors.Join(err, fmt.Errorf("%s is %q, not in progress", in.about(), state.Value))
 		}
 		return *result, nil
 	}
