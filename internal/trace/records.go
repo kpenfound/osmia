@@ -43,10 +43,13 @@ type Record interface {
 	traceRecord()
 }
 
+// Document is a versioned file. Source names where a handed document came
+// from: "file:" and an absolute path, an issue URL, or "stdin".
 type Document struct {
 	Header
 	Path    string `json:"path"`
 	Content string `json:"content"`
+	Source  string `json:"source,omitempty"`
 }
 
 func (Document) traceRecord() {}
@@ -194,7 +197,7 @@ func validate(r Record) error {
 	valid := false
 	switch v := r.(type) {
 	case Document:
-		valid = documentPath(v.Path, h.Workstream != "") == nil
+		valid = documentPath(v.Path, h.Workstream != "") == nil && (v.Source == "" || strings.HasPrefix(v.Path, "handed/") && present(v.Source) && !strings.ContainsAny(v.Source, "\x00\r\n"))
 	case Transition:
 		valid = key(v.Subject) && present(v.To) && present(v.Reason)
 	case Question:

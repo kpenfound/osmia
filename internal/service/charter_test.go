@@ -19,7 +19,7 @@ import (
 
 func handInError(t *testing.T, c *Client, req HandInRequest) *APIError {
 	t.Helper()
-	err := c.HandIn(context.Background(), req)
+	_, err := c.HandIn(context.Background(), req)
 	var api *APIError
 	if !errors.As(err, &api) {
 		t.Fatalf("hand-in: %v", err)
@@ -75,7 +75,7 @@ func TestHandInCharterGate(t *testing.T) {
 		t.Fatal("project add reports charter state")
 	}
 
-	api := handInError(t, c, HandInRequest{Project: id, Paths: []string{"/tmp/design.md"}})
+	api := handInError(t, c, HandInRequest{Project: id, Key: "k", Path: "/tmp/design.md"})
 	if api.Code != CharterEmpty || !strings.Contains(api.Message, string(id)) || !strings.Contains(api.Message, "charter has no rules") || !strings.Contains(api.Message, path) {
 		t.Fatalf("empty charter: %+v", api)
 	}
@@ -102,11 +102,12 @@ func TestHandInCharterGate(t *testing.T) {
 	if state == nil || !state.Ready || state.Rules != 3 || state.Revision != 2 || len(state.Diagnostics) != 2 || !strings.Contains(state.Diagnostics[0].Message, "gap") || !strings.Contains(state.Diagnostics[1].Message, "cannot be cited") {
 		t.Fatalf("edited status: %+v", state)
 	}
+	// Past the gate, the request itself is checked.
 	api = handInError(t, c, HandInRequest{Project: id})
-	if api.Code != Unsupported || !strings.Contains(api.Message, string(id)) {
+	if api.Code != Validation || !strings.Contains(api.Message, "key") {
 		t.Fatalf("ready charter: %+v", api)
 	}
-	if code := handInStatus(t, s, `{"project":"`+string(id)+`","paths":[]}`); code != http.StatusNotImplemented {
+	if code := handInStatus(t, s, `{"project":"`+string(id)+`"}`); code != 422 {
 		t.Fatalf("ready charter status %d", code)
 	}
 	if n := charterRevisionCount(t, s); n != 2 {
