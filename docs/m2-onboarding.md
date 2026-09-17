@@ -49,8 +49,9 @@ librarian writes:
 - a refined `kb/entities.json` whose entities `trace`, `service`, `demo` and
   `internal` carry names, aliases and owners.
 
-Each file becomes a revision in the trace's `documents.jsonl`, written by the
-agent `librarian`. The seed revision before it is written by the owner who ran
+Each file becomes a revision in the trace's `documents.jsonl` with actor
+`agent`/`agent_librarian` and the extraction operation as its cause. The seed
+revision before it has actor `owner`/`local`, the owner who ran
 `project add`. Status shows `Knowledge base: extraction 1 succeeded`.
 
 The test hashes every path, mode and file content in the clone, `.git`
@@ -103,16 +104,16 @@ endpoint prints them, so the test calls them directly:
   `file` mode. It contains the charter rules `charter#1` and `charter#2` from
   revision 2, the prose of `kb/trace.md` and not that of other subsystems,
   the entity `trace`, and an empty set of decisions, because no rulings are
-  recorded yet. See [turn context bundles](context.md).
+  recorded. See [turn context bundles](context.md).
 
 ### 6. Restart during extraction
 
 The fake librarian's first turn waits until it is cancelled. While status
 shows extraction 1 as `running`, the test stops the service and starts it
-again. The interrupted attempt is closed, a second librarian turn runs, and
-extraction 1 succeeds. The trace then holds exactly one charter revision, one
-revision per subsystem file and two entity map revisions (the seed and the
-librarian's). The restart recorded nothing twice.
+again. A second librarian turn runs, and extraction 1 succeeds. The trace
+then holds exactly one charter revision, one revision per subsystem file and
+two entity map revisions (the seed and the librarian's). The restart recorded
+nothing twice.
 
 ### 7. Remove the project
 

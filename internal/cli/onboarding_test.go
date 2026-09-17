@@ -91,11 +91,13 @@ func (s *fakeLibrarianSession) Run(ctx context.Context, req agent.Request) (*age
 	first := len(f.runs) == 1
 	tools := f.clients[req.Env["OSMIA_MCP_TOKEN"]]
 	f.mu.Unlock()
+	if first {
+		close(f.entered)
+	}
 	if tools == nil {
 		return nil, fmt.Errorf("turn %s has no tools", req.Name)
 	}
 	if first {
-		close(f.entered)
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
@@ -315,10 +317,14 @@ func TestM2ProjectOnboarding(t *testing.T) {
 	if want := map[string]int{"charter": 1, "kb-entities": 2, "subsystem-trace": 1, "subsystem-service": 1, "subsystem-demo": 1}; !reflect.DeepEqual(counts, want) {
 		t.Fatalf("document revisions %v, want %v", counts, want)
 	}
-	// Registration records the seed; the librarian's revisions follow it.
+	// Registration records the seed as the owner; the librarian's revisions
+	// follow it.
+	if seed := docs["kb-entities"][0]; seed.Actor != (trace.Actor{Kind: "owner", ID: "local"}) {
+		t.Fatalf("seed revision: %+v", seed.Header)
+	}
 	for doc, revisions := range docs {
 		last := revisions[len(revisions)-1]
-		if doc != "charter" && (last.Actor.Kind != "agent" || last.Cause == "") {
+		if doc != "charter" && (last.Actor != (trace.Actor{Kind: "agent", ID: "agent_librarian"}) || last.Cause == "") {
 			t.Fatalf("%s is not a librarian revision: %+v", doc, last.Header)
 		}
 	}

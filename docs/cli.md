@@ -66,15 +66,17 @@ The [onboarding walkthrough](m2-onboarding.md) runs `project add`, `handin`,
   `projects/<id>/config.toml`, creates the trace repository with a charter
   template and an entity map seeded from the clone's tracked files, lists the ID in
   `active_projects`, requests the librarian's first knowledge-base extraction
-  and activates the project without a restart. The clone path is made absolute by the client and must be an
-  existing local Git repository outside the Osmia root; nothing is written to
-  it. The output names the project ID, the trace path and the next step:
-  writing the charter in `<trace>/charter.md`. The extraction runs in the
-  service after the command returns; `status` shows its state, and the project
-  is usable whether it succeeds or fails. `osmia serve` has no librarian
-  runner, so there the extraction fails with that reason. Operation stays single-project:
-  adding another project while one is active is refused and the error names
-  the active project. Repeating the active project's exact registration
+  and activates the project without a restart. The clone path is made
+  absolute by the client and must be an existing local Git repository outside
+  the Osmia root; nothing is written to it. The output names the project ID,
+  the trace path and the next step: writing the charter in
+  `<trace>/charter.md`. The extraction runs in the service after the command
+  returns; `status` shows its state, and the project is usable whether it
+  succeeds or fails. `osmia serve` has no librarian runner, so there the
+  extraction fails with the recorded reason "this service has no agent runner
+  for the librarian"; `osmia project extract` starts a new attempt. Operation
+  stays single-project: adding another project while one is active is refused
+  and the error names the active project. Repeating the active project's exact registration
   returns it again.
 - `project extract <project-id>` starts a new
   [knowledge-base extraction](knowledge-base.md#extraction) of the active
