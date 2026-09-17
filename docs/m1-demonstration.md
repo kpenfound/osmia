@@ -7,7 +7,8 @@ service, trace repository, reconciliation controller, thread runner, turn
 dispatcher and turn isolation path. The agent backend, container engine, MCP
 transport and workspace provider are fakes. The test uses no network, live
 model or real container, and it runs in a temporary root with a local Git
-repository as the target clone.
+repository as the target clone. The [M2 hand-in demonstration](m2-demonstration.md)
+follows the same pattern from handed material to a sketched spec and plan.
 
 ## Running it
 
