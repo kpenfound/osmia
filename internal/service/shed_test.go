@@ -77,7 +77,8 @@ func (f *shedFixture) awaitShed(t *testing.T, stream config.WorkstreamID, want s
 			return
 		}
 		// A round ends once: another ending never becomes the wanted one.
-		if (strings.HasPrefix(state.Value, "heard-") || strings.HasPrefix(state.Value, "failed-")) && strings.TrimLeft(state.Value, "headfil-") == strings.TrimLeft(want, "headfil-") {
+		round := func(value string) string { return value[strings.LastIndexByte(value, '-')+1:] }
+		if (strings.HasPrefix(state.Value, "heard-") || strings.HasPrefix(state.Value, "failed-")) && round(state.Value) == round(want) {
 			t.Fatalf("workstream %s shed ended %q, want %q", stream, state.Value, want)
 		}
 		if time.Now().After(deadline) {
