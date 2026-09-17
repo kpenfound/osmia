@@ -715,11 +715,12 @@ func TestRoundOperationInputIsValidated(t *testing.T) {
 }
 
 // A stop between the round's record and its transition leaves the files
-// recorded: the next service records nothing again and only moves the shed.
+// recorded: the next service records nothing again and only moves the shed,
+// to heard even when the workstream was abandoned in between.
 // A turn the stopped service captured is completed without running a member.
 func TestRoundRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 	t.Parallel()
-	for _, crash := range []string{"captured", "recorded"} {
+	for _, crash := range []string{"captured", "recorded", "recorded-then-abandoned"} {
 		t.Run(crash, func(t *testing.T) {
 			f := newShedFixture(t, 1)
 			ctx := context.Background()
@@ -777,10 +778,17 @@ func TestRoundRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 			must(t, err)
 			must(t, os.MkdirAll(filepath.Join(directory, "output"), 0700))
 			must(t, os.WriteFile(filepath.Join(directory, "output", "contributions.json"), data, 0600))
-			if crash == "recorded" {
+			if crash != "captured" {
 				must(t, repo.CompleteTurn(ctx, stream, member, second.TurnID, "earlier-session", f.clock.Now()))
 				must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.DocumentID(1, member), Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: trace.Actor{Kind: "agent", ID: member}, Cause: operation, Depth: 1},
 					Path: shed.Path(1, member), Content: string(data)}}))
+			}
+			if crash == "recorded-then-abandoned" {
+				// The owner abandoned the workstream after the record was
+				// committed: the round was heard, and its state says so.
+				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "abandoned", Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: "owner"}
+				_, err := repo.SetFeatureState(ctx, h, AbandonedState, "the owner abandoned the workstream")
+				must(t, err)
 			}
 			must(t, repo.Close())
 
@@ -825,5 +833,105 @@ func TestMemberInterruptedEveryAttemptIsRecordedAsFailed(t *testing.T) {
 	must(t, err)
 	if len(th.Turns) != maxRoundAttempts {
 		t.Fatalf("attempts: %+v", th.Turns)
+	}
+}
+
+// setCommittee rewrites capacity.committee in the fixture's config.toml.
+func (f *shedFixture) setCommittee(t *testing.T, members int) {
+	t.Helper()
+	path := filepath.Join(f.opts.Config.Root, "config.toml")
+	data, err := os.ReadFile(path)
+	must(t, err)
+	old := fmt.Sprintf("committee = %d\n", f.members)
+	if !strings.Contains(string(data), old) {
+		t.Fatalf("config.toml lacks %q", old)
+	}
+	must(t, os.WriteFile(path, []byte(strings.Replace(string(data), old, fmt.Sprintf("committee = %d\n", members), 1)), 0600))
+	f.members = members
+}
+
+// A committee is fixed once its workstream is in the shed: a later
+// capacity.committee neither adds a member nor widens a later round.
+func TestCapacityChangeLeavesAnExistingCommitteeAlone(t *testing.T) {
+	t.Parallel()
+	f := newShedFixture(t, 2)
+	ctx := context.Background()
+	for round := 1; round <= 2; round++ {
+		for i := 1; i <= 3; i++ {
+			f.member(round, i, 1, func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error { return nil })
+		}
+	}
+	stream := f.handIn(t, "design", handedDesign)
+	f.awaitShed(t, stream, "heard-1")
+	f.stop(t)
+	f.setCommittee(t, 3)
+	f.start(t)
+	defer f.stop(t)
+	if got := f.s.current().Capacity.Committee; got != 3 {
+		t.Fatalf("loaded capacity.committee %d", got)
+	}
+	d := &debate{s: f.s, repository: f.repository()}
+	must(t, d.Pass(ctx))
+	state, err := f.repository().Workflow(stream, shedSubject)
+	must(t, err)
+	must(t, d.request(ctx, stream, state, roundInput{Round: 2, Spec: 1, Plan: 1}, "shed-round-1-heard"))
+	f.awaitShed(t, stream, "heard-2")
+	if _, err := f.repository().Thread(stream, committeeAgent(3)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the committee grew: %v", err)
+	}
+	records, err := shed.Records(f.repository(), stream)
+	must(t, err)
+	var second []string
+	for _, r := range records {
+		if r.Round == 2 {
+			second = append(second, r.Member)
+		}
+	}
+	if want := []string{committeeAgent(1), committeeAgent(2)}; !slices.Equal(second, want) {
+		t.Fatalf("round 2 heard %v, want %v", second, want)
+	}
+	if runs := f.runs(); slices.Contains(runs, roundTurnID(2, committeeAgent(3), 1)) {
+		t.Fatalf("a third member ran: %v", runs)
+	}
+}
+
+// The in-shed transition counts the committee that runs. A stop after the
+// committee's threads were created and before the transition, followed by a
+// lower capacity.committee, leaves the larger committee: the reason names it.
+func TestInShedReasonCountsTheCommitteeThatRuns(t *testing.T) {
+	t.Parallel()
+	f := newShedFixture(t, 3)
+	ctx := context.Background()
+	runner := f.opts.Committee
+	f.stop(t)
+	f.opts.Committee = nil
+	f.start(t)
+	stream := f.handIn(t, "design", handedDesign)
+	f.await(t, stream, sketched)
+	// What the stopped service got to: the three threads, not the transition.
+	must(t, (&debate{s: f.s, repository: f.repository()}).ensureCommittee(ctx, stream, 3))
+	f.stop(t)
+	f.setCommittee(t, 2)
+	all := newBarrier(3)
+	for i := 1; i <= 3; i++ {
+		f.member(1, i, 1, func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
+			return all.wait(ctx)
+		})
+	}
+	f.opts.Committee = runner
+	f.start(t)
+	defer f.stop(t)
+	f.awaitShed(t, stream, "heard-1")
+	var reason string
+	for _, tr := range f.transitions(t, stream) {
+		if tr.Subject == trace.FeatureSubject && tr.To == InShedState {
+			reason = tr.Reason
+		}
+	}
+	if want := "spec.md revision 1 and plan.json revision 1 enter the shed with a committee of 3"; reason != want {
+		t.Fatalf("in-shed reason %q, want %q", reason, want)
+	}
+	if records, err := shed.Records(f.repository(), stream); err != nil || len(records) != 3 {
+		t.Fatalf("records: %+v %v", records, err)
 	}
 }

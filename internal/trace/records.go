@@ -267,7 +267,7 @@ func documentPath(p string, stream bool) error {
 var shedRound = regexp.MustCompile(`^round-[1-9][0-9]{0,8}$`)
 
 // shedPath reports whether parts name a shed record of a workstream,
-// shed/round-<n>/<name>.json, where the name is a record ID.
+// shed/round-<n>/<name>.json, where the name is a key such as an agent ID.
 func shedPath(parts []string) bool {
 	return len(parts) == 3 && parts[0] == "shed" && shedRound.MatchString(parts[1]) && strings.HasSuffix(parts[2], ".json") && key(strings.TrimSuffix(parts[2], ".json"))
 }

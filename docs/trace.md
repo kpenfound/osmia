@@ -48,8 +48,9 @@ does not infer authority, readiness or workflow transitions from them.
 Only documents can be project-scoped. Project document paths are `charter.md`,
 `kb/entities.json`, `kb/<name>.md` and `notes/<role>.md`; workstream document paths
 are `spec.md`, `plan.json`, `handed/<name>` and the shed records
-`shed/round-<n>/<name>.json`, where `<n>` is a positive round number without
-leading zeros and `<name>` is a record ID. Handed inputs are immutable.
+`shed/round-<n>/<agent>.json`, where `<n>` is a positive round number without
+leading zeros and `<agent>` is the committee member's agent ID. Handed inputs
+are immutable.
 Only a handed document carries a `source`: `file:` and the absolute path it was
 read from, the issue URL, or `stdin`.
 Document paths retain one record identity. Agent role and thread IDs stay stable

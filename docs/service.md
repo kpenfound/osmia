@@ -319,8 +319,8 @@ The committee is a fixed set of durable threads of the workstream:
 `agent_committee_1` to `agent_committee_<N>` (role `committee`, threads
 `thread_committee_<i>`), where `N` is
 [`capacity.committee`](configuration.md) when the workstream enters the shed.
-Later rounds run the threads that exist; a changed configuration does not
-resize a committee.
+Every round runs the threads that exist, and the transition's reason counts
+them; a changed configuration does not resize a committee.
 
 The workflow subject `shed` tracks the rounds, with transitions by
 `service`/`shed` in `events.jsonl`:
@@ -418,7 +418,9 @@ operation without running a member.
 [Abandoning](#abandoning) the workstream cancels the members' running turns.
 The round of an abandoned workstream records no file and ends `failed-<n>`
 with the reason `round <n> failed: the workstream was abandoned, so the
-committee is not heard`.
+committee is not heard`. A round whose files were committed before the
+workstream was abandoned still ends `heard-<n>`, so the shed state never
+contradicts the record.
 
 `Options.Committee` supplies the execution engine and MCP host factory the
 committee's turns run in. Without it no workstream enters the shed, so a
@@ -668,11 +670,16 @@ either pause mode. The gate reads the runtime store on every pass, so after a
 pause is cleared the loop's next periodic pass runs the held turns with no new
 message or operation.
 
-The scheduler also dispatches within the configured `[capacity]`. Mason,
-reviewer and committee turns share `capacity.masons`, `capacity.reviewers` and
-`capacity.committee` across workstreams. Every other role runs one turn at a
-time per workstream. Each workstream runs at most the project's
-`capacity.per_workstream` turns at once. Chief-of-staff turns take no slot and
+The scheduler also dispatches within the configured `[capacity]`. Mason and
+reviewer turns share `capacity.masons` and `capacity.reviewers` across
+workstreams. Committee turns are not dispatched by the scheduler: a
+[shed round](#a-members-turn) runs every member of its workstream's committee
+at once, outside `capacity.per_workstream`, so two workstreams in the shed run
+two committees at the same time. Every other role runs one turn at a time per
+workstream. Each workstream runs at most the project's
+`capacity.per_workstream` of the turns the scheduler dispatches at once; a
+round's turns in flight count toward that number, so they hold the
+workstream's slots against other roles while the round runs. Chief-of-staff turns take no slot and
 run even when every slot is taken. A turn holds its slots while it is in
 flight, so they are free again once it completes, whether it succeeded, failed,
 is waiting or was cancelled. A claim a restart interrupted holds no slot,

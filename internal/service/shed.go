@@ -129,12 +129,17 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 		return err
 	}
 	if feature.Value == SketchedState {
-		members := d.s.current().Capacity.Committee
-		if err := d.ensureCommittee(ctx, stream, members); err != nil {
+		if err := d.ensureCommittee(ctx, stream, d.s.current().Capacity.Committee); err != nil {
 			return err
 		}
-		reason := fmt.Sprintf("%s enter the shed with a committee of %d", pin, members)
-		_, err := d.repository.MoveFeatureState(ctx, d.header(InShedState, stream, SketchedState, d.s.now()), SketchedState, InShedState, reason)
+		// The committee is the threads that exist, which is what every round
+		// runs.
+		members, err := d.committee(stream)
+		if err != nil {
+			return err
+		}
+		reason := fmt.Sprintf("%s enter the shed with a committee of %d", pin, len(members))
+		_, err = d.repository.MoveFeatureState(ctx, d.header(InShedState, stream, SketchedState, d.s.now()), SketchedState, InShedState, reason)
 		if errors.Is(err, trace.ErrConflict) {
 			return nil
 		}
@@ -348,7 +353,8 @@ var errNoCommittee = errors.New("this service has no agent runner for the commit
 // member's contributions are recorded as one file of the round, in one
 // commit, and the shed moves to heard-<n>. A member whose turn failed is
 // recorded with the failure and what it contributed before it. Abandoning
-// the workstream cancels the running turns and fails the round. Storage
+// the workstream cancels the running turns and fails a round that has no
+// record; a round whose files are committed is heard all the same. Storage
 // errors and a missing committee runner leave the operation pending for
 // another attempt, which finds the turns that already ended in the threads.
 func (d *debate) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
@@ -393,13 +399,23 @@ func (d *debate) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err := errors.Join(failures...); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	if gone, err := abandoned(d.repository, stream); err != nil || gone {
+	recorded, err := shed.Records(d.repository, stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	// A round whose files are committed was heard, whatever happened to the
+	// workstream since: only a round without a record fails on abandonment.
+	heard := slices.ContainsFunc(recorded, func(r shed.Record) bool { return r.Round == in.Round })
+	if !heard {
+		gone, err := abandoned(d.repository, stream)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		return d.terminal(ctx, op.ID, stream, in.Round, "failed", fmt.Sprintf("round %d failed: the workstream was abandoned, so the committee is not heard", in.Round))
+		if gone {
+			return d.terminal(ctx, op.ID, stream, in.Round, "failed", fmt.Sprintf("round %d failed: the workstream was abandoned, so the committee is not heard", in.Round))
+		}
 	}
-	return d.record(ctx, op.ID, stream, in, records)
+	return d.record(ctx, op.ID, stream, in, records, recorded)
 }
 
 // member drives one member's turn of the round to its end and returns what
@@ -772,12 +788,9 @@ func (d *debate) stage(ctx context.Context, clone string, stream config.Workstre
 
 // record commits one file per member under shed/round-<n>/, each authored by
 // its member and caused by the operation, then moves the shed to heard-<n>.
-// A round whose files are already recorded only moves.
-func (d *debate) record(ctx context.Context, operation string, stream config.WorkstreamID, in roundInput, records []shed.Record) (coreadapter.OperationResult, error) {
-	recorded, err := shed.Records(d.repository, stream)
-	if err != nil {
-		return coreadapter.OperationResult{}, err
-	}
+// recorded is what the workstream's shed already holds: a round with files in
+// it only moves.
+func (d *debate) record(ctx context.Context, operation string, stream config.WorkstreamID, in roundInput, records, recorded []shed.Record) (coreadapter.OperationResult, error) {
 	if !slices.ContainsFunc(recorded, func(r shed.Record) bool { return r.Round == in.Round }) {
 		at := d.s.now()
 		var docs []trace.Document
@@ -792,6 +805,7 @@ func (d *debate) record(ctx context.Context, operation string, stream config.Wor
 		if err := d.repository.RecordDocuments(ctx, docs); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
+		var err error
 		if recorded, err = shed.Records(d.repository, stream); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
