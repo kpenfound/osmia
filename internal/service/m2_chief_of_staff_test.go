@@ -515,7 +515,7 @@ func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
 			`{"recorded":true,"questions":["2"],"scope":"notify","next":"The ruling is delivered to each asker as its next turn."}`,
 		},
 	}
-	if st := results["status"]; len(st) != 2 || !strings.HasPrefix(st[0], `{"stored":false,"reason":`) || st[1] != `{"stored":true,"revision":1}` {
+	if st := results["status"]; len(st) != 2 || st[0] != `{"stored":false,"reason":"agents[0] contains an Osmia or backend identifier (\"`+demoAgent+`\"); refer to the work or the agent in words"}` || st[1] != `{"stored":true,"revision":1}` {
 		t.Fatalf("set_status results: %v", st)
 	}
 	delete(results, "status")
