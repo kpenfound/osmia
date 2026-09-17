@@ -41,7 +41,8 @@ type Options struct {
 	// configured capacity, replacing Reconciliation.Schedule. A runtime pause
 	// holds new turns on the threads it covers, except chief-of-staff turns;
 	// clearing it lets them run. Outbox events are delivered to each
-	// workstream's chief of staff as queued turns, one per event window.
+	// workstream's chief of staff as queued turns, one per event window, and
+	// each recorded answer to a question is queued on its asker's thread.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
 	// Librarian supplies the execution boundary of the librarian's
@@ -412,9 +413,9 @@ func (s *Service) stop(active *activeProject) error {
 // service's own reconcilers for knowledge-base extraction and architect
 // drafts; the architect controller runs at the start of every pass. With
 // Options.Threads, outbox events are then delivered to each workstream's
-// chief of staff and the scheduler runs, whose gate holds turns that a
-// runtime pause covers; without it, the configured Schedule hook runs
-// instead.
+// chief of staff, recorded answers are queued on their askers' threads, and
+// the scheduler runs, whose gate holds turns that a runtime pause covers;
+// without it, the configured Schedule hook runs instead.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, error) {
 	options, threads := s.options.Reconciliation, s.options.Threads
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
@@ -460,12 +461,12 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 			repository.Close()
 			return nil, nil, err
 		}
-		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), Profile: s.chiefProfile(cfg)})
+		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), Profile: s.chiefProfile(cfg), System: s.chiefEventsPrompt(cfg.Project.ID, repository)})
 		if err != nil {
 			repository.Close()
 			return nil, nil, err
 		}
-		hooks = append(hooks, deliver.Pass, dispatch.Pass)
+		hooks = append(hooks, deliver.Pass, s.answers(cfg, repository).Pass, dispatch.Pass)
 	}
 	options.Schedule = func(ctx context.Context) error {
 		for _, hook := range hooks {

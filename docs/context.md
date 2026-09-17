@@ -46,10 +46,13 @@ without a scope.
 ## Rendering
 
 `Bundle.Render` returns the text form a turn request carries. An owner message
-to the chief of staff carries it in the request's system prompt; see
+to the chief of staff carries it in the request's system prompt, and so does
+every [event turn](service.md#event-delivery); see
 [conversation](service.md#conversation). Each
 section header names the path and record it came from, so an agent can cite
-`charter#2`, `kb/internal.md` or a ruling's record and revision. Knowledge-base
+`charter#2`, `kb/internal.md` or, by its record ID, a ruling as
+`ruling#<record>`; the [answer tool](trace.md#questions) checks such
+citations. Knowledge-base
 prose is included verbatim between a
 `### kb/<subsystem>.md (subsystem <subsystem>)` line and a
 `### end of kb/<subsystem>.md` line; a newline is added when the prose does not

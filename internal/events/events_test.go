@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -347,6 +348,43 @@ func TestProfileFailureKeepsEvents(t *testing.T) {
 	}
 	if n := unacknowledged(t, repo); n != 1 {
 		t.Fatalf("%d unacknowledged", n)
+	}
+}
+
+func TestSystemPromptIsBuiltPerWorkstreamWhenATurnIsQueued(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t)
+	defer repo.Close()
+	var asked []config.WorkstreamID
+	fail := errors.New("no context")
+	var failing error
+	d, err := New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil },
+		System: func(_ context.Context, s config.WorkstreamID) (string, error) {
+			asked = append(asked, s)
+			return "Context of " + string(s), failing
+		}})
+	must(t, err)
+	// No system prompt is built without events, or inside the window.
+	must(t, d.Pass(ctx))
+	f.notify(t, repo, "first")
+	must(t, d.Pass(ctx))
+	if len(asked) != 0 {
+		t.Fatalf("system prompt built early: %v", asked)
+	}
+	f.clock.Advance(time.Second)
+	// A failing system prompt keeps the events for a later pass.
+	failing = fail
+	if err := d.Pass(ctx); !errors.Is(err, fail) {
+		t.Fatalf("system prompt error not reported: %v", err)
+	}
+	if n, turns := unacknowledged(t, repo), eventTurns(t, repo); n != 1 || len(turns) != 0 {
+		t.Fatalf("%d unacknowledged, turns %+v", n, turns)
+	}
+	failing = nil
+	must(t, d.Pass(ctx))
+	turns := eventTurns(t, repo)
+	if len(turns) != 1 || turns[0].Request.SystemPrompt != "Context of "+string(stream) || !slices.Equal(asked, []config.WorkstreamID{stream, stream}) {
+		t.Fatalf("turns %+v, asked %v", turns, asked)
 	}
 }
 

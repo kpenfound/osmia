@@ -34,6 +34,9 @@ type Options struct {
 	Lease time.Duration
 	// Profile returns the chief of staff's profile for a new turn.
 	Profile func() (coreadapter.Profile, error)
+	// System returns the system prompt of a new event turn of the workstream.
+	// Without it the turn has none.
+	System func(context.Context, config.WorkstreamID) (string, error)
 }
 
 // Deliverer turns a workstream's ready outbox events into one chief-of-staff
@@ -133,6 +136,12 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	if err != nil {
 		return err
 	}
+	system := ""
+	if d.options.System != nil {
+		if system, err = d.options.System(ctx, stream); err != nil {
+			return err
+		}
+	}
 	token, err := newToken()
 	if err != nil {
 		return err
@@ -161,7 +170,7 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	req := trace.TurnRequest{
 		Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: turn, Revision: 1, Project: d.repository.Project(), Workstream: stream,
 			At: now, Actor: Actor, Cause: claimed[0].TransitionID},
-		AgentID: chief.Identity.ID, ThreadID: chief.Identity.ThreadID, TurnID: turn, Profile: profile, Prompt: Prompt(claimed)}
+		AgentID: chief.Identity.ID, ThreadID: chief.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: system, Prompt: Prompt(claimed)}
 	if _, err := d.repository.EnqueueTurn(ctx, req); err != nil {
 		return err
 	}

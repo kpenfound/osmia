@@ -68,7 +68,10 @@ func narrow(grant coreadapter.Capabilities, request *coreadapter.Capabilities) c
 }
 
 // roleTools names tools only one role may hold, whatever the service grant says.
-var roleTools = map[string]string{"set_status": "chief_of_staff"}
+var roleTools = map[string]string{"set_status": "chief_of_staff", "answer": "chief_of_staff", "escalate": "chief_of_staff", "route_amendment": "chief_of_staff", "propose_charter": "chief_of_staff"}
+
+// deniedTools names tools one role may never hold, whatever the service grant says.
+var deniedTools = map[string]string{"ask": "chief_of_staff"}
 
 func roleGrant(role string, grant coreadapter.Capabilities) (coreadapter.Capabilities, error) {
 	switch role {
@@ -80,7 +83,7 @@ func roleGrant(role string, grant coreadapter.Capabilities) (coreadapter.Capabil
 	}
 	grant.Tools = slices.DeleteFunc(slices.Clone(grant.Tools), func(name string) bool {
 		owner, reserved := roleTools[name]
-		return reserved && owner != role
+		return reserved && owner != role || deniedTools[name] == role
 	})
 	return grant, nil
 }

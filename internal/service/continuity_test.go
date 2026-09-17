@@ -144,6 +144,10 @@ func (e *demoEngine) Run(ctx context.Context, req agent.Request) (*agent.Result,
 	e.mu.Lock()
 	e.runs = append(e.runs, req.Name)
 	turn := e.turns[req.Name]
+	if turn == nil {
+		// Turns the service names itself, such as event turns, share a script.
+		turn = e.turns["*"]
+	}
 	e.mu.Unlock()
 	e.sessions.mu.Lock()
 	tools := e.sessions.byKey[req.Env["OSMIA_MCP_TOKEN"]]

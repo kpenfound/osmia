@@ -262,41 +262,87 @@ func (r *Repository) transact(ctx context.Context, tx Transaction) (WorkflowStat
 		}
 		return WorkflowState{Version: old.ExpectedVersion + 1, Value: old.Transition.To}, nil
 	}
-	state, err := v.transition(tx, r.project, stream)
+	files, states, err := r.stage(stream, log, v, nil, tx)
 	if err != nil {
 		return WorkflowState{}, err
+	}
+	if err := r.publish(ctx, files); err != nil {
+		return WorkflowState{}, err
+	}
+	_ = r.wake.Notify(context.Background())
+	return states[0], nil
+}
+
+// stage requires r.mu. It applies txs in order to the loaded workflow of
+// stream and returns the files of one commit that records them together with
+// records, each appended to its trace file, and the state each transaction
+// produced. The caller has validated the records and their revisions.
+func (r *Repository) stage(stream config.WorkstreamID, log workflowLog, v *workflowView, records []Record, txs ...Transaction) (map[string][]byte, []WorkflowState, error) {
+	var states []WorkflowState
+	for _, tx := range txs {
+		state, err := v.transition(tx, r.project, stream)
+		if err != nil {
+			return nil, nil, err
+		}
+		states = append(states, state)
 	}
 	prefix := "workstreams/" + string(stream) + "/"
 	events, err := r.readFile(prefix + "events.jsonl")
 	if err != nil {
-		return WorkflowState{}, err
+		return nil, nil, err
 	}
+	recorded := map[string]bool{}
 	for _, line := range bytes.Split(events, []byte{'\n'}) {
 		if len(line) == 0 {
 			continue
 		}
 		record, err := decodeRecord(line)
 		if err != nil {
-			return WorkflowState{}, err
+			return nil, nil, err
 		}
-		if record.header().ID == tx.Transition.ID {
-			return WorkflowState{}, ErrConflict
+		recorded[record.header().ID] = true
+	}
+	for _, tx := range txs {
+		if recorded[tx.Transition.ID] {
+			return nil, nil, ErrConflict
 		}
+		line, err := json.Marshal(tx.Transition)
+		if err != nil {
+			return nil, nil, err
+		}
+		events = append(events, append(line, '\n')...)
+		log.Transactions = append(log.Transactions, tx)
 	}
-	line, err := json.Marshal(tx.Transition)
-	if err != nil {
-		return WorkflowState{}, err
-	}
-	log.Transactions = append(log.Transactions, tx)
 	data, err := json.MarshalIndent(log, "", "  ")
 	if err != nil {
-		return WorkflowState{}, err
+		return nil, nil, err
 	}
-	if err := r.publish(ctx, map[string][]byte{prefix + "workflow.json": append(data, '\n'), prefix + "events.jsonl": append(events, append(line, '\n')...)}); err != nil {
-		return WorkflowState{}, err
+	files := map[string][]byte{prefix + "workflow.json": append(data, '\n'), prefix + "events.jsonl": events}
+	if err := r.appendRecords(files, records); err != nil {
+		return nil, nil, err
 	}
-	_ = r.wake.Notify(context.Background())
-	return state, nil
+	return files, states, nil
+}
+
+// appendRecords requires r.mu. It appends each record as a line of its trace
+// file in files, starting from the file's bytes already in files or on disk.
+func (r *Repository) appendRecords(files map[string][]byte, records []Record) error {
+	for _, rec := range records {
+		name := recordPath(rec)
+		old, ok := files[name]
+		if !ok {
+			var err error
+			if old, err = r.readFile(name); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
+		line, err := json.Marshal(rec)
+		if err != nil {
+			return err
+		}
+		files[name] = append(old, append(line, '\n')...)
+	}
+	return nil
 }
 
 func (r *Repository) Workflow(stream config.WorkstreamID, subject string) (WorkflowState, error) {

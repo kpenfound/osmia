@@ -502,6 +502,10 @@ override when one is set, which may name any configured profile, otherwise the
 role binding. The turn is queued
 with `EnqueueTurn`, so a turn in flight on the chief-of-staff thread finishes
 first, and the scheduler dispatches it in the same pass otherwise.
+The turn's system prompt names the workstream, carries
+`questions.Guidance` (what to do with an open question) and the workstream's
+[context bundle](context.md) assembled from the local files and trace when the
+turn is queued, which is the chief of staff's whole context for a question.
 
 Delivery claims every event with one new attempt token, queues the turn
 `events.TurnID(token)`, then acknowledges the events. A crash or restart at any
@@ -509,6 +513,36 @@ point neither loses nor repeats an event: an event with a claim whose turn is
 already on the chief-of-staff thread is acknowledged without another turn, and
 any other unacknowledged event is delivered in the next window. A claim whose
 lease ran out before its acknowledgement is settled the same way. A
-failing store call or chief-of-staff profile lookup stops the loop, as the
+failing store call, chief-of-staff profile lookup or bundle assembly stops the loop, as the
 scheduler's errors do; an event another claim holds is skipped and retried on a
 later pass.
+
+### Questions
+
+A role asks with the `ask` tool, and the chief of staff chooses with `answer`
+or `escalate`; the [trace reference](trace.md#questions) describes the
+records, the tools and the citation checks. An embedder offers the tools of
+`questions.Tools` through its turn runner's scoped tools and wraps that runner
+in `questions.Turns`, which ends an asking turn with the outcome `waiting`.
+The asker's thread then parks as described above: it holds no slot, its
+workspace stays, the workstream keeps its feature state, and nothing times
+the question out.
+
+`ask` raises one notice event, so the question reaches the chief of staff
+through [event delivery](#event-delivery), together with any other event of
+the same window. Several questions in one window arrive as one turn, which
+lets the chief of staff escalate them as one batch.
+
+In every reconciliation pass, after event delivery and before the scheduler,
+`questions.Deliverer` queues each answered question's answer as the asker's
+next turn on its original thread, which unparks it; the scheduler dispatches
+it in the same pass when a slot is free. The turn's profile is the asker's
+role binding, or its runtime override, at delivery. An abandoned workstream
+keeps its answers undelivered. A failing trace read or profile lookup stops
+the loop, as the scheduler's errors do.
+
+Questions, choices and deliveries are derived from the trace on every pass. A
+restart with an open question delivers its event once the window closes and
+asks nothing again. A restart between a recorded answer and its delivery
+queues the answer turn once. An escalated question stays escalated and its
+asker stays parked until the owner rules.

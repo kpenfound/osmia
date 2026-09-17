@@ -37,8 +37,8 @@ does not infer authority, readiness or workflow transitions from them.
 | --- | --- | --- |
 | `Document` | `documents.jsonl` and its document path | Path and complete content of each revision; a handed document also records its source |
 | `Transition` | `events.jsonl` | Subject, prior/resulting state and reason |
-| `Question` | `questions/<id>/question.jsonl` | Asking actor, original question and owner-facing text |
-| `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer and affected references |
+| `Question` | `questions/<id>/question.jsonl` | Asking actor, its thread and turn, the question as asked, and once escalated the owner-facing text and the escalation; see [questions](#questions) |
+| `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer, citations and affected references |
 | `Agent` | `agents/<id>/identity.jsonl` | Stable role/thread identity and backend session at that revision |
 | `TurnRequest` | `agents/<agent-id>/log.jsonl` | Thread/turn identity, accepted profile, system prompt, request and caller-supplied context |
 | `TurnResponse` | `agents/<agent-id>/log.jsonl` | Exact request revision, thread/turn identity, adapter result and any execution failure |
@@ -170,8 +170,8 @@ claim, acknowledgement and release history, sorted by event ID. Each entry's
 The repository serializes calls under its exclusive process lock. Publication
 writes immutable Git objects using a private index, syncs the objects, writes and
 syncs a recovery journal under `.git`, then atomically replaces and syncs the
-branch ref. That ref is the visibility boundary. Ordinary workflow, transition
-and owned agent files are materialized from the committed objects before the journal is removed.
+branch ref. That ref is the visibility boundary. Ordinary workflow, transition,
+question and owned agent files are materialized from the committed objects before the journal is removed.
 Before publication, recovery retains the prior state; after publication, recovery
 finishes materializing the complete new state. Store reads and writes finish any
 pending publication before inspecting the files. Direct filesystem readers must
@@ -500,6 +500,101 @@ status the check refuses is an ordinary tool result,
 `{"stored":false,"reason":"…"}`, so the chief of staff reads why; a stored
 one returns `{"stored":true,"revision":n}`. Turn isolation grants the tool to
 `chief_of_staff` only; see [turn isolation](isolation.md#capabilities).
+
+## Questions
+
+A role's question, the chief of staff's one choice for it and the answer's
+way back are records under `workstreams/<id>/questions/<n>/`, where `n` counts
+the workstream's questions from 1. Each question also has a workflow subject,
+`trace.QuestionSubject(n)` (`question_<n>`), whose state is `open`, `answered`
+or `escalated`. The state leaves `open` once, so a question gets exactly one
+choice. Every write below is one commit through the journaled publication
+boundary: the records, the transition in `events.jsonl` and any event appear
+together or not at all. Each write requires the calling scope to name this
+service session's active, uncaptured turn, as `SetStatus` does, and a scope of
+the wrong role or turn is an ordinary error. A request from the right turn
+that cannot be recorded returns `*QuestionRefused` with a reason written for
+the agent, and writes nothing.
+
+| Call | Records | Transition |
+| --- | --- | --- |
+| `Ask(ctx, agent, scope, text, at)` | Revision 1 of `Question` `n`: `asked_by` (the agent), `thread`, `turn` and the scope's unit, with `question` as asked. | `question_<n>_open`, from nothing to `open`, with one `notice` event for the chief of staff: `Question <n> is open, asked by the <role>: <question>`. |
+| `AnswerQuestion(ctx, agent, scope, n, text, citations, at)` | Revision 1 of `Ruling` `n`: `question_id`, the question's latest revision, `decision` `answer`, `returned_answer` and `citations`. | `question_<n>_answered`, `open` to `answered`. |
+| `EscalateQuestions(ctx, agent, scope, request, at)` | For every listed question, its next `Question` revision: `sent_to_owner` holds the rephrasing and `escalation` holds `batch`, the batch's `questions`, `blocked`, `options` and `recommendation`. The batch ID is `escalation_` and the first listed question. | `question_<n>_escalated` for each, `open` to `escalated`. |
+
+In every record the actor is the calling agent, the cause is its turn
+request's ID and the depth is one more than the request's.
+
+`Ask` fails for a chief-of-staff scope, and `AnswerQuestion` and
+`EscalateQuestions` fail for any other; these are ordinary errors, which the
+tools pass on as tool errors. `Ask` refuses an empty question, and a second
+question from a turn that already asked one. `AnswerQuestion` and
+`EscalateQuestions` refuse a question that does not exist, is already
+answered, is escalated (`question <n> is escalated to the owner; only the
+owner's ruling answers it`), or was not asked through `ask` and so has no
+workflow subject. An escalated question therefore cannot then be answered by
+the chief of staff. An answer needs text and at least one citation; an open
+question that already has a ruling record with its number fails with
+`ErrConflict`. An escalation needs at least one question, a rephrasing, what is
+blocked and a recommendation; options may be empty. A batch that lists a
+question twice, or any question that is not open, escalates none of them.
+
+`Questions(stream)` returns each question, oldest first, as a `QuestionState`:
+the question as asked, its latest revision, the subject's state and the latest
+revision of its ruling. An escalated question has no ruling, so it still
+counts as open in the [workstream status](#workstream-status).
+
+`internal/questions` holds the tools. `questions.Tools(repository, agent,
+scope, now)` returns the memory tools of one claimed turn by role: `ask` for
+every role but the chief of staff, and `answer`, `escalate`, `route_amendment`
+and `propose_charter` for the chief of staff. The
+[role grant](isolation.md#capabilities) enforces the same split whatever the
+service grants. Unknown input fields are rejected. A refusal is an ordinary
+tool result, `{"recorded":false,"reason":"…"}`, so the agent reads why.
+
+| Tool | Input | Recorded result |
+| --- | --- | --- |
+| `ask` | `question` | `{"recorded":true,"question":"<n>","next":"…"}` |
+| `answer` | `question`, `text`, `citations` | `{"recorded":true,"question":"<n>","next":"…"}` |
+| `escalate` | `questions`, `rephrasing`, `blocked`, `options`, `recommendation` | `{"recorded":true,"batch":"escalation_<n>","questions":[…]}` |
+| `route_amendment`, `propose_charter` | any object | Always `{"recorded":false,"reason":"reserved until amendments and standing rulings (M4)"}`; they read and write nothing. |
+
+Before `answer` records anything, `questions.Resolve` checks every citation
+against the trace, and the first one that names nothing refuses the answer
+with its reason:
+
+| Citation | Resolves when |
+| --- | --- |
+| `charter#<n>` | The latest charter numbers a rule `n` exactly once. The charter is read through `Repository.Charter`, which first records an owner edit. |
+| `kb/<subsystem>.md` | That knowledge-base file exists and can be read. |
+| `ruling#<record>` | The question's workstream records a ruling with that record ID. |
+| `spec#<n>` | The workstream's latest recorded `spec.md` numbers an acceptance criterion `n` exactly once. |
+| `plan#<unit>` | The workstream's latest recorded `plan.json` parses and holds the unit ID exactly once. |
+
+Anything else is refused as not a citation. The citation check runs before the
+write and outside its lock, so an owner edit between the two is not seen. A
+refused `answer` records nothing of its own, but checking a `charter#<n>`
+citation first records a pending owner edit of the charter, as every charter
+read does.
+
+`questions.Turns` wraps the turn runner the thread dispatcher uses. After the
+wrapped run it reads the workstream's questions, and a turn that asked one
+ends with the outcome `waiting` and the report `Asked question <n>`, whatever
+the agent reported, so its thread parks. A turn that asked nothing keeps its
+result. It forwards resume checks to the wrapped runner.
+
+`questions.Deliverer.Pass` queues each answered question's
+`returned_answer` on the thread that asked, as turn `answer_<n>`
+(`questions.TurnID`) with request ID `request_answer_<n>`, actor
+`service`/`questions` and cause `question_<n>_answered`. The prompt is
+`questions.Prompt`: the question number, the question as asked, the answer and
+the citations. The turn carries the asking turn's unit and system prompt and
+the profile `Profile(role)` returns at delivery. The tools only record; this
+pass is the one path that delivers. A question whose thread already holds its
+answer turn is skipped, so a repeated pass or a restart between the record and
+the delivery queues the turn exactly once. A question whose asking agent the
+trace does not hold is skipped. A profile
+error stops the pass. `questions.Deliver` is the single-question step.
 
 ## Feature spec and plan
 

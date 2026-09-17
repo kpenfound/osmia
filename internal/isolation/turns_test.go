@@ -330,6 +330,45 @@ func TestStatusToolOnlyReachesChiefOfStaff(t *testing.T) {
 	}
 }
 
+func TestQuestionToolsFollowTheRole(t *testing.T) {
+	chief := []string{"answer", "escalate", "route_amendment", "propose_charter"}
+	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason", "librarian"} {
+		t.Run(role, func(t *testing.T) {
+			r, _, h, engine, input := fixture(t, role, "container")
+			// Every role is granted every question tool by name, and the
+			// service registers them all.
+			granted := append([]string{"ask"}, chief...)
+			r.Grants[role] = a.Capabilities{Tools: granted}
+			handle := func(context.Context, json.RawMessage) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }
+			r.Scoped = func(context.Context, a.Scope) ([]a.Tool, error) {
+				var tools []a.Tool
+				for _, name := range granted {
+					tools = append(tools, a.Tool{Name: name, Effect: a.ToolMemory, Handle: handle})
+				}
+				return tools, nil
+			}
+			if _, err := r.Run(context.Background(), input); err != nil {
+				t.Fatal(err)
+			}
+			var names []string
+			for _, tool := range h.requests[0].Tools {
+				names = append(names, tool.Name)
+			}
+			want := []string{"ask"}
+			if role == "chief_of_staff" {
+				want = chief
+			}
+			var allowed []string
+			for _, name := range want {
+				allowed = append(allowed, "mcp__osmia_0__"+name)
+			}
+			if !reflect.DeepEqual(names, want) || !reflect.DeepEqual(h.requests[0].Capabilities.Tools, want) || !reflect.DeepEqual(engine.Requests[0].Profile.AllowedTools, allowed) {
+				t.Fatalf("tools %v, grant %v, allow list %v; want %v", names, h.requests[0].Capabilities.Tools, engine.Requests[0].Profile.AllowedTools, want)
+			}
+		})
+	}
+}
+
 type verifyOnlyEngine struct{ a.Engine }
 
 func TestServiceTurnsForwardResumeChecksToEngine(t *testing.T) {
