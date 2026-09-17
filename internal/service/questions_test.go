@@ -39,39 +39,63 @@ func toolNames(ctx context.Context, tools *mcp.ClientSession) ([]string, error) 
 	return names, nil
 }
 
-// A fake mason and a fake reviewer ask, a fake chief of staff answers one
-// question with a citation and escalates the others as a batch, and the
-// service restarts with open, answered-but-undelivered and escalated
-// questions. Nothing is lost and nothing runs twice.
-func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
+// questionAsker is one agent of a question fixture with its first queued turn.
+type questionAsker struct {
+	stream                    config.WorkstreamID
+	agent, thread, role, turn string
+}
+
+// questionFixture is a project whose askers and chiefs of staff are fake
+// agents holding the real question tools over MCP. The clock stands still, so
+// the event window closes only when a test advances it. Fake turns lock mu
+// around results and problems.
+type questionFixture struct {
+	opts     Options
+	cfg      *config.Config
+	clock    *fixedClock
+	engine   *demoEngine
+	lives    chan *trace.Repository
+	ticks    chan time.Time
+	mu       sync.Mutex
+	results  map[string][]string
+	problems []string
+}
+
+// newQuestionFixture creates the trace with the charter, each asker's
+// workstream and thread, and one queued turn per asker. global is appended to
+// the root's config.toml.
+func newQuestionFixture(t *testing.T, prefix, global, charter string, askers []questionAsker) *questionFixture {
+	t.Helper()
 	ctx := context.Background()
-	home, err := os.MkdirTemp("", "qa-")
+	home, err := os.MkdirTemp("", prefix)
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	opts := fixtureAt(t, home)
-	// One mason slot: the second mason runs only once the first has parked.
-	global := filepath.Join(opts.Config.Root, "config.toml")
-	data, err := os.ReadFile(global)
+	f := &questionFixture{opts: fixtureAt(t, home), clock: &fixedClock{now: demoStart}, lives: make(chan *trace.Repository, 1), ticks: make(chan time.Time), results: map[string][]string{}}
+	path := filepath.Join(f.opts.Config.Root, "config.toml")
+	data, err := os.ReadFile(path)
 	must(t, err)
-	must(t, os.WriteFile(global, append(data, []byte("[capacity]\nmasons = 1\n")...), 0600))
-	cfg, err := config.Load(opts.Config)
+	must(t, os.WriteFile(path, append(data, []byte(global)...), 0600))
+	f.cfg, err = config.Load(f.opts.Config)
 	must(t, err)
+	cfg, clock := f.cfg, f.clock
 	must(t, os.MkdirAll(cfg.Project.Clone, 0700))
 	demoGit(t, home, "-C", cfg.Project.Clone, "init", "-q")
 
-	clock := &fixedClock{now: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	must(t, err)
-	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
 	traceDir, err := cfg.Root.ProjectTrace(project)
 	must(t, err)
-	must(t, os.WriteFile(filepath.Join(traceDir, "charter.md"), []byte("# Charter\n\n1. Keep state in files under the root.\n"), 0600))
-	agents := map[string]string{demoThread: demoAgent, "thread_mason2": "agent_mason2", "thread_reviewer": "agent_reviewer", trace.ChiefOfStaff: trace.ChiefOfStaff}
-	for _, a := range []struct{ agent, thread, role, turn string }{
-		{demoAgent, demoThread, "mason", "build"}, {"agent_mason2", "thread_mason2", "mason", "build2"}, {"agent_reviewer", "thread_reviewer", "reviewer", "review"},
-	} {
-		h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: a.agent, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}
+	must(t, os.WriteFile(filepath.Join(traceDir, "charter.md"), []byte(charter), 0600))
+	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff}
+	created := map[config.WorkstreamID]bool{}
+	for _, a := range askers {
+		if !created[a.stream] {
+			must(t, repo.CreateWorkstream(ctx, a.stream, clock.Now(), owner))
+			created[a.stream] = true
+		}
+		agents[a.thread] = a.agent
+		h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: a.agent, Project: project, Workstream: a.stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}
 		must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: a.role, ThreadID: a.thread}))
 		h.Schema, h.ID, h.Cause, h.Depth = "osmia.trace.turn-request", "request_"+a.turn, "message_"+a.turn, 1
 		_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: a.agent, ThreadID: a.thread, TurnID: a.turn,
@@ -81,18 +105,17 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	must(t, repo.Close())
 
 	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
-	engine := &demoEngine{sessions: sessions, turns: map[string]demoTurn{}}
-	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+	f.engine = &demoEngine{sessions: sessions, turns: map[string]demoTurn{}}
+	f.engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
 	views := filepath.Join(cfg.Root.String(), "views")
 	must(t, os.Mkdir(views, 0700))
-	lives := make(chan *trace.Repository, 1)
 	// Every role is granted every question tool; the role decides what it sees.
 	every := append([]string{"file_read", questions.AskTool}, questions.ChiefTools...)
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
-		lives <- r
-		turns := &isolation.Turns{Workspaces: &demoWorkspaces{directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: engine,
+	f.opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+		f.lives <- r
+		turns := &isolation.Turns{Workspaces: &demoWorkspaces{directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: f.engine,
 			Grants: map[string]coreadapter.Capabilities{"mason": {Tools: every}, "reviewer": {Tools: every}, trace.ChiefOfStaff: {Tools: every}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
@@ -110,39 +133,56 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 				return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 			}}, nil
 	}
-	ticks := make(chan time.Time)
-	opts.Reconciliation.Now, opts.Reconciliation.Ticks = clock.Now, ticks
-	// A tick is received only between passes, so after several of them every
-	// pass an earlier one caused has finished.
-	settle := func(s *Service) {
-		t.Helper()
-		for range 5 {
-			select {
-			case ticks <- clock.Now():
-			case <-time.After(demoTimeout):
-				s.Close()
-				t.Fatal("service did not finish its pass")
-			}
-		}
-	}
+	f.opts.Reconciliation.Now, f.opts.Reconciliation.Ticks = clock.Now, f.ticks
+	return f
+}
 
-	var mu sync.Mutex
-	results := map[string][]string{}
-	var problems []string
-	problem := func(format string, args ...any) {
-		problems = append(problems, fmt.Sprintf(format, args...))
-	}
-	use := func(ctx context.Context, tools *mcp.ClientSession, step, name string, args map[string]any) error {
-		out, err := callTool(ctx, tools, name, args)
-		if err != nil {
-			return err
+// settle sends several ticks. A tick is received only between passes, so
+// afterwards every pass an earlier one caused has finished.
+func (f *questionFixture) settle(t *testing.T, s *Service) {
+	t.Helper()
+	for range 5 {
+		select {
+		case f.ticks <- f.clock.Now():
+		case <-time.After(demoTimeout):
+			s.Close()
+			t.Fatal("service did not finish its pass")
 		}
-		results[step] = append(results[step], out)
-		return nil
 	}
-	result := func(req agent.Request, id, text string) *agent.Result {
-		return &agent.Result{ClaudeID: id, ResultText: text, SessionDir: req.SessionDir, NumTurns: 1}
+}
+
+// problem notes what a fake agent saw wrong; the test fails on them at its end.
+func (f *questionFixture) problem(format string, args ...any) {
+	f.problems = append(f.problems, fmt.Sprintf(format, args...))
+}
+
+// use calls a tool and keeps its result under step.
+func (f *questionFixture) use(ctx context.Context, tools *mcp.ClientSession, step, name string, args map[string]any) error {
+	out, err := callTool(ctx, tools, name, args)
+	if err != nil {
+		return err
 	}
+	f.results[step] = append(f.results[step], out)
+	return nil
+}
+
+func questionResult(req agent.Request, id, text string) *agent.Result {
+	return &agent.Result{ClaudeID: id, ResultText: text, SessionDir: req.SessionDir, NumTurns: 1}
+}
+
+// A fake mason and a fake reviewer ask, a fake chief of staff answers one
+// question with a citation and escalates the others as a batch, and the
+// service restarts with open, answered-but-undelivered and escalated
+// questions. Nothing is lost and nothing runs twice.
+func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
+	ctx := context.Background()
+	f := newQuestionFixture(t, "qa-", "[capacity]\nmasons = 1\n", "# Charter\n\n1. Keep state in files under the root.\n", []questionAsker{
+		{stream, demoAgent, demoThread, "mason", "build"}, {stream, "agent_mason2", "thread_mason2", "mason", "build2"}, {stream, "agent_reviewer", "thread_reviewer", "reviewer", "review"},
+	})
+	opts, clock, engine, lives, ticks := f.opts, f.clock, f.engine, f.lives, f.ticks
+	settle := func(s *Service) { t.Helper(); f.settle(t, s) }
+	mu, results, problem, use, result := &f.mu, f.results, f.problem, f.use, questionResult
+	var repo *trace.Repository
 	asker := func(session, question string, want ...string) demoTurn {
 		return func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			mu.Lock()
@@ -183,7 +223,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			mu.Unlock()
 			return nil, err
 		}
-		if !slices.Equal(names, []string{"answer", "escalate", "file_read", "propose_charter", "route_amendment"}) {
+		if !slices.Equal(names, []string{"answer", "escalate", "file_read", "propose_charter", "relay_ruling", "route_amendment"}) {
 			problem("chief of staff tools %v", names)
 		}
 		for _, part := range []string{"You are the chief of staff for workstream " + string(stream), questions.Guidance, "- charter#1 [Charter]: Keep state in files under the root."} {
@@ -433,9 +473,24 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	if !reflect.DeepEqual(results, want) {
 		t.Fatalf("tool results:\n%v\nwant:\n%v", results, want)
 	}
-	if len(problems) != 0 {
-		t.Fatalf("fake agents saw:\n%s", strings.Join(problems, "\n"))
+	if len(f.problems) != 0 {
+		t.Fatalf("fake agents saw:\n%s", strings.Join(f.problems, "\n"))
 	}
+}
+
+// claimTurn queues and claims a turn of the agent in an offline trace and
+// returns the turn's scope, so a test can call the question writes directly.
+func claimTurn(t *testing.T, repo *trace.Repository, home string, ws config.WorkstreamID, agent, thread, turn string, at time.Time) coreadapter.Scope {
+	t.Helper()
+	ctx := context.Background()
+	h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: project, Workstream: ws, At: at, Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "message_" + turn}
+	_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: agent, ThreadID: thread, TurnID: turn, Profile: coreadapter.Profile{Name: "other", Backend: "codex", Model: "other"}, Prompt: "Work"})
+	must(t, err)
+	_, err = repo.ClaimTurn(ctx, ws, agent, "token_"+turn, filepath.Join(home, turn), at)
+	must(t, err)
+	th, err := repo.Thread(ws, agent)
+	must(t, err)
+	return coreadapter.Scope{Project: string(project), Workstream: string(ws), Thread: thread, Turn: turn, Role: th.Identity.Role}
 }
 
 // An answer recorded in an abandoned workstream stays undelivered, while
@@ -456,24 +511,13 @@ func TestAnswersAreNotDeliveredToAbandonedWorkstreams(t *testing.T) {
 	traceDir, err := cfg.Root.ProjectTrace(project)
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(traceDir, "charter.md"), []byte("# Charter\n\n1. Keep state in files.\n"), 0600))
-	claim := func(ws config.WorkstreamID, agent, thread, turn string) coreadapter.Scope {
-		t.Helper()
-		h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: project, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "message_" + turn}
-		_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: agent, ThreadID: thread, TurnID: turn, Profile: coreadapter.Profile{Name: "other", Backend: "codex", Model: "other"}, Prompt: "Work"})
-		must(t, err)
-		_, err = repo.ClaimTurn(ctx, ws, agent, "token_"+turn, filepath.Join(home, turn), clock.Now())
-		must(t, err)
-		th, err := repo.Thread(ws, agent)
-		must(t, err)
-		return coreadapter.Scope{Project: string(project), Workstream: string(ws), Thread: thread, Turn: turn, Role: th.Identity.Role}
-	}
 	for _, ws := range []config.WorkstreamID{stream, quiet} {
 		must(t, repo.CreateWorkstream(ctx, ws, clock.Now(), owner))
 		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}
 		must(t, repo.CreateThread(ctx, identity))
-		_, err := repo.Ask(ctx, demoAgent, claim(ws, demoAgent, demoThread, "build"), "Where does state live?", clock.Now())
+		_, err := repo.Ask(ctx, demoAgent, claimTurn(t, repo, home, ws, demoAgent, demoThread, "build", clock.Now()), "Where does state live?", clock.Now())
 		must(t, err)
-		_, err = repo.AnswerQuestion(ctx, trace.ChiefOfStaff, claim(ws, trace.ChiefOfStaff, trace.ChiefOfStaff, "events"), "1", "In files.", []string{"charter#1"}, clock.Now())
+		_, err = repo.AnswerQuestion(ctx, trace.ChiefOfStaff, claimTurn(t, repo, home, ws, trace.ChiefOfStaff, trace.ChiefOfStaff, "events", clock.Now()), "1", "In files.", []string{"charter#1"}, clock.Now())
 		must(t, err)
 	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: abandonTransition}

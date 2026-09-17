@@ -107,7 +107,8 @@ type Decision struct {
 
 // Notice is an owner ruling the chief of staff relayed with scope notify. It
 // applies to the whole project, so every bundle on the project carries it,
-// whatever workstream recorded it and whatever the bundle's scope.
+// whatever workstream recorded it and whatever the bundle's scope. A ruling
+// relayed to a batch of questions is one notice.
 type Notice struct {
 	Source     string              `json:"source"`
 	Workstream config.WorkstreamID `json:"workstream"`
@@ -177,7 +178,12 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 		return Bundle{}, fmt.Errorf("notices: %w", err)
 	}
 	for _, d := range all {
-		if d.Scope == trace.ScopeNotify {
+		// One relay gives every ruling of its batch the same text at the same
+		// time; it is one notice, sourced from the first of them.
+		same := func(n Notice) bool {
+			return n.Workstream == d.Workstream && n.At.Equal(d.At) && n.Text == d.ReturnedAnswer
+		}
+		if d.Scope == trace.ScopeNotify && !slices.ContainsFunc(b.Notices, same) {
 			b.Notices = append(b.Notices, Notice{Source: d.Source, Workstream: d.Workstream, Record: d.Record, Revision: d.Revision, At: d.At, Text: d.ReturnedAnswer})
 		}
 	}
