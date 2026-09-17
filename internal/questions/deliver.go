@@ -21,13 +21,18 @@ var Actor = trace.Actor{Kind: "service", ID: "questions"}
 // once.
 func TurnID(id string) string { return "answer_" + id }
 
-// Prompt is the text of the turn that delivers an answer.
-func Prompt(q trace.Question, text string, citations []string) string {
+// Prompt is the text of the turn that delivers ruling's returned answer. It
+// says when the answer is the owner's ruling, relayed by the chief of staff.
+func Prompt(q trace.Question, ruling trace.Ruling) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Answer to your question %s.\n\nYou asked:\n%s\n\nAnswer:\n%s\n", q.ID, strings.TrimSpace(q.Question), strings.TrimSpace(text))
-	if len(citations) > 0 {
+	opening := "Answer to your question %s."
+	if ruling.Decision == trace.DecisionRuling {
+		opening = "The owner ruled on your question %s. The chief of staff relays the ruling."
+	}
+	fmt.Fprintf(&b, opening+"\n\nYou asked:\n%s\n\nAnswer:\n%s\n", q.ID, strings.TrimSpace(q.Question), strings.TrimSpace(ruling.ReturnedAnswer))
+	if len(ruling.Citations) > 0 {
 		b.WriteString("\nCitations:\n")
-		for _, c := range citations {
+		for _, c := range ruling.Citations {
 			fmt.Fprintf(&b, "- %s\n", c)
 		}
 	}
@@ -70,7 +75,7 @@ func Deliver(ctx context.Context, repository *trace.Repository, q trace.Question
 		Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: asked.Project, Workstream: stream, Unit: asked.Unit,
 			At: at, Actor: Actor, Cause: trace.QuestionSubject(asked.ID) + "_" + trace.QuestionAnswered, Depth: q.Ruling.Depth + 1},
 		AgentID: thread.Identity.ID, ThreadID: thread.Identity.ThreadID, TurnID: turn, Profile: p, SystemPrompt: system,
-		Prompt: Prompt(asked, q.Ruling.ReturnedAnswer, q.Ruling.Citations)})
+		Prompt: Prompt(asked, *q.Ruling)})
 	return err == nil, err
 }
 

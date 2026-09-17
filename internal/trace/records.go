@@ -81,9 +81,11 @@ type Question struct {
 
 // Escalation is the chief of staff's choice to send questions to the owner.
 // Batch identifies the escalation and Questions lists every question it
-// covers, so the revisions of one batch carry the same value.
+// covers, so the revisions of one batch carry the same value. Inbox numbers
+// the escalation among all of the project's, from 1.
 type Escalation struct {
 	Batch          string   `json:"batch"`
+	Inbox          int      `json:"inbox"`
 	Questions      []string `json:"questions"`
 	Blocked        string   `json:"blocked"`
 	Options        []string `json:"options,omitempty"`
@@ -92,13 +94,19 @@ type Escalation struct {
 
 func (Question) traceRecord() {}
 
+// Ruling is the answer to one question. The chief of staff's own answer is a
+// single revision with Decision DecisionAnswer. The owner's ruling on an
+// escalated question is revision 1, Decision DecisionRuling with OwnerResponse
+// as the owner gave it; the chief of staff's relay is revision 2, which adds
+// ReturnedAnswer, what the asker receives, and Scope.
 type Ruling struct {
 	Header
 	QuestionID       string   `json:"question_id"`
 	QuestionRevision int      `json:"question_revision"`
 	Decision         string   `json:"decision"`
 	OwnerResponse    string   `json:"owner_response,omitempty"`
-	ReturnedAnswer   string   `json:"returned_answer"`
+	ReturnedAnswer   string   `json:"returned_answer,omitempty"`
+	Scope            string   `json:"scope,omitempty"`
 	Citations        []string `json:"citations,omitempty"`
 	Changes          []string `json:"changes,omitempty"`
 }
@@ -223,7 +231,7 @@ func validate(r Record) error {
 	case Question:
 		valid = validActor(v.AskedBy) && present(v.Question) && (v.Thread == "" || key(v.Thread)) && (v.Turn == "" || key(v.Turn)) && (v.Escalation == nil || present(v.SentToOwner) && v.Escalation.valid(h.ID))
 	case Ruling:
-		valid = key(v.QuestionID) && v.QuestionRevision > 0 && present(v.Decision) && present(v.ReturnedAnswer) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
+		valid = key(v.QuestionID) && v.QuestionRevision > 0 && present(v.Decision) && (present(v.ReturnedAnswer) || present(v.OwnerResponse)) && validRulingScope(v) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Agent:
 		valid = key(v.Role) && key(v.ThreadID) && (v.Session == (coreadapter.BackendSession{}) || validSession(v.Session))
 	case TurnRequest:

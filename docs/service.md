@@ -45,6 +45,8 @@ client to release idle connections. API version 1 uses snake_case JSON fields.
 | GET | `/status/<workstream-id>` | `WorkstreamStatus` for one workstream of the active project |
 | POST | `/conversation/<workstream-id>` | `SendRequest`: text; returns the accepted `ConversationEntry` |
 | GET | `/conversation/<workstream-id>` | `ConversationResponse`: the workstream's conversation with its chief of staff |
+| GET | `/inbox` | `InboxResponse`: the escalations of the active project that wait for the owner's ruling |
+| POST | `/inbox/<number>` | `AnswerRequest`: text; records the owner's ruling and returns `AnswerResponse` |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
 | POST | `/projects/extract` | `ProjectExtractRequest`: project; returns `ExtractionResponse` |
@@ -351,6 +353,52 @@ configured project returns `no_project`, a workstream the active trace does not
 hold (or no trace at all) returns `not_found`, and an unreadable trace returns
 `internal`; these messages name the workstream or project.
 
+## Inbox and rulings
+
+`GET /v1/inbox` returns an `InboxResponse`: `entries`, every escalation of the
+active project whose questions are still `escalated`, ordered by inbox number.
+Questions the chief of staff escalated as one batch are one entry. An
+escalation of an abandoned workstream is left out. Without a configured
+project, or without a trace, `entries` is empty. A trace that cannot be read
+returns `internal`.
+
+| Field | Meaning |
+| --- | --- |
+| `number` | The inbox number `POST /v1/inbox/<number>` accepts. The trace assigns it when the questions are escalated, counting the project's escalations from 1, and never reuses it |
+| `workstream`, `batch` | The workstream and the escalation's batch ID in it |
+| `question` | The chief of staff's rephrasing for the owner |
+| `blocked` | What waits on the ruling |
+| `options` | The choices, possibly none |
+| `recommendation` | What the chief of staff would decide |
+| `escalated_at` | When the questions were escalated |
+| `asked` | Each question of the batch in the order it was escalated: `id`, `asked_by` (the asking agent), `unit` when the asking turn had one, and `question` as asked |
+
+`POST /v1/inbox/<number>` takes an `AnswerRequest`, `text`, and records it as
+the owner's ruling on that entry. One commit holds revision 1 of the ruling of
+every question in the batch, each question's move from `escalated` to `ruled`
+and one notice event for the workstream's chief of staff, so the ruling is
+durable before anything acts on it and a failed write leaves neither a ruling
+nor an event; see [the trace reference](trace.md#the-owners-ruling). It
+returns an `AnswerResponse`: `number`, `workstream`, `batch`, the `questions`
+the ruling covers, the `ruling` as given and `at`.
+
+| Case | Error |
+| --- | --- |
+| `<number>` is not a positive decimal integer | `validation`: `inbox entry must be a number from osmia inbox` |
+| No configured project | `no_project` |
+| No entry carries the number, or the project has no trace | `validation`: `there is no inbox entry <n>; list the entries with osmia inbox` |
+| Empty text | `validation`: `text must not be empty` |
+| The entry already has a ruling, relayed or not | `conflict`: `inbox entry <n> is already answered` |
+| The entry belongs to an abandoned workstream | `conflict`: `inbox entry <n> belongs to abandoned workstream <id> and takes no ruling` |
+| The trace cannot be read or written | `internal` |
+
+A refused request records nothing. The abandoned-workstream check and the
+write hold the trace repository's lock together, so an abandonment that commits
+first always refuses the ruling. Rulings are accepted without a turn
+reconciler, but only a service with `Options.Threads` delivers the event to
+the chief of staff and the relayed ruling to the askers, as described under
+[questions](#questions).
+
 ## Conversation
 
 `POST /v1/conversation/<workstream-id>` sends the owner's message to the
@@ -503,7 +551,7 @@ role binding. The turn is queued
 with `EnqueueTurn`, so a turn in flight on the chief-of-staff thread finishes
 first, and the scheduler dispatches it in the same pass otherwise.
 The turn's system prompt names the workstream, carries
-`questions.Guidance` (what to do with an open question) and the workstream's
+`questions.Guidance` (what to do with an open question and with the owner's ruling) and the workstream's
 [context bundle](context.md) assembled from the local files and trace when the
 turn is queued, which is the chief of staff's whole context for a question.
 
@@ -541,8 +589,18 @@ role binding, or its runtime override, at delivery. An abandoned workstream
 keeps its answers undelivered. A failing trace read or profile lookup stops
 the loop, as the scheduler's errors do.
 
+An escalated question waits in the [inbox](#inbox-and-rulings). The owner's
+ruling raises one notice event in the question's workstream, so it reaches the
+chief of staff as its next event turn. There the chief of staff calls
+`relay_ruling`, which records what goes back and its scope and moves every
+question of the batch to `answered`; the same delivery pass then queues the
+relayed ruling on each asker's original thread.
+
 Questions, choices and deliveries are derived from the trace on every pass. A
 restart with an open question delivers its event once the window closes and
 asks nothing again. A restart between a recorded answer and its delivery
 queues the answer turn once. An escalated question stays escalated and its
-asker stays parked until the owner rules.
+asker stays parked until the owner rules. A restart after the owner's ruling
+delivers its event once the window closes; a restart after the relay queues
+each asker's answer turn once; a restart with an answer turn queued runs it
+once.

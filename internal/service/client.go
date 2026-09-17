@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -138,5 +139,19 @@ func (c *Client) Send(ctx context.Context, id config.WorkstreamID, text string) 
 func (c *Client) Conversation(ctx context.Context, id config.WorkstreamID) (ConversationResponse, error) {
 	var v ConversationResponse
 	err := c.Do(ctx, "GET", Prefix+"/conversation/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
+}
+
+// Inbox lists the escalations waiting for the owner's ruling.
+func (c *Client) Inbox(ctx context.Context) (InboxResponse, error) {
+	var v InboxResponse
+	err := c.Do(ctx, "GET", Prefix+"/inbox", nil, &v)
+	return v, err
+}
+
+// Answer records the owner's ruling on an inbox entry.
+func (c *Client) Answer(ctx context.Context, number int, text string) (AnswerResponse, error) {
+	var v AnswerResponse
+	err := c.Do(ctx, "POST", Prefix+"/inbox/"+strconv.Itoa(number), AnswerRequest{Text: text}, &v)
 	return v, err
 }

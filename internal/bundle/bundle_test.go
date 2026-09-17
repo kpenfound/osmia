@@ -305,6 +305,77 @@ func TestBundleDecisions(t *testing.T) {
 	}
 }
 
+// A ruling relayed with scope notify is a notice in every bundle on the
+// project, whatever workstream the bundle is scoped to; a local ruling and an
+// unrelayed one are decisions of their own workstream only.
+func TestBundleNotices(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	for _, s := range []config.WorkstreamID{first, second} {
+		if err := f.repo.CreateWorkstream(ctx, s, timestamp, owner); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if b := f.assemble(t, bundle.Scope{Workstream: second}); b.Notices == nil || len(b.Notices) != 0 || !strings.HasSuffix(b.Render(), "\n## Notices\nNo project-wide notices.\n") {
+		t.Fatalf("bundle without notices %#v:\n%s", b.Notices, b.Render())
+	}
+	local := ruling(first, "local", 1, timestamp, trace.DecisionRuling)
+	local.OwnerResponse, local.Scope = "Keep it", trace.ScopeLocal
+	pending := ruling(first, "pending", 1, timestamp.Add(time.Minute), trace.DecisionRuling)
+	pending.OwnerResponse, pending.ReturnedAnswer = "Use files", ""
+	wide := ruling(first, "wide", 1, timestamp.Add(2*time.Minute), trace.DecisionRuling)
+	wide.OwnerResponse, wide.ReturnedAnswer = "No new dependencies", ""
+	relayed := wide
+	relayed.Revision, relayed.ReturnedAnswer, relayed.Scope = 2, "The owner allows no new\ndependencies.", trace.ScopeNotify
+	// The same relay reached a second question of the batch.
+	sibling := relayed
+	sibling.ID, sibling.QuestionID, sibling.Revision = "wide2", "q-wide2", 1
+	// Another relay in the workstream is a notice of its own, whether it
+	// differs in its text or in its time.
+	wider := sibling
+	wider.ID, wider.QuestionID, wider.ReturnedAnswer = "wider", "q-wider", "Logs stay JSON."
+	later := sibling
+	later.ID, later.QuestionID, later.At = "later", "q-later", timestamp.Add(3*time.Minute)
+	for _, r := range []trace.Ruling{local, pending, wide, relayed, sibling, wider, later} {
+		if err := f.repo.Append(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sourceOf := func(question string) string {
+		return "workstreams/" + string(first) + "/questions/" + question + "/rulings.jsonl"
+	}
+	source := sourceOf("q-wide")
+	want := []bundle.Notice{
+		{Source: source, Workstream: first, Record: "wide", Revision: 2, At: timestamp.Add(2 * time.Minute), Text: "The owner allows no new\ndependencies."},
+		{Source: sourceOf("q-wider"), Workstream: first, Record: "wider", Revision: 1, At: timestamp.Add(2 * time.Minute), Text: "Logs stay JSON."},
+		{Source: sourceOf("q-later"), Workstream: first, Record: "later", Revision: 1, At: timestamp.Add(3 * time.Minute), Text: "The owner allows no new\ndependencies."},
+	}
+	for _, scope := range []bundle.Scope{{}, {Workstream: first}, {Workstream: second}, {Entities: []string{"internal"}}} {
+		b := f.assemble(t, scope)
+		if !reflect.DeepEqual(b.Notices, want) {
+			t.Fatalf("notices of scope %+v: %#v", scope, b.Notices)
+		}
+		if !strings.HasSuffix(b.Render(), "\n## Notices\n- "+source+" (record wide revision 2, workstream "+string(first)+")\n  notice: The owner allows no new\n    dependencies.\n"+
+			"- "+sourceOf("q-wider")+" (record wider revision 1, workstream "+string(first)+")\n  notice: Logs stay JSON.\n"+
+			"- "+sourceOf("q-later")+" (record later revision 1, workstream "+string(first)+")\n  notice: The owner allows no new\n    dependencies.\n") {
+			t.Fatalf("render of scope %+v:\n%s", scope, b.Render())
+		}
+	}
+	b := f.assemble(t, bundle.Scope{Workstream: second})
+	if len(b.Decisions) != 0 {
+		t.Fatalf("another workstream's rulings are decisions here: %#v", b.Decisions)
+	}
+	text := f.assemble(t, bundle.Scope{Workstream: first}).Render()
+	for _, part := range []string{
+		"  decision: ruling\n  owner: Use files\n  answer: waiting for the chief of staff to relay the ruling\n",
+		"  decision: ruling\n  owner: Keep it\n  answer: Answer to local\n",
+	} {
+		if !strings.Contains(text, part) {
+			t.Fatalf("render lacks %q:\n%s", part, text)
+		}
+	}
+}
+
 func TestBundleIsDeterministic(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()

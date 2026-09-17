@@ -272,13 +272,13 @@ func TestChiefOfStaffChoosesOnceForEachQuestion(t *testing.T) {
 		}
 		for _, id := range []string{"2", "3"} {
 			q := s[id]
-			e := Escalation{Batch: "escalation_2", Questions: []string{"2", "3"}, Blocked: request.Blocked, Options: request.Options, Recommendation: request.Recommendation}
+			e := Escalation{Batch: "escalation_2", Inbox: 1, Questions: []string{"2", "3"}, Blocked: request.Blocked, Options: request.Options, Recommendation: request.Recommendation}
 			if q.State != QuestionEscalated || q.Ruling != nil || q.Latest.Revision != 2 || q.Latest.SentToOwner != request.Rephrasing || !reflect.DeepEqual(*q.Latest.Escalation, e) ||
 				q.Latest.Question != q.Asked.Question || q.Latest.Thread != q.Asked.Thread || q.Latest.Actor != (Actor{Kind: "agent", ID: "chief"}) || q.Asked.Escalation != nil {
 				t.Fatalf("escalated question %s: %+v", id, q)
 			}
 		}
-		if q := s["4"]; q.State != QuestionEscalated || q.Latest.Escalation.Batch != "escalation_4" || len(q.Latest.Escalation.Options) != 0 {
+		if q := s["4"]; q.State != QuestionEscalated || q.Latest.Escalation.Batch != "escalation_4" || q.Latest.Escalation.Inbox != 2 || len(q.Latest.Escalation.Options) != 0 {
 			t.Fatalf("single escalation: %+v", q)
 		}
 		// An escalated question stays open until it is ruled on.
