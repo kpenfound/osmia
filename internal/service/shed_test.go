@@ -746,7 +746,7 @@ func TestRoundOperationInputIsValidated(t *testing.T) {
 			t.Errorf("%s: decoded", name)
 		}
 	}
-	if in, err := decodeRound(coreadapter.Operation{Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":2,"spec":3,"plan":4}`)}); err != nil || in != (roundInput{2, 3, 4}) {
+	if in, err := decodeRound(coreadapter.Operation{Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":2,"spec":3,"plan":4}`)}); err != nil || in != (roundInput{Round: 2, Spec: 3, Plan: 4}) {
 		t.Fatalf("decoded %+v %v", in, err)
 	}
 }

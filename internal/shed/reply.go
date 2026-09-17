@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -48,17 +47,10 @@ type Reply struct {
 }
 
 // ReplyPath is the workstream path of the architect's reply to a round.
-func ReplyPath(round int) string {
-	return "shed/round-" + strconv.Itoa(round) + "/" + replyName + ".json"
-}
+func ReplyPath(round int) string { return roundPath(round, replyName) }
 
 // ReplyDocumentID is the trace record ID of the architect's reply to a round.
-func ReplyDocumentID(round int) string {
-	return "shed-round-" + strconv.Itoa(round) + "-" + replyName
-}
-
-// isReply reports whether a shed path names an architect's reply.
-func isReply(path string) bool { return strings.HasSuffix(path, "/"+replyName+".json") }
+func ReplyDocumentID(round int) string { return roundDocumentID(round, replyName) }
 
 func (r Reply) check() error {
 	switch {
@@ -120,24 +112,30 @@ func ParseReply(data []byte) (Reply, error) {
 // Replies returns the architect's recorded replies of the workstream, ordered
 // by round. A reply whose content disagrees with its path is an error.
 func Replies(repository *trace.Repository, stream config.WorkstreamID) ([]Reply, error) {
-	documents, err := trace.Read[trace.Document](repository, stream)
+	return replies(repository, stream, replyName, ReplyPath)
+}
+
+// Redrafted returns the architect's recorded reports of the redrafts the owner
+// asked for, ordered by the round each was asked for after. A report is a
+// reply of the same shape, holding what the architect answered and which
+// revision it redrafted to.
+func Redrafted(repository *trace.Repository, stream config.WorkstreamID) ([]Reply, error) {
+	return replies(repository, stream, redraftedName, RedraftedPath)
+}
+
+func replies(repository *trace.Repository, stream config.WorkstreamID, name string, path func(int) string) ([]Reply, error) {
+	latest, err := shedFiles(repository, stream, name)
 	if err != nil {
 		return nil, err
 	}
-	latest := map[string]trace.Document{}
-	for _, d := range documents {
-		if strings.HasPrefix(d.Path, "shed/") && isReply(d.Path) {
-			latest[d.Path] = d
-		}
-	}
 	var out []Reply
-	for path, d := range latest {
+	for at, d := range latest {
 		r, err := ParseReply([]byte(d.Content))
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			return nil, fmt.Errorf("%s: %w", at, err)
 		}
-		if ReplyPath(r.Round) != path {
-			return nil, fmt.Errorf("%s: records the reply to round %d", path, r.Round)
+		if path(r.Round) != at {
+			return nil, fmt.Errorf("%s: records the %s of round %d", at, name, r.Round)
 		}
 		out = append(out, r)
 	}

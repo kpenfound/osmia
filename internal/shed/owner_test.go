@@ -202,15 +202,18 @@ func TestRequestForFurtherRoundsRoundTripsAndBoundsTheLimit(t *testing.T) {
 	for name, tc := range map[string]struct {
 		configured int
 		requests   []shed.More
+		redrafts   []shed.Redraft
 		want       int
 	}{
-		"no request":         {3, nil, 3},
-		"beyond the cap":     {3, []shed.More{{Round: 3, Rounds: 2}}, 5},
-		"short of the cap":   {5, []shed.More{{Round: 1, Rounds: 1}}, 2},
-		"the last one wins":  {3, []shed.More{{Round: 3, Rounds: 2}, {Round: 5, Rounds: 1}}, 6},
-		"the highest counts": {3, []shed.More{{Round: 5, Rounds: 1}, {Round: 3, Rounds: 2}}, 6},
+		"no request":                 {3, nil, nil, 3},
+		"beyond the cap":             {3, []shed.More{{Round: 3, Rounds: 2}}, nil, 5},
+		"short of the cap":           {5, []shed.More{{Round: 1, Rounds: 1}}, nil, 2},
+		"the last one wins":          {3, []shed.More{{Round: 3, Rounds: 2}, {Round: 5, Rounds: 1}}, nil, 6},
+		"the highest counts":         {3, []shed.More{{Round: 5, Rounds: 1}, {Round: 3, Rounds: 2}}, nil, 6},
+		"a redraft asks for a round": {5, nil, []shed.Redraft{{Round: 1}}, 2},
+		"the redraft counts too":     {3, []shed.More{{Round: 1, Rounds: 1}}, []shed.Redraft{{Round: 3}}, 4},
 	} {
-		if got := shed.Limit(tc.configured, tc.requests); got != tc.want {
+		if got := shed.Limit(tc.configured, tc.requests, tc.redrafts); got != tc.want {
 			t.Fatalf("%s: limit %d, want %d", name, got, tc.want)
 		}
 	}

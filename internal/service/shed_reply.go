@@ -23,8 +23,14 @@ import (
 )
 
 // ReplyAction is the runner-boundary operation action that runs the
-// architect's one reply to a heard shed round.
-const ReplyAction = "shed-reply"
+// architect's one reply to a heard shed round, and RedraftAction the one that
+// runs the redraft of the spec and the plan the owner asked for after debate
+// concluded. Both are one architect turn on the same path, and differ in what
+// the turn answers and where its record goes.
+const (
+	ReplyAction   = "shed-reply"
+	RedraftAction = "shed-redraft"
+)
 
 const (
 	// maxRedrafts bounds the redrafts the architect may deliver in one reply
@@ -35,12 +41,83 @@ const (
 	replyFile        = "reply.json"
 )
 
-func replyIDs(n int) (transition, event string) {
-	transition = fmt.Sprintf("shed-reply-%d", n)
+// answering names what the architect's turn answers: one round of the
+// committee, or the owner's request for a redraft after it.
+func (in roundInput) answering() string {
+	if in.Redraft {
+		return "redraft"
+	}
+	return "reply"
+}
+
+// action is the operation action that runs the turn.
+func (in roundInput) action() string {
+	if in.Redraft {
+		return RedraftAction
+	}
+	return ReplyAction
+}
+
+// running is the shed state while the turn runs, and recorded the kind of the
+// state it reaches once its record is committed.
+func (in roundInput) running() string { return fmt.Sprintf("%s-%d", in.answering(), in.Round) }
+func (in roundInput) recorded() string {
+	if in.Redraft {
+		return "redrafted"
+	}
+	return "replied"
+}
+
+// ids are the transition and run-event IDs of the turn's operation.
+func (in roundInput) ids() (transition, event string) {
+	transition = fmt.Sprintf("shed-%s-%d", in.answering(), in.Round)
 	return transition, trace.EventID(transition, "run")
 }
-func replyTurnPrefix(n int) string { return fmt.Sprintf("reply-%d-", n) }
-func replyTurnID(n, k int) string  { return replyTurnPrefix(n) + strconv.Itoa(k) }
+
+// path and documentID are where the architect's record of the turn goes.
+func (in roundInput) path() string {
+	if in.Redraft {
+		return shed.RedraftedPath(in.Round)
+	}
+	return shed.ReplyPath(in.Round)
+}
+
+func (in roundInput) documentID() string {
+	if in.Redraft {
+		return shed.RedraftedDocumentID(in.Round)
+	}
+	return shed.ReplyDocumentID(in.Round)
+}
+
+// about names the architect's answer for a message: its reply is to the round,
+// and the redraft the owner asked for comes after it.
+func (in roundInput) about() string {
+	if in.Redraft {
+		return fmt.Sprintf("the redraft after round %d", in.Round)
+	}
+	return fmt.Sprintf("the reply to round %d", in.Round)
+}
+
+// turnPrefix is what every turn of the operation is named with, and turnID
+// the name of its k-th turn.
+func (in roundInput) turnPrefix() string { return fmt.Sprintf("%s-%d-", in.answering(), in.Round) }
+func (in roundInput) turnID(k int) string {
+	return in.turnPrefix() + strconv.Itoa(k)
+}
+
+// turns returns the operation's turns of the architect thread, in order.
+func (in roundInput) turns(t trace.Thread) []trace.QueuedTurn {
+	var out []trace.QueuedTurn
+	for _, q := range t.Turns {
+		if strings.HasPrefix(q.Request.TurnID, in.turnPrefix()) {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+func replyIDs(n int) (transition, event string) { return roundInput{Round: n}.ids() }
+func replyTurnID(n, k int) string               { return roundInput{Round: n}.turnID(k) }
 
 // replier reconciles the architect's reply operations of the shed controller.
 type replier struct{ *debate }
@@ -52,63 +129,69 @@ func (d *debate) drafter() *drafter { return &drafter{s: d.s, repository: d.repo
 // requestReply publishes the architect's reply to a heard round as a durable
 // operation pinned to the revision the round debated.
 func (d *debate) requestReply(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, in roundInput, open int) error {
+	round, _ := roundIDs(in.Round)
+	reason := fmt.Sprintf("%d objections stand after round %d; the architect is asked for its reply", open, in.Round)
+	return d.requestAnswer(ctx, stream, state, in, round+"-heard", reason, fmt.Sprintf("Architect's reply to committee round %d", in.Round))
+}
+
+// requestRedraft publishes the redraft the owner asked for after round n as a
+// durable operation pinned to the latest recorded revisions, which are what
+// the architect redrafts and what the owner may have edited since the request.
+func (d *debate) requestRedraft(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, in roundInput, note string) error {
+	reason := fmt.Sprintf("the owner asked for a redraft after round %d: %s", in.Round, note)
+	return d.requestAnswer(ctx, stream, state, in, shed.RedraftDocumentID(in.Round), reason, fmt.Sprintf("Architect's redraft after round %d, at the owner's request", in.Round))
+}
+
+// requestAnswer publishes one architect turn of the shed as a durable
+// operation and moves the shed to the state that says it is running.
+func (d *debate) requestAnswer(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, in roundInput, cause, reason, body string) error {
 	if err := d.drafter().ensureThread(ctx, stream); err != nil {
 		return err
 	}
-	transition, event := replyIDs(in.Round)
+	transition, event := in.ids()
 	input, err := encodeRound(in)
 	if err != nil {
 		return err
 	}
-	round, _ := roundIDs(in.Round)
-	op := coreadapter.Operation{ID: trace.OperationID(d.repository.Project(), stream, event), Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: input}
-	reason := fmt.Sprintf("%d objections stand after round %d; the architect is asked for its reply", open, in.Round)
+	op := coreadapter.Operation{ID: trace.OperationID(d.repository.Project(), stream, event), Boundary: coreadapter.RunnerBoundary, Action: in.action(), Input: input}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: d.header(transition, stream, round+"-heard", d.s.now()), Subject: shedSubject, From: state.Value, To: fmt.Sprintf("reply-%d", in.Round), Reason: reason},
-		Events:     []trace.Event{{ID: event, Kind: "shed-reply", Body: fmt.Sprintf("Architect's reply to committee round %d", in.Round), Operation: &op}}}
+		Transition: trace.Transition{Header: d.header(transition, stream, cause, d.s.now()), Subject: shedSubject, From: state.Value, To: in.running(), Reason: reason},
+		Events:     []trace.Event{{ID: event, Kind: in.action(), Body: body, Operation: &op}}}
 	_, err = d.repository.Transact(ctx, tx)
 	return err
 }
 
-// replyOutcome returns the recorded terminal result of the reply to round n:
-// succeeded once the reply is recorded, failed when its failed transition is
-// recorded, nil before either.
-func (d *debate) replyOutcome(stream config.WorkstreamID, n int) (*coreadapter.OperationResult, error) {
+// replyOutcome returns the recorded terminal result of one architect turn of
+// the shed: succeeded once its record is committed, failed when its failed
+// transition is recorded, nil before either.
+func (d *debate) replyOutcome(stream config.WorkstreamID, in roundInput) (*coreadapter.OperationResult, error) {
 	transitions, err := trace.Read[trace.Transition](d.repository, stream)
 	if err != nil {
 		return nil, err
 	}
-	reply, _ := replyIDs(n)
+	id, _ := in.ids()
 	for _, t := range transitions {
 		switch {
 		case t.Subject != shedSubject:
-		case t.ID == reply+"-replied":
+		case t.ID == id+"-"+in.recorded():
 			return &coreadapter.OperationResult{Outcome: "succeeded", Evidence: t.Reason}, nil
-		case t.ID == reply+"-failed":
+		case t.ID == id+"-failed":
 			return &coreadapter.OperationResult{Outcome: "failed", Evidence: t.Reason}, nil
 		}
 	}
 	return nil, nil
 }
 
-// replyTurns returns the architect's turns of the reply to round n, in order.
-func replyTurns(t trace.Thread, n int) []trace.QueuedTurn {
-	prefix := replyTurnPrefix(n)
-	var out []trace.QueuedTurn
-	for _, q := range t.Turns {
-		if strings.HasPrefix(q.Request.TurnID, prefix) {
-			out = append(out, q)
-		}
-	}
-	return out
-}
-
 func (r replier) decode(op coreadapter.Operation) (roundInput, config.WorkstreamID, error) {
-	in, err := decodeShed(op, ReplyAction)
+	in, err := decodeShed(op, op.Action)
 	if err != nil {
 		return in, "", err
 	}
-	_, event := replyIDs(in.Round)
+	if op.Action != ReplyAction && op.Action != RedraftAction {
+		return in, "", fmt.Errorf("unsupported runner operation %q", op.Action)
+	}
+	in.Redraft = op.Action == RedraftAction
+	_, event := in.ids()
 	stream, err := r.owner(op, event)
 	return in, stream, err
 }
@@ -122,35 +205,35 @@ func (r replier) Inspect(_ context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
-	result, err := r.replyOutcome(stream, in.Round)
+	result, err := r.replyOutcome(stream, in)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
 	if result != nil {
-		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "reply " + result.Outcome, Result: result}, nil
+		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: in.answering() + " " + result.Outcome, Result: result}, nil
 	}
 	t, err := r.repository.Thread(stream, architectAgent)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
-	if turns := replyTurns(t, in.Round); len(turns) > 0 {
+	if turns := in.turns(t); len(turns) > 0 {
 		if last := turns[len(turns)-1]; last.Claim != nil && last.Response == nil && t.Status != "interrupted" {
 			return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "architect turn " + last.Request.TurnID + " is running"}, nil
 		}
 	}
-	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("the reply to round %d is not recorded", in.Round)}, nil
+	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: in.about() + " is not recorded"}, nil
 }
 
-// Apply drives the reply to a terminal result. The architect gets one turn
-// for the round; a turn that ends normally with an invalid redraft is followed
-// by another that returns the problems, while redrafts remain, and an invalid
-// redraft is never recorded. The reply and a valid redraft are recorded in one
-// commit and the shed moves to replied-<n>. A failed turn and a redraft given
-// up are recorded in the reply, so the debate goes on without them.
-// Abandoning the workstream cancels the running turn and fails a reply that
-// has no record; a reply whose file is committed is replied all the same.
-// Storage errors and a missing architect runner leave the operation pending
-// for another attempt.
+// Apply drives the architect's reply to a round, or the redraft the owner
+// asked for after one, to a terminal result. The architect gets one turn; a
+// turn that ends normally with an invalid redraft is followed by another that
+// returns the problems, while redrafts remain, and an invalid redraft is never
+// recorded. The record and a valid redraft are recorded in one commit and the
+// shed moves to replied-<n> or redrafted-<n>. A failed turn and a redraft
+// given up are recorded, so the debate goes on without them. Abandoning the
+// workstream cancels the running turn and fails an answer that has no record;
+// one whose file is committed is recorded all the same. Storage errors and a
+// missing architect runner leave the operation pending for another attempt.
 func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	d := r.debate
 	none := coreadapter.OperationResult{}
@@ -158,7 +241,7 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return none, err
 	}
-	if result, err := d.replyOutcome(stream, in.Round); err != nil || result != nil {
+	if result, err := d.replyOutcome(stream, in); err != nil || result != nil {
 		if err != nil {
 			return none, err
 		}
@@ -178,19 +261,19 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		if err := ctx.Err(); err != nil {
 			return none, err
 		}
-		// A reply whose file is committed was given, whatever happened to the
-		// workstream since.
-		if recorded, err := d.recordedReply(stream, n); err != nil || recorded != nil {
+		// An answer whose file is committed was given, whatever happened to
+		// the workstream since.
+		if recorded, err := d.recordedReply(stream, in); err != nil || recorded != nil {
 			if err != nil {
 				return none, err
 			}
-			return d.replied(ctx, op.ID, stream, *recorded)
+			return d.replied(ctx, op.ID, stream, in, *recorded)
 		}
 		t, err := d.repository.Thread(stream, architectAgent)
 		if err != nil {
 			return none, err
 		}
-		turns := replyTurns(t, n)
+		turns := in.turns(t)
 		var last *trace.QueuedTurn
 		if len(turns) > 0 {
 			last = &turns[len(turns)-1]
@@ -209,12 +292,12 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 				if err != nil {
 					return none, err
 				}
-				return d.replyFailed(ctx, op.ID, stream, n, abandonedReply(n))
+				return d.replyFailed(ctx, op.ID, stream, in, abandonedReply(in))
 			}
 			interrupted := len(slices.DeleteFunc(slices.Clone(turns), func(q trace.QueuedTurn) bool { return q.Status() != "interrupted" }))
 			if interrupted >= maxReplyAttempts {
 				reply.Failure = fmt.Sprintf("the architect's turn was interrupted %d times by service stops", interrupted)
-				return d.recordReply(ctx, op.ID, stream, turns, reply, nil)
+				return d.recordReply(ctx, op.ID, stream, in, turns, reply, nil)
 			}
 			if d.s.options.Architect == nil {
 				return none, errNoArchitect
@@ -252,11 +335,11 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 				return none, err
 			}
 			if len(problems) == 0 {
-				return d.recordReply(ctx, op.ID, stream, turns, reply, files)
+				return d.recordReply(ctx, op.ID, stream, in, turns, reply, files)
 			}
 			if redrafts(turns) >= maxRedrafts {
 				reply.Problems = problems
-				return d.recordReply(ctx, op.ID, stream, turns, reply, nil)
+				return d.recordReply(ctx, op.ID, stream, in, turns, reply, nil)
 			}
 			if d.s.options.Architect == nil {
 				return none, errNoArchitect
@@ -269,7 +352,7 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 			if last.Response != nil && last.Response.Failure != "" {
 				reply.Failure = last.Response.Failure
 			}
-			return d.recordReply(ctx, op.ID, stream, turns, reply, nil)
+			return d.recordReply(ctx, op.ID, stream, in, turns, reply, nil)
 		}
 	}
 }
@@ -281,14 +364,19 @@ func redrafts(turns []trace.QueuedTurn) int {
 	return len(slices.DeleteFunc(slices.Clone(turns), func(q trace.QueuedTurn) bool { return q.CompletedAt.IsZero() || q.Status() != "idle" }))
 }
 
-// recordedReply returns the recorded reply to round n, nil when there is none.
-func (d *debate) recordedReply(stream config.WorkstreamID, n int) (*shed.Reply, error) {
-	replies, err := shed.Replies(d.repository, stream)
+// recordedReply returns the architect's recorded answer of the operation, nil
+// when there is none.
+func (d *debate) recordedReply(stream config.WorkstreamID, in roundInput) (*shed.Reply, error) {
+	read := shed.Replies
+	if in.Redraft {
+		read = shed.Redrafted
+	}
+	replies, err := read(d.repository, stream)
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range replies {
-		if r.Round == n {
+		if r.Round == in.Round {
 			return &r, nil
 		}
 	}
@@ -364,18 +452,19 @@ func (d *debate) answers(stream config.WorkstreamID, turns []trace.QueuedTurn) (
 	return answers, turn, nil
 }
 
-// recordReply commits the architect's reply as shed/round-<n>/reply.json and
-// the files of a valid redraft as revisions of spec.md and plan.json, all
-// authored by the architect and caused by the operation, in one commit, then
-// moves the shed to replied-<n>.
-func (d *debate) recordReply(ctx context.Context, operation string, stream config.WorkstreamID, turns []trace.QueuedTurn, reply shed.Reply, files map[string]string) (coreadapter.OperationResult, error) {
-	// A reply that is not committed yet records nothing for a workstream the
+// recordReply commits the architect's answer as shed/round-<n>/reply.json or,
+// for a redraft the owner asked for, shed/round-<n>/redrafted.json, and the
+// files of a valid redraft as revisions of spec.md and plan.json, all authored
+// by the architect and caused by the operation, in one commit, then moves the
+// shed to replied-<n> or redrafted-<n>.
+func (d *debate) recordReply(ctx context.Context, operation string, stream config.WorkstreamID, in roundInput, turns []trace.QueuedTurn, reply shed.Reply, files map[string]string) (coreadapter.OperationResult, error) {
+	// An answer that is not committed yet records nothing for a workstream the
 	// owner abandoned while the turn ran.
 	if gone, err := abandoned(d.repository, stream); err != nil || gone {
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		return d.replyFailed(ctx, operation, stream, reply.Round, abandonedReply(reply.Round))
+		return d.replyFailed(ctx, operation, stream, in, abandonedReply(in))
 	}
 	var err error
 	if reply.Answers, reply.Turn, err = d.answers(stream, turns); err != nil {
@@ -406,13 +495,13 @@ func (d *debate) recordReply(ctx context.Context, operation string, stream confi
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	replyDoc := trace.Document{Header: header(shed.ReplyDocumentID(reply.Round), 1), Path: shed.ReplyPath(reply.Round), Content: string(data)}
+	replyDoc := trace.Document{Header: header(in.documentID(), 1), Path: in.path(), Content: string(data)}
 	err = d.repository.RecordDocuments(ctx, append(docs, replyDoc))
 	if errors.Is(err, trace.ErrOwnerEdit) && reply.Redraft != nil {
 		// The owner has edited a file the redraft changes and the edit is not
 		// recorded yet. The redraft must not write over it, so it is given up
-		// like an invalid one and the reply is recorded on its own.
-		if reply, replyDoc, err = d.withoutRedraft(stream, reply, header); err != nil {
+		// like an invalid one and the answer is recorded on its own.
+		if reply, replyDoc, err = d.withoutRedraft(stream, in, reply, header); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 		err = d.repository.RecordDocuments(ctx, []trace.Document{replyDoc})
@@ -420,13 +509,13 @@ func (d *debate) recordReply(ctx context.Context, operation string, stream confi
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	return d.replied(ctx, operation, stream, reply)
+	return d.replied(ctx, operation, stream, in, reply)
 }
 
 // withoutRedraft gives up a redraft the owner's own unrecorded edit stands in
 // the way of: the reply keeps its answers, records why the redraft was given
 // up, and the revision the round debated stays.
-func (d *debate) withoutRedraft(stream config.WorkstreamID, reply shed.Reply, header func(string, int) trace.Header) (shed.Reply, trace.Document, error) {
+func (d *debate) withoutRedraft(stream config.WorkstreamID, in roundInput, reply shed.Reply, header func(string, int) trace.Header) (shed.Reply, trace.Document, error) {
 	edited, err := d.repository.OwnerEdits(stream)
 	if err != nil {
 		return reply, trace.Document{}, err
@@ -437,13 +526,16 @@ func (d *debate) withoutRedraft(stream config.WorkstreamID, reply shed.Reply, he
 	if err != nil {
 		return reply, trace.Document{}, err
 	}
-	return reply, trace.Document{Header: header(shed.ReplyDocumentID(reply.Round), 1), Path: shed.ReplyPath(reply.Round), Content: string(data)}, nil
+	return reply, trace.Document{Header: header(in.documentID(), 1), Path: in.path(), Content: string(data)}, nil
 }
 
-// replied moves the shed to replied-<n> for a recorded reply, with a reason
-// that says what the reply holds.
-func (d *debate) replied(ctx context.Context, operation string, stream config.WorkstreamID, reply shed.Reply) (coreadapter.OperationResult, error) {
+// replied moves the shed to replied-<n> or redrafted-<n> for a recorded
+// answer, with a reason that says what it holds.
+func (d *debate) replied(ctx context.Context, operation string, stream config.WorkstreamID, in roundInput, reply shed.Reply) (coreadapter.OperationResult, error) {
 	reason := fmt.Sprintf("the architect answered %d objections after round %d", len(reply.Answers), reply.Round)
+	if in.Redraft {
+		reason = fmt.Sprintf("the architect redrafted at the owner's request after round %d and answered %d objections", reply.Round, len(reply.Answers))
+	}
 	switch {
 	case reply.Failure != "":
 		reason += "; its turn failed: " + reply.Failure
@@ -454,41 +546,41 @@ func (d *debate) replied(ctx context.Context, operation string, stream config.Wo
 	default:
 		reason += " and left " + reply.Revision.String() + " as it is"
 	}
-	return d.endReply(ctx, operation, stream, reply.Round, "replied", reason)
+	return d.endReply(ctx, operation, stream, in, in.recorded(), reason)
 }
 
-// abandonedReply is why the reply to round n of an abandoned workstream
+// abandonedReply is why the architect's answer of an abandoned workstream
 // failed.
-func abandonedReply(n int) string {
-	return fmt.Sprintf("the reply to round %d failed: the workstream was abandoned, so the architect's reply is not recorded", n)
+func abandonedReply(in roundInput) string {
+	return fmt.Sprintf("%s failed: the workstream was abandoned, so the architect's %s is not recorded", in.about(), in.answering())
 }
 
-func (d *debate) replyFailed(ctx context.Context, operation string, stream config.WorkstreamID, n int, reason string) (coreadapter.OperationResult, error) {
-	return d.endReply(ctx, operation, stream, n, "failed", reason)
+func (d *debate) replyFailed(ctx context.Context, operation string, stream config.WorkstreamID, in roundInput, reason string) (coreadapter.OperationResult, error) {
+	return d.endReply(ctx, operation, stream, in, "failed", reason)
 }
 
-// endReply ends the reply to round n with a shed transition, replied-<n> or
-// failed-<n>, and returns the matching result. The transition already
-// recorded is returned as it is.
-func (d *debate) endReply(ctx context.Context, operation string, stream config.WorkstreamID, n int, kind, reason string) (coreadapter.OperationResult, error) {
+// endReply ends the architect's answer with a shed transition, replied-<n>,
+// redrafted-<n> or failed-<n>, and returns the matching result. The transition
+// already recorded is returned as it is.
+func (d *debate) endReply(ctx context.Context, operation string, stream config.WorkstreamID, in roundInput, kind, reason string) (coreadapter.OperationResult, error) {
 	outcome := coreadapter.OperationResult{Outcome: "failed", Evidence: reason}
-	if kind == "replied" {
+	if kind == in.recorded() {
 		outcome.Outcome = "succeeded"
 	}
 	state, err := d.repository.Workflow(stream, shedSubject)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	if state.Value != fmt.Sprintf("reply-%d", n) {
-		result, err := d.replyOutcome(stream, n)
+	if state.Value != in.running() {
+		result, err := d.replyOutcome(stream, in)
 		if err != nil || result == nil {
-			return coreadapter.OperationResult{}, errors.Join(err, fmt.Errorf("the reply to round %d is %q, not in progress", n, state.Value))
+			return coreadapter.OperationResult{}, errors.Join(err, fmt.Errorf("%s is %q, not in progress", in.about(), state.Value))
 		}
 		return *result, nil
 	}
-	id, _ := replyIDs(n)
+	id, _ := in.ids()
 	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: d.header(id+"-"+kind, stream, operation, d.s.now()), Subject: shedSubject, From: state.Value, To: fmt.Sprintf("%s-%d", kind, n), Reason: reason}}
+		Transition: trace.Transition{Header: d.header(id+"-"+kind, stream, operation, d.s.now()), Subject: shedSubject, From: state.Value, To: fmt.Sprintf("%s-%d", kind, in.Round), Reason: reason}}
 	if _, err := d.repository.Transact(ctx, tx); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -496,7 +588,7 @@ func (d *debate) endReply(ctx context.Context, operation string, stream config.W
 }
 
 // standingAfter returns the dissent that stood once round n was heard, and
-// that the owner has not dismissed: what the architect answers.
+// that the owner has not disposed of: what the architect answers.
 func (d *debate) standingAfter(stream config.WorkstreamID, n int) ([]shed.Entry, error) {
 	records, err := d.earlier(stream, n+1)
 	if err != nil {
@@ -509,9 +601,9 @@ func (d *debate) standingAfter(stream config.WorkstreamID, n int) ([]shed.Entry,
 	return shed.Standing(shed.DissentRecord(records, rulings)), nil
 }
 
-// enqueueReply accepts the next architect turn of the reply, fixing its
-// profile and prompts. A turn that follows an invalid redraft lists why it
-// was not accepted.
+// enqueueReply accepts the next architect turn of the reply, or of the
+// redraft the owner asked for, fixing its profile and prompts. A turn that
+// follows an invalid redraft lists why it was not accepted.
 func (d *debate) enqueueReply(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in roundInput, turns []trace.QueuedTurn, operation string) error {
 	profile, _, err := d.s.roleExecution(cfg, architectRole)
 	if err != nil {
@@ -531,9 +623,17 @@ func (d *debate) enqueueReply(ctx context.Context, cfg *config.Config, stream co
 			return err
 		}
 	}
-	turn := replyTurnID(in.Round, len(turns)+1)
+	prompt := replyPrompt(in, latest, open, problems)
+	if in.Redraft {
+		asked, err := d.asked(stream, in.Round)
+		if err != nil {
+			return err
+		}
+		prompt = redraftPrompt(in, latest, open, problems, asked.Note)
+	}
+	turn := in.turnID(len(turns) + 1)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: shedActor, Cause: operation, Depth: 1},
-		AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: architectSystemPrompt(cfg.Project), Prompt: replyPrompt(in, latest, open, problems)}
+		AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: architectSystemPrompt(cfg.Project), Prompt: prompt}
 	_, err = d.repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -583,7 +683,7 @@ func (d *debate) replyPath(stream config.WorkstreamID, in roundInput) *isolation
 		},
 		Grants: map[string]coreadapter.Capabilities{architectRole: {Tools: []string{"file_read", shed.ReplyTool, DraftTool}}},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-			if scope.Workstream != string(stream) || scope.Role != architectRole || scope.Project != string(d.repository.Project()) || scope.Thread != architectThread || !strings.HasPrefix(scope.Turn, replyTurnPrefix(in.Round)) {
+			if scope.Workstream != string(stream) || scope.Role != architectRole || scope.Project != string(d.repository.Project()) || scope.Thread != architectThread || !strings.HasPrefix(scope.Turn, in.turnPrefix()) {
 				return nil, denied
 			}
 			open, err := d.standingAfter(stream, in.Round)
@@ -678,7 +778,7 @@ func (d *debate) stageReply(ctx context.Context, stream config.WorkstreamID, in 
 	if err != nil {
 		return nil, err
 	}
-	earlier := slices.DeleteFunc(replyTurns(t, in.Round), func(q trace.QueuedTurn) bool { return q.Request.TurnID == turn })
+	earlier := slices.DeleteFunc(in.turns(t), func(q trace.QueuedTurn) bool { return q.Request.TurnID == turn })
 	if previous := d.returned(earlier); previous != "" {
 		delivered, _, err := d.redraft(stream, previous)
 		if err != nil {
@@ -705,12 +805,62 @@ func (d *debate) stageReply(ctx context.Context, stream config.WorkstreamID, in 
 
 func replyPrompt(in roundInput, latest shed.Pin, open []shed.Entry, problems []string) string {
 	var b strings.Builder
-	redraft := ""
-	if len(problems) > 0 {
-		fmt.Fprintf(&b, "Your redraft was not accepted, and the committee will not read it:\n- %s\n\nWhat you delivered is in redraft/. Deliver every file of the redraft again with %s, corrected: only what this turn delivers counts. Deliver nothing to leave the revision as it is. Your answers so far are kept; answer an objection again only to replace what you said.\n\n", strings.Join(problems, "\n- "), DraftTool)
-		redraft = "- redraft/: the files of your redraft that was not accepted.\n"
-	}
+	returned, redraft := invalidRedraft(problems)
+	b.WriteString(returned)
 	fmt.Fprintf(&b, "Round %d of the shed is heard. The committee debated %s. %d objections stand:\n", in.Round, in.pin(), len(open))
+	b.WriteString(dissentList(open))
+	fmt.Fprintf(&b, `
+What each kind asks of you:
+- charter: a veto on the part it names. It blocks until its member concedes it after a redraft, or the owner disposes of it.
+- size: split the unit by what it addresses. It blocks until its member concedes it.
+- proof: name a proof that can show the criterion. It blocks until its member concedes it.
+- fit: advice to the owner. It never blocks; answer it.
+- owner: the owner's own objection. It blocks until the owner disposes of it; answer it as you would a member's.
+
+%s
+This is your one reply to this round. Answer each objection with %s, giving its ID and your answer. When the objections call for a change, also deliver the changed spec.md, plan.json or both with %s: the redraft is validated by the rules your draft was, and a valid one is the revision the committee debates next. An invalid one comes back to you. Deliver nothing to leave the revision as it is.`, view(latest, redraft), shed.ReplyTool, DraftTool)
+	return b.String()
+}
+
+// redraftPrompt is the architect's turn for the redraft the owner asked for
+// after debate concluded: the owner's note is what to change, and the dissent
+// that stands is what the committee will read the redraft against.
+func redraftPrompt(in roundInput, latest shed.Pin, open []shed.Entry, problems []string, note string) string {
+	var b strings.Builder
+	returned, redraft := invalidRedraft(problems)
+	b.WriteString(returned)
+	fmt.Fprintf(&b, "Debate concluded after round %d of the shed, and the owner read the packet and asked you to redraft %s. The owner's note:\n\n%s\n\n", in.Round, in.pin(), note)
+	fmt.Fprintf(&b, "%d objections stand:\n", len(open))
+	b.WriteString(dissentList(open))
+	fmt.Fprintf(&b, `
+%s
+Deliver the redrafted spec.md, plan.json or both with %s: the redraft is validated by the rules your draft was, and a valid one is the revision the committee debates in the round that follows. An invalid one comes back to you. Answer with %s an objection your redraft settles, giving its ID and your answer. Deliver nothing to leave the revision as it is; the owner's note is then unanswered.`, view(latest, redraft), DraftTool, shed.ReplyTool)
+	return b.String()
+}
+
+// invalidRedraft is what the turn is told about a redraft that was not
+// accepted, and the line naming where the turn can read it.
+func invalidRedraft(problems []string) (returned, view string) {
+	if len(problems) == 0 {
+		return "", ""
+	}
+	return fmt.Sprintf("Your redraft was not accepted, and the committee will not read it:\n- %s\n\nWhat you delivered is in redraft/. Deliver every file of the redraft again with %s, corrected: only what this turn delivers counts. Deliver nothing to leave the revision as it is. Your answers so far are kept; answer an objection again only to replace what you said.\n\n", strings.Join(problems, "\n- "), DraftTool),
+		"- redraft/: the files of your redraft that was not accepted.\n"
+}
+
+// view describes what the architect's staged view holds.
+func view(latest shed.Pin, redraft string) string {
+	return fmt.Sprintf(`Your view holds:
+- spec.md and plan.json: the latest recorded revision, %s.
+- handed/, charter.md and context.md: what you drafted from.
+- shed/round-<n>/: what every member contributed to each round, your earlier replies as reply.json, and the owner's own files of the round.
+%s`, latest, redraft)
+}
+
+// dissentList is one line per objection that stands, as the architect reads
+// them.
+func dissentList(open []shed.Entry) string {
+	var b strings.Builder
 	for _, e := range open {
 		weight := "advisory"
 		if e.Blocking {
@@ -727,19 +877,19 @@ func replyPrompt(in roundInput, latest shed.Pin, open []shed.Entry, problems []s
 		}
 		fmt.Fprintf(&b, "- %s (%s, %s, by %s in round %d%s%s): %s\n", e.ID, e.Kind, weight, e.Member, e.Round, about, citing, e.Argument)
 	}
-	fmt.Fprintf(&b, `
-What each kind asks of you:
-- charter: a veto on the part it names. It blocks until its member concedes it after a redraft, or the owner disposes of it.
-- size: split the unit by what it addresses. It blocks until its member concedes it.
-- proof: name a proof that can show the criterion. It blocks until its member concedes it.
-- fit: advice to the owner. It never blocks; answer it.
-- owner: the owner's own objection. It blocks until the owner disposes of it; answer it as you would a member's.
-
-Your view holds:
-- spec.md and plan.json: the latest recorded revision, %s.
-- handed/, charter.md and context.md: what you drafted from.
-- shed/round-<n>/: what every member contributed to each round, and your earlier replies as reply.json.
-%s
-This is your one reply to this round. Answer each objection with %s, giving its ID and your answer. When the objections call for a change, also deliver the changed spec.md, plan.json or both with %s: the redraft is validated by the rules your draft was, and a valid one is the revision the committee debates next. An invalid one comes back to you. Deliver nothing to leave the revision as it is.`, latest, redraft, shed.ReplyTool, DraftTool)
 	return b.String()
+}
+
+// asked returns the owner's request for the redraft after round n.
+func (d *debate) asked(stream config.WorkstreamID, n int) (shed.Redraft, error) {
+	redrafts, err := shed.Redrafts(d.repository, stream)
+	if err != nil {
+		return shed.Redraft{}, err
+	}
+	for _, r := range redrafts {
+		if r.Round == n {
+			return r, nil
+		}
+	}
+	return shed.Redraft{}, fmt.Errorf("no redraft is asked for after round %d", n)
 }

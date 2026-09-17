@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -24,6 +23,15 @@ const (
 	// moreName is the file name, without its extension, of the owner's
 	// request for further rounds after a round concluded the debate.
 	moreName = "more"
+	// redraftName is the file name, without its extension, of the owner's
+	// request for a redraft of the spec and the plan, and redraftedName the
+	// architect's report of the redraft it wrote for it.
+	redraftName   = "redraft"
+	redraftedName = "redrafted"
+	// packetName is the file name, without its extension, of the ratification
+	// packet, and ratificationName of the owner's ratification.
+	packetName       = "packet"
+	ratificationName = "ratification"
 )
 
 // Owner is the kind of the owner's own objections. It is not one of Kinds: a
@@ -34,7 +42,11 @@ const Owner Kind = "owner"
 // reserved reports whether a shed file name, without its extension, belongs
 // to the architect or to the owner rather than to a committee member.
 func reserved(name string) bool {
-	return name == replyName || name == rulingsName || name == moreName
+	switch name {
+	case replyName, redraftedName, rulingsName, moreName, redraftName, packetName, ratificationName:
+		return true
+	}
+	return false
 }
 
 // reservedPath reports whether a shed path names one of the reserved files.
@@ -52,10 +64,20 @@ const (
 	// Dismissed says the objection is settled by the owner: it is kept as a
 	// recorded disposition and no longer blocks or holds up the debate.
 	Dismissed Disposition = "dismissed"
+	// Overruled says the owner decided to proceed in spite of the objection
+	// at the ratification gate. Like a dismissal it is kept as a recorded
+	// disposition and blocks no longer, and it is the one disposition a
+	// charter veto takes.
+	Overruled Disposition = "overruled"
 )
 
-// Dispositions lists the rulings the owner may make.
-var Dispositions = []Disposition{Sustained, Dismissed}
+// Dispositions lists the dispositions the owner may record.
+var Dispositions = []Disposition{Sustained, Dismissed, Overruled}
+
+// Settled reports whether the disposition takes the objection out of the
+// debate: the owner has dealt with it, so the architect does not answer it
+// again and no round runs on for it.
+func (d Disposition) Settled() bool { return d == Dismissed || d == Overruled }
 
 // ParseDisposition returns the disposition the owner asked for, written as
 // the verb the CLI and the API take.
@@ -86,14 +108,10 @@ type Rulings struct {
 }
 
 // RulingsPath is the workstream path of the owner's rulings of a round.
-func RulingsPath(round int) string {
-	return "shed/round-" + strconv.Itoa(round) + "/" + rulingsName + ".json"
-}
+func RulingsPath(round int) string { return roundPath(round, rulingsName) }
 
 // RulingsDocumentID is the trace record ID of the owner's rulings of a round.
-func RulingsDocumentID(round int) string {
-	return "shed-round-" + strconv.Itoa(round) + "-" + rulingsName
-}
+func RulingsDocumentID(round int) string { return roundDocumentID(round, rulingsName) }
 
 func (r Rulings) check() error {
 	switch {
@@ -153,14 +171,10 @@ type More struct {
 
 // MorePath is the workstream path of the owner's request for further rounds
 // after round n.
-func MorePath(round int) string {
-	return "shed/round-" + strconv.Itoa(round) + "/" + moreName + ".json"
-}
+func MorePath(round int) string { return roundPath(round, moreName) }
 
 // MoreDocumentID is the trace record ID of that request.
-func MoreDocumentID(round int) string {
-	return "shed-round-" + strconv.Itoa(round) + "-" + moreName
-}
+func MoreDocumentID(round int) string { return roundDocumentID(round, moreName) }
 
 func (m More) check() error {
 	switch {
@@ -215,9 +229,9 @@ func decodeFile(data []byte, out any, what string) error {
 	return nil
 }
 
-// ownerFiles returns the latest revision of every recorded shed file of the
+// shedFiles returns the latest revision of every recorded shed file of the
 // workstream whose name, without its extension, is the given one.
-func ownerFiles(repository *trace.Repository, stream config.WorkstreamID, name string) (map[string]trace.Document, error) {
+func shedFiles(repository *trace.Repository, stream config.WorkstreamID, name string) (map[string]trace.Document, error) {
 	documents, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
 		return nil, err
@@ -236,7 +250,7 @@ func ownerFiles(repository *trace.Repository, stream config.WorkstreamID, name s
 // round they were made in. A rulings file whose content disagrees with its
 // path is an error.
 func AllRulings(repository *trace.Repository, stream config.WorkstreamID) ([]Rulings, error) {
-	latest, err := ownerFiles(repository, stream, rulingsName)
+	latest, err := shedFiles(repository, stream, rulingsName)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +273,7 @@ func AllRulings(repository *trace.Repository, stream config.WorkstreamID) ([]Rul
 // round they were made after. A request whose content disagrees with its path
 // is an error.
 func Requests(repository *trace.Repository, stream config.WorkstreamID) ([]More, error) {
-	latest, err := ownerFiles(repository, stream, moreName)
+	latest, err := shedFiles(repository, stream, moreName)
 	if err != nil {
 		return nil, err
 	}
@@ -279,17 +293,23 @@ func Requests(repository *trace.Repository, stream config.WorkstreamID) ([]More,
 }
 
 // Limit is the last round of debate the workstream may run: the configured
-// cap until the owner asks for further rounds, and from then on the last
-// round asked for. A request replaces the cap rather than adding to it, so
-// debate the owner resumed runs the rounds asked for and no more.
-func Limit(configured int, requests []More) int {
-	if len(requests) == 0 {
+// cap until the owner asks for further rounds or for a redraft, and from then
+// on the last round asked for. A request replaces the cap rather than adding
+// to it, so debate the owner resumed runs the rounds asked for and no more; a
+// redraft asks for the one round that debates it.
+func Limit(configured int, requests []More, redrafts []Redraft) int {
+	if len(requests) == 0 && len(redrafts) == 0 {
 		return configured
 	}
 	limit := 0
 	for _, m := range requests {
 		if m.Round+m.Rounds > limit {
 			limit = m.Round + m.Rounds
+		}
+	}
+	for _, r := range redrafts {
+		if r.Round+1 > limit {
+			limit = r.Round + 1
 		}
 	}
 	return limit

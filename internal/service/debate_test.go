@@ -221,7 +221,7 @@ func TestDebateConcludesByConsensusInOneRound(t *testing.T) {
 	if end.Reason != "debate concluded by consensus after round 1: no objection stands" || end.Cause != "shed-round-1-heard" || end.Actor != shedActor || end.From != "heard-1" {
 		t.Fatalf("conclusion: %+v", end)
 	}
-	if notice := f.concluded(t, stream, 1); notice.Event.Body != "Debate concluded: "+end.Reason+". The workstream stays in-shed until the owner rules." {
+	if notice := f.concluded(t, stream, 1); notice.Event.Body != "Debate concluded: "+end.Reason+". The workstream stays in-shed until the owner decides.\n"+presentation("ratify: no objection stands") {
 		t.Fatalf("notice %q", notice.Event.Body)
 	}
 	f.stillInShed(t, stream)
@@ -344,7 +344,7 @@ func TestRedraftThenConcessionEndsTheDebate(t *testing.T) {
 		ops[0].Result.Evidence != "the architect answered 2 objections after round 1 and redrafted: spec.md revision 1 and plan.json revision 2" {
 		t.Fatalf("reply operations: %+v", ops)
 	}
-	if in, err := decodeShed(ops[0].Operation, ReplyAction); err != nil || in != (roundInput{1, 1, 1}) {
+	if in, err := decodeShed(ops[0].Operation, ReplyAction); err != nil || in != (roundInput{Round: 1, Spec: 1, Plan: 1}) {
 		t.Fatalf("reply input %+v %v", in, err)
 	}
 	asked, told := f.transition(t, stream, "shed-reply-1"), f.transition(t, stream, "shed-reply-1-replied")
@@ -372,7 +372,7 @@ func TestRedraftThenConcessionEndsTheDebate(t *testing.T) {
 		t.Fatalf("round operations: %+v", rounds)
 	}
 	for _, op := range rounds {
-		if in, err := decodeRound(op.Operation); err != nil || in != (roundInput{1, 1, 1}) && in != (roundInput{2, 1, 2}) {
+		if in, err := decodeRound(op.Operation); err != nil || in != (roundInput{Round: 1, Spec: 1, Plan: 1}) && in != (roundInput{Round: 2, Spec: 1, Plan: 2}) {
 			t.Fatalf("round input %+v %v", in, err)
 		}
 	}
@@ -537,7 +537,7 @@ func TestCapReachedWithAnOpenVetoApprovesNothing(t *testing.T) {
 		t.Fatalf("conclusion: %+v", end)
 	}
 	notice := f.concluded(t, stream, 2).Event.Body
-	for _, want := range []string{"Debate concluded: " + end.Reason + ". The workstream stays in-shed until the owner rules.", "Open dissent:",
+	for _, want := range []string{"Debate concluded: " + end.Reason + ". The workstream stays in-shed until the owner decides.", "Open dissent:", presentation(shed.Recommend([]shed.Entry{{Blocking: true, Dissent: shed.Dissent{Objection: shed.Objection{ID: veto}}}})),
 		"- " + veto + " (charter, blocking, by " + committeeAgent(1) + " in round 1 on spec#2, against spec.md revision 1 and plan.json revision 1): It does not hold.",
 		"- " + advice + " (fit, advisory, by " + committeeAgent(2) + " in round 1 on plan, against spec.md revision 1 and plan.json revision 1): It does not hold."} {
 		if !strings.Contains(notice, want) {
@@ -905,7 +905,7 @@ func TestReplyWaitsForAnArchitectRunner(t *testing.T) {
 	}
 	th, err := f.repository().Thread(stream, architectAgent)
 	must(t, err)
-	if turns := replyTurns(th, 1); len(turns) != 1 || turns[0].Status() != "interrupted" {
+	if turns := (roundInput{Round: 1}).turns(th); len(turns) != 1 || turns[0].Status() != "interrupted" {
 		t.Fatalf("a turn was queued without a runner: %+v", turns)
 	}
 	f.stop(t)
@@ -1093,7 +1093,7 @@ func TestRoundWhereEveryTurnFailedConcludesWithoutAReview(t *testing.T) {
 	if want := "debate concluded after round 1 without a review: the turns of all 2 members failed, so no objection stands and nobody agreed"; end.Reason != want {
 		t.Fatalf("conclusion %q, want %q", end.Reason, want)
 	}
-	if notice := f.concluded(t, stream, 1).Event.Body; notice != "Debate concluded: "+end.Reason+". The workstream stays in-shed until the owner rules." || strings.Contains(notice, "consensus") {
+	if notice := f.concluded(t, stream, 1).Event.Body; notice != "Debate concluded: "+end.Reason+". The workstream stays in-shed until the owner decides.\n"+presentation("ratify: no objection stands") || strings.Contains(notice, "consensus") {
 		t.Fatalf("notice %q", notice)
 	}
 	f.stillInShed(t, stream)

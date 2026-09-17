@@ -238,11 +238,11 @@ type Dissent struct {
 // Blocking reports whether the dissent stands in the way of ratification: the
 // owner's own objection, a charter veto, or a size or proof objection the
 // architect has to settle. A fit objection is advice and never blocks. The
-// owner's ruling on the objection overrides this.
+// owner's disposition of the objection overrides this.
 func (d Dissent) Blocking() bool { return d.Kind != Fit }
 
 // Entry is one line of the dissent record: an objection that stands, whether
-// it blocks, and what the owner ruled about it.
+// it blocks, and how the owner disposed of it.
 type Entry struct {
 	Dissent
 	Blocking    bool        `json:"blocking"`
@@ -251,9 +251,10 @@ type Entry struct {
 }
 
 // DissentRecord is the dissent that stands after the given records, each
-// objection with its kind, member, part, the owner's ruling on it and whether
-// it blocks. A sustained objection blocks whatever its kind; a dismissed one
-// blocks no longer and is kept as the owner's recorded disposition.
+// objection with its kind, member, part, the owner's disposition of it and whether
+// it blocks. A sustained objection blocks whatever its kind; a dismissed or
+// overruled one blocks no longer and is kept as the owner's recorded
+// disposition.
 func DissentRecord(records []Record, rulings []Rulings) []Entry {
 	ruled := map[string]Ruling{}
 	for _, one := range flatten(rulings) {
@@ -271,10 +272,17 @@ func DissentRecord(records []Record, rulings []Rulings) []Entry {
 	return entries
 }
 
-// Standing returns the entries of a dissent record the owner has not
-// dismissed: what the architect still answers and the debate still runs for.
+// Standing returns the entries of a dissent record the owner has not settled:
+// what the architect still answers and the debate still runs for.
 func Standing(entries []Entry) []Entry {
-	return slices.DeleteFunc(slices.Clone(entries), func(e Entry) bool { return e.Disposition == Dismissed })
+	return slices.DeleteFunc(slices.Clone(entries), func(e Entry) bool { return e.Disposition.Settled() })
+}
+
+// Blocked returns the entries of a dissent record that stand in the way of
+// ratification: what blocks and what the owner sustained, in the order the
+// record holds them.
+func Blocked(entries []Entry) []Entry {
+	return slices.DeleteFunc(slices.Clone(entries), func(e Entry) bool { return !e.Blocking })
 }
 
 // OpenDissent computes the dissent that stands after the given records,

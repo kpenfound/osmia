@@ -291,7 +291,8 @@ with the reason `draft <n> failed: the workstream was abandoned, so the
 architect runs no turn for it`; nothing more is requested.
 
 `Options.Architect` supplies the execution engine and MCP host factory the
-architect's turns run in. Without it the controller requests nothing, so a
+architect's turns run in: its drafts, its replies to shed rounds and the
+redrafts the owner asks for. Without it the controller requests nothing, so a
 handed workstream stays `handed` until a service with a runner starts and
 drafts it. A draft already requested stays pending: applying it returns
 `this service has no agent runner for the architect` wherever it would start or
@@ -321,23 +322,27 @@ the trace says it is:
 | `heard-<n>` | some | Ask the architect for [its reply](#the-architects-reply) to round `n`. |
 | `replied-<n>` | some, `n` below the round limit | Round `n+1`, against the latest revisions. |
 | `replied-<n>` | some, `n` at the round limit or above | Conclude at the cap. |
-| `concluded-<n>` | | Round `n+1` where the [owner asked for further rounds](#the-owner-in-the-shed) after round `n` and the limit allows it, nothing otherwise. |
-| `round-<n>`, `reply-<n>`, `failed-<n>` | | Nothing. |
+| `concluded-<n>` | | The [redraft the owner asked for](#redraft) after round `n`, then round `n+1`; round `n+1` alone where they asked for [further rounds](#more-debate) and the limit allows it; nothing otherwise. |
+| `redrafted-<n>` | | Round `n+1`, against the revisions the redraft wrote. |
+| `round-<n>`, `reply-<n>`, `redraft-<n>`, `failed-<n>` | | Nothing. |
 
-Open dissent here is the dissent record without what the owner dismissed. The
-round limit is `shed.max_rounds` until the owner asks for
-[further rounds](#more-debate), and the last round they asked for from then
-on. Only a workstream in feature state `in-shed` takes a step, so an abandoned
+Open dissent here is the dissent record without what the owner dismissed or
+overruled. The round limit is `shed.max_rounds` until the owner asks for
+[further rounds](#more-debate) or for a redraft, and the last round they asked
+for from then on. Only a workstream in feature state `in-shed` takes a step, so an abandoned
 workstream's debate stays where it stopped. A debate the owner skipped takes no
 step at all. A step that runs turns waits for
 the runner of those turns: entering the shed and every round for
-`Options.Committee`, the reply for `Options.Architect`. Concluding runs no
-turn and waits for neither, so a service with an architect runner and no
-committee runner still answers a heard round and still concludes a debate.
+`Options.Committee`, the reply and the redraft for `Options.Architect`.
+Concluding runs no turn and waits for neither, so a service with an architect
+runner and no committee runner still answers a heard round and still concludes
+a debate.
 
 Before any of that, and for a skipped debate too, every pass records the
 owner's [edits](#the-owner-in-the-shed) to `spec.md` and `plan.json`, so no
-turn ever reads an unrecorded edit.
+turn ever reads an unrecorded edit. After it, the pass presents the
+[ratification packet](#the-ratification-gate) of a workstream whose debate has
+concluded or been skipped.
 
 ### Entering the shed
 
@@ -385,7 +390,7 @@ Each turn gets a read-only private copy of a view staged under
 | `charter.md` | The charter as recorded, after any owner edit is recorded. |
 | `context.md` | The rendered [context bundle](context.md) for the whole project, with the workstream's decisions. |
 | `repo/` | The tracked files of the owner's clone. |
-| `shed/round-<k>/` | The records of the earlier rounds, and the architect's reply to each as `reply.json`. |
+| `shed/round-<k>/` | The records of the earlier rounds, the architect's reply to each as `reply.json`, and the owner's own files of the round. |
 
 A member gets `file_read`, `object` and `concede` and nothing else: no notes,
 no write, execute, network or VCS capability. `object` and `concede` are
@@ -456,11 +461,12 @@ part, argument, citations, the revision it was made against, the owner's
 | `size` | yes | The draft goes back to the architect for a split. It stands until conceded. |
 | `proof` | yes | The draft goes back to the architect for a proof. It stands until conceded. |
 | `fit` | no | Advice to the owner, carried in the dissent record. It never blocks. |
-| `owner` | yes | The [owner's own objection](#the-owner-in-the-shed). The architect answers it like any other, and it stands until the owner dismisses it. |
+| `owner` | yes | The [owner's own objection](#the-owner-in-the-shed). The architect answers it like any other, and it stands until the owner disposes of it. |
 
-The owner's ruling overrides the kind: a sustained objection blocks whatever
-its kind, and a dismissed one blocks no longer. Consensus is a dissent record
-with no entry the owner has not dismissed, advice included. It is never a vote,
+The owner's disposition overrides the kind: a sustained objection blocks
+whatever its kind, and a dismissed or overruled one blocks no longer.
+Consensus is a dissent record with no entry the owner has not disposed of,
+advice included. It is never a vote,
 and no member reports a confidence.
 
 Recovery keys on the trace: a restart during the round finds the turns that
@@ -501,7 +507,7 @@ The turn gets a read-only private copy of a view staged under
 | --- | --- |
 | `spec.md`, `plan.json` | The latest recorded revisions. |
 | `handed/<name>`, `charter.md`, `context.md` | As for [drafting](#the-turn). |
-| `shed/round-<k>/` | Every member's record of every round so far, and the architect's earlier replies. |
+| `shed/round-<k>/` | Every member's record of every round so far, the architect's earlier replies and redrafts, and the owner's own files of the round. |
 | `redraft/spec.md`, `redraft/plan.json` | After an invalid redraft, the files of it the architect delivered. |
 
 The architect gets `file_read`, `reply` and `draft_write` and nothing else.
@@ -509,7 +515,7 @@ The architect gets `file_read`, `reply` and `draft_write` and nothing else.
 `objection`, the ID of an objection that stood once the round was heard, and
 `answer`; answering an objection again replaces the earlier answer, and an
 answer that is refused is an ordinary result, `{"recorded":false,"reason":...}`.
-The prompt lists every objection the owner has not dismissed with its ID,
+The prompt lists every objection the owner has not disposed of with its ID,
 kind, whether it blocks, member, round, and the part and citations it has, and
 says what each kind asks of the architect.
 
@@ -556,11 +562,15 @@ reply to round <n> failed: the workstream was abandoned, so the architect's
 reply is not recorded`. A reply whose file was committed before the workstream
 was abandoned still ends `replied-<n>`.
 
-Without `Options.Architect` the controller asks for no reply, so the shed
-stays `heard-<n>` until a service with a runner starts. A reply already
-requested stays pending: applying it returns `this service has no agent runner
-for the architect` wherever it would start or run a turn, and no attempt is
-spent.
+Without `Options.Architect` the controller asks for no reply and no
+[redraft](#redraft), so the shed stays `heard-<n>` or `concluded-<n>` until a
+service with a runner starts. One already requested stays pending: applying it
+returns `this service has no agent runner for the architect` wherever it would
+start or run a turn, and no attempt is spent.
+
+The redraft the owner asks for takes the same turn path, with its own
+operation, transition, states and record; everything this section says of a
+reply holds for it, except that what it answers is the owner's note.
 
 ### Concluding the debate
 
@@ -577,26 +587,31 @@ at the cap, once the reply to the round limit is recorded: caused by
 the shed.max_rounds cap of <max>, with <k> objections standing, <b> of them
 blocking; the cap approves nothing`. The round limit is `shed.max_rounds`, read
 from the loaded configuration when the step is taken, until the owner asks for
-[further rounds](#more-debate); from then on it is the last round they asked
-for, and the reason names it instead: `at round <n>, the last of the further
-rounds the owner asked for`.
+[further rounds](#more-debate) or for a [redraft](#redraft); from then on it is
+the last round they asked for, and the reason names it instead: `at round <n>,
+the last of the further rounds the owner asked for` where a request for further
+rounds reaches the limit, and `at round <n>, the round that debated the redraft
+the owner asked for` where the redraft does.
 
 Either way the workstream stays `in-shed`, the dissent that stands keeps
 standing, and no later pass starts a round. The conclusion commits with a
 notice for the chief of staff (event key `concluded`), delivered through the
 [outbox](#event-delivery): `Debate concluded: <reason>. The workstream stays
-in-shed until the owner rules.` When dissent stands, that is followed by
+in-shed until the owner decides.` When dissent stands, that is followed by
 `Open dissent:` and one line per entry of the dissent record with its ID,
 kind, the owner's disposition where there is one, `blocking` or `advisory`,
 member, round, the part it has, revision and argument; a conclusion by
-consensus has no such line. A debate whose every standing
-objection the owner dismissed concludes with the reason `debate concluded
-after round <n>: the owner dismissed every objection that stood`, and its
+consensus has no such line. The notice ends with the
+[packet](#the-ratification-gate) to present and the recommendation in it, and
+asks the chief of staff to make the decision the owner has to take now the
+attention of its status. A debate whose every standing
+objection the owner disposed of concludes with the reason `debate concluded
+after round <n>: the owner disposed of every objection that stood`, and its
 notice lists them with their disposition.
 
 ## The owner in the shed
 
-The owner takes part in the debate directly, through four API calls and their
+The owner takes part in the debate directly, through six API calls and their
 CLI wrappers. Each is recorded with the owner as actor (`owner`/`local`), and
 each transition reaches `events.jsonl` with a notice for the chief of staff.
 The workflow subject `shed-owner` tracks them, separately from `shed` so that
@@ -606,15 +621,19 @@ an owner action never races a running round:
 | --- | --- |
 | `objected-<n>` | The owner objected in round `n`. |
 | `ruled-<n>` | The owner ruled on an objection in round `n`. |
+| `overruled-<n>` | The owner overruled an objection in round `n`. |
 | `more-<n>` | The owner asked for further rounds after debate concluded at round `n`. |
+| `redraft-<n>` | The owner asked the architect for a redraft after debate concluded at round `n`. |
+| `ratified-<n>` | The owner [ratified](#the-ratification-gate) the spec and the plan in round `n`. |
 | `skipped` | The owner skipped debate. No committee turn starts again. |
 | `invalid-edit` | An owner edit was read, found invalid and not recorded. |
 
 The round an action is recorded under is the round the `shed` state has
-reached, or round 1 before the first round runs. The owner's objections and
-rulings of a round keep the revision the file was opened against, as a
-member's record keeps the revision its round was pinned to; a request for
-further rounds is about rounds, not revisions, and records none.
+reached, or round 1 before the first round runs. The owner's objections,
+rulings, requests for a redraft and ratifications of a round keep the revision
+the file was opened against, as a member's record keeps the revision its round
+was pinned to; a request for further rounds is about rounds, not revisions, and
+records none.
 
 `skipped` is the value of the action alone: a later objection, ruling or
 reported edit moves the subject on, and none of them un-skips the debate,
@@ -628,18 +647,50 @@ owner's own objection to the current round. It is recorded in
 the member name `owner`, with kind `owner` and the ID `owner-r<n>-<k>`. Unlike
 a member's objection it needs no part and no citation. It stands in the dissent
 record and blocks, the architect answers it in its reply to the round like any
-other, and no member's turn settles it: the owner dismisses it with a ruling.
+other, and no member's turn settles it: the owner disposes of it with a ruling
+or an overrule.
 
 ### Rule
 
 `POST /v1/shed/rule/<workstream-id>` with `{"objection": "<id>",
 "disposition": "sustain"|"dismiss", "note": "..."}` rules on one objection that
 stands. The rulings of a round are one document, `shed/round-<n>/rulings.json`,
-each with the objection, the disposition and the owner's note; ruling again on
-the same objection replaces the earlier ruling. A sustained objection blocks
-whatever its kind, until its member concedes it after a redraft. A dismissed one
-stays in the dissent record with its disposition, no longer blocks, and neither
-the architect answers it again nor does the debate run on for it.
+each with the objection, the disposition and the owner's note; disposing of the
+same objection again replaces the earlier disposition. A sustained objection
+blocks whatever its kind, until its member concedes it after a redraft. A
+dismissed one stays in the dissent record with its disposition, no longer
+blocks, and neither the architect answers it again nor does the debate run on
+for it.
+
+### Overrule
+
+`POST /v1/shed/overrule/<workstream-id>` with `{"objection": "<id>",
+"reason": "..."}` overrules one objection that stands, charter vetoes included.
+It is a disposition of the same kind as a ruling, `overruled`, recorded in the
+same `shed/round-<n>/rulings.json` against the revision the documents are at,
+and it settles the objection exactly as a dismissal does. The two differ in
+what they say: a dismissal settles an objection while debate runs, and an
+overrule is the owner's decision to proceed in spite of it at the
+[ratification gate](#the-ratification-gate).
+
+### Redraft
+
+`POST /v1/shed/redraft/<workstream-id>` with `{"note": "..."}` sends the spec
+and the plan back to the architect once debate has concluded. The request is
+recorded in `shed/round-<n>/redraft.json` against the round it concluded at,
+with the revisions it was made against and the owner's note, and makes the
+round limit `n+1`. The controller then asks the architect for the redraft as
+one turn (state `redraft-<n>`, operation `shed-redraft`, transition
+`shed-redraft-<n>`), recorded as `shed/round-<n>/redrafted.json` with the
+revisions it wrote, as its reply to a round is recorded; the shed moves to
+`redrafted-<n>` and round `n+1` debates what the architect wrote, whether the
+redraft changed anything or not. The turn carries the owner's note and the
+dissent that stands, and is bounded by the drafting bounds of a reply: an
+invalid redraft comes back to the architect, and a redraft the owner's own
+unrecorded edit stands in the way of is given up. The request is refused with
+`conflict` while debate has not concluded, on a skipped debate, and on a
+conclusion the owner already asked a redraft for; an empty note is a
+`validation` refusal.
 
 ### Edit
 
@@ -681,11 +732,92 @@ is still running, on a debate that never concluded, and on a skipped one. A
 conclusion the owner did not follow with a request stays a conclusion.
 
 Every action is refused with `conflict` unless the workstream is `in-shed`
-(`sketched` or `in-shed` for skip), with `validation` for an empty argument, an
-unknown disposition or a round count out of range, and with `not_found` for an
-objection that does not stand. The response is a `ShedResponse`: `project`,
-`workstream`, `action`, `round`, the `objection` an objection or ruling
-concerns, the `rounds` a request asked for, and the recorded `detail`.
+(`sketched` or `in-shed` for skip and ratification), with `validation` for an
+empty argument, an unknown disposition, an empty note or a round count out of
+range, and with `not_found` for an objection that does not stand. The response
+is a `ShedResponse`: `project`, `workstream`, `action`, `round`, the
+`objection` an objection or disposition concerns, the `rounds` a request asked
+for, and the recorded `detail`.
+
+## The ratification gate
+
+Debate that concluded, and debate the owner skipped, put the decision to the
+owner. The shed pass presents it as the ratification packet, and
+`osmia ratify` is the decision.
+
+### The packet
+
+Every shed pass records the packet of a workstream in the shed whose debate has
+concluded or been skipped, as the next revision of
+`shed/round-<n>/packet.json` (record ID `shed-round-<n>-packet`, actor
+`service`/`shed`, cause `ratification-packet`) whenever what it says differs
+from the revision already recorded. A workstream at no decision point has no
+packet. A packet holds:
+
+- `round`, the round debate ended after, and `skipped`, whether the owner
+  skipped it;
+- `revision`, the revisions of `spec.md` and `plan.json` the owner decides on;
+- `conclusion`, the recorded reason debate ended;
+- `dissent`, the dissent record with every entry that blocks ratification
+  first, each marked `blocking` or advisory and carrying the owner's
+  disposition where there is one;
+- `recommendation`: `ratify: no objection stands`, `ratify: nothing blocks, and
+  <k> objections stand as advice on the record`, or `do not ratify yet:
+  ratification is blocked by <k> objections (<ids>); overrule or sustain each
+  one, or ask for a redraft`.
+
+Because the pass records a new revision whenever the packet changes, every
+owner action that changes what it says is followed by the packet that says it.
+`GET /v1/packet/<workstream-id>` serves the latest recorded packet of the
+latest round with its revision and the time it was recorded, and `not_found`
+for a workstream that has none.
+
+### Ratifying
+
+`POST /v1/ratify/<workstream-id>` with `{"spec": <s>, "plan": <p>}` ratifies
+exactly those revisions. `osmia ratify` reads the packet and pins the revisions
+it names, so a ratification of revisions that have moved since is refused
+rather than silently applied to what the owner did not read.
+
+Ratification is refused with `conflict`, and every reason that applies is
+listed in the one refusal:
+
+- `<asked> are ratified, and the current revisions are <current>: read the
+  packet again`;
+- `objection <id> (<kind>, by <member> in round <n> on <part>) blocks and has
+  no disposition`, or `... blocks and is sustained and is not conceded`, one
+  line per entry of the dissent record that blocks;
+- `the plan is not valid: <problem>`, one line per problem of the recorded spec
+  and plan, validated exactly as a draft is;
+- `the workstream is sketched and debate is not skipped: it is ratified in the
+  shed`.
+
+A workstream that is neither `in-shed` nor `sketched` is refused by the state
+check every owner action of the shed makes, and revisions below 1 with
+`validation`. Revisions already ratified are not recorded again: that call asks
+for the [sealing](#sealing) of the ratification on the record instead, and
+answers with the detail `workstream <id> is ratified at <revisions> already;
+the sealing is asked for again`.
+
+What passes is recorded in `shed/round-<n>/ratification.json` (actor
+`owner`/`local`, cause `owner-shed`) with the revisions it approves, the
+dissent record it was given over and the dispositions in force, and the owner
+subject moves to `ratified-<n>`; the reason is `the owner ratified <revisions>
+after round <n>`, followed by `, over <k> objections the owner disposed of`
+where there were any. The gate itself changes no state beyond that record. The
+response is a `RatifyResponse`: `project`, `workstream`, `round`, `spec`,
+`plan`, `sealed` and the recorded `detail`.
+
+### Sealing
+
+A recorded ratification triggers `Options.Sealing`, which seals the ratified
+revisions and moves the workstream on. Without one the ratification stands and
+the response reports `sealed: false`. A sealing that fails leaves the
+ratification recorded and answers `internal` with `<revisions> is ratified for
+workstream <id> and the sealing did not start; ratify again to ask for it`, and
+a service stop between the record and the call leaves the same thing owed:
+ratifying the same revisions again records nothing and asks for the sealing
+again, which is why a sealing seals the same revisions twice without harm.
 
 ## Abandoning
 

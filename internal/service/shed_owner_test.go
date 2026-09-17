@@ -308,7 +308,7 @@ func TestDismissingEveryObjectionConcludesTheDebate(t *testing.T) {
 
 	f.awaitShed(t, stream, "concluded-1", "round-2")
 	end := f.transition(t, stream, "shed-concluded-1")
-	if end.Reason != "debate concluded after round 1: the owner dismissed every objection that stood" {
+	if end.Reason != "debate concluded after round 1: the owner disposed of every objection that stood" {
 		t.Fatalf("conclusion %q", end.Reason)
 	}
 	// The objection is still on the record, with the owner's disposition.
@@ -382,6 +382,10 @@ func TestOwnerSkipsDebateAcrossARestart(t *testing.T) {
 	if _, err := f.c.ShedMore(ctx, stream, 1); !failed(err, Conflict) {
 		t.Fatalf("more after a skip: %v", err)
 	}
+	_, err = f.c.ShedRedraft(ctx, stream, "Split it.")
+	if !failed(err, Conflict) || !strings.Contains(err.Error(), "skipped debate") {
+		t.Fatalf("a redraft after a skip: %v", err)
+	}
 }
 
 // Skip is refused while a round is running, and on a workstream that is not
@@ -398,10 +402,15 @@ func TestSkipIsRefusedWhileARoundRunsAndOutsideTheShed(t *testing.T) {
 	if _, err := f.c.ShedSkip(ctx, stream); !failed(err, Conflict) {
 		t.Fatalf("skipping a running round: %v", err)
 	}
-	// Further rounds are the owner's to ask for only once debate concluded.
+	// Further rounds and a redraft are the owner's to ask for only once
+	// debate concluded.
 	_, err := f.c.ShedMore(ctx, stream, 1)
 	if !failed(err, Conflict) || !strings.Contains(err.Error(), "has not concluded") {
 		t.Fatalf("more while round 1 runs: %v", err)
+	}
+	_, err = f.c.ShedRedraft(ctx, stream, "Split it.")
+	if !failed(err, Conflict) || !strings.Contains(err.Error(), "has not concluded") {
+		t.Fatalf("a redraft while round 1 runs: %v", err)
 	}
 	close(release)
 	f.awaitShed(t, stream, "concluded-1")
@@ -410,10 +419,13 @@ func TestSkipIsRefusedWhileARoundRunsAndOutsideTheShed(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, call := range map[string]func() error{
-		"skip":   func() error { _, err := f.c.ShedSkip(ctx, stream); return err },
-		"object": func() error { _, err := f.c.ShedObject(ctx, stream, "No."); return err },
-		"rule":   func() error { _, err := f.c.ShedRule(ctx, stream, "owner-r1-1", "dismiss", ""); return err },
-		"more":   func() error { _, err := f.c.ShedMore(ctx, stream, 1); return err },
+		"skip":     func() error { _, err := f.c.ShedSkip(ctx, stream); return err },
+		"object":   func() error { _, err := f.c.ShedObject(ctx, stream, "No."); return err },
+		"rule":     func() error { _, err := f.c.ShedRule(ctx, stream, "owner-r1-1", "dismiss", ""); return err },
+		"overrule": func() error { _, err := f.c.ShedOverrule(ctx, stream, "owner-r1-1", ""); return err },
+		"more":     func() error { _, err := f.c.ShedMore(ctx, stream, 1); return err },
+		"redraft":  func() error { _, err := f.c.ShedRedraft(ctx, stream, "Split it."); return err },
+		"ratify":   func() error { _, err := f.c.Ratify(ctx, stream, 1, 1); return err },
 	} {
 		if err := call(); !failed(err, Conflict) || !strings.Contains(err.Error(), AbandonedState) {
 			t.Fatalf("%s on an abandoned workstream: %v", name, err)
@@ -737,8 +749,15 @@ func TestShedActionsRefuseAnUnknownWorkstream(t *testing.T) {
 			_, err := f.c.ShedRule(ctx, id, "owner-r1-1", "dismiss", "")
 			return err
 		},
-		"skip": func(id config.WorkstreamID) error { _, err := f.c.ShedSkip(ctx, id); return err },
-		"more": func(id config.WorkstreamID) error { _, err := f.c.ShedMore(ctx, id, 1); return err },
+		"overrule": func(id config.WorkstreamID) error {
+			_, err := f.c.ShedOverrule(ctx, id, "owner-r1-1", "")
+			return err
+		},
+		"skip":    func(id config.WorkstreamID) error { _, err := f.c.ShedSkip(ctx, id); return err },
+		"more":    func(id config.WorkstreamID) error { _, err := f.c.ShedMore(ctx, id, 1); return err },
+		"redraft": func(id config.WorkstreamID) error { _, err := f.c.ShedRedraft(ctx, id, "Split it."); return err },
+		"packet":  func(id config.WorkstreamID) error { _, err := f.c.Packet(ctx, id); return err },
+		"ratify":  func(id config.WorkstreamID) error { _, err := f.c.Ratify(ctx, id, 1, 1); return err },
 	}
 	for name, call := range calls {
 		if err := call(unknown); !failed(err, Validation) {
