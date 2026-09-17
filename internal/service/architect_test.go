@@ -467,7 +467,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	f.script("draft-3-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan},
 		func(ctx context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
 			var problems []error
-			for _, want := range []string{"Draft 2 was not accepted:", `unit "resume": dependency cycle dedupe -> resume -> dedupe`, "spec#2: no unit addresses this criterion"} {
+			for _, want := range []string{"Draft 2 was not accepted:", `unit "dedupe": dependency cycle dedupe -> resume -> dedupe`, "spec#2: no unit addresses this criterion"} {
 				if !strings.Contains(req.Prompt, want) {
 					problems = append(problems, fmt.Errorf("prompt lacks %q:\n%s", want, req.Prompt))
 				}
@@ -510,7 +510,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 		{"draft-1", "", "drafting-1", "the workstream was handed in; the architect is asked for draft 1"},
 		{"draft-1-invalid", "drafting-1", "invalid-1", "draft 1 of the spec and plan is invalid:\n- plan.json was not delivered"},
 		{"draft-2", "invalid-1", "drafting-2", "draft 1 was invalid; the architect is asked for draft 2"},
-		{"draft-2-invalid", "drafting-2", "invalid-2", "draft 2 of the spec and plan is invalid:\n- unit \"resume\": dependency cycle dedupe -> resume -> dedupe\n- spec#2: no unit addresses this criterion"},
+		{"draft-2-invalid", "drafting-2", "invalid-2", "draft 2 of the spec and plan is invalid:\n- unit \"dedupe\": dependency cycle dedupe -> resume -> dedupe\n- spec#2: no unit addresses this criterion"},
 		{"draft-3", "invalid-2", "drafting-3", "draft 2 was invalid; the architect is asked for draft 3"},
 	} {
 		tr, ok := byID[want.id]
