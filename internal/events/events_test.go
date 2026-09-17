@@ -474,8 +474,12 @@ func TestEventOfAQueuedOrRunningTurnIsNotDeliveredTwice(t *testing.T) {
 }
 
 func TestEventOfAFailedTurnIsDeliveredInOneNewTurn(t *testing.T) {
-	for _, expired := range []bool{false, true} {
-		t.Run(fmt.Sprintf("expired=%v", expired), func(t *testing.T) {
+	for _, c := range []struct {
+		name               string
+		cancelled, expired bool
+	}{{"failed", false, false}, {"failed after the lease", false, true}, {"cancelled", true, false}} {
+		expired := c.expired
+		t.Run(c.name, func(t *testing.T) {
 			ctx := context.Background()
 			f, repo := setup(t)
 			defer repo.Close()
@@ -483,7 +487,15 @@ func TestEventOfAFailedTurnIsDeliveredInOneNewTurn(t *testing.T) {
 			f.clock.Advance(time.Minute)
 			d := f.deliverer(t, repo, time.Second)
 			must(t, d.Pass(ctx))
-			f.finish(t, repo, f.claimNext(t, repo), false)
+			if c.cancelled {
+				n, err := repo.CancelTurns(ctx, stream, f.clock.Now(), owner, "Workstream abandoned")
+				must(t, err)
+				if th, err := repo.ChiefOfStaffThread(stream); err != nil || n != 1 || th.Turns[0].Status() != "interrupted" {
+					t.Fatalf("cancelled %d: %+v, %v", n, th, err)
+				}
+			} else {
+				f.finish(t, repo, f.claimNext(t, repo), false)
+			}
 			if expired {
 				f.clock.Advance(time.Hour)
 			}

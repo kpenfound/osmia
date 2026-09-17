@@ -135,12 +135,9 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 		case turnPending:
 			continue
 		}
-		if !free[e.Event.ID] {
-			// A claim of this session holds the event. Its turn failed, or it
-			// has none yet and the claim is left to run out.
-			if e.Claim == nil || states[TurnID(e.Claim.Token)] != turnFailed {
-				continue
-			}
+		if !free[e.Event.ID] && e.Claim != nil {
+			// A claim of this session whose turn failed, or that has no turn,
+			// still holds the event.
 			if err := d.step("before-release"); err != nil {
 				return err
 			}
