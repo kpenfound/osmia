@@ -120,7 +120,12 @@ turn cannot reach the host's loopback by that address: the caller sets
 `CoreTransport.Via` to the host name the container reaches the host by (Docker
 Desktop's `host.docker.internal`), and the URL names that host with the
 listener's port. On Linux a container reaches the host only on the bridge
-gateway, so `Serve` is `mcphost.StartOn` bound to that address. Service tests use
+gateway, so `Serve` is `mcphost.StartOn` bound to that address.
+`ContainerTransport` is that transport: it names `host.docker.internal`, which
+core's container sessions resolve on macOS and Linux, and listens on the
+loopback on macOS and on the gateway the container engine reports for its
+`bridge` network on Linux. `MCPHost.Container`, when set, serves every turn
+whose execution mode is `container`; `MCPHost.Transport` serves the others. Service tests use
 in-memory SDK transports, and the `CoreTransport` tests serve on a loopback port;
 execution and providers are faked, and no test launches an agent, container
 engine or VCS process.
