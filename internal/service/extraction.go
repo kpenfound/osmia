@@ -184,6 +184,11 @@ func extractionState(r *trace.Repository) (*ExtractionState, error) {
 	state := &ExtractionState{Extraction: n, State: "pending", At: latest.Transition.At}
 	for _, a := range latest.History {
 		state.At = a.At
+		if a.Kind == "result" {
+			// The result fixes the extraction's time; a later acknowledgement
+			// must not move it.
+			break
+		}
 		switch a.Kind {
 		case "retry":
 			state.Reason = a.Failure
