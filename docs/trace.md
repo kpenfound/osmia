@@ -170,8 +170,8 @@ claim, acknowledgement and release history, sorted by event ID. Each entry's
 The repository serializes calls under its exclusive process lock. Publication
 writes immutable Git objects using a private index, syncs the objects, writes and
 syncs a recovery journal under `.git`, then atomically replaces and syncs the
-branch ref. That ref is the visibility boundary. Ordinary workflow, transition
-and owned agent files are materialized from the committed objects before the journal is removed.
+branch ref. That ref is the visibility boundary. Ordinary workflow, transition,
+question and owned agent files are materialized from the committed objects before the journal is removed.
 Before publication, recovery retains the prior state; after publication, recovery
 finishes materializing the complete new state. Store reads and writes finish any
 pending publication before inspecting the files. Direct filesystem readers must
