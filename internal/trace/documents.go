@@ -51,9 +51,6 @@ func (r *Repository) RecordDocuments(ctx context.Context, docs []Document) error
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := r.checkGit(); err != nil {
-		return err
-	}
 	if err := r.checkHistory(ctx); err != nil {
 		return err
 	}

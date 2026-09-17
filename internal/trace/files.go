@@ -50,6 +50,31 @@ func (r *Repository) checked(name string) error {
 	}
 	return nil
 }
+
+// checkedEntry is checked for an entry of fs.WalkDir, which has already
+// checked the entry's ancestors, so only the entry itself is inspected.
+func (r *Repository) checkedEntry(name string, entry fs.DirEntry) error {
+	if entry.Type()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("%s: symlink aliases are forbidden", name)
+	}
+	if entry.IsDir() {
+		return nil
+	}
+	info, err := r.dir.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s: symlink aliases are forbidden", name)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s: expected a directory or regular file", name)
+	}
+	if st, ok := info.Sys().(*syscall.Stat_t); ok && st.Nlink > 1 {
+		return fmt.Errorf("%s: hardlink aliases are forbidden", name)
+	}
+	return nil
+}
 func (r *Repository) readFile(name string) ([]byte, error) {
 	if err := r.checked(name); err != nil {
 		return nil, err
@@ -252,7 +277,7 @@ func (r *Repository) walk(fn func(string, fs.DirEntry) error) error {
 		if name == ".git" {
 			return fs.SkipDir
 		}
-		if err := r.checked(name); err != nil {
+		if err := r.checkedEntry(name, entry); err != nil {
 			return err
 		}
 		return fn(name, entry)

@@ -34,7 +34,7 @@ func (r *Repository) checkGit() error {
 		if name == ".git/commondir" || name == ".git/objects/info/alternates" || name == ".git/objects/info/http-alternates" {
 			return fmt.Errorf("%s: external Git storage is forbidden", name)
 		}
-		return r.checked(name)
+		return r.checkedEntry(name, entry)
 	})
 	if err != nil {
 		return err
@@ -60,10 +60,9 @@ func (r *Repository) git(ctx context.Context, input []byte, args ...string) (str
 	return strings.TrimSpace(string(out)), err
 }
 
+// gitBytes runs Git without checking the repository; callers run checkGit
+// once before the Git commands of an operation.
 func (r *Repository) gitBytes(ctx context.Context, input []byte, index string, args ...string) ([]byte, error) {
-	if err := r.checkGit(); err != nil {
-		return nil, err
-	}
 	cmd := exec.CommandContext(ctx, "git", append([]string{"--git-dir=" + r.directory + "/.git", "--work-tree=" + r.directory, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "gc.auto=0"}, args...)...)
 	cmd.Dir = r.directory
 	// No inherited Git routing, credentials, config includes, hooks or signing.
@@ -98,6 +97,9 @@ func (r *Repository) commitContent(ctx context.Context, paths []string, content 
 		return err
 	}
 	old := strings.TrimSpace(string(parent))
+	if err := r.checkGit(); err != nil {
+		return err
+	}
 	base := "--empty"
 	if old != "" {
 		base = "HEAD"
@@ -147,23 +149,12 @@ func (r *Repository) checkHistory(ctx context.Context) error {
 	if err := r.recoverPublication(ctx); err != nil {
 		return err
 	}
-	tree, err := r.git(ctx, nil, "ls-tree", "-rz", "HEAD")
+	blobs, err := r.headTree(ctx)
 	if err != nil {
 		return err
 	}
 	tracked := map[string]bool{}
-	for _, entry := range strings.Split(tree, "\x00") {
-		if entry == "" {
-			continue
-		}
-		meta, name, ok := strings.Cut(entry, "\t")
-		fields := strings.Fields(meta)
-		if !ok || len(fields) != 3 || fields[0] != "100644" || fields[1] != "blob" {
-			return fmt.Errorf("invalid trace Git tree entry %q", entry)
-		}
-		if err := relative(name); err != nil {
-			return err
-		}
+	for name, oid := range blobs {
 		tracked[name] = true
 		if name == "charter.md" {
 			continue
@@ -175,7 +166,7 @@ func (r *Repository) checkHistory(ctx context.Context) error {
 		hash := sha1.New()
 		fmt.Fprintf(hash, "blob %d\x00", len(data))
 		hash.Write(data)
-		if fmt.Sprintf("%x", hash.Sum(nil)) != fields[2] {
+		if fmt.Sprintf("%x", hash.Sum(nil)) != oid {
 			return fmt.Errorf("%s: trace files differ from committed history; reconciliation required", name)
 		}
 	}
@@ -185,4 +176,43 @@ func (r *Repository) checkHistory(ctx context.Context) error {
 		}
 		return nil
 	})
+}
+
+// headTree returns the blob identity of every file committed at HEAD. A
+// commit's tree never changes, so the listing is kept until HEAD moves.
+func (r *Repository) headTree(ctx context.Context) (map[string]string, error) {
+	ref, err := r.readFile(".git/refs/heads/main")
+	if err != nil {
+		return nil, err
+	}
+	head := strings.TrimSpace(string(ref))
+	r.gitMu.Lock()
+	defer r.gitMu.Unlock()
+	if r.tree != nil && r.treeHead == head {
+		return r.tree, nil
+	}
+	if err := r.checkGit(); err != nil {
+		return nil, err
+	}
+	tree, err := r.git(ctx, nil, "ls-tree", "-rz", head)
+	if err != nil {
+		return nil, err
+	}
+	blobs := map[string]string{}
+	for _, entry := range strings.Split(tree, "\x00") {
+		if entry == "" {
+			continue
+		}
+		meta, name, ok := strings.Cut(entry, "\t")
+		fields := strings.Fields(meta)
+		if !ok || len(fields) != 3 || fields[0] != "100644" || fields[1] != "blob" {
+			return nil, fmt.Errorf("invalid trace Git tree entry %q", entry)
+		}
+		if err := relative(name); err != nil {
+			return nil, err
+		}
+		blobs[name] = fields[2]
+	}
+	r.tree, r.treeHead = blobs, head
+	return blobs, nil
 }
