@@ -208,20 +208,21 @@ func (s *Service) shedObject(ctx context.Context, raw string, req ShedObjectRequ
 	if err != nil {
 		return ShedResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the shed records of workstream %s; check the trace repository", o.stream)}
 	}
+	// A round's file keeps the revision it was opened against, as a member's
+	// record keeps the revision its round was pinned to.
 	record := shed.Record{Version: shed.Version, Round: o.round, Member: shed.OwnerMember, Revision: o.pin}
 	for _, r := range records {
 		if r.Owned() && r.Round == o.round {
 			record = r
 		}
 	}
-	record.Revision = o.pin
 	objection := shed.Objection{ID: shed.ObjectionID(o.round, shed.OwnerMember, len(record.Objections)+1), Kind: shed.Owner, Argument: argument}
 	record.Objections = append(slices.Clone(record.Objections), objection)
 	content, err := shed.Encode(record)
 	if err != nil {
 		return ShedResponse{}, &APIError{Validation, "the objection cannot be recorded: " + err.Error()}
 	}
-	reason := fmt.Sprintf("the owner objected to round %d against %s: %s", o.round, o.pin, argument)
+	reason := fmt.Sprintf("the owner objected to round %d against %s: %s", o.round, record.Revision, argument)
 	if api := o.record(ctx, shed.DocumentID(o.round, shed.OwnerMember), shed.Path(o.round, shed.OwnerMember), string(content), fmt.Sprintf("objected-%d", o.round), reason); api != nil {
 		return ShedResponse{}, api
 	}
@@ -258,14 +259,13 @@ func (s *Service) shedRule(ctx context.Context, raw string, req ShedRuleRequest)
 			rulings = r
 		}
 	}
-	rulings.Revision = o.pin
 	ruling := shed.Ruling{Objection: req.Objection, Disposition: disposition, Note: strings.TrimSpace(req.Note)}
 	rulings.Rulings = append(slices.DeleteFunc(slices.Clone(rulings.Rulings), func(r shed.Ruling) bool { return r.Objection == ruling.Objection }), ruling)
 	content, err := shed.EncodeRulings(rulings)
 	if err != nil {
 		return ShedResponse{}, &APIError{Validation, "the ruling cannot be recorded: " + err.Error()}
 	}
-	reason := fmt.Sprintf("the owner %s objection %s of %s in round %d, against %s", disposition, ruling.Objection, entries[i].Member, o.round, o.pin)
+	reason := fmt.Sprintf("the owner %s objection %s of %s in round %d, against %s", disposition, ruling.Objection, entries[i].Member, o.round, rulings.Revision)
 	if ruling.Note != "" {
 		reason += ": " + ruling.Note
 	}

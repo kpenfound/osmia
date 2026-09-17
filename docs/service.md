@@ -508,9 +508,9 @@ The architect gets `file_read`, `reply` and `draft_write` and nothing else.
 `objection`, the ID of an objection that stood once the round was heard, and
 `answer`; answering an objection again replaces the earlier answer, and an
 answer that is refused is an ordinary result, `{"recorded":false,"reason":...}`.
-The prompt lists every objection that stands with its ID, kind, whether it
-blocks, member, round, part, citations and argument, and says what each kind
-asks of the architect.
+The prompt lists every objection the owner has not dismissed with its ID,
+kind, whether it blocks, member, round, and the part and citations it has, and
+says what each kind asks of the architect.
 
 The architect redrafts by delivering a changed `spec.md`, `plan.json` or both
 with `draft_write`; a delivered file equal to the latest revision is no
@@ -579,8 +579,9 @@ notice for the chief of staff (event key `concluded`), delivered through the
 [outbox](#event-delivery): `Debate concluded: <reason>. The workstream stays
 in-shed until the owner rules.` When dissent stands, that is followed by
 `Open dissent:` and one line per entry of the dissent record with its ID,
-kind, `blocking` or `advisory`, member, round, part, revision and argument;
-a conclusion by consensus has no such line. A debate whose every standing
+kind, the owner's disposition where there is one, `blocking` or `advisory`,
+member, round, the part it has, revision and argument; a conclusion by
+consensus has no such line. A debate whose every standing
 objection the owner dismissed concludes with the reason `debate concluded
 after round <n>: the owner dismissed every objection that stood`, and its
 notice lists them with their disposition.
@@ -602,7 +603,9 @@ an owner action never races a running round:
 | `invalid-edit` | An owner edit was read, found invalid and not recorded. |
 
 The round an action is recorded under is the round the `shed` state has
-reached, or round 1 before the first round runs.
+reached, or round 1 before the first round runs. Each of the owner's files of
+a round keeps the revision it was opened against, as a member's record keeps
+the revision its round was pinned to.
 
 ### Object
 

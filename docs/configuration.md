@@ -109,7 +109,9 @@ the global pool still limits concurrent execution.
 plan for on its own. Debate that reaches it
 [concludes with its dissent open](service.md#concluding-the-debate): the cap
 approves nothing. The service reads it when a round's reply is recorded, so a
-changed value applies to debates still running.
+changed value applies to debates still running. It also bounds how many
+[further rounds](service.md#more-debate) the owner may ask for after a
+conclusion, which are the only rounds run beyond the cap.
 
 `capacity.committee` is the size of each workstream's committee, not a pool
 shared across workstreams: a workstream that

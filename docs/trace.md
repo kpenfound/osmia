@@ -99,9 +99,10 @@ trace accounting does not change the operational ledger adapter's file format.
 
 ## Charter
 
-The owner edits `charter.md` directly, so it is the one tracked file allowed to
-differ from committed history; appending any other record neither refuses nor
-commits such an edit. `Charter(ctx, at)` is the only way to read the charter:
+The owner edits `charter.md` directly, so it is one of the tracked files
+allowed to differ from committed history, with a workstream's
+[`spec.md` and `plan.json`](#owner-edited-workstream-documents); appending any
+other record neither refuses nor commits such an edit. `Charter(ctx, at)` is the only way to read the charter:
 it returns the latest recorded revision (document ID `charter`) after
 recording `charter.md` as a new revision by the owner (`owner`/`local`, cause
 `owner-edit`) when the file differs from the latest revision. A read without an
@@ -110,6 +111,24 @@ the recorded bytes, so an edit saved meanwhile is recorded by the next read.
 `Append` of a project `charter.md` revision is refused with `ErrConflict`
 unless the file matches the latest recorded revision. The rule format is
 described in [charter](charter.md).
+
+## Owner-edited workstream documents
+
+A workstream's `spec.md` and `plan.json` are the owner's to edit in place too.
+`OwnerDocument(ctx, stream, id, at, check)` returns the latest recorded
+revision of one of them after recording the file as a new revision by the
+owner (`owner`/`local`, cause `owner-edit`) when it differs. A read without an
+edit records nothing, the file itself is not rewritten, and the commit takes
+the recorded bytes, as for the charter. `check` reads the edited content and
+may refuse it: nothing is recorded, the latest recorded revision stays
+current, and the error wraps `ErrOwnerEdit`. It runs while the repository is
+held, so it must not read the trace. A document with no recorded revision is
+not the owner's to create and is reported as missing.
+
+`RecordDocuments` refuses a revision of either file with `ErrConflict` while
+the file holds an edit no revision records, so an agent's draft never writes
+over an owner edit that has not been read yet. Which reads happen when is in
+[the owner in the shed](service.md#the-owner-in-the-shed).
 
 ## Failure and ownership boundaries
 

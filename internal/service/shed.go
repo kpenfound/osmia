@@ -320,7 +320,15 @@ func (d *debate) conclude(ctx context.Context, stream config.WorkstreamID, state
 		if e.Blocking {
 			weight = "blocking"
 		}
-		fmt.Fprintf(&body, "\n- %s (%s, %s, by %s in round %d on %s, against %s): %s", e.ID, e.Kind, weight, e.Member, e.Round, e.Part, e.Revision, e.Argument)
+		if e.Disposition != "" {
+			weight = string(e.Disposition) + ", " + weight
+		}
+		// The owner's own objection names no part.
+		about := " on " + e.Part
+		if e.Part == "" {
+			about = ""
+		}
+		fmt.Fprintf(&body, "\n- %s (%s, %s, by %s in round %d%s, against %s): %s", e.ID, e.Kind, weight, e.Member, e.Round, about, e.Revision, e.Argument)
 	}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: d.header(id, stream, cause, d.s.now()), Subject: shedSubject, From: state.Value, To: fmt.Sprintf("concluded-%d", n), Reason: reason},

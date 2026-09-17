@@ -689,7 +689,16 @@ func replyPrompt(in roundInput, latest shed.Pin, open []shed.Entry, problems []s
 		if e.Blocking {
 			weight = "blocking"
 		}
-		fmt.Fprintf(&b, "- %s (%s, %s, by %s in round %d on %s, citing %s): %s\n", e.ID, e.Kind, weight, e.Member, e.Round, e.Part, strings.Join(e.Citations, ", "), e.Argument)
+		// The owner's own objection names no part and cites nothing.
+		about := " on " + e.Part
+		if e.Part == "" {
+			about = ""
+		}
+		citing := ", citing " + strings.Join(e.Citations, ", ")
+		if len(e.Citations) == 0 {
+			citing = ""
+		}
+		fmt.Fprintf(&b, "- %s (%s, %s, by %s in round %d%s%s): %s\n", e.ID, e.Kind, weight, e.Member, e.Round, about, citing, e.Argument)
 	}
 	fmt.Fprintf(&b, `
 What each kind asks of you:
@@ -697,6 +706,7 @@ What each kind asks of you:
 - size: split the unit by what it addresses. It blocks until its member concedes it.
 - proof: name a proof that can show the criterion. It blocks until its member concedes it.
 - fit: advice to the owner. It never blocks; answer it.
+- owner: the owner's own objection. It blocks until the owner disposes of it; answer it as you would a member's.
 
 Your view holds:
 - spec.md and plan.json: the latest recorded revision, %s.

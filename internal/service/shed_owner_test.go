@@ -134,6 +134,20 @@ func TestOwnerObjectionIsAnsweredLikeAMembers(t *testing.T) {
 	if len(reply.Answers) != 1 || reply.Answers[0].Objection != "owner-r1-1" {
 		t.Fatalf("reply %+v", reply)
 	}
+	// The owner's file of the round is not one of the committee's: the round
+	// still records the member that was heard.
+	docs := f.documents(t, stream, shed.DocumentID(1, committeeAgent(1)))
+	if len(docs) != 1 {
+		t.Fatalf("the round recorded %d member files", len(docs))
+	}
+	heard, err := shed.Parse([]byte(docs[0].Content))
+	must(t, err)
+	if !heard.Silent() || heard.Owned() {
+		t.Fatalf("member record %+v", heard)
+	}
+	if reason := f.transition(t, stream, "shed-round-1-heard").Reason; !strings.Contains(reason, "1 members heard, 0 objections") {
+		t.Fatalf("round 1 %q", reason)
+	}
 	p.check(t)
 
 	// A second objection is the same round's next revision of the same file.
@@ -150,6 +164,38 @@ func TestOwnerObjectionIsAnsweredLikeAMembers(t *testing.T) {
 	}
 	if _, err := f.c.ShedObject(ctx, stream, "  "); !failed(err, Validation) {
 		t.Fatalf("empty argument: %v", err)
+	}
+}
+
+// The owner's objection is not a committee record: a round abandoned before
+// any member is heard still fails, and records nothing of the committee.
+func TestAnAbandonedRoundFailsThoughTheOwnerObjected(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 1)
+	defer f.stop(t)
+	ctx := context.Background()
+	started := make(chan struct{})
+	f.member(1, 1, 1, func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	stream := f.handIn(t, "design", handedDesign)
+	awaitStart(t, started)
+	if _, err := f.c.ShedObject(ctx, stream, "The plan never names the retry budget."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.c.Abandon(ctx, stream, "no longer needed"); err != nil {
+		t.Fatal(err)
+	}
+	f.awaitShed(t, stream, "failed-1", "heard-1")
+	records, err := shed.Records(f.repository(), stream)
+	must(t, err)
+	if len(records) != 1 || !records[0].Owned() {
+		t.Fatalf("records of an abandoned round: %+v", records)
+	}
+	if reason := f.transition(t, stream, "shed-round-1-failed").Reason; !strings.Contains(reason, "the committee is not heard") {
+		t.Fatalf("failure %q", reason)
 	}
 }
 
@@ -225,6 +271,56 @@ func TestOwnerRulingDisposesOfAnObjection(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
+}
+
+// Dismissing the dissent that stands ends the debate where it is: the next
+// step concludes instead of running another round, and says why.
+func TestDismissingEveryObjectionConcludesTheDebate(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 2)
+	defer f.stop(t)
+	ctx := context.Background()
+	p := &faults{}
+	objection := shed.ObjectionID(1, committeeAgent(1), 1)
+	f.member(1, 1, 1, objects(p, shed.Size, "plan#resume", "spec#1"))
+	replying, release := make(chan struct{}), make(chan struct{})
+	f.script(replyTurnID(1, 1), nil, func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
+		close(replying)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	stream := f.handIn(t, "design", handedDesign)
+	select {
+	case <-replying:
+	case <-time.After(demoTimeout):
+		t.Fatal("the reply did not start")
+	}
+	if _, err := f.c.ShedRule(ctx, stream, objection, "dismiss", "The unit is small enough."); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+
+	f.awaitShed(t, stream, "concluded-1", "round-2")
+	end := f.transition(t, stream, "shed-concluded-1")
+	if end.Reason != "debate concluded after round 1: the owner dismissed every objection that stood" {
+		t.Fatalf("conclusion %q", end.Reason)
+	}
+	// The objection is still on the record, with the owner's disposition.
+	entries := f.dissent(t, stream)
+	if len(entries) != 1 || entries[0].ID != objection || entries[0].Blocking || entries[0].Disposition != shed.Dismissed {
+		t.Fatalf("dissent %+v", entries)
+	}
+	if notice := f.concluded(t, stream, 1); !strings.Contains(notice.Event.Body, "dismissed") {
+		t.Fatalf("notice %q", notice.Event.Body)
+	}
+	if ran := f.ran(); ran[roundTurnID(2, committeeAgent(1), 1)] != 0 {
+		t.Fatalf("round 2 ran: %v", ran)
+	}
+	p.check(t)
 }
 
 // Skipping debate runs no round, in this service and in the next, and leaves
