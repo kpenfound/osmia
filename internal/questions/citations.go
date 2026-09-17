@@ -40,9 +40,10 @@ func (e *Unresolved) Error() string {
 // Resolve checks that citation names something recorded for the workstream:
 // a rule of the latest charter, an existing knowledge-base file, a ruling of
 // the workstream, or a criterion or unit of the workstream's latest recorded
-// spec or plan. It returns *Unresolved for a citation that names nothing, and
-// any other error for a trace that cannot be read. Reading the charter first
-// records an owner edit, as every charter read does.
+// spec or plan. It returns *Unresolved for a citation that names nothing or
+// whose knowledge-base file or plan cannot be read, and any other error for a
+// trace that cannot be read. Reading the charter first records an owner edit,
+// as every charter read does.
 func Resolve(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, citation string, now time.Time) error {
 	unresolved := func(format string, args ...any) error {
 		return &Unresolved{Citation: citation, Reason: fmt.Sprintf(format, args...)}

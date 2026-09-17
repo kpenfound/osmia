@@ -147,7 +147,7 @@ func questionTransition(h Header, id, from, to, reason string) Transaction {
 
 // Ask records text as the workstream's next question, numbered from 1, asked
 // by the scope's active turn, and raises one notice for the chief of staff in
-// the same commit. A chief-of-staff turn, an empty question and a second
+// the same commit. A chief-of-staff turn fails. An empty question and a second
 // question from the same turn are refused with *QuestionRefused.
 func (r *Repository) Ask(ctx context.Context, agent string, scope coreadapter.Scope, text string, at time.Time) (Question, error) {
 	r.mu.Lock()
@@ -227,8 +227,10 @@ func (r *Repository) chiefTurn(ctx context.Context, agent string, scope coreadap
 // AnswerQuestion records the chief of staff's answer to an open question as
 // the question's ruling, with the citations it rests on, and moves the
 // question to answered in the same commit. The caller has checked that every
-// citation resolves. A question that is not open, an empty answer and an
-// answer without a citation are refused with *QuestionRefused.
+// citation resolves. A turn of another role fails, and so does, with
+// ErrConflict, an open question that already has a ruling record. A question
+// that is not open, an empty answer and an answer without a citation are
+// refused with *QuestionRefused.
 func (r *Repository) AnswerQuestion(ctx context.Context, agent string, scope coreadapter.Scope, id, text string, citations []string, at time.Time) (Ruling, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -282,8 +284,8 @@ type EscalationRequest struct {
 
 // EscalateQuestions marks every listed open question escalated in one commit:
 // each gets a revision carrying the rephrasing and the escalation, whose
-// batch ID it returns. Unless every question is open, none is escalated and
-// the request is refused with *QuestionRefused.
+// batch ID it returns. A turn of another role fails. Unless every question is
+// open, none is escalated and the request is refused with *QuestionRefused.
 func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope coreadapter.Scope, req EscalationRequest, at time.Time) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

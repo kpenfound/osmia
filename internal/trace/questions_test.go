@@ -31,6 +31,16 @@ func askerThread(t *testing.T, r *Repository, agent, role, turn string) coreadap
 	return coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Unit: "unit1", Thread: agent + "_thread", Turn: turn, Role: role}
 }
 
+// failure checks that err is an ordinary error, not a refusal written for the
+// agent, and that it says part.
+func failure(t *testing.T, err error, part string) {
+	t.Helper()
+	var refused *QuestionRefused
+	if err == nil || errors.As(err, &refused) || !strings.Contains(err.Error(), part) {
+		t.Fatalf("want an ordinary error saying %q, got %v", part, err)
+	}
+}
+
 func refusal(t *testing.T, err error) string {
 	t.Helper()
 	var refused *QuestionRefused
@@ -81,9 +91,7 @@ func TestAskRecordsTheQuestionAndOneEventTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := r.Ask(ctx, "chief", chief, "May I ask?", at); err == nil || !strings.Contains(err.Error(), "cannot ask") {
-		t.Fatalf("chief of staff asked: %v", err)
-	}
+	failure(t, second(r.Ask(ctx, "chief", chief, "May I ask?", at)), "the chief of staff answers questions and cannot ask one")
 	if got := refusal(t, second(r.Ask(ctx, "mason1", mason, " \n", at))); !strings.Contains(got, "question is required") {
 		t.Fatalf("empty question: %s", got)
 	}
@@ -152,9 +160,7 @@ func TestAskRecordsTheQuestionAndOneEventTogether(t *testing.T) {
 	// A turn that is not this session's active claim cannot ask.
 	stale := mason
 	stale.Turn = "other"
-	if _, err := r.Ask(ctx, "mason1", stale, "Which store?", asked); err == nil {
-		t.Fatal("unclaimed turn asked")
-	}
+	failure(t, second(r.Ask(ctx, "mason1", stale, "Which store?", asked)), "turn scope denied")
 	if got, _ := r.Outbox(streamID); len(questionStates(t, r)) != 2 || len(got) != len(before)+2 {
 		t.Fatalf("refused asks left records: %d events", len(got))
 	}
@@ -176,12 +182,11 @@ func TestChiefOfStaffChoosesOnceForEachQuestion(t *testing.T) {
 	when := at.Add(time.Hour)
 
 	// Only the chief of staff chooses, and an answer needs text and a citation.
-	if _, err := r.AnswerQuestion(ctx, "mason1", mason, "1", "Use the file store.", []string{"charter#1"}, when); err == nil || !strings.Contains(err.Error(), "only a chief-of-staff turn") {
-		t.Fatalf("mason answered: %v", err)
-	}
-	if _, err := r.EscalateQuestions(ctx, "mason1", mason, EscalationRequest{Questions: []string{"1"}, Rephrasing: "r", Blocked: "b", Recommendation: "c"}, when); err == nil || !strings.Contains(err.Error(), "only a chief-of-staff turn") {
-		t.Fatalf("mason escalated: %v", err)
-	}
+	failure(t, second(r.AnswerQuestion(ctx, "mason1", mason, "1", "Use the file store.", []string{"charter#1"}, when)), "only a chief-of-staff turn may choose what happens to a question")
+	failure(t, second(r.EscalateQuestions(ctx, "mason1", mason, EscalationRequest{Questions: []string{"1"}, Rephrasing: "r", Blocked: "b", Recommendation: "c"}, when)), "only a chief-of-staff turn may choose what happens to a question")
+	stale := chief
+	stale.Turn = "other"
+	failure(t, second(r.AnswerQuestion(ctx, "chief", stale, "1", "Use the file store.", []string{"charter#1"}, when)), "turn scope denied")
 	for reason, call := range map[string]func() error{
 		"an answer needs at least one citation; escalate a question the record does not settle": func() error {
 			return second(r.AnswerQuestion(ctx, "chief", chief, "1", "Use the file store.", nil, when))
@@ -291,4 +296,32 @@ func TestChiefOfStaffChoosesOnceForEachQuestion(t *testing.T) {
 	}
 	defer reopened.Close()
 	check(reopened)
+}
+
+// An open question whose number already names a ruling record, such as an
+// imported one, cannot be answered: a second first revision would damage the
+// ruling's history.
+func TestAnswerRefusesToOverwriteARuling(t *testing.T) {
+	ctx := context.Background()
+	r, _, _ := create(t)
+	chief := chiefThread(t, r, "chief1")
+	if _, err := r.Ask(ctx, "mason1", askerThread(t, r, "mason1", "mason", "build1"), "Which store?", at); err != nil {
+		t.Fatal(err)
+	}
+	imported := Ruling{Header: header("ruling", "1"), QuestionID: "imported", QuestionRevision: 1, Decision: "Owner ruled", ReturnedAnswer: "Use local files"}
+	if err := r.Append(ctx, imported); err != nil {
+		t.Fatal(err)
+	}
+	_, err := r.AnswerQuestion(ctx, "chief", chief, "1", "Use the file store.", []string{"charter#1"}, at.Add(time.Hour))
+	var refused *QuestionRefused
+	if !errors.Is(err, ErrConflict) || errors.As(err, &refused) {
+		t.Fatalf("answer over an existing ruling: %v", err)
+	}
+	if s := questionStates(t, r)["1"]; s.State != QuestionOpen || s.Ruling != nil {
+		t.Fatalf("question after the conflict: %+v", s)
+	}
+	rulings, err := Read[Ruling](r, streamID)
+	if err != nil || len(rulings) != 1 || !reflect.DeepEqual(rulings[0], imported) {
+		t.Fatalf("rulings: %+v %v", rulings, err)
+	}
 }

@@ -511,7 +511,8 @@ or `escalated`. The state leaves `open` once, so a question gets exactly one
 choice. Every write below is one commit through the journaled publication
 boundary: the records, the transition in `events.jsonl` and any event appear
 together or not at all. Each write requires the calling scope to name this
-service session's active, uncaptured turn, as `SetStatus` does. A request
+service session's active, uncaptured turn, as `SetStatus` does, and a scope of
+the wrong role or turn is an ordinary error. A request from the right turn
 that cannot be recorded returns `*QuestionRefused` with a reason written for
 the agent, and writes nothing.
 
@@ -524,13 +525,17 @@ the agent, and writes nothing.
 In every record the actor is the calling agent, the cause is its turn
 request's ID and the depth is one more than the request's.
 
-`Ask` refuses a chief-of-staff scope, an empty question, and a second question
-from a turn that already asked one. `AnswerQuestion` and `EscalateQuestions`
-accept a chief-of-staff scope only. They refuse a question that does not
-exist, is already answered, or is escalated (`question <n> is escalated to the
-owner; only the owner's ruling answers it`), so an escalated question cannot
-then be answered by the chief of staff. An answer needs text and at least one
-citation. An escalation needs at least one question, a rephrasing, what is
+`Ask` fails for a chief-of-staff scope, and `AnswerQuestion` and
+`EscalateQuestions` fail for any other; these are ordinary errors, which the
+tools pass on as tool errors. `Ask` refuses an empty question, and a second
+question from a turn that already asked one. `AnswerQuestion` and
+`EscalateQuestions` refuse a question that does not exist, is already
+answered, is escalated (`question <n> is escalated to the owner; only the
+owner's ruling answers it`), or was not asked through `ask` and so has no
+workflow subject. An escalated question therefore cannot then be answered by
+the chief of staff. An answer needs text and at least one citation; an open
+question that already has a ruling record with its number fails with
+`ErrConflict`. An escalation needs at least one question, a rephrasing, what is
 blocked and a recommendation; options may be empty. A batch that lists a
 question twice, or any question that is not open, escalates none of them.
 
@@ -567,7 +572,10 @@ with its reason:
 | `plan#<unit>` | The workstream's latest recorded `plan.json` parses and holds the unit ID exactly once. |
 
 Anything else is refused as not a citation. The citation check runs before the
-write and outside its lock, so an owner edit between the two is not seen.
+write and outside its lock, so an owner edit between the two is not seen. A
+refused `answer` records nothing of its own, but checking a `charter#<n>`
+citation first records a pending owner edit of the charter, as every charter
+read does.
 
 `questions.Turns` wraps the turn runner the thread dispatcher uses. After the
 wrapped run it reads the workstream's questions, and a turn that asked one

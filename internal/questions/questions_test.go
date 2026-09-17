@@ -246,36 +246,50 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 	}
 
 	// An answer without a citation, or with one that names nothing, records
-	// nothing and says why.
+	// nothing and says why. The reserved tools say so and record nothing.
+	reserved := `{"recorded":false,"reason":"reserved until amendments and standing rulings (M4)"}`
 	before := f.head(t)
+	for _, c := range [][3]string{
+		{"answer", `{"question":"1","text":"In files.","citations":[]}`, `{"recorded":false,"reason":"an answer needs at least one citation; escalate a question the record does not settle"}`},
+		{"answer", `{"question":"1","text":"In files.","citations":["kb/missing.md"]}`, `{"recorded":false,"reason":"citation \"kb/missing.md\" does not resolve: the knowledge base has no file kb/missing.md"}`},
+		{"answer", `{"question":"1","text":"In files.","citations":["the code"]}`, `{"recorded":false,"reason":"citation \"the code\" does not resolve: it is not one of ` + questions.CitationForms + `"}`},
+		{"answer", `{"question":"1","text":"In files.","citations":["spec#9"]}`, `{"recorded":false,"reason":"citation \"spec#9\" does not resolve: the spec has no acceptance criterion numbered 9 exactly once"}`},
+		{"route_amendment", `{"question":"1","text":"Amend criterion 1."}`, reserved},
+		{"propose_charter", `{"question":"1","text":"Amend criterion 1."}`, reserved},
+		{"route_amendment", `{}`, reserved},
+		{"propose_charter", `{}`, reserved},
+	} {
+		if got := call(t, chief[c[0]], c[1]); got != c[2] {
+			t.Fatalf("%s %s:\n%s\nwant\n%s", c[0], c[1], got, c[2])
+		}
+	}
+	if got := f.head(t); got != before {
+		t.Fatalf("a refused or reserved call committed: %s, was %s", got, before)
+	}
+	// Checking a charter citation first records the owner's pending edit of
+	// the charter, and nothing else, even when the answer is then refused.
+	if got := call(t, chief["answer"], `{"question":"1","text":"In files.","citations":["charter#2","charter#9"]}`); got != `{"recorded":false,"reason":"citation \"charter#9\" does not resolve: the charter has no rule numbered 9 exactly once"}` {
+		t.Fatalf("answer citing a missing rule: %s", got)
+	}
+	documents, err := trace.Read[trace.Document](f.repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	edit := documents[len(documents)-1]
+	recorded := f.head(t)
+	if recorded == before || edit.Path != "charter.md" || edit.Revision != 2 || edit.Actor != owner || !strings.Contains(edit.Content, "2. Keep state in files.") {
+		t.Fatalf("pending charter edit: head %s, was %s, latest document %+v", recorded, before, edit.Header)
+	}
 	for input, want := range map[string]string{
-		`{"question":"1","text":"In files.","citations":[]}`:                        `{"recorded":false,"reason":"an answer needs at least one citation; escalate a question the record does not settle"}`,
-		`{"question":"1","text":"In files.","citations":["charter#2","charter#9"]}`: `{"recorded":false,"reason":"citation \"charter#9\" does not resolve: the charter has no rule numbered 9 exactly once"}`,
-		`{"question":"1","text":"In files.","citations":["kb/missing.md"]}`:         `{"recorded":false,"reason":"citation \"kb/missing.md\" does not resolve: the knowledge base has no file kb/missing.md"}`,
-		`{"question":"1","text":"In files.","citations":["the code"]}`:              `{"recorded":false,"reason":"citation \"the code\" does not resolve: it is not one of ` + questions.CitationForms + `"}`,
-		`{"question":"5","text":"In files.","citations":["charter#2"]}`:             `{"recorded":false,"reason":"there is no question 5 in this workstream"}`,
+		`{"question":"1","text":"In files.","citations":["charter#3"]}`: `{"recorded":false,"reason":"citation \"charter#3\" does not resolve: the charter has no rule numbered 3 exactly once"}`,
+		`{"question":"5","text":"In files.","citations":["charter#2"]}`: `{"recorded":false,"reason":"there is no question 5 in this workstream"}`,
 	} {
 		if got := call(t, chief["answer"], input); got != want {
 			t.Fatalf("answer %s:\n%s\nwant\n%s", input, got, want)
 		}
 	}
-	// The reserved tools say so and record nothing.
-	for _, name := range []string{"route_amendment", "propose_charter"} {
-		if got := call(t, chief[name], `{"question":"1","text":"Amend criterion 1."}`); got != `{"recorded":false,"reason":"reserved until amendments and standing rulings (M4)"}` {
-			t.Fatalf("%s: %s", name, got)
-		}
-	}
-	// The first charter read recorded the owner's edit; nothing else moved.
-	if s := states(t, f); s["1"].State != trace.QuestionOpen || s["2"].State != trace.QuestionOpen {
-		t.Fatalf("refusals changed a question: %+v", s)
-	}
-	recorded := f.head(t)
-	for _, name := range []string{"route_amendment", "propose_charter"} {
-		call(t, chief[name], `{}`)
-	}
-	call(t, chief["answer"], `{"question":"1","text":"In files.","citations":["spec#9"]}`)
-	if got := f.head(t); got != recorded || before == "" {
-		t.Fatalf("a refused or reserved call committed: %s, was %s", got, recorded)
+	if s := states(t, f); s["1"].State != trace.QuestionOpen || s["2"].State != trace.QuestionOpen || f.head(t) != recorded {
+		t.Fatalf("refusals changed a question or committed: %+v", s)
 	}
 
 	profiles := map[string]int{}
@@ -313,6 +327,16 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 	legacy.Schema, legacy.ID = "osmia.trace.ruling", "legacy-ruling"
 	if err := f.repo.Append(ctx, trace.Ruling{Header: legacy, QuestionID: "legacy", QuestionRevision: 1, Decision: "Owner ruled", ReturnedAnswer: "Not yet relayed"}); err != nil {
 		t.Fatal(err)
+	}
+
+	// A question recorded without ask has no state to leave, so the chief of
+	// staff cannot choose for it.
+	unasked := `{"recorded":false,"reason":"question legacy was not asked through ask and cannot be chosen for"}`
+	if got := call(t, chief["answer"], `{"question":"legacy","text":"x","citations":["charter#1"]}`); got != unasked {
+		t.Fatalf("answer to a legacy question: %s", got)
+	}
+	if got := call(t, chief["escalate"], `{"questions":["legacy"],"rephrasing":"r","blocked":"b","options":[],"recommendation":"c"}`); got != unasked {
+		t.Fatalf("escalation of a legacy question: %s", got)
 	}
 
 	// A skipped workstream keeps its answer undelivered.

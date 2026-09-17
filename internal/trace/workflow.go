@@ -318,24 +318,31 @@ func (r *Repository) stage(stream config.WorkstreamID, log workflowLog, v *workf
 		return nil, nil, err
 	}
 	files := map[string][]byte{prefix + "workflow.json": append(data, '\n'), prefix + "events.jsonl": events}
+	if err := r.appendRecords(files, records); err != nil {
+		return nil, nil, err
+	}
+	return files, states, nil
+}
+
+// appendRecords requires r.mu. It appends each record as a line of its trace
+// file in files, starting from the file's bytes already in files or on disk.
+func (r *Repository) appendRecords(files map[string][]byte, records []Record) error {
 	for _, rec := range records {
 		name := recordPath(rec)
-		if err := r.checked(name); err != nil {
-			return nil, nil, err
-		}
 		old, ok := files[name]
 		if !ok {
+			var err error
 			if old, err = r.readFile(name); err != nil && !os.IsNotExist(err) {
-				return nil, nil, err
+				return err
 			}
 		}
 		line, err := json.Marshal(rec)
 		if err != nil {
-			return nil, nil, err
+			return err
 		}
 		files[name] = append(old, append(line, '\n')...)
 	}
-	return files, states, nil
+	return nil
 }
 
 func (r *Repository) Workflow(stream config.WorkstreamID, subject string) (WorkflowState, error) {
