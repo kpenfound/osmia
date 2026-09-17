@@ -491,7 +491,8 @@ func TestCapReachedWithAnOpenVetoApprovesNothing(t *testing.T) {
 	veto, advice := shed.ObjectionID(1, committeeAgent(1), 1), shed.ObjectionID(1, committeeAgent(2), 1)
 	f.member(1, 1, 1, objects(p, shed.Charter, "spec#2", "charter#2"))
 	f.member(1, 2, 1, objects(p, shed.Fit, "plan", "spec#1"))
-	f.script(replyTurnID(1, 1), nil, answers(p, "Criterion 2 has a test.", veto))
+	// Delivering the recorded plan again is no redraft.
+	f.script(replyTurnID(1, 1), map[string]string{plan.PlanPath: validPlan}, answers(p, "Criterion 2 has a test.", veto))
 	// A silent turn on the revision the veto was made against settles nothing.
 	f.member(2, 1, 1, silent)
 	f.member(2, 2, 1, silent)
@@ -520,6 +521,9 @@ func TestCapReachedWithAnOpenVetoApprovesNothing(t *testing.T) {
 		}
 	}
 	f.stillInShed(t, stream)
+	if reply := f.reply(t, stream, 1); reply.Redraft != nil || len(f.documents(t, stream, plan.PlanDocument)) != 1 {
+		t.Fatalf("an unchanged plan was recorded as a redraft: %+v", reply)
+	}
 	open, err := Dissent(f.repository(), stream)
 	must(t, err)
 	if len(open) != 2 || open[0].ID != veto || open[0].Kind != shed.Charter || open[0].Member != committeeAgent(1) || open[0].Part != "spec#2" || !open[0].Blocking ||
@@ -572,13 +576,13 @@ func TestDebateResumesMidRoundAfterARestart(t *testing.T) {
 	t.Parallel()
 	f := newDebateFixture(t, 2, 2)
 	p := &faults{}
-	size := shed.ObjectionID(1, committeeAgent(1), 1)
+	size, fit := shed.ObjectionID(1, committeeAgent(1), 1), shed.ObjectionID(1, committeeAgent(2), 1)
 	f.member(1, 1, 1, objects(p, shed.Size, "plan#resume", "spec#1"))
-	f.member(1, 2, 1, silent)
+	f.member(1, 2, 1, objects(p, shed.Fit, "plan", "spec#1"))
 	replying := make(chan struct{})
 	f.script(replyTurnID(1, 1), nil, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
 		// What an interrupted turn answered is not the reply.
-		answers(p, "Lost.", size)(ctx, req, verified, tools)
+		answers(p, "Lost.", fit)(ctx, req, verified, tools)
 		close(replying)
 		<-ctx.Done()
 		return ctx.Err()
@@ -604,7 +608,7 @@ func TestDebateResumesMidRoundAfterARestart(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	f.member(2, 2, 1, silent)
+	f.member(2, 2, 1, concedes(p, fit))
 	f.start(t)
 	wait(debating, "round 2")
 	deadline := time.Now().Add(demoTimeout)
@@ -910,5 +914,44 @@ func TestReplyOperationInputIsValidated(t *testing.T) {
 	}
 	if _, err := decodeRound(coreadapter.Operation{Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1}`)}); err == nil {
 		t.Error("a reply decoded as a round")
+	}
+}
+
+// The reply's tools are bound to the architect's turn of that reply: every
+// other scope is denied them.
+func TestReplyToolsAreBoundToTheReplyTurn(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 1)
+	defer f.stop(t)
+	p := &faults{}
+	f.member(1, 1, 1, objects(p, shed.Size, "plan#resume", "spec#1"))
+	stream := f.handIn(t, "design", handedDesign)
+	f.awaitShed(t, stream, "concluded-1")
+	p.check(t)
+	ctx := context.Background()
+	path := (&debate{s: f.s, repository: f.repository()}).replyPath(stream, roundInput{Round: 1, Spec: 1, Plan: 1})
+	valid := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: architectRole, Thread: architectThread, Turn: replyTurnID(1, 2)}
+	tools, err := path.Scoped(ctx, valid)
+	must(t, err)
+	var names []string
+	for _, tool := range tools {
+		names = append(names, tool.Name)
+	}
+	if want := []string{shed.ReplyTool, DraftTool}; !slices.Equal(names, want) {
+		t.Fatalf("tools %v, want %v", names, want)
+	}
+	for name, mutate := range map[string]func(*coreadapter.Scope){
+		"another project":    func(s *coreadapter.Scope) { s.Project = "other" },
+		"another workstream": func(s *coreadapter.Scope) { s.Workstream = "w_fedcba9876543210fedcba9876543210" },
+		"another role":       func(s *coreadapter.Scope) { s.Role = committeeRole },
+		"another thread":     func(s *coreadapter.Scope) { s.Thread = committeeThread(1) },
+		"a drafting turn":    func(s *coreadapter.Scope) { s.Turn = draftTurnID(1, 1) },
+		"another round":      func(s *coreadapter.Scope) { s.Turn = replyTurnID(2, 1) },
+	} {
+		scope := valid
+		mutate(&scope)
+		if tools, err := path.Scoped(ctx, scope); err == nil {
+			t.Errorf("%s: got %d tools", name, len(tools))
+		}
 	}
 }
