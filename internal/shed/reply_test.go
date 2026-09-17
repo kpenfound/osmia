@@ -21,7 +21,7 @@ func TestDissentRecordMarksWhatBlocks(t *testing.T) {
 		r.Objections = append(r.Objections, o)
 	}
 	conceded := record(2, alice, one, 0, shed.ObjectionID(1, alice, 3))
-	got := shed.DissentRecord([]shed.Record{r, conceded})
+	got := shed.DissentRecord([]shed.Record{r, conceded}, nil)
 	want := map[shed.Kind]bool{shed.Charter: true, shed.Fit: false, shed.Proof: true}
 	if len(got) != len(want) {
 		t.Fatalf("dissent record %+v", got)
@@ -36,7 +36,7 @@ func TestDissentRecordMarksWhatBlocks(t *testing.T) {
 	if err != nil || !strings.Contains(string(data), `"blocking":true`) || !strings.Contains(string(data), `"kind":"charter"`) || !strings.Contains(string(data), `"member":"`+alice+`"`) || !strings.Contains(string(data), `"part":"plan#resume"`) {
 		t.Fatalf("encoded entry %s %v", data, err)
 	}
-	if got := shed.DissentRecord(nil); len(got) != 0 {
+	if got := shed.DissentRecord(nil, nil); len(got) != 0 {
 		t.Fatalf("dissent of no record: %+v", got)
 	}
 }

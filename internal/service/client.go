@@ -113,6 +113,32 @@ func (c *Client) Abandon(ctx context.Context, id config.WorkstreamID, reason str
 	return v, err
 }
 
+// ShedObject adds the owner's own objection to a workstream's current round.
+func (c *Client) ShedObject(ctx context.Context, id config.WorkstreamID, argument string) (ShedResponse, error) {
+	return c.shed(ctx, "object", id, ShedObjectRequest{Argument: argument})
+}
+
+// ShedRule records the owner's ruling on one objection that stands.
+func (c *Client) ShedRule(ctx context.Context, id config.WorkstreamID, objection, disposition, note string) (ShedResponse, error) {
+	return c.shed(ctx, "rule", id, ShedRuleRequest{Objection: objection, Disposition: disposition, Note: note})
+}
+
+// ShedSkip records that the owner skips debate on a workstream.
+func (c *Client) ShedSkip(ctx context.Context, id config.WorkstreamID) (ShedResponse, error) {
+	return c.shed(ctx, "skip", id, struct{}{})
+}
+
+// ShedMore asks for further rounds of debate after it concluded.
+func (c *Client) ShedMore(ctx context.Context, id config.WorkstreamID, rounds int) (ShedResponse, error) {
+	return c.shed(ctx, "more", id, ShedMoreRequest{Rounds: rounds})
+}
+
+func (c *Client) shed(ctx context.Context, action string, id config.WorkstreamID, input any) (ShedResponse, error) {
+	var v ShedResponse
+	err := c.Do(ctx, "POST", Prefix+"/shed/"+action+"/"+url.PathEscape(string(id)), input, &v)
+	return v, err
+}
+
 // Statuses lists every workstream's status in the active project.
 func (c *Client) Statuses(ctx context.Context) (StatusResponse, error) {
 	var v StatusResponse

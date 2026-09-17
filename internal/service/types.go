@@ -142,6 +142,38 @@ type AbandonResponse struct {
 	Reason     string              `json:"reason"`
 }
 
+// ShedObjectRequest adds the owner's own objection to the current round.
+type ShedObjectRequest struct {
+	Argument string `json:"argument"`
+}
+
+// ShedRuleRequest rules on one objection that stands: disposition is sustain
+// or dismiss, and note is the owner's reason, which may be empty.
+type ShedRuleRequest struct {
+	Objection   string `json:"objection"`
+	Disposition string `json:"disposition"`
+	Note        string `json:"note,omitempty"`
+}
+
+// ShedMoreRequest asks for further rounds of debate after it concluded.
+type ShedMoreRequest struct {
+	Rounds int `json:"rounds"`
+}
+
+// ShedResponse reports one owner action in the shed: what was recorded, the
+// round it was recorded under and, for an objection or a ruling, which
+// objection it concerns. Rounds is what a request for further debate asked
+// for.
+type ShedResponse struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	Action     string              `json:"action"`
+	Round      int                 `json:"round"`
+	Objection  string              `json:"objection,omitempty"`
+	Rounds     int                 `json:"rounds,omitempty"`
+	Detail     string              `json:"detail"`
+}
+
 // ProjectAddRequest registers a project. Clone is an absolute path to an
 // existing local Git repository; base_branch defaults to main.
 type ProjectAddRequest struct {

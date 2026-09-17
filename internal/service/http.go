@@ -230,6 +230,44 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if rest, ok := strings.CutPrefix(r.URL.Path, Prefix+"/shed/"); ok && r.Method == http.MethodPost {
+		action, id, _ := strings.Cut(rest, "/")
+		var (
+			out ShedResponse
+			api *APIError
+		)
+		switch action {
+		case "object":
+			var v ShedObjectRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			out, api = s.shedObject(r.Context(), id, v)
+		case "rule":
+			var v ShedRuleRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			out, api = s.shedRule(r.Context(), id, v)
+		case "skip":
+			out, api = s.shedSkip(r.Context(), id)
+		case "more":
+			var v ShedMoreRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			out, api = s.shedMore(r.Context(), id, v)
+		default:
+			fail(w, Unsupported)
+			return
+		}
+		if api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
 	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/abandon/"); ok && r.Method == http.MethodPost {
 		var v AbandonRequest
 		if !decode(w, r, &v) {

@@ -49,10 +49,17 @@ Only documents can be project-scoped. Project document paths are `charter.md`,
 `kb/entities.json`, `kb/<name>.md` and `notes/<role>.md`; workstream document paths
 are `spec.md`, `plan.json`, `handed/<name>` and the shed records
 `shed/round-<n>/<agent>.json`, where `<n>` is a positive round number without
-leading zeros and `<agent>` is the committee member's agent ID, and
+leading zeros and `<agent>` is the committee member's agent ID,
 `shed/round-<n>/reply.json`, the architect's
-[reply to the round](service.md#the-architects-reply). Handed inputs
-are immutable.
+[reply to the round](service.md#the-architects-reply), and the three files of
+[the owner's own part](service.md#the-owner-in-the-shed) in a round:
+`shed/round-<n>/owner.json`, the owner's objections, a record of the same shape
+as a member's; `shed/round-<n>/rulings.json`, what the owner ruled about the
+objections that stand; and `shed/round-<n>/more.json`, the further rounds the
+owner asked for after debate concluded at round `n`. Handed inputs
+are immutable. `spec.md` and `plan.json` are owner-edited: a revision of either
+is recorded with the actor `owner`/`local` and the cause `owner-edit` when the
+file differs from the latest recorded revision, as the charter is.
 Only a handed document carries a `source`: `file:` and the absolute path it was
 read from, the issue URL, or `stdin`.
 Document paths retain one record identity. Agent role and thread IDs stay stable

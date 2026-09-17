@@ -20,8 +20,10 @@ func prose(p string) bool {
 // revision is recorded or none is. A kb/<subsystem>.md revision with empty
 // content records the subsystem's removal, and its file is deleted. The
 // charter is owner-edited and handed input is immutable, so neither can be
-// recorded this way. Revisions are checked against the recorded history
-// before anything is written.
+// recorded this way, and a revision of spec.md or plan.json is refused with
+// ErrConflict while the file holds an owner edit no revision records: the
+// edit is read and recorded first. Revisions are checked against the recorded
+// history before anything is written.
 func (r *Repository) RecordDocuments(ctx context.Context, docs []Document) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

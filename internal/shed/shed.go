@@ -71,7 +71,8 @@ type Concession struct {
 }
 
 // Record is what one member contributed to one round, and the revision the
-// round was pinned to. A record without objections or concessions is a silent
+// round was pinned to. The owner's own objections are a record of the same
+// shape, under the owner's member name. A record without objections or concessions is a silent
 // turn. Failure is why the member's turn did not end normally; what it
 // contributed before failing is kept.
 type Record struct {
@@ -114,14 +115,22 @@ func (r Record) check() error {
 		return fmt.Errorf("unsupported shed record version %d", r.Version)
 	case r.Round < 1:
 		return errors.New("shed record requires a positive round")
-	case !memberPattern.MatchString(r.Member) || r.Member == replyName:
+	case !memberPattern.MatchString(r.Member) || reserved(r.Member):
 		return fmt.Errorf("invalid shed member %q", r.Member)
 	case r.Revision.Spec < 1 || r.Revision.Plan < 1:
 		return errors.New("shed record requires the revision it was made against")
+	case r.Owned() && (len(r.Concessions) > 0 || r.Failure != "" || r.Turn != ""):
+		return errors.New("the owner's record holds objections alone: the owner runs no turn")
 	}
 	for i, o := range r.Objections {
 		if o.ID != ObjectionID(r.Round, r.Member, i+1) {
 			return fmt.Errorf("objection %d has ID %q, want %q", i+1, o.ID, ObjectionID(r.Round, r.Member, i+1))
+		}
+		if r.Owned() {
+			if o.Kind != Owner || strings.TrimSpace(o.Argument) == "" {
+				return fmt.Errorf("the owner's objection %s requires the %s kind and an argument", o.ID, Owner)
+			}
+			continue
 		}
 		if !slices.Contains(Kinds, o.Kind) || strings.TrimSpace(o.Part) == "" || strings.TrimSpace(o.Argument) == "" || len(o.Citations) == 0 {
 			return fmt.Errorf("objection %s requires a kind, a part, an argument and a citation", o.ID)
@@ -134,6 +143,10 @@ func (r Record) check() error {
 	}
 	return nil
 }
+
+// Owned reports whether the record holds the owner's own objections rather
+// than one committee member's contribution.
+func (r Record) Owned() bool { return r.Member == OwnerMember }
 
 // Encode returns the file content of a valid record.
 func Encode(r Record) ([]byte, error) {
@@ -177,8 +190,9 @@ func Parse(data []byte) (Record, error) {
 	return r, r.check()
 }
 
-// Records returns the latest revision of every member's contribution recorded
-// under the workstream's shed/, ordered by round and member. A record whose
+// Records returns the latest revision of every member's contribution and of
+// the owner's objections recorded under the workstream's shed/, ordered by
+// round and member. A record whose
 // content disagrees with its path is an error.
 func Records(repository *trace.Repository, stream config.WorkstreamID) ([]Record, error) {
 	documents, err := trace.Read[trace.Document](repository, stream)
@@ -187,7 +201,7 @@ func Records(repository *trace.Repository, stream config.WorkstreamID) ([]Record
 	}
 	latest := map[string]trace.Document{}
 	for _, d := range documents {
-		if strings.HasPrefix(d.Path, "shed/") && !isReply(d.Path) {
+		if strings.HasPrefix(d.Path, "shed/") && !reservedPath(d.Path) {
 			latest[d.Path] = d
 		}
 	}
@@ -221,30 +235,50 @@ type Dissent struct {
 	Revision Pin    `json:"revision"`
 }
 
-// Blocking reports whether the dissent stands in the way of ratification: a
-// charter veto, or a size or proof objection the architect has to settle. A
-// fit objection is advice and never blocks.
+// Blocking reports whether the dissent stands in the way of ratification: the
+// owner's own objection, a charter veto, or a size or proof objection the
+// architect has to settle. A fit objection is advice and never blocks. The
+// owner's ruling on the objection overrides this.
 func (d Dissent) Blocking() bool { return d.Kind != Fit }
 
-// Entry is one line of the dissent record: an objection that stands, and
-// whether it blocks.
+// Entry is one line of the dissent record: an objection that stands, whether
+// it blocks, and what the owner ruled about it.
 type Entry struct {
 	Dissent
-	Blocking bool `json:"blocking"`
+	Blocking    bool        `json:"blocking"`
+	Disposition Disposition `json:"disposition,omitempty"`
+	Note        string      `json:"note,omitempty"`
 }
 
 // DissentRecord is the dissent that stands after the given records, each
-// objection with its kind, member, part and whether it blocks.
-func DissentRecord(records []Record) []Entry {
+// objection with its kind, member, part, the owner's ruling on it and whether
+// it blocks. A sustained objection blocks whatever its kind; a dismissed one
+// blocks no longer and is kept as the owner's recorded disposition.
+func DissentRecord(records []Record, rulings []Rulings) []Entry {
+	ruled := map[string]Ruling{}
+	for _, one := range flatten(rulings) {
+		ruled[one.Objection] = one
+	}
 	open := OpenDissent(records)
 	entries := make([]Entry, len(open))
 	for i, d := range open {
 		entries[i] = Entry{Dissent: d, Blocking: d.Blocking()}
+		if r, ok := ruled[d.ID]; ok {
+			entries[i].Disposition, entries[i].Note = r.Disposition, r.Note
+			entries[i].Blocking = r.Disposition == Sustained
+		}
 	}
 	return entries
 }
 
-// OpenDissent computes the dissent that stands after the given records. An
+// Standing returns the entries of a dissent record the owner has not
+// dismissed: what the architect still answers and the debate still runs for.
+func Standing(entries []Entry) []Entry {
+	return slices.DeleteFunc(slices.Clone(entries), func(e Entry) bool { return e.Disposition == Dismissed })
+}
+
+// OpenDissent computes the dissent that stands after the given records,
+// including the owner's own objections, which no member's turn settles. An
 // objection stands until its member concedes it, or until the member accepts
 // a later revision of the documents: a turn that ends normally against the
 // later revision without a new objection. A silent turn against the revision

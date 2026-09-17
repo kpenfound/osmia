@@ -468,13 +468,18 @@ func (d *debate) endReply(ctx context.Context, operation string, stream config.W
 	return outcome, nil
 }
 
-// standingAfter returns the dissent that stood once round n was heard.
+// standingAfter returns the dissent that stood once round n was heard, and
+// that the owner has not dismissed: what the architect answers.
 func (d *debate) standingAfter(stream config.WorkstreamID, n int) ([]shed.Entry, error) {
 	records, err := d.earlier(stream, n+1)
 	if err != nil {
 		return nil, err
 	}
-	return shed.DissentRecord(records), nil
+	rulings, err := shed.AllRulings(d.repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	return shed.Standing(shed.DissentRecord(records, rulings)), nil
 }
 
 // enqueueReply accepts the next architect turn of the reply, fixing its
@@ -489,7 +494,7 @@ func (d *debate) enqueueReply(ctx context.Context, cfg *config.Config, stream co
 	if err != nil {
 		return err
 	}
-	latest, err := d.latestPin(stream)
+	latest, err := latestPin(d.repository, stream)
 	if err != nil {
 		return err
 	}
