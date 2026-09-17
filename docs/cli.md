@@ -64,7 +64,7 @@ The [onboarding walkthrough](m2-onboarding.md) runs `project add`, `handin`,
   [--base-branch NAME]` registers a project with the running service: it
   validates the request, generates the project ID, writes
   `projects/<id>/config.toml`, creates the trace repository with a charter
-  template and an entity map seeded from the clone, lists the ID in
+  template and an entity map seeded from the clone's tracked files, lists the ID in
   `active_projects`, requests the librarian's first knowledge-base extraction
   and activates the project without a restart. The clone path is made absolute by the client and must be an
   existing local Git repository outside the Osmia root; nothing is written to

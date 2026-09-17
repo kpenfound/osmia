@@ -161,8 +161,9 @@ Subsystem prose lives beside the map as `kb/<subsystem>.md`.
 `trace.Repository.Prose` reads one file as it is on disk and
 `trace.Repository.Subsystems` lists them; [context bundles](context.md) use both.
 
-`osmia project add` seeds the map from the clone and creates the trace with
-`CreateSeeded`. A registration that is interrupted before the trace's first
+`osmia project add` seeds the map from a temporary copy of the clone's tracked
+files, the same input the librarian's `seed/entities.json` comes from, and
+creates the trace with `CreateSeeded`. A registration that is interrupted before the trace's first
 commit seeds again when it is finished.
 
 ## Extraction
