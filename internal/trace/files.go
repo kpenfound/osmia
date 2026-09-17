@@ -54,9 +54,6 @@ func (r *Repository) checked(name string) error {
 // checkedEntry is checked for an entry of fs.WalkDir, which has already
 // checked the entry's ancestors, so only the entry itself is inspected.
 func (r *Repository) checkedEntry(name string, entry fs.DirEntry) error {
-	if entry.Type()&fs.ModeSymlink != 0 {
-		return fmt.Errorf("%s: symlink aliases are forbidden", name)
-	}
 	if entry.IsDir() {
 		return nil
 	}

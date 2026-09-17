@@ -381,6 +381,55 @@ func TestSymlinksAndGitRedirection(t *testing.T) {
 		})
 	}
 }
+func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
+	for _, mode := range []string{"config", "alternates", "hardlink"} {
+		// A write runs Git to publish; a read runs Git once HEAD has moved
+		// since the handle last listed its tree.
+		for _, op := range []string{"write", "read"} {
+			t.Run(mode+"/"+op, func(t *testing.T) {
+				r, _, p := create(t)
+				ctx := context.Background()
+				if op == "read" {
+					if err := r.Append(ctx, specimens()[0]); err != nil {
+						t.Fatal(err)
+					}
+				}
+				git := filepath.Join(r.directory, ".git")
+				if err := os.MkdirAll(filepath.Join(git, "objects", "info"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				var err error
+				want := ""
+				switch mode {
+				case "config":
+					err = os.WriteFile(filepath.Join(git, "config"), []byte(gitConfig+"[core]\n\tbare = true\n"), 0600)
+					want = "differs from the isolated local configuration"
+				case "alternates":
+					err = os.WriteFile(filepath.Join(git, "objects", "info", "alternates"), []byte(filepath.Join(p.Clone, ".git", "objects")+"\n"), 0600)
+					want = "external Git storage is forbidden"
+				case "hardlink":
+					sentinel := filepath.Join(p.Clone, "sentinel")
+					if err := os.WriteFile(sentinel, []byte("untouched"), 0600); err != nil {
+						t.Fatal(err)
+					}
+					err = os.Link(sentinel, filepath.Join(git, "objects", "info", "linked"))
+					want = "hardlink aliases are forbidden"
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if op == "write" {
+					err = r.Append(ctx, specimens()[0])
+				} else {
+					_, err = r.Workflow(streamID, FeatureSubject)
+				}
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("%s with a tampered store: %v", op, err)
+				}
+			})
+		}
+	}
+}
 func TestGitEnvironmentAndExistingRepositories(t *testing.T) {
 	root, p := fixture(t)
 	t.Setenv("GIT_DIR", filepath.Join(p.Clone, ".git"))
