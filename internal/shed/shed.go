@@ -238,11 +238,11 @@ type Dissent struct {
 // Blocking reports whether the dissent stands in the way of ratification: the
 // owner's own objection, a charter veto, or a size or proof objection the
 // architect has to settle. A fit objection is advice and never blocks. The
-// owner's ruling on the objection overrides this.
+// owner's disposition of the objection overrides this.
 func (d Dissent) Blocking() bool { return d.Kind != Fit }
 
 // Entry is one line of the dissent record: an objection that stands, whether
-// it blocks, and what the owner ruled about it.
+// it blocks, and how the owner disposed of it.
 type Entry struct {
 	Dissent
 	Blocking    bool        `json:"blocking"`
@@ -251,7 +251,7 @@ type Entry struct {
 }
 
 // DissentRecord is the dissent that stands after the given records, each
-// objection with its kind, member, part, the owner's ruling on it and whether
+// objection with its kind, member, part, the owner's disposition of it and whether
 // it blocks. A sustained objection blocks whatever its kind; a dismissed or
 // overruled one blocks no longer and is kept as the owner's recorded
 // disposition.

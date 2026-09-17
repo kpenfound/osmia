@@ -20,8 +20,11 @@ osmia answer 1 "Resume uploads; never restart them."
 osmia abandon w_0123456789abcdef0123456789abcdef "Superseded by the new upload design."
 osmia shed object w_0123456789abcdef0123456789abcdef "The plan never names the retry budget."
 osmia shed rule w_0123456789abcdef0123456789abcdef agent_committee_1-r1-1 dismiss "We accept the risk."
+osmia shed overrule w_0123456789abcdef0123456789abcdef agent_committee_1-r1-2 "Ship it and note the risk."
 osmia shed skip w_0123456789abcdef0123456789abcdef
 osmia shed more w_0123456789abcdef0123456789abcdef 2
+osmia shed redraft w_0123456789abcdef0123456789abcdef "Split the resume unit by what it addresses."
+osmia ratify w_0123456789abcdef0123456789abcdef
 osmia pause all --reason "Away for the weekend"
 osmia resume all
 osmia profiles
@@ -112,6 +115,13 @@ a service restart.
   its member concedes it after a redraft; `dismiss` records your disposition
   and it blocks no longer. The note is optional and is one argument; quote it.
   An objection that does not stand fails with `not_found` (exit 4).
+- `shed overrule <workstream-id> <objection-id> [reason]` overrules one
+  objection that stands, charter vetoes included: your disposition is recorded
+  against the revision the documents are at, the objection stays in the dissent
+  record and blocks no longer. Use it at the decision point, where `shed rule`
+  is for settling an objection while debate runs. The reason is optional and is
+  one argument; quote it. An objection that does not stand fails with
+  `not_found` (exit 4).
 - `shed skip <workstream-id>` skips debate for a `sketched` or `in-shed`
   workstream. No further committee or architect turn starts; the workstream
   still needs your ratification of the spec and the plan. A running round, or a
@@ -122,6 +132,22 @@ a service restart.
   debate still running or never concluded fails with `conflict` (exit 5), a
   count out of range with `validation` (exit 4), and a count that is not a
   number is a usage error (exit 2).
+- `shed redraft <workstream-id> <note>` sends the spec and the plan back to
+  the architect once debate has concluded. The note is what to change and is
+  one argument; quote it. The architect writes the redraft, and debate resumes
+  with one round that reads it. A debate still running or never concluded, a
+  skipped one, and a conclusion you have already asked a redraft for fail with
+  `conflict` (exit 5); an empty note fails with `validation` (exit 4).
+- `ratify <workstream-id>` ratifies the spec and the plan of a workstream in
+  the shed. It reads your ratification packet, pins the revisions the packet
+  names and ratifies exactly those, so revisions that moved since are refused.
+  Ratification is refused, with every reason listed, when an objection still
+  blocks and you have not overruled it, when the plan does not validate, when
+  the revisions are not the current ones, and when the workstream is not in the
+  shed: all `conflict` (exit 5). What passes records your approval of those
+  revisions and triggers the sealing of the workstream. A workstream with no
+  packet yet fails with `not_found` (exit 4). See
+  [the ratification gate](service.md#the-ratification-gate).
 - Editing the documents needs no command. You edit `spec.md` and `plan.json` in
   the workstream's directory under the trace yourself. The service records what
   you changed as a new revision of yours before any turn reads it, and the next
@@ -260,7 +286,7 @@ existing owner, and ensure the socket path is unused or stale. Do not delete a
 live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
-Detached management, install/upgrade commands, completion, web/tailnet,
-ratification, reload and trace navigation are unavailable. The command examples in
+Detached management, install/upgrade commands, completion, web/tailnet, reload
+and trace navigation are unavailable. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.

@@ -51,12 +51,19 @@ are `spec.md`, `plan.json`, `handed/<name>` and the shed records
 `shed/round-<n>/<agent>.json`, where `<n>` is a positive round number without
 leading zeros and `<agent>` is the committee member's agent ID,
 `shed/round-<n>/reply.json`, the architect's
-[reply to the round](service.md#the-architects-reply), and the three files of
-[the owner's own part](service.md#the-owner-in-the-shed) in a round:
-`shed/round-<n>/owner.json`, the owner's objections, a record of the same shape
-as a member's; `shed/round-<n>/rulings.json`, what the owner ruled about the
-objections that stand; and `shed/round-<n>/more.json`, the further rounds the
-owner asked for after debate concluded at round `n`. Handed inputs
+[reply to the round](service.md#the-architects-reply),
+`shed/round-<n>/redrafted.json`, its
+[redraft](service.md#redraft) at the owner's request, a record of the same
+shape as a reply, `shed/round-<n>/packet.json`, the
+[ratification packet](service.md#the-packet) the chief of staff presents, and
+the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
+round: `shed/round-<n>/owner.json`, the owner's objections, a record of the
+same shape as a member's; `shed/round-<n>/rulings.json`, what the owner ruled
+and overruled about the objections that stand; `shed/round-<n>/more.json`, the
+further rounds the owner asked for after debate concluded at round `n`;
+`shed/round-<n>/redraft.json`, the redraft they asked for instead; and
+`shed/round-<n>/ratification.json`, the
+[ratification](service.md#ratifying) of the revisions in force. Handed inputs
 are immutable. `spec.md` and `plan.json` are owner-edited: a revision of either
 is recorded with the actor `owner`/`local` and the cause `owner-edit` when the
 file differs from the latest recorded revision, as the charter is.

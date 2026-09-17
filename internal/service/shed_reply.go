@@ -578,7 +578,7 @@ func (d *debate) endReply(ctx context.Context, operation string, stream config.W
 }
 
 // standingAfter returns the dissent that stood once round n was heard, and
-// that the owner has not dismissed: what the architect answers.
+// that the owner has not disposed of: what the architect answers.
 func (d *debate) standingAfter(stream config.WorkstreamID, n int) ([]shed.Entry, error) {
 	records, err := d.earlier(stream, n+1)
 	if err != nil {
