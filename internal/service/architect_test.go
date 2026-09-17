@@ -234,10 +234,6 @@ func readTool(ctx context.Context, tools *mcp.ClientSession, path string) (strin
 	return text, err
 }
 
-// checkArchitectBoundary makes the negative assertions from inside the turn:
-// the view holds the handed input, the charter and the bundle and nothing
-// else, the role reads files and delivers the draft, and nothing carries
-// notes, write, execute, network or VCS access.
 // checkReadOnlyGrants asserts the grants core verified for a read-only turn:
 // the private view read-only, the session read-only with the scratch
 // directory the turn starts in, the scoped MCP server as the only tool, and
@@ -267,6 +263,10 @@ func checkReadOnlyGrants(req agent.Request, verified *agent.Turn, clone string, 
 	}
 }
 
+// checkArchitectBoundary makes the negative assertions from inside the turn:
+// the view holds the handed input, the charter and the bundle and nothing
+// else, the role reads files and delivers the draft, and nothing carries
+// notes, write, execute, network or VCS access.
 func checkArchitectBoundary(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession, clone, handed, charter string) error {
 	var problems []error
 	fail := func(format string, args ...any) { problems = append(problems, fmt.Errorf(format, args...)) }
