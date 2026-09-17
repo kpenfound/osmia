@@ -421,6 +421,11 @@ func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				ref := filepath.Join(git, "refs", "heads", "main")
+				before, err := os.ReadFile(ref)
+				if err != nil {
+					t.Fatal(err)
+				}
 				if op == "write" {
 					err = r.Append(ctx, specimens()[0])
 				} else {
@@ -428,6 +433,9 @@ func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
 				}
 				if err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatalf("%s with a tampered store: %v", op, err)
+				}
+				if after, err := os.ReadFile(ref); err != nil || string(after) != string(before) {
+					t.Fatalf("Git committed with a tampered store: %s %v", after, err)
 				}
 			})
 		}
