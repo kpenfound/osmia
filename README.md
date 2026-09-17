@@ -48,6 +48,9 @@ across a service restart with fake engines and explains how to inspect its trace
 The [M2 onboarding demonstration](docs/m2-onboarding.md) walks a project
 from `osmia project add` to a ready charter and a local knowledge base.
 
+The [M2 hand-in demonstration](docs/m2-demonstration.md) takes handed
+material to a validated spec and plan with a fake architect and chief of staff.
+
 The [charter reference](docs/charter.md) documents the charter template, the
 numbered-rule format and how owner edits are recorded.
 
