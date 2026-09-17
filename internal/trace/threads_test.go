@@ -675,27 +675,30 @@ func TestCancelTurnsLeavesCapturedTurns(t *testing.T) {
 // so the recovered trace opens again.
 func TestRecoverySettlesFinalAttempt(t *testing.T) {
 	actor := Actor{Kind: "service", ID: "abandon"}
-	recorded := coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "partial"}, SessionDirectory: "/owned/session/claim1", StartedAt: at, FinalResponse: "Partial", Cancelled: true}
+	abandon := func(ctx context.Context, r *Repository) error {
+		return r.AbandonTurn(ctx, streamID, "mason", "one", at.Add(time.Minute))
+	}
+	cancel := func(ctx context.Context, r *Repository) error {
+		_, err := r.CancelTurns(ctx, streamID, at.Add(time.Minute), actor, "gone")
+		return err
+	}
+	stopped := coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "partial"}, SessionDirectory: "/owned/session/claim1", StartedAt: at, FinalResponse: "Partial", Cancelled: true}
+	finished := coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "done"}, SessionDirectory: "/owned/session/claim1", StartedAt: at, FinalResponse: "Done"}
 	for _, c := range []struct {
-		name    string
-		result  *coreadapter.SessionResult
-		recover func(context.Context, *Repository) error
-		failure string
+		name     string
+		result   *coreadapter.SessionResult
+		recorded string // the failure the stopped session recorded with the result
+		recover  func(context.Context, *Repository) error
+		failure  string
+		subtype  string
+		status   string
 	}{
-		{"abandon intent", nil, func(ctx context.Context, r *Repository) error {
-			return r.AbandonTurn(ctx, streamID, "mason", "one", at.Add(time.Minute))
-		}, "the service stopped before the turn captured a result"},
-		{"cancel intent", nil, func(ctx context.Context, r *Repository) error {
-			_, err := r.CancelTurns(ctx, streamID, at.Add(time.Minute), actor, "gone")
-			return err
-		}, "gone"},
-		{"abandon result", &recorded, func(ctx context.Context, r *Repository) error {
-			return r.AbandonTurn(ctx, streamID, "mason", "one", at.Add(time.Minute))
-		}, "stopped"},
-		{"cancel result", &recorded, func(ctx context.Context, r *Repository) error {
-			_, err := r.CancelTurns(ctx, streamID, at.Add(time.Minute), actor, "gone")
-			return err
-		}, "stopped"},
+		{"abandon intent", nil, "", abandon, "the service stopped before the turn captured a result", "interrupted", "interrupted"},
+		{"cancel intent", nil, "", cancel, "gone", "cancelled", "interrupted"},
+		{"abandon stopped result", &stopped, "stopped", abandon, "stopped", "", "interrupted"},
+		{"cancel stopped result", &stopped, "stopped", cancel, "stopped", "", "interrupted"},
+		{"abandon finished result", &finished, "", abandon, "", "", "idle"},
+		{"cancel finished result", &finished, "", cancel, "", "", "idle"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -710,7 +713,7 @@ func TestRecoverySettlesFinalAttempt(t *testing.T) {
 				t.Fatal(err)
 			}
 			if c.result != nil {
-				a.Result, a.Failure = c.result, "stopped"
+				a.Result, a.Failure = c.result, c.recorded
 				if err := r.RecordAttempt(ctx, streamID, "mason", "one", "claim1", a); err != nil {
 					t.Fatal(err)
 				}
@@ -735,7 +738,10 @@ func TestRecoverySettlesFinalAttempt(t *testing.T) {
 			if got.Response == nil || last.Result == nil || !reflect.DeepEqual(*last.Result, got.Response.Result) || last.Failure != c.failure || got.Response.Failure != c.failure {
 				t.Fatalf("turn %+v", got)
 			}
-			if c.result != nil && (!reflect.DeepEqual(got.Response.Result, recorded) || th.Session != recorded.Session) {
+			if got.Response.Result.ErrorSubtype != c.subtype || got.Status() != c.status || th.Status != c.status || th.Active != "" {
+				t.Fatalf("subtype %q, status %q, thread %q active %q", got.Response.Result.ErrorSubtype, got.Status(), th.Status, th.Active)
+			}
+			if c.result != nil && (!reflect.DeepEqual(got.Response.Result, *c.result) || th.Session != c.result.Session) {
 				t.Fatalf("recorded result not kept: %+v %+v", got.Response.Result, th.Session)
 			}
 			if c.result == nil && (!got.Response.Result.Cancelled || th.Session != threadAgent().Session) {

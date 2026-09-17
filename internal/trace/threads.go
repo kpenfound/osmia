@@ -407,11 +407,13 @@ func (r *Repository) CaptureTurn(ctx context.Context, token string, response Tur
 
 // AbandonTurn completes a turn that a previous service session reserved and
 // never captured a result for. The exclusive repository lock proves that
-// session is gone, so the turn is recorded as interrupted with the claim's
-// start time and session directory, and the thread becomes eligible for its
-// next request. A final attempt without a result receives that interrupted
-// result; one that recorded a result keeps it, and the response carries it. A turn reserved by this session, one with a captured result,
-// and one that is not reserved are refused with ErrClaim.
+// session is gone, and the thread becomes eligible for its next request. A
+// turn whose final attempt has no result, or that has no attempt, is recorded
+// as interrupted with the claim's start time and session directory, and that
+// result also completes the final attempt. A turn whose final attempt recorded
+// a result is completed with that result and failure, and its status follows
+// them. A turn reserved by this session, one with a captured result, and one
+// that is not reserved are refused with ErrClaim.
 func (r *Repository) AbandonTurn(ctx context.Context, stream config.WorkstreamID, agent, turn string, at time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -478,10 +480,12 @@ func settleAttempt(q *QueuedTurn, response *TurnResponse) {
 // CancelTurns completes every unfinished turn of the workstream that no runner
 // of this repository session holds: queued turns and turns a previous session
 // reserved without a captured result. Each is recorded as cancelled with the
-// given reason; a reserved turn's final attempt is settled as AbandonTurn
-// settles it. A turn this session reserved, or one with a captured result,
-// is left to its runner, and later turns of its thread wait for another call.
-// It returns the number of turns it completed.
+// given actor and reason, and a reserved turn's final attempt without a result
+// receives that result, except a reserved turn whose final attempt recorded a
+// result: that turn keeps the attempt's result and failure. A turn this
+// session reserved, or one with a captured result, is left to its runner, and
+// later turns of its thread wait for another call. It returns the number of
+// turns it completed.
 func (r *Repository) CancelTurns(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor, reason string) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
