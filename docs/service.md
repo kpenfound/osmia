@@ -210,7 +210,7 @@ keeps the workflow subject `draft`, whose transitions are recorded in
 | --- | --- |
 | `drafting-<n>` | Draft `n` is requested: transition `draft-<n>` published an `architect-draft` operation, which the reconciliation loop runs. |
 | `invalid-<n>` | Draft `n` was recorded and failed validation. Transition `draft-<n>-invalid` lists every problem in its reason, and the operation's result carries the same text. |
-| `failed-<n>` | Draft `n` ran no valid turn: the architect's turn failed, service stops interrupted it three times, or the workstream left `handed` before the draft was presented. Transition `draft-<n>-failed` holds the reason. |
+| `failed-<n>` | Draft `n` ran no valid turn: the architect's turn failed, service stops interrupted it three times, the workstream was abandoned, or the workstream left `handed` before the draft was presented. Transition `draft-<n>-failed` holds the reason. |
 | `exhausted` | Three drafts were not accepted. Transition `draft-exhausted` records it with a notice for the chief of staff naming the count and the last failure, and nothing more is requested. |
 
 Draft 1 is requested as soon as the workstream is handed, with the hand-in
@@ -278,6 +278,12 @@ and records nothing again; one after the transition finds it and repeats
 nothing. A recorded outcome completes the operation without running the
 architect.
 
+[Abandoning](#abandoning) the workstream cancels the architect's running turn,
+which is recorded as interrupted. The draft of an abandoned workstream starts
+no turn, completes a queued one as cancelled, and records `draft-<n>-failed`
+with the reason `draft <n> failed: the workstream was abandoned, so the
+architect runs no turn for it`; nothing more is requested.
+
 `Options.Architect` supplies the isolation engine and MCP host factory the
 architect's turns run in. Without it the controller requests nothing, so a
 handed workstream stays `handed` until a service with a runner starts and
@@ -290,7 +296,8 @@ for the owner. The body is `{"reason": "..."}`. A workstream whose feature state
 is neither `delivered` nor `abandoned` moves to `abandoned` in one recorded
 transition whose actor is the owner (`owner`/`local`) and whose reason is the
 owner's, with a notice for the chief of staff in the same commit. The service
-then cancels the turn operations it is applying for the workstream, so a
+then cancels the turn operations it is applying for the workstream, the
+[architect's draft](#architect-drafting) included, so a
 running turn stops and records the partial result it has, and completes every
 other unfinished turn of the workstream as cancelled (actor
 `service`/`abandon`). A cancelled turn holds no capacity.
