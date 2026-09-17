@@ -127,7 +127,9 @@ func (r *runningTurns) cancel(stream config.WorkstreamID) {
 
 // abandonable runs turn operations through the bound thread reconciler under
 // a context that abandoning their workstream cancels. A turn of an abandoned
-// workstream is completed as cancelled instead of being run.
+// workstream is completed as cancelled instead of being run, and a turn that
+// finishes after its workstream was abandoned completes the thread's later
+// turns as cancelled.
 type abandonable struct {
 	coreadapter.Reconciler
 	s          *Service
@@ -151,5 +153,12 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 			return coreadapter.OperationResult{}, err
 		}
 	}
-	return a.Reconciler.Apply(ctx, op)
+	result, err := a.Reconciler.Apply(ctx, op)
+	// Abandoning while this turn ran left the thread's later turns queued.
+	if gone, _ := abandoned(a.repository, in.Workstream); gone {
+		if _, cancelErr := a.repository.CancelTurns(context.WithoutCancel(ctx), in.Workstream, a.s.now(), abandonActor, cancelReason); cancelErr != nil {
+			return result, errors.Join(err, cancelErr)
+		}
+	}
+	return result, err
 }

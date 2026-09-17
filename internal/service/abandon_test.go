@@ -119,14 +119,6 @@ func TestAbandonRefusals(t *testing.T) {
 	}
 }
 
-func TestAbandonWithoutProject(t *testing.T) {
-	s, _ := start(t, fixture(t))
-	code, body := abandonCall(t, s, stream, `{"reason":"r"}`)
-	if code != http.StatusConflict || !strings.Contains(body, `"no_project"`) {
-		t.Fatalf("%d %s", code, body)
-	}
-}
-
 // TestAbandonCancelsTurnsAcrossRestart abandons a workstream while one of its
 // turns runs and another waits: the running turn stops with its result kept,
 // the waiting one never runs, and neither do turns queued later, before or

@@ -566,9 +566,11 @@ func (r *Repository) saveThread(ctx context.Context, stream config.WorkstreamID,
 	files := map[string][]byte{"workstreams/" + string(stream) + "/workflow.json": append(data, '\n')}
 	for _, rec := range additions {
 		name := recordPath(rec)
-		old, err := r.readFile(name)
-		if err != nil && !os.IsNotExist(err) {
-			return err
+		old, ok := files[name]
+		if !ok {
+			if old, err = r.readFile(name); err != nil && !os.IsNotExist(err) {
+				return err
+			}
 		}
 		line, err := json.Marshal(rec)
 		if err != nil {
