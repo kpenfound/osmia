@@ -265,8 +265,9 @@ func (r *Repository) recoverPublication(ctx context.Context) error {
 }
 
 // publicationPath accepts the ordinary files the publication journal may
-// materialize or remove: workflow, transition, question and owned agent files
-// of a workstream, private role notes, and project documents other than the charter.
+// materialize or remove: workflow, transition, question, shed and owned agent
+// files of a workstream, private role notes, and project documents other than
+// the charter.
 func publicationPath(name string) error {
 	parts := strings.Split(name, "/")
 	switch {
@@ -281,6 +282,9 @@ func publicationPath(name string) error {
 			return nil
 		}
 		if len(parts) == 5 && parts[2] == "questions" && key(parts[3]) && (parts[4] == "question.jsonl" || parts[4] == "rulings.jsonl") {
+			return nil
+		}
+		if shedPath(parts[2:]) {
 			return nil
 		}
 	case len(parts) == 2 && parts[0] == "notes" && strings.HasSuffix(parts[1], ".md") && key(strings.TrimSuffix(parts[1], ".md")):

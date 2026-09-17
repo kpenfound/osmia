@@ -258,10 +258,18 @@ func documentPath(p string, stream bool) error {
 	if !stream && (p == "charter.md" || p == "kb/entities.json" || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && (p == "spec.md" || p == "plan.json" || (len(parts) == 2 && parts[0] == "handed")) {
+	if stream && (p == "spec.md" || p == "plan.json" || (len(parts) == 2 && parts[0] == "handed") || shedPath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)
+}
+
+var shedRound = regexp.MustCompile(`^round-[1-9][0-9]{0,8}$`)
+
+// shedPath reports whether parts name a shed record of a workstream,
+// shed/round-<n>/<name>.json, where the name is a record ID.
+func shedPath(parts []string) bool {
+	return len(parts) == 3 && parts[0] == "shed" && shedRound.MatchString(parts[1]) && strings.HasSuffix(parts[2], ".json") && key(strings.TrimSuffix(parts[2], ".json"))
 }
 func relative(p string) error {
 	if p == "" || path.IsAbs(p) || path.Clean(p) != p || strings.ContainsAny(p, "\\\x00\r\n:") {

@@ -39,8 +39,8 @@ func CoreEnforcement() Enforcement {
 // question tools. The chief of staff reads its context from the prompt.
 var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName}, questions.ChiefTools...)}
 
-// Enforce returns opts with Librarian, Architect and Threads running every
-// role turn through e. Thread turns are granted to the chief of staff only;
+// Enforce returns opts with Librarian, Architect, Committee and Threads
+// running every role turn through e. Thread turns are granted to the chief of staff only;
 // a turn of any other role fails with a recorded reason. Each role's sandbox
 // comes from its configuration, and a sandbox the platform cannot enforce
 // fails the turn with core's reason. Thread turns take the chief of staff's
@@ -49,6 +49,7 @@ var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName
 func Enforce(opts Options, e Enforcement) Options {
 	opts.Librarian = &Librarian{Engine: e.Engine, Hosts: e.Hosts}
 	opts.Architect = &Architect{Engine: e.Engine, Hosts: e.Hosts}
+	opts.Committee = &Committee{Engine: e.Engine, Hosts: e.Hosts}
 	clock := opts.Reconciliation.Now
 	if clock == nil {
 		clock = time.Now

@@ -67,7 +67,8 @@ func narrow(grant coreadapter.Capabilities, request *coreadapter.Capabilities) c
 }
 
 // roleTools names tools only one role may hold, whatever the service grant says.
-var roleTools = map[string]string{"set_status": "chief_of_staff", "answer": "chief_of_staff", "escalate": "chief_of_staff", "relay_ruling": "chief_of_staff", "route_amendment": "chief_of_staff", "propose_charter": "chief_of_staff"}
+var roleTools = map[string]string{"set_status": "chief_of_staff", "answer": "chief_of_staff", "escalate": "chief_of_staff", "relay_ruling": "chief_of_staff", "route_amendment": "chief_of_staff", "propose_charter": "chief_of_staff",
+	"object": "committee", "concede": "committee"}
 
 // deniedTools names tools one role may never hold, whatever the service grant says.
 var deniedTools = map[string]string{"ask": "chief_of_staff"}

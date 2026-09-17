@@ -30,6 +30,11 @@ var (
 	planCitation    = regexp.MustCompile(`^plan#(.+)$`)
 )
 
+// IsCharter reports whether citation has the form of a charter rule,
+// charter#<n>, and IsProse the form of a knowledge-base file, kb/<subsystem>.md.
+func IsCharter(citation string) bool { return charterCitation.MatchString(citation) }
+func IsProse(citation string) bool   { return proseCitation.MatchString(citation) }
+
 // Unresolved is why a citation cannot support an answer.
 type Unresolved struct{ Citation, Reason string }
 
