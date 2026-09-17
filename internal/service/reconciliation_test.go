@@ -268,7 +268,7 @@ func TestServiceReconcilesOperationsInStageOrder(t *testing.T) {
 	// The loop accepts its first tick only after finishing the startup pass.
 	select {
 	case ticks <- now:
-	case <-time.After(10 * time.Second):
+	case <-time.After(demoTimeout):
 		t.Fatal("the startup pass did not finish")
 	}
 	must(t, s.Close())
