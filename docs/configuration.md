@@ -129,10 +129,10 @@ If there is no profile named `default`, bind all seven roles explicitly. Role ke
 
 A `claude` sandbox requires Claude in every profile in the role's fallback chain.
 No arbitrary mounts, credentials, environment, tools or capability grants are
-accepted from these files. Sandbox settings describe requested execution; even
-`none` requires the service's full isolation contract. The current pinned core
-runner cannot enforce that contract and rejects execution until an enforcing
-boundary is supplied; see [the adapter boundary](core-adapter.md). Successful
+accepted from these files. Sandbox settings describe requested execution. Turns
+run only with `container`: core's host boundaries cannot enforce the service's
+isolation contract, so a turn with `none` or `claude` is refused before launch;
+see [container verification](isolation.md#container-verification). Successful
 configuration loading does not imply that execution is available.
 
 ## Project registration

@@ -36,21 +36,6 @@ type SessionExecutor interface {
 	Run(context.Context, agent.Request, ExecutionSettings) (*agent.Result, error)
 }
 
-// CoreExecutor exposes the pinned runner's capability gap without weakening the
-// complete-environment contract. A future enforcing boundary can implement
-// SessionExecutor without changing service-facing turn records.
-type CoreExecutor struct{ Runner *agent.Runner }
-
-func (e CoreExecutor) Check(context.Context, Isolation, ExecutionSettings) error {
-	return unsupported("environment", "pinned core runner inherits host environment; an enforcing execution boundary is required")
-}
-func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings ExecutionSettings) (*agent.Result, error) {
-	if err := e.Check(ctx, Isolation{}, settings); err != nil {
-		return nil, err
-	}
-	return e.Runner.Run(ctx, req)
-}
-
 // TurnRunner performs one attempt; it never selects work or advances workflow.
 type TurnRunner struct{ Executor SessionExecutor }
 

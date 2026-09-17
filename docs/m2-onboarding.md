@@ -3,7 +3,7 @@
 Onboarding takes a project from a local clone to a ready charter and a local
 knowledge base. `TestM2ProjectOnboarding` in `internal/cli/onboarding_test.go`
 runs every step through the CLI entry point and the API client against a real
-service on its Unix socket. The librarian is a scripted fake isolation engine
+service on its Unix socket. The librarian is a scripted fake execution engine
 and MCP transport. The test makes no provider or GitHub calls and pushes
 nothing. It runs in a temporary root with a local Git repository as the clone.
 
@@ -127,7 +127,9 @@ is unchanged.
 
 ## What is faked
 
-The test passes a scripted `service.Options.Librarian`: an isolation engine
-that runs no model and an in-memory MCP transport. `osmia serve` supplies no
+The test passes a scripted `service.Options.Librarian`: an execution engine
+that verifies grants with core's container boundary and runs no model, and an
+in-memory MCP transport. The root's configuration runs the librarian in a
+`container` with a fixture image. `osmia serve` supplies no
 librarian runner, so there every extraction fails with a recorded reason and
 `project extract` can retry it later. The project stays usable.

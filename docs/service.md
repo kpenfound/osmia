@@ -308,9 +308,9 @@ intended binding; it receives the service-owned repository handle, which callers
 must not close. The [M1 demonstration](m1-demonstration.md) uses this path with
 fake engines.
 
-`Options.Librarian` supplies the isolation engine and MCP host factory the
+`Options.Librarian` supplies the execution engine and MCP host factory the
 librarian's extraction turns run in. Without it every extraction fails with a
-recorded reason, so a service without an enforcing engine still registers
+recorded reason, so a service without an execution engine still registers
 projects and reports the failure in status.
 
 With `Options.Threads` set, the service also runs queued workstream turns on its

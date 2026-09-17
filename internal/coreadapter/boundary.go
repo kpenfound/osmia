@@ -3,6 +3,7 @@ package coreadapter
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"maps"
 	"net/url"
@@ -13,64 +14,44 @@ import (
 	"strings"
 
 	"github.com/kpenfound/busybees/core/agent"
+	"github.com/kpenfound/busybees/core/vcs"
 )
 
-// Mount is the complete host exposure for a session. Backend images and runtime
-// support must be provided by the engine without additional host mounts.
-type Mount struct {
-	Source, Target string
-	ReadOnly       bool
-}
-
-// BoundaryPolicy describes restrictions the engine must establish before launch.
-// Network is model-tool network access; provider and scoped MCP transport remain
-// engine-owned and must not expose a general fetch or proxy capability.
-type BoundaryPolicy struct {
-	Isolation                                       Isolation
-	Mode, Image                                     string
-	Mounts                                          []Mount
-	NoVCS, NoHostEnvironment, NoDeliveryCredentials bool
-	NoHostFiles, NoExtraTools, NoConfigDiscovery    bool
-	NoPrivilegeEscalation                           bool
-}
-
-// IsolationEngine prepares a stopped execution boundary. It is trusted service
-// code, not a model/tool callback. Inspect must report restrictions established
-// by the OS/backend, not echo requested flags. Prepare owns partial-error cleanup.
-// No production implementation is supplied by the pinned core runner.
-type IsolationEngine interface {
-	Prepare(context.Context, BoundaryPolicy) (IsolatedSession, error)
-}
-type IsolatedSession interface {
-	Inspect(context.Context) (BoundaryPolicy, error)
+// Engine starts sessions inside the boundary their grants describe.
+// *agent.Runner implements it: Verify returns the turn core would run for a
+// request, and Run verifies the same request again before starting anything.
+type Engine interface {
+	Verify(agent.Request) (*agent.Turn, error)
 	Run(context.Context, agent.Request) (*agent.Result, error)
-	Release(context.Context) error
 }
 
-// BoundaryExecutor binds one turn to a service-selected policy. The engine must
-// confine writes to the view, deny VCS executables (including absolute paths and
-// shell indirection), and enforce tool permissions independent of model prompts.
-// TODO: Remove this extra boundary adapter when busybees/core provides verified
-// execution with complete environments, confined mounts and immutable tool grants.
-type BoundaryExecutor struct {
+var _ Engine = (*agent.Runner)(nil)
+
+// CoreExecutor binds one turn to a service-selected isolation and runs it
+// through core with grants built from that isolation alone: the view as the
+// only mount besides the session's own directory, the service environment as
+// the complete allowlist, the scoped MCP servers as the only tools, and no
+// VCS. Only container sessions are accepted, because a host session reads the
+// whole filesystem.
+type CoreExecutor struct {
 	Required Isolation
-	Engine   IsolationEngine
+	Runner   Engine
 }
 
-func (e BoundaryExecutor) Check(ctx context.Context, iso Isolation, settings ExecutionSettings) error {
+func (e CoreExecutor) Check(ctx context.Context, iso Isolation, settings ExecutionSettings) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if !reflect.DeepEqual(iso, e.Required) {
 		return unsupported("isolation", "turn differs from service grant")
 	}
-	if e.Engine == nil {
-		return unsupported("isolation engine", "no enforcing host or container engine supplied")
+	if e.Runner == nil {
+		return unsupported("execution engine", "no core runner supplied")
 	}
-	if settings.Mode != "none" && settings.Mode != "container" {
-		return unsupported("isolation mode", "requires host or container")
+	if settings.Mode != agent.SandboxContainer {
+		return unsupported("isolation mode", "requires a container; a host session reads the whole filesystem")
 	}
-	if settings.Mode == "container" && settings.Image == "" {
+	if settings.Image == "" {
 		return unsupported("container", "image is required")
 	}
 	if len(settings.Mounts) != 0 || len(settings.Domains) != 0 {
@@ -149,18 +130,26 @@ func validateFileTree(dir string) error {
 	})
 }
 
-func (e BoundaryExecutor) Run(ctx context.Context, req agent.Request, settings ExecutionSettings) (result *agent.Result, err error) {
-	if err = e.Check(ctx, e.Required, settings); err != nil {
+func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings ExecutionSettings) (*agent.Result, error) {
+	if err := e.Check(ctx, e.Required, settings); err != nil {
 		return nil, err
 	}
 	iso := e.Required
-	// All ambient extension points in core's request are forbidden. This check
-	// also protects callers that invoke Run without the normal turn translator.
-	if req.Workspace == nil || req.Workspace.Directory() != iso.Workspace.Directory || req.Workspace.VCS() != nil || req.Profile.VCSAccess ||
-		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.ContainerEnv) != 0 || req.HostMCP != nil ||
-		len(req.Profile.Env) != 0 || len(req.Profile.Skills) != 0 || req.Profile.Shell != "" || req.Profile.ContainerUseEnvironment != "" ||
+	if req.SessionDir == "" {
+		return nil, unsupported("execution request", "session directory is required")
+	}
+	grants, err := coreGrants(iso, req.SessionDir, slices.Collect(maps.Keys(req.Profile.MCP)))
+	if err != nil {
+		return nil, err
+	}
+	// Core refuses whatever the grants do not cover. These are the request
+	// fields grants do not describe; they also protect callers that invoke
+	// Run without the normal turn translator.
+	if req.Workspace == nil || req.Workspace.Directory() != iso.Workspace.Directory || req.Workspace.VCS() != nil ||
+		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.Profile.Skills) != 0 || req.Profile.ContainerUseEnvironment != "" ||
 		len(req.Profile.SandboxDomains) != 0 || req.Profile.Sandbox != settings.Mode || req.Profile.SandboxImage != settings.Image ||
-		!maps.Equal(req.Env, iso.Environment) || !slices.Equal(req.Profile.AllowedTools, AllowedTools(slices.Collect(maps.Keys(req.Profile.MCP)), iso.Capabilities.Tools)) {
+		!maps.Equal(req.Env, iso.Environment) || !slices.Equal(req.Profile.AllowedTools, AllowedTools(slices.Collect(maps.Keys(req.Profile.MCP)), iso.Capabilities.Tools)) ||
+		(req.Grants != nil && !reflect.DeepEqual(*req.Grants, grants)) {
 		return nil, unsupported("execution request", "request widens the service boundary")
 	}
 	for _, endpoint := range req.Profile.MCP {
@@ -169,49 +158,120 @@ func (e BoundaryExecutor) Run(ctx context.Context, req agent.Request, settings E
 			return nil, unsupported("MCP", "only service-authenticated HTTP endpoints are permitted")
 		}
 	}
-	policy := BoundaryPolicy{Isolation: cloneIsolation(iso), Mode: settings.Mode, Image: settings.Image,
-		Mounts: []Mount{{Source: iso.Workspace.Directory, Target: iso.Workspace.Directory, ReadOnly: iso.Workspace.Access == ReadOnly}},
-		NoVCS:  true, NoHostEnvironment: true, NoDeliveryCredentials: true, NoHostFiles: true, NoExtraTools: true, NoConfigDiscovery: true, NoPrivilegeEscalation: true}
-	session, err := e.Engine.Prepare(ctx, clonePolicy(policy))
+	if err = os.MkdirAll(req.SessionDir, 0o700); err != nil {
+		return nil, err
+	}
+	if iso.Workspace.Access == ReadOnly {
+		// Core runs a session in a writable directory; a read-only view is
+		// mounted beside an empty scratch directory the session starts in.
+		scratch := grants.Mounts[len(grants.Mounts)-1].Path
+		if err = os.Mkdir(scratch, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+			return nil, err
+		}
+		req.Workspace = vcs.Directory(scratch)
+	}
+	req.Grants = &grants
+	turn, err := e.Runner.Verify(req)
+	if errors.Is(err, agent.ErrNotGranted) || errors.Is(err, agent.ErrUnsupported) || errors.Is(err, agent.ErrNoGrants) {
+		return nil, fmt.Errorf("%w: grants: %w", ErrUnsupported, err)
+	}
 	if err != nil {
 		return nil, err
 	}
-	if session == nil {
-		return nil, unsupported("isolation engine", "no stopped session returned")
-	}
-	defer func() { err = errors.Join(err, session.Release(context.WithoutCancel(ctx))) }()
-	actual, err := session.Inspect(ctx)
-	if err != nil {
+	if err = verifiedTurn(turn, iso, grants); err != nil {
 		return nil, err
-	}
-	if !reflect.DeepEqual(policy, actual) {
-		return nil, unsupported("isolation verification", "established boundary differs from service policy")
 	}
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
-	return session.Run(ctx, req)
+	return e.Runner.Run(ctx, req)
 }
 
-// CheckResume asks the enforcing engine whether the saved session is available
+// scratchDirectory is the session subdirectory a read-only turn starts in.
+const scratchDirectory = "work"
+
+// coreGrants are the complete capabilities of a turn in iso: the view with its
+// access, the session directory read-only, a writable scratch directory inside
+// it when the view is read-only, the service environment and one MCP server
+// grant per scoped endpoint, without built-in tools or VCS.
+func coreGrants(iso Isolation, sessionDir string, servers []string) (agent.Grants, error) {
+	access := agent.ReadOnly
+	if iso.Workspace.Access == ReadWrite {
+		access = agent.ReadWrite
+	}
+	session, err := filepath.Abs(sessionDir)
+	if err != nil {
+		return agent.Grants{}, err
+	}
+	grants := agent.Grants{
+		Env:    slices.Sorted(maps.Keys(iso.Environment)),
+		Tools:  []string{},
+		Mounts: []agent.Mount{{Path: iso.Workspace.Directory, Access: access}, {Path: session, Access: agent.ReadOnly}},
+	}
+	if access == agent.ReadOnly {
+		grants.Mounts = append(grants.Mounts, agent.Mount{Path: filepath.Join(session, scratchDirectory), Access: agent.ReadWrite})
+	}
+	for _, server := range slices.Sorted(slices.Values(servers)) {
+		grants.Tools = append(grants.Tools, "mcp__"+server)
+	}
+	return grants, nil
+}
+
+// verifiedTurn refuses a turn whose effective boundary differs from the one
+// the grants describe: VCS or a built-in tool granted, a VCS executable left
+// on PATH, a variable beyond the service environment and the container's
+// HOME, or a bind outside the granted mounts.
+func verifiedTurn(turn *agent.Turn, iso Isolation, grants agent.Grants) error {
+	if turn == nil {
+		return unsupported("grant verification", "engine verified no turn")
+	}
+	if turn.VCS || turn.Tools == nil || len(turn.Tools) != 0 || len(turn.WriteDirs) != 0 {
+		return unsupported("grant verification", "turn grants VCS or additional tools")
+	}
+	for _, name := range agent.VCSExecutables {
+		if !slices.Contains(turn.DeniedExecutables, name) {
+			return unsupported("grant verification", "VCS executable "+name+" is not denied")
+		}
+	}
+	env := map[string]string{}
+	for _, kv := range turn.Env {
+		key, value, _ := strings.Cut(kv, "=")
+		env[key] = value
+	}
+	delete(env, "HOME")
+	if !maps.Equal(env, iso.Environment) {
+		return unsupported("grant verification", "turn environment differs from the service environment")
+	}
+	aliases := map[string]agent.Mount{}
+	for _, m := range grants.Mounts {
+		real, err := filepath.EvalSymlinks(m.Path)
+		if err != nil {
+			return err
+		}
+		aliases[m.Path] = agent.Mount{Path: real, Access: m.Access}
+		aliases[real] = agent.Mount{Path: real, Access: m.Access}
+	}
+	view := false
+	for _, bind := range turn.Binds {
+		granted, ok := aliases[bind.Destination]
+		if !ok || granted.Path != bind.Source || granted.Access != bind.Access {
+			return unsupported("grant verification", "container bind "+bind.Destination+" is not granted")
+		}
+		view = view || bind.Destination == iso.Workspace.Directory
+	}
+	if !view {
+		return unsupported("grant verification", "container does not bind the view")
+	}
+	return nil
+}
+
+// CheckResume asks the execution engine whether the saved session is available
 // and compatible. It reads no transcript and launches nothing. An engine without
 // this capability selects owned-log replay.
-func (e BoundaryExecutor) CheckResume(ctx context.Context, previous, next Profile, session BackendSession) error {
-	checker, ok := e.Engine.(ResumeChecker)
+func (e CoreExecutor) CheckResume(ctx context.Context, previous, next Profile, session BackendSession) error {
+	checker, ok := e.Runner.(ResumeChecker)
 	if !ok {
-		return unsupported("resume", "isolation engine cannot verify saved session compatibility and availability")
+		return unsupported("resume", "execution engine cannot verify saved session compatibility and availability")
 	}
 	return checker.CheckResume(ctx, previous, next, session)
-}
-
-func cloneIsolation(iso Isolation) Isolation {
-	iso.Environment = maps.Clone(iso.Environment)
-	iso.Credentials = slices.Clone(iso.Credentials)
-	iso.Capabilities.Tools = slices.Clone(iso.Capabilities.Tools)
-	return iso
-}
-func clonePolicy(p BoundaryPolicy) BoundaryPolicy {
-	p.Isolation = cloneIsolation(p.Isolation)
-	p.Mounts = slices.Clone(p.Mounts)
-	return p
 }

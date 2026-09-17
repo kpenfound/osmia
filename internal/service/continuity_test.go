@@ -112,11 +112,12 @@ func (d *demoTransport) Start(ctx context.Context, server *mcp.Server) (coreadap
 	return coreadapter.Endpoint{URL: "http://osmia-mcp.invalid/turn", BearerTokenEnvironment: "OSMIA_MCP_TOKEN"}, release, nil
 }
 
-// demoTurn is what the fake backend does inside the verified boundary.
-type demoTurn func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) (*agent.Result, error)
+// demoTurn is what the fake backend does inside the boundary core verified.
+type demoTurn func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error)
 
-// demoEngine is the fake container engine. It reports the requested policy as
-// established, which is fixture evidence rather than OS enforcement.
+// demoEngine is the fake container engine. It verifies requests with core's
+// own container boundary, which is evidence of the grants, not of OS
+// enforcement.
 type demoEngine struct {
 	mu       sync.Mutex
 	sessions *demoSessions
@@ -132,20 +133,14 @@ func (e *demoEngine) CheckResume(_ context.Context, previous, next coreadapter.P
 	e.checks++
 	return e.resume(previous, next, session)
 }
-func (e *demoEngine) Prepare(ctx context.Context, policy coreadapter.BoundaryPolicy) (coreadapter.IsolatedSession, error) {
-	return &demoSession{engine: e, policy: policy}, ctx.Err()
+func (e *demoEngine) Verify(req agent.Request) (*agent.Turn, error) {
+	return (&agent.Runner{}).Verify(req)
 }
-
-type demoSession struct {
-	engine *demoEngine
-	policy coreadapter.BoundaryPolicy
-}
-
-func (s *demoSession) Inspect(context.Context) (coreadapter.BoundaryPolicy, error) {
-	return s.policy, nil
-}
-func (s *demoSession) Run(ctx context.Context, req agent.Request) (*agent.Result, error) {
-	e := s.engine
+func (e *demoEngine) Run(ctx context.Context, req agent.Request) (*agent.Result, error) {
+	verified, err := e.Verify(req)
+	if err != nil {
+		return nil, err
+	}
 	e.mu.Lock()
 	e.runs = append(e.runs, req.Name)
 	turn := e.turns[req.Name]
@@ -156,9 +151,32 @@ func (s *demoSession) Run(ctx context.Context, req agent.Request) (*agent.Result
 	if turn == nil || tools == nil {
 		return nil, fmt.Errorf("unexpected turn %q", req.Name)
 	}
-	return turn(ctx, req, s.policy, tools)
+	return turn(ctx, req, verified, tools)
 }
-func (s *demoSession) Release(context.Context) error { return nil }
+
+// checkGrants reports a request whose grants or verified turn reach beyond a
+// private writable view outside clone: another mount, VCS, a built-in tool, a
+// VCS executable on PATH, or a variable beyond the request's own.
+func checkGrants(req agent.Request, verified *agent.Turn, clone string, fail func(string, ...any)) {
+	view := req.Workspace.Directory()
+	g := req.Grants
+	if g == nil || len(g.Mounts) != 2 || g.Mounts[0] != (agent.Mount{Path: view, Access: agent.ReadWrite}) || g.Mounts[1] != (agent.Mount{Path: req.SessionDir, Access: agent.ReadOnly}) || view == clone || strings.HasPrefix(view, clone+string(filepath.Separator)) {
+		fail("grants %+v expose more than the private view", g)
+		return
+	}
+	if g.VCS || verified.VCS || !slices.Equal(verified.DeniedExecutables, agent.VCSExecutables) {
+		fail("VCS is not denied: %+v", verified)
+	}
+	if !slices.Equal(g.Tools, []string{"mcp__osmia_0"}) || verified.Tools == nil || len(verified.Tools) != 0 {
+		fail("tools %v %v exceed the scoped MCP server", g.Tools, verified.Tools)
+	}
+	for _, kv := range verified.Env {
+		key, value, _ := strings.Cut(kv, "=")
+		if key != "HOME" && req.Env[key] != value {
+			fail("verified environment exposes %s", key)
+		}
+	}
+}
 
 func callTool(ctx context.Context, tools *mcp.ClientSession, name string, args map[string]any) (string, error) {
 	result, err := tools.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
@@ -179,7 +197,7 @@ func callTool(ctx context.Context, tools *mcp.ClientSession, name string, args m
 
 // checkBoundary makes the negative assertions from inside a running turn. It
 // returns an error because it runs on the service's controller goroutine.
-func checkBoundary(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession, clone string) error {
+func checkBoundary(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession, clone string) error {
 	var problems []error
 	fail := func(format string, args ...any) { problems = append(problems, fmt.Errorf(format, args...)) }
 	listed, err := tools.ListTools(ctx, nil)
@@ -213,19 +231,9 @@ func checkBoundary(ctx context.Context, req agent.Request, policy coreadapter.Bo
 			fail("runtime read %s", path)
 		}
 	}
-	view := policy.Isolation.Workspace.Directory
-	if len(policy.Mounts) != 1 || policy.Mounts[0].Source != view || view == clone || strings.HasPrefix(view, clone+string(filepath.Separator)) {
-		fail("mounts %+v expose more than the private view", policy.Mounts)
-	}
-	if _, err := os.Lstat(filepath.Join(view, ".git")); !errors.Is(err, fs.ErrNotExist) {
+	checkGrants(req, verified, clone, fail)
+	if _, err := os.Lstat(filepath.Join(req.Workspace.Directory(), ".git")); !errors.Is(err, fs.ErrNotExist) {
 		fail("view contains VCS metadata")
-	}
-	if !policy.NoVCS || !policy.NoHostEnvironment || !policy.NoDeliveryCredentials || !policy.NoHostFiles || !policy.NoExtraTools || !policy.NoConfigDiscovery || !policy.NoPrivilegeEscalation {
-		fail("mandatory restrictions missing: %+v", policy)
-	}
-	caps := policy.Isolation.Capabilities
-	if caps.Execute || caps.Network || !caps.WriteFiles {
-		fail("capabilities %+v exceed the mason test grant", caps)
 	}
 	if req.Profile.VCSAccess || req.Workspace == nil || req.Workspace.VCS() != nil || len(req.VCSEnv) != 0 || len(req.ContainerEnv) != 0 {
 		fail("request carries VCS access")
@@ -386,8 +394,8 @@ func demonstrate(t *testing.T, mode string) {
 	// First service lifetime: the first turn runs; a second message arrives
 	// while it is active; the service stops as the backend returns.
 	entered := make(chan struct{})
-	engine.turns["first"] = func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) (*agent.Result, error) {
-		err := checkBoundary(ctx, req, policy, tools, clone)
+	engine.turns["first"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		err := checkBoundary(ctx, req, verified, tools, clone)
 		if req.ResumeID != "" || !strings.HasSuffix(req.Prompt, first.Prompt) {
 			err = errors.Join(err, fmt.Errorf("first turn context: %q %q", req.ResumeID, req.Prompt))
 		}
@@ -450,9 +458,9 @@ func demonstrate(t *testing.T, mode string) {
 
 	// Second service lifetime: the controller finds both intents by scanning.
 	finished := make(chan struct{})
-	engine.turns["second"] = func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.turns["second"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		defer close(finished)
-		err := checkBoundary(ctx, req, policy, tools, clone)
+		err := checkBoundary(ctx, req, verified, tools, clone)
 		switch mode {
 		case "resume":
 			if req.ResumeID != "session-first" || req.Prompt != second.Prompt {
