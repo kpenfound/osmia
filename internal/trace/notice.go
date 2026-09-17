@@ -28,7 +28,8 @@ func (r *Repository) SetFeatureState(ctx context.Context, h Header, to, reason s
 }
 
 // SetFeatureStateUnless is SetFeatureState, except that it refuses with
-// ErrFeatureState, writing nothing, when the current state is one of refused.
+// ErrFeatureState, writing nothing, when the current state is one of refused,
+// even for a retry of a transition that already committed.
 // The check and the write hold the same lock.
 func (r *Repository) SetFeatureStateUnless(ctx context.Context, h Header, to, reason string, refused ...string) (WorkflowState, error) {
 	r.mu.Lock()
@@ -40,17 +41,17 @@ func (r *Repository) SetFeatureStateUnless(ctx context.Context, h Header, to, re
 	if err != nil {
 		return WorkflowState{}, err
 	}
-	if old, ok := v.transactions[h.ID]; ok {
-		if old.Transition.Subject != FeatureSubject || !equalJSON(old.Transition.Header, h) || old.Transition.To != to || old.Transition.Reason != reason {
-			return WorkflowState{}, ErrConflict
-		}
-		return WorkflowState{Version: old.ExpectedVersion + 1, Value: to}, nil
-	}
 	state := v.states[FeatureSubject]
 	for _, value := range refused {
 		if state.Value == value {
 			return state, ErrFeatureState
 		}
+	}
+	if old, ok := v.transactions[h.ID]; ok {
+		if old.Transition.Subject != FeatureSubject || !equalJSON(old.Transition.Header, h) || old.Transition.To != to || old.Transition.Reason != reason {
+			return WorkflowState{}, ErrConflict
+		}
+		return WorkflowState{Version: old.ExpectedVersion + 1, Value: to}, nil
 	}
 	body := fmt.Sprintf("Workstream state changed to %s: %s", to, reason)
 	if state.Value != "" {
