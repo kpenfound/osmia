@@ -134,6 +134,9 @@ type HostRequest struct {
 	Scope        Scope
 	Capabilities Capabilities
 	Tools        []Tool
+	// Execution is the turn's execution settings, which decide where the
+	// turn reaches its server from.
+	Execution ExecutionSettings
 }
 
 // Endpoint is where a turn reaches its MCP server. Token is the bearer

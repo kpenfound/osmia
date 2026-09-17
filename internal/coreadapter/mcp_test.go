@@ -3,11 +3,16 @@ package coreadapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/busybees/core/mcphost"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -206,3 +211,101 @@ type closeTracker struct {
 }
 
 func (c closeTracker) Close() error { *c.closed = true; return c.Lease.Close() }
+
+// A container turn is served by the container transport, every other turn by
+// the default one; without a container transport the default serves both.
+func TestMCPHostServesContainerTurnsWithContainerTransport(t *testing.T) {
+	ctx := context.Background()
+	request := func(mode string) HostRequest {
+		return HostRequest{Scope: Scope{Role: "architect"}, Execution: ExecutionSettings{Mode: mode, Image: "image"}}
+	}
+	host, container := &memoryTransport{}, &memoryTransport{}
+	for _, mode := range []string{agent.SandboxNone, agent.SandboxClaude, agent.SandboxContainer} {
+		hosted, err := (&MCPHost{Transport: host, Container: container}).Host(ctx, request(mode))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := hosted.Lease.Release(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if host.starts != 2 || container.starts != 1 {
+		t.Fatalf("host starts %d, container starts %d", host.starts, container.starts)
+	}
+	hosted, err := (&MCPHost{Transport: host}).Host(ctx, request(agent.SandboxContainer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hosted.Lease.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if host.starts != 3 {
+		t.Fatalf("host starts %d", host.starts)
+	}
+	if _, err := (&MCPHost{Container: container}).Host(ctx, request(agent.SandboxNone)); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("host turn without a default transport: %v", err)
+	}
+}
+
+// On macOS a container turn's server listens on the loopback and is named by
+// the container host alias; the engine is not asked.
+func TestContainerTransportOnMacOS(t *testing.T) {
+	defer func(os string) { hostOS = os }(hostOS)
+	hostOS = "darwin"
+	ctx := context.Background()
+	endpoint, lease, err := ContainerTransport(filepath.Join(t.TempDir(), "missing-engine")).Start(ctx, mcp.NewServer(&mcp.Implementation{Name: "test", Version: "1"}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release(ctx)
+	parsed, err := url.Parse(endpoint.URL)
+	if err != nil || parsed.Hostname() != ContainerHost || endpoint.Token == "" {
+		t.Fatalf("endpoint: %+v", endpoint)
+	}
+	conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", parsed.Port()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+}
+
+// On Linux a container turn's server listens on the gateway the engine
+// reports; a failing engine or a report that is no address fails the start.
+func TestContainerTransportOnLinux(t *testing.T) {
+	defer func(os string) { hostOS = os }(hostOS)
+	hostOS = "linux"
+	ctx := context.Background()
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	engine := func(body string) string {
+		p := filepath.Join(t.TempDir(), "docker")
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	// The loopback stands in for the bridge gateway, which a test cannot bind.
+	args := filepath.Join(t.TempDir(), "args")
+	endpoint, lease, err := ContainerTransport(engine(`printf '%s\n' "$@" > `+args+"\necho ' 127.0.0.1 '\n")).Start(ctx, server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release(ctx)
+	parsed, err := url.Parse(endpoint.URL)
+	if err != nil || parsed.Hostname() != ContainerHost {
+		t.Fatalf("endpoint: %+v", endpoint)
+	}
+	conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", parsed.Port()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+	got, err := os.ReadFile(args)
+	if err != nil || string(got) != "network\ninspect\nbridge\n--format\n{{(index .IPAM.Config 0).Gateway}}\n" {
+		t.Fatalf("engine arguments %q %v", got, err)
+	}
+	for body, want := range map[string]string{"exit 1\n": "network inspect bridge", "echo bridge\n": `reported "bridge", not an address`} {
+		if _, _, err := ContainerTransport(engine(body)).Start(ctx, server); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("engine %q: %v", body, err)
+		}
+	}
+}
