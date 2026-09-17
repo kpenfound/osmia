@@ -258,15 +258,20 @@ func (s *Service) extractProject(ctx context.Context, req ProjectExtractRequest)
 }
 
 // runnerAdapter routes runner-boundary operations: extraction passes to the
-// service's extractor, everything else to the bound thread reconciler.
+// service's extractor, architect drafts to its drafter, everything else to
+// the bound thread reconciler.
 type runnerAdapter struct {
 	turns   coreadapter.Reconciler
 	extract *extractor
+	draft   *drafter
 }
 
 func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	if op.Action == ExtractAction {
 		return a.extract.Inspect(ctx, op)
+	}
+	if op.Action == DraftAction {
+		return a.draft.Inspect(ctx, op)
 	}
 	if a.turns == nil {
 		return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "No reconciliation adapter configured"}, nil
@@ -276,6 +281,9 @@ func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (c
 func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	if op.Action == ExtractAction {
 		return a.extract.Apply(ctx, op)
+	}
+	if op.Action == DraftAction {
+		return a.draft.Apply(ctx, op)
 	}
 	if a.turns == nil {
 		return coreadapter.OperationResult{}, errors.New("no runner adapter is configured")
@@ -470,13 +478,13 @@ func (e *extractor) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	}
 }
 
-// librarianExecution resolves the librarian's effective profile: the runtime
-// override when one is set, otherwise the configured role binding.
-func (s *Service) librarianExecution(cfg *config.Config) (coreadapter.Profile, coreadapter.ExecutionSettings, error) {
+// roleExecution resolves a role's effective profile: the runtime override
+// when one is set, otherwise the configured role binding.
+func (s *Service) roleExecution(cfg *config.Config, role string) (coreadapter.Profile, coreadapter.ExecutionSettings, error) {
 	state, _ := s.store.Effective()
-	name := state.Profiles[librarianRole]
+	name := state.Profiles[role]
 	if name == "" {
-		name = cfg.Roles[librarianRole].Profile
+		name = cfg.Roles[role].Profile
 	}
 	p, ok := cfg.Profiles[name]
 	if !ok {
@@ -486,14 +494,14 @@ func (s *Service) librarianExecution(cfg *config.Config) (coreadapter.Profile, c
 	if err != nil {
 		return coreadapter.Profile{}, coreadapter.ExecutionSettings{}, err
 	}
-	role := cfg.Roles[librarianRole]
-	return coreadapter.Profile{Name: name, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns}, coreadapter.ExecutionSettings{Mode: role.Sandbox, Image: role.Image}, nil
+	r := cfg.Roles[role]
+	return coreadapter.Profile{Name: name, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image}, nil
 }
 
 // enqueue accepts the librarian turn of one extraction attempt, fixing its
 // profile and prompts.
 func (e *extractor) enqueue(ctx context.Context, cfg *config.Config, n, attempt int, operation string) error {
-	profile, _, err := e.s.librarianExecution(cfg)
+	profile, _, err := e.s.roleExecution(cfg, librarianRole)
 	if err != nil {
 		return err
 	}
@@ -571,7 +579,7 @@ func (e *extractor) selectView(ctx context.Context, scope coreadapter.Scope) (is
 	if scope.Role != librarianRole || scope.Project != string(e.repository.Project()) || !cfg.HasProject() || cfg.Project.ID != e.repository.Project() {
 		return isolation.Selection{}, errors.New("view selection denied")
 	}
-	_, settings, err := e.s.librarianExecution(cfg)
+	_, settings, err := e.s.roleExecution(cfg, librarianRole)
 	if err != nil {
 		return isolation.Selection{}, err
 	}

@@ -328,3 +328,101 @@ func TestRecordDocumentsRefusesUnpublishablePaths(t *testing.T) {
 	}
 	reopened.Close()
 }
+
+func streamDocument(id, path, content string, revision int) Document {
+	d := projectDocument(id, path, content, revision)
+	d.Workstream = streamID
+	return d
+}
+
+func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	dir, err := root.ProjectTrace(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handed := streamDocument("handed", "handed/design.md", "# Design\n", 1)
+	handed.Source = "stdin"
+	if err := r.Append(ctx, handed); err != nil {
+		t.Fatal(err)
+	}
+	before := gitOutput(t, r, "rev-list", "--count", "HEAD")
+	commits := func() int {
+		n, err := strconv.Atoi(gitOutput(t, r, "rev-list", "--count", "HEAD"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	created := commits()
+	first := []Document{streamDocument("spec", "spec.md", "# Spec\n", 1), streamDocument("plan", "plan.json", "{\"version\":1,\"units\":[]}\n", 1)}
+	if err := r.RecordDocuments(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if got := commits(); got != created+1 {
+		t.Fatalf("commits after one record: %d, %d before it", got, created)
+	}
+	streamDir := filepath.Join(dir, "workstreams", string(streamID))
+	for name, want := range map[string]string{"spec.md": "# Spec\n", "plan.json": "{\"version\":1,\"units\":[]}\n"} {
+		data, err := os.ReadFile(filepath.Join(streamDir, name))
+		if err != nil || string(data) != want {
+			t.Fatalf("%s on disk: %q %v", name, data, err)
+		}
+	}
+	docs, err := Read[Document](r, streamID)
+	if err != nil || len(docs) != 3 || docs[1].ID != "spec" || docs[2].ID != "plan" {
+		t.Fatalf("revisions: %+v %v", docs, err)
+	}
+	if project, err := Read[Document](r, ""); err != nil || len(project) != 1 {
+		t.Fatalf("project documents changed: %+v %v", project, err)
+	}
+	// Every revision in the batch is checked before anything is written: mixed
+	// scopes, a handed revision, a project path in a workstream, an unknown
+	// workstream and a repeated revision are all refused whole.
+	other := streamDocument("spec", "spec.md", "x\n", 2)
+	other.Workstream = legacyStream
+	handed2 := streamDocument("handed", "handed/design.md", "changed\n", 2)
+	handed2.Source = "stdin"
+	invalid := [][]Document{
+		{streamDocument("spec", "spec.md", "x\n", 2), projectDocument("subsystem-trace", "kb/trace.md", "x\n", 1)},
+		{streamDocument("spec", "spec.md", "x\n", 2), handed2},
+		{streamDocument("spec", "spec.md", "x\n", 2), streamDocument("subsystem-trace", "kb/trace.md", "x\n", 1)},
+		{other},
+		{streamDocument("spec", "spec.md", "x\n", 1)},
+		{streamDocument("spec", "spec.md", "x\n", 2), streamDocument("spec", "spec.md", "y\n", 3)},
+	}
+	after := gitOutput(t, r, "rev-list", "--count", "HEAD")
+	for i, docs := range invalid {
+		if err := r.RecordDocuments(ctx, docs); err == nil {
+			t.Fatalf("batch %d accepted", i)
+		}
+		if got := gitOutput(t, r, "rev-list", "--count", "HEAD"); got != after {
+			t.Fatalf("batch %d committed: %s (was %s before the first record)", i, got, before)
+		}
+		if _, err := r.dir.Stat(publicationFile); !os.IsNotExist(err) {
+			t.Fatalf("batch %d: journal left behind: %v", i, err)
+		}
+	}
+	second := []Document{streamDocument("spec", "spec.md", "# Spec 2\n", 2), streamDocument("plan", "plan.json", "{\"version\":1,\"units\":[]}\n", 2)}
+	if err := r.RecordDocuments(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(streamDir, "spec.md")); err != nil || string(data) != "# Spec 2\n" {
+		t.Fatalf("spec.md after revision 2: %q %v", data, err)
+	}
+	if committed := gitOutput(t, r, "show", "HEAD~1:workstreams/"+string(streamID)+"/spec.md"); committed != "# Spec" {
+		t.Fatalf("history lost revision 1: %q", committed)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(root, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if docs, err := Read[Document](reopened, streamID); err != nil || len(docs) != 5 {
+		t.Fatalf("reopen: %d %v", len(docs), err)
+	}
+}

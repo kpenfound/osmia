@@ -77,3 +77,35 @@ func TestNoticeIdentity(t *testing.T) {
 		t.Fatalf("notice %+v", e)
 	}
 }
+
+func TestMoveFeatureStateRequiresTheExpectedState(t *testing.T) {
+	r, _, _ := create(t)
+	ctx := context.Background()
+	if _, err := r.MoveFeatureState(ctx, header("transition", "sketched"), "handed", "sketched", "Draft accepted"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("move from an absent state: %v", err)
+	}
+	if _, err := r.SetFeatureState(ctx, header("transition", "handed"), "handed", "Owner handed in a design"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.MoveFeatureState(ctx, header("transition", "sketched"), "planning", "sketched", "Draft accepted"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("move from another state: %v", err)
+	}
+	state, err := r.MoveFeatureState(ctx, header("transition", "sketched"), "handed", "sketched", "Draft accepted")
+	if err != nil || state != (WorkflowState{Version: 2, Value: "sketched"}) {
+		t.Fatalf("state %v: %v", state, err)
+	}
+	// The same transition again returns the committed state whatever the
+	// expected state says, so a retry after a commit is not refused.
+	if again, err := r.MoveFeatureState(ctx, header("transition", "sketched"), "handed", "sketched", "Draft accepted"); err != nil || again != state {
+		t.Fatalf("retry %v: %v", again, err)
+	}
+	if _, err := r.MoveFeatureState(ctx, header("transition", "sketched"), "handed", "sketched", "Another reason"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changed retry: %v", err)
+	}
+	if got, err := r.Workflow(streamID, FeatureSubject); err != nil || got != state {
+		t.Fatalf("feature state %v: %v", got, err)
+	}
+	if entries := ready(t, r, at); len(entries) != 2 || !strings.Contains(entries[len(entries)-1].Event.Body+entries[0].Event.Body, "changed from handed to sketched: Draft accepted") {
+		t.Fatalf("entries %+v", entries)
+	}
+}

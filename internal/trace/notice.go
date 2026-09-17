@@ -20,6 +20,17 @@ func Notice(transition, key, body string) Event {
 // header identifies the transition; a retry with the same header, value and
 // reason returns the state it committed.
 func (r *Repository) SetFeatureState(ctx context.Context, h Header, to, reason string) (WorkflowState, error) {
+	return r.setFeatureState(ctx, h, nil, to, reason)
+}
+
+// MoveFeatureState is SetFeatureState from an expected current state: it
+// refuses with ErrConflict when the workstream is in another state, unless
+// the same transition was already recorded.
+func (r *Repository) MoveFeatureState(ctx context.Context, h Header, from, to, reason string) (WorkflowState, error) {
+	return r.setFeatureState(ctx, h, &from, to, reason)
+}
+
+func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string, to, reason string) (WorkflowState, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -36,6 +47,9 @@ func (r *Repository) SetFeatureState(ctx context.Context, h Header, to, reason s
 		return WorkflowState{Version: old.ExpectedVersion + 1, Value: to}, nil
 	}
 	state := v.states[FeatureSubject]
+	if from != nil && state.Value != *from {
+		return WorkflowState{}, fmt.Errorf("%w: workstream is %q, not %q", ErrConflict, state.Value, *from)
+	}
 	body := fmt.Sprintf("Workstream state changed to %s: %s", to, reason)
 	if state.Value != "" {
 		body = fmt.Sprintf("Workstream state changed from %s to %s: %s", state.Value, to, reason)

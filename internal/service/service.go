@@ -48,6 +48,9 @@ type Options struct {
 	// knowledge-base extraction turns. Without it every extraction fails with
 	// a recorded reason and the project stays usable.
 	Librarian *Librarian
+	// Architect supplies the execution boundary of the architect's drafting
+	// turns. Without it every draft fails with a recorded reason.
+	Architect *Architect
 	// Issues fetches issue URLs handed in. It defaults to the GitHub REST API
 	// with the service's GITHUB_TOKEN environment variable, which no session
 	// receives.
@@ -307,14 +310,15 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 }
 
 // admit is the scheduler's gate. It declines every turn of the librarian's
-// workstream, which the service's extractor runs itself in the librarian's
-// staged view, and holds the project's other queued turns that a runtime
-// pause in force covers. The store is read on every pass, so a cleared pause
-// lets held turns run on the loop's next periodic pass.
+// workstream and of every architect thread, which the service's own
+// reconcilers run in their staged views, and holds the project's other queued
+// turns that a runtime pause in force covers. The store is read on every
+// pass, so a cleared pause lets held turns run on the loop's next periodic
+// pass.
 func (s *Service) admit(project config.ProjectID) func(context.Context, scheduler.Candidate) (bool, error) {
 	librarian := librarianWorkstream(project)
 	return func(_ context.Context, c scheduler.Candidate) (bool, error) {
-		if c.Workstream == librarian {
+		if c.Workstream == librarian || c.Thread.Identity.Role == architectRole {
 			return false, nil
 		}
 		st, _ := s.store.Effective()
@@ -396,9 +400,10 @@ func (s *Service) stop(active *activeProject) error {
 // openReconciliation leaves trace creation to project registration; an existing
 // trace must open cleanly before the service can report readiness. The runner
 // boundary is served by the bound thread reconciler for turns and by the
-// service's extractor for knowledge-base extraction; the scheduler's gate holds
-// turns that a runtime pause covers, and outbox events are delivered to each
-// workstream's chief of staff before the scheduler runs.
+// service's own reconcilers for knowledge-base extraction and architect
+// drafts; the architect controller runs at the start of every pass, then
+// outbox events are delivered to each workstream's chief of staff and the
+// scheduler runs, whose gate holds turns that a runtime pause covers.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, error) {
 	options, threads := s.options.Reconciliation, s.options.Threads
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
@@ -424,7 +429,12 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if adapters == nil {
 		adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{}
 	}
-	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: &extractor{s: s, repository: repository}}
+	draft := &drafter{s: s, repository: repository}
+	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: &extractor{s: s, repository: repository}, draft: draft}
+	hooks := []func(context.Context) error{draft.Pass}
+	if threads == nil && options.Schedule != nil {
+		hooks = append(hooks, options.Schedule)
+	}
 	if threads != nil {
 		bound, err := threads(repository)
 		if err != nil {
@@ -444,12 +454,15 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 			repository.Close()
 			return nil, nil, err
 		}
-		options.Schedule = func(ctx context.Context) error {
-			if err := deliver.Pass(ctx); err != nil {
+		hooks = append(hooks, deliver.Pass, dispatch.Pass)
+	}
+	options.Schedule = func(ctx context.Context) error {
+		for _, hook := range hooks {
+			if err := hook(ctx); err != nil {
 				return err
 			}
-			return dispatch.Pass(ctx)
 		}
+		return nil
 	}
 	adapters[coreadapter.RunnerBoundary] = runner
 	options.Adapters = adapters
