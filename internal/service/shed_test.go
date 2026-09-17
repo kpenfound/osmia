@@ -119,6 +119,13 @@ func (f *shedFixture) roundOperations(t *testing.T, stream config.WorkstreamID) 
 	return slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != RoundAction })
 }
 
+// acknowledgedRoundOperations returns the round operations once every one of
+// them is acknowledged, for assertions reached through an awaited state.
+func (f *shedFixture) acknowledgedRoundOperations(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
+	t.Helper()
+	return awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.roundOperations(t, stream) })
+}
+
 // tool calls object or concede and returns whether it was recorded, and the
 // objection ID or the reason.
 func shedTool(ctx context.Context, tools *mcp.ClientSession, name string, args map[string]any) (bool, string, error) {
@@ -366,7 +373,7 @@ func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T
 	}
 	// One file per member records the revision and what the member
 	// contributed, authored by the member, in one commit.
-	ops := f.roundOperations(t, stream)
+	ops := f.acknowledgedRoundOperations(t, stream)
 	if len(ops) != 1 || !ops[0].Acknowledged || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" ||
 		ops[0].Result.Evidence != "round 1 against spec.md revision 1 and plan.json revision 1: 3 members heard, 3 objections, 1 concessions, 0 failed turns; 2 objections stand" {
 		t.Fatalf("operations: %+v", ops)
@@ -608,7 +615,7 @@ func TestCommitteeRoundRecordsAFailedMember(t *testing.T) {
 	if len(records) != 2 || !strings.Contains(records[0].Failure, "the agent crashed") || len(records[0].Objections) != 1 || records[0].Objections[0].Kind != shed.Proof || !records[1].Silent() {
 		t.Fatalf("records: %+v", records)
 	}
-	ops := f.roundOperations(t, stream)
+	ops := f.acknowledgedRoundOperations(t, stream)
 	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" || !strings.Contains(ops[0].Result.Evidence, "2 members heard, 1 objections, 0 concessions, 1 failed turns; 1 objections stand") {
 		t.Fatalf("operations: %+v", ops)
 	}
@@ -719,7 +726,7 @@ func TestAbandonFailsARunningRound(t *testing.T) {
 	if records, err := shed.Records(f.repository(), stream); err != nil || len(records) != 0 {
 		t.Fatalf("records of an abandoned round: %+v %v", records, err)
 	}
-	ops := f.roundOperations(t, stream)
+	ops := f.acknowledgedRoundOperations(t, stream)
 	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" || !strings.Contains(ops[0].Result.Evidence, "the workstream was abandoned") {
 		t.Fatalf("operations: %+v", ops)
 	}
@@ -832,7 +839,7 @@ func TestRoundRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 			if len(docs) != 1 || docs[0].Cause != operation || docs[0].Content != string(data) {
 				t.Fatalf("records: %+v", docs)
 			}
-			round := f.roundOperations(t, stream)
+			round := f.acknowledgedRoundOperations(t, stream)
 			if len(round) != 1 || round[0].Result == nil || round[0].Result.Outcome != "succeeded" || !strings.Contains(round[0].Result.Evidence, "1 members heard, 1 objections, 0 concessions, 0 failed turns; 1 objections stand") {
 				t.Fatalf("operations: %+v", round)
 			}

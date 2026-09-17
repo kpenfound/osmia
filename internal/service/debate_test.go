@@ -125,6 +125,13 @@ func (f *shedFixture) replyOperations(t *testing.T, stream config.WorkstreamID) 
 	return slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != ReplyAction })
 }
 
+// acknowledgedReplies returns the reply operations once every one of them is
+// acknowledged, for assertions reached through an awaited shed state.
+func (f *shedFixture) acknowledgedReplies(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
+	t.Helper()
+	return awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.replyOperations(t, stream) })
+}
+
 // settledReplies returns the reply operations once each has its result: the
 // shed moves before the operation that moved it records what it did.
 func (f *shedFixture) settledReplies(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
@@ -332,7 +339,7 @@ func TestRedraftThenConcessionEndsTheDebate(t *testing.T) {
 		t.Fatalf("shed went %v, want %v", moves, want)
 	}
 	// One reply, recorded with the redraft in one commit, by the architect.
-	ops := f.replyOperations(t, stream)
+	ops := f.acknowledgedReplies(t, stream)
 	if len(ops) != 1 || !ops[0].Acknowledged || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" ||
 		ops[0].Result.Evidence != "the architect answered 2 objections after round 1 and redrafted: spec.md revision 1 and plan.json revision 2" {
 		t.Fatalf("reply operations: %+v", ops)
@@ -442,7 +449,7 @@ func TestInvalidRedraftGoesBackToTheArchitect(t *testing.T) {
 	if reply.Turn != replyTurnID(1, 2) || reply.Redraft == nil || *reply.Redraft != (shed.Pin{Spec: 1, Plan: 2}) || len(reply.Problems) != 0 || !slices.Equal(reply.Answers, []shed.Answer{{Objection: proof, Answer: "A test shows it now."}}) {
 		t.Fatalf("reply: %+v", reply)
 	}
-	if ops := f.replyOperations(t, stream); len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
+	if ops := f.settledReplies(t, stream); len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
 		t.Fatalf("reply operations: %+v", ops)
 	}
 	if ran := f.ran(); ran[replyTurnID(1, 1)] != 1 || ran[replyTurnID(1, 2)] != 1 || ran[replyTurnID(1, 3)] != 0 {
