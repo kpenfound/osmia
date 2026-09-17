@@ -409,7 +409,8 @@ func (r *Repository) CaptureTurn(ctx context.Context, token string, response Tur
 // never captured a result for. The exclusive repository lock proves that
 // session is gone, so the turn is recorded as interrupted with the claim's
 // start time and session directory, and the thread becomes eligible for its
-// next request. A turn reserved by this session, one with a captured result,
+// next request. A final attempt without a result receives that interrupted
+// result; one that recorded a result keeps it, and the response carries it. A turn reserved by this session, one with a captured result,
 // and one that is not reserved are refused with ErrClaim.
 func (r *Repository) AbandonTurn(ctx context.Context, stream config.WorkstreamID, agent, turn string, at time.Time) error {
 	r.mu.Lock()
@@ -444,18 +445,41 @@ func (r *Repository) AbandonTurn(ctx context.Context, stream config.WorkstreamID
 		response := TurnResponse{Header: h, AgentID: agent, ThreadID: req.ThreadID, TurnID: turn, RequestID: req.ID, RequestRevision: req.Revision,
 			Result:  coreadapter.SessionResult{SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, Cancelled: true, IsError: true, ErrorSubtype: "interrupted"},
 			Failure: "the service stopped before the turn captured a result"}
+		settleAttempt(&q, &response)
 		q.Response, q.CompletedAt = &response, at
 		t.Turns[i], t.Active, t.Status = q, "", q.Status()
+		if response.Result.Session != (coreadapter.BackendSession{}) {
+			t.Session = response.Result.Session
+		}
 		log.Threads[agent] = t
 		return r.saveThread(ctx, stream, log, response)
 	}
 	return ErrClaim
 }
 
+// settleAttempt makes a recovered turn's response and its final attempt one
+// value. A final attempt with a recorded result supplies the response's result
+// and failure; one without receives the response's.
+func settleAttempt(q *QueuedTurn, response *TurnResponse) {
+	n := len(q.Attempts)
+	if n == 0 {
+		return
+	}
+	q.Attempts = slices.Clone(q.Attempts)
+	last := &q.Attempts[n-1]
+	if last.Result != nil {
+		response.Result, response.Failure = *last.Result, last.Failure
+		return
+	}
+	result := response.Result
+	last.Result, last.Failure = &result, response.Failure
+}
+
 // CancelTurns completes every unfinished turn of the workstream that no runner
 // of this repository session holds: queued turns and turns a previous session
 // reserved without a captured result. Each is recorded as cancelled with the
-// given reason. A turn this session reserved, or one with a captured result,
+// given reason; a reserved turn's final attempt is settled as AbandonTurn
+// settles it. A turn this session reserved, or one with a captured result,
 // is left to its runner, and later turns of its thread wait for another call.
 // It returns the number of turns it completed.
 func (r *Repository) CancelTurns(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor, reason string) (int, error) {
@@ -498,8 +522,12 @@ func (r *Repository) CancelTurns(ctx context.Context, stream config.WorkstreamID
 			response := TurnResponse{Header: h, AgentID: agent, ThreadID: req.ThreadID, TurnID: req.TurnID, RequestID: req.ID, RequestRevision: req.Revision,
 				Result:  coreadapter.SessionResult{SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, Cancelled: true, IsError: true, ErrorSubtype: "cancelled"},
 				Failure: reason}
+			settleAttempt(&q, &response)
 			q.Response, q.CompletedAt = &response, done
 			t.Turns[i], t.Active, t.Status = q, "", q.Status()
+			if response.Result.Session != (coreadapter.BackendSession{}) {
+				t.Session = response.Result.Session
+			}
 			responses = append(responses, response)
 			changed = true
 		}

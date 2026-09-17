@@ -337,7 +337,10 @@ given actor and reason: queued turns and turns a previous session reserved
 without a captured result. In each thread it stops at the first turn the
 current session reserved or that has a captured result, whichever session
 captured it, and leaves that turn and the thread's later turns to a later
-call. As with operation
+call. Both keep a reserved turn's response equal to its final attempt: an
+attempt without a result receives the recovery's result and failure, and an
+attempt that recorded a result before the session stopped supplies the
+response's result and failure instead. As with operation
 workers, callers must join turn execution before closing the repository handle.
 
 `internal/thread.Runner` joins the queue to `coreadapter.Turns`. `RunNext` accepts
