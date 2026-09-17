@@ -487,7 +487,19 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	defer f.stop(t)
 	// Draft 1 delivers no plan through the tool but leaves bytes that are not
 	// UTF-8 text where the service reads the delivery; draft 2 a plan with a
-	// cycle and an unaddressed criterion; draft 3 a valid plan.
+	// cycle and an unaddressed criterion; draft 3 a valid plan. Drafts 2 and 3
+	// wait until the test has seen the state the previous draft left.
+	sawInvalid1, sawInvalid2 := make(chan struct{}), make(chan struct{})
+	gate := func(ctx context.Context, open <-chan struct{}) error {
+		select {
+		case <-open:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(demoTimeout):
+			return errors.New("the test never released the turn")
+		}
+	}
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec},
 		func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
 			output := filepath.Join(filepath.Dir(req.SessionDir), "output")
@@ -498,6 +510,9 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 		})
 	f.script("draft-2-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: cyclicPlan},
 		func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
+			if err := gate(ctx, sawInvalid1); err != nil {
+				return err
+			}
 			var problems []error
 			for _, want := range []string{"Draft 1 was not accepted:", "draft 1 of the spec and plan is invalid:\n- plan.json is not UTF-8 text", "draft/spec.md and draft/plan.json: your previous draft", "Deliver corrected files"} {
 				if !strings.Contains(req.Prompt, want) {
@@ -517,6 +532,9 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 		})
 	f.script("draft-3-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan},
 		func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
+			if err := gate(ctx, sawInvalid2); err != nil {
+				return err
+			}
 			var problems []error
 			for _, want := range []string{"Draft 2 was not accepted:", `unit "dedupe": dependency cycle dedupe -> resume -> dedupe`, "spec#2: no unit addresses this criterion"} {
 				if !strings.Contains(req.Prompt, want) {
@@ -538,6 +556,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	if docs := f.documents(t, stream, plan.PlanDocument); len(docs) != 0 {
 		t.Fatalf("plan after draft 1: %+v", docs)
 	}
+	close(sawInvalid1)
 	f.await(t, stream, draftAt("invalid-2"))
 	if docs := f.documents(t, stream, plan.PlanDocument); len(docs) != 1 || docs[0].Content != cyclicPlan || docs[0].Revision != 1 {
 		t.Fatalf("plan after draft 2: %+v", docs)
@@ -545,6 +564,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	if feature, err := f.repository().Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != HandedState {
 		t.Fatalf("feature state %+v %v", feature, err)
 	}
+	close(sawInvalid2)
 	f.await(t, stream, sketched)
 	if runs := f.runs(); !slices.Equal(runs, []string{"draft-1-1", "draft-2-1", "draft-3-1"}) {
 		t.Fatalf("backend runs %v", runs)
