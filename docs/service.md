@@ -549,7 +549,7 @@ role binding. The turn is queued
 with `EnqueueTurn`, so a turn in flight on the chief-of-staff thread finishes
 first, and the scheduler dispatches it in the same pass otherwise.
 The turn's system prompt names the workstream, carries
-`questions.Guidance` (what to do with an open question) and the workstream's
+`questions.Guidance` (what to do with an open question and with the owner's ruling) and the workstream's
 [context bundle](context.md) assembled from the local files and trace when the
 turn is queued, which is the chief of staff's whole context for a question.
 
