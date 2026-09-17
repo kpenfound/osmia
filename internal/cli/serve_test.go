@@ -176,7 +176,7 @@ func TestServeRunsRoleTurns(t *testing.T) {
 }
 
 // chief checks the boundary serve gives a chief-of-staff thread turn: its
-// session directory under the thread's, an empty workspace of its own and
+// session directory under the thread's, empty workspaces of its own and
 // only its status and question tools.
 func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream string) {
 	t.Helper()
@@ -186,10 +186,13 @@ func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream stri
 	if !strings.HasPrefix(turn.Request.SessionDir, threads) {
 		t.Fatalf("session directory %s is not under %s", turn.Request.SessionDir, threads)
 	}
-	workspace := filepath.Join(resolved, "workspaces", project, workstream)
-	entries, err := os.ReadDir(workspace)
-	if err != nil || len(entries) != 0 || turn.Request.Workspace.Directory() != workspace {
-		t.Fatalf("workspace %s (%v): %v, %v", turn.Request.Workspace.Directory(), err, entries, workspace)
+	for _, workspace := range []string{filepath.Join(resolved, "workspaces", project, workstream), turn.Request.Workspace.Directory()} {
+		if entries, err := os.ReadDir(workspace); err != nil || len(entries) != 0 {
+			t.Fatalf("workspace %s is not an empty directory: %v %v", workspace, entries, err)
+		}
+	}
+	if work := turn.Request.Workspace.Directory(); filepath.Dir(work) != turn.Request.SessionDir {
+		t.Fatalf("working directory %s is not the session's own", work)
 	}
 	granted := append([]string{status.ToolName}, questions.ChiefTools...)
 	var tools []string
