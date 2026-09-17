@@ -222,7 +222,11 @@ trace does not hold (or no trace at all), the librarian's workstream, or an
 empty reason returns `validation`; no configured project returns `no_project`;
 a delivered or abandoned workstream, or one whose state changes during the
 request, returns `conflict`; a trace that cannot be read or written returns
-`internal`. These messages name the workstream or project.
+`internal`. These messages name the workstream, except the empty reason
+(`reason must not be empty`) and `no_project` (`no project is configured; add
+one with osmia project add`). If the transition was recorded but the turns
+could not be cancelled, the `internal` message says the workstream is
+abandoned and that its queued turns are cancelled at the next start.
 
 ## Workstream status
 
@@ -254,8 +258,10 @@ hold (or no trace at all) returns `not_found`, and an unreadable trace returns
 workstream's chief-of-staff thread, and to no other. The body is
 `{"text": "..."}`. The service queues the message on that thread with
 `EnqueueTurn` and answers only once the request is in the trace, so an
-acknowledged message survives a restart and runs exactly once. It runs as the
-thread's next turn; a message sent while a turn is in flight waits for it.
+acknowledged message survives a restart and runs at most once. It runs as the
+thread's next turn; a message sent while a turn is in flight waits for it. A
+message to an abandoned workstream is accepted but never runs: the next
+service start completes it as cancelled (see [abandoning](#abandoning)).
 
 The accepted request fixes, at acceptance:
 

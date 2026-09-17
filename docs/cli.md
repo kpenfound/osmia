@@ -53,7 +53,9 @@ The [onboarding walkthrough](m2-onboarding.md) runs `project add`, `handin`,
   of staff. The message is one argument; quote it. The service records it
   before answering, and the output names the message's turn ID and its state
   (`queued`). The chief of staff answers it as its next turn, after any turn
-  already running. An empty message, or a workstream the active project does
+  already running. A message to an abandoned workstream is recorded but never
+  answered; the next service start completes it as cancelled and
+  `conversation` lists it as `failed`. An empty message, or a workstream the active project does
   not hold, fails with `validation` (exit 4); with no project configured it
   fails with `no_project` (exit 4). See [conversation](service.md#conversation).
 - `conversation <workstream-id>` lists the owner's messages to that

@@ -328,11 +328,12 @@ proves that session is gone, so the turn is completed with an `interrupted`
 response carrying the claim's start time and session directory, and the
 thread's next request becomes eligible. It refuses the current session's own
 reservation, a captured turn and an unreserved one. `CancelTurns` completes
-every unfinished turn of a workstream that no runner of the current session
-holds, queued or left reserved by a previous session, with a cancelled
-response carrying the given actor and reason. It stops at a thread's turn the
-current session reserved or has captured, leaving it and that thread's later
-turns to a later call. As with operation
+the unfinished turns of a workstream with a cancelled response carrying the
+given actor and reason: queued turns and turns a previous session reserved
+without a captured result. In each thread it stops at the first turn the
+current session reserved or that has a captured result, whichever session
+captured it, and leaves that turn and the thread's later turns to a later
+call. As with operation
 workers, callers must join turn execution before closing the repository handle.
 
 `internal/thread.Runner` joins the queue to `coreadapter.Turns`. `RunNext` accepts

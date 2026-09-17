@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
+	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -246,5 +247,47 @@ func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 	st, api := s.workstreamStatus(string(stream))
 	if api != nil || st.State == nil || *st.State != AbandonedState {
 		t.Fatalf("status %+v %v", st, api)
+	}
+}
+
+// TestAbandonedTurnOperationDoesNotRun applies a turn operation of an
+// abandoned workstream: the turn completes as cancelled without a backend call.
+func TestAbandonedTurnOperationDoesNotRun(t *testing.T) {
+	ctx := context.Background()
+	home, err := os.MkdirTemp("", "ao-")
+	must(t, err)
+	t.Cleanup(func() { os.RemoveAll(home) })
+	cfg, err := config.Load(fixtureAt(t, home).Config)
+	must(t, err)
+	clock := &demoClock{now: demoStart}
+	owner := trace.Actor{Kind: "owner", ID: "local"}
+	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
+	must(t, err)
+	defer repo.Close()
+	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}
+	must(t, repo.CreateThread(ctx, identity))
+	queueTurn(t, repo, "first", clock.Now())
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: abandonTransition}
+	_, err = repo.SetFeatureState(ctx, h, AbandonedState, "gone")
+	must(t, err)
+
+	turns := &adaptertest.Turns{}
+	s := &Service{options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}}
+	a := abandonable{Reconciler: thread.Dispatcher{Runner: thread.Runner{Store: repo, Turns: turns, Now: clock.Now},
+		Prepare: func(context.Context, thread.TurnInput) (coreadapter.PreparedTurn, error) {
+			return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(home, "session")}, nil
+		}}, s: s, repository: repo}
+	op, err := thread.TurnOperation(project, "event", thread.TurnInput{Workstream: stream, Agent: demoAgent, Turn: "first"})
+	must(t, err)
+	result, err := a.Apply(ctx, op)
+	must(t, err)
+	if result.Outcome != "interrupted" || len(turns.Calls()) != 0 {
+		t.Fatalf("result %+v, backend calls %d", result, len(turns.Calls()))
+	}
+	th, err := repo.Thread(stream, demoAgent)
+	must(t, err)
+	if q := th.Turns[0]; q.Response == nil || !q.Response.Result.Cancelled || q.Response.Failure != cancelReason {
+		t.Fatalf("turn %+v", q)
 	}
 }

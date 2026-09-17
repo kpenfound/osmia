@@ -47,23 +47,19 @@ func (s *Service) abandon(ctx context.Context, raw string, req AbandonRequest) (
 		return AbandonResponse{}, &APIError{Validation, "reason must not be empty"}
 	}
 	failed := &APIError{Internal, fmt.Sprintf("cannot abandon workstream %s; check the trace repository", stream)}
-	state, err := repository.Workflow(stream, trace.FeatureSubject)
-	if err != nil {
-		return AbandonResponse{}, failed
-	}
-	if state.Value == AbandonedState || state.Value == DeliveredState {
-		return AbandonResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s is %s and cannot be abandoned", stream, state.Value)}
-	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: project, Workstream: stream, At: s.now(), Actor: ownerActor, Cause: abandonTransition}
-	if _, err := repository.SetFeatureState(ctx, h, AbandonedState, reason); err != nil {
-		if errors.Is(err, trace.ErrConflict) {
-			return AbandonResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s changed state while abandoning it; check osmia status and retry", stream)}
-		}
+	state, err := repository.SetFeatureStateUnless(ctx, h, AbandonedState, reason, AbandonedState, DeliveredState)
+	switch {
+	case errors.Is(err, trace.ErrFeatureState):
+		return AbandonResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s is %s and cannot be abandoned", stream, state.Value)}
+	case errors.Is(err, trace.ErrConflict):
+		return AbandonResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s changed state while abandoning it; check osmia status and retry", stream)}
+	case err != nil:
 		return AbandonResponse{}, failed
 	}
 	s.turns.cancel(stream)
 	if _, err := repository.CancelTurns(context.WithoutCancel(ctx), stream, s.now(), abandonActor, cancelReason); err != nil {
-		return AbandonResponse{}, failed
+		return AbandonResponse{}, &APIError{Internal, fmt.Sprintf("workstream %s is abandoned but its queued turns could not be cancelled; they are cancelled at the next start. Check the trace repository", stream)}
 	}
 	return AbandonResponse{Project: project, Workstream: stream, State: AbandonedState, Reason: reason}, nil
 }
