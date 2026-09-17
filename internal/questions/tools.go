@@ -65,7 +65,7 @@ func Tools(repository *trace.Repository, agent string, scope coreadapter.Scope, 
 		if err != nil {
 			return refuse(err)
 		}
-		return json.Marshal(struct {
+		return encode(struct {
 			Recorded bool   `json:"recorded"`
 			Question string `json:"question"`
 			Next     string `json:"next"`
@@ -92,7 +92,7 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 			if err := Resolve(ctx, repository, stream, c, now()); err != nil {
 				var unresolved *Unresolved
 				if errors.As(err, &unresolved) {
-					return json.Marshal(refusal{Reason: unresolved.Error()})
+					return encode(refusal{Reason: unresolved.Error()})
 				}
 				return nil, err
 			}
@@ -101,7 +101,7 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 		if err != nil {
 			return refuse(err)
 		}
-		return json.Marshal(struct {
+		return encode(struct {
 			Recorded bool   `json:"recorded"`
 			Question string `json:"question"`
 			Next     string `json:"next"`
@@ -125,7 +125,7 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 		if err != nil {
 			return refuse(err)
 		}
-		return json.Marshal(struct {
+		return encode(struct {
 			Recorded  bool     `json:"recorded"`
 			Batch     string   `json:"batch"`
 			Questions []string `json:"questions"`
@@ -139,7 +139,7 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 		tools = append(tools, coreadapter.Tool{Name: reserved.name, Effect: coreadapter.ToolMemory, Description: reserved.description,
 			InputSchema: json.RawMessage(`{"type":"object"}`),
 			Handle: func(context.Context, json.RawMessage) (json.RawMessage, error) {
-				return json.Marshal(refusal{Reason: Reserved})
+				return encode(refusal{Reason: Reserved})
 			}})
 	}
 	return tools
@@ -149,9 +149,21 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 func refuse(err error) (json.RawMessage, error) {
 	var refused *trace.QuestionRefused
 	if errors.As(err, &refused) {
-		return json.Marshal(refusal{Reason: refused.Reason})
+		return encode(refusal{Reason: refused.Reason})
 	}
 	return nil, err
+}
+
+// encode writes a tool result without escaping the angle brackets of the
+// citation forms.
+func encode(v any) (json.RawMessage, error) {
+	var b bytes.Buffer
+	e := json.NewEncoder(&b)
+	e.SetEscapeHTML(false)
+	if err := e.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSpace(b.Bytes()), nil
 }
 
 func decodeInput(raw json.RawMessage, into any) error {
