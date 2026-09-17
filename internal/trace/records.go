@@ -6,6 +6,7 @@ import (
 	"math"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -64,11 +65,29 @@ type Transition struct {
 
 func (Transition) traceRecord() {}
 
+// Question is one question a role asked. Revision 1 holds it as asked, with
+// the asking agent's thread and turn. An escalation appends a revision whose
+// SentToOwner is the chief of staff's rephrasing and whose Escalation holds
+// the rest of what the owner is sent.
 type Question struct {
 	Header
-	AskedBy     Actor  `json:"asked_by"`
-	Question    string `json:"question"`
-	SentToOwner string `json:"sent_to_owner,omitempty"`
+	AskedBy     Actor       `json:"asked_by"`
+	Thread      string      `json:"thread,omitempty"`
+	Turn        string      `json:"turn,omitempty"`
+	Question    string      `json:"question"`
+	SentToOwner string      `json:"sent_to_owner,omitempty"`
+	Escalation  *Escalation `json:"escalation,omitempty"`
+}
+
+// Escalation is the chief of staff's choice to send questions to the owner.
+// Batch identifies the escalation and Questions lists every question it
+// covers, so the revisions of one batch carry the same value.
+type Escalation struct {
+	Batch          string   `json:"batch"`
+	Questions      []string `json:"questions"`
+	Blocked        string   `json:"blocked"`
+	Options        []string `json:"options,omitempty"`
+	Recommendation string   `json:"recommendation"`
 }
 
 func (Question) traceRecord() {}
@@ -80,6 +99,7 @@ type Ruling struct {
 	Decision         string   `json:"decision"`
 	OwnerResponse    string   `json:"owner_response,omitempty"`
 	ReturnedAnswer   string   `json:"returned_answer"`
+	Citations        []string `json:"citations,omitempty"`
 	Changes          []string `json:"changes,omitempty"`
 }
 
@@ -201,9 +221,9 @@ func validate(r Record) error {
 	case Transition:
 		valid = key(v.Subject) && present(v.To) && present(v.Reason)
 	case Question:
-		valid = validActor(v.AskedBy) && present(v.Question)
+		valid = validActor(v.AskedBy) && present(v.Question) && (v.Thread == "" || key(v.Thread)) && (v.Turn == "" || key(v.Turn)) && (v.Escalation == nil || present(v.SentToOwner) && v.Escalation.valid(h.ID))
 	case Ruling:
-		valid = key(v.QuestionID) && v.QuestionRevision > 0 && present(v.Decision) && present(v.ReturnedAnswer)
+		valid = key(v.QuestionID) && v.QuestionRevision > 0 && present(v.Decision) && present(v.ReturnedAnswer) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Agent:
 		valid = key(v.Role) && key(v.ThreadID) && (v.Session == (coreadapter.BackendSession{}) || validSession(v.Session))
 	case TurnRequest:
