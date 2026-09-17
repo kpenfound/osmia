@@ -726,6 +726,9 @@ func (d *debate) stage(ctx context.Context, clone string, stream config.Workstre
 	if err := os.RemoveAll(workspace); err != nil {
 		return nil, err
 	}
+	if err := os.MkdirAll(filepath.Join(workspace, "repo"), 0700); err != nil {
+		return nil, err
+	}
 	if err := copyTracked(ctx, clone, filepath.Join(workspace, "repo")); err != nil {
 		return nil, err
 	}

@@ -407,6 +407,46 @@ func TestQuestionToolsFollowTheRole(t *testing.T) {
 	}
 }
 
+// Every role is granted the shed contribution tools by name and the service
+// registers them for all; only the committee holds them, and it holds no tool
+// that writes, runs or fetches.
+func TestShedToolsOnlyReachTheCommittee(t *testing.T) {
+	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason", "librarian"} {
+		t.Run(role, func(t *testing.T) {
+			r, _, h, engine, input := fixture(t, role, "container")
+			r.Grants[role] = a.Capabilities{Tools: []string{"file_read", "file_write", "object", "concede"}, WriteFiles: role == "committee", Execute: role == "committee", Network: role == "committee"}
+			handle := func(context.Context, json.RawMessage) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }
+			r.Scoped = func(context.Context, a.Scope) ([]a.Tool, error) {
+				return []a.Tool{{Name: "object", Effect: a.ToolMemory, Handle: handle}, {Name: "concede", Effect: a.ToolMemory, Handle: handle}}, nil
+			}
+			if _, err := r.Run(context.Background(), input); err != nil {
+				t.Fatal(err)
+			}
+			var names []string
+			for _, tool := range h.requests[0].Tools {
+				names = append(names, tool.Name)
+			}
+			want := []string{"file_read"}
+			if role == "committee" {
+				want = []string{"file_read", "object", "concede"}
+			}
+			var allowed []string
+			for _, name := range want {
+				allowed = append(allowed, "mcp__osmia_0__"+name)
+			}
+			if !reflect.DeepEqual(names, want) || !reflect.DeepEqual(h.requests[0].Capabilities.Tools, want) || !reflect.DeepEqual(engine.Requests[0].Profile.AllowedTools, allowed) {
+				t.Fatalf("tools %v, grant %v, allow list %v; want %v", names, h.requests[0].Capabilities.Tools, engine.Requests[0].Profile.AllowedTools, want)
+			}
+			if role == "committee" {
+				c := h.requests[0].Capabilities
+				if c.WriteFiles || c.Execute || c.Network || engine.Requests[0].Grants.Mounts[0].Access != agent.ReadOnly {
+					t.Fatalf("committee capabilities %+v, mounts %+v", c, engine.Requests[0].Grants.Mounts)
+				}
+			}
+		})
+	}
+}
+
 type verifyOnlyEngine struct{ a.Engine }
 
 func TestServiceTurnsForwardResumeChecksToEngine(t *testing.T) {
