@@ -105,6 +105,12 @@ it, with every other ready event, as one
 [chief-of-staff turn](service.md#event-delivery). A workstream cap may exceed global mason capacity:
 the global pool still limits concurrent execution.
 
+`shed.max_rounds` caps the rounds the service debates a workstream's spec and
+plan for on its own. Debate that reaches it
+[concludes with its dissent open](service.md#concluding-the-debate): the cap
+approves nothing. The service reads it when a round's reply is recorded, so a
+changed value applies to debates still running.
+
 `capacity.committee` is the size of each workstream's committee, not a pool
 shared across workstreams: a workstream that
 [enters the shed](service.md#entering-the-shed) gets that many committee

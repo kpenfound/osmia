@@ -53,7 +53,7 @@ var (
 )
 
 // Architect supplies the execution boundary of the architect's drafting
-// turns: the core execution engine and the role-scoped MCP host. The service
+// turns and shed replies: the core execution engine and the role-scoped MCP host. The service
 // owns the architect's view, tools, prompt and output.
 type Architect struct {
 	Engine coreadapter.Engine

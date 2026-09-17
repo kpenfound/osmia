@@ -447,6 +447,35 @@ func TestShedToolsOnlyReachTheCommittee(t *testing.T) {
 	}
 }
 
+// Every role is granted the reply tool by name and the service registers it
+// for all; only the architect holds it.
+func TestReplyToolOnlyReachesTheArchitect(t *testing.T) {
+	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason", "librarian"} {
+		t.Run(role, func(t *testing.T) {
+			r, _, h, _, input := fixture(t, role, "container")
+			r.Grants[role] = a.Capabilities{Tools: []string{"file_read", "reply"}}
+			handle := func(context.Context, json.RawMessage) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }
+			r.Scoped = func(context.Context, a.Scope) ([]a.Tool, error) {
+				return []a.Tool{{Name: "reply", Effect: a.ToolMemory, Handle: handle}}, nil
+			}
+			if _, err := r.Run(context.Background(), input); err != nil {
+				t.Fatal(err)
+			}
+			var names []string
+			for _, tool := range h.requests[0].Tools {
+				names = append(names, tool.Name)
+			}
+			want := []string{"file_read"}
+			if role == "architect" {
+				want = []string{"file_read", "reply"}
+			}
+			if !reflect.DeepEqual(names, want) || !reflect.DeepEqual(h.requests[0].Capabilities.Tools, want) {
+				t.Fatalf("tools %v, grant %v; want %v", names, h.requests[0].Capabilities.Tools, want)
+			}
+		})
+	}
+}
+
 type verifyOnlyEngine struct{ a.Engine }
 
 func TestServiceTurnsForwardResumeChecksToEngine(t *testing.T) {

@@ -114,7 +114,7 @@ func (r Record) check() error {
 		return fmt.Errorf("unsupported shed record version %d", r.Version)
 	case r.Round < 1:
 		return errors.New("shed record requires a positive round")
-	case !memberPattern.MatchString(r.Member):
+	case !memberPattern.MatchString(r.Member) || r.Member == replyName:
 		return fmt.Errorf("invalid shed member %q", r.Member)
 	case r.Revision.Spec < 1 || r.Revision.Plan < 1:
 		return errors.New("shed record requires the revision it was made against")
@@ -177,9 +177,9 @@ func Parse(data []byte) (Record, error) {
 	return r, r.check()
 }
 
-// Records returns the latest revision of every contribution recorded under
-// the workstream's shed/, ordered by round and member. A record whose content
-// disagrees with its path is an error.
+// Records returns the latest revision of every member's contribution recorded
+// under the workstream's shed/, ordered by round and member. A record whose
+// content disagrees with its path is an error.
 func Records(repository *trace.Repository, stream config.WorkstreamID) ([]Record, error) {
 	documents, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -187,7 +187,7 @@ func Records(repository *trace.Repository, stream config.WorkstreamID) ([]Record
 	}
 	latest := map[string]trace.Document{}
 	for _, d := range documents {
-		if strings.HasPrefix(d.Path, "shed/") {
+		if strings.HasPrefix(d.Path, "shed/") && !isReply(d.Path) {
 			latest[d.Path] = d
 		}
 	}
@@ -219,6 +219,29 @@ type Dissent struct {
 	Member   string `json:"member"`
 	Round    int    `json:"round"`
 	Revision Pin    `json:"revision"`
+}
+
+// Blocking reports whether the dissent stands in the way of ratification: a
+// charter veto, or a size or proof objection the architect has to settle. A
+// fit objection is advice and never blocks.
+func (d Dissent) Blocking() bool { return d.Kind != Fit }
+
+// Entry is one line of the dissent record: an objection that stands, and
+// whether it blocks.
+type Entry struct {
+	Dissent
+	Blocking bool `json:"blocking"`
+}
+
+// DissentRecord is the dissent that stands after the given records, each
+// objection with its kind, member, part and whether it blocks.
+func DissentRecord(records []Record) []Entry {
+	open := OpenDissent(records)
+	entries := make([]Entry, len(open))
+	for i, d := range open {
+		entries[i] = Entry{Dissent: d, Blocking: d.Blocking()}
+	}
+	return entries
 }
 
 // OpenDissent computes the dissent that stands after the given records. An

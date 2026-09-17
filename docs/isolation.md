@@ -10,7 +10,8 @@ The service supplies a workspace provider, a view directory under the Osmia root
 role grants, a scope selector, an MCP host factory and an execution engine. These
 are Go dependencies, not repository or profile configuration. The service runs
 the librarian's [knowledge-base extraction](knowledge-base.md#extraction), the
-architect's drafting, the committee's [shed rounds](service.md#the-shed-committee-rounds)
+architect's drafting and [replies to the shed](service.md#the-architects-reply),
+the committee's [shed rounds](service.md#the-shed-debate)
 and chief-of-staff thread turns through it; see
 [running turns](service.md#running-turns).
 
@@ -49,7 +50,7 @@ fetch permission. Some tools belong to one role: `set_status`, `answer`,
 other role's grant, so only `chief_of_staff` can see them, and `ask` is removed
 from the `chief_of_staff` grant, so every other role can hold it and the chief
 of staff cannot. `object` and `concede` are removed from every grant but the
-`committee`'s. The selector's
+`committee`'s, and `reply` from every grant but the `architect`'s. The selector's
 optional `Narrow` request intersects the grant. Neither prompts nor profiles
 grant tools. The full workflow role-tool catalogue is outside this M1
 implementation.
@@ -57,7 +58,8 @@ implementation.
 The service registry classifies each tool as read, write, memory, execute, fetch
 or VCS. Memory tools change only service-owned records bound to the turn, such as
 private role memory, the [workstream status](trace.md#workstream-status), the
-architect's [delivered draft](service.md#architect-drafting) or a committee
+architect's [delivered draft](service.md#architect-drafting) and its
+[answers to a round](service.md#the-architects-reply) or a committee
 member's [shed contributions](service.md#a-members-turn), and
 enforce their own scope, so any granted role may use them. `Turns.Scoped` supplies
 trusted handlers bound to the claimed turn's scope, such as the trace's

@@ -49,7 +49,9 @@ Only documents can be project-scoped. Project document paths are `charter.md`,
 `kb/entities.json`, `kb/<name>.md` and `notes/<role>.md`; workstream document paths
 are `spec.md`, `plan.json`, `handed/<name>` and the shed records
 `shed/round-<n>/<agent>.json`, where `<n>` is a positive round number without
-leading zeros and `<agent>` is the committee member's agent ID. Handed inputs
+leading zeros and `<agent>` is the committee member's agent ID, and
+`shed/round-<n>/reply.json`, the architect's
+[reply to the round](service.md#the-architects-reply). Handed inputs
 are immutable.
 Only a handed document carries a `source`: `file:` and the absolute path it was
 read from, the issue URL, or `stdin`.
