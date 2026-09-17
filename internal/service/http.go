@@ -211,6 +211,18 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/abandon/"); ok && r.Method == http.MethodPost {
+		var v AbandonRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		if out, api := s.abandon(r.Context(), id, v); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
 	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/handin" {
 		var v HandInRequest
 		if !decode(w, r, &v) {

@@ -591,3 +591,81 @@ func TestThreadParked(t *testing.T) {
 		}
 	}
 }
+
+func TestCancelTurnsCompletesUnheldTurns(t *testing.T) {
+	ctx := context.Background()
+	r, root, p := create(t)
+	if err := r.CreateThread(ctx, threadAgent()); err != nil {
+		t.Fatal(err)
+	}
+	enqueue(t, r, "one")
+	enqueue(t, r, "two")
+	claimTurn(t, r, "claim1")
+	actor := Actor{Kind: "service", ID: "abandon"}
+	if _, err := r.CancelTurns(ctx, streamID, time.Time{}, actor, "gone"); err == nil {
+		t.Fatal("zero timestamp accepted")
+	}
+	if _, err := r.CancelTurns(ctx, streamID, at, actor, " "); err == nil {
+		t.Fatal("empty reason accepted")
+	}
+	// This session's reserved turn, and its successor, are left to the runner.
+	if n, err := r.CancelTurns(ctx, streamID, at, actor, "gone"); err != nil || n != 0 {
+		t.Fatalf("held turn: %d %v", n, err)
+	}
+	r.Close()
+	r, err := Open(root, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	later := at.Add(time.Minute)
+	n, err := r.CancelTurns(ctx, streamID, later, actor, "gone")
+	if err != nil || n != 2 {
+		t.Fatalf("cancel: %d %v", n, err)
+	}
+	th := mustThread(t, r)
+	if th.Active != "" || th.Status != "interrupted" {
+		t.Fatalf("thread %#v", th)
+	}
+	for _, q := range th.Turns {
+		res := q.Response
+		if res == nil || !q.CompletedAt.Equal(later) || !res.Result.Cancelled || res.Failure != "gone" || res.Actor != actor || res.Result.SessionDirectory != q.Claim.SessionDirectory {
+			t.Fatalf("turn %s: %#v", q.Request.TurnID, q)
+		}
+	}
+	if th.Turns[0].Claim.Token != "claim1" {
+		t.Fatalf("interrupted claim replaced: %#v", th.Turns[0].Claim)
+	}
+	responses, err := Read[TurnResponse](r, streamID)
+	if err != nil || len(responses) != 2 {
+		t.Fatalf("responses %v %v", responses, err)
+	}
+	if n, err := r.CancelTurns(ctx, streamID, later, actor, "gone"); err != nil || n != 0 {
+		t.Fatalf("repeat: %d %v", n, err)
+	}
+	// A turn queued afterwards is cancelled by the next call.
+	enqueue(t, r, "three")
+	if n, err := r.CancelTurns(ctx, streamID, later, actor, "gone"); err != nil || n != 1 {
+		t.Fatalf("new turn: %d %v", n, err)
+	}
+}
+
+func TestCancelTurnsLeavesCapturedTurns(t *testing.T) {
+	ctx := context.Background()
+	r, _, _ := create(t)
+	if err := r.CreateThread(ctx, threadAgent()); err != nil {
+		t.Fatal(err)
+	}
+	enqueue(t, r, "one")
+	enqueue(t, r, "two")
+	q := claimTurn(t, r, "claim1")
+	if err := r.CaptureTurn(ctx, "claim1", threadResponse(q)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := r.CancelTurns(ctx, streamID, at, Actor{Kind: "service", ID: "abandon"}, "gone"); err != nil || n != 0 {
+		t.Fatalf("captured turn: %d %v", n, err)
+	}
+	if th := mustThread(t, r); th.Status != "captured" || th.Turns[1].Claim != nil {
+		t.Fatalf("thread %#v", th)
+	}
+}

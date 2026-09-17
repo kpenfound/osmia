@@ -27,6 +27,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
   handin <project-id> <path|issue-url|-> [--json]
+  abandon <workstream-id> <reason> [--json]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
   pause <all|project-id|workstream-id> [--hard] [--reason TEXT] [--json]
@@ -133,7 +134,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 0
 	case "status":
 		valid = len(a) <= 1
-	case "send":
+	case "send", "abandon":
 		valid = len(a) == 2
 	case "conversation":
 		valid = len(a) == 1
@@ -175,7 +176,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "send" || cmd == "conversation" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "send" || cmd == "conversation" || cmd == "status" && len(a) == 1)
 	}
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
@@ -274,6 +275,21 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Workstream %s handed in to project %s\nState: %s\nHanded: %s\nSource: %s\n", result.Workstream, result.Project, result.State, result.Handed, result.Source)
+		return 0
+	}
+	if cmd == "abandon" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		result, err := c.Abandon(ctx, id, a[1])
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Workstream %s abandoned\nReason: %s\n", result.Workstream, result.Reason)
 		return 0
 	}
 	if cmd == "send" || cmd == "conversation" {

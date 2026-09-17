@@ -2,8 +2,12 @@ package trace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
+
+// ErrFeatureState reports a feature state a transition refuses to leave.
+var ErrFeatureState = errors.New("feature state refuses the transition")
 
 // NoticeKind is the kind of outbox events delivered to a workstream's chief of
 // staff as information.
@@ -20,6 +24,14 @@ func Notice(transition, key, body string) Event {
 // header identifies the transition; a retry with the same header, value and
 // reason returns the state it committed.
 func (r *Repository) SetFeatureState(ctx context.Context, h Header, to, reason string) (WorkflowState, error) {
+	return r.SetFeatureStateUnless(ctx, h, to, reason)
+}
+
+// SetFeatureStateUnless is SetFeatureState, except that it refuses with
+// ErrFeatureState, writing nothing, when the current state is one of refused,
+// even for a retry of a transition that already committed.
+// The check and the write hold the same lock.
+func (r *Repository) SetFeatureStateUnless(ctx context.Context, h Header, to, reason string, refused ...string) (WorkflowState, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -29,13 +41,18 @@ func (r *Repository) SetFeatureState(ctx context.Context, h Header, to, reason s
 	if err != nil {
 		return WorkflowState{}, err
 	}
+	state := v.states[FeatureSubject]
+	for _, value := range refused {
+		if state.Value == value {
+			return state, ErrFeatureState
+		}
+	}
 	if old, ok := v.transactions[h.ID]; ok {
 		if old.Transition.Subject != FeatureSubject || !equalJSON(old.Transition.Header, h) || old.Transition.To != to || old.Transition.Reason != reason {
 			return WorkflowState{}, ErrConflict
 		}
 		return WorkflowState{Version: old.ExpectedVersion + 1, Value: to}, nil
 	}
-	state := v.states[FeatureSubject]
 	body := fmt.Sprintf("Workstream state changed to %s: %s", to, reason)
 	if state.Value != "" {
 		body = fmt.Sprintf("Workstream state changed from %s to %s: %s", state.Value, to, reason)

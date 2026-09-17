@@ -452,6 +452,67 @@ func (r *Repository) AbandonTurn(ctx context.Context, stream config.WorkstreamID
 	return ErrClaim
 }
 
+// CancelTurns completes every unfinished turn of the workstream that no runner
+// of this repository session holds: queued turns and turns a previous session
+// reserved without a captured result. Each is recorded as cancelled with the
+// given reason. A turn this session reserved, or one with a captured result,
+// is left to its runner, and later turns of its thread wait for another call.
+// It returns the number of turns it completed.
+func (r *Repository) CancelTurns(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor, reason string) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if at.IsZero() || !present(reason) {
+		return 0, fmt.Errorf("timestamp and reason required")
+	}
+	log, _, err := r.loadWorkflow(stream)
+	if err != nil {
+		return 0, err
+	}
+	var responses []Record
+	for _, agent := range slices.Sorted(maps.Keys(log.Threads)) {
+		t := log.Threads[agent]
+		changed := false
+	turns:
+		for i, q := range t.Turns {
+			switch {
+			case !q.CompletedAt.IsZero():
+				continue
+			case q.Response != nil, q.Claim != nil && q.Claim.ServiceSession == r.session:
+				break turns
+			}
+			req := q.Request
+			done := at
+			if done.Before(req.At) {
+				done = req.At
+			}
+			if q.Claim == nil {
+				q.Claim = &TurnClaim{Token: EventID(req.ID, "cancel"), ServiceSession: r.session, SessionDirectory: "none", At: done}
+			} else if done.Before(q.Claim.At) {
+				done = q.Claim.At
+			}
+			h := req.Header
+			h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", EventID(req.ID, "response"), done, actor
+			response := TurnResponse{Header: h, AgentID: agent, ThreadID: req.ThreadID, TurnID: req.TurnID, RequestID: req.ID, RequestRevision: req.Revision,
+				Result:  coreadapter.SessionResult{SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, Cancelled: true, IsError: true, ErrorSubtype: "cancelled"},
+				Failure: reason}
+			q.Response, q.CompletedAt = &response, done
+			t.Turns[i], t.Active, t.Status = q, "", q.Status()
+			responses = append(responses, response)
+			changed = true
+		}
+		if changed {
+			log.Threads[agent] = t
+		}
+	}
+	if len(responses) == 0 {
+		return 0, nil
+	}
+	return len(responses), r.saveThread(ctx, stream, log, responses...)
+}
+
 // CompleteTurn releases the reservation only after result capture. It can finish
 // a captured turn after restart without running the backend again.
 func (r *Repository) CompleteTurn(ctx context.Context, stream config.WorkstreamID, agent, turn, token string, at time.Time) error {
@@ -505,9 +566,11 @@ func (r *Repository) saveThread(ctx context.Context, stream config.WorkstreamID,
 	files := map[string][]byte{"workstreams/" + string(stream) + "/workflow.json": append(data, '\n')}
 	for _, rec := range additions {
 		name := recordPath(rec)
-		old, err := r.readFile(name)
-		if err != nil && !os.IsNotExist(err) {
-			return err
+		old, ok := files[name]
+		if !ok {
+			if old, err = r.readFile(name); err != nil && !os.IsNotExist(err) {
+				return err
+			}
 		}
 		line, err := json.Marshal(rec)
 		if err != nil {

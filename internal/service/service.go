@@ -70,6 +70,7 @@ type Service struct {
 	pending    error
 	projectMu  sync.Mutex // serializes project registration and removal
 	handInMu   sync.Mutex // serializes hand-ins
+	turns      runningTurns
 	options    Options
 	store      *runtime.Store
 	lock       *os.File
@@ -303,19 +304,26 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 		repository.Close()
 		return nil, err
 	}
+	if err := cancelAbandoned(context.Background(), repository, s.now); err != nil {
+		repository.Close()
+		return nil, err
+	}
 	return &activeProject{repository: repository, controller: controller, done: make(chan error, 1)}, nil
 }
 
 // admit is the scheduler's gate. It declines every turn of the librarian's
 // workstream, which the service's extractor runs itself in the librarian's
-// staged view, and holds the project's other queued turns that a runtime
+// staged view, and of abandoned workstreams, and holds the project's other queued turns that a runtime
 // pause in force covers. The store is read on every pass, so a cleared pause
 // lets held turns run on the loop's next periodic pass.
-func (s *Service) admit(project config.ProjectID) func(context.Context, scheduler.Candidate) (bool, error) {
+func (s *Service) admit(project config.ProjectID, repository *trace.Repository) func(context.Context, scheduler.Candidate) (bool, error) {
 	librarian := librarianWorkstream(project)
 	return func(_ context.Context, c scheduler.Candidate) (bool, error) {
 		if c.Workstream == librarian {
 			return false, nil
+		}
+		if gone, err := abandoned(repository, c.Workstream); err != nil || gone {
+			return false, err
 		}
 		st, _ := s.store.Effective()
 		return !scheduler.Held(st.Pauses, project, c), nil
@@ -431,10 +439,10 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 			repository.Close()
 			return nil, nil, err
 		}
-		runner.turns = bound
+		runner.turns = abandonable{Reconciler: bound, s: s, repository: repository}
 		limits := cfg.Capacity
 		limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
-		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg.Project.ID), Capacity: &limits})
+		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg.Project.ID, repository), Capacity: &limits})
 		if err != nil {
 			repository.Close()
 			return nil, nil, err

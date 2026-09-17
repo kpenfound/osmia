@@ -105,6 +105,13 @@ func (c *Client) HandIn(ctx context.Context, req HandInRequest) (HandInResponse,
 	return v, err
 }
 
+// Abandon abandons a workstream with the owner's reason.
+func (c *Client) Abandon(ctx context.Context, id config.WorkstreamID, reason string) (AbandonResponse, error) {
+	var v AbandonResponse
+	err := c.Do(ctx, "POST", Prefix+"/abandon/"+url.PathEscape(string(id)), AbandonRequest{Reason: reason}, &v)
+	return v, err
+}
+
 // Statuses lists every workstream's status in the active project.
 func (c *Client) Statuses(ctx context.Context) (StatusResponse, error) {
 	var v StatusResponse

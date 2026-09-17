@@ -48,6 +48,7 @@ client to release idle connections. API version 1 uses snake_case JSON fields.
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
 | POST | `/projects/extract` | `ProjectExtractRequest`: project; returns `ExtractionResponse` |
+| POST | `/abandon/<workstream-id>` | `AbandonRequest`: reason; returns `AbandonResponse` |
 | POST | `/handin` | `HandInRequest`: project, key, and one of path, url and stdin; returns `HandInResponse` |
 | PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason, source |
 | DELETE | `/runtime/pause` | `ClearPauseRequest`: scope, project, workstream |
@@ -195,6 +196,38 @@ same key with another source, or other stdin text, returns `conflict` naming
 the key and the workstream. A storage failure returns `internal` and names the
 workstream; retry with the same key.
 
+## Abandoning
+
+`POST /v1/abandon/<workstream-id>` abandons a workstream of the active project
+for the owner. The body is `{"reason": "..."}`. A workstream whose feature state
+is neither `delivered` nor `abandoned` moves to `abandoned` in one recorded
+transition whose actor is the owner (`owner`/`local`) and whose reason is the
+owner's, with a notice for the chief of staff in the same commit. The service
+then cancels the turn operations it is applying for the workstream, so a
+running turn stops and records the partial result it has, and completes every
+other unfinished turn of the workstream as cancelled (actor
+`service`/`abandon`). A cancelled turn holds no capacity.
+
+The scheduler admits no turn of an abandoned workstream, and a turn operation
+of one completes its turn as cancelled instead of running it. When the service
+opens a trace it completes the unfinished turns of every abandoned workstream,
+which finishes an abandonment a stop interrupted. Turns queued afterwards, such
+as the chief of staff's turn for the notice or an owner message, stay queued
+and never run. Nothing is deleted: the trace, `handed/`, the documents and any
+branch stay. Workstream status reports the state `abandoned`.
+
+The response is an `AbandonResponse`: `project`, `workstream`, `state`
+(`abandoned`) and `reason`. A malformed workstream ID, a workstream the active
+trace does not hold (or no trace at all), the librarian's workstream, or an
+empty reason returns `validation`; no configured project returns `no_project`;
+a delivered or abandoned workstream, or one whose state changes during the
+request, returns `conflict`; a trace that cannot be read or written returns
+`internal`. These messages name the workstream, except the empty reason
+(`reason must not be empty`) and `no_project` (`no project is configured; add
+one with osmia project add`). If the transition was recorded but the turns
+could not be cancelled, the `internal` message says the workstream is
+abandoned and that its queued turns are cancelled at the next start.
+
 ## Workstream status
 
 `GET /v1/status` lists each workstream of the active project in trace manifest
@@ -225,8 +258,10 @@ hold (or no trace at all) returns `not_found`, and an unreadable trace returns
 workstream's chief-of-staff thread, and to no other. The body is
 `{"text": "..."}`. The service queues the message on that thread with
 `EnqueueTurn` and answers only once the request is in the trace, so an
-acknowledged message survives a restart and runs exactly once. It runs as the
-thread's next turn; a message sent while a turn is in flight waits for it.
+acknowledged message survives a restart and runs at most once. It runs as the
+thread's next turn; a message sent while a turn is in flight waits for it. A
+message to an abandoned workstream is accepted but never runs: the next
+service start completes it as cancelled (see [abandoning](#abandoning)).
 
 The accepted request fixes, at acceptance:
 

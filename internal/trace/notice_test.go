@@ -77,3 +77,23 @@ func TestNoticeIdentity(t *testing.T) {
 		t.Fatalf("notice %+v", e)
 	}
 }
+
+func TestSetFeatureStateUnlessRefusesListedStates(t *testing.T) {
+	ctx := context.Background()
+	r, _, _ := create(t)
+	h := header("transition", "deliver")
+	if _, err := r.SetFeatureState(ctx, h, "delivered", "opened"); err != nil {
+		t.Fatal(err)
+	}
+	h2 := header("transition", "abandon")
+	state, err := r.SetFeatureStateUnless(ctx, h2, "abandoned", "gone", "abandoned", "delivered")
+	if !errors.Is(err, ErrFeatureState) || state.Value != "delivered" {
+		t.Fatalf("refusal: %+v %v", state, err)
+	}
+	if got, err := r.Workflow(streamID, FeatureSubject); err != nil || got.Value != "delivered" {
+		t.Fatalf("state after refusal %+v %v", got, err)
+	}
+	if _, err := r.SetFeatureStateUnless(ctx, h2, "abandoned", "gone", "abandoned"); err != nil {
+		t.Fatal(err)
+	}
+}
