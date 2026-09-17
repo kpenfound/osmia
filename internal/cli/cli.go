@@ -12,6 +12,7 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -30,6 +31,8 @@ const usage = `Usage: osmia <command> [--root PATH]
   abandon <workstream-id> <reason> [--json]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
+  inbox [--json]
+  answer <inbox-number> <ruling> [--json]
   pause <all|project-id|workstream-id> [--hard] [--reason TEXT] [--json]
   resume <all|project-id|workstream-id> [--json]
   priority set <workstream-id>... | priority clear [--json]
@@ -138,6 +141,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 2
 	case "conversation":
 		valid = len(a) == 1
+	case "inbox":
+		valid = len(a) == 0
+	case "answer":
+		valid = len(a) == 2
 	case "pause", "resume":
 		valid = len(a) == 1
 	case "handin":
@@ -176,7 +183,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "send" || cmd == "conversation" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "status" && len(a) == 1)
 	}
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
@@ -316,6 +323,32 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, list)
 		}
 		showConversation(stdout, list)
+		return 0
+	}
+	if cmd == "inbox" {
+		list, err := c.Inbox(ctx)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, list)
+		}
+		showInbox(stdout, list)
+		return 0
+	}
+	if cmd == "answer" {
+		number, err := strconv.Atoi(a[0])
+		if err != nil || number < 1 {
+			return invalid()
+		}
+		result, err := c.Answer(ctx, number, a[1])
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Ruling recorded on inbox entry %d (%s, questions %s)\nThe chief of staff relays it to the askers.\n", result.Number, result.Workstream, strings.Join(result.Questions, ", "))
 		return 0
 	}
 	if cmd == "status" && len(a) == 1 {
@@ -580,6 +613,35 @@ func showConversation(w io.Writer, list service.ConversationResponse) {
 		fmt.Fprintf(w, "%s %s [%s %s]\n", e.At.Format(time.RFC3339), author, e.Turn, e.State)
 		for _, line := range strings.Split(strings.TrimRight(e.Text, "\n"), "\n") {
 			fmt.Fprintf(w, "  %s\n", line)
+		}
+	}
+}
+
+// showInbox prints each entry's number and rephrased question, then what it
+// blocks, the options, the recommendation and the questions as asked.
+func showInbox(w io.Writer, list service.InboxResponse) {
+	if len(list.Entries) == 0 {
+		fmt.Fprintln(w, "Inbox: no questions are waiting for you")
+		return
+	}
+	fmt.Fprintf(w, "Inbox: %d waiting; answer one with osmia answer <number> \"...\"\n", len(list.Entries))
+	block := func(label, text string) {
+		lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+		fmt.Fprintf(w, "  %s: %s\n", label, lines[0])
+		for _, line := range lines[1:] {
+			fmt.Fprintf(w, "    %s\n", line)
+		}
+	}
+	for _, e := range list.Entries {
+		fmt.Fprintf(w, "\n[%d] %s %s (%s)\n", e.Number, e.EscalatedAt.Format(time.RFC3339), e.Workstream, e.Batch)
+		block("Question", e.Question)
+		block("Blocked", e.Blocked)
+		for i, option := range e.Options {
+			block(fmt.Sprintf("Option %d", i+1), option)
+		}
+		block("Recommendation", e.Recommendation)
+		for _, q := range e.Asked {
+			block(fmt.Sprintf("Asked by %s as question %s", q.AskedBy, q.ID), q.Question)
 		}
 	}
 }

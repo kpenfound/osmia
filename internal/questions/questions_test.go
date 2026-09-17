@@ -478,3 +478,86 @@ func TestTurnThatAskedEndsWaiting(t *testing.T) {
 		t.Fatalf("resume check: %v, %d calls", err, resumable.checked)
 	}
 }
+
+// The owner's ruling on a batch reaches no asker until the chief of staff
+// relays it; the relay then reaches each asker once, on the thread that asked.
+func TestRelayRulingDeliversToEachAsker(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	chief := tools(t, f, "chief", f.turn(t, "chief", trace.ChiefOfStaff, "chief1"), start.Add(time.Hour))
+	for agent, question := range map[string]string{"mason1": "Where does state live?", "reviewer1": "Is the log format fixed?"} {
+		role := strings.TrimSuffix(agent, "1")
+		if _, err := f.repo.Ask(ctx, agent, f.turn(t, agent, role, "turn_"+agent), question, start); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err := f.repo.Questions(stream)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("questions: %+v %v", list, err)
+	}
+	ids := map[string]string{}
+	for _, q := range list {
+		ids[q.Asked.AskedBy.ID] = q.Asked.ID
+	}
+	call(t, chief["escalate"], `{"questions":["1","2"],"rephrasing":"Are state and logs part of the contract?","blocked":"Both units.","options":[],"recommendation":"Yes."}`)
+	d := &questions.Deliverer{Repository: f.repo, Now: func() time.Time { return start.Add(3 * time.Hour) },
+		Profile: func(string) (coreadapter.Profile, error) {
+			return coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, nil
+		}}
+	turns := func(agent string) []trace.QueuedTurn {
+		t.Helper()
+		th, err := f.repo.Thread(stream, agent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return th.Turns
+	}
+
+	if got := call(t, chief["relay_ruling"], `{"question":"1","text":"Both are fixed.","scope":"local"}`); got != `{"recorded":false,"reason":"question 1 has no ruling from the owner to relay"}` {
+		t.Fatalf("relay before the ruling: %s", got)
+	}
+	if _, err := f.repo.Rule(ctx, 1, "Both are part of the contract.", owner, start.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// The owner's words alone are not what the askers receive.
+	if err := d.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(turns("mason1")) != 1 || len(turns("reviewer1")) != 1 {
+		t.Fatal("an unrelayed ruling was delivered")
+	}
+	before := f.head(t)
+	for input, want := range map[string]string{
+		`{"question":"1","text":"Both are fixed.","scope":"project"}`: `{"recorded":false,"reason":"scope must be local, for the askers only, or notify, for a notice to the whole project"}`,
+		`{"question":"1","text":"","scope":"local"}`:                  `{"recorded":false,"reason":"text is required: the owner's ruling as the askers should read it"}`,
+	} {
+		if got := call(t, chief["relay_ruling"], input); got != want {
+			t.Fatalf("relay %s:\n%s\nwant\n%s", input, got, want)
+		}
+	}
+	if _, err := chief["relay_ruling"].Handle(ctx, json.RawMessage(`{"question":"1","text":"x","scope":"local","to":"mason1"}`)); err == nil {
+		t.Fatal("relay_ruling accepted an unknown field")
+	}
+	if got := f.head(t); got != before {
+		t.Fatalf("a refused relay committed: %s, was %s", got, before)
+	}
+	if got := call(t, chief["relay_ruling"], `{"question":"2","text":"State and the log format are both fixed.","scope":"notify"}`); got != `{"recorded":true,"questions":["1","2"],"scope":"notify","next":"The ruling is delivered to each asker as its next turn."}` {
+		t.Fatalf("relay: %s", got)
+	}
+	if got := call(t, chief["relay_ruling"], `{"question":"1","text":"Again.","scope":"local"}`); got != `{"recorded":false,"reason":"question 1 is already answered"}` {
+		t.Fatalf("second relay: %s", got)
+	}
+	for range 2 {
+		if err := d.Pass(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for agent, question := range map[string]string{"mason1": "Where does state live?", "reviewer1": "Is the log format fixed?"} {
+		got := turns(agent)
+		id := ids[agent]
+		want := "The owner ruled on your question " + id + ". The chief of staff relays the ruling.\n\nYou asked:\n" + question + "\n\nAnswer:\nState and the log format are both fixed.\n"
+		if len(got) != 2 || got[1].Request.TurnID != "answer_"+id || got[1].Request.ThreadID != agent+"_thread" || got[1].Request.Prompt != want || got[1].Request.Cause != "question_"+id+"_answered" {
+			t.Fatalf("%s turns: %+v", agent, got)
+		}
+	}
+}

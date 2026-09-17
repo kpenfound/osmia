@@ -489,16 +489,16 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	// Draft 1 delivers no plan through the tool but leaves bytes that are not
 	// UTF-8 text where the service reads the delivery; draft 2 a plan with a
 	// cycle and an unaddressed criterion; draft 3 a valid plan. Drafts 2 and 3
-	// start only once the test has seen the draft before them rejected.
-	seen1, seen2 := make(chan struct{}), make(chan struct{})
-	wait := func(ctx context.Context, seen <-chan struct{}) error {
+	// wait until the test has seen the state the previous draft left.
+	sawInvalid1, sawInvalid2 := make(chan struct{}), make(chan struct{})
+	gate := func(ctx context.Context, open <-chan struct{}) error {
 		select {
-		case <-seen:
+		case <-open:
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(demoTimeout):
-			return errors.New("the test did not observe the previous draft")
+			return errors.New("the test never released the turn")
 		}
 	}
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec},
@@ -511,7 +511,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 		})
 	f.script("draft-2-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: cyclicPlan},
 		func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-			if err := wait(ctx, seen1); err != nil {
+			if err := gate(ctx, sawInvalid1); err != nil {
 				return err
 			}
 			var problems []error
@@ -533,7 +533,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 		})
 	f.script("draft-3-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan},
 		func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-			if err := wait(ctx, seen2); err != nil {
+			if err := gate(ctx, sawInvalid2); err != nil {
 				return err
 			}
 			var problems []error
@@ -557,7 +557,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	if docs := f.documents(t, stream, plan.PlanDocument); len(docs) != 0 {
 		t.Fatalf("plan after draft 1: %+v", docs)
 	}
-	close(seen1)
+	close(sawInvalid1)
 	f.await(t, stream, draftAt("invalid-2"))
 	if docs := f.documents(t, stream, plan.PlanDocument); len(docs) != 1 || docs[0].Content != cyclicPlan || docs[0].Revision != 1 {
 		t.Fatalf("plan after draft 2: %+v", docs)
@@ -565,7 +565,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	if feature, err := f.repository().Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != HandedState {
 		t.Fatalf("feature state %+v %v", feature, err)
 	}
-	close(seen2)
+	close(sawInvalid2)
 	f.await(t, stream, sketched)
 	if runs := f.runs(); !slices.Equal(runs, []string{"draft-1-1", "draft-2-1", "draft-3-1"}) {
 		t.Fatalf("backend runs %v", runs)

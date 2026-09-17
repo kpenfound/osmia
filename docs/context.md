@@ -33,10 +33,11 @@ reload.
 | Knowledge base | `kb/<subsystem>.md` | Without a scope, every `kb/*.md` file. With a scope, the files named after each resolved entity or one of its `part_of` ancestors. |
 | Missing prose | | Each named scope entity for which no file exists along its own lineage, with the paths looked for. A missing file is not an error. |
 | Entities | `kb/entities.json`, record `kb-entities` | Latest recorded map revision. Without a scope, every entity; with a scope, the entities `ResolveEntities` returns, including their parts, with their path patterns. Scope names that resolve to nothing are listed as unresolved. |
-| Decisions | `workstreams/<id>/questions/<q>/rulings.jsonl` | The latest revision of each ruling in the workstream, or in every workstream of the project without one, with its record ID, revision and question. An empty set is valid. |
+| Decisions | `workstreams/<id>/questions/<q>/rulings.jsonl` | The latest revision of each ruling in the workstream, or in every workstream of the project without one, with its record ID, revision and question. An owner ruling shows what the owner said; one the chief of staff has not relayed shows `answer: waiting for the chief of staff to relay the ruling`. An empty set is valid. |
+| Notices | `workstreams/<id>/questions/<q>/rulings.jsonl` | Every owner ruling of the project that the chief of staff relayed with scope `notify`, from every workstream, whatever the bundle's workstream and entity scope: its source, record ID, revision, workstream and the relayed text. A ruling relayed to a batch of questions is one notice, sourced from the batch's first ruling in decision order. A ruling relayed with scope `local` is no notice. An empty set is valid. |
 
 Knowledge-base files are ordered by subsystem name, entities by ID, and decisions
-by workstream, time and record ID. The same files and records always produce the
+and notices by workstream, time and record ID. The same files and records always produce the
 same bundle.
 
 A symlinked or otherwise irregular `kb/<subsystem>.md` entry the bundle would
