@@ -58,6 +58,10 @@ func (r *Repository) checkedEntry(name string, entry fs.DirEntry) error {
 		return nil
 	}
 	info, err := r.dir.Lstat(name)
+	if os.IsNotExist(err) {
+		// Git removes its temporary files while another handle walks.
+		return nil
+	}
 	if err != nil {
 		return err
 	}

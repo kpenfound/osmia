@@ -186,6 +186,9 @@ func (r *Repository) headTree(ctx context.Context) (map[string]string, error) {
 		return nil, err
 	}
 	head := strings.TrimSpace(string(ref))
+	if !objectID.MatchString(head) {
+		return nil, fmt.Errorf("invalid trace HEAD %q", head)
+	}
 	r.gitMu.Lock()
 	defer r.gitMu.Unlock()
 	if r.tree != nil && r.treeHead == head {

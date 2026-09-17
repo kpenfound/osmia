@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -459,6 +461,46 @@ func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+func TestCheckedEntryAcceptsAVanishedFile(t *testing.T) {
+	r, _, _ := create(t)
+	name := ".git/tmp_obj_vanished"
+	if err := os.WriteFile(filepath.Join(r.directory, name), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := fs.ReadDir(r.dir.FS(), ".git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry fs.DirEntry
+	for _, e := range entries {
+		if e.Name() == path.Base(name) {
+			entry = e
+		}
+	}
+	if entry == nil {
+		t.Fatal("entry not listed")
+	}
+	// The file is removed between the directory listing and the check.
+	if err := os.Remove(filepath.Join(r.directory, name)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.checkedEntry(name, entry); err != nil {
+		t.Fatalf("vanished entry: %v", err)
+	}
+}
+func TestHeadTreeRefusesAnInvalidRef(t *testing.T) {
+	for _, ref := range []string{"main~1", "-p", "HEAD", strings.Repeat("a", 39)} {
+		t.Run(ref, func(t *testing.T) {
+			r, _, _ := create(t)
+			if err := os.WriteFile(filepath.Join(r.directory, ".git", "refs", "heads", "main"), []byte(ref+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.Workflow(streamID, FeatureSubject); err == nil || !strings.Contains(err.Error(), "invalid trace HEAD") {
+				t.Fatalf("ref %q: %v", ref, err)
+			}
+		})
 	}
 }
 func TestGitEnvironmentAndExistingRepositories(t *testing.T) {
