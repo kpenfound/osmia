@@ -51,7 +51,8 @@ implementation.
 
 The service registry classifies each tool as read, write, memory, execute, fetch
 or VCS. Memory tools change only service-owned records bound to the turn, such as
-private role memory or the [workstream status](trace.md#workstream-status), and
+private role memory, the [workstream status](trace.md#workstream-status) or the
+architect's [delivered draft](service.md#architect-drafting), and
 enforce their own scope, so any granted role may use them. `Turns.Scoped` supplies
 trusted handlers bound to the claimed turn's scope, such as the trace's
 [private role notes](trace.md#private-role-notes). They join the same registry,

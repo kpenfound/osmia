@@ -194,7 +194,105 @@ repeating a key returns the same response without reading the input again or
 writing anything; a hand-in interrupted part way is finished by the retry. The
 same key with another source, or other stdin text, returns `conflict` naming
 the key and the workstream. A storage failure returns `internal` and names the
-workstream; retry with the same key.
+workstream; retry with the same key. The next reconciliation pass asks the
+architect for the workstream's spec and plan; see
+[architect drafting](#architect-drafting).
+
+## Architect drafting
+
+The architect controller runs at the start of every reconciliation pass,
+before event delivery and the scheduler, with or without `Options.Threads`.
+For every workstream in feature state `handed`, except the librarian's, it
+keeps the workflow subject `draft`, whose transitions are recorded in
+`events.jsonl` with the actor `service`/`architect-drafting`:
+
+| `draft` state | Meaning |
+| --- | --- |
+| `drafting-<n>` | Draft `n` is requested: transition `draft-<n>` published an `architect-draft` operation, which the reconciliation loop runs. |
+| `invalid-<n>` | Draft `n` was recorded and failed validation. Transition `draft-<n>-invalid` lists every problem in its reason, and the operation's result carries the same text. |
+| `failed-<n>` | Draft `n` ran no valid turn: the architect's turn failed, service stops interrupted it three times, the workstream was abandoned, or the workstream left `handed` before the draft was presented. Transition `draft-<n>-failed` holds the reason. |
+| `exhausted` | Three drafts were not accepted. Transition `draft-exhausted` records it (`none of the architect's 3 drafts of the spec and plan was accepted; ...`) with a notice for the chief of staff naming the count and quoting the last draft's outcome, and nothing more is requested. |
+
+Draft 1 is requested as soon as the workstream is handed, with the hand-in
+transition as cause; after `invalid-<n>` or `failed-<n>` with `n` below three,
+draft `n+1` is requested with that outcome's transition as cause. A draft in
+progress, an exhausted workstream and a workstream in any other feature state
+need nothing. The bound is the librarian's: three drafts per workstream and
+three turns per draft.
+
+### The turn
+
+Each draft is one turn of the workstream's `agent_architect` thread (role
+`architect`, thread `thread_architect`, created with the first request), run
+through the thread runner and the [turn isolation](isolation.md) path by the
+service's own reconciler, never the scheduler: the scheduler's gate declines
+every architect thread. Turn `draft-<n>-<attempt>` carries the operation ID
+as cause; a service stop mid-turn leaves it interrupted, and the next start
+abandons it and starts the next attempt, up to three per draft. The turn's
+profile is the architect's effective binding when the turn is accepted.
+
+The service stages the view under
+`<root>/architect/<project-id>/<workstream-id>/<turn>/workspace` and gives the
+turn a read-only private copy of it:
+
+| Path in the view | Content |
+| --- | --- |
+| `handed/<name>` | The handed input, unchanged. |
+| `charter.md` | The charter as recorded, after any owner edit is recorded. |
+| `context.md` | The rendered [context bundle](context.md) for the whole project, with the workstream's decisions. |
+| `draft/spec.md`, `draft/plan.json` | The latest recorded draft, once one is recorded. |
+
+The architect gets `file_read` and `draft_write` and nothing else: no notes
+(they are the project's, not the workstream's), no write, execute, network or
+VCS capability, and no other context source. `draft_write` takes `path` (`spec.md` or `plan.json`) and
+`content` (UTF-8 text of at most 512 KiB) and stores the file in the turn's
+service-owned directory; it is a memory tool, so the read-only role holds it.
+The prompt names the view, asks for `spec.md` with the intended behaviour,
+what the feature must not do and a `## Acceptance criteria` section holding
+a numbered list, and for `plan.json` in the [plan format](trace.md#planjson)
+with every criterion addressed by a unit with a named proof, acyclic
+dependencies and footprints naming entities of the bundle. It states the
+validation rules and leaves how finely the work is cut to the architect. The
+prompt of draft `n+1` opens with `Draft <n> was not accepted:` and the reason
+of draft `n`'s transition, and points at `draft/` when a draft is recorded or
+says no file of that draft was recorded.
+
+### Recording and validation
+
+When the turn completes, the delivered files are recorded with
+`RecordDocuments` in one commit as revisions of the workstream's `spec` and
+`plan` documents (actor `agent`/`agent_architect`, cause the operation ID). A
+file that was not delivered, or is not UTF-8 text, is a problem with the draft
+and records no revision. The recorded draft is then validated with
+`plan.ParseSpec`, `plan.Parse` and `plan.Validate` against the latest recorded
+entity map; see [validation](trace.md#validation).
+
+A valid draft moves the workstream `handed -> sketched` in one transaction:
+transition `sketched`, actor `service`/`architect-drafting`, cause the
+operation ID, timestamped with the draft's revisions, and a reason naming the
+draft, its revisions and their criteria and unit counts. Its notice tells the
+chief of staff the draft exists. An invalid draft records `draft-<n>-invalid`
+instead and the workstream stays `handed`.
+
+Recovery keys on the trace: a restart during the turn finds it interrupted;
+one between recording and the transition finds the revisions by their cause
+and records nothing again; one after the transition finds it and repeats
+nothing. A recorded outcome completes the operation without running the
+architect.
+
+[Abandoning](#abandoning) the workstream cancels the architect's running turn,
+which is recorded as interrupted. The draft of an abandoned workstream starts
+no turn, completes a queued one as cancelled, and records `draft-<n>-failed`
+with the reason `draft <n> failed: the workstream was abandoned, so the
+architect runs no turn for it`; nothing more is requested.
+
+`Options.Architect` supplies the isolation engine and MCP host factory the
+architect's turns run in. Without it the controller requests nothing, so a
+handed workstream stays `handed` until a service with a runner starts and
+drafts it. A draft already requested stays pending: applying it returns
+`this service has no agent runner for the architect` wherever it would start or
+run a turn, the operation is retried, and no draft is spent. A captured turn is
+still completed and its draft recorded, since that runs no architect.
 
 ## Abandoning
 
@@ -203,7 +301,8 @@ for the owner. The body is `{"reason": "..."}`. A workstream whose feature state
 is neither `delivered` nor `abandoned` moves to `abandoned` in one recorded
 transition whose actor is the owner (`owner`/`local`) and whose reason is the
 owner's, with a notice for the chief of staff in the same commit. The service
-then cancels the turn operations it is applying for the workstream, so a
+then cancels the turn operations it is applying for the workstream, the
+[architect's draft](#architect-drafting) included, so a
 running turn stops and records the partial result it has, and completes every
 other unfinished turn of the workstream as cancelled (actor
 `service`/`abandon`). A cancelled turn holds no capacity.
@@ -302,8 +401,8 @@ with `Options.Threads` runs them.
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
 opened, each time a project's trace opens: at startup and when a project is
 added. It replaces any runner adapter in `Options.Reconciliation` for every
-runner operation except the librarian's `kb-extract` action, which the service
-reconciles itself. The [thread dispatcher](trace.md#turn-dispatch) is the
+runner operation except the librarian's `kb-extract` action and the
+architect's `architect-draft` action, which the service reconciles itself. The [thread dispatcher](trace.md#turn-dispatch) is the
 intended binding; it receives the service-owned repository handle, which callers
 must not close. The [M1 demonstration](m1-demonstration.md) uses this path with
 fake engines.
@@ -316,7 +415,9 @@ projects and reports the failure in status.
 With `Options.Threads` set, the service also runs queued workstream turns on its
 own and delivers outbox events to each chief of staff (see
 [event delivery](#event-delivery)). Event delivery followed by the scheduler
-replaces any `Schedule` hook in `Options.Reconciliation`.
+replaces any `Schedule` hook in `Options.Reconciliation`; without
+`Options.Threads` that hook runs. In both cases the
+[architect controller](#architect-drafting) runs first.
 At the start of every reconciliation pass, `internal/scheduler` reads each
 workstream's threads and turn operations. For every thread with no turn in
 flight, it publishes a `thread-turn` operation for the oldest unfinished turn,
@@ -345,9 +446,10 @@ existing operation, as the [turn dispatch](trace.md#turn-dispatch) table
 describes: it is neither dispatched again nor lost. `scheduler.Options.Admit` is
 the dispatch gate after capacity.
 
-The service's gate declines every turn of the librarian's workstream: the
-service's own `kb-extract` reconciler runs those, staged in the librarian's
-view, and a librarian turn the scheduler found queued gets no turn operation.
+The service's gate declines every turn of the librarian's workstream and of
+every `architect` thread: the service's own `kb-extract` and `architect-draft`
+reconcilers run those, staged in their own views, and such a turn the
+scheduler found queued gets no turn operation.
 The gate holds a turn that a pause in `runtime.Effective` covers:
 a `factory` pause, a `project` pause on the active project, or a `workstream`
 pause on the turn's workstream. Chief-of-staff turns are never held, so the
@@ -384,7 +486,8 @@ so a failed transaction leaves no event. `trace.Notice` builds such an event,
 and `Repository.SetFeatureState` records a feature state change with one.
 `internal/events` delivers them.
 
-At the start of every reconciliation pass, before the scheduler, the deliverer
+At the start of every reconciliation pass, after the architect controller and
+before the scheduler, the deliverer
 reads each workstream's ready notification events (events without an
 operation). It waits until the oldest has been ready for `events.window` (see
 [configuration](configuration.md#top-level-configtoml)), then delivers every
