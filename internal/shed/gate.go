@@ -170,12 +170,20 @@ func Objections(n int) string {
 
 // PacketRound returns the round whose ratification packet a workstream path
 // holds, and whether it is one.
-func PacketRound(path string) (int, bool) {
+func PacketRound(path string) (int, bool) { return fileRound(path, packetName) }
+
+// RatificationRound returns the round whose ratification a workstream path
+// holds, and whether it is one.
+func RatificationRound(path string) (int, bool) { return fileRound(path, ratificationName) }
+
+// fileRound returns the round of the shed file shed/round-<n>/<name>.json a
+// path names, and whether it names one.
+func fileRound(path, name string) (int, bool) {
 	rest, ok := strings.CutPrefix(path, "shed/round-")
 	if !ok {
 		return 0, false
 	}
-	number, ok := strings.CutSuffix(rest, "/"+packetName+".json")
+	number, ok := strings.CutSuffix(rest, "/"+name+".json")
 	if !ok {
 		return 0, false
 	}

@@ -47,19 +47,29 @@ const (
 var sealingActor = trace.Actor{Kind: "service", ID: "sealing"}
 
 // sealInput identifies the ratification a sealing seals: its number, the
-// round the owner ratified in and the revisions they ratified.
+// round the owner ratified in, the revisions they ratified and the revision
+// of the ratification's record, which the owner records again to ask for a
+// sealing after one failed.
 type sealInput struct {
-	Seal  int `json:"seal"`
-	Round int `json:"round"`
-	Spec  int `json:"spec"`
-	Plan  int `json:"plan"`
+	Seal         int `json:"seal"`
+	Round        int `json:"round"`
+	Spec         int `json:"spec"`
+	Plan         int `json:"plan"`
+	Ratification int `json:"ratification"`
 }
 
 func (in sealInput) pin() shed.Pin { return shed.Pin{Spec: in.Spec, Plan: in.Plan} }
 
-// seals reports whether the sealing is of the given ratification.
-func (in sealInput) seals(r shed.Ratification) bool {
-	return in.Round == r.Round && in.pin() == r.Revision
+// seals reports whether the sealing is of the given ratification record.
+func (in sealInput) seals(r ratification) bool {
+	return in.Round == r.Round && in.pin() == r.Revision && in.Ratification == r.Recorded
+}
+
+// ratification is the owner's recorded ratification with the revision of
+// its record.
+type ratification struct {
+	shed.Ratification
+	Recorded int
 }
 
 func sealIDs(k int) (transition, event string) {
@@ -80,8 +90,8 @@ func sealState(value string) (kind string, n int, ok bool) {
 func featureBranch(stream config.WorkstreamID) string { return "osmia/" + string(stream) }
 
 // sealer is the sealing controller. Its pass asks for the sealing of every
-// ratification no sealing was asked for, which is what a service stop between
-// the record of a ratification and its request leaves behind. Its reconciler
+// ratification record no sealing was asked for: the record is the owner's
+// request, and the controller alone publishes the operation. Its reconciler
 // runs each sealing operation.
 type sealer struct {
 	s          *Service
@@ -111,9 +121,10 @@ func (z *sealer) Pass(ctx context.Context) error {
 	return nil
 }
 
-// reconcile asks for the sealing of the latest ratification of a workstream
-// in the shed when no sealing of it was ever asked for. A ratification whose
-// sealing failed is asked for again by the owner, not here.
+// reconcile asks for the sealing of the latest ratification record of a
+// workstream in the shed when no sealing of that record was asked for. A
+// ratification whose sealing failed is recorded again by the owner to be
+// sealed again, never asked for again here.
 func (z *sealer) reconcile(ctx context.Context, stream config.WorkstreamID) error {
 	feature, err := z.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -131,26 +142,40 @@ func (z *sealer) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 		return err
 	}
 	_, err = z.request(ctx, stream, latest)
-	// Another writer asked for it first; the next pass finds it asked for.
-	if errors.Is(err, trace.ErrConflict) {
-		return nil
-	}
 	return err
 }
 
 // latestRatification returns the owner's latest ratification of the
-// workstream, and whether there is one.
-func latestRatification(repository *trace.Repository, stream config.WorkstreamID) (shed.Ratification, bool, error) {
-	ratified, err := shed.Ratifications(repository, stream)
-	if err != nil || len(ratified) == 0 {
-		return shed.Ratification{}, false, err
+// workstream, the one of the latest round at its latest recorded revision,
+// and whether there is one.
+func latestRatification(repository *trace.Repository, stream config.WorkstreamID) (ratification, bool, error) {
+	documents, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return ratification{}, false, err
 	}
-	return ratified[len(ratified)-1], true, nil
+	var latest trace.Document
+	round := 0
+	for _, d := range documents {
+		if n, ok := shed.RatificationRound(d.Path); ok && n >= round {
+			latest, round = d, n
+		}
+	}
+	if round == 0 {
+		return ratification{}, false, nil
+	}
+	r, err := shed.ParseRatification([]byte(latest.Content))
+	if err != nil {
+		return ratification{}, false, fmt.Errorf("%s: %w", latest.Path, err)
+	}
+	if r.Round != round {
+		return ratification{}, false, fmt.Errorf("%s: records the ratification of round %d", latest.Path, r.Round)
+	}
+	return ratification{Ratification: r, Recorded: latest.Revision}, true, nil
 }
 
-// sealing returns the latest sealing operation of the given ratification,
-// and whether one was asked for.
-func (z *sealer) sealing(stream config.WorkstreamID, r shed.Ratification) (trace.OperationRecord, bool, error) {
+// sealing returns the latest sealing operation of the given ratification
+// record, and whether one was asked for.
+func (z *sealer) sealing(stream config.WorkstreamID, r ratification) (trace.OperationRecord, bool, error) {
 	ops, err := z.repository.Operations(stream)
 	if err != nil {
 		return trace.OperationRecord{}, false, err
@@ -177,8 +202,8 @@ func (z *sealer) header(id string, stream config.WorkstreamID, cause string, at 
 }
 
 // request publishes the next sealing of the workstream, of the given
-// ratification, as a durable operation, and returns its number.
-func (z *sealer) request(ctx context.Context, stream config.WorkstreamID, r shed.Ratification) (int, error) {
+// ratification record, as a durable operation, and returns its number.
+func (z *sealer) request(ctx context.Context, stream config.WorkstreamID, r ratification) (int, error) {
 	state, err := z.repository.Workflow(stream, sealSubject)
 	if err != nil {
 		return 0, err
@@ -188,14 +213,14 @@ func (z *sealer) request(ctx context.Context, stream config.WorkstreamID, r shed
 		k = n + 1
 	}
 	transition, event := sealIDs(k)
-	input, err := json.Marshal(sealInput{Seal: k, Round: r.Round, Spec: r.Revision.Spec, Plan: r.Revision.Plan})
+	input, err := json.Marshal(sealInput{Seal: k, Round: r.Round, Spec: r.Revision.Spec, Plan: r.Revision.Plan, Ratification: r.Recorded})
 	if err != nil {
 		return 0, err
 	}
 	op := coreadapter.Operation{ID: trace.OperationID(z.repository.Project(), stream, event), Boundary: coreadapter.RepositoryBoundary, Action: SealAction, Input: input}
 	reason := fmt.Sprintf("the owner ratified %s in round %d; sealing %d fetches upstream, records the seal and the footprints and creates the feature branch", r.Revision, r.Round, k)
 	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: z.header(transition, stream, shed.RatificationDocumentID(r.Round), z.s.now()), Subject: sealSubject, From: state.Value, To: fmt.Sprintf("sealing-%d", k), Reason: reason},
+		Transition: trace.Transition{Header: z.header(transition, stream, fmt.Sprintf("%s-%d", shed.RatificationDocumentID(r.Round), r.Recorded), z.s.now()), Subject: sealSubject, From: state.Value, To: fmt.Sprintf("sealing-%d", k), Reason: reason},
 		Events:     []trace.Event{{ID: event, Kind: "seal", Body: fmt.Sprintf("Seal %s of the workstream", r.Revision), Operation: &op}}}
 	_, err = z.repository.Transact(ctx, tx)
 	return k, err
@@ -211,8 +236,8 @@ func decodeSeal(op coreadapter.Operation) (sealInput, error) {
 	if err := dec.Decode(&in); err != nil {
 		return in, fmt.Errorf("invalid seal operation input: %w", err)
 	}
-	if in.Seal < 1 || in.Round < 1 || in.Spec < 1 || in.Plan < 1 {
-		return in, errors.New("seal operation requires positive sealing, round and revision numbers")
+	if in.Seal < 1 || in.Round < 1 || in.Spec < 1 || in.Plan < 1 || in.Ratification < 1 {
+		return in, errors.New("seal operation requires positive sealing, round, revision and record numbers")
 	}
 	return in, nil
 }
@@ -322,6 +347,9 @@ func (z *sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		return fail("the workstream has no ratification on the record")
 	}
 	if !in.seals(latest) {
+		if latest.Round == in.Round && latest.Revision == in.pin() {
+			return fail(fmt.Sprintf("the owner ratified %s in round %d again after this sealing was asked for; the later record is sealed instead", in.pin(), in.Round))
+		}
 		return fail(fmt.Sprintf("the owner's latest ratification is of %s in round %d, not of %s in round %d", latest.Revision, latest.Round, in.pin(), in.Round))
 	}
 	spec, graph, err := z.documents(stream, in.pin())

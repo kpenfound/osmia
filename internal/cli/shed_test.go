@@ -111,13 +111,13 @@ func TestShedCommands(t *testing.T) {
 	// never completes and the workstream stays in the shed.
 	var ratified service.RatifyResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "ratify", stream, "--json")), &ratified))
-	if ratified.Spec != 1 || ratified.Plan != 1 || ratified.Round != 1 || ratified.Sealing != "requested" || ratified.Workstream != stream || !strings.HasSuffix(ratified.Detail, "; sealing 1 is requested") {
+	if ratified.Spec != 1 || ratified.Plan != 1 || ratified.Round != 1 || ratified.Sealing != "requested" || ratified.Workstream != stream || !strings.HasSuffix(ratified.Detail, "; the sealing is asked for") {
 		t.Fatalf("ratify --json %+v", ratified)
 	}
 	// Ratifying the same revisions again reports the sealing asked for,
 	// pending or running as the loop has it at the time.
 	want := "Workstream " + stream + " ratified: spec.md revision 1 and plan.json revision 1\nworkstream " + stream +
-		" is ratified at spec.md revision 1 and plan.json revision 1 already; sealing 1 is "
+		" is ratified at spec.md revision 1 and plan.json revision 1 already; "
 	if out := successful(t, root, "ratify", stream); !strings.HasPrefix(out, want) || !strings.HasSuffix(out, "\n") {
 		t.Fatalf("ratify output %q, want a prefix %q", out, want)
 	}

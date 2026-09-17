@@ -151,7 +151,7 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 	if ratified.Round != 1 || ratified.Spec != 1 || ratified.Plan != 1 || ratified.Sealing != "requested" || ratified.Workstream != stream {
 		t.Fatalf("ratification %+v", ratified)
 	}
-	if want := "the owner ratified spec.md revision 1 and plan.json revision 1 after round 1, over 1 objection the owner disposed of; sealing 1 is requested"; ratified.Detail != want {
+	if want := "the owner ratified spec.md revision 1 and plan.json revision 1 after round 1, over 1 objection the owner disposed of; the sealing is asked for"; ratified.Detail != want {
 		t.Fatalf("detail %q, want %q", ratified.Detail, want)
 	}
 	record := f.ratification(t, stream, 1)
@@ -170,7 +170,7 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 	// the sealing already asked for.
 	again, err := f.c.Ratify(ctx, stream, 1, 1)
 	must(t, err)
-	if (again.Sealing != "pending" && again.Sealing != "running") || again.Round != 1 || !strings.HasPrefix(again.Detail, fmt.Sprintf("workstream %s is ratified at %s already; sealing 1 is %s", stream, shed.Pin{Spec: 1, Plan: 1}, again.Sealing)) {
+	if !slices.Contains([]string{"requested", "pending", "running"}, again.Sealing) || again.Round != 1 || !strings.HasPrefix(again.Detail, fmt.Sprintf("workstream %s is ratified at %s already; ", stream, shed.Pin{Spec: 1, Plan: 1})) {
 		t.Fatalf("ratifying twice %+v", again)
 	}
 	if docs := f.documents(t, stream, shed.RatificationDocumentID(1)); len(docs) != 1 {

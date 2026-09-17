@@ -66,16 +66,23 @@ func (f *architectFixture) sealMoves(t *testing.T, stream config.WorkstreamID) [
 	return moves
 }
 
+// sealOperations returns the workstream's sealing operations in sealing
+// order.
 func (f *architectFixture) sealOperations(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
 	ops, err := f.repository().Operations(stream)
 	must(t, err)
 	var out []trace.OperationRecord
+	number := map[string]int{}
 	for _, o := range ops {
 		if o.Operation.Action == SealAction {
+			in, err := decodeSeal(o.Operation)
+			must(t, err)
+			number[o.EventID] = in.Seal
 			out = append(out, o)
 		}
 	}
+	slices.SortFunc(out, func(a, b trace.OperationRecord) int { return number[a.EventID] - number[b.EventID] })
 	return out
 }
 
@@ -157,7 +164,7 @@ func TestSealingRecordsTheSealAndCreatesTheFeatureBranch(t *testing.T) {
 	commit := f.upstream(t)
 	home := filepath.Dir(f.clone)
 	stream, out := f.ratified(t)
-	if out.Sealing != "requested" || !strings.HasSuffix(out.Detail, "; sealing 1 is requested") {
+	if out.Sealing != "requested" || !strings.HasSuffix(out.Detail, "; the sealing is asked for") {
 		t.Fatalf("ratification %+v", out)
 	}
 	f.awaitFeature(t, stream, RatifiedState)
@@ -168,13 +175,13 @@ func TestSealingRecordsTheSealAndCreatesTheFeatureBranch(t *testing.T) {
 		t.Fatalf("seal operations %+v", ops)
 	}
 	operation := ops[0].Operation.ID
-	if ops[0].Operation.Boundary != "repository" || string(ops[0].Operation.Input) != `{"seal":1,"round":1,"spec":1,"plan":1}` {
-		t.Fatalf("seal operation %+v", ops[0].Operation)
+	if in, err := decodeSeal(ops[0].Operation); err != nil || in != (sealInput{Seal: 1, Round: 1, Spec: 1, Plan: 1, Ratification: 1}) {
+		t.Fatalf("seal operation %+v: %v", ops[0].Operation, err)
 	}
 	if moves := f.sealMoves(t, stream); !slices.Equal(moves, []string{"sealing-1"}) {
 		t.Fatalf("seal subject went %v", moves)
 	}
-	if request := f.transition(t, stream, "seal-1"); request.Cause != shed.RatificationDocumentID(1) || request.Reason != "the owner ratified spec.md revision 1 and plan.json revision 1 in round 1; sealing 1 fetches upstream, records the seal and the footprints and creates the feature branch" {
+	if request := f.transition(t, stream, "seal-1"); request.Cause != shed.RatificationDocumentID(1)+"-1" || request.Reason != "the owner ratified spec.md revision 1 and plan.json revision 1 in round 1; sealing 1 fetches upstream, records the seal and the footprints and creates the feature branch" {
 		t.Fatalf("the request %+v", request)
 	}
 
@@ -275,6 +282,9 @@ func TestSealingRetriesAFailedFetch(t *testing.T) {
 	if ops := f.sealOperations(t, stream); len(ops) != 1 {
 		t.Fatalf("ratifying again asked for %+v", ops)
 	}
+	if docs := f.documents(t, stream, shed.RatificationDocumentID(1)); len(docs) != 1 {
+		t.Fatalf("ratifying again recorded %+v", docs)
+	}
 	if moves := f.sealMoves(t, stream); !slices.Equal(moves, []string{"sealing-1"}) {
 		t.Fatalf("seal subject went %v", moves)
 	}
@@ -347,8 +357,16 @@ func TestSealingResumesFromTheBranchTheCloneHolds(t *testing.T) {
 	demoGit(t, home, "-C", f.clone, "branch", "-f", branch, commit)
 	again, err := f.c.Ratify(ctx, stream, 1, 1)
 	must(t, err)
-	if again.Sealing != "requested" || again.Detail != fmt.Sprintf("workstream %s is ratified at spec.md revision 1 and plan.json revision 1 already; sealing 2 is requested", stream) {
+	if again.Sealing != "requested" || again.Detail != fmt.Sprintf("workstream %s is ratified at spec.md revision 1 and plan.json revision 1 already; sealing 1 failed and the sealing is asked for again", stream) {
 		t.Fatalf("ratifying again %+v", again)
+	}
+	// The request is the ratification recorded again, as its next revision.
+	docs := f.documents(t, stream, shed.RatificationDocumentID(1))
+	if len(docs) != 2 || docs[1].Revision != 2 || docs[1].Content != docs[0].Content {
+		t.Fatalf("ratification documents %+v", docs)
+	}
+	if got := f.transition(t, stream, shed.RatificationDocumentID(1)+"-2"); got.To != "ratified-1" || got.Reason != "the owner ratified spec.md revision 1 and plan.json revision 1 after round 1 again; sealing 1 failed and the sealing is asked for again" {
+		t.Fatalf("the second ratification %+v", got)
 	}
 	f.awaitFeature(t, stream, RatifiedState)
 	ops = awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, stream) })
@@ -391,7 +409,7 @@ func TestSealingSealsTheLatestRatificationOnly(t *testing.T) {
 	f.awaitPacket(t, stream, "ratify: no objection stands")
 	second, err := f.c.Ratify(ctx, stream, 2, 1)
 	must(t, err)
-	if second.Sealing != "requested" || !strings.HasSuffix(second.Detail, "; sealing 2 is requested") {
+	if second.Sealing != "requested" || !strings.HasSuffix(second.Detail, "; the sealing is asked for") {
 		t.Fatalf("the second ratification %+v", second)
 	}
 	f.awaitSealMove(t, stream, "failed-1")
