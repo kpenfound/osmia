@@ -81,7 +81,7 @@ func TestRawExecutionRequestCannotWidenBoundary(t *testing.T) {
 }
 
 // coreRefuses names the widening requests that reach core's session.
-var coreRefuses = map[string]bool{"VCS": true, "profile env": true, "container env": true, "host MCP": true, "shell": true}
+var coreRefuses = map[string]bool{"VCS": true, "profile env": true, "host MCP": true, "shell": true}
 
 func boundaryTurn(t *testing.T, mode string) a.PreparedTurn {
 	t.Helper()
@@ -178,11 +178,9 @@ func toolTurn(t *testing.T, mode string) a.PreparedTurn {
 func TestPolicyMismatchNeverStarts(t *testing.T) {
 	pinned := t.TempDir()
 	mutations := map[string]func(*agent.Policy, string){
-		"sandbox": func(p *agent.Policy, _ string) { p.Sandbox = agent.SandboxNone },
-		"image":   func(p *agent.Policy, _ string) { p.Image = "other-image" },
-		"writable view": func(p *agent.Policy, view string) {
-			p.Mounts = append(p.Mounts, agent.Mount{Path: view, Access: agent.ReadWrite})
-		},
+		"sandbox":         func(p *agent.Policy, _ string) { p.Sandbox = agent.SandboxNone },
+		"image":           func(p *agent.Policy, _ string) { p.Image = "other-image" },
+		"writable view":   func(p *agent.Policy, view string) { setAccess(p, view, agent.ReadWrite) },
 		"unreadable view": func(p *agent.Policy, view string) { p.Denied = append(p.Denied, view) },
 		"writable pinned": func(p *agent.Policy, _ string) {
 			p.Mounts = append(p.Mounts, agent.Mount{Path: pinned, Access: agent.ReadWrite})
@@ -211,6 +209,14 @@ func TestPolicyMismatchNeverStarts(t *testing.T) {
 	}
 }
 
+func setAccess(p *agent.Policy, path string, access agent.Access) {
+	for i := range p.Mounts {
+		if p.Mounts[i].Path == path {
+			p.Mounts[i].Access = access
+		}
+	}
+}
+
 func TestWritableViewPolicyIsAccepted(t *testing.T) {
 	turn := toolTurn(t, "none")
 	turn.Sandbox.Verified.Workspace.Access = a.ReadWrite
@@ -222,13 +228,7 @@ func TestWritableViewPolicyIsAccepted(t *testing.T) {
 	}
 	// A writable view whose session reads it only is a mismatch too.
 	view := turn.Sandbox.Verified.Workspace.Directory
-	engine = &adaptertest.Engine{Policy: func(p *agent.Policy) {
-		for i := range p.Mounts {
-			if p.Mounts[i].Path == view {
-				p.Mounts[i].Access = agent.ReadOnly
-			}
-		}
-	}}
+	engine = &adaptertest.Engine{Policy: func(p *agent.Policy) { setAccess(p, view, agent.ReadOnly) }}
 	executor.Runner = engine
 	if _, err := (&a.TurnRunner{Executor: executor}).Run(context.Background(), turn); !errors.Is(err, a.ErrUnsupported) || len(engine.Requests) != 0 {
 		t.Fatalf("err=%v launches=%d", err, len(engine.Requests))

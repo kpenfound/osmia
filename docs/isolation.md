@@ -108,7 +108,7 @@ endpoints. A mismatch is an `UnsupportedError` with capability
 The session then admits the request against its grants and refuses a
 variable, tool, MCP server or mount the grants do not name, VCS access, and a
 writable mount holding VCS metadata. A request field the grants do not describe
-(VCS environment, skills, container-use environment, network domains, a
+(VCS or container environment, skills, container-use environment, network domains, a
 different sandbox or image, a different allow list, or an MCP entry other than a
 service-authenticated HTTP endpoint) is refused before a session is prepared.
 Core's refusals (`ErrNotGranted`, `ErrUnsupported`, `ErrNoGrants`, and
