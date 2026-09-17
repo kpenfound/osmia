@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -18,6 +19,25 @@ var ErrOwnerEdit = errors.New("owner edit refused")
 // edits on disk to its path.
 var ownerEditable = map[string]string{"spec": "spec.md", "plan": "plan.json"}
 
+// ownerEdited reports whether a trace file is one the owner edits in place,
+// so that a difference from the committed history is an edit to record and
+// not damage.
+func ownerEdited(name string) bool {
+	if name == "charter.md" {
+		return true
+	}
+	parts := strings.Split(name, "/")
+	if len(parts) != 3 || parts[0] != "workstreams" {
+		return false
+	}
+	for _, path := range ownerEditable {
+		if parts[2] == path {
+			return true
+		}
+	}
+	return false
+}
+
 // OwnerDocument returns the latest recorded revision of a workstream document
 // the owner edits on disk, spec.md or plan.json. When the file differs from
 // that revision, the file is first recorded as a new revision by the owner,
@@ -26,7 +46,8 @@ var ownerEditable = map[string]string{"spec": "spec.md", "plan": "plan.json"}
 //
 // check reads the edited content and refuses it: nothing is recorded, and the
 // latest recorded revision is returned with an error wrapping ErrOwnerEdit
-// and check's own. A document with no recorded revision is not the owner's to
+// and check's own. It runs while the repository is held, so it must not read
+// the trace. A document with no recorded revision is not the owner's to
 // create, and is reported as missing.
 func (r *Repository) OwnerDocument(ctx context.Context, stream config.WorkstreamID, id string, at time.Time, check func(string) error) (Document, error) {
 	path, ok := ownerEditable[id]

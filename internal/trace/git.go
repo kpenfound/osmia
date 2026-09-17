@@ -143,8 +143,8 @@ func (r *Repository) commitContent(ctx context.Context, paths []string, content 
 
 // checkHistory finishes journaled workflow publication and reports other
 // uncommitted file changes without guessing how to reconcile them. The owner
-// edits charter.md directly; Charter records those edits, so a difference
-// there is expected.
+// edits charter.md and a workstream's spec.md and plan.json directly; Charter
+// and OwnerDocument record those edits, so a difference there is expected.
 func (r *Repository) checkHistory(ctx context.Context) error {
 	if err := r.recoverPublication(ctx); err != nil {
 		return err
@@ -156,7 +156,7 @@ func (r *Repository) checkHistory(ctx context.Context) error {
 	tracked := map[string]bool{}
 	for name, oid := range blobs {
 		tracked[name] = true
-		if name == "charter.md" {
+		if ownerEdited(name) {
 			continue
 		}
 		data, err := r.readFile(name)

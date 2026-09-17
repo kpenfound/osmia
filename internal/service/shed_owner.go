@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -26,13 +27,14 @@ func (d *debate) ownerEdits(ctx context.Context, stream config.WorkstreamID) (sh
 	if err != nil {
 		return shed.Pin{}, err
 	}
-	dr := d.drafter()
+	// The check runs while the trace is held, so the entity map it validates
+	// against is loaded before the read.
+	entities, err := kb.Load(d.repository)
+	if err != nil {
+		return shed.Pin{}, err
+	}
 	planDoc, err := d.repository.OwnerDocument(ctx, stream, plan.PlanDocument, d.s.now(), func(content string) error {
-		problems, err := dr.validate(specDoc, trace.Document{Content: content})
-		if err != nil {
-			return err
-		}
-		if len(problems) > 0 {
+		if problems := validateDraft(specDoc.Content, content, entities); len(problems) > 0 {
 			return errors.New(strings.Join(problems, "; "))
 		}
 		return nil
