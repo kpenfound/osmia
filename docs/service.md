@@ -286,7 +286,7 @@ no turn, completes a queued one as cancelled, and records `draft-<n>-failed`
 with the reason `draft <n> failed: the workstream was abandoned, so the
 architect runs no turn for it`; nothing more is requested.
 
-`Options.Architect` supplies the isolation engine and MCP host factory the
+`Options.Architect` supplies the execution engine and MCP host factory the
 architect's turns run in. Without it the controller requests nothing, so a
 handed workstream stays `handed` until a service with a runner starts and
 drafts it. A draft already requested stays pending: applying it returns
