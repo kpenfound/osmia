@@ -21,6 +21,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 const project config.ProjectID = "p_0123456789abcdef0123456789abcdef"
@@ -32,6 +33,33 @@ func must(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+// awaitAcknowledged polls fetch until it returns operations and the reconcile
+// controller has acknowledged every one of them. An operation's result and its
+// acknowledgement are committed after the state its Apply commits, so a test
+// that reached an operation through an awaited state must wait here before it
+// asserts on the operation's result, acknowledgement or history.
+func awaitAcknowledged(t *testing.T, fetch func(*testing.T) []trace.OperationRecord) []trace.OperationRecord {
+	t.Helper()
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		ops := fetch(t)
+		acknowledged := len(ops) > 0
+		for _, o := range ops {
+			if !o.Acknowledged {
+				acknowledged = false
+			}
+		}
+		if acknowledged {
+			return ops
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("operations were not acknowledged: %+v", ops)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func fixture(t *testing.T) Options {
 	t.Helper()
 	home, err := os.MkdirTemp("", "os-")

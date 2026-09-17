@@ -214,6 +214,13 @@ func (f *architectFixture) draftOperations(t *testing.T, stream config.Workstrea
 	return out
 }
 
+// acknowledgedDraftOperations returns the draft operations once every one of
+// them is acknowledged, for assertions reached through an awaited state.
+func (f *architectFixture) acknowledgedDraftOperations(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
+	t.Helper()
+	return awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.draftOperations(t, stream) })
+}
+
 func (f *architectFixture) architectThread(t *testing.T, stream config.WorkstreamID) trace.Thread {
 	t.Helper()
 	th, err := f.repository().Thread(stream, architectAgent)
@@ -359,7 +366,7 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 	}
 	// The draft is recorded as architect-authored revisions caused by the
 	// draft operation, in one commit, and the files are on disk.
-	ops := f.draftOperations(t, stream)
+	ops := f.acknowledgedDraftOperations(t, stream)
 	if len(ops) != 1 || !ops[0].Acknowledged || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" || !strings.Contains(ops[0].Result.Evidence, "draft 1 passed validation") {
 		t.Fatalf("operations: %+v", ops)
 	}
@@ -570,7 +577,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	if runs := f.runs(); !slices.Equal(runs, []string{"draft-1-1", "draft-2-1", "draft-3-1"}) {
 		t.Fatalf("backend runs %v", runs)
 	}
-	ops := f.draftOperations(t, stream)
+	ops := f.acknowledgedDraftOperations(t, stream)
 	if len(ops) != 3 {
 		t.Fatalf("operations: %+v", ops)
 	}
@@ -725,7 +732,7 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 	if runs := f3.runs(); len(runs) != maxDrafts*maxDraftAttempts {
 		t.Fatalf("backend runs %v", runs)
 	}
-	ops = f3.draftOperations(t, stream)
+	ops = f3.acknowledgedDraftOperations(t, stream)
 	if len(ops) != maxDrafts || ops[0].Result == nil || !strings.Contains(ops[0].Result.Evidence, fmt.Sprintf("draft 1 failed: the architect turn was interrupted %d times by service stops", maxDraftAttempts)) {
 		t.Fatalf("operations: %+v", ops)
 	}
@@ -755,7 +762,7 @@ func TestArchitectRedraftsAfterAFailedTurn(t *testing.T) {
 	if runs := f.runs(); !slices.Equal(runs, []string{"draft-1-1", "draft-2-1"}) {
 		t.Fatalf("backend runs %v", runs)
 	}
-	ops := f.draftOperations(t, stream)
+	ops := f.acknowledgedDraftOperations(t, stream)
 	if len(ops) != 2 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" ||
 		!strings.HasPrefix(ops[0].Result.Evidence, "draft 1 failed: architect turn draft-1-1 failed: ") || !strings.Contains(ops[0].Result.Evidence, "backend crashed") {
 		t.Fatalf("operations: %+v", ops)
@@ -1022,7 +1029,7 @@ func TestArchitectDraftSurvivesRestart(t *testing.T) {
 			defer f.stop(t)
 			if crash == "moved" {
 				f.await(t, stream, draftAt("failed-1"))
-				ops := f.draftOperations(t, stream)
+				ops := f.acknowledgedDraftOperations(t, stream)
 				if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" || !strings.Contains(ops[0].Result.Evidence, "the workstream is abandoned, not handed, so the valid draft was recorded and not presented") {
 					t.Fatalf("operations: %+v", ops)
 				}
@@ -1048,7 +1055,7 @@ func TestArchitectDraftSurvivesRestart(t *testing.T) {
 			}
 			// One result, one set of revisions, one transition: the retries
 			// produced no duplicates.
-			ops = f.draftOperations(t, stream)
+			ops = f.acknowledgedDraftOperations(t, stream)
 			kinds := map[string]int{}
 			for _, a := range ops[0].History {
 				kinds[a.Kind]++
@@ -1100,7 +1107,7 @@ func TestAbandonStopsTheArchitectDraft(t *testing.T) {
 	check := func(t *testing.T, f *architectFixture, stream config.WorkstreamID) {
 		t.Helper()
 		f.await(t, stream, draftAt("failed-1"))
-		ops := f.draftOperations(t, stream)
+		ops := f.acknowledgedDraftOperations(t, stream)
 		if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" || ops[0].Result.Evidence != evidence {
 			t.Fatalf("operations: %+v", ops)
 		}
