@@ -184,7 +184,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		if !slices.Equal(names, []string{"answer", "escalate", "file_read", "propose_charter", "route_amendment"}) {
 			problem("chief of staff tools %v", names)
 		}
-		for _, part := range []string{"You are the chief of staff for workstream " + string(stream), questions.Guidance, "- charter#1: Keep state in files under the root."} {
+		for _, part := range []string{"You are the chief of staff for workstream " + string(stream), questions.Guidance, "- charter#1 [Charter]: Keep state in files under the root."} {
 			if !strings.Contains(req.SystemPrompt, part) {
 				problem("event turn system prompt lacks %q:\n%s", part, req.SystemPrompt)
 			}
@@ -327,15 +327,17 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		t.Fatalf("restart with open questions ran: %v", got)
 	}
 	clock.Advance(time.Minute)
-	select {
-	case ticks <- clock.Now():
-	case <-time.After(demoTimeout):
-		t.Fatal("service did not finish its pass")
-	}
-	select {
-	case <-answered:
-	case <-time.After(demoTimeout):
-		t.Fatal("chief of staff did not answer")
+	// The pass that sees the closed window blocks inside the chief-of-staff
+	// turn, so it may never take another tick.
+	for waiting := true; waiting; {
+		select {
+		case ticks <- clock.Now():
+		case <-answered:
+			waiting = false
+		case <-time.After(demoTimeout):
+			s.Close()
+			t.Fatal("chief of staff did not answer")
+		}
 	}
 	if got := turnsOf(repo, demoAgent); !slices.Equal(got, []string{"build"}) {
 		t.Fatalf("answer delivered inside the chief-of-staff turn: %v", got)
