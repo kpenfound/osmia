@@ -573,7 +573,7 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 		}
 	}
 	if len(notices) != 1 || notices[0].Event.Kind != trace.NoticeKind || notices[0].Event.Operation != nil ||
-		!strings.Contains(notices[0].Event.Body, "failed 3 times and drafting has stopped; the workstream stays handed. Last failure: draft 3 of the spec and plan is invalid:\n- unit \"resume\": dependency cycle") {
+		!strings.Contains(notices[0].Event.Body, "failed 3 times and drafting has stopped; the workstream stays handed. Last failure: draft 3 of the spec and plan is invalid:\n- unit \"dedupe\": dependency cycle") {
 		t.Fatalf("outbox: %+v", outbox)
 	}
 	var last trace.Transition

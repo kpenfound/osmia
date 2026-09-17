@@ -64,15 +64,17 @@ the affected files. For example, changing a spec retains both full document
 revisions in `documents.jsonl` and both versions of `spec.md` in Git history.
 There is no terminal-history deletion operation.
 
-`RecordDocuments(ctx, documents)` records several project document revisions
-as one commit through the journaled publication boundary, so after a failure
-or an interruption either all of them are recorded or none is. Every revision
-is checked against the recorded history before anything is written; the
-charter is refused because the owner edits it. A `kb/<subsystem>.md` revision
-with empty content records the subsystem's removal: the revision is kept in
-`documents.jsonl` and the file is deleted from the tree and from disk. The
-[knowledge-base extraction](knowledge-base.md#extraction) records each pass
-this way.
+`RecordDocuments(ctx, documents)` records several document revisions of one
+scope, the project or one workstream, as one commit through the journaled
+publication boundary, so after a failure or an interruption either all of
+them are recorded or none is. Every revision is checked against the recorded
+history before anything is written; the charter is refused because the owner
+edits it, and handed input because it is immutable. A `kb/<subsystem>.md`
+revision with empty content records the subsystem's removal: the revision is
+kept in `documents.jsonl` and the file is deleted from the tree and from
+disk. The [knowledge-base extraction](knowledge-base.md#extraction) records
+each pass this way, and [architect drafting](service.md#architect-drafting)
+records each draft's `spec.md` and `plan.json`.
 
 `Read[trace.Document](repository, workstreamID)` enumerates typed revisions;
 `Get[trace.Document](repository, workstreamID, id, revision)` retrieves one.
@@ -148,7 +150,9 @@ kind and body for [chief-of-staff delivery](service.md#event-delivery).
 `SetFeatureState(ctx, header, to, reason)` moves the workstream's `feature`
 subject from its current state and records a notice of the change in the same
 transaction; a retry with the same header, state and reason returns the
-committed state. Local operation intents also
+committed state. `MoveFeatureState(ctx, header, from, to, reason)` does the
+same from an expected current state and refuses any other with `ErrConflict`,
+except for the retry of a committed transition. Local operation intents also
 carry the operation described below. Callers retain the complete
 request across retries, including timestamps and event order. An identical retry
 returns its original resulting state even if later transactions exist. Reusing a
@@ -495,7 +499,10 @@ one returns `{"stored":true,"revision":n}`. Turn isolation grants the tool to
 
 A workstream's `spec.md` and `plan.json` are ordinary `Document` records with
 IDs `spec` and `plan`. Every change is a new revision; `internal/plan` parses
-and validates their content and never writes the trace itself.
+and validates their content and never writes the trace itself. The service
+records the architect's drafts, including drafts that fail validation, so the
+latest revision is not always a valid one; see
+[architect drafting](service.md#architect-drafting).
 
 ### spec.md
 
