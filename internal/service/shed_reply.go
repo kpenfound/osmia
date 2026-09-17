@@ -58,11 +58,15 @@ func (in roundInput) action() string {
 	return ReplyAction
 }
 
-// running is the shed state while the turn runs, done the state once its
-// record is committed and recorded the kind of that state.
-func (in roundInput) running() string  { return fmt.Sprintf("%s-%d", in.answering(), in.Round) }
-func (in roundInput) done() string     { return fmt.Sprintf("%s-%d", in.recorded(), in.Round) }
-func (in roundInput) recorded() string { return in.answering() + "ed" }
+// running is the shed state while the turn runs, and recorded the kind of the
+// state it reaches once its record is committed.
+func (in roundInput) running() string { return fmt.Sprintf("%s-%d", in.answering(), in.Round) }
+func (in roundInput) recorded() string {
+	if in.Redraft {
+		return "redrafted"
+	}
+	return "replied"
+}
 
 // ids are the transition and run-event IDs of the turn's operation.
 func (in roundInput) ids() (transition, event string) {

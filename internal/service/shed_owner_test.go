@@ -410,10 +410,13 @@ func TestSkipIsRefusedWhileARoundRunsAndOutsideTheShed(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, call := range map[string]func() error{
-		"skip":   func() error { _, err := f.c.ShedSkip(ctx, stream); return err },
-		"object": func() error { _, err := f.c.ShedObject(ctx, stream, "No."); return err },
-		"rule":   func() error { _, err := f.c.ShedRule(ctx, stream, "owner-r1-1", "dismiss", ""); return err },
-		"more":   func() error { _, err := f.c.ShedMore(ctx, stream, 1); return err },
+		"skip":     func() error { _, err := f.c.ShedSkip(ctx, stream); return err },
+		"object":   func() error { _, err := f.c.ShedObject(ctx, stream, "No."); return err },
+		"rule":     func() error { _, err := f.c.ShedRule(ctx, stream, "owner-r1-1", "dismiss", ""); return err },
+		"overrule": func() error { _, err := f.c.ShedOverrule(ctx, stream, "owner-r1-1", ""); return err },
+		"more":     func() error { _, err := f.c.ShedMore(ctx, stream, 1); return err },
+		"redraft":  func() error { _, err := f.c.ShedRedraft(ctx, stream, "Split it."); return err },
+		"ratify":   func() error { _, err := f.c.Ratify(ctx, stream, 1, 1); return err },
 	} {
 		if err := call(); !failed(err, Conflict) || !strings.Contains(err.Error(), AbandonedState) {
 			t.Fatalf("%s on an abandoned workstream: %v", name, err)
@@ -737,8 +740,15 @@ func TestShedActionsRefuseAnUnknownWorkstream(t *testing.T) {
 			_, err := f.c.ShedRule(ctx, id, "owner-r1-1", "dismiss", "")
 			return err
 		},
-		"skip": func(id config.WorkstreamID) error { _, err := f.c.ShedSkip(ctx, id); return err },
-		"more": func(id config.WorkstreamID) error { _, err := f.c.ShedMore(ctx, id, 1); return err },
+		"overrule": func(id config.WorkstreamID) error {
+			_, err := f.c.ShedOverrule(ctx, id, "owner-r1-1", "")
+			return err
+		},
+		"skip":    func(id config.WorkstreamID) error { _, err := f.c.ShedSkip(ctx, id); return err },
+		"more":    func(id config.WorkstreamID) error { _, err := f.c.ShedMore(ctx, id, 1); return err },
+		"redraft": func(id config.WorkstreamID) error { _, err := f.c.ShedRedraft(ctx, id, "Split it."); return err },
+		"packet":  func(id config.WorkstreamID) error { _, err := f.c.Packet(ctx, id); return err },
+		"ratify":  func(id config.WorkstreamID) error { _, err := f.c.Ratify(ctx, id, 1, 1); return err },
 	}
 	for name, call := range calls {
 		if err := call(unknown); !failed(err, Validation) {

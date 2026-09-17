@@ -152,7 +152,7 @@ func Recommend(entries []Entry) string {
 		for i, e := range blocked {
 			ids[i] = e.ID
 		}
-		return fmt.Sprintf("do not ratify yet: %s block ratification (%s); overrule or sustain each one, or ask for a redraft",
+		return fmt.Sprintf("do not ratify yet: ratification is blocked by %s (%s); overrule or sustain each one, or ask for a redraft",
 			Objections(len(blocked)), strings.Join(ids, ", "))
 	case len(entries) > 0:
 		return fmt.Sprintf("ratify: nothing blocks, and %s stand as advice on the record", Objections(len(entries)))
