@@ -264,7 +264,7 @@ func checkArchitectBoundary(ctx context.Context, req agent.Request, policy corea
 			fail("runtime read %s", path)
 		}
 	}
-	for _, args := range []map[string]any{{"path": "notes.md", "content": "x"}, {"path": "../spec.md", "content": "x"}, {"path": "spec.md"}, {"path": "spec.md", "content": "x", "extra": 1}} {
+	for _, args := range []map[string]any{{"path": "notes.md", "content": "x"}, {"path": "../spec.md", "content": "x"}, {"path": "spec.md"}, {"path": "spec.md", "content": "x", "extra": 1}, {"path": "plan.json", "content": strings.Repeat("x", MaxHandedBytes+1)}} {
 		if _, err := callTool(ctx, tools, DraftTool, args); err == nil {
 			fail("draft_write accepted %v", args)
 		}
@@ -392,9 +392,20 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 		t.Fatalf("architect notes: %q %v", notes, err)
 	}
 	// Another pass, and applying the operation again as a retry after a stop
-	// would, record nothing more.
+	// would, record nothing more; a workstream in another feature state is
+	// not drafted.
+	other := config.WorkstreamID("w_0123456789abcdef0123456789abcdef")
+	must(t, f.repository().CreateWorkstream(ctx, other, f.clock.Now(), ownerActor))
+	_, err = f.repository().SetFeatureState(ctx, trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "ratified", Revision: 1, Project: f.project, Workstream: other, At: f.clock.Now(), Actor: ownerActor, Cause: "owner"}, "ratified", "the owner ratified the plan")
+	must(t, err)
 	d := &drafter{s: f.s, repository: f.repository()}
 	must(t, d.Pass(ctx))
+	if state, err := f.repository().Workflow(other, draftSubject); err != nil || state.Value != "" {
+		t.Fatalf("a ratified workstream was drafted: %+v %v", state, err)
+	}
+	if _, err := f.repository().Thread(other, architectAgent); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a ratified workstream got an architect thread: %v", err)
+	}
 	same := func(got *coreadapter.OperationResult) bool {
 		return got != nil && got.Outcome == ops[0].Result.Outcome && got.Evidence == ops[0].Result.Evidence && len(got.Data) == 0
 	}
@@ -442,13 +453,21 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	f := newArchitectFixture(t)
 	defer f.stop(t)
-	// Draft 1 delivers no plan at all; draft 2 a plan with a cycle and an
-	// unaddressed criterion; draft 3 a valid plan.
-	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec}, nil)
+	// Draft 1 delivers no plan through the tool but leaves bytes that are not
+	// UTF-8 text where the service reads the delivery; draft 2 a plan with a
+	// cycle and an unaddressed criterion; draft 3 a valid plan.
+	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec},
+		func(_ context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, _ *mcp.ClientSession) error {
+			output := filepath.Join(filepath.Dir(req.SessionDir), "output")
+			if err := os.MkdirAll(output, 0700); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(output, plan.PlanPath), []byte{'{', 0xff, 0xfe, '}'}, 0600)
+		})
 	f.script("draft-2-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: cyclicPlan},
 		func(ctx context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
 			var problems []error
-			for _, want := range []string{"Draft 1 was not accepted:", "draft 1 of the spec and plan is invalid:\n- plan.json was not delivered", "draft/spec.md and draft/plan.json: your previous draft", "Deliver corrected files"} {
+			for _, want := range []string{"Draft 1 was not accepted:", "draft 1 of the spec and plan is invalid:\n- plan.json is not UTF-8 text", "draft/spec.md and draft/plan.json: your previous draft", "Deliver corrected files"} {
 				if !strings.Contains(req.Prompt, want) {
 					problems = append(problems, fmt.Errorf("prompt lacks %q:\n%s", want, req.Prompt))
 				}
@@ -508,7 +527,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	}
 	for i, want := range []struct{ id, from, to, reason string }{
 		{"draft-1", "", "drafting-1", "the workstream was handed in; the architect is asked for draft 1"},
-		{"draft-1-invalid", "drafting-1", "invalid-1", "draft 1 of the spec and plan is invalid:\n- plan.json was not delivered"},
+		{"draft-1-invalid", "drafting-1", "invalid-1", "draft 1 of the spec and plan is invalid:\n- plan.json is not UTF-8 text"},
 		{"draft-2", "invalid-1", "drafting-2", "draft 1 was invalid; the architect is asked for draft 2"},
 		{"draft-2-invalid", "drafting-2", "invalid-2", "draft 2 of the spec and plan is invalid:\n- spec#2: no unit addresses this criterion\n- unit \"dedupe\": dependency cycle dedupe -> resume -> dedupe"},
 		{"draft-3", "invalid-2", "drafting-3", "draft 2 was invalid; the architect is asked for draft 3"},
@@ -536,7 +555,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 		t.Fatalf("plan revisions: %+v", docs)
 	}
 	th := f.architectThread(t, stream)
-	if len(th.Turns) != 3 || !strings.Contains(th.Turns[1].Request.Prompt, "plan.json was not delivered") || !strings.Contains(th.Turns[2].Request.Prompt, "dependency cycle") {
+	if len(th.Turns) != 3 || !strings.Contains(th.Turns[1].Request.Prompt, "plan.json is not UTF-8 text") || !strings.Contains(th.Turns[2].Request.Prompt, "dependency cycle") {
 		t.Fatalf("thread: %+v", th)
 	}
 	// The chief of staff was told nothing about the invalid drafts.
@@ -615,10 +634,33 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 	if docs := f2.documents(t, stream, plan.SpecDocument); len(docs) != 0 {
 		t.Fatalf("documents: %+v", docs)
 	}
+
+	// A draft whose every turn is interrupted fails with the count, and the
+	// drafts are exhausted the same way.
+	f3 := newArchitectFixture(t)
+	defer f3.stop(t)
+	f3.engine.mu.Lock()
+	for n := 1; n <= maxDrafts; n++ {
+		for attempt := 1; attempt <= maxDraftAttempts; attempt++ {
+			f3.engine.turns[fmt.Sprintf("draft-%d-%d", n, attempt)] = func(context.Context, agent.Request, coreadapter.BoundaryPolicy, *mcp.ClientSession) (*agent.Result, error) {
+				return nil, errors.Join(context.Canceled, errors.New("connection dropped"))
+			}
+		}
+	}
+	f3.engine.mu.Unlock()
+	stream = f3.handIn(t, "design", handedDesign)
+	f3.await(t, stream, draftAt("exhausted"))
+	if runs := f3.runs(); len(runs) != maxDrafts*maxDraftAttempts {
+		t.Fatalf("backend runs %v", runs)
+	}
+	ops = f3.draftOperations(t, stream)
+	if len(ops) != maxDrafts || ops[0].Result == nil || !strings.Contains(ops[0].Result.Evidence, fmt.Sprintf("draft 1 failed: the architect turn was interrupted %d times by service stops", maxDraftAttempts)) {
+		t.Fatalf("operations: %+v", ops)
+	}
 }
 
 func TestArchitectDraftSurvivesRestart(t *testing.T) {
-	for _, crash := range []string{"during-turn", "captured", "completed", "recorded"} {
+	for _, crash := range []string{"during-turn", "captured", "completed", "recorded", "moved"} {
 		t.Run(crash, func(t *testing.T) {
 			f := newArchitectFixture(t)
 			ctx := context.Background()
@@ -689,18 +731,42 @@ func TestArchitectDraftSurvivesRestart(t *testing.T) {
 				must(t, os.MkdirAll(filepath.Join(directory, "output"), 0700))
 				must(t, os.WriteFile(filepath.Join(directory, "output", "spec.md"), []byte(validSpec), 0600))
 				must(t, os.WriteFile(filepath.Join(directory, "output", "plan.json"), []byte(validPlan), 0600))
-				if crash == "recorded" {
+				if crash == "recorded" || crash == "moved" {
 					at := f.clock.Now()
 					header := func(id string) trace.Header {
 						return trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: f.project, Workstream: stream, At: at, Actor: architectActor, Cause: operation, Depth: 1}
 					}
 					must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: header(plan.SpecDocument), Path: plan.SpecPath, Content: validSpec}, {Header: header(plan.PlanDocument), Path: plan.PlanPath, Content: validPlan}}))
 				}
+				if crash == "moved" {
+					// The workstream left handed before the draft was presented.
+					h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "abandoned", Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: "owner"}
+					_, err := repo.SetFeatureState(ctx, h, "abandoned", "the owner abandoned the workstream")
+					must(t, err)
+				}
 			}
 			must(t, repo.Close())
 
 			f.start(t)
 			defer f.stop(t)
+			if crash == "moved" {
+				f.await(t, stream, draftAt("failed-1"))
+				ops := f.draftOperations(t, stream)
+				if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" || !strings.Contains(ops[0].Result.Evidence, "the workstream is abandoned, not handed, so the valid draft was recorded and not presented") {
+					t.Fatalf("operations: %+v", ops)
+				}
+				if state, err := f.repository().Workflow(stream, trace.FeatureSubject); err != nil || state.Value != "abandoned" {
+					t.Fatalf("feature state %+v %v", state, err)
+				}
+				must(t, (&drafter{s: f.s, repository: f.repository()}).Pass(ctx))
+				if ops := f.draftOperations(t, stream); len(ops) != 1 {
+					t.Fatalf("another draft was requested: %+v", ops)
+				}
+				if docs := f.documents(t, stream, plan.SpecDocument); len(docs) != 1 {
+					t.Fatalf("spec revisions: %+v", docs)
+				}
+				return
+			}
 			f.await(t, stream, sketched)
 			if got := f.runs(); !slices.Equal(got, runs) {
 				t.Fatalf("backend runs %v, want %v", got, runs)
