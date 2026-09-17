@@ -101,7 +101,9 @@ func serve(t *testing.T, root string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan int, 1)
 	var diag bytes.Buffer
-	go func() { result <- Run(ctx, []string{"serve", "--root", root}, strings.NewReader(""), &bytes.Buffer{}, &diag) }()
+	go func() {
+		result <- Run(ctx, []string{"serve", "--root", root}, strings.NewReader(""), &bytes.Buffer{}, &diag)
+	}()
 	t.Cleanup(func() {
 		cancel()
 		select {
