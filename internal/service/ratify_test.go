@@ -291,6 +291,13 @@ func TestRedraftGoesBackToTheArchitectAndDebateResumes(t *testing.T) {
 	if i < 0 || records[i].Revision != (shed.Pin{Spec: 1, Plan: 2}) {
 		t.Fatalf("round 2 debated %+v", records)
 	}
+	// The round that debates the redraft is caused by the redraft.
+	if round := f.transition(t, stream, "shed-round-2"); round.Cause != "shed-redraft-1-redrafted" || round.From != "redrafted-1" {
+		t.Fatalf("round 2 %+v", round)
+	}
+	if asked := f.transition(t, stream, "shed-redraft-1"); asked.Cause != shed.RedraftDocumentID(1) || asked.From != "concluded-1" {
+		t.Fatalf("the redraft %+v", asked)
+	}
 	// The conclusion of the resumed debate presents the packet again, at the
 	// revision the redraft wrote.
 	packet := f.awaitPacket(t, stream, "ratify: no objection stands")
@@ -403,5 +410,28 @@ func TestSkippedDebateIsRatifiedAndSeals(t *testing.T) {
 	}
 	if calls := sealing.sealed(); len(calls) != 2 || calls[1].stream != other {
 		t.Fatalf("sealing was asked for %+v", calls)
+	}
+}
+
+// The conclusion at the round limit names what stopped the debate: the
+// configured cap, the further rounds the owner asked for, or the round that
+// debated the redraft they asked for instead.
+func TestBoundNamesWhatStoppedTheDebate(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		requests []shed.More
+		redrafts []shed.Redraft
+		limit    int
+		want     string
+	}{
+		"the configured cap":          {nil, nil, 3, "at the shed.max_rounds cap of 3"},
+		"the rounds asked for":        {[]shed.More{{Round: 1, Rounds: 1}}, nil, 2, "at round 2, the last of the further rounds the owner asked for"},
+		"the redraft asked for":       {nil, []shed.Redraft{{Round: 2}}, 3, "at round 3, the round that debated the redraft the owner asked for"},
+		"the later of the two":        {[]shed.More{{Round: 1, Rounds: 1}}, []shed.Redraft{{Round: 3}}, 4, "at round 4, the round that debated the redraft the owner asked for"},
+		"the rounds asked for, later": {[]shed.More{{Round: 3, Rounds: 2}}, []shed.Redraft{{Round: 1}}, 5, "at round 5, the last of the further rounds the owner asked for"},
+	} {
+		if got := bound(3, tc.requests, tc.redrafts, tc.limit); got != tc.want {
+			t.Fatalf("%s: %q, want %q", name, got, tc.want)
+		}
 	}
 }

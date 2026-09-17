@@ -235,38 +235,28 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 	configured := d.s.current().Shed.MaxRounds
 	limit := shed.Limit(configured, requests, redrafts)
 	if kind == "concluded" {
-		// The redraft the owner asked for is written before debate resumes.
-		asked := slices.ContainsFunc(redrafts, func(r shed.Redraft) bool { return r.Round == n })
-		if asked {
-			written, err := d.recordedReply(stream, roundInput{Round: n, Redraft: true})
+		// A redraft the owner asked for after this conclusion comes before
+		// the round that debates it: recording it moves the shed to
+		// redrafted-<n>, where that round is requested.
+		if slices.ContainsFunc(redrafts, func(r shed.Redraft) bool { return r.Round == n }) {
+			if d.s.options.Architect == nil {
+				return nil
+			}
+			asked, err := d.asked(stream, n)
 			if err != nil {
 				return err
 			}
-			if written == nil {
-				if d.s.options.Architect == nil {
-					return nil
-				}
-				note, err := d.asked(stream, n)
-				if err != nil {
-					return err
-				}
-				return d.requestRedraft(ctx, stream, state, roundInput{Round: n, Spec: latest.Spec, Plan: latest.Plan, Redraft: true}, note.Note)
-			}
+			return d.requestRedraft(ctx, stream, state, roundInput{Round: n, Spec: latest.Spec, Plan: latest.Plan, Redraft: true}, asked.Note)
 		}
 		// Debate otherwise resumes only where the owner asked for further
 		// rounds after this conclusion; the cap bounds how many of them run.
-		if n >= limit || !asked && !slices.ContainsFunc(requests, func(m shed.More) bool { return m.Round == n }) {
+		if n >= limit || !slices.ContainsFunc(requests, func(m shed.More) bool { return m.Round == n }) {
 			return nil
 		}
 		if d.s.options.Committee == nil {
 			return nil
 		}
-		cause := shed.MoreDocumentID(n)
-		if asked {
-			id, _ := roundInput{Round: n, Redraft: true}.ids()
-			cause = id + "-redrafted"
-		}
-		return d.request(ctx, stream, state, roundInput{Round: n + 1, Spec: latest.Spec, Plan: latest.Plan}, cause)
+		return d.request(ctx, stream, state, roundInput{Round: n + 1, Spec: latest.Spec, Plan: latest.Plan}, shed.MoreDocumentID(n))
 	}
 	if kind == "redrafted" {
 		// The owner asked for the redraft to be debated: the round runs
