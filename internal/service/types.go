@@ -107,11 +107,26 @@ type CharterState struct {
 	Diagnostics []charter.Diagnostic `json:"diagnostics"`
 }
 
-// HandInRequest hands work to a project. Paths are absolute paths to the
-// design documents being handed in.
+// HandInRequest hands work to a project. Exactly one of Path (an absolute
+// path to a file), URL (a GitHub issue URL) and Stdin (the input itself) is
+// set. Key identifies the request: a retry with the same key returns the same
+// workstream.
 type HandInRequest struct {
 	Project config.ProjectID `json:"project"`
-	Paths   []string         `json:"paths"`
+	Key     string           `json:"key"`
+	Path    string           `json:"path,omitempty"`
+	URL     string           `json:"url,omitempty"`
+	Stdin   *string          `json:"stdin,omitempty"`
+}
+
+// HandInResponse names the workstream a hand-in created. Handed is the path
+// of the copied input; Source is where it came from, as recorded.
+type HandInResponse struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	State      string              `json:"state"`
+	Handed     string              `json:"handed"`
+	Source     string              `json:"source"`
 }
 
 // ProjectAddRequest registers a project. Clone is an absolute path to an

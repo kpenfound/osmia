@@ -124,7 +124,7 @@ func TestProjectCommands(t *testing.T) {
 	if code != 4 || out != "" || diag != "charter_empty: project "+string(id)+" cannot take work: its charter has no rules; write numbered rules (\"1. ...\") in "+added.Project.Charter+"\n" {
 		t.Fatalf("empty charter hand-in: %d %s %s", code, out, diag)
 	}
-	code, out, diag = invoke(t, root, "handin", project)
+	code, out, diag = invoke(t, root, "handin", project, "design.md")
 	if code != 4 || out != "" || !strings.Contains(diag, "not_found: project "+project+" is not an active project") {
 		t.Fatalf("unknown project hand-in: %d %s %s", code, out, diag)
 	}
@@ -140,9 +140,9 @@ func TestProjectCommands(t *testing.T) {
 	if cs := st2.Configuration.Project.CharterState; cs == nil || !cs.Ready || cs.Rules != 2 || cs.Revision != 2 || len(cs.Diagnostics) != 1 {
 		t.Fatalf("status JSON: %+v", cs)
 	}
-	code, out, diag = invoke(t, root, "handin", string(id), "--json")
-	if code != 5 || out != "" || !strings.Contains(diag, "unsupported: project "+string(id)+" has a charter with 2 rules, but hand-in is not implemented yet") {
-		t.Fatalf("ready charter hand-in: %d %s %s", code, out, diag)
+	code, out, diag = invoke(t, root, "handin", string(id), "missing.md")
+	if code != 4 || out != "" || !strings.Contains(diag, "validation: cannot read ") || !strings.Contains(diag, "missing.md") {
+		t.Fatalf("missing file hand-in: %d %s %s", code, out, diag)
 	}
 	if !strings.Contains(successful(t, root, "priority", "clear"), "applied=true") {
 		t.Fatal("priority without restart")
@@ -192,7 +192,8 @@ func TestProjectUsage(t *testing.T) {
 		{"project"}, {"project", "add"}, {"project", "add", "name"}, {"project", "add", "name", "--upstream", "a/b", "--fork", "c/d"},
 		{"project", "add", "name", "--upstream", "a/b", "--fork", "c/d", "--clone", ""}, {"project", "remove"}, {"project", "remove", "not-an-id"},
 		{"project", "remove", project, "--clone", "x"}, {"status", "--upstream", "a/b"}, {"project", "list"},
-		{"handin"}, {"handin", "not-an-id"}, {"handin", project, "--clone", "x"},
+		{"handin"}, {"handin", "not-an-id"}, {"handin", project}, {"handin", project, "a.md", "b.md"}, {"handin", "not-an-id", "a.md"},
+		{"handin", project, ""}, {"handin", project, "a.md", "--clone", "x"}, {"handin", project, "a.md", "--hard"},
 		{"project", "extract"}, {"project", "extract", "not-an-id"}, {"project", "extract", project, "--hard"},
 	} {
 		code, out, diag := invoke(t, root, args...)

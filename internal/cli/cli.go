@@ -3,6 +3,8 @@ package cli
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
@@ -23,7 +26,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH [--base-branch NAME] [--json]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
-  handin <project-id> [path...] [--json]
+  handin <project-id> <path|issue-url|-> [--json]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
   pause <all|project-id|workstream-id> [--hard] [--reason TEXT] [--json]
@@ -45,7 +48,7 @@ func parse(args []string) (o options, err error) {
 	seen := map[string]bool{}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		if !strings.HasPrefix(a, "-") {
+		if !strings.HasPrefix(a, "-") || a == "-" {
 			o.args = append(o.args, a)
 			continue
 		}
@@ -106,9 +109,10 @@ func parse(args []string) (o options, err error) {
 	return o, nil
 }
 
-// Run writes results to stdout, diagnostics to stderr, and returns a documented
-// exit code. Client execution never loads configuration or opens runtime files.
-func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+// Run reads hand-in input from stdin, writes results to stdout and
+// diagnostics to stderr, and returns a documented exit code. Client execution
+// never loads configuration or opens runtime files.
+func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	o, err := parse(args)
 	invalid := func() int { fmt.Fprintln(stderr, "invalid arguments; use osmia --help"); return 2 }
 	if err != nil {
@@ -136,7 +140,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "pause", "resume":
 		valid = len(a) == 1
 	case "handin":
-		valid = len(a) >= 1
+		valid = len(a) == 2
 	case "priority":
 		valid = len(a) >= 2 && a[0] == "set" || len(a) == 1 && a[0] == "clear"
 	case "profiles":
@@ -228,19 +232,49 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return invalid()
 		}
-		paths := []string{}
-		for _, p := range a[1:] {
-			abs, err := filepath.Abs(p)
+		key, err := handInKey()
+		if err != nil {
+			fmt.Fprintln(stderr, "cannot generate a hand-in key")
+			return 1
+		}
+		req := service.HandInRequest{Project: id, Key: key}
+		switch input := a[1]; {
+		case input == "-":
+			data, err := io.ReadAll(io.LimitReader(stdin, service.MaxHandedBytes+1))
+			if err != nil {
+				fmt.Fprintln(stderr, "cannot read the hand-in from stdin")
+				return 1
+			}
+			if len(data) > service.MaxHandedBytes {
+				fmt.Fprintf(stderr, "stdin is larger than %d bytes; hand in a smaller input\n", service.MaxHandedBytes)
+				return 4
+			}
+			if !utf8.Valid(data) {
+				fmt.Fprintln(stderr, "stdin is not UTF-8 text; hand in a text input")
+				return 4
+			}
+			text := string(data)
+			req.Stdin = &text
+		case strings.HasPrefix(input, "https://") || strings.HasPrefix(input, "http://"):
+			req.URL = input
+		case input == "":
+			return invalid()
+		default:
+			abs, err := filepath.Abs(input)
 			if err != nil {
 				return invalid()
 			}
-			paths = append(paths, abs)
+			req.Path = abs
 		}
-		if err := c.HandIn(ctx, service.HandInRequest{Project: id, Paths: paths}); err != nil {
+		result, err := c.HandIn(ctx, req)
+		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintln(stderr, "invalid service response: hand-in reported success without a result")
-		return 1
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Workstream %s handed in to project %s\nState: %s\nHanded: %s\nSource: %s\n", result.Workstream, result.Project, result.State, result.Handed, result.Source)
+		return 0
 	}
 	if cmd == "send" || cmd == "conversation" {
 		id, err := config.ParseWorkstreamID(a[0])
@@ -547,6 +581,16 @@ func attention(s string) string {
 		return "none"
 	}
 	return s
+}
+
+// handInKey identifies one hand-in command, so the service creates one
+// workstream however often the request reaches it.
+func handInKey() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return "cli-" + hex.EncodeToString(b[:]), nil
 }
 
 // report maps an API error to exit code and guidance. Project operations

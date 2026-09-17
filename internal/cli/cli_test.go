@@ -53,7 +53,7 @@ clone=%q
 func invoke(t *testing.T, root string, args ...string) (int, string, string) {
 	t.Helper()
 	var out, diag bytes.Buffer
-	code := Run(context.Background(), append([]string{"--root", root}, args...), &out, &diag)
+	code := Run(context.Background(), append([]string{"--root", root}, args...), strings.NewReader(""), &out, &diag)
 	return code, out.String(), diag.String()
 }
 func successful(t *testing.T, root string, args ...string) string {
@@ -227,7 +227,7 @@ func TestServeLifecycle(t *testing.T) {
 			if !defaultRoot {
 				args = append(args, "--root", root)
 			}
-			go func() { result <- Run(ctx, args, &bytes.Buffer{}, &diag) }()
+			go func() { result <- Run(ctx, args, strings.NewReader(""), &bytes.Buffer{}, &diag) }()
 			c := service.NewClient(socket)
 			defer c.Close()
 			deadline := time.Now().Add(5 * time.Second)
