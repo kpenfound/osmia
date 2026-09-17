@@ -44,6 +44,7 @@ type fixture struct {
 	failNext bool
 	// failed is the prompt of the turn runAll failed.
 	failed string
+	claims int
 }
 
 func must(t *testing.T, err error) {
@@ -108,7 +109,8 @@ func eventTurns(t *testing.T, repo *trace.Repository) []trace.QueuedTurn {
 // claimNext reserves the chief of staff's next queued turn.
 func (f *fixture) claimNext(t *testing.T, repo *trace.Repository) trace.QueuedTurn {
 	t.Helper()
-	token := fmt.Sprintf("run_%d", f.clock.Now().UnixNano())
+	f.claims++
+	token := fmt.Sprintf("run_%d", f.claims)
 	q, err := repo.ClaimTurn(context.Background(), stream, trace.ChiefOfStaff, token, "/sessions/"+token, f.clock.Now())
 	must(t, err)
 	return q
@@ -329,6 +331,7 @@ func TestCrashAndRestartNeitherLoseNorRepeatEvents(t *testing.T) {
 				n    int
 			}{"none", 1}) {
 				t.Run(fmt.Sprintf("failed=%v/%s%d_then_%s%d", failed, first.name, first.n, second.name, second.n), func(t *testing.T) {
+					t.Parallel()
 					crashAndRestart(t, failed, first.name, first.n, second.name, second.n)
 				})
 			}
