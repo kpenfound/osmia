@@ -412,6 +412,7 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				if x := awaitExtraction(t, c); x.State != "failed" {
 					t.Fatalf("extraction: %+v", x)
 				}
+				awaitExtractionAcknowledged(t, s)
 				if out := demoGit(t, filepath.Dir(root), "--git-dir="+filepath.Join(root, "projects", string(id), ".git"), "rev-list", "--count", "HEAD"); strings.TrimSpace(out) != "10" {
 					t.Fatalf("trace history: %s", out)
 				}
