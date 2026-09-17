@@ -383,9 +383,9 @@ func TestSymlinksAndGitRedirection(t *testing.T) {
 }
 func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
 	for _, mode := range []string{"config", "alternates", "hardlink"} {
-		// A write runs Git to publish even when the handle has listed HEAD's
-		// tree; a read runs Git once HEAD has moved since that listing.
-		for _, op := range []string{"write", "read"} {
+		// Records and workflow publications run Git even when the handle has
+		// listed HEAD's tree; a read runs Git once HEAD has moved since then.
+		for _, op := range []string{"record", "publish", "read"} {
 			t.Run(mode+"/"+op, func(t *testing.T) {
 				r, _, p := create(t)
 				ctx := context.Background()
@@ -426,9 +426,12 @@ func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if op == "write" {
+				switch op {
+				case "record":
 					err = r.Append(ctx, specimens()[0])
-				} else {
+				case "publish":
+					_, err = r.SetFeatureState(ctx, header("transition", "handed"), "handed", "the owner handed a design")
+				default:
 					_, err = r.Workflow(streamID, FeatureSubject)
 				}
 				if err == nil || !strings.Contains(err.Error(), want) {
