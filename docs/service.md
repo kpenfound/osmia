@@ -211,7 +211,7 @@ keeps the workflow subject `draft`, whose transitions are recorded in
 | `drafting-<n>` | Draft `n` is requested: transition `draft-<n>` published an `architect-draft` operation, which the reconciliation loop runs. |
 | `invalid-<n>` | Draft `n` was recorded and failed validation. Transition `draft-<n>-invalid` lists every problem in its reason, and the operation's result carries the same text. |
 | `failed-<n>` | Draft `n` ran no valid turn: the architect's turn failed, service stops interrupted it three times, the workstream was abandoned, or the workstream left `handed` before the draft was presented. Transition `draft-<n>-failed` holds the reason. |
-| `exhausted` | Three drafts were not accepted. Transition `draft-exhausted` records it with a notice for the chief of staff naming the count and the last failure, and nothing more is requested. |
+| `exhausted` | Three drafts were not accepted. Transition `draft-exhausted` records it (`none of the architect's 3 drafts of the spec and plan was accepted; ...`) with a notice for the chief of staff naming the count and quoting the last draft's outcome, and nothing more is requested. |
 
 Draft 1 is requested as soon as the workstream is handed, with the hand-in
 transition as cause; after `invalid-<n>` or `failed-<n>` with `n` below three,
@@ -242,9 +242,9 @@ turn a read-only private copy of it:
 | `context.md` | The rendered [context bundle](context.md) for the whole project, with the workstream's decisions. |
 | `draft/spec.md`, `draft/plan.json` | The latest recorded draft, once one is recorded. |
 
-The architect gets `file_read`, `draft_write`, `notes_read` and `notes_write`
-and nothing else: no write, execute, network or VCS capability, and no other
-context source. `draft_write` takes `path` (`spec.md` or `plan.json`) and
+The architect gets `file_read` and `draft_write` and nothing else: no notes
+(they are the project's, not the workstream's), no write, execute, network or
+VCS capability, and no other context source. `draft_write` takes `path` (`spec.md` or `plan.json`) and
 `content` (UTF-8 text of at most 512 KiB) and stores the file in the turn's
 service-owned directory; it is a memory tool, so the read-only role holds it.
 The prompt names the view, asks for `spec.md` with the intended behaviour,
@@ -253,7 +253,9 @@ a numbered list, and for `plan.json` in the [plan format](trace.md#planjson)
 with every criterion addressed by a unit with a named proof, acyclic
 dependencies and footprints naming entities of the bundle. It states the
 validation rules and leaves how finely the work is cut to the architect. The
-prompt of draft `n+1` opens with the problems of draft `n`.
+prompt of draft `n+1` opens with `Draft <n> was not accepted:` and the reason
+of draft `n`'s transition, and points at `draft/` when a draft is recorded or
+says no file of that draft was recorded.
 
 ### Recording and validation
 
@@ -287,7 +289,10 @@ architect runs no turn for it`; nothing more is requested.
 `Options.Architect` supplies the isolation engine and MCP host factory the
 architect's turns run in. Without it the controller requests nothing, so a
 handed workstream stays `handed` until a service with a runner starts and
-drafts it; a draft already requested runs no turn and fails.
+drafts it. A draft already requested stays pending: applying it returns
+`this service has no agent runner for the architect` wherever it would start or
+run a turn, the operation is retried, and no draft is spent. A captured turn is
+still completed and its draft recorded, since that runs no architect.
 
 ## Abandoning
 

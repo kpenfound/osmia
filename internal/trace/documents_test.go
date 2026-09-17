@@ -380,7 +380,7 @@ func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
 	// Every revision in the batch is checked before anything is written: mixed
 	// scopes, a handed revision, a project path in a workstream, an unknown
 	// workstream and a repeated revision are all refused whole.
-	other := streamDocument("spec", "spec.md", "x\n", 2)
+	other := streamDocument("spec", "spec.md", "x\n", 1)
 	other.Workstream = legacyStream
 	handed2 := streamDocument("handed", "handed/design.md", "changed\n", 2)
 	handed2.Source = "stdin"

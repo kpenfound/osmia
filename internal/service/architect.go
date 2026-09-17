@@ -152,8 +152,8 @@ func (d *drafter) reconcile(ctx context.Context, stream config.WorkstreamID) err
 	if err != nil {
 		return err
 	}
-	reason := fmt.Sprintf("the architect's drafts of the spec and plan were %s %d times; drafting stops and the workstream stays %s", kind, n, HandedState)
-	body := fmt.Sprintf("The architect's drafts of the spec and plan failed %d times and drafting has stopped; the workstream stays %s. Last failure: %s", n, HandedState, last.Reason)
+	reason := fmt.Sprintf("none of the architect's %d drafts of the spec and plan was accepted; drafting stops and the workstream stays %s", n, HandedState)
+	body := fmt.Sprintf("None of the architect's %d drafts of the spec and plan was accepted and drafting has stopped; the workstream stays %s. Last draft: %s", n, HandedState, last.Reason)
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: d.header("draft-exhausted", stream, last.ID, d.s.now()), Subject: draftSubject, From: state.Value, To: "exhausted", Reason: reason},
 		Events:     []trace.Event{trace.Notice("draft-exhausted", "chief", body)}}
@@ -310,14 +310,18 @@ func (d *drafter) Inspect(_ context.Context, op coreadapter.Operation) (coreadap
 	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "architect turn " + last.Request.TurnID + " is " + last.Status() + "; draft not recorded"}, nil
 }
 
+// errNoArchitect leaves a draft pending in a service that cannot run the
+// architect's turn, so the draft is not spent on the missing runner.
+var errNoArchitect = errors.New("this service has no agent runner for the architect")
+
 // Apply drives the draft to a terminal result: it abandons a turn a previous
 // service stop interrupted, starts a new turn while attempts remain, runs the
 // pending turn through the dispatcher, and records a completed turn's draft.
 // Abandoning the workstream cancels the running turn, and the draft of an
 // abandoned workstream fails without starting another.
 // A failed turn and an invalid draft are terminal failures recorded as draft
-// transitions; storage errors leave the operation pending for another
-// attempt.
+// transitions; storage errors and a missing architect runner leave the
+// operation pending for another attempt.
 func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	in, err := decodeDraft(op)
 	if err != nil {
@@ -374,6 +378,9 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 			if len(turns) >= maxDraftAttempts {
 				return d.terminal(ctx, op.ID, stream, n, "failed", fmt.Sprintf("draft %d failed: the architect turn was interrupted %d times by service stops", n, len(turns)))
 			}
+			if d.s.options.Architect == nil {
+				return coreadapter.OperationResult{}, errNoArchitect
+			}
 			if err := d.enqueue(ctx, cfg, stream, n, len(turns)+1, op.ID); err != nil {
 				return coreadapter.OperationResult{}, err
 			}
@@ -392,6 +399,8 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 			turnCtx := running
 			if last.Response != nil {
 				turnCtx = ctx
+			} else if d.s.options.Architect == nil {
+				return coreadapter.OperationResult{}, errNoArchitect
 			}
 			if _, err := d.dispatch(turnCtx, stream, last.Request.TurnID); err != nil {
 				return coreadapter.OperationResult{}, err
@@ -446,17 +455,24 @@ func (d *drafter) enqueue(ctx context.Context, cfg *config.Config, stream config
 	if err != nil {
 		return err
 	}
-	previous := ""
+	previous, drafted := "", false
 	if n > 1 {
 		last, err := d.previous(stream, n-1)
 		if err != nil {
 			return err
 		}
 		previous = last.Reason
+		latest, err := d.latest(stream)
+		if err != nil {
+			return err
+		}
+		_, spec := latest[plan.SpecDocument]
+		_, graph := latest[plan.PlanDocument]
+		drafted = spec || graph
 	}
 	turn := draftTurnID(n, attempt)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: draftingActor, Cause: operation, Depth: 1},
-		AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: architectSystemPrompt(cfg.Project), Prompt: architectPrompt(handed.Path, n, previous)}
+		AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: architectSystemPrompt(cfg.Project), Prompt: architectPrompt(handed.Path, n, previous, drafted)}
 	_, err = d.repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -518,8 +534,9 @@ func (d *drafter) dispatch(ctx context.Context, stream config.WorkstreamID, turn
 
 // turns is the architect's isolated turn path: a read-only private view of
 // the handed input, the charter and the context bundle, the file reading
-// tool, the delivery tool and the role's notes, and no write, execute,
-// network or VCS capability.
+// tool and the delivery tool, and no notes, write, execute, network or VCS
+// capability: notes are the project's, and would carry one workstream's
+// drafting into another's.
 func (d *drafter) turns(stream config.WorkstreamID) *isolation.Turns {
 	var engine coreadapter.IsolationEngine
 	var hosts func(string) coreadapter.MCPHosts
@@ -530,16 +547,12 @@ func (d *drafter) turns(stream config.WorkstreamID) *isolation.Turns {
 		Workspaces: stagedWorkspaces{},
 		Views:      isolation.Views{Directory: filepath.Join(d.s.current().Root.String(), "views")},
 		Select:     d.selectView,
-		Grants:     map[string]coreadapter.Capabilities{architectRole: {Tools: []string{"file_read", DraftTool, "notes_read", "notes_write"}}},
+		Grants:     map[string]coreadapter.Capabilities{architectRole: {Tools: []string{"file_read", DraftTool}}},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Workstream != string(stream) {
 				return nil, errors.New("turn scope denied")
 			}
-			tools, err := d.repository.NotesTools(architectAgent, scope)
-			if err != nil {
-				return nil, err
-			}
-			return append(tools, d.draftTool(scope)), nil
+			return []coreadapter.Tool{d.draftTool(scope)}, nil
 		},
 		Hosts:  hosts,
 		Engine: engine,
@@ -784,12 +797,15 @@ func architectSystemPrompt(p config.Project) string {
 	return fmt.Sprintf("You are the architect of the %s project (%s). You draft one workstream's feature spec and plan from what the owner handed in, the project's charter and its knowledge base, in the vocabulary the knowledge base gives the project. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them.", p.Name, p.Upstream, DraftTool)
 }
 
-func architectPrompt(handedPath string, n int, previous string) string {
+func architectPrompt(handedPath string, n int, previous string, drafted bool) string {
 	var b strings.Builder
 	draft := ""
-	if n > 1 {
+	switch {
+	case n > 1 && drafted:
 		fmt.Fprintf(&b, "Draft %d was not accepted:\n%s\n\nYour previous spec.md and plan.json are in draft/. Deliver corrected files.\n\n", n-1, previous)
 		draft = "- draft/spec.md and draft/plan.json: your previous draft.\n"
+	case n > 1:
+		fmt.Fprintf(&b, "Draft %d was not accepted:\n%s\n\nNo file of that draft was recorded. Deliver both files.\n\n", n-1, previous)
 	}
 	fmt.Fprintf(&b, `Draft the feature spec and the plan for this workstream.
 

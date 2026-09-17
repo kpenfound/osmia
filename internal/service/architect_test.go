@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -224,8 +225,8 @@ func readTool(ctx context.Context, tools *mcp.ClientSession, path string) (strin
 
 // checkArchitectBoundary makes the negative assertions from inside the turn:
 // the view holds the handed input, the charter and the bundle and nothing
-// else, the role reads files, delivers the draft and keeps notes, and
-// nothing carries write, execute, network or VCS access.
+// else, the role reads files and delivers the draft, and nothing carries
+// notes, write, execute, network or VCS access.
 func checkArchitectBoundary(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession, clone, handed, charter string) error {
 	var problems []error
 	fail := func(format string, args ...any) { problems = append(problems, fmt.Errorf(format, args...)) }
@@ -238,10 +239,10 @@ func checkArchitectBoundary(ctx context.Context, req agent.Request, policy corea
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if want := []string{DraftTool, "file_read", "notes_read", "notes_write"}; !slices.Equal(names, want) {
+	if want := []string{DraftTool, "file_read"}; !slices.Equal(names, want) {
 		fail("role tools %v, want %v", names, want)
 	}
-	for _, name := range []string{"file_write", "shell", "git_push", "set_status"} {
+	for _, name := range []string{"file_write", "shell", "git_push", "set_status", "notes_read", "notes_write"} {
 		if _, err := callTool(ctx, tools, name, map[string]any{"path": "x", "content": "y"}); err == nil {
 			fail("runtime called %s", name)
 		}
@@ -317,8 +318,7 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 			if _, e := readTool(ctx, tools, "draft/spec.md"); e == nil {
 				err = errors.Join(err, errors.New("first turn sees a previous draft"))
 			}
-			_, e := callTool(ctx, tools, "notes_write", map[string]any{"text": "architect: cite charter#2 in every plan"})
-			return errors.Join(err, e)
+			return err
 		})
 	head := demoGit(t, filepath.Dir(f.clone), "-C", f.trace, "rev-parse", "HEAD")
 	stream := f.handIn(t, "design", handedDesign)
@@ -389,8 +389,8 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 	if len(th.Turns) != 1 || th.Turns[0].Request.TurnID != "draft-1-1" || th.Turns[0].Status() != "idle" || th.Identity.Role != architectRole || th.Active != "" {
 		t.Fatalf("architect thread: %+v", th)
 	}
-	if notes, err := os.ReadFile(filepath.Join(f.trace, "notes", "architect.md")); err != nil || string(notes) != "architect: cite charter#2 in every plan" {
-		t.Fatalf("architect notes: %q %v", notes, err)
+	if _, err := os.Stat(filepath.Join(f.trace, "notes", "architect.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("architect notes: %v", err)
 	}
 	// Another pass, and applying the operation again as a retry after a stop
 	// would, record nothing more; a workstream in another feature state is
@@ -593,7 +593,7 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 		}
 	}
 	if len(notices) != 1 || notices[0].Event.Kind != trace.NoticeKind || notices[0].Event.Operation != nil ||
-		!strings.Contains(notices[0].Event.Body, "failed 3 times and drafting has stopped; the workstream stays handed. Last failure: draft 3 of the spec and plan is invalid:\n- spec#2: no unit addresses this criterion\n- unit \"dedupe\": dependency cycle") {
+		!strings.HasPrefix(notices[0].Event.Body, "None of the architect's 3 drafts of the spec and plan was accepted and drafting has stopped; the workstream stays handed. Last draft: draft 3 of the spec and plan is invalid:\n- spec#2: no unit addresses this criterion\n- unit \"dedupe\": dependency cycle") {
 		t.Fatalf("outbox: %+v", outbox)
 	}
 	var last trace.Transition
@@ -602,7 +602,7 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 			last = tr
 		}
 	}
-	if last.From != "invalid-3" || last.To != "exhausted" || last.Actor != draftingActor || last.Cause != "draft-3-invalid" || !strings.Contains(last.Reason, "invalid 3 times; drafting stops") {
+	if last.From != "invalid-3" || last.To != "exhausted" || last.Actor != draftingActor || last.Cause != "draft-3-invalid" || last.Reason != "none of the architect's 3 drafts of the spec and plan was accepted; drafting stops and the workstream stays handed" {
 		t.Fatalf("exhausted transition: %+v", last)
 	}
 	// Nothing more is requested, however many passes run.
@@ -675,6 +675,203 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 	ops = f3.draftOperations(t, stream)
 	if len(ops) != maxDrafts || ops[0].Result == nil || !strings.Contains(ops[0].Result.Evidence, fmt.Sprintf("draft 1 failed: the architect turn was interrupted %d times by service stops", maxDraftAttempts)) {
 		t.Fatalf("operations: %+v", ops)
+	}
+}
+
+func TestArchitectRedraftsAfterAFailedTurn(t *testing.T) {
+	f := newArchitectFixture(t)
+	defer f.stop(t)
+	f.engine.mu.Lock()
+	f.engine.turns["draft-1-1"] = func(context.Context, agent.Request, coreadapter.BoundaryPolicy, *mcp.ClientSession) (*agent.Result, error) {
+		return nil, errors.New("backend crashed")
+	}
+	f.engine.mu.Unlock()
+	var mu sync.Mutex
+	prompt := ""
+	f.script("draft-2-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan},
+		func(ctx context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
+			mu.Lock()
+			prompt = req.Prompt
+			mu.Unlock()
+			if _, err := readTool(ctx, tools, "draft/spec.md"); err == nil {
+				return errors.New("the view holds a draft that was never recorded")
+			}
+			return nil
+		})
+	stream := f.handIn(t, "design", handedDesign)
+	f.await(t, stream, sketched)
+	if runs := f.runs(); !slices.Equal(runs, []string{"draft-1-1", "draft-2-1"}) {
+		t.Fatalf("backend runs %v", runs)
+	}
+	ops := f.draftOperations(t, stream)
+	if len(ops) != 2 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" ||
+		!strings.HasPrefix(ops[0].Result.Evidence, "draft 1 failed: architect turn draft-1-1 failed: ") || !strings.Contains(ops[0].Result.Evidence, "backend crashed") {
+		t.Fatalf("operations: %+v", ops)
+	}
+	reason := ops[0].Result.Evidence
+	byID := map[string]trace.Transition{}
+	for _, tr := range f.transitions(t, stream) {
+		byID[tr.ID] = tr
+	}
+	if failed := byID["draft-1-failed"]; failed.From != "drafting-1" || failed.To != "failed-1" || failed.Reason != reason || failed.Actor != draftingActor || failed.Cause != ops[0].Operation.ID {
+		t.Fatalf("failed transition: %+v", failed)
+	}
+	if next := byID["draft-2"]; next.From != "failed-1" || next.To != "drafting-2" || next.Cause != "draft-1-failed" {
+		t.Fatalf("second request: %+v", next)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if want := "Draft 1 was not accepted:\n" + reason + "\n\nNo file of that draft was recorded. Deliver both files.\n\n"; !strings.HasPrefix(prompt, want) || strings.Contains(prompt, "draft/") {
+		t.Fatalf("second prompt: %q", prompt)
+	}
+	if th := f.architectThread(t, stream); len(th.Turns) != 2 || th.Turns[0].Status() != "failed" || th.Turns[1].Status() != "idle" {
+		t.Fatalf("thread: %+v", th)
+	}
+}
+
+func TestArchitectDraftWaitsForARunner(t *testing.T) {
+	f := newArchitectFixture(t)
+	ctx := context.Background()
+	entered := make(chan struct{})
+	var once sync.Once
+	f.engine.mu.Lock()
+	f.engine.turns["draft-1-1"] = func(ctx context.Context, _ agent.Request, _ coreadapter.BoundaryPolicy, _ *mcp.ClientSession) (*agent.Result, error) {
+		once.Do(func() { close(entered) })
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	f.engine.mu.Unlock()
+	stream := f.handIn(t, "design", handedDesign)
+	select {
+	case <-entered:
+	case <-time.After(demoTimeout):
+		t.Fatal("the draft did not start")
+	}
+	f.stop(t)
+
+	// retried waits until the pending draft was retried more than before for
+	// the missing runner, and checks that nothing else happened to it.
+	retried := func(before int, turns int) int {
+		t.Helper()
+		deadline := time.Now().Add(demoTimeout)
+		for {
+			ops := f.draftOperations(t, stream)
+			if len(ops) != 1 || ops[0].Result != nil {
+				t.Fatalf("operations: %+v", ops)
+			}
+			n := 0
+			for _, a := range ops[0].History {
+				if a.Kind == "retry" && strings.Contains(a.Failure, "this service has no agent runner for the architect") {
+					n++
+				}
+			}
+			if n > before {
+				if state, err := f.repository().Workflow(stream, draftSubject); err != nil || state.Value != "drafting-1" {
+					t.Fatalf("draft state %+v %v", state, err)
+				}
+				if th := f.architectThread(t, stream); len(th.Turns) != turns {
+					t.Fatalf("thread: %+v", th)
+				}
+				if runs := f.runs(); !slices.Equal(runs, []string{"draft-1-1"}) {
+					t.Fatalf("backend runs %v", runs)
+				}
+				return n
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the draft was not retried: %+v", ops[0].History)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	// A service without a runner starts no second attempt: the draft stays
+	// pending and unspent.
+	runner := f.opts.Architect
+	f.opts.Architect = nil
+	f.start(t)
+	count := retried(0, 1)
+	f.stop(t)
+
+	// Nor does it run an attempt an earlier service accepted and did not
+	// reserve.
+	cfg, err := config.Load(f.opts.Config)
+	must(t, err)
+	repo, err := trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
+	must(t, err)
+	th, err := repo.Thread(stream, architectAgent)
+	must(t, err)
+	second := th.Turns[0].Request
+	second.ID, second.TurnID, second.At = "request_draft-1-2", "draft-1-2", f.clock.Now()
+	_, err = repo.EnqueueTurn(ctx, second)
+	must(t, err)
+	must(t, repo.Close())
+	f.start(t)
+	retried(count, 2)
+	if th := f.architectThread(t, stream); th.Turns[1].Claim != nil {
+		t.Fatalf("queued turn: %+v", th.Turns[1])
+	}
+	f.stop(t)
+
+	// A service with a runner then drafts the workstream.
+	f.opts.Architect = runner
+	f.script("draft-1-2", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
+	f.start(t)
+	defer f.stop(t)
+	f.await(t, stream, sketched)
+	if runs := f.runs(); !slices.Equal(runs, []string{"draft-1-1", "draft-1-2"}) {
+		t.Fatalf("backend runs %v", runs)
+	}
+}
+
+func TestArchitectDraftsBeforeTheScheduleHook(t *testing.T) {
+	opts, clone, engine, sessions, clock := newArchitectOptions(t)
+	var repository atomic.Pointer[trace.Repository]
+	var mu sync.Mutex
+	var seen []string
+	opts.Reconciliation.Schedule = func(context.Context) error {
+		repo := repository.Load()
+		if repo == nil {
+			return nil
+		}
+		streams, err := repo.Workstreams()
+		if err != nil {
+			return err
+		}
+		for _, stream := range streams {
+			feature, err := repo.Workflow(stream, trace.FeatureSubject)
+			if err != nil {
+				return err
+			}
+			if feature.Value != HandedState {
+				continue
+			}
+			draft, err := repo.Workflow(stream, draftSubject)
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			seen = append(seen, draft.Value)
+			mu.Unlock()
+		}
+		return nil
+	}
+	f := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
+	f.start(t)
+	defer f.stop(t)
+	added, err := f.c.AddProject(context.Background(), request(clone))
+	must(t, err)
+	f.project, f.trace = added.Project.ID, added.Project.Trace
+	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
+	repository.Store(f.repository())
+	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
+	stream := f.handIn(t, "design", handedDesign)
+	f.await(t, stream, sketched)
+	// The embedder's hook ran, and whenever it saw the handed workstream the
+	// drafter had already requested its draft in the same pass.
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) == 0 || slices.ContainsFunc(seen, func(v string) bool { return v != "drafting-1" }) {
+		t.Fatalf("draft states the Schedule hook saw: %q", seen)
 	}
 }
 

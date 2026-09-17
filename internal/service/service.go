@@ -49,7 +49,8 @@ type Options struct {
 	// a recorded reason and the project stays usable.
 	Librarian *Librarian
 	// Architect supplies the execution boundary of the architect's drafting
-	// turns. Without it no draft is requested and handed workstreams wait.
+	// turns. Without it no draft is requested, a draft already requested
+	// stays pending, and handed workstreams wait.
 	Architect *Architect
 	// Issues fetches issue URLs handed in. It defaults to the GitHub REST API
 	// with the service's GITHUB_TOKEN environment variable, which no session
@@ -409,9 +410,11 @@ func (s *Service) stop(active *activeProject) error {
 // trace must open cleanly before the service can report readiness. The runner
 // boundary is served by the bound thread reconciler for turns and by the
 // service's own reconcilers for knowledge-base extraction and architect
-// drafts; the architect controller runs at the start of every pass, then
-// outbox events are delivered to each workstream's chief of staff and the
-// scheduler runs, whose gate holds turns that a runtime pause covers.
+// drafts; the architect controller runs at the start of every pass. With
+// Options.Threads, outbox events are then delivered to each workstream's
+// chief of staff and the scheduler runs, whose gate holds turns that a
+// runtime pause covers; without it, the configured Schedule hook runs
+// instead.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, error) {
 	options, threads := s.options.Reconciliation, s.options.Threads
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
