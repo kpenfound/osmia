@@ -384,15 +384,29 @@ func TestSymlinksAndGitRedirection(t *testing.T) {
 func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
 	for _, mode := range []string{"config", "alternates", "hardlink"} {
 		// Records and workflow publications run Git even when the handle has
-		// listed HEAD's tree; a read runs Git once HEAD has moved since then.
-		for _, op := range []string{"record", "publish", "read"} {
+		// listed HEAD's tree; a read runs Git once HEAD has moved since then,
+		// and to finish a publication that stopped after its ref moved.
+		for _, op := range []string{"record", "publish", "read", "recover"} {
 			t.Run(mode+"/"+op, func(t *testing.T) {
 				r, _, p := create(t)
 				ctx := context.Background()
 				var err error
-				if op == "read" {
+				switch op {
+				case "read":
 					err = r.Append(ctx, specimens()[0])
-				} else {
+				case "recover":
+					injected := errors.New("injected publication failure")
+					r.failPublication = func(step string) error {
+						if step == "ref-published" {
+							return injected
+						}
+						return nil
+					}
+					if _, err := r.SetFeatureState(ctx, header("transition", "handed"), "handed", "the owner handed a design"); !errors.Is(err, injected) {
+						t.Fatalf("injection not reached: %v", err)
+					}
+					r.failPublication = nil
+				default:
 					_, err = r.Workflow(streamID, FeatureSubject)
 				}
 				if err != nil {
@@ -439,6 +453,9 @@ func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
 				}
 				if after, err := os.ReadFile(ref); err != nil || string(after) != string(before) {
 					t.Fatalf("Git committed with a tampered store: %s %v", after, err)
+				}
+				if _, err := os.Stat(filepath.Join(r.directory, publicationFile)); op == "recover" && err != nil {
+					t.Fatalf("recovery finished with a tampered store: %v", err)
 				}
 			})
 		}
