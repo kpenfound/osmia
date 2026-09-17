@@ -72,27 +72,13 @@ func (s *Service) answer(ctx context.Context, raw string, req AnswerRequest) (An
 		return AnswerResponse{}, &APIError{Validation, "text must not be empty"}
 	}
 	failed := &APIError{Internal, fmt.Sprintf("cannot record the ruling on inbox entry %d; check the trace repository", number)}
-	entries, err := active.repository.Inbox()
-	if err != nil {
-		return AnswerResponse{}, failed
-	}
-	for _, e := range entries {
-		if e.Number != number {
-			continue
-		}
-		gone, err := abandoned(active.repository, e.Workstream)
-		if err != nil {
-			return AnswerResponse{}, failed
-		}
-		if gone {
-			return AnswerResponse{}, &APIError{Conflict, fmt.Sprintf("inbox entry %d belongs to abandoned workstream %s and takes no ruling", number, e.Workstream)}
-		}
-	}
 	at := s.now()
-	entry, err := active.repository.Rule(ctx, number, req.Text, ownerActor, at)
+	entry, err := active.repository.Rule(ctx, number, req.Text, ownerActor, at, AbandonedState)
 	switch {
 	case errors.Is(err, trace.ErrInboxEntry):
 		return AnswerResponse{}, unknown
+	case errors.Is(err, trace.ErrFeatureState):
+		return AnswerResponse{}, &APIError{Conflict, fmt.Sprintf("inbox entry %d belongs to abandoned workstream %s and takes no ruling", number, entry.Workstream)}
 	case errors.Is(err, trace.ErrRuled):
 		return AnswerResponse{}, &APIError{Conflict, fmt.Sprintf("inbox entry %d is already answered", number)}
 	case err != nil:

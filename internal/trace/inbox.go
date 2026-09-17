@@ -92,9 +92,11 @@ func escalations(states []QuestionState) []InboxEntry {
 // the ruling of every question in the batch, each question's move from
 // escalated to ruled and one notice for the chief of staff, in one commit. It
 // returns the entry as it was ruled on. An unknown number fails with
-// ErrInboxEntry and an entry that is no longer escalated with ErrRuled; both
-// write nothing. Text must not be blank.
-func (r *Repository) Rule(ctx context.Context, number int, text string, owner Actor, at time.Time) (InboxEntry, error) {
+// ErrInboxEntry, an entry whose workstream's feature state is one of refused
+// with ErrFeatureState and the entry, and an entry that is no longer escalated
+// with ErrRuled; all three write nothing. The checks and the write hold the
+// same lock. Text must not be blank.
+func (r *Repository) Rule(ctx context.Context, number int, text string, owner Actor, at time.Time, refused ...string) (InboxEntry, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -112,12 +114,15 @@ func (r *Repository) Rule(ctx context.Context, number int, text string, owner Ac
 		return InboxEntry{}, fmt.Errorf("%w: %d", ErrInboxEntry, number)
 	}
 	entry := entries[i]
-	if entry.State != QuestionEscalated {
-		return InboxEntry{}, fmt.Errorf("%w: %d", ErrRuled, number)
-	}
 	log, v, err := r.loadWorkflow(entry.Workstream)
 	if err != nil {
 		return InboxEntry{}, err
+	}
+	if slices.Contains(refused, v.states[FeatureSubject].Value) {
+		return entry, ErrFeatureState
+	}
+	if entry.State != QuestionEscalated {
+		return InboxEntry{}, fmt.Errorf("%w: %d", ErrRuled, number)
 	}
 	var ids []string
 	var rulings []Record

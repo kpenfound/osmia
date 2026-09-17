@@ -392,7 +392,9 @@ the ruling covers, the `ruling` as given and `at`.
 | The entry belongs to an abandoned workstream | `conflict`: `inbox entry <n> belongs to abandoned workstream <id> and takes no ruling` |
 | The trace cannot be read or written | `internal` |
 
-A refused request records nothing. Rulings are accepted without a turn
+A refused request records nothing. The abandoned-workstream check and the
+write hold the trace repository's lock together, so an abandonment that commits
+first always refuses the ruling. Rulings are accepted without a turn
 reconciler, but only a service with `Options.Threads` delivers the event to
 the chief of staff and the relayed ruling to the askers, as described under
 [questions](#questions).

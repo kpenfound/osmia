@@ -61,6 +61,9 @@ func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 	}
 
 	owner := Actor{Kind: "owner", ID: "local"}
+	if _, err := r.SetFeatureState(ctx, header("transition", "abandoned"), "abandoned", "Owner abandoned the workstream"); err != nil {
+		t.Fatal(err)
+	}
 	before, err := r.Outbox(streamID)
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +78,10 @@ func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 	}
 	if _, err := r.Rule(ctx, 9, "Resume.", owner, when); !errors.Is(err, ErrInboxEntry) {
 		t.Fatalf("unknown entry: %v", err)
+	}
+	// An entry of a workstream in a refused feature state takes no ruling.
+	if e, err := r.Rule(ctx, 1, "Resume uploads.", owner, when, "delivered", "abandoned"); !errors.Is(err, ErrFeatureState) || e.Number != 1 || e.Workstream != streamID {
+		t.Fatalf("ruling on a refused workstream's entry: %+v %v", e, err)
 	}
 	for name, call := range map[string]func() error{
 		"blank ruling": func() error { return second(r.Rule(ctx, 1, " \n", owner, when)) },
@@ -96,7 +103,7 @@ func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 	r.failPublication = nil
 	unchanged("a refused or failed ruling")
 
-	ruled, err := r.Rule(ctx, 1, "Resume uploads.", owner, when)
+	ruled, err := r.Rule(ctx, 1, "Resume uploads.", owner, when, "delivered")
 	if err != nil || ruled.Number != 1 || ruled.Batch != "escalation_2" || len(ruled.Questions) != 2 {
 		t.Fatalf("ruled entry: %+v %v", ruled, err)
 	}
@@ -134,6 +141,9 @@ func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 	// A second answer conflicts and changes nothing.
 	if _, err := r.Rule(ctx, 1, "Restart uploads.", owner, when); !errors.Is(err, ErrRuled) {
 		t.Fatalf("second ruling: %v", err)
+	}
+	if _, err := r.Rule(ctx, 1, "Restart uploads.", owner, when, "abandoned"); !errors.Is(err, ErrFeatureState) {
+		t.Fatalf("second ruling on a refused workstream's entry: %v", err)
 	}
 	if s := questionStates(t, r)["1"]; !reflect.DeepEqual(*s.Ruling, wantRuling("1")) {
 		t.Fatalf("second ruling changed the first: %+v", s.Ruling)

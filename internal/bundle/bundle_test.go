@@ -330,19 +330,34 @@ func TestBundleNotices(t *testing.T) {
 	// The same relay reached a second question of the batch.
 	sibling := relayed
 	sibling.ID, sibling.QuestionID, sibling.Revision = "wide2", "q-wide2", 1
-	for _, r := range []trace.Ruling{local, pending, wide, relayed, sibling} {
+	// Another relay in the workstream is a notice of its own, whether it
+	// differs in its text or in its time.
+	wider := sibling
+	wider.ID, wider.QuestionID, wider.ReturnedAnswer = "wider", "q-wider", "Logs stay JSON."
+	later := sibling
+	later.ID, later.QuestionID, later.At = "later", "q-later", timestamp.Add(3*time.Minute)
+	for _, r := range []trace.Ruling{local, pending, wide, relayed, sibling, wider, later} {
 		if err := f.repo.Append(ctx, r); err != nil {
 			t.Fatal(err)
 		}
 	}
-	source := "workstreams/" + string(first) + "/questions/q-wide/rulings.jsonl"
-	want := []bundle.Notice{{Source: source, Workstream: first, Record: "wide", Revision: 2, At: timestamp.Add(2 * time.Minute), Text: "The owner allows no new\ndependencies."}}
+	sourceOf := func(question string) string {
+		return "workstreams/" + string(first) + "/questions/" + question + "/rulings.jsonl"
+	}
+	source := sourceOf("q-wide")
+	want := []bundle.Notice{
+		{Source: source, Workstream: first, Record: "wide", Revision: 2, At: timestamp.Add(2 * time.Minute), Text: "The owner allows no new\ndependencies."},
+		{Source: sourceOf("q-wider"), Workstream: first, Record: "wider", Revision: 1, At: timestamp.Add(2 * time.Minute), Text: "Logs stay JSON."},
+		{Source: sourceOf("q-later"), Workstream: first, Record: "later", Revision: 1, At: timestamp.Add(3 * time.Minute), Text: "The owner allows no new\ndependencies."},
+	}
 	for _, scope := range []bundle.Scope{{}, {Workstream: first}, {Workstream: second}, {Entities: []string{"internal"}}} {
 		b := f.assemble(t, scope)
 		if !reflect.DeepEqual(b.Notices, want) {
 			t.Fatalf("notices of scope %+v: %#v", scope, b.Notices)
 		}
-		if !strings.HasSuffix(b.Render(), "\n## Notices\n- "+source+" (record wide revision 2, workstream "+string(first)+")\n  notice: The owner allows no new\n    dependencies.\n") {
+		if !strings.HasSuffix(b.Render(), "\n## Notices\n- "+source+" (record wide revision 2, workstream "+string(first)+")\n  notice: The owner allows no new\n    dependencies.\n"+
+			"- "+sourceOf("q-wider")+" (record wider revision 1, workstream "+string(first)+")\n  notice: Logs stay JSON.\n"+
+			"- "+sourceOf("q-later")+" (record later revision 1, workstream "+string(first)+")\n  notice: The owner allows no new\n    dependencies.\n") {
 			t.Fatalf("render of scope %+v:\n%s", scope, b.Render())
 		}
 	}

@@ -356,7 +356,8 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 }
 
 // The inbox leaves out an abandoned workstream's escalation, which takes no
-// ruling, and an idle service has an empty inbox.
+// ruling, and a service without a trace or without a project has an empty
+// inbox.
 func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "qj-")
@@ -406,4 +407,12 @@ func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
 	if _, api := idle.answer(ctx, "1", AnswerRequest{Text: "In files."}); api == nil || api.Code != Validation || api.Message != "there is no inbox entry 1; list the entries with osmia inbox" {
 		t.Fatalf("answer without a trace: %v", api)
 	}
+
+	empty, _ := projectFixture(t)
+	_, c := start(t, empty)
+	if inbox, err := c.Inbox(ctx); err != nil || inbox.Entries == nil || len(inbox.Entries) != 0 {
+		t.Fatalf("inbox without a project: %+v %v", inbox, err)
+	}
+	_, err = c.Answer(ctx, 1, "In files.")
+	apiError(t, err, NoProject, "no project is configured; add one with osmia project add")
 }
