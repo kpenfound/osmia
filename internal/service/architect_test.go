@@ -56,10 +56,21 @@ type architectFixture struct {
 	clock    *demoClock
 }
 
+// architectContainer runs the architect in a container, the only sandbox
+// the core executor accepts.
+const architectContainer = `[roles.architect]
+sandbox = "container"
+image = "fixture-image"
+`
+
 func newArchitectOptions(t *testing.T) (Options, string, *demoEngine, *demoSessions, *demoClock) {
 	t.Helper()
 	opts, clone := projectFixture(t)
 	home := filepath.Dir(clone)
+	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
+	must(t, err)
+	_, err = configFile.WriteString(architectContainer)
+	must(t, errors.Join(err, configFile.Close()))
 	must(t, os.MkdirAll(filepath.Join(clone, "internal", "trace"), 0700))
 	must(t, os.WriteFile(filepath.Join(clone, "internal", "trace", "git.go"), []byte("package trace\n"), 0600))
 	must(t, os.WriteFile(filepath.Join(clone, "CODEOWNERS"), []byte("/internal/ @core\n"), 0600))
@@ -116,13 +127,13 @@ func (f *architectFixture) repository() *trace.Repository { return f.s.active.re
 
 // script installs the fake architect's behaviour for one turn: it delivers
 // the given files and returns a successful result.
-func (f *architectFixture) script(turn string, files map[string]string, check func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error) {
+func (f *architectFixture) script(turn string, files map[string]string, check func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error) {
 	f.engine.mu.Lock()
 	defer f.engine.mu.Unlock()
-	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		var err error
 		if check != nil {
-			err = check(ctx, req, policy, tools)
+			err = check(ctx, req, verified, tools)
 		}
 		for _, path := range []string{plan.SpecPath, plan.PlanPath} {
 			content, ok := files[path]
@@ -223,11 +234,40 @@ func readTool(ctx context.Context, tools *mcp.ClientSession, path string) (strin
 	return text, err
 }
 
+// checkReadOnlyGrants asserts the grants core verified for a read-only turn:
+// the private view read-only, the session read-only with the scratch
+// directory the turn starts in, the scoped MCP server as the only tool, and
+// no VCS or host environment.
+func checkReadOnlyGrants(req agent.Request, verified *agent.Turn, clone string, fail func(string, ...any)) {
+	g := req.Grants
+	if g == nil || len(g.Mounts) != 3 {
+		fail("grants %+v are not a read-only view", g)
+		return
+	}
+	view, scratch := g.Mounts[0].Path, filepath.Join(req.SessionDir, "work")
+	if g.Mounts[0].Access != agent.ReadOnly || g.Mounts[1] != (agent.Mount{Path: req.SessionDir, Access: agent.ReadOnly}) || g.Mounts[2] != (agent.Mount{Path: scratch, Access: agent.ReadWrite}) ||
+		req.Workspace == nil || req.Workspace.Directory() != scratch || view == clone || strings.HasPrefix(view, clone+string(filepath.Separator)) {
+		fail("grants %+v expose more than the read-only private view", g)
+	}
+	if g.VCS || verified.VCS || !slices.Equal(verified.DeniedExecutables, agent.VCSExecutables) {
+		fail("VCS is not denied: %+v", verified)
+	}
+	if !slices.Equal(g.Tools, []string{"mcp__osmia_0"}) || verified.Tools == nil || len(verified.Tools) != 0 {
+		fail("tools %v %v exceed the scoped MCP server", g.Tools, verified.Tools)
+	}
+	for _, kv := range verified.Env {
+		key, value, _ := strings.Cut(kv, "=")
+		if key != "HOME" && req.Env[key] != value {
+			fail("verified environment exposes %s", key)
+		}
+	}
+}
+
 // checkArchitectBoundary makes the negative assertions from inside the turn:
 // the view holds the handed input, the charter and the bundle and nothing
 // else, the role reads files and delivers the draft, and nothing carries
 // notes, write, execute, network or VCS access.
-func checkArchitectBoundary(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession, clone, handed, charter string) error {
+func checkArchitectBoundary(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession, clone, handed, charter string) error {
 	var problems []error
 	fail := func(format string, args ...any) { problems = append(problems, fmt.Errorf(format, args...)) }
 	listed, err := tools.ListTools(ctx, nil)
@@ -271,14 +311,7 @@ func checkArchitectBoundary(ctx context.Context, req agent.Request, policy corea
 			fail("draft_write accepted %v", args)
 		}
 	}
-	view := policy.Isolation.Workspace.Directory
-	if len(policy.Mounts) != 1 || policy.Mounts[0].Source != view || view == clone || strings.HasPrefix(view, clone+string(filepath.Separator)) {
-		fail("mounts %+v expose more than the private view", policy.Mounts)
-	}
-	caps := policy.Isolation.Capabilities
-	if caps.Execute || caps.Network || caps.WriteFiles || policy.Isolation.Workspace.Access != coreadapter.ReadOnly || !policy.NoVCS || !policy.NoDeliveryCredentials || !policy.NoHostEnvironment {
-		fail("capabilities %+v policy %+v", caps, policy)
-	}
+	checkReadOnlyGrants(req, verified, clone, fail)
 	if req.Profile.VCSAccess || req.Workspace == nil || req.Workspace.VCS() != nil || len(req.VCSEnv) != 0 || req.Profile.Name != architectRole {
 		fail("request carries VCS access or another role: %+v", req.Profile)
 	}
@@ -310,8 +343,8 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 	ctx := context.Background()
 	charter := "1. Keep changes small.\n2. Every change has a test.\n"
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan},
-		func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
-			err := checkArchitectBoundary(ctx, req, policy, tools, f.clone, handedDesign, charter)
+		func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+			err := checkArchitectBoundary(ctx, req, verified, tools, f.clone, handedDesign, charter)
 			if req.ResumeID != "" || strings.Contains(req.Prompt, "was not accepted") {
 				err = errors.Join(err, fmt.Errorf("first turn carries history: %q", req.ResumeID))
 			}
@@ -458,7 +491,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	// UTF-8 text where the service reads the delivery; draft 2 a plan with a
 	// cycle and an unaddressed criterion; draft 3 a valid plan.
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec},
-		func(_ context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, _ *mcp.ClientSession) error {
+		func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
 			output := filepath.Join(filepath.Dir(req.SessionDir), "output")
 			if err := os.MkdirAll(output, 0700); err != nil {
 				return err
@@ -466,7 +499,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 			return os.WriteFile(filepath.Join(output, plan.PlanPath), []byte{'{', 0xff, 0xfe, '}'}, 0600)
 		})
 	f.script("draft-2-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: cyclicPlan},
-		func(ctx context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
+		func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 			var problems []error
 			for _, want := range []string{"Draft 1 was not accepted:", "draft 1 of the spec and plan is invalid:\n- plan.json is not UTF-8 text", "draft/spec.md and draft/plan.json: your previous draft", "Deliver corrected files"} {
 				if !strings.Contains(req.Prompt, want) {
@@ -485,7 +518,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 			return errors.Join(problems...)
 		})
 	f.script("draft-3-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan},
-		func(ctx context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
+		func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 			var problems []error
 			for _, want := range []string{"Draft 2 was not accepted:", `unit "dedupe": dependency cycle dedupe -> resume -> dedupe`, "spec#2: no unit addresses this criterion"} {
 				if !strings.Contains(req.Prompt, want) {
@@ -661,7 +694,7 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 	f3.engine.mu.Lock()
 	for n := 1; n <= maxDrafts; n++ {
 		for attempt := 1; attempt <= maxDraftAttempts; attempt++ {
-			f3.engine.turns[fmt.Sprintf("draft-%d-%d", n, attempt)] = func(context.Context, agent.Request, coreadapter.BoundaryPolicy, *mcp.ClientSession) (*agent.Result, error) {
+			f3.engine.turns[fmt.Sprintf("draft-%d-%d", n, attempt)] = func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
 				return nil, errors.Join(context.Canceled, errors.New("connection dropped"))
 			}
 		}
@@ -682,12 +715,12 @@ func TestArchitectRedraftsAfterAFailedTurn(t *testing.T) {
 	f := newArchitectFixture(t)
 	defer f.stop(t)
 	f.engine.mu.Lock()
-	f.engine.turns["draft-1-1"] = func(context.Context, agent.Request, coreadapter.BoundaryPolicy, *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.turns["draft-1-1"] = func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
 		return nil, errors.New("backend crashed")
 	}
 	f.engine.mu.Unlock()
 	f.script("draft-2-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan},
-		func(ctx context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
+		func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 			if !strings.Contains(req.Prompt, "Draft 1 was not accepted:\ndraft 1 failed: architect turn draft-1-1 failed: ") {
 				return fmt.Errorf("second prompt: %q", req.Prompt)
 			}
@@ -733,7 +766,7 @@ func TestArchitectDraftWaitsForARunner(t *testing.T) {
 	entered := make(chan struct{})
 	var once sync.Once
 	f.engine.mu.Lock()
-	f.engine.turns["draft-1-1"] = func(ctx context.Context, _ agent.Request, _ coreadapter.BoundaryPolicy, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.turns["draft-1-1"] = func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		once.Do(func() { close(entered) })
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -883,7 +916,7 @@ func TestArchitectDraftSurvivesRestart(t *testing.T) {
 			entered := make(chan struct{})
 			var once sync.Once
 			f.engine.mu.Lock()
-			f.engine.turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				once.Do(func() { close(entered) })
 				<-ctx.Done()
 				return nil, ctx.Err()
@@ -1027,7 +1060,7 @@ func TestAbandonStopsTheArchitectDraft(t *testing.T) {
 		entered := make(chan struct{})
 		var once sync.Once
 		f.engine.mu.Lock()
-		f.engine.turns["draft-1-1"] = func(ctx context.Context, _ agent.Request, _ coreadapter.BoundaryPolicy, _ *mcp.ClientSession) (*agent.Result, error) {
+		f.engine.turns["draft-1-1"] = func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 			once.Do(func() { close(entered) })
 			select {
 			case <-ctx.Done():
