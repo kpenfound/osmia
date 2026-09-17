@@ -686,13 +686,11 @@ func TestArchitectRedraftsAfterAFailedTurn(t *testing.T) {
 		return nil, errors.New("backend crashed")
 	}
 	f.engine.mu.Unlock()
-	var mu sync.Mutex
-	prompt := ""
 	f.script("draft-2-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan},
 		func(ctx context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
-			mu.Lock()
-			prompt = req.Prompt
-			mu.Unlock()
+			if !strings.Contains(req.Prompt, "Draft 1 was not accepted:\ndraft 1 failed: architect turn draft-1-1 failed: ") {
+				return fmt.Errorf("second prompt: %q", req.Prompt)
+			}
 			if _, err := readTool(ctx, tools, "draft/spec.md"); err == nil {
 				return errors.New("the view holds a draft that was never recorded")
 			}
@@ -719,13 +717,13 @@ func TestArchitectRedraftsAfterAFailedTurn(t *testing.T) {
 	if next := byID["draft-2"]; next.From != "failed-1" || next.To != "drafting-2" || next.Cause != "draft-1-failed" {
 		t.Fatalf("second request: %+v", next)
 	}
-	mu.Lock()
-	defer mu.Unlock()
+	th := f.architectThread(t, stream)
+	if len(th.Turns) != 2 || th.Turns[0].Status() != "failed" || th.Turns[1].Status() != "idle" {
+		t.Fatalf("thread: %+v", th)
+	}
+	prompt := th.Turns[1].Request.Prompt
 	if want := "Draft 1 was not accepted:\n" + reason + "\n\nNo file of that draft was recorded. Deliver both files.\n\n"; !strings.HasPrefix(prompt, want) || strings.Contains(prompt, "draft/") {
 		t.Fatalf("second prompt: %q", prompt)
-	}
-	if th := f.architectThread(t, stream); len(th.Turns) != 2 || th.Turns[0].Status() != "failed" || th.Turns[1].Status() != "idle" {
-		t.Fatalf("thread: %+v", th)
 	}
 }
 
