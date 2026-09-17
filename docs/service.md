@@ -324,7 +324,11 @@ the trace says it is:
 | `round-<n>`, `reply-<n>`, `concluded-<n>`, `failed-<n>` | | Nothing. |
 
 Only a workstream in feature state `in-shed` takes a step, so an abandoned
-workstream's debate stays where it stopped.
+workstream's debate stays where it stopped. A step that runs turns waits for
+the runner of those turns: entering the shed and every round for
+`Options.Committee`, the reply for `Options.Architect`. Concluding runs no
+turn and waits for neither, so a service with an architect runner and no
+committee runner still answers a heard round and still concludes a debate.
 
 ### Entering the shed
 
@@ -460,9 +464,10 @@ workstream was abandoned still ends `heard-<n>`, so the shed state never
 contradicts the record.
 
 `Options.Committee` supplies the execution engine and MCP host factory the
-committee's turns run in. Without it no workstream enters the shed, so a
-sketched workstream stays `sketched` until a service with a runner starts. A
-round already requested stays pending: applying it returns `this service has
+committee's turns run in. Without it no workstream enters the shed and no
+round is requested, so a sketched workstream stays `sketched`, and a debate
+whose next step is a round stays `replied-<n>`, until a service with a runner
+starts. A round already requested stays pending: applying it returns `this service has
 no agent runner for the committee` wherever it would start or run a turn, the
 operation is retried, and no member's attempt is spent.
 
@@ -501,9 +506,10 @@ change. The redraft is validated as a [draft](#recording-and-validation) is,
 together with the latest revision of the file that was not delivered, before
 anything is recorded:
 
-- A valid redraft is recorded as the next revisions of `spec` and `plan`
+- A valid redraft is recorded as the next revision of each file it changed
   (actor `agent`/`agent_architect`, cause the operation ID), in one commit with
-  the reply. The next round is pinned to them.
+  the reply; a file it left alone keeps its revision. The reply's `redraft`
+  names both revisions, and the next round is pinned to them.
 - An invalid redraft is never recorded, so it is never the revision the
   committee debates. It goes back to the architect: the next turn of the same
   operation opens with `Your redraft was not accepted, and the committee will
@@ -527,10 +533,11 @@ starts the next one; one between the record and the transition finds
 `reply.json` and records nothing again; a recorded outcome completes the
 operation without running the architect. [Abandoning](#abandoning) the
 workstream cancels the running turn, and the reply of an abandoned workstream
-records no file and ends `failed-<n>` with the reason `the reply to round <n>
-failed: the workstream was abandoned, so the architect runs no turn for it`. A
-reply whose file was committed before the workstream was abandoned still ends
-`replied-<n>`.
+records no file, whether its turn was cancelled, never started or ended while
+the owner abandoned the workstream, and ends `failed-<n>` with the reason `the
+reply to round <n> failed: the workstream was abandoned, so the architect's
+reply is not recorded`. A reply whose file was committed before the workstream
+was abandoned still ends `replied-<n>`.
 
 Without `Options.Architect` the controller asks for no reply, so the shed
 stays `heard-<n>` until a service with a runner starts. A reply already
@@ -543,7 +550,12 @@ spent.
 Debate ends early by consensus, as soon as a heard round leaves no dissent
 open: transition `shed-concluded-<n>`, caused by `shed-round-<n>-heard`, with
 the reason `debate concluded by consensus after round <n>: no objection
-stands`. Otherwise it ends at the cap, once the reply to round
+stands`. Consensus is among the members whose turns ended normally: when some
+turns of the round failed the reason adds `; the turns of <f> of <m> members
+failed`, and when all of them failed nothing was reviewed and the reason is
+`debate concluded after round <n> without a review: the turns of all <m>
+members failed, so no objection stands and nobody agreed`. Otherwise it ends
+at the cap, once the reply to round
 `shed.max_rounds` is recorded: caused by `shed-reply-<n>-replied`, with the
 reason `debate stopped after round <n>, at the shed.max_rounds cap of <max>,
 with <k> objections standing, <b> of them blocking; the cap approves nothing`.
@@ -553,9 +565,10 @@ Either way the workstream stays `in-shed`, the dissent that stands keeps
 standing, and no later pass starts a round. The conclusion commits with a
 notice for the chief of staff (event key `concluded`), delivered through the
 [outbox](#event-delivery): `Debate concluded: <reason>. The workstream stays
-in-shed until the owner rules.`, followed by `Open dissent:` and one line per
-entry of the dissent record with its ID, kind, `blocking` or `advisory`,
-member, round, part, revision and argument.
+in-shed until the owner rules.` When dissent stands, that is followed by
+`Open dissent:` and one line per entry of the dissent record with its ID,
+kind, `blocking` or `advisory`, member, round, part, revision and argument;
+a conclusion by consensus has no such line.
 
 ## Abandoning
 
@@ -739,8 +752,9 @@ service keeps running and the other roles' turns still run.
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
 opened and the configuration it loaded, each time a project's trace opens: at startup and when a project is
 added. It replaces any runner adapter in `Options.Reconciliation` for every
-runner operation except the librarian's `kb-extract` action and the
-architect's `architect-draft` action, which the service reconciles itself. The [thread dispatcher](trace.md#turn-dispatch) is the
+runner operation except the librarian's `kb-extract`, the architect's
+`architect-draft` and the shed's `shed-round` and `shed-reply` actions, which
+the service reconciles itself. The [thread dispatcher](trace.md#turn-dispatch) is the
 intended binding; it receives the service-owned repository handle, which callers
 must not close. The [M1 demonstration](m1-demonstration.md) uses this path with
 fake engines.
@@ -763,6 +777,7 @@ so the factory finishes work before it widens it: the turns the scheduler
 dispatched and every other operation first, then the shed's `shed-round` and
 `shed-reply` operations, then `architect-draft` operations. Within a stage
 they keep workstream order.
+
 At the start of every reconciliation pass, `internal/scheduler` reads each
 workstream's threads and turn operations. For every thread with no turn in
 flight, it publishes a `thread-turn` operation for the oldest unfinished turn,

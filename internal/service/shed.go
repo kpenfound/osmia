@@ -97,13 +97,8 @@ type debate struct {
 
 var _ coreadapter.Reconciler = (*debate)(nil)
 
-// Pass reconciles every workstream of the trace except the librarian's. A
-// service without a committee runner moves nothing: sketched workstreams wait
-// for a service that has one.
+// Pass reconciles every workstream of the trace except the librarian's.
 func (d *debate) Pass(ctx context.Context) error {
-	if d.s.options.Committee == nil {
-		return nil
-	}
 	streams, err := d.repository.Workstreams()
 	if err != nil {
 		return err
@@ -125,7 +120,8 @@ func (d *debate) Pass(ctx context.Context) error {
 
 // reconcile gives a sketched workstream its committee and moves it to
 // in-shed, then takes the next step of a workstream in the shed. Every other
-// feature state needs nothing.
+// feature state needs nothing. A service without a committee runner leaves a
+// sketched workstream where it is, waiting for a service that has one.
 func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) error {
 	feature, err := d.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -139,6 +135,9 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 		return err
 	}
 	if feature.Value == SketchedState {
+		if d.s.options.Committee == nil {
+			return nil
+		}
 		if err := d.ensureCommittee(ctx, stream, d.s.current().Capacity.Committee); err != nil {
 			return err
 		}
@@ -166,13 +165,18 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 // architect's reply. After the reply, the next round runs against the latest
 // revision unless shed.max_rounds rounds have run, which concludes the debate
 // with its dissent open. A round or a reply in progress, a concluded debate
-// and a failed round need nothing.
+// and a failed round need nothing. A round waits for a service that can run
+// the committee and a reply for one that can run the architect; concluding
+// runs no turn and waits for neither.
 func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest shed.Pin) error {
 	state, err := d.repository.Workflow(stream, shedSubject)
 	if err != nil {
 		return err
 	}
 	if state.Value == "" {
+		if d.s.options.Committee == nil {
+			return nil
+		}
 		return d.request(ctx, stream, state, roundInput{Round: 1, Spec: latest.Spec, Plan: latest.Plan}, InShedState)
 	}
 	kind, n, ok := shedState(state.Value)
@@ -188,7 +192,7 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 	limit := d.s.current().Shed.MaxRounds
 	switch {
 	case len(open) == 0:
-		return d.conclude(ctx, stream, state, n, round+"-heard", fmt.Sprintf("debate concluded by consensus after round %d: no objection stands", n), open)
+		return d.conclude(ctx, stream, state, n, round+"-heard", unopposed(records, n), open)
 	case kind == "heard":
 		// The reply waits for a service that can run the architect.
 		if d.s.options.Architect == nil {
@@ -204,8 +208,33 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 		reply, _ := replyIDs(n)
 		return d.conclude(ctx, stream, state, n, reply+"-replied", fmt.Sprintf("debate stopped after round %d, at the shed.max_rounds cap of %d, with %s; the cap approves nothing", n, limit, standing(open)), open)
 	}
+	if d.s.options.Committee == nil {
+		return nil
+	}
 	reply, _ := replyIDs(n)
 	return d.request(ctx, stream, state, roundInput{Round: n + 1, Spec: latest.Spec, Plan: latest.Plan}, reply+"-replied")
+}
+
+// unopposed is why a debate with no open dissent concludes after round n. It
+// is consensus only among the members whose turns ended normally: a round in
+// which every turn failed reviewed nothing, and the reason says so.
+func unopposed(records []shed.Record, n int) string {
+	members, failed := 0, 0
+	for _, r := range records {
+		if r.Round == n {
+			members++
+			if r.Failure != "" {
+				failed++
+			}
+		}
+	}
+	switch {
+	case failed == members:
+		return fmt.Sprintf("debate concluded after round %d without a review: the turns of all %d members failed, so no objection stands and nobody agreed", n, members)
+	case failed > 0:
+		return fmt.Sprintf("debate concluded by consensus after round %d: no objection stands; the turns of %d of %d members failed", n, failed, members)
+	}
+	return fmt.Sprintf("debate concluded by consensus after round %d: no objection stands", n)
 }
 
 // Dissent returns the workstream's dissent record, computed from the recorded

@@ -674,10 +674,12 @@ func TestDebateResumesMidRoundAfterARestart(t *testing.T) {
 
 // A stop between the reply's record and its transition leaves the file
 // recorded: the next service records nothing again and only moves the shed,
-// to replied even when the workstream was abandoned in between.
+// to replied even when the workstream was abandoned in between. A turn that
+// ended with its reply not yet recorded records nothing once the workstream
+// is abandoned, and the reply fails.
 func TestReplyRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 	t.Parallel()
-	for _, crash := range []string{"recorded", "recorded-then-abandoned"} {
+	for _, crash := range []string{"recorded", "recorded-then-abandoned", "answered-then-abandoned"} {
 		t.Run(crash, func(t *testing.T) {
 			f := newDebateFixture(t, 1, 1)
 			ctx := context.Background()
@@ -735,9 +737,16 @@ func TestReplyRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 			must(t, repo.CompleteTurn(ctx, stream, architectAgent, second.TurnID, "earlier-session", f.clock.Now()))
 			data, err := shed.EncodeReply(shed.Reply{Version: shed.Version, Round: 1, Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: second.TurnID, Answers: []shed.Answer{{Objection: size, Answer: "Recorded."}}})
 			must(t, err)
-			must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.ReplyDocumentID(1), Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: architectActor, Cause: operation, Depth: 1},
-				Path: shed.ReplyPath(1), Content: string(data)}}))
-			if crash == "recorded-then-abandoned" {
+			if crash == "answered-then-abandoned" {
+				// The turn's answers and a valid redraft are kept, not recorded.
+				must(t, os.MkdirAll(filepath.Join(directory, "output"), 0700))
+				must(t, os.WriteFile(filepath.Join(directory, "output", replyFile), data, 0600))
+				must(t, os.WriteFile(filepath.Join(directory, "output", plan.PlanPath), []byte(splitPlan), 0600))
+			} else {
+				must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.ReplyDocumentID(1), Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: architectActor, Cause: operation, Depth: 1},
+					Path: shed.ReplyPath(1), Content: string(data)}}))
+			}
+			if crash != "recorded" {
 				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "abandoned", Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: "owner"}
 				_, err := repo.SetFeatureState(ctx, h, AbandonedState, "the owner abandoned the workstream")
 				must(t, err)
@@ -746,6 +755,20 @@ func TestReplyRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 
 			f.start(t)
 			defer f.stop(t)
+			if crash == "answered-then-abandoned" {
+				f.awaitShed(t, stream, "failed-1", "replied-1")
+				replies := f.settledReplies(t, stream)
+				if len(replies) != 1 || replies[0].Result.Outcome != "failed" || replies[0].Result.Evidence != "the reply to round 1 failed: the workstream was abandoned, so the architect's reply is not recorded" {
+					t.Fatalf("operations: %+v", replies)
+				}
+				if docs := f.documents(t, stream, shed.ReplyDocumentID(1)); len(docs) != 0 || len(f.documents(t, stream, plan.PlanDocument)) != 1 {
+					t.Fatalf("an abandoned workstream's reply was recorded: %+v", docs)
+				}
+				if ran := f.ran(); ran[replyTurnID(1, 2)] != 0 || ran[replyTurnID(1, 3)] != 0 {
+					t.Fatalf("architect turns: %v", ran)
+				}
+				return
+			}
 			f.awaitShed(t, stream, "replied-1")
 			if ran := f.ran(); ran[replyTurnID(1, 1)] != 1 || ran[replyTurnID(1, 2)] != 0 || ran[replyTurnID(1, 3)] != 0 {
 				t.Fatalf("architect turns: %v", ran)
@@ -798,7 +821,7 @@ func TestAbandonFailsARunningReply(t *testing.T) {
 		t.Fatalf("replies of an abandoned workstream: %+v %v", replies, err)
 	}
 	ops := f.settledReplies(t, stream)
-	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" || ops[0].Result.Evidence != "the reply to round 1 failed: the workstream was abandoned, so the architect runs no turn for it" {
+	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" || ops[0].Result.Evidence != "the reply to round 1 failed: the workstream was abandoned, so the architect's reply is not recorded" {
 		t.Fatalf("operations: %+v", ops)
 	}
 	if failed := f.transition(t, stream, "shed-reply-1-failed"); failed.From != "reply-1" || failed.Reason != ops[0].Result.Evidence {
@@ -970,5 +993,186 @@ func TestReplyToolsAreBoundToTheReplyTurn(t *testing.T) {
 		if tools, err := path.Scoped(ctx, scope); err == nil {
 			t.Errorf("%s: got %d tools", name, len(tools))
 		}
+	}
+}
+
+// A turn returned after an invalid redraft that delivers nothing leaves the
+// revision as it is: the earlier turn's invalid files are not picked up.
+func TestReturnedTurnThatDeliversNothingLeavesTheRevision(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 1)
+	defer f.stop(t)
+	p := &faults{}
+	size := shed.ObjectionID(1, committeeAgent(1), 1)
+	f.member(1, 1, 1, objects(p, shed.Size, "plan#resume", "spec#1"))
+	f.script(replyTurnID(1, 1), map[string]string{plan.PlanPath: cyclicPlan}, answers(p, "Split.", size))
+	f.script(replyTurnID(1, 2), nil, func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
+		if !strings.Contains(req.Prompt, "Deliver nothing to leave the revision as it is") {
+			p.report("returned redraft prompt:\n%s", req.Prompt)
+		}
+		return nil
+	})
+	stream := f.handIn(t, "design", handedDesign)
+	f.awaitShed(t, stream, "concluded-1")
+	p.check(t)
+	reply := f.reply(t, stream, 1)
+	if reply.Redraft != nil || len(reply.Problems) != 0 || reply.Failure != "" || reply.Turn != replyTurnID(1, 2) || len(reply.Answers) != 1 {
+		t.Fatalf("reply: %+v", reply)
+	}
+	if plans := f.documents(t, stream, plan.PlanDocument); len(plans) != 1 || plans[0].Content != validPlan {
+		t.Fatalf("plan revisions: %+v", plans)
+	}
+	if told := f.transition(t, stream, "shed-reply-1-replied"); told.Reason != "the architect answered 1 objections after round 1 and left spec.md revision 1 and plan.json revision 1 as it is" {
+		t.Fatalf("replied reason %q", told.Reason)
+	}
+	if ran := f.ran(); ran[replyTurnID(1, 2)] != 1 || ran[replyTurnID(1, 3)] != 0 {
+		t.Fatalf("architect turns: %v", ran)
+	}
+}
+
+// A redraft of spec.md alone revises the spec and leaves the plan at its
+// revision; the reply names both and the next round is pinned to them.
+func TestSpecRedraftLeavesThePlanAtItsRevision(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 2)
+	defer f.stop(t)
+	p := &faults{}
+	fit := shed.ObjectionID(1, committeeAgent(1), 1)
+	revised := strings.Replace(validSpec, "It must not re-send acknowledged chunks.", "It never sends an acknowledged chunk again.", 1)
+	if revised == validSpec {
+		t.Fatal("the revised spec equals the draft")
+	}
+	f.member(1, 1, 1, objects(p, shed.Fit, "spec", "charter#1"))
+	f.script(replyTurnID(1, 1), map[string]string{plan.SpecPath: revised}, answers(p, "Reworded.", fit))
+	f.member(2, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+		if !strings.Contains(req.Prompt, "spec.md revision 2 and plan.json revision 1") {
+			p.report("round 2 prompt:\n%s", req.Prompt)
+		}
+		if got, err := readTool(ctx, tools, "spec.md"); err != nil || got != revised {
+			p.report("round 2 debates %q %v", got, err)
+		}
+		return concedes(p, fit)(ctx, req, verified, tools)
+	})
+	stream := f.handIn(t, "design", handedDesign)
+	f.awaitShed(t, stream, "concluded-2")
+	p.check(t)
+	specs := f.documents(t, stream, plan.SpecDocument)
+	if len(specs) != 2 || specs[1].Content != revised || specs[1].Actor != architectActor || len(f.documents(t, stream, plan.PlanDocument)) != 1 {
+		t.Fatalf("spec revisions: %+v", specs)
+	}
+	if reply := f.reply(t, stream, 1); reply.Redraft == nil || *reply.Redraft != (shed.Pin{Spec: 2, Plan: 1}) {
+		t.Fatalf("reply: %+v", reply)
+	}
+	if told := f.transition(t, stream, "shed-reply-1-replied"); told.Reason != "the architect answered 1 objections after round 1 and redrafted: spec.md revision 2 and plan.json revision 1" {
+		t.Fatalf("replied reason %q", told.Reason)
+	}
+}
+
+// A round in which every member's turn failed reviewed nothing: the debate
+// concludes, and neither the trace nor the chief of staff is told of a
+// consensus.
+func TestRoundWhereEveryTurnFailedConcludesWithoutAReview(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 2, 3)
+	defer f.stop(t)
+	crash := func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error {
+		return errors.New("the agent crashed")
+	}
+	f.member(1, 1, 1, crash)
+	f.member(1, 2, 1, crash)
+	stream := f.handIn(t, "design", handedDesign)
+	f.awaitShed(t, stream, "concluded-1")
+	end := f.transition(t, stream, "shed-concluded-1")
+	if want := "debate concluded after round 1 without a review: the turns of all 2 members failed, so no objection stands and nobody agreed"; end.Reason != want {
+		t.Fatalf("conclusion %q, want %q", end.Reason, want)
+	}
+	if notice := f.concluded(t, stream, 1).Event.Body; notice != "Debate concluded: "+end.Reason+". The workstream stays in-shed until the owner rules." || strings.Contains(notice, "consensus") {
+		t.Fatalf("notice %q", notice)
+	}
+	f.stillInShed(t, stream)
+	if ran := f.ran(); ran[replyTurnID(1, 1)] != 0 {
+		t.Fatalf("the architect replied to nothing: %v", ran)
+	}
+}
+
+// Some failed turns leave a consensus among the members who were heard, and
+// the conclusion says how many were not.
+func TestConsensusNamesTheTurnsThatFailed(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 2, 3)
+	defer f.stop(t)
+	f.member(1, 1, 1, func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error {
+		return errors.New("the agent crashed")
+	})
+	f.member(1, 2, 1, silent)
+	stream := f.handIn(t, "design", handedDesign)
+	f.awaitShed(t, stream, "concluded-1")
+	if end, want := f.transition(t, stream, "shed-concluded-1"), "debate concluded by consensus after round 1: no objection stands; the turns of 1 of 2 members failed"; end.Reason != want {
+		t.Fatalf("conclusion %q, want %q", end.Reason, want)
+	}
+}
+
+// setRounds rewrites shed.max_rounds in the fixture's config.toml.
+func (f *shedFixture) setRounds(t *testing.T, from, to int) {
+	t.Helper()
+	path := filepath.Join(f.opts.Config.Root, "config.toml")
+	data, err := os.ReadFile(path)
+	must(t, err)
+	old := fmt.Sprintf("max_rounds = %d\n", from)
+	if !strings.Contains(string(data), old) {
+		t.Fatalf("config.toml lacks %q", old)
+	}
+	must(t, os.WriteFile(path, []byte(strings.Replace(string(data), old, fmt.Sprintf("max_rounds = %d\n", to), 1)), 0600))
+}
+
+// A service that can run the architect and not the committee still answers a
+// heard round and still concludes; only the next round waits. The cap is the
+// loaded configuration's when the step is taken, so a changed shed.max_rounds
+// applies to a debate that is already running.
+func TestDebateWithoutACommitteeRunnerStillRepliesAndConcludes(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 2)
+	ctx := context.Background()
+	p := &faults{}
+	size := shed.ObjectionID(1, committeeAgent(1), 1)
+	f.member(1, 1, 1, objects(p, shed.Size, "plan#resume", "spec#1"))
+	replying := make(chan struct{})
+	f.script(replyTurnID(1, 1), nil, func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
+		close(replying)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	stream := f.handIn(t, "design", handedDesign)
+	select {
+	case <-replying:
+	case <-time.After(demoTimeout):
+		t.Fatal("the reply did not start")
+	}
+	f.stop(t)
+
+	// Without a committee runner the reply is given; round 2 waits.
+	f.script(replyTurnID(1, 2), nil, answers(p, "Split.", size))
+	f.opts.Committee = nil
+	f.start(t)
+	f.awaitShed(t, stream, "replied-1")
+	f.settledReplies(t, stream)
+	must(t, (&debate{s: f.s, repository: f.repository()}).Pass(ctx))
+	if moves := f.shedMoves(t, stream); moves[len(moves)-1] != "replied-1" || len(f.roundOperations(t, stream)) != 1 {
+		t.Fatalf("a round was requested without a committee runner: %v", moves)
+	}
+	f.stop(t)
+	p.check(t)
+
+	// The cap now is round 1: the debate concludes there, still without a
+	// committee runner.
+	f.setRounds(t, 2, 1)
+	f.start(t)
+	defer f.stop(t)
+	f.awaitShed(t, stream, "concluded-1")
+	if end, want := f.transition(t, stream, "shed-concluded-1"), "debate stopped after round 1, at the shed.max_rounds cap of 1, with 1 objections standing, 1 of them blocking; the cap approves nothing"; end.Reason != want {
+		t.Fatalf("conclusion %q, want %q", end.Reason, want)
+	}
+	if ran := f.ran(); ran[roundTurnID(2, committeeAgent(1), 1)] != 0 {
+		t.Fatalf("round 2 ran: %v", ran)
 	}
 }

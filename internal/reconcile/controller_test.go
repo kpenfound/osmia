@@ -461,4 +461,14 @@ func TestPriorityOrdersAPassAcrossWorkstreams(t *testing.T) {
 	if want := []string{"early", "early", "prepare", "late", "late"}; !slices.Equal(got, want) {
 		t.Fatalf("applied %v, want %v", got, want)
 	}
+	// Equal priorities keep the order the workstreams hold them in.
+	for i, stream := range map[int]config.WorkstreamID{0: streamID, 1: other, 3: streamID, 4: other} {
+		name := "early"
+		if i > 2 {
+			name = "late"
+		}
+		if want := trace.OperationID(projectID, stream, trace.EventID("ordered", name)); f.system.applications[i] != want {
+			t.Fatalf("operation %d is %s, want %s of workstream %s: %v", i+1, f.system.applications[i], want, stream, f.system.applications)
+		}
+	}
 }

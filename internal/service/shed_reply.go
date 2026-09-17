@@ -209,7 +209,7 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 				if err != nil {
 					return none, err
 				}
-				return d.replyFailed(ctx, op.ID, stream, n, fmt.Sprintf("the reply to round %d failed: the workstream was abandoned, so the architect runs no turn for it", n))
+				return d.replyFailed(ctx, op.ID, stream, n, abandonedReply(n))
 			}
 			interrupted := len(slices.DeleteFunc(slices.Clone(turns), func(q trace.QueuedTurn) bool { return q.Status() != "interrupted" }))
 			if interrupted >= maxReplyAttempts {
@@ -369,6 +369,14 @@ func (d *debate) answers(stream config.WorkstreamID, turns []trace.QueuedTurn) (
 // authored by the architect and caused by the operation, in one commit, then
 // moves the shed to replied-<n>.
 func (d *debate) recordReply(ctx context.Context, operation string, stream config.WorkstreamID, turns []trace.QueuedTurn, reply shed.Reply, files map[string]string) (coreadapter.OperationResult, error) {
+	// A reply that is not committed yet records nothing for a workstream the
+	// owner abandoned while the turn ran.
+	if gone, err := abandoned(d.repository, stream); err != nil || gone {
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		return d.replyFailed(ctx, operation, stream, reply.Round, abandonedReply(reply.Round))
+	}
 	var err error
 	if reply.Answers, reply.Turn, err = d.answers(stream, turns); err != nil {
 		return coreadapter.OperationResult{}, err
@@ -420,6 +428,12 @@ func (d *debate) replied(ctx context.Context, operation string, stream config.Wo
 		reason += " and left " + reply.Revision.String() + " as it is"
 	}
 	return d.endReply(ctx, operation, stream, reply.Round, "replied", reason)
+}
+
+// abandonedReply is why the reply to round n of an abandoned workstream
+// failed.
+func abandonedReply(n int) string {
+	return fmt.Sprintf("the reply to round %d failed: the workstream was abandoned, so the architect's reply is not recorded", n)
 }
 
 func (d *debate) replyFailed(ctx context.Context, operation string, stream config.WorkstreamID, n int, reason string) (coreadapter.OperationResult, error) {
