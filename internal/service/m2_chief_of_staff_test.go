@@ -477,6 +477,7 @@ func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	for path, wants := range map[string][]string{
 		"workstreams/" + string(stream) + "/questions/2/question.jsonl": {chiefDemoQuestion, `"batch":"escalation_2"`},
 		"workstreams/" + string(stream) + "/questions/2/rulings.jsonl":  {`"owner_response":"` + chiefDemoRuling, `"returned_answer":"` + chiefDemoRelayed},
+		"workstreams/" + string(stream) + "/questions/1/question.jsonl": {"Where does state live?"},
 		"workstreams/" + string(stream) + "/questions/1/rulings.jsonl":  {`"returned_answer":"` + chiefDemoAnswer, `"citations":["charter#1"]`},
 	} {
 		committed := demoGit(t, "", "-C", traceDir, "cat-file", "blob", "HEAD:"+path)
