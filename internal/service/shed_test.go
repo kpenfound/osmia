@@ -82,12 +82,14 @@ func (f *shedFixture) member(round, i, attempt int, run func(ctx context.Context
 // awaitShed waits until the workstream's shed has reached the wanted state,
 // whatever it moved to since. It fails at once when the shed reaches a state
 // in never, after which the wanted one cannot come: by default, for a heard
-// round, its failure.
+// round, its failure, and for a conclusion, the next round.
 func (f *shedFixture) awaitShed(t *testing.T, stream config.WorkstreamID, want string, never ...string) {
 	t.Helper()
 	deadline := time.Now().Add(demoTimeout)
 	if kind, n, ok := shedState(want); ok && kind == "heard" && len(never) == 0 {
 		never = []string{fmt.Sprintf("failed-%d", n)}
+	} else if ok && kind == "concluded" && len(never) == 0 {
+		never = []string{fmt.Sprintf("round-%d", n+1)}
 	}
 	for {
 		var reached []string

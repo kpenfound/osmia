@@ -125,6 +125,23 @@ func (f *shedFixture) replyOperations(t *testing.T, stream config.WorkstreamID) 
 	return slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != ReplyAction })
 }
 
+// settledReplies returns the reply operations once each has its result: the
+// shed moves before the operation that moved it records what it did.
+func (f *shedFixture) settledReplies(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
+	t.Helper()
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		ops := f.replyOperations(t, stream)
+		if !slices.ContainsFunc(ops, func(o trace.OperationRecord) bool { return o.Result == nil }) {
+			return ops
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("reply operations without a result: %+v", ops)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // ran counts how often the backend ran each turn.
 func (f *shedFixture) ran() map[string]int {
 	out := map[string]int{}
@@ -736,7 +753,7 @@ func TestReplyRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 			if docs := f.documents(t, stream, shed.ReplyDocumentID(1)); len(docs) != 1 || docs[0].Content != string(data) {
 				t.Fatalf("reply documents: %+v", docs)
 			}
-			replies := f.replyOperations(t, stream)
+			replies := f.settledReplies(t, stream)
 			if len(replies) != 1 || replies[0].Result == nil || replies[0].Result.Outcome != "succeeded" || replies[0].Result.Evidence != "the architect answered 1 objections after round 1 and left spec.md revision 1 and plan.json revision 1 as it is" {
 				t.Fatalf("operations: %+v", replies)
 			}
@@ -780,7 +797,7 @@ func TestAbandonFailsARunningReply(t *testing.T) {
 	if replies, err := shed.Replies(f.repository(), stream); err != nil || len(replies) != 0 {
 		t.Fatalf("replies of an abandoned workstream: %+v %v", replies, err)
 	}
-	ops := f.replyOperations(t, stream)
+	ops := f.settledReplies(t, stream)
 	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" || ops[0].Result.Evidence != "the reply to round 1 failed: the workstream was abandoned, so the architect runs no turn for it" {
 		t.Fatalf("operations: %+v", ops)
 	}
