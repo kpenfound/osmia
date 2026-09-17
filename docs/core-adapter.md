@@ -125,10 +125,12 @@ gateway, so `Serve` is `mcphost.StartOn` bound to that address.
 core's container sessions resolve on macOS and Linux, and listens on the
 loopback on macOS and on the gateway the container engine reports for its
 `bridge` network on Linux. `MCPHost.Container`, when set, serves every turn
-whose execution mode is `container`; `MCPHost.Transport` serves the others. Service tests use
-in-memory SDK transports, and the `CoreTransport` tests serve on a loopback port;
-execution and providers are faked, and no test launches an agent, container
-engine or VCS process.
+whose execution mode is `container`; `MCPHost.Transport` serves the others.
+Service tests use in-memory SDK transports, and the `CoreTransport` tests serve
+on a loopback port. The Linux `ContainerTransport` test runs a fake engine
+script that reports the loopback as the bridge gateway. Execution and providers
+are faked, and no test launches an agent, a real container engine or a VCS
+process.
 
 ## Review evidence
 
