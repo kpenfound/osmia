@@ -215,6 +215,8 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	engine.turns["answer_1"] = asker("session-mason", "Which file holds the index?", answerPrompt, "Work: build")
 
 	answered, escalated := make(chan struct{}), make(chan struct{})
+	// firstDeliveries counts the turns that carried the events of questions 1 and 2.
+	firstDeliveries := 0
 	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
 		names, err := toolNames(ctx, tools)
@@ -231,9 +233,36 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			}
 		}
 		switch {
+		// A replayed prompt carries earlier events, so the newest is matched first.
+		case strings.Contains(req.Prompt, "Question 3 is open, asked by the mason: Which file holds the index?"):
+			defer mu.Unlock()
+			for _, call := range []struct {
+				tool string
+				args map[string]any
+			}{
+				{"escalate", map[string]any{"questions": []string{"2", "3"}, "rephrasing": "Are the log format and the index file part of the contract?", "blocked": "The upload unit and its review.", "options": []string{"Both fixed", "Both free"}, "recommendation": "Both fixed."}},
+				{"answer", map[string]any{"question": "2", "text": "Fixed.", "citations": []string{"charter#1"}}},
+				{"escalate", map[string]any{"questions": []string{"3"}, "rephrasing": "Again?", "blocked": "The same.", "options": []string{}, "recommendation": "No."}},
+			} {
+				if err := use(ctx, tools, "chief-escalates", call.tool, call.args); err != nil {
+					return nil, err
+				}
+			}
+			close(escalated)
+			return result(req, "session-chief", "Escalated"), nil
 		case strings.Contains(req.Prompt, "Question 1 is open, asked by the mason: Where does state live?"):
 			if !strings.Contains(req.Prompt, "Question 2 is open, asked by the reviewer: Is the log format fixed?") {
 				problem("questions were not delivered together:\n%s", req.Prompt)
+			}
+			firstDeliveries++
+			if firstDeliveries > 1 {
+				// The stop interrupted the turn that answered, so its events
+				// arrive again; question 1 is already answered.
+				defer mu.Unlock()
+				if err := use(ctx, tools, "chief-redelivered", "answer", map[string]any{"question": "1", "text": "In files under the root.", "citations": []string{"charter#1"}}); err != nil {
+					return nil, err
+				}
+				return result(req, "session-chief", "Already answered"), nil
 			}
 			for _, call := range []struct {
 				tool string
@@ -256,22 +285,6 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			close(answered)
 			<-ctx.Done()
 			return nil, ctx.Err()
-		case strings.Contains(req.Prompt, "Question 3 is open, asked by the mason: Which file holds the index?"):
-			defer mu.Unlock()
-			for _, call := range []struct {
-				tool string
-				args map[string]any
-			}{
-				{"escalate", map[string]any{"questions": []string{"2", "3"}, "rephrasing": "Are the log format and the index file part of the contract?", "blocked": "The upload unit and its review.", "options": []string{"Both fixed", "Both free"}, "recommendation": "Both fixed."}},
-				{"answer", map[string]any{"question": "2", "text": "Fixed.", "citations": []string{"charter#1"}}},
-				{"escalate", map[string]any{"questions": []string{"3"}, "rephrasing": "Again?", "blocked": "The same.", "options": []string{}, "recommendation": "No."}},
-			} {
-				if err := use(ctx, tools, "chief-escalates", call.tool, call.args); err != nil {
-					return nil, err
-				}
-			}
-			close(escalated)
-			return result(req, "session-chief", "Escalated"), nil
 		}
 		mu.Unlock()
 		problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
@@ -386,8 +399,9 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	must(t, s.Close())
 
 	// Third lifetime, with an answered but undelivered question: the answer
-	// reaches the mason's thread once, the mason asks again, and the chief of
-	// staff escalates the two open questions together.
+	// reaches the mason's thread once, the events of the interrupted
+	// chief-of-staff turn arrive again in one new turn, the mason asks again,
+	// and the chief of staff escalates the two open questions together.
 	s, err = Start(ctx, opts)
 	must(t, err)
 	repo = <-lives
@@ -399,6 +413,12 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	must(t, err)
 	if req := th.Turns[1].Request; req.Prompt != answerPrompt || req.ThreadID != demoThread || req.SystemPrompt != "You are the mason." || req.Profile.Name != "default" {
 		t.Fatalf("answer turn: %+v", req)
+	}
+	mu.Lock()
+	again := firstDeliveries
+	mu.Unlock()
+	if again != 2 {
+		t.Fatalf("events of the interrupted turn delivered %d times in all", again)
 	}
 	if got := states(repo); !reflect.DeepEqual(got, map[string]string{"1": trace.QuestionAnswered, "2": trace.QuestionOpen, "3": trace.QuestionOpen}) || !parked(repo, demoAgent) {
 		t.Fatalf("questions after the answer: %v, mason parked %v", got, parked(repo, demoAgent))
@@ -421,7 +441,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	if got := states(repo); !reflect.DeepEqual(got, map[string]string{"1": trace.QuestionAnswered, "2": trace.QuestionEscalated, "3": trace.QuestionEscalated}) {
 		t.Fatalf("final questions: %v", got)
 	}
-	if got := runs(); !reflect.DeepEqual(got, map[string]int{"build": 1, "build2": 1, "review": 1, "answer_1": 1, "events": 2}) {
+	if got := runs(); !reflect.DeepEqual(got, map[string]int{"build": 1, "build2": 1, "review": 1, "answer_1": 1, "events": 3}) {
 		t.Fatalf("runs: %v", got)
 	}
 	if !parked(repo, demoAgent) || !parked(repo, "agent_reviewer") {
@@ -463,6 +483,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			`{"recorded":true,"question":"1","next":"The answer is delivered to the asker as its next turn."}`,
 			`{"recorded":false,"reason":"question 1 is already answered"}`,
 		},
+		"chief-redelivered": {`{"recorded":false,"reason":"question 1 is already answered"}`},
 		"chief-escalates": {
 			`{"recorded":true,"batch":"escalation_2","questions":["2","3"]}`,
 			`{"recorded":false,"reason":"question 2 is escalated to the owner; only the owner's ruling answers it"}`,
