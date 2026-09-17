@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -62,6 +64,22 @@ func handedWorkstream(t *testing.T, root string, project config.ProjectID, strea
 	return doc, string(handed)
 }
 
+// handedCount counts the project's workstreams other than the librarian's.
+func handedCount(t *testing.T, root string, project config.ProjectID) int {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(root, "projects", string(project), "workstreams"))
+	must(t, err)
+	sum := sha256.Sum256([]byte("librarian:" + string(project)))
+	librarian := "w_" + hex.EncodeToString(sum[:16])
+	n := 0
+	for _, e := range entries {
+		if e.Name() != librarian {
+			n++
+		}
+	}
+	return n
+}
+
 func TestHandInCommand(t *testing.T) {
 	root, project, home := handInFixture(t)
 	design := filepath.Join(home, "design.md")
@@ -112,10 +130,8 @@ func TestHandInCommand(t *testing.T) {
 	if strings.Contains(second, string(result.Workstream)) || strings.Split(second, "\n")[0] == lines[0] {
 		t.Fatalf("second hand-in reused a workstream:\n%s", second)
 	}
-	entries, err := os.ReadDir(filepath.Join(root, "projects", string(project), "workstreams"))
-	must(t, err)
-	if len(entries) != 4 {
-		t.Fatalf("%d workstreams", len(entries))
+	if n := handedCount(t, root, project); n != 4 {
+		t.Fatalf("%d workstreams", n)
 	}
 
 	for _, c := range []struct {
@@ -136,10 +152,8 @@ func TestHandInCommand(t *testing.T) {
 			t.Errorf("%v: %d %q %q", c.args, code, out, diag)
 		}
 	}
-	entries, err = os.ReadDir(filepath.Join(root, "projects", string(project), "workstreams"))
-	must(t, err)
-	if len(entries) != 4 {
-		t.Fatalf("refused hand-ins created workstreams: %d", len(entries))
+	if n := handedCount(t, root, project); n != 4 {
+		t.Fatalf("refused hand-ins created workstreams: %d", n)
 	}
 }
 

@@ -92,11 +92,34 @@ func (f *handInFixture) head(t *testing.T) string {
 	return strings.TrimSpace(string(out))
 }
 
+// unchanged reports whether no commit since head touched the trace outside
+// the librarian's workstream, which the project's extraction writes to.
+func (f *handInFixture) unchanged(t *testing.T, head string) bool {
+	t.Helper()
+	out, err := exec.Command("git", "-C", f.trace, "diff", "--name-only", head, "HEAD").Output()
+	must(t, err)
+	librarian := "workstreams/" + string(librarianWorkstream(f.project)) + "/"
+	for _, name := range strings.Fields(string(out)) {
+		if !strings.HasPrefix(name, librarian) {
+			t.Logf("changed: %s", name)
+			return false
+		}
+	}
+	return true
+}
+
+// streams lists the project's workstreams other than the librarian's.
 func (f *handInFixture) streams(t *testing.T) []config.WorkstreamID {
 	t.Helper()
 	streams, err := f.repository().Workstreams()
 	must(t, err)
-	return streams
+	var out []config.WorkstreamID
+	for _, id := range streams {
+		if id != librarianWorkstream(f.project) {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // checkHanded verifies everything a successful hand-in records.
@@ -208,7 +231,7 @@ func TestHandInRetryReturnsTheSameWorkstream(t *testing.T) {
 	if again := f.handIn(t, HandInRequest{Key: "retry", Path: design}); again != first {
 		t.Fatalf("retry %+v, first %+v", again, first)
 	}
-	if f.head(t) != head {
+	if !f.unchanged(t, head) {
 		t.Fatal("retry wrote to the trace")
 	}
 	f.checkHanded(t, first, "retry", "design.md", "file:"+design, "design")
@@ -241,7 +264,7 @@ func TestHandInRetryReturnsTheSameWorkstream(t *testing.T) {
 			t.Fatalf("%+v: %+v", req, api)
 		}
 	}
-	if f.head(t) != head || len(f.streams(t)) != 3 {
+	if !f.unchanged(t, head) || len(f.streams(t)) != 3 {
 		t.Fatal("refused retry wrote to the trace")
 	}
 }
@@ -318,7 +341,7 @@ func TestHandInRefusalsWriteNothing(t *testing.T) {
 			t.Errorf("%+.80v: %+v", c.req, api)
 		}
 	}
-	if f.head(t) != head || len(f.streams(t)) != 1 {
+	if !f.unchanged(t, head) || len(f.streams(t)) != 1 {
 		t.Fatal("a refused hand-in wrote to the trace")
 	}
 
@@ -332,7 +355,7 @@ func TestHandInRefusalsWriteNothing(t *testing.T) {
 	if api.Code != CharterEmpty || !strings.Contains(api.Message, f.charter) || f.issues.fetches != fetches {
 		t.Fatalf("empty charter: %+v, %d fetches", api, f.issues.fetches-fetches)
 	}
-	if f.head(t) != head || len(f.streams(t)) != 1 {
+	if !f.unchanged(t, head) || len(f.streams(t)) != 1 {
 		t.Fatal("an empty charter hand-in wrote to the trace")
 	}
 
@@ -343,7 +366,7 @@ func TestHandInRefusalsWriteNothing(t *testing.T) {
 	if api.Code != NotFound || !strings.Contains(api.Message, "project "+string(f.project)+" is not an active project") {
 		t.Fatalf("inactive project: %+v", api)
 	}
-	if f.head(t) != head {
+	if !f.unchanged(t, head) {
 		t.Fatal("an inactive project hand-in wrote to the trace")
 	}
 }
