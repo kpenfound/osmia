@@ -31,8 +31,8 @@ remain inside that turn's view. The optional service `Capture` callback can insp
 or snapshot output before cleanup, including partial output from failed execution.
 There is no automatic copy-back, commit, branch landing or delivery.
 
-The service closes the execution boundary, MCP host, view and provider lease, in
-that order, using a non-cancelled cleanup context. Cleanup errors accompany the
+The service closes the MCP host, view and provider lease, in that order, using a
+non-cancelled cleanup context. Cleanup errors accompany the
 turn result. Views and MCP credentials are fresh on every turn, including resumed
 threads; backend state is not an authority to reuse a prior grant. The thread
 runner's resume check is forwarded to the execution engine through the same

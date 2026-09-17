@@ -3,6 +3,7 @@ package coreadapter_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -64,9 +65,21 @@ func TestRawExecutionRequestCannotWidenBoundary(t *testing.T) {
 			if len(engine.Requests) != 2 {
 				t.Fatal("raw override reached construction")
 			}
+			// Only core can refuse these; every other widening is refused
+			// before verification.
+			verified := 2
+			if coreRefuses[name] {
+				verified = 3
+			}
+			if len(engine.Verified) != verified {
+				t.Fatalf("verified %d requests, want %d", len(engine.Verified), verified)
+			}
 		})
 	}
 }
+
+// coreRefuses names the widening requests that reach core's verification.
+var coreRefuses = map[string]bool{"VCS": true, "profile env": true, "container env": true, "host MCP": true, "shell": true}
 
 func boundaryTurn(t *testing.T, mode string) a.PreparedTurn {
 	t.Helper()
@@ -178,10 +191,34 @@ func (nilTurnEngine) Verify(agent.Request) (*agent.Turn, error) { return nil, ni
 
 func TestCoreVerificationFailureNeverStarts(t *testing.T) {
 	turn := boundaryTurn(t, "container")
-	engine := &adaptertest.Engine{VerifyErr: agent.ErrNotGranted}
+	for _, refusal := range []error{agent.ErrNotGranted, agent.ErrUnsupported, agent.ErrNoGrants} {
+		engine := &adaptertest.Engine{VerifyErr: fmt.Errorf("fixture: %w", refusal)}
+		_, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
+		if !errors.Is(err, a.ErrUnsupported) || !errors.Is(err, refusal) || len(engine.Verified) != 1 || len(engine.Requests) != 0 {
+			t.Fatalf("%v: err=%v launches=%d", refusal, err, len(engine.Requests))
+		}
+	}
+	// Any other verification failure, such as an unreadable path, is not a
+	// refusal and keeps its own error.
+	failure := errors.New("fixture I/O failure")
+	engine := &adaptertest.Engine{VerifyErr: failure}
 	_, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
-	if !errors.Is(err, a.ErrUnsupported) || len(engine.Verified) != 1 || len(engine.Requests) != 0 {
+	if errors.Is(err, a.ErrUnsupported) || !errors.Is(err, failure) || len(engine.Requests) != 0 {
 		t.Fatalf("err=%v launches=%d", err, len(engine.Requests))
+	}
+}
+
+func TestNonClaudeBackendsAreRefused(t *testing.T) {
+	for _, backend := range []string{"codex", "opencode"} {
+		t.Run(backend, func(t *testing.T) {
+			turn := boundaryTurn(t, "container")
+			turn.Profile.Backend = backend
+			engine := &adaptertest.Engine{}
+			_, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
+			if !errors.Is(err, a.ErrUnsupported) || !errors.Is(err, agent.ErrUnsupported) || len(engine.Requests) != 0 {
+				t.Fatalf("err=%v launches=%d", err, len(engine.Requests))
+			}
+		})
 	}
 }
 

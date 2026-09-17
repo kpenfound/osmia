@@ -3,6 +3,7 @@ package coreadapter
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"maps"
 	"net/url"
@@ -141,9 +142,6 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(req.SessionDir, 0o700); err != nil {
-		return nil, err
-	}
 	// Core refuses whatever the grants do not cover. These are the request
 	// fields grants do not describe; they also protect callers that invoke
 	// Run without the normal turn translator.
@@ -160,6 +158,9 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 			return nil, unsupported("MCP", "only service-authenticated HTTP endpoints are permitted")
 		}
 	}
+	if err = os.MkdirAll(req.SessionDir, 0o700); err != nil {
+		return nil, err
+	}
 	if iso.Workspace.Access == ReadOnly {
 		// Core runs a session in a writable directory; a read-only view is
 		// mounted beside an empty scratch directory the session starts in.
@@ -171,8 +172,11 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	}
 	req.Grants = &grants
 	turn, err := e.Runner.Verify(req)
+	if errors.Is(err, agent.ErrNotGranted) || errors.Is(err, agent.ErrUnsupported) || errors.Is(err, agent.ErrNoGrants) {
+		return nil, fmt.Errorf("%w: grants: %w", ErrUnsupported, err)
+	}
 	if err != nil {
-		return nil, &UnsupportedError{"grants", err.Error()}
+		return nil, err
 	}
 	if err = verifiedTurn(turn, iso, grants); err != nil {
 		return nil, err
@@ -183,13 +187,13 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	return e.Runner.Run(ctx, req)
 }
 
+// scratchDirectory is the session subdirectory a read-only turn starts in.
+const scratchDirectory = "work"
+
 // coreGrants are the complete capabilities of a turn in iso: the view with its
 // access, the session directory read-only, a writable scratch directory inside
 // it when the view is read-only, the service environment and one MCP server
 // grant per scoped endpoint, without built-in tools or VCS.
-// scratchDirectory is the session subdirectory a read-only turn starts in.
-const scratchDirectory = "work"
-
 func coreGrants(iso Isolation, sessionDir string, servers []string) (agent.Grants, error) {
 	access := agent.ReadOnly
 	if iso.Workspace.Access == ReadWrite {
