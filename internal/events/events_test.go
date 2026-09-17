@@ -40,6 +40,11 @@ type fixture struct {
 	root    config.Root
 	project config.Project
 	clock   *clock
+	// failNext makes the next turn runAll completes fail.
+	failNext bool
+	// failed is the prompt of the turn runAll failed.
+	failed string
+	claims int
 }
 
 func must(t *testing.T, err error) {
@@ -101,6 +106,58 @@ func eventTurns(t *testing.T, repo *trace.Repository) []trace.QueuedTurn {
 	return out
 }
 
+// claimNext reserves the chief of staff's next queued turn.
+func (f *fixture) claimNext(t *testing.T, repo *trace.Repository) trace.QueuedTurn {
+	t.Helper()
+	f.claims++
+	token := fmt.Sprintf("run_%d", f.claims)
+	q, err := repo.ClaimTurn(context.Background(), stream, trace.ChiefOfStaff, token, "/sessions/"+token, f.clock.Now())
+	must(t, err)
+	return q
+}
+
+// finish completes a turn claimed with claimNext, successfully or with a failure.
+func (f *fixture) finish(t *testing.T, repo *trace.Repository, q trace.QueuedTurn, ok bool) {
+	t.Helper()
+	ctx := context.Background()
+	h := q.Request.Header
+	h.Schema, h.ID, h.At = "osmia.trace.turn-response", "response_"+q.Request.TurnID, f.clock.Now()
+	response := trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: 1,
+		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, FinalResponse: "Noted"}}
+	if !ok {
+		response.Result.IsError, response.Failure = true, "the turn failed"
+	}
+	must(t, repo.CaptureTurn(ctx, q.Claim.Token, response))
+	must(t, repo.CompleteTurn(ctx, stream, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, f.clock.Now()))
+}
+
+// runAll completes every queued chief-of-staff turn, successfully unless
+// failNext is set.
+func (f *fixture) runAll(t *testing.T, repo *trace.Repository) {
+	t.Helper()
+	th, err := repo.ChiefOfStaffThread(stream)
+	must(t, err)
+	for _, q := range th.Turns {
+		if q.Claim == nil {
+			ok := !f.failNext
+			if !ok {
+				f.failNext, f.failed = false, q.Request.Prompt
+			}
+			f.finish(t, repo, f.claimNext(t, repo), ok)
+		}
+	}
+}
+
+// deliveries counts the event turns whose prompt carries the notice of id.
+func deliveries(t *testing.T, repo *trace.Repository, id string) int {
+	t.Helper()
+	n := 0
+	for _, q := range eventTurns(t, repo) {
+		n += strings.Count(q.Request.Prompt, "Notice "+id+"\n")
+	}
+	return n
+}
+
 func unacknowledged(t *testing.T, repo *trace.Repository) int {
 	t.Helper()
 	entries, err := repo.Outbox(stream)
@@ -143,6 +200,12 @@ func TestEventsInsideTheWindowMakeOneTurn(t *testing.T) {
 	if req.AgentID != trace.ChiefOfStaff || req.ThreadID != trace.ChiefOfStaff || req.Profile != profile || req.Cause != "first" || !req.At.Equal(f.clock.Now()) || req.SystemPrompt != "" {
 		t.Fatalf("request %+v", req)
 	}
+	// The events stay unacknowledged until their turn completes.
+	if n := unacknowledged(t, repo); n != 3 {
+		t.Fatalf("%d events unacknowledged while the turn is queued", n)
+	}
+	f.runAll(t, repo)
+	must(t, d.Pass(ctx))
 	if n := unacknowledged(t, repo); n != 0 {
 		t.Fatalf("%d events left unacknowledged", n)
 	}
@@ -244,15 +307,17 @@ var steps = []struct {
 	n    int
 }{
 	{"before-claim", 1}, {"before-claim", 2}, {"before-enqueue", 1},
-	{"before-acknowledge", 1}, {"before-acknowledge", 2}, {"before-settle", 1},
+	{"before-settle", 1}, {"before-settle", 2}, {"before-release", 1}, {"before-release", 2},
 }
 
-func crashAt(name string, n int) func(string) error {
+// crashAt fails the nth occurrence of step name and sets *fired when it does.
+func crashAt(name string, n int, fired *bool) func(string) error {
 	seen := 0
 	return func(step string) error {
 		if step == name {
 			seen++
 			if seen == n {
+				*fired = true
 				return errors.New("crash at " + step)
 			}
 		}
@@ -261,76 +326,255 @@ func crashAt(name string, n int) func(string) error {
 }
 
 func TestCrashAndRestartNeitherLoseNorRepeatEvents(t *testing.T) {
-	for _, first := range steps {
-		for _, second := range append(steps, struct {
-			name string
-			n    int
-		}{"none", 1}) {
-			t.Run(fmt.Sprintf("%s%d_then_%s%d", first.name, first.n, second.name, second.n), func(t *testing.T) {
-				ctx := context.Background()
-				f, repo := setup(t)
-				defer func() { repo.Close() }()
-				f.notify(t, repo, "first")
-				f.notify(t, repo, "second")
-				f.clock.Advance(time.Minute)
-				d := f.deliverer(t, repo, time.Second)
-				d.boundary = crashAt(first.name, first.n)
-				_ = d.Pass(ctx)
-
-				// Each restart is a new repository session; a later event joins
-				// whatever was not delivered.
-				repo = f.reopen(t, repo)
-				f.notify(t, repo, "third")
-				f.clock.Advance(time.Minute)
-				d = f.deliverer(t, repo, time.Second)
-				d.boundary = crashAt(second.name, second.n)
-				_ = d.Pass(ctx)
-
-				repo = f.reopen(t, repo)
-				f.clock.Advance(time.Minute)
-				d = f.deliverer(t, repo, time.Second)
-				must(t, d.Pass(ctx))
-				must(t, d.Pass(ctx))
-
-				if n := unacknowledged(t, repo); n != 0 {
-					t.Fatalf("%d events left unacknowledged", n)
-				}
-				for _, id := range []string{"first", "second", "third"} {
-					count := 0
-					for _, q := range eventTurns(t, repo) {
-						count += strings.Count(q.Request.Prompt, "Notice "+id+"\n")
+	// Every crash point fires as the first crash of some cell, and the
+	// release points fire once the first turn failed.
+	var mu sync.Mutex
+	fired := map[string]bool{}
+	t.Cleanup(func() {
+		if t.Failed() {
+			return
+		}
+		for _, step := range steps {
+			key := fmt.Sprintf("%s%d", step.name, step.n)
+			if !fired[key] {
+				t.Errorf("crash point %s never fired", key)
+			}
+		}
+	})
+	for _, failed := range []bool{false, true} {
+		for _, first := range steps {
+			for _, second := range append(steps, struct {
+				name string
+				n    int
+			}{"none", 1}) {
+				t.Run(fmt.Sprintf("failed=%v/%s%d_then_%s%d", failed, first.name, first.n, second.name, second.n), func(t *testing.T) {
+					t.Parallel()
+					if crashAndRestart(t, failed, first.name, first.n, second.name, second.n) {
+						mu.Lock()
+						fired[fmt.Sprintf("%s%d", first.name, first.n)] = true
+						mu.Unlock()
 					}
-					if count != 1 {
-						t.Fatalf("event %s delivered %d times", id, count)
-					}
-				}
-			})
+				})
+			}
 		}
 	}
 }
 
-func TestExpiredLeaseIsAcknowledgedWithoutAnotherTurn(t *testing.T) {
+// crashAndRestart delivers three events across two crashing passes and a
+// clean one, restarting after each and running the queued turns between
+// passes. When failed is set, the first turn to run fails. It reports whether
+// the first crash point fired.
+func crashAndRestart(t *testing.T, failed bool, first string, firstN int, second string, secondN int) bool {
+	ctx := context.Background()
+	f, repo := setup(t)
+	defer func() { repo.Close() }()
+	f.failNext = failed
+	f.notify(t, repo, "first")
+	f.notify(t, repo, "second")
+	f.clock.Advance(time.Minute)
+	d := f.deliverer(t, repo, time.Second)
+	var fired, ignored bool
+	d.boundary = crashAt(first, firstN, &fired)
+	for range 2 {
+		_ = d.Pass(ctx)
+		f.runAll(t, repo)
+	}
+
+	// Each restart is a new repository session; a later event joins
+	// whatever was not delivered.
+	repo = f.reopen(t, repo)
+	f.notify(t, repo, "third")
+	f.clock.Advance(time.Minute)
+	d = f.deliverer(t, repo, time.Second)
+	d.boundary = crashAt(second, secondN, &ignored)
+	for range 2 {
+		_ = d.Pass(ctx)
+		f.runAll(t, repo)
+	}
+
+	repo = f.reopen(t, repo)
+	f.clock.Advance(time.Minute)
+	d = f.deliverer(t, repo, time.Second)
+	for range 3 {
+		must(t, d.Pass(ctx))
+		f.runAll(t, repo)
+	}
+	must(t, d.Pass(ctx))
+
+	if n := unacknowledged(t, repo); n != 0 {
+		t.Fatalf("%d events left unacknowledged", n)
+	}
+	if failed && f.failed == "" {
+		t.Fatal("no turn failed")
+	}
+	for _, id := range []string{"first", "second", "third"} {
+		// An event of the failed turn goes out in exactly one more.
+		want := 1 + strings.Count(f.failed, "Notice "+id+"\n")
+		if n := deliveries(t, repo, id); n != want {
+			t.Fatalf("event %s delivered %d times, want %d", id, n, want)
+		}
+	}
+	return fired
+}
+
+func TestEventOfACompletedTurnIsNeverDeliveredAgain(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t)
+	defer func() { repo.Close() }()
+	f.notify(t, repo, "first")
+	f.clock.Advance(time.Minute)
+	d := f.deliverer(t, repo, time.Second)
+	must(t, d.Pass(ctx))
+	f.runAll(t, repo)
+	// A restart before the acknowledgement settles the event without a turn.
+	repo = f.reopen(t, repo)
+	f.clock.Advance(time.Hour)
+	d = f.deliverer(t, repo, time.Second)
+	must(t, d.Pass(ctx))
+	must(t, d.Pass(ctx))
+	repo = f.reopen(t, repo)
+	must(t, f.deliverer(t, repo, time.Second).Pass(ctx))
+	if n := unacknowledged(t, repo); n != 0 || len(eventTurns(t, repo)) != 1 {
+		t.Fatalf("%d unacknowledged, turns %+v", n, eventTurns(t, repo))
+	}
+}
+
+func TestEventOfATurnCompletedInThisSessionIsAcknowledgedUnderItsClaim(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t)
 	defer repo.Close()
 	f.notify(t, repo, "first")
 	f.clock.Advance(time.Minute)
 	d := f.deliverer(t, repo, time.Second)
-	// The lease runs out between the queued turn and its acknowledgement.
-	d.boundary = func(step string) error {
-		if step == "before-acknowledge" {
-			f.clock.Advance(2 * time.Minute)
-		}
-		return nil
-	}
 	must(t, d.Pass(ctx))
+	f.runAll(t, repo)
+	must(t, d.Pass(ctx))
+	entries, err := repo.Outbox(stream)
+	must(t, err)
+	if len(entries) != 1 || !entries[0].Acknowledged || len(entries[0].History) != 2 || entries[0].History[1].Token != entries[0].History[0].Token {
+		t.Fatalf("outbox %+v", entries)
+	}
+}
+
+func TestEventOfAQueuedOrRunningTurnIsNotDeliveredTwice(t *testing.T) {
+	for _, c := range []struct {
+		name             string
+		running, restart bool
+	}{{"queued", false, false}, {"queued across a restart", false, true}, {"running", true, false}} {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			f, repo := setup(t)
+			defer func() { repo.Close() }()
+			f.notify(t, repo, "first")
+			f.clock.Advance(time.Minute)
+			d := f.deliverer(t, repo, time.Second)
+			must(t, d.Pass(ctx))
+			var q trace.QueuedTurn
+			if c.running {
+				q = f.claimNext(t, repo)
+			}
+			if c.restart {
+				repo = f.reopen(t, repo)
+				d = f.deliverer(t, repo, time.Second)
+			}
+			// The claim's lease runs out while the turn is in flight.
+			f.clock.Advance(time.Hour)
+			must(t, d.Pass(ctx))
+			must(t, d.Pass(ctx))
+			if n := unacknowledged(t, repo); n != 1 || len(eventTurns(t, repo)) != 1 {
+				t.Fatalf("%d unacknowledged, turns %+v", n, eventTurns(t, repo))
+			}
+			if c.running {
+				f.finish(t, repo, q, true)
+			} else {
+				f.runAll(t, repo)
+			}
+			must(t, d.Pass(ctx))
+			if n := unacknowledged(t, repo); n != 0 || len(eventTurns(t, repo)) != 1 {
+				t.Fatalf("%d unacknowledged, turns %+v", n, eventTurns(t, repo))
+			}
+		})
+	}
+}
+
+func TestEventOfAFailedTurnIsDeliveredInOneNewTurn(t *testing.T) {
+	for _, c := range []struct {
+		name               string
+		cancelled, expired bool
+	}{{"failed", false, false}, {"failed after the lease", false, true}, {"cancelled", true, false}} {
+		expired := c.expired
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			f, repo := setup(t)
+			defer repo.Close()
+			f.notify(t, repo, "first")
+			f.clock.Advance(time.Minute)
+			d := f.deliverer(t, repo, time.Second)
+			must(t, d.Pass(ctx))
+			if c.cancelled {
+				n, err := repo.CancelTurns(ctx, stream, f.clock.Now(), owner, "The owner cancelled the turn")
+				must(t, err)
+				if th, err := repo.ChiefOfStaffThread(stream); err != nil || n != 1 || th.Turns[0].Status() != "interrupted" {
+					t.Fatalf("cancelled %d: %+v, %v", n, th, err)
+				}
+			} else {
+				f.finish(t, repo, f.claimNext(t, repo), false)
+			}
+			if expired {
+				f.clock.Advance(time.Hour)
+			}
+			must(t, d.Pass(ctx))
+			must(t, d.Pass(ctx))
+			turns := eventTurns(t, repo)
+			if len(turns) != 2 || deliveries(t, repo, "first") != 2 || turns[1].Request.TurnID == turns[0].Request.TurnID || turns[1].Request.Prompt != turns[0].Request.Prompt {
+				t.Fatalf("turns %+v", turns)
+			}
+			entries, err := repo.Outbox(stream)
+			must(t, err)
+			var kinds []string
+			for _, a := range entries[0].History {
+				kinds = append(kinds, a.Kind)
+			}
+			want := []string{"claim", "release", "claim"}
+			if expired {
+				want = []string{"claim", "claim"}
+			}
+			if !slices.Equal(kinds, want) {
+				t.Fatalf("history %v, want %v", kinds, want)
+			}
+			f.runAll(t, repo)
+			must(t, d.Pass(ctx))
+			must(t, d.Pass(ctx))
+			if n := unacknowledged(t, repo); n != 0 || len(eventTurns(t, repo)) != 2 {
+				t.Fatalf("%d unacknowledged, turns %+v", n, eventTurns(t, repo))
+			}
+		})
+	}
+}
+
+func TestEventOfATurnARestartInterruptedIsDeliveredInOneNewTurn(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t)
+	defer func() { repo.Close() }()
+	f.notify(t, repo, "first")
+	f.clock.Advance(time.Minute)
+	must(t, f.deliverer(t, repo, time.Second).Pass(ctx))
+	f.claimNext(t, repo)
+	// The service stops before the turn captures a result.
+	repo = f.reopen(t, repo)
+	d := f.deliverer(t, repo, time.Second)
+	must(t, d.Pass(ctx))
+	must(t, d.Pass(ctx))
+	repo = f.reopen(t, repo)
+	d = f.deliverer(t, repo, time.Second)
+	f.clock.Advance(time.Hour)
+	must(t, d.Pass(ctx))
+	turns := eventTurns(t, repo)
+	if len(turns) != 2 || deliveries(t, repo, "first") != 2 || turns[1].Claim != nil {
+		t.Fatalf("turns %+v", turns)
+	}
 	if n := unacknowledged(t, repo); n != 1 {
-		t.Fatalf("%d unacknowledged after the expired lease", n)
-	}
-	d.boundary = nil
-	must(t, d.Pass(ctx))
-	if n := unacknowledged(t, repo); n != 0 || len(eventTurns(t, repo)) != 1 {
-		t.Fatalf("%d unacknowledged, turns %+v", n, eventTurns(t, repo))
+		t.Fatalf("%d unacknowledged", n)
 	}
 }
 
@@ -408,5 +652,43 @@ func TestTurnIDIsAValidKey(t *testing.T) {
 	id := TurnID(token)
 	if id != TurnID(token) || id == TurnID(token+"x") || !strings.HasPrefix(id, "events_") || len(id) != 47 {
 		t.Fatalf("turn id %q", id)
+	}
+}
+
+func TestSkippedWorkstreamKeepsItsEvents(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t)
+	defer repo.Close()
+	fail := errors.New("no state")
+	var skip bool
+	var skipErr error
+	var asked []config.WorkstreamID
+	d, err := New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil },
+		Skip: func(s config.WorkstreamID) (bool, error) {
+			asked = append(asked, s)
+			return skip, skipErr
+		}})
+	must(t, err)
+	f.notify(t, repo, "first")
+	f.clock.Advance(time.Minute)
+	// A failed turn leaves a claim this session holds; a skipped workstream
+	// keeps it and gets no new turn.
+	must(t, d.Pass(ctx))
+	f.finish(t, repo, f.claimNext(t, repo), false)
+	skip = true
+	must(t, d.Pass(ctx))
+	skipErr = fail
+	if err := d.Pass(ctx); !errors.Is(err, fail) {
+		t.Fatalf("skip error not reported: %v", err)
+	}
+	entries, err := repo.Outbox(stream)
+	must(t, err)
+	if len(eventTurns(t, repo)) != 1 || len(entries) != 1 || entries[0].Acknowledged || len(entries[0].History) != 1 || !slices.Equal(asked, []config.WorkstreamID{stream, stream, stream}) {
+		t.Fatalf("turns %+v, outbox %+v, asked %v", eventTurns(t, repo), entries, asked)
+	}
+	skip, skipErr = false, nil
+	must(t, d.Pass(ctx))
+	if deliveries(t, repo, "first") != 2 {
+		t.Fatalf("turns %+v", eventTurns(t, repo))
 	}
 }

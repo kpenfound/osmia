@@ -37,15 +37,20 @@ type Options struct {
 	// System returns the system prompt of a new event turn of the workstream.
 	// Without it the turn has none.
 	System func(context.Context, config.WorkstreamID) (string, error)
+	// Skip reports a workstream whose events stay undelivered and
+	// unacknowledged. Without it no workstream is skipped.
+	Skip func(config.WorkstreamID) (bool, error)
 }
 
 // Deliverer turns a workstream's ready outbox events into one chief-of-staff
 // turn each window.
 //
-// A delivery claims every event with one token, enqueues a turn whose ID
-// derives from that token, then acknowledges the events. After a crash, an
-// event with a claim naming a turn already on the chief-of-staff thread is
-// acknowledged without another turn; any other event is delivered again.
+// A delivery claims every event with one token and enqueues a turn whose ID
+// derives from that token. A pass acknowledges an event once a turn its
+// claims name has completed successfully, and leaves it alone while that turn
+// is queued or running, whatever the claim's lease. An event whose turns all
+// failed, or that has no turn, is delivered again in a new turn; a claim of
+// this session still holding it is released first.
 // Passes of one Deliverer run one at a time; a second Deliverer on the same
 // trace must not run concurrently.
 type Deliverer struct {
@@ -99,6 +104,12 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if d.options.Skip != nil {
+		skip, err := d.options.Skip(stream)
+		if err != nil || skip {
+			return err
+		}
+	}
 	chief, err := d.repository.ChiefOfStaffThread(stream)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -106,21 +117,43 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	if err != nil {
 		return err
 	}
-	turns := map[string]bool{}
-	for _, q := range chief.Turns {
-		turns[q.Request.TurnID] = true
+	states := turnStates(chief)
+	all, err := d.repository.Outbox(stream)
+	if err != nil {
+		return err
 	}
 	ready, err := d.repository.Ready(stream, d.options.Now())
 	if err != nil {
 		return err
 	}
-	var pending []trace.OutboxEntry
+	free := map[string]bool{}
 	for _, e := range ready {
-		if delivered(e, turns) {
-			if err := d.settle(ctx, stream, e.Event.ID); err != nil {
+		free[e.Event.ID] = true
+	}
+	var pending []trace.OutboxEntry
+	for _, e := range all {
+		if e.Event.Operation != nil || e.Acknowledged {
+			continue
+		}
+		switch deliveryState(e, states) {
+		case turnDone:
+			if err := d.settle(ctx, stream, e); err != nil {
 				return err
 			}
 			continue
+		case turnPending:
+			continue
+		}
+		if !free[e.Event.ID] && e.Claim != nil {
+			// A claim of this session whose turn failed, or that has no turn,
+			// still holds the event.
+			if err := d.step("before-release"); err != nil {
+				return err
+			}
+			err := d.repository.Release(ctx, stream, e.Event.ID, e.Claim.Token, d.options.Now())
+			if err != nil && !errors.Is(err, trace.ErrClaim) {
+				return err
+			}
 		}
 		pending = append(pending, e)
 	}
@@ -174,31 +207,27 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	if _, err := d.repository.EnqueueTurn(ctx, req); err != nil {
 		return err
 	}
-	for _, e := range claimed {
-		if err := d.step("before-acknowledge"); err != nil {
-			return err
-		}
-		err := d.repository.Acknowledge(ctx, stream, e.Event.ID, token, d.options.Now())
-		if errors.Is(err, trace.ErrClaim) {
-			// The lease ran out first; the next pass acknowledges the event.
-			continue
-		}
-		if err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
-// settle acknowledges an event whose turn is already queued, under a fresh
-// claim of this repository session.
-func (d *Deliverer) settle(ctx context.Context, stream config.WorkstreamID, event string) error {
+// settle acknowledges an event whose turn completed. It uses the claim of
+// this repository session that still holds the event, or a fresh one.
+func (d *Deliverer) settle(ctx context.Context, stream config.WorkstreamID, e trace.OutboxEntry) error {
+	now := d.options.Now()
+	if e.Claim != nil {
+		if err := d.step("before-settle"); err != nil {
+			return err
+		}
+		err := d.repository.Acknowledge(ctx, stream, e.Event.ID, e.Claim.Token, now)
+		if !errors.Is(err, trace.ErrClaim) {
+			return err
+		}
+	}
 	token, err := newToken()
 	if err != nil {
 		return err
 	}
-	now := d.options.Now()
-	if _, err := d.repository.Claim(ctx, stream, event, token, Actor.ID, now, d.options.Lease); err != nil {
+	if _, err := d.repository.Claim(ctx, stream, e.Event.ID, token, Actor.ID, now, d.options.Lease); err != nil {
 		if errors.Is(err, trace.ErrClaimed) || errors.Is(err, trace.ErrClaim) {
 			return nil
 		}
@@ -207,22 +236,56 @@ func (d *Deliverer) settle(ctx context.Context, stream config.WorkstreamID, even
 	if err := d.step("before-settle"); err != nil {
 		return err
 	}
-	err = d.repository.Acknowledge(ctx, stream, event, token, now)
+	err = d.repository.Acknowledge(ctx, stream, e.Event.ID, token, now)
 	if errors.Is(err, trace.ErrClaim) {
 		return nil
 	}
 	return err
 }
 
-// delivered reports whether any claim of the event names a queued turn. A
-// turn is queued only after every claim of its token has succeeded.
-func delivered(e trace.OutboxEntry, turns map[string]bool) bool {
-	for _, a := range e.History {
-		if a.Kind == "claim" && turns[TurnID(a.Token)] {
-			return true
+type turnState int
+
+const (
+	turnNone turnState = iota
+	turnFailed
+	turnPending
+	turnDone
+)
+
+// turnStates classifies the chief-of-staff turns. A turn is pending until it
+// completes, except a reservation an earlier service session left without a
+// result, which never completes and counts as failed. A completed turn failed
+// when it failed or was cancelled, and is done otherwise.
+func turnStates(t trace.Thread) map[string]turnState {
+	states := map[string]turnState{}
+	for _, q := range t.Turns {
+		id := q.Request.TurnID
+		switch status := q.Status(); {
+		case q.CompletedAt.IsZero() && t.Status == "interrupted" && t.Active == id:
+			states[id] = turnFailed
+		case q.CompletedAt.IsZero():
+			states[id] = turnPending
+		case status == "failed" || status == "interrupted":
+			states[id] = turnFailed
+		default:
+			states[id] = turnDone
 		}
 	}
-	return false
+	return states
+}
+
+// deliveryState is the most advanced state among the turns the event's claims
+// name: done, then pending, then failed. turnFailed and turnNone both leave
+// the event to be delivered again. A turn is queued only after every claim of
+// its token has succeeded.
+func deliveryState(e trace.OutboxEntry, states map[string]turnState) turnState {
+	best := turnNone
+	for _, a := range e.History {
+		if a.Kind == "claim" {
+			best = max(best, states[TurnID(a.Token)])
+		}
+	}
+	return best
 }
 
 func newToken() (string, error) {
