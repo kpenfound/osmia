@@ -15,6 +15,8 @@ osmia project remove p_0123456789abcdef0123456789abcdef
 osmia handin p_0123456789abcdef0123456789abcdef design.md
 osmia send w_0123456789abcdef0123456789abcdef "Start with the upload API."
 osmia conversation w_0123456789abcdef0123456789abcdef
+osmia inbox
+osmia answer 1 "Resume uploads; never restart them."
 osmia abandon w_0123456789abcdef0123456789abcdef "Superseded by the new upload design."
 osmia pause all --reason "Away for the weekend"
 osmia resume all
@@ -63,6 +65,24 @@ The [onboarding walkthrough](m2-onboarding.md) runs `project add`, `handin`,
   entry shows when it was sent or answered, who wrote it, its turn ID and the
   turn's state (`queued`, `running`, `done` or `failed`), then its text
   indented. It fails like `send`.
+- `inbox` lists every question the chief of staff escalated to you that has
+  no ruling, across the workstreams of the active project, oldest escalation
+  first. Questions escalated together are one entry. Each entry shows its
+  inbox number, when it was escalated, its workstream and batch, then the
+  chief of staff's rephrasing, what is blocked, the options, its
+  recommendation and each question as its asker put it. An entry of an
+  abandoned workstream is left out. Without a project or a trace the inbox is
+  empty. See [inbox and rulings](service.md#inbox-and-rulings).
+- `answer <inbox-number> <ruling>` records your ruling on an inbox entry. The
+  ruling is one argument; quote it. The service records it before answering;
+  the chief of staff then rephrases it for every asker of the entry, whose
+  threads resume with it as their next turn. The number is the one `inbox`
+  shows; it stays the entry's number for the life of the project. A number
+  that is not a positive integer is a usage error (exit 2). An empty ruling or
+  a number no entry carries fails with `validation` (exit 4); with no project
+  configured it fails with `no_project` (exit 4). An entry that already has a
+  ruling, or belongs to an abandoned workstream, fails with `conflict`
+  (exit 5) and records nothing.
 - `abandon <workstream-id> <reason>` abandons a workstream of the active
   project that is neither delivered nor abandoned. The reason is one argument;
   quote it. The service records the move to `abandoned` with you as actor and
@@ -169,6 +189,8 @@ response; profiles returns the runtime
 response. `abandon` returns the API's abandon response: `project`,
 `workstream`, `state` and `reason`. `send` returns the accepted message entry and `conversation` the
 API's conversation response (see [conversation](service.md#conversation)).
+`inbox` returns the API's inbox response and `answer` its answer response (see
+[inbox and rulings](service.md#inbox-and-rulings)).
 Mutations return `mutation` (the API acknowledgement) and `runtime`
 (the subsequent effective-state response). Project commands return the API's
 project response: the project view (ID, name, upstream, fork, clone, base
@@ -184,7 +206,7 @@ including defaults after clearing overrides. If the mutation succeeds but readin
 the effective state fails, stderr says it was acknowledged; inspect status before
 retrying. Failures leave stdout empty and write actionable diagnostics to stderr.
 Raw configuration/parser and server error text is omitted from failure messages.
-Project, hand-in, abandon, single-workstream status, send and conversation failures print the service's
+Project, hand-in, abandon, single-workstream status, send, conversation, inbox and answer failures print the service's
 message, which names the field, project or workstream ID or path at fault and
 never raw file contents.
 
@@ -205,7 +227,6 @@ live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
 Detached management, install/upgrade commands, completion, web/tailnet,
-inbox, ratification,
-answer, reload and trace navigation are unavailable. The command examples in
+ratification, reload and trace navigation are unavailable. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.
