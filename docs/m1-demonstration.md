@@ -11,24 +11,34 @@ repository as the target clone.
 
 ## Running it
 
+Tests run only inside Dagger, never with `go test` on the host. The test runs
+as part of `DAGGER_X_RELEASE=v1.0.0-beta.13 dagger check`. To run it alone:
+
 ```sh
-go test ./internal/service -run TestM1ThreadContinuityAcrossRestart -v
+DAGGER_X_RELEASE=v1.0.0-beta.13 dagger core container from --address golang:1.26-bookworm \
+  with-directory --path /src --source . --exclude .git,.bees \
+  with-workdir --path /src \
+  with-exec --args=go,test,-count=1,-run,TestM1ThreadContinuityAcrossRestart,-v,./internal/service \
+  combined-output
 ```
 
-The test runs as part of `go test ./...` and
-`DAGGER_X_RELEASE=v1.0.0-beta.13 dagger check`. It removes its temporary roots
-when it finishes. To keep them for inspection, name a directory that does not
-contain previous results:
+It removes its temporary roots when it finishes. To keep them for inspection,
+name a directory inside the container with `OSMIA_M1_DEMO_DIR` and export it:
 
 ```sh
-rm -rf /tmp/osmia-m1
-OSMIA_M1_DEMO_DIR=/tmp/osmia-m1 go test ./internal/service -run TestM1ThreadContinuityAcrossRestart -count=1 -v
+rm -rf ./osmia-m1
+DAGGER_X_RELEASE=v1.0.0-beta.13 dagger core container from --address golang:1.26-bookworm \
+  with-directory --path /src --source . --exclude .git,.bees \
+  with-workdir --path /src \
+  with-env-variable --name OSMIA_M1_DEMO_DIR --value /tmp/osmia-m1 \
+  with-exec --args=go,test,-count=1,-run,TestM1ThreadContinuityAcrossRestart,-v,./internal/service \
+  directory --path /tmp/osmia-m1 export --path ./osmia-m1
 ```
 
 Each case gets its own directory, `<dir>/resume` and `<dir>/replay`, and the
-verbose output prints its root and trace paths. Keep `<dir>` short: the service
-socket lives under the root, and Unix socket paths are limited to about 100
-bytes.
+verbose output of the first command prints its root and trace paths. Keep the
+directory named by `OSMIA_M1_DEMO_DIR` short: the service socket lives under
+the root, and Unix socket paths are limited to about 100 bytes.
 
 ## What happens
 

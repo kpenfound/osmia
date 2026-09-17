@@ -173,6 +173,11 @@ Read AGENTS.md before planning or implementing Osmia.
 docs/design.md is the source of truth for feature scope and behavior.
 docs/design.md is large and you should search for keywords rather than using cat.
 Work only within the configured milestone; do not bring later milestones forward.
+NEVER run go test on the host, in any role and for any reason: reproducing a
+flake, a mutation check and a single test included. Tests start processes that
+leak onto the machine the factory runs on. Tests run only inside Dagger: dagger
+check for the suite, and the single-test command in AGENTS.md for one package or
+test. go build, go vet and gofmt are fine on the host; go vet type-checks tests.
 """
 # File whose contents are appended after prompt (relative to this file).
 #prompt_file = "docs/team-conventions.md"
@@ -185,9 +190,15 @@ skills = [
 # Agentic turns per session and wall-clock limit.
 max_turns = 300
 timeout = "90m"
-# Tool restrictions passed straight to claude.
+# Tool restrictions passed straight to claude. A Bash restriction is a
+# permission rule, Bash(<command pattern>); claude splits a bare command string
+# on its spaces into tool names that match nothing. Tests run only inside
+# Dagger, so go test is denied on the host. The rule holds under
+# --dangerously-skip-permissions and covers a bare go test, each part of a
+# compound command, env prefixes, subshells and the timeout, time and nohup
+# wrappers. It does not reach bash -c, a script or a Makefile target.
 #allowed_tools = []
-disallowed_tools = ["Artifact", "go test*"]
+disallowed_tools = ["Artifact", "Bash(go test *)"]
 # Shell for claude's Bash tool in sessions (exported as $SHELL).
 #shell = "/bin/bash"
 
@@ -215,9 +226,9 @@ profile = "manager_dumb"
 profile = "coder_medium"
 prompt = """
 Validate changes with dagger check using DAGGER_X_RELEASE from this configuration.
-ONLY RUN TESTS WITH dagger check. DO NOT TEST WITH go test
-Your tests must NEVER execute real agents. They must be mocked.
-""""
+ONLY RUN TESTS INSIDE DAGGER. DO NOT TEST WITH go test ON THE HOST.
+Your tests must NEVER execute real agents, containers or docker. They must be faked.
+"""
 profile_by_size = { l = "coder_smart", m = "coder_medium", s = "coder_dumb", xs = "coder_dumb" }
 # Largest size a developer takes: xs, s, m, l or xl. Anything bigger is sent
 # back to triage for the project manager to split.
