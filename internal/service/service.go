@@ -51,8 +51,9 @@ type Options struct {
 	// a recorded reason and the project stays usable.
 	Librarian *Librarian
 	// Architect supplies the execution boundary of the architect's drafting
-	// turns. Without it no draft is requested, a draft already requested
-	// stays pending, and handed workstreams wait.
+	// turns and of its replies to shed rounds. Without it no draft and no
+	// reply is requested, one already requested stays pending, and handed
+	// workstreams and heard rounds wait.
 	Architect *Architect
 	// Committee supplies the execution boundary of the committee's shed
 	// turns. Without it no workstream enters the shed, a round already

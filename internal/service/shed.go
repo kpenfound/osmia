@@ -948,7 +948,7 @@ Your view holds:
 - charter.md: the owner's rules for contributing to this project. Cite them as charter#<n>.
 - context.md: the project context bundle: the charter's rules, the knowledge-base prose per subsystem, the entity map and the recorded decisions. Cite a knowledge-base file as kb/<subsystem>.md and an entity as %s<entity>.
 - repo/: the tracked files of the owner's clone, read-only.
-- shed/round-<n>/: what every member contributed in earlier rounds, when there are any.
+- shed/round-<n>/: what every member contributed in earlier rounds, and the architect's reply to each as reply.json, when there are any.
 
 Apply two tests and one judgement, and call %s once for each thing you find:
 - charter: a part that violates a charter rule. This is a veto on that part; cite the rule.
