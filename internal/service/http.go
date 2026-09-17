@@ -251,17 +251,49 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			out, api = s.shedRule(r.Context(), id, v)
 		case "skip":
 			out, api = s.shedSkip(r.Context(), id)
+		case "overrule":
+			var v ShedOverruleRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			out, api = s.shedOverrule(r.Context(), id, v)
 		case "more":
 			var v ShedMoreRequest
 			if !decode(w, r, &v) {
 				return
 			}
 			out, api = s.shedMore(r.Context(), id, v)
+		case "redraft":
+			var v ShedRedraftRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			out, api = s.shedRedraft(r.Context(), id, v)
 		default:
 			fail(w, Unsupported)
 			return
 		}
 		if api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
+	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/packet/"); ok && r.Method == http.MethodGet {
+		if out, api := s.packet(id); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
+	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/ratify/"); ok && r.Method == http.MethodPost {
+		var v RatifyRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		if out, api := s.ratify(r.Context(), id, v); api != nil {
 			failWith(w, api)
 		} else {
 			respond(w, 200, out)

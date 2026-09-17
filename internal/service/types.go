@@ -8,6 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/shed"
 )
 
 const Prefix = "/v1"
@@ -155,9 +156,53 @@ type ShedRuleRequest struct {
 	Note        string `json:"note,omitempty"`
 }
 
+// ShedOverruleRequest overrules one objection that stands, with the owner's
+// reason, which may be empty.
+type ShedOverruleRequest struct {
+	Objection string `json:"objection"`
+	Reason    string `json:"reason,omitempty"`
+}
+
 // ShedMoreRequest asks for further rounds of debate after it concluded.
 type ShedMoreRequest struct {
 	Rounds int `json:"rounds"`
+}
+
+// ShedRedraftRequest asks the architect for a redraft of the spec and the
+// plan, with the owner's note saying what to change.
+type ShedRedraftRequest struct {
+	Note string `json:"note"`
+}
+
+// PacketResponse is the ratification packet of a workstream: the revisions the
+// owner decides on, why debate ended, the dissent record with what blocks
+// ratification first, and the chief of staff's recommendation.
+type PacketResponse struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	Packet     shed.Packet         `json:"packet"`
+	Revision   int                 `json:"revision"`
+	At         time.Time           `json:"at"`
+}
+
+// RatifyRequest ratifies the exact revisions of the spec and the plan the
+// owner read in the packet.
+type RatifyRequest struct {
+	Spec int `json:"spec"`
+	Plan int `json:"plan"`
+}
+
+// RatifyResponse reports a recorded ratification: the revisions it approves,
+// the round it was given in, the dispositions it stood on and whether the
+// sealing operation was triggered.
+type RatifyResponse struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	Round      int                 `json:"round"`
+	Spec       int                 `json:"spec"`
+	Plan       int                 `json:"plan"`
+	Sealed     bool                `json:"sealed"`
+	Detail     string              `json:"detail"`
 }
 
 // ShedResponse reports one owner action in the shed: what was recorded, the

@@ -128,9 +128,33 @@ func (c *Client) ShedSkip(ctx context.Context, id config.WorkstreamID) (ShedResp
 	return c.shed(ctx, "skip", id, struct{}{})
 }
 
+// ShedOverrule records that the owner overruled one objection that stands.
+func (c *Client) ShedOverrule(ctx context.Context, id config.WorkstreamID, objection, reason string) (ShedResponse, error) {
+	return c.shed(ctx, "overrule", id, ShedOverruleRequest{Objection: objection, Reason: reason})
+}
+
 // ShedMore asks for further rounds of debate after it concluded.
 func (c *Client) ShedMore(ctx context.Context, id config.WorkstreamID, rounds int) (ShedResponse, error) {
 	return c.shed(ctx, "more", id, ShedMoreRequest{Rounds: rounds})
+}
+
+// ShedRedraft asks the architect for a redraft of the spec and the plan.
+func (c *Client) ShedRedraft(ctx context.Context, id config.WorkstreamID, note string) (ShedResponse, error) {
+	return c.shed(ctx, "redraft", id, ShedRedraftRequest{Note: note})
+}
+
+// Packet reads a workstream's ratification packet.
+func (c *Client) Packet(ctx context.Context, id config.WorkstreamID) (PacketResponse, error) {
+	var v PacketResponse
+	err := c.Do(ctx, "GET", Prefix+"/packet/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
+}
+
+// Ratify ratifies the given revisions of a workstream's spec and plan.
+func (c *Client) Ratify(ctx context.Context, id config.WorkstreamID, spec, plan int) (RatifyResponse, error) {
+	var v RatifyResponse
+	err := c.Do(ctx, "POST", Prefix+"/ratify/"+url.PathEscape(string(id)), RatifyRequest{Spec: spec, Plan: plan}, &v)
+	return v, err
 }
 
 func (c *Client) shed(ctx context.Context, action string, id config.WorkstreamID, input any) (ShedResponse, error) {

@@ -51,9 +51,10 @@ type Options struct {
 	// a recorded reason and the project stays usable.
 	Librarian *Librarian
 	// Architect supplies the execution boundary of the architect's drafting
-	// turns and of its replies to shed rounds. Without it no draft and no
-	// reply is requested, one already requested stays pending, and handed
-	// workstreams and heard rounds wait.
+	// turns, of its replies to shed rounds and of the redrafts the owner asks
+	// for. Without it no draft, reply and redraft is requested, one already
+	// requested stays pending, and handed workstreams, heard rounds and
+	// requested redrafts wait.
 	Architect *Architect
 	// Committee supplies the execution boundary of the committee's shed
 	// turns. Without it no workstream enters the shed and no round is
@@ -65,6 +66,9 @@ type Options struct {
 	// with the service's GITHUB_TOKEN environment variable, which no session
 	// receives.
 	Issues issues.Client
+	// Sealing is triggered by a ratification that passes the gate. Without it
+	// a ratification is recorded and nothing is sealed.
+	Sealing Sealing
 }
 
 // activeProject is the runtime state of the configured project: its open trace
@@ -503,10 +507,11 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 
 // stagePriority orders the operations of a pass so that the factory finishes
 // work before it widens it: the turns the scheduler dispatched and everything
-// else first, then the shed's rounds and replies, then architect drafts.
+// else first, then the shed's rounds, replies and redrafts, then architect
+// drafts.
 func stagePriority(op coreadapter.Operation) int {
 	switch op.Action {
-	case RoundAction, ReplyAction:
+	case RoundAction, ReplyAction, RedraftAction:
 		return 1
 	case DraftAction:
 		return 2

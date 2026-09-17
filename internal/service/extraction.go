@@ -283,7 +283,7 @@ func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (c
 	if op.Action == RoundAction {
 		return a.rounds.Inspect(ctx, op)
 	}
-	if op.Action == ReplyAction {
+	if op.Action == ReplyAction || op.Action == RedraftAction {
 		return replier{a.rounds}.Inspect(ctx, op)
 	}
 	if a.turns == nil {
@@ -301,7 +301,7 @@ func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (cor
 	if op.Action == RoundAction {
 		return a.rounds.Apply(ctx, op)
 	}
-	if op.Action == ReplyAction {
+	if op.Action == ReplyAction || op.Action == RedraftAction {
 		return replier{a.rounds}.Apply(ctx, op)
 	}
 	if a.turns == nil {

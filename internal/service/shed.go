@@ -37,14 +37,17 @@ const (
 	// shedSubject is the workflow subject that tracks a workstream's debate:
 	// round-<n> while the committee runs, heard-<n> once its contributions
 	// are recorded, reply-<n> while the architect answers, replied-<n> once
-	// its reply is recorded, concluded-<n> once debate ended after round n,
-	// and failed-<n> when round n ended without a record or a reply.
+	// its reply is recorded, redraft-<n> while the architect writes the
+	// redraft the owner asked for after round n and redrafted-<n> once it is
+	// recorded, concluded-<n> once debate ended after round n, and failed-<n>
+	// when round n ended without a record or a reply.
 	shedSubject = "shed"
 	// ownerSubject is the workflow subject that tracks the owner's own part
-	// in the shed, one value per action: objected-<n>, ruled-<n>, more-<n>,
-	// skipped and invalid-edit. The debate controller reads it and writes it
-	// only to report an invalid owner edit, so an owner action never races a
-	// round for the shed subject.
+	// in the shed, one value per action: objected-<n>, ruled-<n>,
+	// overruled-<n>, more-<n>, redraft-<n>, ratified-<n>, skipped and
+	// invalid-edit. The debate controller reads it and writes it only to
+	// report an invalid owner edit, so an owner action never races a round for
+	// the shed subject.
 	ownerSubject = "shed-owner"
 	// skippedValue is the owner-subject value of the action that skips
 	// debate, and skipTransition the transition that records it. A later
@@ -71,11 +74,14 @@ type Committee struct {
 }
 
 // roundInput pins a round to the revisions of spec.md and plan.json every
-// member reads.
+// member reads. Redraft distinguishes the architect's redraft at the owner's
+// request from its reply to the round: it comes from the operation's action,
+// not from its recorded input.
 type roundInput struct {
-	Round int `json:"round"`
-	Spec  int `json:"spec"`
-	Plan  int `json:"plan"`
+	Round   int  `json:"round"`
+	Spec    int  `json:"spec"`
+	Plan    int  `json:"plan"`
+	Redraft bool `json:"-"`
 }
 
 func (in roundInput) pin() shed.Pin { return shed.Pin{Spec: in.Spec, Plan: in.Plan} }
@@ -92,12 +98,15 @@ func roundTurnID(n int, agent string, attempt int) string {
 	return roundTurnPrefix(n, agent) + strconv.Itoa(attempt)
 }
 
-// shedState splits a shed-subject value into its kind (round, heard, reply,
-// replied, concluded or failed) and round number.
+// shedStates are the kinds of shed-subject value, each followed by the round
+// it is about.
+var shedStates = []string{"round", "heard", "reply", "replied", "redraft", "redrafted", "concluded", "failed"}
+
+// shedState splits a shed-subject value into its kind and round number.
 func shedState(value string) (kind string, n int, ok bool) {
 	kind, number, found := strings.Cut(value, "-")
 	n, err := strconv.Atoi(number)
-	return kind, n, found && err == nil && n > 0 && slices.Contains([]string{"round", "heard", "reply", "replied", "concluded", "failed"}, kind)
+	return kind, n, found && err == nil && n > 0 && slices.Contains(shedStates, kind)
 }
 
 // debate is the shed controller. Its pass moves every sketched workstream
@@ -155,9 +164,9 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 	}
 	// A skipped debate runs no committee turn, so the workstream needs
 	// neither a committee nor a round; it waits in the shed for the owner to
-	// ratify both documents.
+	// ratify both documents, with the packet that asks them to.
 	if skipped {
-		return nil
+		return d.presentPacket(ctx, stream, true)
 	}
 	if feature.Value == SketchedState {
 		if d.s.options.Committee == nil {
@@ -181,7 +190,12 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 			return err
 		}
 	}
-	return d.step(ctx, stream, pin)
+	if err := d.step(ctx, stream, pin); err != nil {
+		return err
+	}
+	// The packet is presented once the step of this pass concluded the
+	// debate, and follows every owner action that changes what it says.
+	return d.presentPacket(ctx, stream, false)
 }
 
 // step derives what the debate needs next from the shed state and the
@@ -189,10 +203,12 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 // concludes the debate by consensus; one with open dissent gets the
 // architect's reply. After the reply, the next round runs against the latest
 // revision unless shed.max_rounds rounds have run, which concludes the debate
-// with its dissent open. A round or a reply in progress, a concluded debate
-// and a failed round need nothing. A round waits for a service that can run
-// the committee and a reply for one that can run the architect; concluding
-// runs no turn and waits for neither.
+// with its dissent open. A conclusion the owner followed with a request for a
+// redraft gets that redraft, and the round after it debates what the architect
+// wrote. A round, a reply or a redraft in progress, a concluded debate the
+// owner has not answered and a failed round need nothing. A round waits for a
+// service that can run the committee and a reply or redraft for one that can
+// run the architect; concluding runs no turn and waits for neither.
 func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest shed.Pin) error {
 	state, err := d.repository.Workflow(stream, shedSubject)
 	if err != nil {
@@ -205,25 +221,61 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 		return d.request(ctx, stream, state, roundInput{Round: 1, Spec: latest.Spec, Plan: latest.Plan}, InShedState)
 	}
 	kind, n, ok := shedState(state.Value)
-	if !ok || kind != "heard" && kind != "replied" && kind != "concluded" {
+	if !ok || kind != "heard" && kind != "replied" && kind != "concluded" && kind != "redrafted" {
 		return nil
 	}
 	requests, err := shed.Requests(d.repository, stream)
 	if err != nil {
 		return err
 	}
+	redrafts, err := shed.Redrafts(d.repository, stream)
+	if err != nil {
+		return err
+	}
 	configured := d.s.current().Shed.MaxRounds
-	limit := shed.Limit(configured, requests)
+	limit := shed.Limit(configured, requests, redrafts)
 	if kind == "concluded" {
-		// Debate resumes only where the owner asked for further rounds after
-		// this conclusion; the cap bounds how many of them run.
-		if n >= limit || !slices.ContainsFunc(requests, func(m shed.More) bool { return m.Round == n }) {
+		// The redraft the owner asked for is written before debate resumes.
+		asked := slices.ContainsFunc(redrafts, func(r shed.Redraft) bool { return r.Round == n })
+		if asked {
+			written, err := d.recordedReply(stream, roundInput{Round: n, Redraft: true})
+			if err != nil {
+				return err
+			}
+			if written == nil {
+				if d.s.options.Architect == nil {
+					return nil
+				}
+				note, err := d.asked(stream, n)
+				if err != nil {
+					return err
+				}
+				return d.requestRedraft(ctx, stream, state, roundInput{Round: n, Spec: latest.Spec, Plan: latest.Plan, Redraft: true}, note.Note)
+			}
+		}
+		// Debate otherwise resumes only where the owner asked for further
+		// rounds after this conclusion; the cap bounds how many of them run.
+		if n >= limit || !asked && !slices.ContainsFunc(requests, func(m shed.More) bool { return m.Round == n }) {
 			return nil
 		}
 		if d.s.options.Committee == nil {
 			return nil
 		}
-		return d.request(ctx, stream, state, roundInput{Round: n + 1, Spec: latest.Spec, Plan: latest.Plan}, shed.MoreDocumentID(n))
+		cause := shed.MoreDocumentID(n)
+		if asked {
+			id, _ := roundInput{Round: n, Redraft: true}.ids()
+			cause = id + "-redrafted"
+		}
+		return d.request(ctx, stream, state, roundInput{Round: n + 1, Spec: latest.Spec, Plan: latest.Plan}, cause)
+	}
+	if kind == "redrafted" {
+		// The owner asked for the redraft to be debated: the round runs
+		// whether the redraft changed anything or not.
+		if d.s.options.Committee == nil {
+			return nil
+		}
+		id, _ := roundInput{Round: n, Redraft: true}.ids()
+		return d.request(ctx, stream, state, roundInput{Round: n + 1, Spec: latest.Spec, Plan: latest.Plan}, id+"-redrafted")
 	}
 	records, err := shed.Records(d.repository, stream)
 	if err != nil {
@@ -251,7 +303,7 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 		return d.requestReply(ctx, stream, state, roundInput{Round: n, Spec: records[i].Revision.Spec, Plan: records[i].Revision.Plan}, len(open))
 	case n >= limit:
 		reply, _ := replyIDs(n)
-		return d.conclude(ctx, stream, state, n, reply+"-replied", fmt.Sprintf("debate stopped after round %d, %s, with %s; the cap approves nothing", n, bound(configured, requests, limit), standing(open)), open)
+		return d.conclude(ctx, stream, state, n, reply+"-replied", fmt.Sprintf("debate stopped after round %d, %s, with %s; the cap approves nothing", n, bound(configured, requests, redrafts, limit), standing(open)), open)
 	}
 	if d.s.options.Committee == nil {
 		return nil
@@ -261,21 +313,32 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 }
 
 // bound names what stopped the debate at its last round: the configured cap,
-// or the rounds the owner asked for once they have, which replace it.
-func bound(configured int, requests []shed.More, limit int) string {
-	if len(requests) == 0 {
+// or the rounds the owner asked for once they have, which replace it. A
+// redraft asks for the one round that debates it.
+func bound(configured int, requests []shed.More, redrafts []shed.Redraft, limit int) string {
+	switch {
+	case len(requests) == 0 && len(redrafts) == 0:
 		return fmt.Sprintf("at the shed.max_rounds cap of %d", configured)
+	case slices.ContainsFunc(requests, func(m shed.More) bool { return m.Round+m.Rounds == limit }):
+		return fmt.Sprintf("at round %d, the last of the further rounds the owner asked for", limit)
 	}
-	return fmt.Sprintf("at round %d, the last of the further rounds the owner asked for", limit)
+	return fmt.Sprintf("at round %d, the round that debated the redraft the owner asked for", limit)
+}
+
+// presentation asks the chief of staff to put the decision the packet holds to
+// the owner. It is the attention item of a workstream waiting at the gate.
+func presentation(recommendation string) string {
+	return "The ratification packet is recorded for the owner: the spec and plan revisions, the dissent record and the recommendation to " + recommendation +
+		".\nPresent it, and make the attention of your status the decision the owner has to take now: ratify the revisions, overrule or sustain what blocks, ask for a redraft or for further rounds, or abandon the workstream."
 }
 
 // unopposed is why a debate with nothing standing concludes after round n. It
 // is consensus only among the members whose turns ended normally: a round in
 // which every turn failed reviewed nothing, and the reason says so. Dissent
-// the owner dismissed is not agreement either.
+// the owner disposed of is not agreement either.
 func unopposed(records []shed.Record, open []shed.Entry, n int) string {
 	if len(open) > 0 {
-		return fmt.Sprintf("debate concluded after round %d: the owner dismissed every objection that stood", n)
+		return fmt.Sprintf("debate concluded after round %d: the owner disposed of every objection that stood", n)
 	}
 	members, failed := 0, 0
 	for _, r := range records {
@@ -323,11 +386,12 @@ func standing(open []shed.Entry) string {
 
 // conclude ends the debate after round n. The workstream stays in the shed:
 // the conclusion is a shed transition, and its notice gives the chief of
-// staff the reason and the dissent that stands.
+// staff the reason, the dissent that stands and the packet to present to the
+// owner.
 func (d *debate) conclude(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, n int, cause, reason string, open []shed.Entry) error {
 	id := fmt.Sprintf("shed-concluded-%d", n)
 	var body strings.Builder
-	fmt.Fprintf(&body, "Debate concluded: %s. The workstream stays %s until the owner rules.", reason, InShedState)
+	fmt.Fprintf(&body, "Debate concluded: %s. The workstream stays %s until the owner decides.", reason, InShedState)
 	if len(open) > 0 {
 		body.WriteString("\nOpen dissent:")
 	}
@@ -346,6 +410,7 @@ func (d *debate) conclude(ctx context.Context, stream config.WorkstreamID, state
 		}
 		fmt.Fprintf(&body, "\n- %s (%s, %s, by %s in round %d%s, against %s): %s", e.ID, e.Kind, weight, e.Member, e.Round, about, e.Revision, e.Argument)
 	}
+	body.WriteString("\n" + presentation(shed.Recommend(open)))
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: d.header(id, stream, cause, d.s.now()), Subject: shedSubject, From: state.Value, To: fmt.Sprintf("concluded-%d", n), Reason: reason},
 		Events:     []trace.Event{trace.Notice(id, "concluded", body.String())}}

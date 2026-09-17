@@ -308,7 +308,7 @@ func TestDismissingEveryObjectionConcludesTheDebate(t *testing.T) {
 
 	f.awaitShed(t, stream, "concluded-1", "round-2")
 	end := f.transition(t, stream, "shed-concluded-1")
-	if end.Reason != "debate concluded after round 1: the owner dismissed every objection that stood" {
+	if end.Reason != "debate concluded after round 1: the owner disposed of every objection that stood" {
 		t.Fatalf("conclusion %q", end.Reason)
 	}
 	// The objection is still on the record, with the owner's disposition.

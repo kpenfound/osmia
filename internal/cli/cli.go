@@ -31,8 +31,11 @@ const usage = `Usage: osmia <command> [--root PATH]
   abandon <workstream-id> <reason> [--json]
   shed object <workstream-id> <argument> [--json]
   shed rule <workstream-id> <objection-id> <sustain|dismiss> [note] [--json]
+  shed overrule <workstream-id> <objection-id> [reason] [--json]
   shed skip <workstream-id> [--json]
   shed more <workstream-id> <rounds> [--json]
+  shed redraft <workstream-id> <note> [--json]
+  ratify <workstream-id> [--json]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
   inbox [--json]
@@ -146,6 +149,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) <= 1
 	case "send", "abandon":
 		valid = len(a) == 2
+	case "ratify":
+		valid = len(a) == 1
 	case "conversation":
 		valid = len(a) == 1
 	case "inbox":
@@ -161,7 +166,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "profiles":
 		valid = len(a) == 0 || len(a) == 3 && a[0] == "set" || len(a) == 2 && a[0] == "clear"
 	case "shed":
-		valid = len(a) >= 2 && (a[0] == "object" && len(a) == 3 || a[0] == "rule" && (len(a) == 4 || len(a) == 5) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3)
+		valid = len(a) >= 2 && (a[0] == "object" && len(a) == 3 || a[0] == "rule" && (len(a) == 4 || len(a) == 5) ||
+			a[0] == "overrule" && (len(a) == 3 || len(a) == 4) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3 ||
+			a[0] == "redraft" && len(a) == 3)
 	case "project":
 		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract")
 	}
@@ -192,7 +199,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "ratify" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "status" && len(a) == 1)
 	}
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
@@ -323,8 +330,16 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				note = a[4]
 			}
 			result, err = c.ShedRule(ctx, id, a[2], a[3], note)
+		case "overrule":
+			reason := ""
+			if len(a) == 4 {
+				reason = a[3]
+			}
+			result, err = c.ShedOverrule(ctx, id, a[2], reason)
 		case "skip":
 			result, err = c.ShedSkip(ctx, id)
+		case "redraft":
+			result, err = c.ShedRedraft(ctx, id, a[2])
 		case "more":
 			// A count that is not a number is a usage error; one out of range
 			// is the service's to refuse, naming shed.max_rounds.
@@ -341,6 +356,32 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Shed of workstream %s: %s\n%s\n", result.Workstream, result.Action, result.Detail)
+		return 0
+	}
+	if cmd == "ratify" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		// The packet names the revisions the owner read, and ratification
+		// pins them: revisions the architect or the owner moved since are the
+		// service's to refuse.
+		packet, err := c.Packet(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		result, err := c.Ratify(ctx, id, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		sealed := "sealing did not start"
+		if result.Sealed {
+			sealed = "sealing started"
+		}
+		fmt.Fprintf(stdout, "Workstream %s ratified: spec.md revision %d and plan.json revision %d\n%s\n%s\n", result.Workstream, result.Spec, result.Plan, result.Detail, sealed)
 		return 0
 	}
 	if cmd == "send" || cmd == "conversation" {
