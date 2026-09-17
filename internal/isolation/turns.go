@@ -2,7 +2,6 @@ package isolation
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,7 +35,7 @@ type Turns struct {
 	// Scoped supplies trusted handlers bound to one claimed turn, such as private
 	// role notes. They join the same registry and grant checks as Tools.
 	Scoped func(context.Context, coreadapter.Scope) ([]coreadapter.Tool, error)
-	Hosts  func(token string) coreadapter.MCPHosts
+	Hosts  coreadapter.MCPHosts
 	Engine coreadapter.Engine
 	// Capture may snapshot selected output through the service before cleanup.
 	// It runs even on execution errors, but never grants an agent VCS access.
@@ -130,7 +129,7 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	if env == nil {
 		env = map[string]string{}
 	}
-	if _, exists := env["OSMIA_MCP_TOKEN"]; exists {
+	if _, exists := env[coreadapter.TokenEnvironment]; exists {
 		return result, errors.New("MCP credentials must be service-generated")
 	}
 	if err = coreadapter.PublicEnvironment(env); err != nil {
@@ -184,7 +183,7 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	prepared.Execution = selected.Execution
 	prepared.Sandbox = coreadapter.SandboxLease{Verified: coreadapter.Isolation{Workspace: view.Workspace(), Capabilities: capabilities, Environment: env,
 		DenyVCS: true, DenyInheritedEnvironment: true, DenyDeliveryCredentials: true}}
-	executor := coreadapter.CoreExecutor{Required: prepared.Sandbox.Verified, Runner: r.Engine}
+	executor := coreadapter.CoreExecutor{Required: prepared.Sandbox.Verified, Runner: r.Engine, Pinned: []string{workspace.Workspace.Directory}}
 	if err = executor.Check(ctx, prepared.Sandbox.Verified, prepared.Execution); err != nil {
 		return result, err
 	}
@@ -192,12 +191,7 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 		if r.Hosts == nil {
 			return result, errors.New("service MCP host is required for granted tools")
 		}
-		token := rand.Text()
-		host := r.Hosts(token)
-		if host == nil {
-			return result, errors.New("service MCP host is missing")
-		}
-		hosted, hostErr := host.Host(ctx, coreadapter.HostRequest{Scope: input.Scope, Capabilities: capabilities, Tools: approved})
+		hosted, hostErr := r.Hosts.Host(ctx, coreadapter.HostRequest{Scope: input.Scope, Capabilities: capabilities, Tools: approved})
 		if hostErr != nil {
 			return result, hostErr
 		}
@@ -205,10 +199,10 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 			return result, errors.New("service MCP host returned no lease")
 		}
 		defer func() { err = errors.Join(err, hosted.Lease.Release(context.WithoutCancel(ctx))) }()
-		if hosted.Endpoint.BearerTokenEnvironment != "OSMIA_MCP_TOKEN" {
-			return result, errors.New("MCP host must use the service token environment")
+		if hosted.Endpoint.BearerTokenEnvironment != coreadapter.TokenEnvironment || hosted.Endpoint.Token == "" {
+			return result, errors.New("MCP host must hand the turn a token in the service token environment")
 		}
-		env["OSMIA_MCP_TOKEN"] = token
+		env[coreadapter.TokenEnvironment] = hosted.Endpoint.Token
 		prepared.MCP = []coreadapter.Endpoint{hosted.Endpoint}
 	}
 	result, err = (&coreadapter.TurnRunner{Executor: executor}).Run(ctx, prepared)

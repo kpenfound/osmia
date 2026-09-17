@@ -68,16 +68,16 @@ enforce their declared effect and scope; arbitrary discovered handlers cannot be
 registered. An empty grant exposes no built-in tools or MCP endpoint.
 
 Only literal `LANG`, `LC_ALL` and `TZ` values may be supplied as public environment.
-The service generates `OSMIA_MCP_TOKEN` for a turn's authenticated HTTP MCP host.
+The MCP transport generates a fresh bearer token for each turn, which the service passes as `OSMIA_MCP_TOKEN`.
 There is no environment inheritance, shell expansion or lookup of host provider,
 GitHub, SSH-agent or cloud/delivery credentials. Unresolved credential references
 fail closed. Provider transport/authentication is the execution engine's concern;
 it must not give tools general network access or delivery credentials.
 
-## Container verification
+## Enforced execution
 
-`coreadapter.CoreExecutor` runs a turn through busybees/core with `agent.Grants`
-built from the verified isolation alone:
+`coreadapter.CoreExecutor` runs a turn through a busybees/core enforcer with
+`agent.Grants` built from the verified isolation alone:
 
 | Grant | Value |
 |---|---|
@@ -86,27 +86,39 @@ built from the verified isolation alone:
 | `Tools` | one `mcp__osmia_<i>` server per scoped endpoint and no built-in tool |
 | `VCS` | not granted |
 
-Only `container` execution is accepted. Core's host boundaries cannot keep these
-grants: `none` needs the whole filesystem writable and VCS granted, and `claude`
-reads the whole filesystem. Extra mounts and domain overrides are rejected. The
-view is checked again for symlinks, special files and VCS metadata before
-construction.
+The engine hands out the enforcer of the role's sandbox mode:
+`coreadapter.NewEnforcer` builds `agent.NewHostNone` for `none`,
+`agent.NewHostClaude` for `claude` and `agent.NewContainer` with the role's
+image for `container`. A host mode with an image, a container without one,
+extra mounts and domain overrides are rejected. The view is checked again for
+symlinks, special files and VCS metadata before construction.
 
-The executor first asks the engine's `Verify` for the turn core would run and
-refuses it unless it matches the grants: VCS not granted and `gh`, `git`, `hg`,
-`jj` and `svn` shadowed by stand-ins; no built-in tools; no write directories;
-an environment of the service variables plus the container's `HOME`; and binds
-of the granted mounts only, including the view. Core then verifies the request
-again before it starts anything, and refuses a variable, tool, MCP server or
-mount the grants do not name, VCS access, and a writable mount holding VCS
-metadata. A request field the grants do not describe (VCS environment, skills,
-container-use environment, network domains, a different sandbox or image, a
-different allow list, or an MCP entry other than a service-authenticated HTTP
-endpoint) is refused before verification. Every refusal is an `UnsupportedError`
-returned before the runtime starts.
+The enforcer's `Prepare` asks the platform whether it can hold the grants. When
+it cannot (confined `claude` on Linux, or a platform without a confiner), core's
+`ErrUnsupported` is returned, wrapped in `coreadapter.ErrUnsupported` with core's
+reason, and recorded as the turn's failure. The executor then reads the prepared
+session's policy and refuses the turn unless it matches the grants: the sandbox
+and image are the role's; the view is readable and writable exactly when the
+role writes files; the provider workspace the view was copied from is not
+writable; VCS is not granted and `gh`, `git`, `hg`, `jj` and `svn` are denied;
+no built-in tool is granted; and the MCP servers are exactly the scoped
+endpoints. A mismatch is an `UnsupportedError` with capability
+`session policy`.
 
-`*agent.Runner` is the production engine. The hermetic engine fixture verifies
-requests with core's own container boundary and records them; it tests
-construction, permission checks and durable failures, not actual OS sandboxing.
+The session then admits the request against its grants and refuses a
+variable, tool, MCP server or mount the grants do not name, VCS access, and a
+writable mount holding VCS metadata. A request field the grants do not describe
+(VCS environment, skills, container-use environment, network domains, a
+different sandbox or image, a different allow list, or an MCP entry other than a
+service-authenticated HTTP endpoint) is refused before a session is prepared.
+Core's refusals (`ErrNotGranted`, `ErrUnsupported`, `ErrNoGrants`, and
+`ErrPolicyChanged` when the policy no longer describes the turn) are wrapped in
+`coreadapter.ErrUnsupported` and are not retried. Every refusal is returned
+before the runtime starts, and the session is released after every attempt.
+
+`coreadapter.CoreEngine` is the production engine. The hermetic engine
+fixtures hand out core's `enforcertest.Enforcer`, which checks grants and
+requests with core's own code and starts no process; they test construction,
+permission checks and durable failures, not actual OS sandboxing.
 `os.Root`, MCP filtering and profile flags are application restrictions and are
 not, by themselves, an OS security sandbox.

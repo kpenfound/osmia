@@ -53,11 +53,11 @@ var (
 )
 
 // Architect supplies the execution boundary of the architect's drafting
-// turns: the core execution engine and the factory of role-scoped MCP
-// hosts. The service owns the architect's view, tools, prompt and output.
+// turns: the core execution engine and the role-scoped MCP host. The service
+// owns the architect's view, tools, prompt and output.
 type Architect struct {
 	Engine coreadapter.Engine
-	Hosts  func(token string) coreadapter.MCPHosts
+	Hosts  coreadapter.MCPHosts
 }
 
 type draftInput struct {
@@ -539,7 +539,7 @@ func (d *drafter) dispatch(ctx context.Context, stream config.WorkstreamID, turn
 // drafting into another's.
 func (d *drafter) turns(stream config.WorkstreamID) *isolation.Turns {
 	var engine coreadapter.Engine
-	var hosts func(string) coreadapter.MCPHosts
+	var hosts coreadapter.MCPHosts
 	if a := d.s.options.Architect; a != nil {
 		engine, hosts = a.Engine, a.Hosts
 	}

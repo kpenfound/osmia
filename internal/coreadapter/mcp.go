@@ -5,16 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
 	"slices"
 
 	"github.com/kpenfound/busybees/core/mcphost"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// MCPTransport binds a server to caller-selected transport and credentials.
-// Start owns cleanup if startup fails; a successful lease closes the transport.
+// MCPTransport serves a server to one turn and returns where the turn reaches
+// it, with the bearer token the endpoint requires. Start owns cleanup if
+// startup fails; a successful lease closes the transport.
 type MCPTransport interface {
 	Start(context.Context, *mcp.Server) (Endpoint, Lease, error)
 }
@@ -91,27 +90,30 @@ func scopedServer(req HostRequest) (server *mcp.Server, err error) {
 	return registry.NewServer(req.Scope.Role, mcp.Implementation{Name: "osmia", Version: "1"})
 }
 
-// HTTPTransport serves an already-bound listener using core's authenticated MCP
-// host. The caller owns address selection and passes the token through its scoped
-// credential boundary. Each transport instance is used for one Host call.
-type HTTPTransport struct {
-	Listener net.Listener
-	Endpoint Endpoint
-	Token    string
-}
+// TokenEnvironment is the variable a turn reads its MCP bearer token from.
+const TokenEnvironment = "OSMIA_MCP_TOKEN"
 
-func (h *HTTPTransport) Start(ctx context.Context, server *mcp.Server) (Endpoint, Lease, error) {
-	if h.Listener == nil {
-		return Endpoint{}, nil, errors.New("MCP HTTP listener is missing")
+// CoreTransport serves each server with core's MCP host: Serve, or
+// mcphost.Start when Serve is nil, which listens on a fresh loopback port and
+// requires a fresh bearer token. The endpoint carries that token and names
+// TokenEnvironment as the variable the turn reads it from. Releasing the lease
+// stops the server.
+type CoreTransport struct{ Serve mcphost.StartFunc }
+
+var _ MCPTransport = CoreTransport{}
+
+func (t CoreTransport) Start(ctx context.Context, server *mcp.Server) (Endpoint, Lease, error) {
+	start := t.Serve
+	if start == nil {
+		start = mcphost.Start
 	}
-	parsed, err := url.Parse(h.Endpoint.URL)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || h.Token == "" || h.Endpoint.BearerTokenEnvironment == "" {
-		return Endpoint{}, nil, errors.Join(errors.New("MCP HTTP requires a URL, token and token environment name"), h.Listener.Close())
+	endpoint, lease, err := start(ctx, server)
+	if err != nil {
+		return Endpoint{}, nil, err
 	}
-	runCtx, cancel := context.WithCancel(ctx)
-	finished := make(chan struct{})
-	var serveErr error
-	go func() { defer close(finished); serveErr = mcphost.ServeHTTP(runCtx, server, h.Listener, h.Token) }()
-	lease := &releaseLease{release: func(context.Context) error { cancel(); <-finished; return serveErr }}
-	return h.Endpoint, lease, nil
+	if endpoint.URL == "" || endpoint.Token == "" {
+		return Endpoint{}, nil, errors.Join(errors.New("MCP host returned no URL or token"), lease.Close())
+	}
+	return Endpoint{URL: endpoint.URL, BearerTokenEnvironment: TokenEnvironment, Token: endpoint.Token},
+		&releaseLease{release: func(context.Context) error { return lease.Close() }}, nil
 }

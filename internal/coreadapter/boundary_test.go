@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/kpenfound/busybees/core/agent"
@@ -65,20 +67,20 @@ func TestRawExecutionRequestCannotWidenBoundary(t *testing.T) {
 			if len(engine.Requests) != 2 {
 				t.Fatal("raw override reached construction")
 			}
-			// Only core can refuse these; every other widening is refused
-			// before verification.
-			verified := 2
+			// Only core's session can refuse these; every other widening is
+			// refused before a session is prepared.
+			prepared := 2
 			if coreRefuses[name] {
-				verified = 3
+				prepared = 3
 			}
-			if len(engine.Verified) != verified {
-				t.Fatalf("verified %d requests, want %d", len(engine.Verified), verified)
+			if len(engine.Prepared) != prepared || !engine.Released() {
+				t.Fatalf("prepared %d sessions, want %d, all released", len(engine.Prepared), prepared)
 			}
 		})
 	}
 }
 
-// coreRefuses names the widening requests that reach core's verification.
+// coreRefuses names the widening requests that reach core's session.
 var coreRefuses = map[string]bool{"VCS": true, "profile env": true, "container env": true, "host MCP": true, "shell": true}
 
 func boundaryTurn(t *testing.T, mode string) a.PreparedTurn {
@@ -103,8 +105,8 @@ func TestContainerConstruction(t *testing.T) {
 	if _, err := runner.Run(context.Background(), turn); err != nil {
 		t.Fatal(err)
 	}
-	if len(engine.Verified) != 1 || len(engine.Requests) != 1 {
-		t.Fatal("verification or execution missing")
+	if len(engine.Prepared) != 1 || len(engine.Requests) != 1 || !engine.Released() {
+		t.Fatal("session or execution missing")
 	}
 	req := engine.Requests[0]
 	view := turn.Sandbox.Verified.Workspace.Directory
@@ -136,76 +138,189 @@ func TestContainerConstruction(t *testing.T) {
 	}
 }
 
-func TestHostSessionsAreRefused(t *testing.T) {
-	for _, mode := range []string{"none", "claude"} {
+func TestEverySandboxModeReachesRun(t *testing.T) {
+	for _, mode := range []string{"none", "claude", "container"} {
 		t.Run(mode, func(t *testing.T) {
-			turn := boundaryTurn(t, mode)
+			turn := toolTurn(t, mode)
 			engine := &adaptertest.Engine{}
-			_, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
-			if !errors.Is(err, a.ErrUnsupported) || len(engine.Verified) != 0 || len(engine.Requests) != 0 {
-				t.Fatalf("err=%v verified=%d launches=%d", err, len(engine.Verified), len(engine.Requests))
+			result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine, Pinned: []string{t.TempDir()}}}).Run(context.Background(), turn)
+			if err != nil || result.FinalResponse != "fixture response" {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+			if len(engine.Requests) != 1 || !engine.Released() {
+				t.Fatalf("launches=%d released=%v", len(engine.Requests), engine.Released())
+			}
+			req := engine.Requests[0]
+			if req.Profile.Sandbox != mode || req.Profile.Confine != (mode != "container") || req.Profile.SandboxImage != turn.Execution.Image {
+				t.Fatalf("admitted profile: %+v", req.Profile)
+			}
+			if req.Grants == nil || !reflect.DeepEqual(req.Grants.Tools, []string{"mcp__osmia_0"}) {
+				t.Fatalf("admitted grants: %+v", req.Grants)
 			}
 		})
 	}
 }
 
-func TestUnverifiedEngineNeverStarts(t *testing.T) {
-	mutations := map[string]func(*agent.Turn){
-		"no turn":                  nil,
-		"VCS":                      func(p *agent.Turn) { p.VCS = true },
-		"VCS executable":           func(p *agent.Turn) { p.DeniedExecutables = p.DeniedExecutables[1:] },
-		"host environment":         func(p *agent.Turn) { p.Env = append(p.Env, "PATH=/usr/bin") },
-		"delivery credentials":     func(p *agent.Turn) { p.Env = append(p.Env, "GH_TOKEN=secret") },
-		"changed environment":      func(p *agent.Turn) { p.Env[0] = "LANG=en_US" },
-		"built-in tools":           func(p *agent.Turn) { p.Tools = nil },
-		"new tool":                 func(p *agent.Turn) { p.Tools = []string{"Bash"} },
-		"write directory":          func(p *agent.Turn) { p.WriteDirs = []string{"/host"} },
-		"writable read-only mount": func(p *agent.Turn) { p.Binds[0].Access = agent.ReadWrite },
-		"alternate source":         func(p *agent.Turn) { p.Binds[0].Source = "/" },
-		"alternate target":         func(p *agent.Turn) { p.Binds[0].Destination = "/" },
-		"extra mount": func(p *agent.Turn) {
-			p.Binds = append(p.Binds, agent.Bind{Source: "/host", Destination: "/host", Access: agent.ReadOnly})
+// toolTurn is a read-only turn in mode with one granted tool on one service
+// MCP server.
+func toolTurn(t *testing.T, mode string) a.PreparedTurn {
+	t.Helper()
+	turn := boundaryTurn(t, mode)
+	if mode != "container" {
+		turn.Execution.Image = ""
+	}
+	turn.Sandbox.Verified.Capabilities.Tools = []string{"notes_read"}
+	turn.Sandbox.Verified.Environment["OSMIA_MCP_TOKEN"] = "scoped-fixture-token"
+	turn.MCP = []a.Endpoint{{URL: "http://127.0.0.1:1/mcp", BearerTokenEnvironment: "OSMIA_MCP_TOKEN", Token: "scoped-fixture-token"}}
+	return turn
+}
+
+func TestPolicyMismatchNeverStarts(t *testing.T) {
+	pinned := t.TempDir()
+	mutations := map[string]func(*agent.Policy, string){
+		"sandbox": func(p *agent.Policy, _ string) { p.Sandbox = agent.SandboxNone },
+		"image":   func(p *agent.Policy, _ string) { p.Image = "other-image" },
+		"writable view": func(p *agent.Policy, view string) {
+			p.Mounts = append(p.Mounts, agent.Mount{Path: view, Access: agent.ReadWrite})
 		},
-		"missing view": func(p *agent.Turn) { p.Binds = p.Binds[1:] },
+		"unreadable view": func(p *agent.Policy, view string) { p.Denied = append(p.Denied, view) },
+		"writable pinned": func(p *agent.Policy, _ string) {
+			p.Mounts = append(p.Mounts, agent.Mount{Path: pinned, Access: agent.ReadWrite})
+		},
+		"VCS":               func(p *agent.Policy, _ string) { p.VCS = true },
+		"VCS executable":    func(p *agent.Policy, _ string) { p.DeniedExecutables = p.DeniedExecutables[1:] },
+		"every built-in":    func(p *agent.Policy, _ string) { p.Tools = nil },
+		"built-in tool":     func(p *agent.Policy, _ string) { p.Tools = []string{"Bash"} },
+		"missing server":    func(p *agent.Policy, _ string) { p.MCPServers = nil },
+		"additional server": func(p *agent.Policy, _ string) { p.MCPServers = append(p.MCPServers, "rogue") },
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
-			turn := boundaryTurn(t, "container")
-			engine := &adaptertest.Engine{Mutate: mutate}
-			executor := a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}
-			if mutate == nil {
-				executor.Runner = nilTurnEngine{engine}
+			turn := toolTurn(t, "container")
+			view := turn.Sandbox.Verified.Workspace.Directory
+			engine := &adaptertest.Engine{Policy: func(p *agent.Policy) { mutate(p, view) }}
+			result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine, Pinned: []string{pinned}}}).Run(context.Background(), turn)
+			var refusal *a.UnsupportedError
+			if !errors.As(err, &refusal) || refusal.Capability != "session policy" || !result.IsError {
+				t.Fatalf("err=%v result=%+v", err, result)
 			}
-			_, err := (&a.TurnRunner{Executor: executor}).Run(context.Background(), turn)
-			if !errors.Is(err, a.ErrUnsupported) || len(engine.Requests) != 0 {
-				t.Fatalf("err=%v launches=%d", err, len(engine.Requests))
+			if len(engine.Prepared) != 1 || len(engine.Requests) != 0 || !engine.Released() {
+				t.Fatalf("prepared=%d launches=%d released=%v", len(engine.Prepared), len(engine.Requests), engine.Released())
 			}
 		})
 	}
 }
 
-// nilTurnEngine verifies nothing and reports no error.
-type nilTurnEngine struct{ *adaptertest.Engine }
+func TestWritableViewPolicyIsAccepted(t *testing.T) {
+	turn := toolTurn(t, "none")
+	turn.Sandbox.Verified.Workspace.Access = a.ReadWrite
+	turn.Sandbox.Verified.Capabilities.WriteFiles = true
+	engine := &adaptertest.Engine{}
+	executor := a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}
+	if _, err := (&a.TurnRunner{Executor: executor}).Run(context.Background(), turn); err != nil || len(engine.Requests) != 1 {
+		t.Fatalf("err=%v launches=%d", err, len(engine.Requests))
+	}
+	// A writable view whose session reads it only is a mismatch too.
+	view := turn.Sandbox.Verified.Workspace.Directory
+	engine = &adaptertest.Engine{Policy: func(p *agent.Policy) {
+		for i := range p.Mounts {
+			if p.Mounts[i].Path == view {
+				p.Mounts[i].Access = agent.ReadOnly
+			}
+		}
+	}}
+	executor.Runner = engine
+	if _, err := (&a.TurnRunner{Executor: executor}).Run(context.Background(), turn); !errors.Is(err, a.ErrUnsupported) || len(engine.Requests) != 0 {
+		t.Fatalf("err=%v launches=%d", err, len(engine.Requests))
+	}
+}
 
-func (nilTurnEngine) Verify(agent.Request) (*agent.Turn, error) { return nil, nil }
+func TestChangedPolicyIsARefusal(t *testing.T) {
+	turn := boundaryTurn(t, "container")
+	engine := &adaptertest.Engine{RunErr: fmt.Errorf("fixture: %w", agent.ErrPolicyChanged)}
+	result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
+	if !errors.Is(err, a.ErrUnsupported) || !errors.Is(err, agent.ErrPolicyChanged) || !result.IsError {
+		t.Fatalf("err=%v result=%+v", err, result)
+	}
+	if len(engine.Enforcers) != 1 || len(engine.Prepared) != 1 || !engine.Released() {
+		t.Fatalf("enforcers=%d prepared=%d released=%v", len(engine.Enforcers), len(engine.Prepared), engine.Released())
+	}
+}
 
-func TestCoreVerificationFailureNeverStarts(t *testing.T) {
+func TestCoreRefusalNeverStarts(t *testing.T) {
 	turn := boundaryTurn(t, "container")
 	for _, refusal := range []error{agent.ErrNotGranted, agent.ErrUnsupported, agent.ErrNoGrants} {
-		engine := &adaptertest.Engine{VerifyErr: fmt.Errorf("fixture: %w", refusal)}
-		_, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
-		if !errors.Is(err, a.ErrUnsupported) || !errors.Is(err, refusal) || len(engine.Verified) != 1 || len(engine.Requests) != 0 {
+		engine := &adaptertest.Engine{PrepareErr: fmt.Errorf("fixture reason: %w", refusal)}
+		result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
+		if !errors.Is(err, a.ErrUnsupported) || !errors.Is(err, refusal) || !strings.Contains(err.Error(), "fixture reason") || !result.IsError || len(engine.Requests) != 0 {
 			t.Fatalf("%v: err=%v launches=%d", refusal, err, len(engine.Requests))
 		}
 	}
-	// Any other verification failure, such as an unreadable path, is not a
-	// refusal and keeps its own error.
+	// Any other failure, such as an unreadable path or an engine that has no
+	// enforcer, is not a refusal and keeps its own error.
 	failure := errors.New("fixture I/O failure")
-	engine := &adaptertest.Engine{VerifyErr: failure}
-	_, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
-	if errors.Is(err, a.ErrUnsupported) || !errors.Is(err, failure) || len(engine.Requests) != 0 {
-		t.Fatalf("err=%v launches=%d", err, len(engine.Requests))
+	for _, engine := range []*adaptertest.Engine{{PrepareErr: failure}, {EnforcerErr: failure}} {
+		_, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
+		if errors.Is(err, a.ErrUnsupported) || !errors.Is(err, failure) || len(engine.Requests) != 0 {
+			t.Fatalf("err=%v launches=%d", err, len(engine.Requests))
+		}
 	}
+}
+
+func TestNewEnforcer(t *testing.T) {
+	runner := agent.Runner{}
+	kinds := map[string]string{}
+	for _, settings := range []a.ExecutionSettings{{Mode: "none"}, {Mode: "claude"}, {Mode: "container", Image: "fixture-image"}} {
+		e, err := a.NewEnforcer(runner, settings)
+		if err != nil || e == nil {
+			t.Fatalf("%+v: %v", settings, err)
+		}
+		kinds[settings.Mode] = fmt.Sprintf("%T", e)
+		if _, err := (a.CoreEngine{Runner: runner}).Enforcer(settings); err != nil {
+			t.Fatalf("engine %+v: %v", settings, err)
+		}
+	}
+	if kinds["none"] == kinds["container"] {
+		t.Fatalf("container enforcer is a host enforcer: %v", kinds)
+	}
+	for _, settings := range []a.ExecutionSettings{{Mode: "none", Image: "fixture-image"}, {Mode: "claude", Image: "fixture-image"}, {Mode: "container"}, {Mode: "vm"}, {}} {
+		if e, err := a.NewEnforcer(runner, settings); !errors.Is(err, a.ErrUnsupported) || e != nil {
+			t.Fatalf("%+v: %v", settings, err)
+		}
+	}
+}
+
+// Host enforcers are told apart by the policy of a session they prepare
+// under a confiner that allows everything and starts nothing.
+func TestNewHostEnforcerKinds(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := agent.Runner{Confiner: allowAll{}, SystemPaths: []agent.Mount{}}
+	for _, mode := range []string{"none", "claude"} {
+		e, err := a.NewEnforcer(runner, a.ExecutionSettings{Mode: mode})
+		if err != nil {
+			t.Fatal(err)
+		}
+		session, err := e.Prepare(context.Background(), agent.Grants{Tools: []string{}, Mounts: []agent.Mount{{Path: dir, Access: agent.ReadOnly}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := session.Policy().Sandbox; got != mode {
+			t.Fatalf("%s enforcer prepared a %s session", mode, got)
+		}
+		if err := session.Release(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+type allowAll struct{}
+
+func (allowAll) Check(agent.Confinement) error { return nil }
+func (allowAll) Start(cmd *exec.Cmd, _ agent.Confinement) error {
+	return errors.New("fixture confiner starts nothing")
 }
 
 func TestNonClaudeBackendsAreRefused(t *testing.T) {
@@ -239,6 +354,9 @@ func TestBoundaryRejectsUnsafeInputs(t *testing.T) {
 				t.Fatal(err)
 			}
 		},
+		"host image": func(_ *testing.T, p *a.PreparedTurn) { p.Execution.Mode = "none" },
+		"no image":   func(_ *testing.T, p *a.PreparedTurn) { p.Execution.Image = "" },
+		"no mode":    func(_ *testing.T, p *a.PreparedTurn) { p.Execution.Mode = "" },
 		"symlink": func(t *testing.T, p *a.PreparedTurn) {
 			if err := os.Symlink(t.TempDir(), filepath.Join(p.Sandbox.Verified.Workspace.Directory, "escape")); err != nil {
 				t.Fatal(err)
@@ -251,7 +369,7 @@ func TestBoundaryRejectsUnsafeInputs(t *testing.T) {
 			mutate(t, &turn)
 			engine := &adaptertest.Engine{}
 			result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
-			if err == nil || len(engine.Verified) != 0 || len(engine.Requests) != 0 {
+			if err == nil || len(engine.Enforcers) != 0 || len(engine.Requests) != 0 {
 				t.Fatalf("unsafe construction: %v", err)
 			}
 			if !result.IsError || result.Session != (a.BackendSession{}) {

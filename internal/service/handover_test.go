@@ -92,9 +92,7 @@ func TestM2HandInToSketchedPlan(t *testing.T) {
 				set, err := status.Tool(r, trace.ChiefOfStaff, scope, clock.Now)
 				return []coreadapter.Tool{set}, err
 			},
-			Hosts: func(token string) coreadapter.MCPHosts {
-				return &coreadapter.MCPHost{Transport: &demoTransport{token: token, sessions: sessions}}
-			},
+			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}},
 		}
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {

@@ -8,7 +8,7 @@ returns configured results/errors, records calls, honours pre-cancellation and
 fails when exhausted. It does not emulate an enforcing sandbox or durable store.
 
 The direct dependency is pinned to
-`github.com/kpenfound/busybees/core v0.0.0-20260915214133-94e7a8d3105e`.
+`github.com/kpenfound/busybees/core v0.4.2`.
 Only public core packages may be imported inside adapters. No sibling checkout
 or local replacement is needed. The public `vcs.Workspace` compile-time fixture
 keeps the dependency checked by Go without executing a session or repository.
@@ -23,7 +23,7 @@ Capabilities describe this pinned version, based on its public API and README.
 | Osmia port | Core package / primitive | Boundary and upstream gaps |
 |---|---|---|
 | `Turns` | `agent.Runner`, `Request`, `Result`, backend implementations | Runs a prepared turn and returns backend identity, final response, outcome, cost knowledge and failure detail. Resume is backend-dependent: the pinned Codex path ignores `ResumeID`. Uniform resumable backends are an upstream gap. Osmia owns log replay, turn queues and profile selection. |
-| `Sandboxes` | `agent.Grants`, `Runner.Verify`, `ContainerBoundary`; `vcs.Workspace` | Core verifies a request against its complete grants (environment allowlist, tools, mounts, VCS) before starting anything and shadows VCS executables when VCS is not granted. The contract separates required isolation from verified isolation; flags or prompts are not verification. Unsupported requirements must fail before launch. |
+| `Sandboxes` | `agent.Grants`, `agent.Enforcer` (`NewHostNone`, `NewHostClaude`, `NewContainer`), `Session.Policy`; `vcs.Workspace` | Core prepares a session for the grants only where the platform can enforce them, reports the policy it enforces, and admits a request against its complete grants (environment allowlist, tools, mounts, VCS) before starting anything; VCS executables are denied when VCS is not granted. The contract separates required isolation from verified isolation; flags or prompts are not verification. Unsupported requirements must fail before launch. |
 | `MCPHosts` | `mcphost.Registry`, role policies, transports | Hosts supplied role-scoped tools with explicit capabilities. Osmia supplies handlers, fixed routes and outcome validation. No workflow handlers are inherited from busybees. |
 | `Workspaces` | `vcs.Provider`, `Workspace`, `Directory` | Caller owns acquisition and lifetime across turns. Core exposes the provider interface but **no reusable concrete git-worktree provider** in the public module; that implementation is an upstream gap. The lease port neither commits nor rebases nor delivers. |
 | `Reviews` | `review.Runner`, `Bundle`, `ReadArtifact`, findings | Accepts supplied context and diff; retains partial artifacts, findings and session accounting. Core does not bind approval to spec/plan/candidate revisions: Osmia carries that identity and owns approval checks. Interactive review threads belong to Osmia. |
@@ -83,10 +83,11 @@ with literal values; its generic mounts are exactly `ExecutionSettings.Mounts`.
 No VCS workspace resources or VCS environment are forwarded, and core's VCS
 access flag is always false.
 
-`CoreExecutor` is the implementation. It runs the turn through an `Engine`
-(`*agent.Runner` in production) with grants built from the verified isolation
-and refuses a turn core's `Verify` reports outside them; see
-[container verification](isolation.md#container-verification). The fake engine
+`CoreExecutor` is the implementation. It runs the turn through the enforcer an
+`Engine` hands out for the role's execution settings (`CoreEngine` in
+production), with grants built from the verified isolation, and refuses a
+session whose policy differs from them; see
+[enforced execution](isolation.md#enforced-execution). The fake engine
 tests validate request translation and grants, not actual isolation. Unresolved
 credential references, unsupported sandbox/backend modes, cost caps, and backend
 turn limits or resume modes that core ignores also fail before execution.
@@ -111,9 +112,10 @@ supplied tools intersecting the capability allowlist and enforcing their declare
 read/write/execute/fetch effects. VCS or unclassified tools, duplicate names,
 missing roles and malformed approved tools are rejected before hosting;
 hidden and unknown names cannot reach a
-handler. `HTTPTransport` serves a caller-bound listener using core's authenticated
-HTTP transport, with a caller-supplied token and endpoint. The service owns address
-selection and credential delivery. Tests use in-memory SDK transports and fake
+handler. `CoreTransport` serves the registry with `mcphost.Start`: a fresh
+loopback port and a fresh bearer token per turn. The endpoint carries the token
+and names `OSMIA_MCP_TOKEN` as the variable the turn reads it from; releasing the
+lease stops the server. Tests use in-memory SDK transports and fake
 execution/providers; they launch no agents, container engines or VCS processes.
 
 ## Review evidence

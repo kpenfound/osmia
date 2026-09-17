@@ -3,8 +3,10 @@ package thread
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,17 +28,24 @@ func TestIsolationFailureIsDurableBeforeExecution(t *testing.T) {
 			}
 			lease := &adaptertest.Lease{Releases: *adaptertest.NewScript[struct{}, struct{}](adaptertest.Reply[struct{}]{})}
 			provider := &adaptertest.Workspaces{Script: *adaptertest.NewScript[a.WorkspaceRequest, a.WorkspaceLease](adaptertest.Reply[a.WorkspaceLease]{Value: a.WorkspaceLease{Workspace: a.Workspace{Directory: source, Access: a.ReadOnly}, Lease: lease}})}
-			engine := &adaptertest.Engine{Mutate: func(turn *agent.Turn) { turn.VCS = true }}
+			// A host session the platform cannot confine is refused by core's
+			// Prepare; a container session whose policy grants VCS is refused
+			// by the adapter.
+			refusal := fmt.Errorf("%w: fixture platform cannot confine claude", agent.ErrUnsupported)
+			engine := &adaptertest.Engine{PrepareErr: refusal}
+			if failure == "container" {
+				engine = &adaptertest.Engine{Policy: func(p *agent.Policy) { p.VCS = true }}
+			}
 			boundary := &isolation.Turns{Workspaces: provider, Views: isolation.Views{Directory: views}, Engine: engine, Grants: map[string]a.Capabilities{"mason": {}},
 				Select: func(context.Context, a.Scope) (isolation.Selection, error) {
-					mode, paths := "none", []string{"file"}
+					execution, paths := a.ExecutionSettings{Mode: "claude"}, []string{"file"}
 					if failure == "container" {
-						mode = "container"
+						execution = a.ExecutionSettings{Mode: "container", Image: "fixture-image"}
 					}
 					if failure == "workspace" {
 						paths = []string{"../escape"}
 					}
-					return isolation.Selection{Paths: paths, Execution: a.ExecutionSettings{Mode: mode, Image: "fixture-image"}}, nil
+					return isolation.Selection{Paths: paths, Execution: execution}, nil
 				}}
 			runner := Runner{Store: repo, Turns: boundary, Now: func() time.Time { return timestamp.Add(time.Second) }}
 			q, runErr := runner.RunNext(context.Background(), stream, "agent", a.PreparedTurn{SessionDirectory: t.TempDir()})
@@ -49,8 +58,14 @@ func TestIsolationFailureIsDurableBeforeExecution(t *testing.T) {
 			if failure != "workspace" && !errors.Is(runErr, a.ErrUnsupported) {
 				t.Fatal(runErr)
 			}
-			if len(engine.Requests) != 0 {
-				t.Fatal("unverified runtime started")
+			if failure == "host" && (!errors.Is(runErr, refusal) || !strings.Contains(q.Response.Failure, "fixture platform cannot confine claude")) {
+				t.Fatalf("core's reason is not the recorded failure: %q, %v", q.Response.Failure, runErr)
+			}
+			if failure != "workspace" && len(engine.Enforcers) != 1 {
+				t.Fatalf("built %d enforcers", len(engine.Enforcers))
+			}
+			if len(engine.Requests) != 0 || !engine.Released() {
+				t.Fatal("unverified runtime started or its session was kept")
 			}
 			entries, err := os.ReadDir(views)
 			if err != nil || len(entries) != 0 {

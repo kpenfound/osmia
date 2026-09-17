@@ -89,9 +89,7 @@ func newLibrarianFixture(t *testing.T) *librarianFixture {
 	}
 	clock := &demoClock{now: demoStart}
 	opts.Reconciliation.Now = clock.Now
-	opts.Librarian = &Librarian{Engine: engine, Hosts: func(token string) coreadapter.MCPHosts {
-		return &coreadapter.MCPHost{Transport: &demoTransport{token: token, sessions: sessions}}
-	}}
+	opts.Librarian = &Librarian{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}}}
 	return &librarianFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
 }
 

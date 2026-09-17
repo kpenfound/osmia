@@ -100,9 +100,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				return questions.Tools(r, agents[scope.Thread], scope, clock.Now)
 			},
-			Hosts: func(token string) coreadapter.MCPHosts {
-				return &coreadapter.MCPHost{Transport: &demoTransport{token: token, sessions: sessions}}
-			},
+			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}},
 		}
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: &questions.Turns{Turns: turns, Repository: r}, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
