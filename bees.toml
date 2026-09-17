@@ -198,7 +198,7 @@ timeout = "90m"
 # compound command, env prefixes, subshells and the timeout, time and nohup
 # wrappers. It does not reach bash -c, a script or a Makefile target.
 #allowed_tools = []
-disallowed_tools = ["Artifact", "Bash(go test *)"]
+disallowed_tools = ["Artifact", "Bash(go test *)", "Bash(docker *)"]
 # Shell for claude's Bash tool in sessions (exported as $SHELL).
 #shell = "/bin/bash"
 
