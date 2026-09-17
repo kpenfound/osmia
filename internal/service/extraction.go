@@ -42,11 +42,11 @@ const (
 var librarianActor = trace.Actor{Kind: "agent", ID: librarianAgent}
 
 // Librarian supplies the execution boundary of the librarian's turns: the
-// core execution engine and the factory of role-scoped MCP hosts. The
-// service owns the librarian's view, tools, prompt and output capture.
+// core execution engine and the role-scoped MCP host. The service owns
+// the librarian's view, tools, prompt and output capture.
 type Librarian struct {
 	Engine coreadapter.Engine
-	Hosts  func(token string) coreadapter.MCPHosts
+	Hosts  coreadapter.MCPHosts
 }
 
 // librarianWorkstream is the project's workstream holding the librarian
@@ -542,7 +542,7 @@ func (e *extractor) dispatch(ctx context.Context, stream config.WorkstreamID, tu
 // VCS capability.
 func (e *extractor) turns() *isolation.Turns {
 	var engine coreadapter.Engine
-	var hosts func(string) coreadapter.MCPHosts
+	var hosts coreadapter.MCPHosts
 	if l := e.s.options.Librarian; l != nil {
 		engine, hosts = l.Engine, l.Hosts
 	}

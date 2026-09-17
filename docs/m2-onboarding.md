@@ -128,7 +128,7 @@ is unchanged.
 ## What is faked
 
 The test passes a scripted `service.Options.Librarian`: an execution engine
-that verifies grants with core's container boundary and runs no model, and an
+behind core's fake enforcer that verifies grants with core's container boundary and runs no model, and an
 in-memory MCP transport. The root's configuration runs the librarian in a
 `container` with a fixture image. `osmia serve` supplies no
 librarian runner, so there every extraction fails with a recorded reason and
