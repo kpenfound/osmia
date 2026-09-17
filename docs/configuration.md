@@ -36,14 +36,15 @@ configuration list; they belong to persisted workstream manifests.
 <root>/projects/<project-id>/config.toml
 <root>/projects/<project-id>/                  dedicated project trace repository
 <root>/projects/<project-id>/workstreams/<workstream-id>/
+<root>/branches/<project-id>/<workstream-id>  the workstream's feature branch, a worktree of the clone
 ```
 
 `Root` provides checked helpers for these paths. Managed state paths reject
 symlink aliases, including aliases within the root that could collapse two
 identities. The clone and root must be separate, non-nested directories, including
 after resolving symlinks. Relative clone paths resolve from the project configuration
-directory; missing clones are accepted for configuration purposes. Nothing is
-written in the clone. Helpers check existing paths, not future filesystem changes;
+directory; missing clones are accepted for configuration purposes. Loading
+configuration writes nothing in the clone. Helpers check existing paths, not future filesystem changes;
 state writers must protect against concurrent symlink replacement.
 
 ## Top-level config.toml
@@ -179,8 +180,11 @@ writing anything, then:
 Validation refuses, each with its own message: a blank name, an upstream or fork
 that is not `owner/repository`, a fork equal to the upstream, an invalid base
 branch, a relative clone path, a clone that does not exist, is not a directory
-or has no `.git` entry, and a clone nested with the root either way. Nothing is
-ever written to the clone; seeding only reads it.
+or has no `.git` entry, and a clone nested with the root either way.
+Registration never writes to the clone; seeding only reads it. The service
+writes to the clone once a workstream is ratified, when its
+[sealing](service.md#sealing) fetches upstream and creates the feature
+branch.
 
 Registration is recoverable. If the service stops at any step, the journal makes
 the next start finish the registration with the same ID, or `osmia project add`

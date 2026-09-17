@@ -302,7 +302,7 @@ still completed and its draft recorded, since that runs no architect.
 ## The shed: debate
 
 The shed controller runs in every reconciliation pass after the architect
-controller, before event delivery and the scheduler. It moves a `sketched`
+controller, before the sealing controller, event delivery and the scheduler. It moves a `sketched`
 workstream into the shed and runs its debate to a conclusion: a round of the
 committee, the architect's one reply to it, and the next round against what
 the architect redrafted, until no dissent stands or the debate reaches its
@@ -804,20 +804,139 @@ What passes is recorded in `shed/round-<n>/ratification.json` (actor
 dissent record it was given over and the dispositions in force, and the owner
 subject moves to `ratified-<n>`; the reason is `the owner ratified <revisions>
 after round <n>`, followed by `, over <k> objections the owner disposed of`
-where there were any. The gate itself changes no state beyond that record. The
-response is a `RatifyResponse`: `project`, `workstream`, `round`, `spec`,
-`plan`, `sealed` and the recorded `detail`.
+where there were any. The gate itself changes no state beyond that record: the
+record is the request for the [sealing](#sealing), which moves the workstream
+on. The response is a `RatifyResponse`: `project`, `workstream`, `round`,
+`spec`, `plan`, `sealing` and the `detail`, which is the recorded reason
+followed by `; the sealing is asked for`.
+
+`sealing` is the state of the sealing the record asked for: `requested` until
+the sealing controller publishes the operation, then `pending` while it is
+queued or waiting to retry and `running` while it runs. Ratifying revisions
+already ratified records nothing while their sealing is requested, pending or
+running, and answers with the detail `workstream <id> is ratified at
+<revisions> already; the sealing is asked for`, or `...; sealing <k> is
+pending` (followed by ` after a failed attempt: <reason>` once an attempt has
+failed) or `...; sealing <k> is running`. Once that sealing has
+[failed](#what-a-sealing-refuses), the same call records the ratification
+again as the next revision of its file, with the owner subject moving to
+`ratified-<n>` again and the reason `the owner ratified <revisions> after
+round <n> again; sealing <k> failed and the sealing is asked for again`; the
+detail says the same and `sealing` is `requested` again. That is how the owner
+asks for a sealing after one failed, once whatever failed it is put right.
 
 ### Sealing
 
-A recorded ratification triggers `Options.Sealing`, which seals the ratified
-revisions and moves the workstream on. Without one the ratification stands and
-the response reports `sealed: false`. A sealing that fails leaves the
-ratification recorded and answers `internal` with `<revisions> is ratified for
-workstream <id> and the sealing did not start; ratify again to ask for it`, and
-a service stop between the record and the call leaves the same thing owed:
-ratifying the same revisions again records nothing and asks for the sealing
-again, which is why a sealing seals the same revisions twice without harm.
+Ratification ends with the seal of design §5.1: the upstream commit and the
+hash of the ratified spec are recorded, the plan's footprints are taken, and
+the feature branch is created in a workspace the service owns on the project's
+clone. The service performs the version control; no agent creates a branch,
+and nothing is pushed. The sealing controller runs in every reconciliation
+pass after the shed controller, and its reconciler runs each sealing as a
+durable operation on the repository boundary, so a restart neither loses nor
+repeats one.
+
+#### Asking for a sealing
+
+The controller reads the owner's latest ratification of every workstream that
+is `in-shed` or `sketched`: the record of the latest round at its latest
+revision. When no sealing of that record was asked for, it publishes one as
+the operation `seal` (input `seal`, `round`, `spec`, `plan` and
+`ratification`, the record's revision) on the workflow subject `seal`, which
+tracks a workstream's sealings:
+
+| `seal` state | Meaning |
+| --- | --- |
+| `sealing-<k>` | Sealing `k` is asked for: queued, running or waiting to retry. |
+| `failed-<k>` | Sealing `k` failed for a reason a retry does not put right. |
+
+The request is the transition `seal-<k>` (actor `service`/`sealing`, cause the
+ratification record's transition, `shed-round-<n>-ratification-<r>`) with
+the reason `the owner ratified <revisions> in round <n>; sealing <k> fetches
+upstream, records the seal and the footprints and creates the feature branch`.
+A sealing that succeeds is recorded by the feature state it moves, not by the
+subject. A service stop between the record of a ratification and the request
+leaves nothing owed but the next pass; one after a request leaves the
+operation pending for the next service, which inspects the clone before
+retrying. A ratification whose sealing failed is not asked for again by the
+controller: the owner asks by ratifying again, which records the ratification
+as a new revision, and the controller seals that record.
+
+#### What a sealing does
+
+Each attempt, in order:
+
+1. Reads the ratification the operation names and the workstream's state,
+   and [refuses](#what-a-sealing-refuses) what cannot be sealed.
+2. Reads the ratified revisions of `spec.md` and `plan.json`, loads the
+   [entity map](knowledge-base.md) and resolves every unit's footprint:
+   the entities it names and every entity that is part of them, with their
+   path patterns, exactly as `kb.Map.ResolveEntities` resolves them. A name the
+   map does not resolve to an entity with a path pattern refuses the sealing.
+3. Finds the clone's remote whose URL names the project's `upstream`
+   (`owner/repository`, however the URL spells it) and fetches its
+   `base_branch` into `refs/remotes/<remote>/<base_branch>`.
+4. Takes the feature branch `osmia/<workstream-id>`. A branch of that name
+   the clone already holds is the feature branch an earlier attempt created:
+   its commit is the seal, and it must be on the fetched branch. Otherwise the
+   branch is created from the fetched commit.
+5. Checks the branch out in the workstream's workspace,
+   `<root>/branches/<project-id>/<workstream-id>`, a Git worktree of the
+   clone, unless the clone has that worktree already. A directory in the way
+   that is no worktree of the clone is reported and left alone.
+6. Records `seal.json` as the workstream document `seal` (actor
+   `service`/`sealing`, cause the operation ID), unless this sealing recorded
+   it before the attempt was interrupted, and moves the feature state to
+   `ratified` from `in-shed`, or from `sketched` when the owner skipped debate
+   on a workstream that never entered the shed, in one transition (ID
+   `ratified`, cause the operation ID) with the chief of staff's notice. The
+   reason is `sealed <revisions> at <commit> of <remote>/<base_branch>
+   (<spec hash>); feature branch <branch> is checked out in <workspace>; the
+   footprints of <n> units are recorded`, and the operation's result carries
+   it as evidence.
+
+`seal.json` holds `version` 1, `seal` (the sealing's number), `round`,
+`revision` (`spec` and `plan`), `spec_hash` (`sha256:` and the hex digest of
+the spec revision's content), `base` (`remote`, `branch`, `commit`), `branch`,
+`workspace` and `footprints`, one per unit in plan order with `unit`,
+`entities` and `paths`. Every sealing that completes records the next revision
+of the file; the seal in force is the latest.
+
+A fetch that fails, a remote the clone lacks, and a branch or worktree that
+cannot be created are infrastructure: the attempt returns the error, the
+operation records a retry with it and the next attempt starts again from what
+the clone holds, so an interrupted or failed attempt never creates a second
+branch or workspace. The workstream stays in the shed until every step has
+succeeded. Git runs in the clone with hooks disabled and no terminal prompt,
+with the owner's Git configuration and SSH agent in reach, because fetching
+their remotes may need their credentials; no session ever runs it.
+
+#### What a sealing refuses
+
+A sealing that finds one of these records `failed-<k>` on the seal subject
+(transition `seal-<k>-failed`, cause `seal-<k>`) with the reason `sealing <k>
+of <revisions> failed: <why>`, a notice for the chief of staff (`The sealing
+of <revisions> failed and the workstream is not ratified: <why>. Once that is
+put right, ratifying the same revisions again asks for the sealing again.`)
+and the failure as the operation's result, and the workstream keeps its state:
+
+- `the workstream is <state>, not in the shed`: it is abandoned, or otherwise
+  past the shed. The check is made again right before the seal is recorded, so
+  an abandonment during the attempt is honoured; a branch the attempt already
+  created stays in the clone, as the design keeps an abandoned workstream's
+  branch.
+- `the owner's latest ratification is of <revisions> in round <n>, not of
+  <revisions> in round <n>`: the owner ratified other revisions since, and
+  that ratification is sealed instead; `the owner ratified <revisions> in
+  round <n> again after this sealing was asked for; the later record is sealed
+  instead` when they ratified the same ones again.
+- `the ratified plan does not parse: <error>`.
+- `the plan's footprints name what the entity map does not resolve: <unit>:
+  <name>, ...`: the entity map changed since the plan was validated.
+- `the clone has a branch <branch> at <commit> that is not on
+  <remote>/<base_branch>; it is not the service's feature branch`: a branch of
+  the feature branch's name the service did not create, or one whose history
+  upstream no longer holds; move it away and ratify again.
 
 ## Abandoning
 
@@ -1018,8 +1137,9 @@ own and delivers outbox events to each chief of staff (see
 [event delivery](#event-delivery)). Event delivery followed by the scheduler
 replaces any `Schedule` hook in `Options.Reconciliation`; without
 `Options.Threads` that hook runs. In both cases the
-[architect controller](#architect-drafting) and then the
-[shed controller](#the-shed-debate) run first.
+[architect controller](#architect-drafting), then the
+[shed controller](#the-shed-debate), then the
+[sealing controller](#sealing) run first.
 
 A pass reconciles its pending operations in stage order, across workstreams,
 so the factory finishes work before it widens it: the turns the scheduler

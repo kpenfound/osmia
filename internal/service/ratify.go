@@ -111,9 +111,9 @@ func (s *Service) packet(raw string) (PacketResponse, *APIError) {
 }
 
 // ratify records the owner's approval of the exact revisions of the spec and
-// the plan they read in the packet, and triggers the sealing operation. It
-// changes no state of its own: the ratification is the record, and sealing
-// moves the workstream on.
+// the plan they read in the packet. It changes no state of its own: the
+// ratification is the record, the record asks for the sealing, and the
+// sealing moves the workstream on.
 func (s *Service) ratify(ctx context.Context, raw string, req RatifyRequest) (RatifyResponse, *APIError) {
 	if req.Spec < 1 || req.Plan < 1 {
 		return RatifyResponse{}, &APIError{Validation, "ratify the revisions of the spec and the plan the packet named"}
