@@ -93,8 +93,13 @@ type drafter struct {
 
 var _ coreadapter.Reconciler = (*drafter)(nil)
 
-// Pass reconciles every workstream of the trace except the librarian's.
+// Pass reconciles every workstream of the trace except the librarian's. A
+// service without an architect runner requests nothing: handed workstreams
+// wait for a service that has one.
 func (d *drafter) Pass(ctx context.Context) error {
+	if d.s.options.Architect == nil {
+		return nil
+	}
 	streams, err := d.repository.Workstreams()
 	if err != nil {
 		return err
@@ -355,9 +360,6 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 		case last == nil || last.Status() == "interrupted":
 			if len(turns) >= maxDraftAttempts {
 				return d.terminal(ctx, op.ID, stream, n, "failed", fmt.Sprintf("draft %d failed: the architect turn was interrupted %d times by service stops", n, len(turns)))
-			}
-			if d.s.options.Architect == nil {
-				return d.terminal(ctx, op.ID, stream, n, "failed", fmt.Sprintf("draft %d failed: this service has no agent runner for the architect", n))
 			}
 			if err := d.enqueue(ctx, cfg, stream, n, len(turns)+1, op.ID); err != nil {
 				return coreadapter.OperationResult{}, err

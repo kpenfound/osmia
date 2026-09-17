@@ -617,22 +617,40 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 		t.Fatalf("every draft is kept: %+v", docs)
 	}
 
-	// A service without an architect runner records each draft as failed
-	// with the reason, runs nothing, and stops the same way.
-	f2 := newArchitectFixture(t)
-	defer f2.stop(t)
-	f2.s.options.Architect = nil
+	// A service without an architect runner requests nothing: the workstream
+	// waits, handed, and a service with a runner drafts it.
+	opts, clone, engine, sessions, clock := newArchitectOptions(t)
+	runner := opts.Architect
+	opts.Architect = nil
+	f2 := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
+	f2.start(t)
+	added, err := f2.c.AddProject(ctx, request(clone))
+	must(t, err)
+	f2.project, f2.trace = added.Project.ID, added.Project.Trace
+	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n"), 0600))
 	stream = f2.handIn(t, "design", handedDesign)
-	f2.await(t, stream, draftAt("exhausted"))
-	if runs := f2.runs(); len(runs) != 0 {
+	must(t, (&drafter{s: f2.s, repository: f2.repository()}).Pass(ctx))
+	if state, err := f2.repository().Workflow(stream, draftSubject); err != nil || state.Value != "" {
+		t.Fatalf("draft requested without a runner: %+v %v", state, err)
+	}
+	if ops := f2.draftOperations(t, stream); len(ops) != 0 {
+		t.Fatalf("operations without a runner: %+v", ops)
+	}
+	if _, err := f2.repository().Thread(stream, architectAgent); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("architect thread without a runner: %v", err)
+	}
+	f2.stop(t)
+	f2.opts.Architect = runner
+	f2.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
+	f2.start(t)
+	defer f2.stop(t)
+	f2.await(t, stream, sketched)
+	if runs := f2.runs(); !slices.Equal(runs, []string{"draft-1-1"}) {
 		t.Fatalf("backend runs %v", runs)
 	}
 	ops := f2.draftOperations(t, stream)
-	if len(ops) != maxDrafts || ops[0].Result == nil || ops[0].Result.Outcome != "failed" || !strings.Contains(ops[0].Result.Evidence, "draft 1 failed: this service has no agent runner for the architect") {
+	if len(ops) != 1 {
 		t.Fatalf("operations: %+v", ops)
-	}
-	if docs := f2.documents(t, stream, plan.SpecDocument); len(docs) != 0 {
-		t.Fatalf("documents: %+v", docs)
 	}
 
 	// A draft whose every turn is interrupted fails with the count, and the

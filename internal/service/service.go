@@ -49,7 +49,7 @@ type Options struct {
 	// a recorded reason and the project stays usable.
 	Librarian *Librarian
 	// Architect supplies the execution boundary of the architect's drafting
-	// turns. Without it every draft fails with a recorded reason.
+	// turns. Without it no draft is requested and handed workstreams wait.
 	Architect *Architect
 	// Issues fetches issue URLs handed in. It defaults to the GitHub REST API
 	// with the service's GITHUB_TOKEN environment variable, which no session

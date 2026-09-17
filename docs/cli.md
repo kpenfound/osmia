@@ -109,9 +109,8 @@ The [onboarding walkthrough](m2-onboarding.md) runs `project add`, `handin`,
   creates nothing. See [service](service.md#hand-in) for what is
   recorded. The service then asks the architect for the spec and plan; see
   [architect drafting](service.md#architect-drafting). `osmia serve` has no
-  architect runner, so there each draft fails with the recorded reason "this
-  service has no agent runner for the architect" until the drafts are
-  exhausted.
+  architect runner, so there the workstream stays `handed` and is not
+  drafted.
 - `pause <all|project-id|workstream-id> [--hard] [--reason TEXT]` stores an
   operator pause; the default mode is soft.
 - `resume <all|project-id|workstream-id>` clears that scope's pause. Parent pauses

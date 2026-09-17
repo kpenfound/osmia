@@ -209,7 +209,7 @@ keeps the workflow subject `draft`, whose transitions are recorded in
 | --- | --- |
 | `drafting-<n>` | Draft `n` is requested: transition `draft-<n>` published an `architect-draft` operation, which the reconciliation loop runs. |
 | `invalid-<n>` | Draft `n` was recorded and failed validation. Transition `draft-<n>-invalid` lists every problem in its reason, and the operation's result carries the same text. |
-| `failed-<n>` | Draft `n` ran no valid turn: the architect's turn failed, service stops interrupted it three times, the service has no architect runner, or the workstream left `handed` before the draft was presented. Transition `draft-<n>-failed` holds the reason. |
+| `failed-<n>` | Draft `n` ran no valid turn: the architect's turn failed, service stops interrupted it three times, or the workstream left `handed` before the draft was presented. Transition `draft-<n>-failed` holds the reason. |
 | `exhausted` | Three drafts were not accepted. Transition `draft-exhausted` records it with a notice for the chief of staff naming the count and the last failure, and nothing more is requested. |
 
 Draft 1 is requested as soon as the workstream is handed, with the hand-in
@@ -278,8 +278,9 @@ nothing. A recorded outcome completes the operation without running the
 architect.
 
 `Options.Architect` supplies the isolation engine and MCP host factory the
-architect's turns run in. Without it every draft fails with a recorded reason
-until the drafts are exhausted.
+architect's turns run in. Without it the controller requests nothing, so a
+handed workstream stays `handed` until a service with a runner starts and
+drafts it; a draft already requested runs no turn and fails.
 
 ## Workstream status
 
