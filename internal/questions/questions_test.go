@@ -304,6 +304,17 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 		t.Fatalf("answer after escalation: %s", got)
 	}
 
+	// A ruling alone delivers nothing: only a question in the answered state
+	// is delivered.
+	legacy := trace.Header{Schema: "osmia.trace.question", Version: trace.Version, ID: "legacy", Revision: 1, Project: project, Workstream: stream, At: start, Actor: owner, Cause: "import"}
+	if err := f.repo.Append(ctx, trace.Question{Header: legacy, AskedBy: trace.Actor{Kind: "agent", ID: "reviewer1"}, Thread: "reviewer1_thread", Turn: "review1", Question: "An older question"}); err != nil {
+		t.Fatal(err)
+	}
+	legacy.Schema, legacy.ID = "osmia.trace.ruling", "legacy-ruling"
+	if err := f.repo.Append(ctx, trace.Ruling{Header: legacy, QuestionID: "legacy", QuestionRevision: 1, Decision: "Owner ruled", ReturnedAnswer: "Not yet relayed"}); err != nil {
+		t.Fatal(err)
+	}
+
 	// A skipped workstream keeps its answer undelivered.
 	d.Skip = func(config.WorkstreamID) (bool, error) { return true, nil }
 	if err := d.Pass(ctx); err != nil {
