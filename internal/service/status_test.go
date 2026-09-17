@@ -114,7 +114,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	release, finished := make(chan struct{}), make(chan struct{})
 	var results []string
 	var mu sync.Mutex
-	engine.turns["status"] = func(ctx context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, tools *mcp.ClientSession) (*agent.Result, error) {
+	engine.turns["status"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		defer close(finished)
 		<-release
 		listed, err := tools.ListTools(ctx, nil)

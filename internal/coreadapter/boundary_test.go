@@ -15,7 +15,15 @@ import (
 
 func TestRawExecutionRequestCannotWidenBoundary(t *testing.T) {
 	mutations := map[string]func(*agent.Request){
-		"VCS":                func(r *agent.Request) { r.Profile.VCSAccess = true },
+		"VCS":              func(r *agent.Request) { r.Profile.VCSAccess = true },
+		"VCS grant":        func(r *agent.Request) { r.Grants.VCS = true },
+		"granted variable": func(r *agent.Request) { r.Grants.Env = append(r.Grants.Env, "GH_TOKEN") },
+		"granted tool":     func(r *agent.Request) { r.Grants.Tools = append(r.Grants.Tools, "Bash") },
+		"granted mount": func(r *agent.Request) {
+			r.Grants.Mounts = append(r.Grants.Mounts, agent.Mount{Path: "/", Access: agent.ReadOnly})
+		},
+		"writable view":      func(r *agent.Request) { r.Grants.Mounts[0].Access = agent.ReadWrite },
+		"no grants":          func(r *agent.Request) { r.Grants = nil },
 		"profile env":        func(r *agent.Request) { r.Profile.Env = map[string]string{"GH_TOKEN": "secret"} },
 		"container env":      func(r *agent.Request) { r.ContainerEnv = map[string]string{"GH_TOKEN": "secret"} },
 		"VCS env":            func(r *agent.Request) { r.VCSEnv = map[string]string{"GH_TOKEN": "secret"} },
@@ -39,8 +47,8 @@ func TestRawExecutionRequestCannotWidenBoundary(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			turn := boundaryTurn(t, "container")
 			turn.Sandbox.Verified.Environment["OSMIA_MCP_TOKEN"] = "scoped-fixture-token"
-			engine := &adaptertest.IsolationEngine{}
-			executor := a.BoundaryExecutor{Required: turn.Sandbox.Verified, Engine: engine}
+			engine := &adaptertest.Engine{}
+			executor := a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}
 			if _, err := (&a.TurnRunner{Executor: executor}).Run(context.Background(), turn); err != nil {
 				t.Fatal(err)
 			}
@@ -49,7 +57,7 @@ func TestRawExecutionRequestCannotWidenBoundary(t *testing.T) {
 			if _, err := executor.Run(context.Background(), req, turn.Execution); !errors.Is(err, a.ErrUnsupported) {
 				t.Fatal(err)
 			}
-			if len(engine.Policies) != 1 || len(engine.Requests) != 1 {
+			if len(engine.Requests) != 1 {
 				t.Fatal("raw override reached construction")
 			}
 		})
@@ -68,62 +76,101 @@ func boundaryTurn(t *testing.T, mode string) a.PreparedTurn {
 			DenyVCS: true, DenyInheritedEnvironment: true, DenyDeliveryCredentials: true}}}
 }
 
-func TestHostAndContainerConstruction(t *testing.T) {
-	for _, mode := range []string{"none", "container"} {
+func TestContainerConstruction(t *testing.T) {
+	for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "SSH_AUTH_SOCK", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "HOME", "PATH"} {
+		t.Setenv(key, "host-secret")
+	}
+	turn := boundaryTurn(t, "container")
+	engine := &adaptertest.Engine{}
+	runner := a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}
+	if _, err := runner.Run(context.Background(), turn); err != nil {
+		t.Fatal(err)
+	}
+	if len(engine.Verified) != 1 || len(engine.Requests) != 1 {
+		t.Fatal("verification or execution missing")
+	}
+	req := engine.Requests[0]
+	view := turn.Sandbox.Verified.Workspace.Directory
+	want := agent.Grants{Env: []string{"LANG"}, Tools: []string{}, Mounts: []agent.Mount{{Path: view, Access: agent.ReadOnly}, {Path: turn.SessionDirectory, Access: agent.ReadOnly}}}
+	if req.Grants == nil || !reflect.DeepEqual(*req.Grants, want) {
+		t.Fatalf("grants: %+v", req.Grants)
+	}
+	if !reflect.DeepEqual(req.Env, map[string]string{"LANG": "C"}) || req.Profile.VCSAccess || req.Workspace.VCS() != nil || len(req.Profile.MCP) != 0 || len(req.Profile.AllowedTools) != 0 {
+		t.Fatalf("ambient access: %+v", req)
+	}
+	verified, err := (&agent.Runner{}).Verify(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(verified.Env, []string{"LANG=C", "HOME=/home/agent"}) || verified.VCS || len(verified.Tools) != 0 || !reflect.DeepEqual(verified.DeniedExecutables, agent.VCSExecutables) {
+		t.Fatalf("turn: %+v", verified)
+	}
+	for _, bind := range verified.Binds {
+		if bind.Access != agent.ReadOnly {
+			t.Fatalf("writable bind: %+v", bind)
+		}
+	}
+}
+
+func TestHostSessionsAreRefused(t *testing.T) {
+	for _, mode := range []string{"none", "claude"} {
 		t.Run(mode, func(t *testing.T) {
-			for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "SSH_AUTH_SOCK", "OPENAI_API_KEY", "HOME", "PATH"} {
-				t.Setenv(key, "host-secret")
-			}
 			turn := boundaryTurn(t, mode)
-			engine := &adaptertest.IsolationEngine{}
-			runner := a.TurnRunner{Executor: a.BoundaryExecutor{Required: turn.Sandbox.Verified, Engine: engine}}
-			if _, err := runner.Run(context.Background(), turn); err != nil {
-				t.Fatal(err)
-			}
-			if len(engine.Requests) != 1 || engine.Released != 1 {
-				t.Fatal("execution or cleanup missing")
-			}
-			policy, req := engine.Policies[0], engine.Requests[0]
-			if policy.Mode != mode || len(policy.Mounts) != 1 || !policy.Mounts[0].ReadOnly || policy.Mounts[0].Source != turn.Sandbox.Verified.Workspace.Directory || !policy.NoVCS || !policy.NoConfigDiscovery || !policy.NoExtraTools || !policy.NoHostFiles || !policy.NoHostEnvironment || !policy.NoDeliveryCredentials || !policy.NoPrivilegeEscalation {
-				t.Fatalf("policy: %+v", policy)
-			}
-			if !reflect.DeepEqual(req.Env, map[string]string{"LANG": "C"}) || req.Profile.VCSAccess || req.Workspace.VCS() != nil || len(req.Profile.MCP) != 0 || len(req.Profile.AllowedTools) != 0 {
-				t.Fatalf("ambient access: %+v", req)
+			engine := &adaptertest.Engine{}
+			_, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
+			if !errors.Is(err, a.ErrUnsupported) || len(engine.Verified) != 0 || len(engine.Requests) != 0 {
+				t.Fatalf("err=%v verified=%d launches=%d", err, len(engine.Verified), len(engine.Requests))
 			}
 		})
 	}
 }
 
 func TestUnverifiedEngineNeverStarts(t *testing.T) {
-	mutations := map[string]func(*a.BoundaryPolicy){
-		"VCS executable":           func(p *a.BoundaryPolicy) { p.NoVCS = false },
-		"host environment":         func(p *a.BoundaryPolicy) { p.NoHostEnvironment = false },
-		"delivery credentials":     func(p *a.BoundaryPolicy) { p.NoDeliveryCredentials = false },
-		"host files":               func(p *a.BoundaryPolicy) { p.NoHostFiles = false },
-		"tool discovery":           func(p *a.BoundaryPolicy) { p.NoExtraTools = false },
-		"repository configuration": func(p *a.BoundaryPolicy) { p.NoConfigDiscovery = false },
-		"privilege escalation":     func(p *a.BoundaryPolicy) { p.NoPrivilegeEscalation = false },
-		"writable read-only mount": func(p *a.BoundaryPolicy) { p.Mounts[0].ReadOnly = false },
-		"alternate source":         func(p *a.BoundaryPolicy) { p.Mounts[0].Source = "/" },
-		"alternate target":         func(p *a.BoundaryPolicy) { p.Mounts[0].Target = "/" },
-		"extra mount":              func(p *a.BoundaryPolicy) { p.Mounts = append(p.Mounts, a.Mount{Source: "/host", Target: "/host"}) },
-		"write override":           func(p *a.BoundaryPolicy) { p.Isolation.Capabilities.WriteFiles = true },
-		"execute override":         func(p *a.BoundaryPolicy) { p.Isolation.Capabilities.Execute = true },
-		"network override":         func(p *a.BoundaryPolicy) { p.Isolation.Capabilities.Network = true },
-		"new tool":                 func(p *a.BoundaryPolicy) { p.Isolation.Capabilities.Tools = []string{"Bash"} },
-		"secret":                   func(p *a.BoundaryPolicy) { p.Isolation.Environment["GH_TOKEN"] = "secret" },
+	mutations := map[string]func(*agent.Turn){
+		"no turn":                  nil,
+		"VCS":                      func(p *agent.Turn) { p.VCS = true },
+		"VCS executable":           func(p *agent.Turn) { p.DeniedExecutables = p.DeniedExecutables[1:] },
+		"host environment":         func(p *agent.Turn) { p.Env = append(p.Env, "PATH=/usr/bin") },
+		"delivery credentials":     func(p *agent.Turn) { p.Env = append(p.Env, "GH_TOKEN=secret") },
+		"changed environment":      func(p *agent.Turn) { p.Env[0] = "LANG=en_US" },
+		"built-in tools":           func(p *agent.Turn) { p.Tools = nil },
+		"new tool":                 func(p *agent.Turn) { p.Tools = []string{"Bash"} },
+		"write directory":          func(p *agent.Turn) { p.WriteDirs = []string{"/host"} },
+		"writable read-only mount": func(p *agent.Turn) { p.Binds[0].Access = agent.ReadWrite },
+		"alternate source":         func(p *agent.Turn) { p.Binds[0].Source = "/" },
+		"alternate target":         func(p *agent.Turn) { p.Binds[0].Destination = "/" },
+		"extra mount": func(p *agent.Turn) {
+			p.Binds = append(p.Binds, agent.Bind{Source: "/host", Destination: "/host", Access: agent.ReadOnly})
+		},
+		"missing view": func(p *agent.Turn) { p.Binds = p.Binds[1:] },
 	}
-	for _, mode := range []string{"none", "container"} {
-		for name, mutate := range mutations {
-			t.Run(mode+"/"+name, func(t *testing.T) {
-				turn := boundaryTurn(t, mode)
-				engine := &adaptertest.IsolationEngine{Mutate: mutate}
-				_, err := (&a.TurnRunner{Executor: a.BoundaryExecutor{Required: turn.Sandbox.Verified, Engine: engine}}).Run(context.Background(), turn)
-				if !errors.Is(err, a.ErrUnsupported) || len(engine.Requests) != 0 || engine.Released != 1 {
-					t.Fatalf("err=%v launches=%d releases=%d", err, len(engine.Requests), engine.Released)
-				}
-			})
-		}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			turn := boundaryTurn(t, "container")
+			engine := &adaptertest.Engine{Mutate: mutate}
+			executor := a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}
+			if mutate == nil {
+				executor.Runner = nilTurnEngine{engine}
+			}
+			_, err := (&a.TurnRunner{Executor: executor}).Run(context.Background(), turn)
+			if !errors.Is(err, a.ErrUnsupported) || len(engine.Requests) != 0 {
+				t.Fatalf("err=%v launches=%d", err, len(engine.Requests))
+			}
+		})
+	}
+}
+
+// nilTurnEngine verifies nothing and reports no error.
+type nilTurnEngine struct{ *adaptertest.Engine }
+
+func (nilTurnEngine) Verify(agent.Request) (*agent.Turn, error) { return nil, nil }
+
+func TestCoreVerificationFailureNeverStarts(t *testing.T) {
+	turn := boundaryTurn(t, "container")
+	engine := &adaptertest.Engine{VerifyErr: agent.ErrNotGranted}
+	_, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
+	if !errors.Is(err, a.ErrUnsupported) || len(engine.Verified) != 1 || len(engine.Requests) != 0 {
+		t.Fatalf("err=%v launches=%d", err, len(engine.Requests))
 	}
 }
 
@@ -154,9 +201,9 @@ func TestBoundaryRejectsUnsafeInputs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			turn := boundaryTurn(t, "container")
 			mutate(t, &turn)
-			engine := &adaptertest.IsolationEngine{}
-			result, err := (&a.TurnRunner{Executor: a.BoundaryExecutor{Required: turn.Sandbox.Verified, Engine: engine}}).Run(context.Background(), turn)
-			if err == nil || len(engine.Policies) != 0 || len(engine.Requests) != 0 {
+			engine := &adaptertest.Engine{}
+			result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
+			if err == nil || len(engine.Verified) != 0 || len(engine.Requests) != 0 {
 				t.Fatalf("unsafe construction: %v", err)
 			}
 			if !result.IsError || result.Session != (a.BackendSession{}) {

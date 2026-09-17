@@ -60,7 +60,7 @@ func (a *LedgerAdapter) read(ctx context.Context, since time.Time) ([]LedgerEntr
 		return nil, err
 	}
 	// TODO: Remove this strict scan when busybees/core supplies fail-closed ledger
-	// reads. Its current reader silently discards malformed records.
+	// reads for every record. Its reader ignores a malformed final record.
 	f, err := os.Open(a.core.LedgerPath())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -118,7 +118,7 @@ func (a *LedgerAdapter) Spend(ctx context.Context, query SpendQuery) (Spend, err
 			total.UnknownCosts++
 		}
 	}
-	total.CostUSD, _ = ops.Spend(selected, "", query.Since)
+	total.CostUSD, _, _ = ops.Spend(selected, "", query.Since)
 	if !nonnegative(total.CostUSD) {
 		return Spend{}, errors.New("ledger total overflow")
 	}

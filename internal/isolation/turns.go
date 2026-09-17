@@ -37,7 +37,7 @@ type Turns struct {
 	// role notes. They join the same registry and grant checks as Tools.
 	Scoped func(context.Context, coreadapter.Scope) ([]coreadapter.Tool, error)
 	Hosts  func(token string) coreadapter.MCPHosts
-	Engine coreadapter.IsolationEngine
+	Engine coreadapter.Engine
 	// Capture may snapshot selected output through the service before cleanup.
 	// It runs even on execution errors, but never grants an agent VCS access.
 	Capture func(context.Context, coreadapter.Scope, *FileView, coreadapter.SessionResult) error
@@ -46,13 +46,13 @@ type Turns struct {
 var _ coreadapter.Turns = (*Turns)(nil)
 var _ coreadapter.ResumeChecker = (*Turns)(nil)
 
-// CheckResume defers to the enforcing engine through the same boundary executor
+// CheckResume defers to the execution engine through the same executor
 // that runs the turn, so continuation never bypasses service isolation.
 func (r *Turns) CheckResume(ctx context.Context, previous, next coreadapter.Profile, session coreadapter.BackendSession) error {
 	if r.Engine == nil {
-		return errors.New("no enforcing host or container engine supplied")
+		return errors.New("no core execution engine supplied")
 	}
-	return (&coreadapter.TurnRunner{Executor: coreadapter.BoundaryExecutor{Engine: r.Engine}}).CheckResume(ctx, previous, next, session)
+	return (&coreadapter.TurnRunner{Executor: coreadapter.CoreExecutor{Runner: r.Engine}}).CheckResume(ctx, previous, next, session)
 }
 
 func narrow(grant coreadapter.Capabilities, request *coreadapter.Capabilities) coreadapter.Capabilities {
@@ -181,7 +181,7 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	prepared.Execution = selected.Execution
 	prepared.Sandbox = coreadapter.SandboxLease{Verified: coreadapter.Isolation{Workspace: view.Workspace(), Capabilities: capabilities, Environment: env,
 		DenyVCS: true, DenyInheritedEnvironment: true, DenyDeliveryCredentials: true}}
-	executor := coreadapter.BoundaryExecutor{Required: prepared.Sandbox.Verified, Engine: r.Engine}
+	executor := coreadapter.CoreExecutor{Required: prepared.Sandbox.Verified, Runner: r.Engine}
 	if err = executor.Check(ctx, prepared.Sandbox.Verified, prepared.Execution); err != nil {
 		return result, err
 	}

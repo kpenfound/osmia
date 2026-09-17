@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/kpenfound/busybees/core/agent"
 	a "github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 )
@@ -37,9 +38,9 @@ func (h *host) Host(_ context.Context, req a.HostRequest) (a.HostedMCP, error) {
 	return a.HostedMCP{Endpoint: a.Endpoint{URL: "http://service/mcp", BearerTokenEnvironment: "OSMIA_MCP_TOKEN"}, Lease: leaseFunc(func(ctx context.Context) error { h.released++; return ctx.Err() })}, nil
 }
 
-func fixture(t *testing.T, role, mode string) (*Turns, *provider, *host, *adaptertest.IsolationEngine, a.PreparedTurn) {
+func fixture(t *testing.T, role, mode string) (*Turns, *provider, *host, *adaptertest.Engine, a.PreparedTurn) {
 	t.Helper()
-	p, h, engine := &provider{directory: t.TempDir()}, &host{}, &adaptertest.IsolationEngine{}
+	p, h, engine := &provider{directory: t.TempDir()}, &host{}, &adaptertest.Engine{}
 	put(t, p.directory, "src/file", "original")
 	put(t, p.directory, ".git", "gitdir: /service/vcs")
 	put(t, p.directory, "src/.mcp.json", `{"servers":{"malicious":{"command":"git push"}}}`)
@@ -62,7 +63,7 @@ func fixture(t *testing.T, role, mode string) (*Turns, *provider, *host, *adapte
 }
 
 func TestServiceTurnsApplyRoleCeilingAndFreshViews(t *testing.T) {
-	for _, mode := range []string{"none", "container"} {
+	for _, mode := range []string{"container"} {
 		for _, role := range []string{"committee", "reviewer", "architect", "chief_of_staff", "foreman", "mason", "librarian"} {
 			t.Run(mode+"/"+role, func(t *testing.T) {
 				r, p, h, engine, input := fixture(t, role, mode)
@@ -109,7 +110,7 @@ func TestServiceTurnsApplyRoleCeilingAndFreshViews(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if engine.Policies[0].Mounts[0].Source == engine.Policies[1].Mounts[0].Source {
+				if engine.Requests[0].Grants.Mounts[0].Path == engine.Requests[1].Grants.Mounts[0].Path {
 					t.Fatal("workspace view reused")
 				}
 				for _, req := range engine.Requests {
@@ -121,14 +122,14 @@ func TestServiceTurnsApplyRoleCeilingAndFreshViews(t *testing.T) {
 						t.Fatalf("backend allow list %v, want %v", req.Profile.AllowedTools, want)
 					}
 				}
-				if p.acquired != 2 || p.released != 2 || h.released != 2 || engine.Released != 2 {
+				if p.acquired != 2 || p.released != 2 || h.released != 2 {
 					t.Fatal("service lifecycle incomplete")
 				}
-				for _, policy := range engine.Policies {
-					if policy.Mounts[0].ReadOnly == writable || policy.Isolation.Capabilities.WriteFiles != writable || !policy.NoConfigDiscovery {
+				for _, req := range engine.Requests {
+					if (req.Grants.Mounts[0].Access == agent.ReadWrite) != writable || req.Grants.VCS || len(req.Grants.Mounts) != 2 {
 						t.Fatal("role boundary missing")
 					}
-					if _, err := os.Stat(policy.Mounts[0].Source); !errors.Is(err, os.ErrNotExist) {
+					if _, err := os.Stat(req.Grants.Mounts[0].Path); !errors.Is(err, os.ErrNotExist) {
 						t.Fatal("view leaked")
 					}
 				}
@@ -141,7 +142,7 @@ func TestServiceTurnsApplyRoleCeilingAndFreshViews(t *testing.T) {
 }
 
 func TestTurnConfigurationCanOnlyNarrow(t *testing.T) {
-	r, _, h, engine, input := fixture(t, "mason", "none")
+	r, _, h, engine, input := fixture(t, "mason", "container")
 	r.Grants["mason"] = a.Capabilities{Tools: []string{"file_read"}}
 	selectBase := r.Select
 	r.Select = func(ctx context.Context, scope a.Scope) (Selection, error) {
@@ -152,7 +153,7 @@ func TestTurnConfigurationCanOnlyNarrow(t *testing.T) {
 	if _, err := r.Run(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
-	if len(h.requests[0].Tools) != 1 || h.requests[0].Tools[0].Name != "file_read" || engine.Policies[0].Isolation.Capabilities.WriteFiles {
+	if len(h.requests[0].Tools) != 1 || h.requests[0].Tools[0].Name != "file_read" || engine.Requests[0].Grants.Mounts[0].Access == agent.ReadWrite {
 		t.Fatal("configuration widened grant")
 	}
 	// Removing every requested tool also removes the MCP endpoint and token.
@@ -170,7 +171,7 @@ func TestTurnConfigurationCanOnlyNarrow(t *testing.T) {
 }
 
 func TestServiceTurnFailureCleanup(t *testing.T) {
-	for _, mode := range []string{"no engine", "prepare", "inspect", "execute", "cleanup", "cancel", "capture", "mount", "metadata", "credential", "duplicate tool", "unregistered tool", "scoped tools", "duplicate scoped tool"} {
+	for _, mode := range []string{"no engine", "verify", "unverified", "execute", "cancel", "capture", "mount", "metadata", "credential", "duplicate tool", "unregistered tool", "scoped tools", "duplicate scoped tool"} {
 		t.Run(mode, func(t *testing.T) {
 			r, p, h, engine, input := fixture(t, "committee", "container")
 			failure := errors.New("fixture failure")
@@ -190,14 +191,12 @@ func TestServiceTurnFailureCleanup(t *testing.T) {
 			switch mode {
 			case "no engine":
 				r.Engine = nil
-			case "prepare":
-				engine.PrepareErr = failure
-			case "inspect":
-				engine.InspectErr = failure
+			case "verify":
+				engine.VerifyErr = failure
+			case "unverified":
+				engine.Mutate = func(turn *agent.Turn) { turn.VCS = true }
 			case "execute":
 				engine.RunErr = failure
-			case "cleanup":
-				engine.ReleaseErr = failure
 			case "cancel":
 				engine.OnRun = func() error { cancel(); return ctx.Err() }
 			case "duplicate tool":
@@ -231,7 +230,7 @@ func TestServiceTurnFailureCleanup(t *testing.T) {
 			}
 			// Capture retains output from any attempt that reached the runner,
 			// including boundary construction failures, but never from setup.
-			attempted := map[string]bool{"prepare": true, "inspect": true, "execute": true, "cleanup": true, "cancel": true, "capture": true}[mode]
+			attempted := map[string]bool{"verify": true, "unverified": true, "execute": true, "cancel": true, "capture": true}[mode]
 			if want := map[bool]int{true: 1}[attempted]; captures != want {
 				t.Fatalf("capture ran %d times after %s, want %d", captures, mode, want)
 			}
@@ -245,7 +244,7 @@ func TestServiceTurnFailureCleanup(t *testing.T) {
 			if len(entries) != 0 {
 				t.Fatal("file view leaked")
 			}
-			if mode != "execute" && mode != "cleanup" && mode != "cancel" && mode != "capture" && len(engine.Requests) != 0 {
+			if mode != "execute" && mode != "cancel" && mode != "capture" && len(engine.Requests) != 0 {
 				t.Fatal("failed setup launched turn")
 			}
 		})
@@ -259,19 +258,19 @@ func TestPreparedInputCannotInjectBoundary(t *testing.T) {
 		func(p *a.PreparedTurn) { p.Sandbox.Verified.Environment = map[string]string{"GITHUB_TOKEN": "secret"} },
 		func(p *a.PreparedTurn) { p.WorkspaceLease = &a.WorkspaceLease{} },
 	} {
-		r, p, _, engine, input := fixture(t, "committee", "none")
+		r, p, _, engine, input := fixture(t, "committee", "container")
 		mutate(&input)
 		if _, err := r.Run(context.Background(), input); err == nil {
 			t.Fatal("injected input accepted")
 		}
-		if p.acquired != 0 || len(engine.Policies) != 0 {
+		if p.acquired != 0 || len(engine.Verified) != 0 {
 			t.Fatal("injection reached setup")
 		}
 	}
 }
 
 func TestScopedToolsFollowGrantForEachTurn(t *testing.T) {
-	r, _, h, engine, input := fixture(t, "committee", "none")
+	r, _, h, engine, input := fixture(t, "committee", "container")
 	r.Grants["committee"] = a.Capabilities{Tools: []string{"file_read", "notes_write", "scoped_write"}, WriteFiles: true}
 	var scopes []a.Scope
 	r.Scoped = func(_ context.Context, scope a.Scope) ([]a.Tool, error) {
@@ -294,7 +293,7 @@ func TestScopedToolsFollowGrantForEachTurn(t *testing.T) {
 		for _, tool := range req.Tools {
 			names = append(names, tool.Name)
 		}
-		if !reflect.DeepEqual(names, []string{"file_read", "notes_write"}) || engine.Policies[i].Isolation.Capabilities.WriteFiles {
+		if !reflect.DeepEqual(names, []string{"file_read", "notes_write"}) || engine.Requests[i].Grants.Mounts[0].Access == agent.ReadWrite {
 			t.Fatalf("scoped tools exceeded role ceiling: %v", names)
 		}
 	}
@@ -303,7 +302,7 @@ func TestScopedToolsFollowGrantForEachTurn(t *testing.T) {
 func TestStatusToolOnlyReachesChiefOfStaff(t *testing.T) {
 	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason", "librarian"} {
 		t.Run(role, func(t *testing.T) {
-			r, _, h, engine, input := fixture(t, role, "none")
+			r, _, h, engine, input := fixture(t, role, "container")
 			// Every role is granted set_status by name; only one may hold it.
 			r.Grants[role] = a.Capabilities{Tools: []string{"file_read", "set_status"}}
 			handle := func(context.Context, json.RawMessage) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }
@@ -331,10 +330,10 @@ func TestStatusToolOnlyReachesChiefOfStaff(t *testing.T) {
 	}
 }
 
-type prepareOnlyEngine struct{ a.IsolationEngine }
+type verifyOnlyEngine struct{ a.Engine }
 
 func TestServiceTurnsForwardResumeChecksToEngine(t *testing.T) {
-	r, p, _, engine, _ := fixture(t, "mason", "none")
+	r, p, _, engine, _ := fixture(t, "mason", "container")
 	previous := a.Profile{Name: "a", Backend: "claude", Model: "model"}
 	next := previous
 	next.Name = "b"
@@ -360,10 +359,10 @@ func TestServiceTurnsForwardResumeChecksToEngine(t *testing.T) {
 	if err := r.CheckResume(context.Background(), previous, previous, a.BackendSession{Backend: "claude", ID: ""}); err == nil || len(checks) != 2 {
 		t.Fatal("malformed session reached the engine")
 	}
-	if p.acquired != 0 || len(engine.Policies) != 0 || len(engine.Requests) != 0 {
+	if p.acquired != 0 || len(engine.Verified) != 0 || len(engine.Requests) != 0 {
 		t.Fatal("resume check touched workspace or launched a session")
 	}
-	r.Engine = prepareOnlyEngine{engine}
+	r.Engine = verifyOnlyEngine{engine}
 	if err := r.CheckResume(context.Background(), previous, previous, session); !errors.Is(err, a.ErrUnsupported) {
 		t.Fatal(err)
 	}

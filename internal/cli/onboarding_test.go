@@ -61,7 +61,7 @@ const onboardingCharter = `# Charter
 2. Every change ships with a test.
 `
 
-// fakeLibrarian is the isolation engine the librarian's turns run in. Its
+// fakeLibrarian is the execution engine the librarian's turns run in. Its
 // first turn waits until the service stops it; later turns write the scripted
 // knowledge base through the turn's file tools.
 type fakeLibrarian struct {
@@ -71,21 +71,14 @@ type fakeLibrarian struct {
 	entered chan struct{}
 }
 
-func (f *fakeLibrarian) Prepare(ctx context.Context, policy coreadapter.BoundaryPolicy) (coreadapter.IsolatedSession, error) {
-	return &fakeLibrarianSession{f: f, policy: policy}, ctx.Err()
+func (f *fakeLibrarian) Verify(req agent.Request) (*agent.Turn, error) {
+	return (&agent.Runner{}).Verify(req)
 }
 
-type fakeLibrarianSession struct {
-	f      *fakeLibrarian
-	policy coreadapter.BoundaryPolicy
-}
-
-func (s *fakeLibrarianSession) Inspect(context.Context) (coreadapter.BoundaryPolicy, error) {
-	return s.policy, nil
-}
-func (s *fakeLibrarianSession) Release(context.Context) error { return nil }
-func (s *fakeLibrarianSession) Run(ctx context.Context, req agent.Request) (*agent.Result, error) {
-	f := s.f
+func (f *fakeLibrarian) Run(ctx context.Context, req agent.Request) (*agent.Result, error) {
+	if _, err := f.Verify(req); err != nil {
+		return nil, err
+	}
 	f.mu.Lock()
 	f.runs = append(f.runs, req.Name)
 	first := len(f.runs) == 1
@@ -233,6 +226,10 @@ func TestM2ProjectOnboarding(t *testing.T) {
 	// and a few subsystems.
 	opts, clone := emptyFixture(t)
 	home := filepath.Dir(clone)
+	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
+	must(t, err)
+	_, err = configFile.WriteString("[roles.librarian]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")
+	must(t, errors.Join(err, configFile.Close()))
 	for path, content := range map[string]string{
 		"CODEOWNERS":                "* @core\n/cmd/ @tools\n/internal/trace/ @core @storage\n",
 		"README.md":                 "# demo\n",

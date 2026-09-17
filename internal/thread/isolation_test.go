@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/busybees/core/agent"
 	a "github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 	"github.com/kpenfound/osmia/internal/isolation"
@@ -25,7 +26,7 @@ func TestIsolationFailureIsDurableBeforeExecution(t *testing.T) {
 			}
 			lease := &adaptertest.Lease{Releases: *adaptertest.NewScript[struct{}, struct{}](adaptertest.Reply[struct{}]{})}
 			provider := &adaptertest.Workspaces{Script: *adaptertest.NewScript[a.WorkspaceRequest, a.WorkspaceLease](adaptertest.Reply[a.WorkspaceLease]{Value: a.WorkspaceLease{Workspace: a.Workspace{Directory: source, Access: a.ReadOnly}, Lease: lease}})}
-			engine := &adaptertest.IsolationEngine{Mutate: func(p *a.BoundaryPolicy) { p.NoConfigDiscovery = false }}
+			engine := &adaptertest.Engine{Mutate: func(turn *agent.Turn) { turn.VCS = true }}
 			boundary := &isolation.Turns{Workspaces: provider, Views: isolation.Views{Directory: views}, Engine: engine, Grants: map[string]a.Capabilities{"mason": {}},
 				Select: func(context.Context, a.Scope) (isolation.Selection, error) {
 					mode, paths := "none", []string{"file"}

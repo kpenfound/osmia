@@ -108,7 +108,7 @@ func TestUnsupportedBeforeExecution(t *testing.T) {
 	turn := prepared(t)
 	_, err := (&TurnRunner{Executor: CoreExecutor{Runner: &agent.Runner{}}}).Run(context.Background(), turn)
 	if !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("core inherited environment accepted: %v", err)
+		t.Fatalf("turn outside the executor's service isolation accepted: %v", err)
 	}
 	f := &fakeExecutor{checkErr: unsupported("isolation", "not enforced")}
 	_, err = (&TurnRunner{Executor: f}).Run(context.Background(), turn)

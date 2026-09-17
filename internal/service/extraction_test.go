@@ -55,10 +55,21 @@ type librarianFixture struct {
 	clock    *demoClock
 }
 
+// librarianContainer runs the librarian in a container, the only sandbox
+// the core executor accepts.
+const librarianContainer = `[roles.librarian]
+sandbox = "container"
+image = "fixture-image"
+`
+
 func newLibrarianFixture(t *testing.T) *librarianFixture {
 	t.Helper()
 	opts, clone := projectFixture(t)
 	home := filepath.Dir(clone)
+	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
+	must(t, err)
+	_, err = configFile.WriteString(librarianContainer)
+	must(t, errors.Join(err, configFile.Close()))
 	must(t, os.MkdirAll(filepath.Join(clone, "internal", "trace"), 0700))
 	must(t, os.WriteFile(filepath.Join(clone, "internal", "trace", "git.go"), []byte("package trace\n"), 0600))
 	must(t, os.WriteFile(filepath.Join(clone, "CODEOWNERS"), []byte("/internal/ @core\n"), 0600))
@@ -86,13 +97,13 @@ func newLibrarianFixture(t *testing.T) *librarianFixture {
 
 // script installs the fake librarian's behaviour for one turn: it writes the
 // given output files and returns a successful result.
-func (f *librarianFixture) script(turn string, files map[string]string, check func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error) {
+func (f *librarianFixture) script(turn string, files map[string]string, check func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error) {
 	f.engine.mu.Lock()
 	defer f.engine.mu.Unlock()
-	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.turns[turn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		var err error
 		if check != nil {
-			err = check(ctx, req, policy, tools)
+			err = check(ctx, req, verified, tools)
 		}
 		for path, content := range files {
 			if _, e := callTool(ctx, tools, "file_write", map[string]any{"path": path, "content": content}); e != nil {
@@ -187,7 +198,7 @@ func entitiesWith(t *testing.T, seed kb.Map, alias string) string {
 // checkLibrarianBoundary makes the negative assertions from inside the turn:
 // only tracked files, the current knowledge base and the seed are visible, the
 // role has file tools and notes only, and nothing carries VCS access.
-func checkLibrarianBoundary(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession, clone, entities, seed string) error {
+func checkLibrarianBoundary(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession, clone, entities, seed string) error {
 	var problems []error
 	fail := func(format string, args ...any) { problems = append(problems, fmt.Errorf(format, args...)) }
 	listed, err := tools.ListTools(ctx, nil)
@@ -226,14 +237,7 @@ func checkLibrarianBoundary(ctx context.Context, req agent.Request, policy corea
 	if _, err := callTool(ctx, tools, "file_write", map[string]any{"path": "repo/AGENTS.md", "content": "tampered"}); err != nil {
 		fail("write in the private copy: %v", err)
 	}
-	view := policy.Isolation.Workspace.Directory
-	if len(policy.Mounts) != 1 || policy.Mounts[0].Source != view || view == clone || strings.HasPrefix(view, clone+string(filepath.Separator)) {
-		fail("mounts %+v expose more than the private view", policy.Mounts)
-	}
-	caps := policy.Isolation.Capabilities
-	if caps.Execute || caps.Network || !caps.WriteFiles || !policy.NoVCS || !policy.NoDeliveryCredentials || !policy.NoHostEnvironment {
-		fail("capabilities %+v policy %+v", caps, policy)
-	}
+	checkGrants(req, verified, clone, fail)
 	if req.Profile.VCSAccess || req.Workspace == nil || req.Workspace.VCS() != nil || len(req.VCSEnv) != 0 || req.Profile.Name != "librarian" {
 		fail("request carries VCS access or another role: %+v", req.Profile)
 	}
@@ -291,8 +295,8 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 	refined := entitiesWith(t, seed, "history")
 	cloneBefore := snapshot(t, f.clone)
 	f.script("extract-1-1", map[string]string{"output/kb/trace.md": "# trace\n\nRun go test ./internal/trace.\n", "output/kb/service.md": "# service\n\nOne process.\n", "output/kb/entities.json": refined},
-		func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
-			err := checkLibrarianBoundary(ctx, req, policy, tools, f.clone, tracked, tracked)
+		func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+			err := checkLibrarianBoundary(ctx, req, verified, tools, f.clone, tracked, tracked)
 			if req.ResumeID != "" || strings.Contains(req.Prompt, "Knowledge base written") {
 				err = errors.Join(err, fmt.Errorf("first turn carries history: %q", req.ResumeID))
 			}
@@ -386,8 +390,8 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 	// A re-run sees the recorded knowledge base, replaces it, and removes the
 	// subsystem it no longer produces.
 	f.script("extract-2-1", map[string]string{"output/kb/trace.md": "# trace\n\nRevised.\n", "output/kb/entities.json": refined},
-		func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
-			err := checkLibrarianBoundary(ctx, req, policy, tools, f.clone, refined, tracked)
+		func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+			err := checkLibrarianBoundary(ctx, req, verified, tools, f.clone, refined, tracked)
 			got, e := callTool(ctx, tools, "file_read", map[string]any{"path": "kb/service.md"})
 			if e != nil || got != `"# service\n\nOne process.\n"` {
 				err = errors.Join(err, fmt.Errorf("previous prose: %q %v", got, e))
@@ -430,7 +434,7 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 	// A third run is refused while it is still running.
 	entered, release := make(chan struct{}), make(chan struct{})
 	f.engine.mu.Lock()
-	f.engine.turns["extract-3-1"] = func(ctx context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.turns["extract-3-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		close(entered)
 		select {
 		case <-release:
@@ -564,7 +568,7 @@ func TestExtractionRefusesInvalidOutput(t *testing.T) {
 	}
 	// A turn that fails in the backend is a failed extraction with its reason.
 	f.engine.mu.Lock()
-	f.engine.turns["extract-4-1"] = func(context.Context, agent.Request, coreadapter.BoundaryPolicy, *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.turns["extract-4-1"] = func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
 		return nil, errors.New("model refused")
 	}
 	f.engine.mu.Unlock()
@@ -589,7 +593,7 @@ func TestExtractionSurvivesRestart(t *testing.T) {
 	entered := make(chan struct{})
 	var once sync.Once
 	f.engine.mu.Lock()
-	f.engine.turns["extract-1-1"] = func(ctx context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.turns["extract-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		once.Do(func() { close(entered) })
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -673,7 +677,7 @@ func TestExtractionSurvivesRestart(t *testing.T) {
 	f2 := newLibrarianFixture(t)
 	f2.engine.mu.Lock()
 	for attempt := 1; attempt <= maxExtractionAttempts; attempt++ {
-		f2.engine.turns[fmt.Sprintf("extract-1-%d", attempt)] = func(ctx context.Context, req agent.Request, _ coreadapter.BoundaryPolicy, tools *mcp.ClientSession) (*agent.Result, error) {
+		f2.engine.turns[fmt.Sprintf("extract-1-%d", attempt)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			return nil, errors.Join(context.Canceled, errors.New("connection dropped"))
 		}
 	}
@@ -791,8 +795,8 @@ func TestSchedulerLeavesLibrarianTurnsToTheExtractor(t *testing.T) {
 	must(t, repo.Close())
 	tracked := f.trackedSeed(t)
 	f.script("extract-2-1", map[string]string{"output/kb/trace.md": "# trace\n\nRevised.\n", "output/kb/entities.json": refined},
-		func(ctx context.Context, req agent.Request, policy coreadapter.BoundaryPolicy, tools *mcp.ClientSession) error {
-			return checkLibrarianBoundary(ctx, req, policy, tools, f.clone, refined, tracked)
+		func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+			return checkLibrarianBoundary(ctx, req, verified, tools, f.clone, refined, tracked)
 		})
 	s, c = start(t, f.opts)
 	defer c.Close()

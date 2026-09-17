@@ -7,21 +7,21 @@ import (
 	a "github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// IsolationEngine records construction without launching any process. Its
-// inspection report is a fixture, not evidence of host/container enforcement.
-type IsolationEngine struct {
-	Policies                                   []a.BoundaryPolicy
-	Requests                                   []agent.Request
-	PrepareErr, InspectErr, RunErr, ReleaseErr error
-	Mutate                                     func(*a.BoundaryPolicy)
-	OnRun                                      func() error
-	Released                                   int
+// Engine verifies requests with core's own boundaries and records them
+// without launching any process.
+type Engine struct {
+	// Verified holds every request passed to Verify; Requests those that ran.
+	Verified, Requests []agent.Request
+	VerifyErr, RunErr  error
+	// Mutate alters the turn core verified before Verify returns it.
+	Mutate func(*agent.Turn)
+	OnRun  func() error
 	// Resume answers CheckResume when set; otherwise the saved session is unavailable.
 	Resume       func(previous, next a.Profile, session a.BackendSession) error
 	ResumeChecks int
 }
 
-func (f *IsolationEngine) CheckResume(ctx context.Context, previous, next a.Profile, session a.BackendSession) error {
+func (f *Engine) CheckResume(ctx context.Context, previous, next a.Profile, session a.BackendSession) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -32,30 +32,29 @@ func (f *IsolationEngine) CheckResume(ctx context.Context, previous, next a.Prof
 	return f.Resume(previous, next, session)
 }
 
-func (f *IsolationEngine) Prepare(ctx context.Context, p a.BoundaryPolicy) (a.IsolatedSession, error) {
+func (f *Engine) Verify(req agent.Request) (*agent.Turn, error) {
+	f.Verified = append(f.Verified, req)
+	if f.VerifyErr != nil {
+		return nil, f.VerifyErr
+	}
+	turn, err := (&agent.Runner{}).Verify(req)
+	if err != nil {
+		return nil, err
+	}
+	if f.Mutate != nil {
+		f.Mutate(turn)
+	}
+	return turn, nil
+}
+
+// Run verifies the request again, as core's runner does, before recording it.
+func (f *Engine) Run(ctx context.Context, req agent.Request) (*agent.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	f.Policies = append(f.Policies, p)
-	if f.PrepareErr != nil {
-		return nil, f.PrepareErr
+	if _, err := (&agent.Runner{}).Verify(req); err != nil {
+		return nil, err
 	}
-	return &isolatedSession{engine: f, policy: p}, nil
-}
-
-type isolatedSession struct {
-	engine *IsolationEngine
-	policy a.BoundaryPolicy
-}
-
-func (s *isolatedSession) Inspect(context.Context) (a.BoundaryPolicy, error) {
-	if s.engine.Mutate != nil {
-		s.engine.Mutate(&s.policy)
-	}
-	return s.policy, s.engine.InspectErr
-}
-func (s *isolatedSession) Run(_ context.Context, req agent.Request) (*agent.Result, error) {
-	f := s.engine
 	f.Requests = append(f.Requests, req)
 	if f.OnRun != nil {
 		if err := f.OnRun(); err != nil {
@@ -63,11 +62,4 @@ func (s *isolatedSession) Run(_ context.Context, req agent.Request) (*agent.Resu
 		}
 	}
 	return &agent.Result{ClaudeID: "fixture-session", ResultText: "fixture response", SessionDir: req.SessionDir}, f.RunErr
-}
-func (s *isolatedSession) Release(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	s.engine.Released++
-	return s.engine.ReleaseErr
 }
