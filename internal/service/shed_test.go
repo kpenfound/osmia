@@ -713,3 +713,117 @@ func TestRoundOperationInputIsValidated(t *testing.T) {
 		t.Fatalf("decoded %+v %v", in, err)
 	}
 }
+
+// A stop between the round's record and its transition leaves the files
+// recorded: the next service records nothing again and only moves the shed.
+// A turn the stopped service captured is completed without running a member.
+func TestRoundRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
+	t.Parallel()
+	for _, crash := range []string{"captured", "recorded"} {
+		t.Run(crash, func(t *testing.T) {
+			f := newShedFixture(t, 1)
+			ctx := context.Background()
+			member := committeeAgent(1)
+			entered := make(chan struct{})
+			f.member(1, 1, 1, func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
+				close(entered)
+				<-ctx.Done()
+				return ctx.Err()
+			})
+			stream := f.handIn(t, "design", handedDesign)
+			select {
+			case <-entered:
+			case <-time.After(demoTimeout):
+				t.Fatal("the round did not start")
+			}
+			f.stop(t)
+
+			// The stopped service ran a second attempt to the end: its
+			// contribution is kept and the turn captured, or the round's file
+			// is already recorded, but the shed has not moved.
+			cfg, err := config.Load(f.opts.Config)
+			must(t, err)
+			repo, err := trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
+			must(t, err)
+			th, err := repo.Thread(stream, member)
+			must(t, err)
+			if len(th.Turns) != 1 || th.Turns[0].Status() != "interrupted" {
+				t.Fatalf("interrupted turn: %+v", th)
+			}
+			ops, err := repo.Operations(stream)
+			must(t, err)
+			operation := ""
+			for _, o := range ops {
+				if o.Operation.Action == RoundAction {
+					operation = o.Operation.ID
+				}
+			}
+			second := th.Turns[0].Request
+			second.TurnID = roundTurnID(1, member, 2)
+			second.ID, second.At = "request_"+second.TurnID, f.clock.Now()
+			_, err = repo.EnqueueTurn(ctx, second)
+			must(t, err)
+			directory := filepath.Join(cfg.Root.String(), "shed", string(f.project), string(stream), second.TurnID)
+			claimed, err := repo.ClaimTurn(ctx, stream, member, "earlier-session", filepath.Join(directory, "session"), f.clock.Now())
+			must(t, err)
+			h := second.Header
+			h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", trace.EventID(second.ID, "response"), f.clock.Now(), trace.Actor{Kind: "service", ID: "thread-runner"}
+			response := trace.TurnResponse{Header: h, AgentID: member, ThreadID: second.ThreadID, TurnID: second.TurnID, RequestID: second.ID, RequestRevision: second.Revision,
+				Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: second.Profile.Backend, ID: "session-2"}, SessionDirectory: claimed.Claim.SessionDirectory, StartedAt: claimed.Claim.At, Duration: time.Second, FinalResponse: "Round read"}}
+			must(t, repo.CaptureTurn(ctx, "earlier-session", response))
+			kept := shed.Record{Version: shed.Version, Round: 1, Member: member, Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: second.TurnID,
+				Objections: []shed.Objection{{ID: shed.ObjectionID(1, member, 1), Kind: shed.Fit, Part: "spec", Argument: "It restarts.", Citations: []string{"charter#1"}}}}
+			data, err := shed.Encode(kept)
+			must(t, err)
+			must(t, os.MkdirAll(filepath.Join(directory, "output"), 0700))
+			must(t, os.WriteFile(filepath.Join(directory, "output", "contributions.json"), data, 0600))
+			if crash == "recorded" {
+				must(t, repo.CompleteTurn(ctx, stream, member, second.TurnID, "earlier-session", f.clock.Now()))
+				must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.DocumentID(1, member), Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: trace.Actor{Kind: "agent", ID: member}, Cause: operation, Depth: 1},
+					Path: shed.Path(1, member), Content: string(data)}}))
+			}
+			must(t, repo.Close())
+
+			f.start(t)
+			defer f.stop(t)
+			f.awaitShed(t, stream, "heard-1")
+			if runs := f.runs(); slices.Contains(runs, second.TurnID) || len(slices.DeleteFunc(runs, func(r string) bool { return r != roundTurnID(1, member, 1) })) != 1 {
+				t.Fatalf("backend runs %v", f.runs())
+			}
+			docs := f.documents(t, stream, shed.DocumentID(1, member))
+			if len(docs) != 1 || docs[0].Cause != operation || docs[0].Content != string(data) {
+				t.Fatalf("records: %+v", docs)
+			}
+			round := f.roundOperations(t, stream)
+			if len(round) != 1 || round[0].Result == nil || round[0].Result.Outcome != "succeeded" || !strings.Contains(round[0].Result.Evidence, "1 members heard, 1 objections, 0 concessions, 0 failed turns; 1 objections stand") {
+				t.Fatalf("operations: %+v", round)
+			}
+		})
+	}
+}
+
+// A member whose every attempt a service stop interrupts is recorded as
+// failed with the count, and the round still ends.
+func TestMemberInterruptedEveryAttemptIsRecordedAsFailed(t *testing.T) {
+	t.Parallel()
+	f := newShedFixture(t, 2)
+	defer f.stop(t)
+	for attempt := 1; attempt <= maxRoundAttempts; attempt++ {
+		f.member(1, 1, attempt, func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error {
+			return errors.Join(context.Canceled, errors.New("connection dropped"))
+		})
+	}
+	f.member(1, 2, 1, func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error { return nil })
+	stream := f.handIn(t, "design", handedDesign)
+	f.awaitShed(t, stream, "heard-1")
+	records, err := shed.Records(f.repository(), stream)
+	must(t, err)
+	if want := fmt.Sprintf("the member's turn was interrupted %d times by service stops", maxRoundAttempts); len(records) != 2 || records[0].Failure != want || records[0].Turn != "" || !records[1].Silent() {
+		t.Fatalf("records: %+v", records)
+	}
+	th, err := f.repository().Thread(stream, committeeAgent(1))
+	must(t, err)
+	if len(th.Turns) != maxRoundAttempts {
+		t.Fatalf("attempts: %+v", th.Turns)
+	}
+}
