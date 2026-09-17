@@ -34,7 +34,7 @@ The [onboarding walkthrough](m2-onboarding.md) runs `project add`, `handin`,
 - `serve [--root PATH]` validates and starts the foreground service. SIGINT and
   SIGTERM drain requests and release ownership and the socket. A live owner is
   refused; a provably stale socket is recovered automatically. The service
-  runs the librarian, architect and chief-of-staff turns in each role's
+  runs the librarian, architect, committee and chief-of-staff turns in each role's
   configured sandbox; see [running turns](service.md#running-turns).
 - `status` shows health, loaded configuration digest/root, the active project
   and its trace path (or that none is configured), its charter state (ready or
