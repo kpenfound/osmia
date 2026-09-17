@@ -139,6 +139,13 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		case Prefix + "/status":
 			respond(w, 200, s.statusList())
 			return
+		case Prefix + "/inbox":
+			if out, api := s.inbox(); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
 		}
 		if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/conversation/"); ok {
 			if out, api := s.conversationList(id); api != nil {
@@ -205,6 +212,18 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if out, api := s.send(r.Context(), id, v); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
+	if n, ok := strings.CutPrefix(r.URL.Path, Prefix+"/inbox/"); ok && r.Method == http.MethodPost {
+		var v AnswerRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		if out, api := s.answer(r.Context(), n, v); api != nil {
 			failWith(w, api)
 		} else {
 			respond(w, 200, out)
