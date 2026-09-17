@@ -347,6 +347,21 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 		t.Fatalf("an escalated question was delivered: %+v", th.Turns)
 	}
 
+	// Deliver queues nothing for a question without a ruling, or asked by an
+	// agent the trace does not hold.
+	noProfile := func(string) (coreadapter.Profile, error) {
+		t.Error("profile looked up for an undeliverable question")
+		return coreadapter.Profile{}, nil
+	}
+	delivered := states(t, f)["1"]
+	unruled, stranger := delivered, delivered
+	unruled.Ruling, stranger.Asked.AskedBy.ID = nil, "nobody"
+	for name, q := range map[string]trace.QuestionState{"no ruling": unruled, "unknown agent": stranger, "already delivered": delivered} {
+		if queued, err := questions.Deliver(ctx, f.repo, q, noProfile, start); queued || err != nil {
+			t.Fatalf("%s: queued %v, %v", name, queued, err)
+		}
+	}
+
 	// A profile that cannot be resolved stops the pass and delivers nothing.
 	f2 := setup(t)
 	chief2 := f2.turn(t, "chief", trace.ChiefOfStaff, "chief1")
@@ -413,6 +428,15 @@ func TestTurnThatAskedEndsWaiting(t *testing.T) {
 	inner.during, inner.err = nil, nil
 	if got, err := turns.Run(ctx, coreadapter.PreparedTurn{Scope: quiet}); err != nil || got.Outcome == nil || got.Outcome.Status != "done" {
 		t.Fatalf("turn that did not ask: %+v %v", got.Outcome, err)
+	}
+	// Another turn of the asking thread, and a turn of the same name on
+	// another thread, asked nothing.
+	later, namesake := asking, quiet
+	later.Turn, namesake.Turn = "later", asking.Turn
+	for _, scope := range []coreadapter.Scope{later, namesake} {
+		if got, err := turns.Run(ctx, coreadapter.PreparedTurn{Scope: scope}); err != nil || got.Outcome == nil || got.Outcome.Status != "done" {
+			t.Fatalf("turn %s of %s: %+v %v", scope.Turn, scope.Thread, got.Outcome, err)
+		}
 	}
 	inner.result.Outcome = nil
 	if got, err := turns.Run(ctx, coreadapter.PreparedTurn{Scope: quiet}); err != nil || got.Outcome != nil {

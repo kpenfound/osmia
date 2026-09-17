@@ -584,8 +584,8 @@ the citations. The turn carries the asking turn's unit and system prompt and
 the profile `Profile(role)` returns at delivery. The tools only record; this
 pass is the one path that delivers. A question whose thread already holds its
 answer turn is skipped, so a repeated pass or a restart between the record and
-the delivery queues the turn exactly once. A question without a recorded
-asking thread, or whose thread the trace does not hold, is skipped. A profile
+the delivery queues the turn exactly once. A question whose asking agent the
+trace does not hold is skipped. A profile
 error stops the pass. `questions.Deliver` is the single-question step.
 
 ## Feature spec and plan

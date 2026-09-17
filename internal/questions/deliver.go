@@ -37,10 +37,11 @@ func Prompt(q trace.Question, text string, citations []string) string {
 // Deliver queues the ruling's returned answer as the next turn of the thread
 // that asked, which unparks it, and reports whether it queued the turn. The
 // turn carries the asking turn's system prompt and unit, and the profile the
-// asker's role is bound to now. A question whose answer is already on the
-// thread, or whose asking thread the trace does not hold, queues nothing.
+// asker's role is bound to now. A question without a ruling, one whose answer
+// is already on the thread, and one whose asking agent the trace does not hold
+// queue nothing.
 func Deliver(ctx context.Context, repository *trace.Repository, q trace.QuestionState, profile func(role string) (coreadapter.Profile, error), at time.Time) (bool, error) {
-	if q.Ruling == nil || q.Asked.Thread == "" {
+	if q.Ruling == nil {
 		return false, nil
 	}
 	asked, stream := q.Asked, q.Asked.Workstream
@@ -50,9 +51,6 @@ func Deliver(ctx context.Context, repository *trace.Repository, q trace.Question
 	}
 	if err != nil {
 		return false, err
-	}
-	if thread.Identity.ThreadID != asked.Thread {
-		return false, nil
 	}
 	system := ""
 	for _, turn := range thread.Turns {
