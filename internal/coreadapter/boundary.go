@@ -17,25 +17,71 @@ import (
 	"github.com/kpenfound/busybees/core/vcs"
 )
 
-// Engine starts sessions inside the boundary their grants describe.
-// *agent.Runner implements it: Verify returns the turn core would run for a
-// request, and Run verifies the same request again before starting anything.
+// Engine hands out the core enforcer that holds turns of one set of execution
+// settings to their grants.
 type Engine interface {
-	Verify(agent.Request) (*agent.Turn, error)
-	Run(context.Context, agent.Request) (*agent.Result, error)
+	Enforcer(ExecutionSettings) (agent.Enforcer, error)
 }
 
-var _ Engine = (*agent.Runner)(nil)
+// CoreEngine is the production Engine: every enforcer runs its turns with
+// Runner.
+type CoreEngine struct{ Runner agent.Runner }
+
+var _ Engine = CoreEngine{}
+
+func (e CoreEngine) Enforcer(settings ExecutionSettings) (agent.Enforcer, error) {
+	return NewEnforcer(e.Runner, settings)
+}
+
+// NewEnforcer builds the enforcer of a role's resolved execution settings:
+// agent.NewHostNone for "none", agent.NewHostClaude for "claude" and
+// agent.NewContainer with the settings' image for "container". A host mode
+// with an image, a container without one, or any other mode is refused with
+// an UnsupportedError. Whether the platform can enforce the mode is decided by
+// the enforcer's Prepare.
+func NewEnforcer(r agent.Runner, settings ExecutionSettings) (agent.Enforcer, error) {
+	if err := checkMode(settings); err != nil {
+		return nil, err
+	}
+	switch settings.Mode {
+	case agent.SandboxClaude:
+		return agent.NewHostClaude(r), nil
+	case agent.SandboxContainer:
+		return agent.NewContainer(r, settings.Image), nil
+	}
+	return agent.NewHostNone(r), nil
+}
+
+// checkMode refuses settings no enforcer is built for: a host mode with an
+// image, a container without one, or a mode other than none, claude and
+// container.
+func checkMode(settings ExecutionSettings) error {
+	switch settings.Mode {
+	case agent.SandboxNone, agent.SandboxClaude:
+		if settings.Image != "" {
+			return unsupported("isolation mode", "a host session runs no image")
+		}
+		return nil
+	case agent.SandboxContainer:
+		if settings.Image == "" {
+			return unsupported("container", "image is required")
+		}
+		return nil
+	}
+	return unsupported("isolation mode", fmt.Sprintf("%q is not none, claude or container", settings.Mode))
+}
 
 // CoreExecutor binds one turn to a service-selected isolation and runs it
-// through core with grants built from that isolation alone: the view as the
-// only mount besides the session's own directory, the service environment as
-// the complete allowlist, the scoped MCP servers as the only tools, and no
-// VCS. Only container sessions are accepted, because a host session reads the
-// whole filesystem.
+// through a core enforcer with grants built from that isolation alone: the
+// view as the only mount besides the session's own directory, the service
+// environment as the complete allowlist, the scoped MCP servers as the only
+// tools, and no VCS. Before the turn runs, the prepared session's policy must
+// match those grants and leave every Pinned directory unwritable.
 type CoreExecutor struct {
 	Required Isolation
 	Runner   Engine
+	// Pinned are the directories of the revisions the view was made from.
+	Pinned []string
 }
 
 func (e CoreExecutor) Check(ctx context.Context, iso Isolation, settings ExecutionSettings) error {
@@ -48,11 +94,8 @@ func (e CoreExecutor) Check(ctx context.Context, iso Isolation, settings Executi
 	if e.Runner == nil {
 		return unsupported("execution engine", "no core runner supplied")
 	}
-	if settings.Mode != agent.SandboxContainer {
-		return unsupported("isolation mode", "requires a container; a host session reads the whole filesystem")
-	}
-	if settings.Image == "" {
-		return unsupported("container", "image is required")
+	if err := checkMode(settings); err != nil {
+		return err
 	}
 	if len(settings.Mounts) != 0 || len(settings.Domains) != 0 {
 		return unsupported("execution overrides", "extra mounts and network domains are not granted")
@@ -86,7 +129,7 @@ func PublicEnvironment(env map[string]string) error {
 			return unsupported("environment", "NUL value")
 		}
 		switch key {
-		case "LANG", "LC_ALL", "TZ", "OSMIA_MCP_TOKEN":
+		case "LANG", "LC_ALL", "TZ", TokenEnvironment:
 		default:
 			return unsupported("environment", "variable is not on the service allowlist")
 		}
@@ -130,7 +173,7 @@ func validateFileTree(dir string) error {
 	})
 }
 
-func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings ExecutionSettings) (*agent.Result, error) {
+func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings ExecutionSettings) (result *agent.Result, err error) {
 	if err := e.Check(ctx, e.Required, settings); err != nil {
 		return nil, err
 	}
@@ -146,7 +189,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	// fields grants do not describe; they also protect callers that invoke
 	// Run without the normal turn translator.
 	if req.Workspace == nil || req.Workspace.Directory() != iso.Workspace.Directory || req.Workspace.VCS() != nil ||
-		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.Profile.Skills) != 0 || req.Profile.ContainerUseEnvironment != "" ||
+		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.ContainerEnv) != 0 || len(req.Profile.Skills) != 0 || req.Profile.ContainerUseEnvironment != "" ||
 		len(req.Profile.SandboxDomains) != 0 || req.Profile.Sandbox != settings.Mode || req.Profile.SandboxImage != settings.Image ||
 		!maps.Equal(req.Env, iso.Environment) || !slices.Equal(req.Profile.AllowedTools, AllowedTools(slices.Collect(maps.Keys(req.Profile.MCP)), iso.Capabilities.Tools)) ||
 		(req.Grants != nil && !reflect.DeepEqual(*req.Grants, grants)) {
@@ -154,7 +197,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	}
 	for _, endpoint := range req.Profile.MCP {
 		parsed, parseErr := url.Parse(endpoint.URL)
-		if parseErr != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || endpoint.Type != "http" || endpoint.Command != "" || len(endpoint.Args) != 0 || len(endpoint.Env) != 0 || len(endpoint.EnvVars) != 0 || len(endpoint.Headers) != 0 || endpoint.BearerTokenEnv != "OSMIA_MCP_TOKEN" || req.Env["OSMIA_MCP_TOKEN"] == "" {
+		if parseErr != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || endpoint.Type != "http" || endpoint.Command != "" || len(endpoint.Args) != 0 || len(endpoint.Env) != 0 || len(endpoint.EnvVars) != 0 || len(endpoint.Headers) != 0 || endpoint.BearerTokenEnv != TokenEnvironment || req.Env[TokenEnvironment] == "" {
 			return nil, unsupported("MCP", "only service-authenticated HTTP endpoints are permitted")
 		}
 	}
@@ -171,20 +214,34 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 		req.Workspace = vcs.Directory(scratch)
 	}
 	req.Grants = &grants
-	turn, err := e.Runner.Verify(req)
-	if errors.Is(err, agent.ErrNotGranted) || errors.Is(err, agent.ErrUnsupported) || errors.Is(err, agent.ErrNoGrants) {
-		return nil, fmt.Errorf("%w: grants: %w", ErrUnsupported, err)
-	}
+	enforcer, err := e.Runner.Enforcer(settings)
 	if err != nil {
-		return nil, err
+		return nil, refusal(err)
 	}
-	if err = verifiedTurn(turn, iso, grants); err != nil {
+	session, err := enforcer.Prepare(ctx, grants)
+	if err != nil {
+		return nil, refusal(err)
+	}
+	defer func() { err = errors.Join(err, session.Release(context.WithoutCancel(ctx))) }()
+	if err = checkPolicy(session.Policy(), iso, settings, grants, e.Pinned); err != nil {
 		return nil, err
 	}
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
-	return e.Runner.Run(ctx, req)
+	result, err = session.Run(ctx, req)
+	return result, refusal(err)
+}
+
+// refusal wraps core's refusals of a turn in ErrUnsupported, keeping core's
+// reason. A turn whose session policy changed since Prepare is one of them.
+func refusal(err error) error {
+	for _, refused := range []error{agent.ErrUnsupported, agent.ErrNotGranted, agent.ErrNoGrants, agent.ErrPolicyChanged} {
+		if errors.Is(err, refused) {
+			return fmt.Errorf("%w: %w", ErrUnsupported, err)
+		}
+	}
+	return err
 }
 
 // scratchDirectory is the session subdirectory a read-only turn starts in.
@@ -217,50 +274,41 @@ func coreGrants(iso Isolation, sessionDir string, servers []string) (agent.Grant
 	return grants, nil
 }
 
-// verifiedTurn refuses a turn whose effective boundary differs from the one
-// the grants describe: VCS or a built-in tool granted, a VCS executable left
-// on PATH, a variable beyond the service environment and the container's
-// HOME, or a bind outside the granted mounts.
-func verifiedTurn(turn *agent.Turn, iso Isolation, grants agent.Grants) error {
-	if turn == nil {
-		return unsupported("grant verification", "engine verified no turn")
+// checkPolicy refuses a session whose policy is not the one the grants
+// describe: another sandbox or image, a view that is not readable or whose
+// write access differs from the isolation's, a writable pinned directory, VCS
+// granted or a VCS executable left undenied, a built-in tool, or MCP servers
+// other than the granted ones.
+func checkPolicy(p agent.Policy, iso Isolation, settings ExecutionSettings, grants agent.Grants, pinned []string) error {
+	if p.Sandbox != settings.Mode || p.Image != settings.Image {
+		return unsupported("session policy", fmt.Sprintf("sandbox %q with image %q differs from the role's", p.Sandbox, p.Image))
 	}
-	if turn.VCS || turn.Tools == nil || len(turn.Tools) != 0 || len(turn.WriteDirs) != 0 {
-		return unsupported("grant verification", "turn grants VCS or additional tools")
+	view := iso.Workspace.Directory
+	if !p.Reads(view) || p.Writes(view) != (iso.Workspace.Access == ReadWrite) {
+		return unsupported("session policy", "view access differs from the grant")
+	}
+	for _, dir := range pinned {
+		if p.Writes(dir) {
+			return unsupported("session policy", "pinned revision "+dir+" is writable")
+		}
+	}
+	if p.VCS {
+		return unsupported("session policy", "VCS is granted")
 	}
 	for _, name := range agent.VCSExecutables {
-		if !slices.Contains(turn.DeniedExecutables, name) {
-			return unsupported("grant verification", "VCS executable "+name+" is not denied")
+		if !slices.Contains(p.DeniedExecutables, name) {
+			return unsupported("session policy", "VCS executable "+name+" is not denied")
 		}
 	}
-	env := map[string]string{}
-	for _, kv := range turn.Env {
-		key, value, _ := strings.Cut(kv, "=")
-		env[key] = value
+	if p.Tools == nil || len(p.Tools) != 0 {
+		return unsupported("session policy", "built-in tools are granted")
 	}
-	delete(env, "HOME")
-	if !maps.Equal(env, iso.Environment) {
-		return unsupported("grant verification", "turn environment differs from the service environment")
+	var servers []string
+	for _, tool := range grants.Tools {
+		servers = append(servers, strings.TrimPrefix(tool, "mcp__"))
 	}
-	aliases := map[string]agent.Mount{}
-	for _, m := range grants.Mounts {
-		real, err := filepath.EvalSymlinks(m.Path)
-		if err != nil {
-			return err
-		}
-		aliases[m.Path] = agent.Mount{Path: real, Access: m.Access}
-		aliases[real] = agent.Mount{Path: real, Access: m.Access}
-	}
-	view := false
-	for _, bind := range turn.Binds {
-		granted, ok := aliases[bind.Destination]
-		if !ok || granted.Path != bind.Source || granted.Access != bind.Access {
-			return unsupported("grant verification", "container bind "+bind.Destination+" is not granted")
-		}
-		view = view || bind.Destination == iso.Workspace.Directory
-	}
-	if !view {
-		return unsupported("grant verification", "container does not bind the view")
+	if !slices.Equal(p.MCPServers, servers) {
+		return unsupported("session policy", "MCP servers differ from the granted ones")
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/busybees/core/agent"
+	"github.com/kpenfound/busybees/core/agent/agenttest/enforcertest"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -81,7 +83,6 @@ func (w *demoWorkspaces) Acquire(_ context.Context, req coreadapter.WorkspaceReq
 // demoTransport serves the scoped MCP server in memory and lends the client
 // side to the fake container engine under the turn's service token.
 type demoTransport struct {
-	token    string
 	sessions *demoSessions
 }
 type demoSessions struct {
@@ -100,24 +101,25 @@ func (d *demoTransport) Start(ctx context.Context, server *mcp.Server) (coreadap
 		served.Close()
 		return coreadapter.Endpoint{}, nil, err
 	}
+	token := rand.Text()
 	d.sessions.mu.Lock()
-	d.sessions.byKey[d.token] = client
+	d.sessions.byKey[token] = client
 	d.sessions.mu.Unlock()
 	release := demoLease(func(context.Context) error {
 		d.sessions.mu.Lock()
-		delete(d.sessions.byKey, d.token)
+		delete(d.sessions.byKey, token)
 		d.sessions.mu.Unlock()
 		return errors.Join(client.Close(), served.Wait())
 	})
-	return coreadapter.Endpoint{URL: "http://osmia-mcp.invalid/turn", BearerTokenEnvironment: "OSMIA_MCP_TOKEN"}, release, nil
+	return coreadapter.Endpoint{URL: "http://osmia-mcp.invalid/turn", BearerTokenEnvironment: "OSMIA_MCP_TOKEN", Token: token}, release, nil
 }
 
 // demoTurn is what the fake backend does inside the boundary core verified.
 type demoTurn func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error)
 
-// demoEngine is the fake container engine. It verifies requests with core's
-// own container boundary, which is evidence of the grants, not of OS
-// enforcement.
+// demoEngine is the fake execution engine. Core's fake enforcer admits each
+// request the way a real session does, and Run verifies it with core's own
+// container boundary, which is evidence of the grants, not of OS enforcement.
 type demoEngine struct {
 	mu       sync.Mutex
 	sessions *demoSessions
@@ -132,6 +134,11 @@ func (e *demoEngine) CheckResume(_ context.Context, previous, next coreadapter.P
 	defer e.mu.Unlock()
 	e.checks++
 	return e.resume(previous, next, session)
+}
+func (e *demoEngine) Enforcer(s coreadapter.ExecutionSettings) (agent.Enforcer, error) {
+	return &enforcertest.Enforcer{Sandbox: s.Mode, Image: s.Image, Agent: func(ctx context.Context, turn *enforcertest.Turn) (*agent.Result, error) {
+		return e.Run(ctx, turn.Request)
+	}}, nil
 }
 func (e *demoEngine) Verify(req agent.Request) (*agent.Turn, error) {
 	return (&agent.Runner{}).Verify(req)
@@ -381,9 +388,7 @@ func demonstrate(t *testing.T, mode string) {
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				return r.NotesTools(demoAgent, scope)
 			},
-			Hosts: func(token string) coreadapter.MCPHosts {
-				return &coreadapter.MCPHost{Transport: &demoTransport{token: token, sessions: sessions}}
-			},
+			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}},
 		}
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
