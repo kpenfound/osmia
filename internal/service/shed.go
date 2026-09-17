@@ -34,9 +34,11 @@ const (
 	// InShedState is the feature state of a workstream whose spec and plan the
 	// committee debates.
 	InShedState = "in-shed"
-	// shedSubject is the workflow subject that tracks a workstream's rounds:
+	// shedSubject is the workflow subject that tracks a workstream's debate:
 	// round-<n> while the committee runs, heard-<n> once its contributions
-	// are recorded, failed-<n> when the round ended without a record.
+	// are recorded, reply-<n> while the architect answers, replied-<n> once
+	// its reply is recorded, concluded-<n> once debate ended after round n,
+	// and failed-<n> when round n ended without a record or a reply.
 	shedSubject = "shed"
 	// maxRoundAttempts bounds the turns one member may start in one round
 	// after service stops interrupt earlier ones: the librarian's bound.
@@ -75,11 +77,19 @@ func roundTurnID(n int, agent string, attempt int) string {
 	return roundTurnPrefix(n, agent) + strconv.Itoa(attempt)
 }
 
-// debate is the committee controller. Its pass moves every sketched
-// workstream into the shed with its committee and asks for the first round,
-// and its reconciler runs each round operation: one turn per member, in
-// parallel against the pinned revision, and the record of what each
-// contributed.
+// shedState splits a shed-subject value into its kind (round, heard, reply,
+// replied, concluded or failed) and round number.
+func shedState(value string) (kind string, n int, ok bool) {
+	kind, number, found := strings.Cut(value, "-")
+	n, err := strconv.Atoi(number)
+	return kind, n, found && err == nil && n > 0 && slices.Contains([]string{"round", "heard", "reply", "replied", "concluded", "failed"}, kind)
+}
+
+// debate is the shed controller. Its pass moves every sketched workstream
+// into the shed with its committee and derives the debate's next step from
+// the trace: a round, the architect's reply to it, or the conclusion. Its
+// reconciler runs each round operation: one turn per member, in parallel
+// against the pinned revision, and the record of what each contributed.
 type debate struct {
 	s          *Service
 	repository *trace.Repository
@@ -114,8 +124,8 @@ func (d *debate) Pass(ctx context.Context) error {
 }
 
 // reconcile gives a sketched workstream its committee and moves it to
-// in-shed, then asks for round 1 of a workstream in the shed that has had no
-// round. Every other state needs nothing.
+// in-shed, then takes the next step of a workstream in the shed. Every other
+// feature state needs nothing.
 func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) error {
 	feature, err := d.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -147,11 +157,90 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 			return err
 		}
 	}
+	return d.step(ctx, stream, pin)
+}
+
+// step derives what the debate needs next from the shed state and the
+// recorded rounds. No round yet: round 1. A heard round with no open dissent
+// concludes the debate by consensus; one with open dissent gets the
+// architect's reply. After the reply, the next round runs against the latest
+// revision unless shed.max_rounds rounds have run, which concludes the debate
+// with its dissent open. A round or a reply in progress, a concluded debate
+// and a failed round need nothing.
+func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest shed.Pin) error {
 	state, err := d.repository.Workflow(stream, shedSubject)
-	if err != nil || state.Value != "" {
+	if err != nil {
 		return err
 	}
-	return d.request(ctx, stream, state, roundInput{Round: 1, Spec: pin.Spec, Plan: pin.Plan}, InShedState)
+	if state.Value == "" {
+		return d.request(ctx, stream, state, roundInput{Round: 1, Spec: latest.Spec, Plan: latest.Plan}, InShedState)
+	}
+	kind, n, ok := shedState(state.Value)
+	if !ok || kind != "heard" && kind != "replied" {
+		return nil
+	}
+	records, err := shed.Records(d.repository, stream)
+	if err != nil {
+		return err
+	}
+	open := shed.DissentRecord(records)
+	round, _ := roundIDs(n)
+	limit := d.s.current().Shed.MaxRounds
+	switch {
+	case len(open) == 0:
+		return d.conclude(ctx, stream, state, n, round+"-heard", fmt.Sprintf("debate concluded by consensus after round %d: no objection stands", n), open)
+	case kind == "heard":
+		// The reply waits for a service that can run the architect.
+		if d.s.options.Architect == nil {
+			return nil
+		}
+		// Every record of a round carries the revision the round was pinned to.
+		i := slices.IndexFunc(records, func(r shed.Record) bool { return r.Round == n })
+		if i < 0 {
+			return fmt.Errorf("round %d was heard and has no record", n)
+		}
+		return d.requestReply(ctx, stream, state, roundInput{Round: n, Spec: records[i].Revision.Spec, Plan: records[i].Revision.Plan}, len(open))
+	case n >= limit:
+		reply, _ := replyIDs(n)
+		return d.conclude(ctx, stream, state, n, reply+"-replied", fmt.Sprintf("debate stopped after round %d, at the shed.max_rounds cap of %d, with %s; the cap approves nothing", n, limit, standing(open)), open)
+	}
+	reply, _ := replyIDs(n)
+	return d.request(ctx, stream, state, roundInput{Round: n + 1, Spec: latest.Spec, Plan: latest.Plan}, reply+"-replied")
+}
+
+// standing counts the open dissent and how much of it blocks.
+func standing(open []shed.Entry) string {
+	blocking := 0
+	for _, e := range open {
+		if e.Blocking {
+			blocking++
+		}
+	}
+	return fmt.Sprintf("%d objections standing, %d of them blocking", len(open), blocking)
+}
+
+// conclude ends the debate after round n. The workstream stays in the shed:
+// the conclusion is a shed transition, and its notice gives the chief of
+// staff the reason and the dissent that stands.
+func (d *debate) conclude(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, n int, cause, reason string, open []shed.Entry) error {
+	id := fmt.Sprintf("shed-concluded-%d", n)
+	var body strings.Builder
+	fmt.Fprintf(&body, "Debate concluded: %s. The workstream stays %s until the owner rules.", reason, InShedState)
+	if len(open) > 0 {
+		body.WriteString("\nOpen dissent:")
+	}
+	for _, e := range open {
+		weight := "advisory"
+		if e.Blocking {
+			weight = "blocking"
+		}
+		fmt.Fprintf(&body, "\n- %s (%s, %s, by %s in round %d on %s, against %s): %s", e.ID, e.Kind, weight, e.Member, e.Round, e.Part, e.Revision, e.Argument)
+	}
+	tx := trace.Transaction{ExpectedVersion: state.Version,
+		Transition: trace.Transition{Header: d.header(id, stream, cause, d.s.now()), Subject: shedSubject, From: state.Value, To: fmt.Sprintf("concluded-%d", n), Reason: reason},
+		Events:     []trace.Event{trace.Notice(id, "concluded", body.String())}}
+	_, err := d.repository.Transact(ctx, tx)
+	return err
 }
 
 func (d *debate) header(id string, stream config.WorkstreamID, cause string, at time.Time) trace.Header {
@@ -226,7 +315,7 @@ func (d *debate) committee(stream config.WorkstreamID) ([]string, error) {
 // request publishes a round as a durable operation.
 func (d *debate) request(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, in roundInput, cause string) error {
 	transition, event := roundIDs(in.Round)
-	input, err := json.Marshal(in)
+	input, err := encodeRound(in)
 	if err != nil {
 		return err
 	}
@@ -239,18 +328,24 @@ func (d *debate) request(ctx context.Context, stream config.WorkstreamID, state 
 	return err
 }
 
-func decodeRound(op coreadapter.Operation) (roundInput, error) {
+func encodeRound(in roundInput) (json.RawMessage, error) { return json.Marshal(in) }
+
+func decodeRound(op coreadapter.Operation) (roundInput, error) { return decodeShed(op, RoundAction) }
+
+// decodeShed reads the input of a shed operation of the given action: a round
+// and the revision it is pinned to.
+func decodeShed(op coreadapter.Operation, action string) (roundInput, error) {
 	var in roundInput
-	if op.Boundary != coreadapter.RunnerBoundary || op.Action != RoundAction {
+	if op.Boundary != coreadapter.RunnerBoundary || op.Action != action {
 		return in, fmt.Errorf("unsupported runner operation %q", op.Action)
 	}
 	dec := json.NewDecoder(bytes.NewReader(op.Input))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil {
-		return in, fmt.Errorf("invalid round operation input: %w", err)
+		return in, fmt.Errorf("invalid %s operation input: %w", action, err)
 	}
 	if in.Round < 1 || in.Spec < 1 || in.Plan < 1 {
-		return in, errors.New("round operation requires a positive round and pinned revisions")
+		return in, fmt.Errorf("%s operation requires a positive round and pinned revisions", action)
 	}
 	return in, nil
 }
@@ -258,17 +353,22 @@ func decodeRound(op coreadapter.Operation) (roundInput, error) {
 // stream returns the workstream a round operation belongs to: the one whose
 // run event derives the operation ID.
 func (d *debate) stream(op coreadapter.Operation, n int) (config.WorkstreamID, error) {
+	_, event := roundIDs(n)
+	return d.owner(op, event)
+}
+
+// owner returns the workstream whose event derives the operation ID.
+func (d *debate) owner(op coreadapter.Operation, event string) (config.WorkstreamID, error) {
 	streams, err := d.repository.Workstreams()
 	if err != nil {
 		return "", err
 	}
-	_, event := roundIDs(n)
 	for _, stream := range streams {
 		if trace.OperationID(d.repository.Project(), stream, event) == op.ID {
 			return stream, nil
 		}
 	}
-	return "", fmt.Errorf("round operation %s belongs to no workstream", op.ID)
+	return "", fmt.Errorf("%s operation %s belongs to no workstream", op.Action, op.ID)
 }
 
 // outcome returns the recorded terminal result of round n: succeeded once

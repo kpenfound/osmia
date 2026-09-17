@@ -415,9 +415,10 @@ func (s *Service) stop(active *activeProject) error {
 // openReconciliation leaves trace creation to project registration; an existing
 // trace must open cleanly before the service can report readiness. The runner
 // boundary is served by the bound thread reconciler for turns and by the
-// service's own reconcilers for knowledge-base extraction, architect drafts
-// and committee rounds; the architect controller and then the committee
-// controller run at the start of every pass. With
+// service's own reconcilers for knowledge-base extraction, architect drafts,
+// committee rounds and the architect's replies to them; the architect
+// controller and then the shed controller run at the start of every pass,
+// and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
 // chief of staff, recorded answers are queued on their askers' threads, and
 // the scheduler runs, whose gate holds turns that a runtime pause covers;
@@ -486,12 +487,28 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	}
 	adapters[coreadapter.RunnerBoundary] = runner
 	options.Adapters = adapters
+	if options.Priority == nil {
+		options.Priority = stagePriority
+	}
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
 		repository.Close()
 		return nil, nil, err
 	}
 	return repository, controller, nil
+}
+
+// stagePriority orders the operations of a pass so that the factory finishes
+// work before it widens it: the turns the scheduler dispatched and everything
+// else first, then the shed's rounds and replies, then architect drafts.
+func stagePriority(op coreadapter.Operation) int {
+	switch op.Action {
+	case RoundAction, ReplyAction:
+		return 1
+	case DraftAction:
+		return 2
+	}
+	return 0
 }
 
 // unlock releases the root ownership lock before closing its file. A child
