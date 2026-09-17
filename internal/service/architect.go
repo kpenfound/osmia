@@ -394,9 +394,6 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 				turnCtx = ctx
 			}
 			if _, err := d.dispatch(turnCtx, stream, last.Request.TurnID); err != nil {
-				if gone, _ := abandoned(d.repository, stream); gone && last.Response == nil && ctx.Err() == nil {
-					continue
-				}
 				return coreadapter.OperationResult{}, err
 			}
 			if err := os.RemoveAll(filepath.Join(d.turnDirectory(stream, last.Request.TurnID), "workspace")); err != nil {

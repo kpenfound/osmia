@@ -910,6 +910,56 @@ func TestAbandonStopsTheArchitectDraft(t *testing.T) {
 		defer f.stop(t)
 		check(t, f, stream)
 	})
+
+	t.Run("queued turn", func(t *testing.T) {
+		f := newArchitectFixture(t)
+		entered := blocked(f)
+		stream := f.handIn(t, "design", handedDesign)
+		select {
+		case <-entered:
+		case <-time.After(demoTimeout):
+			t.Fatal("the draft did not start")
+		}
+		f.stop(t)
+		// The stop interrupted the first attempt. The second was accepted and
+		// not reserved when the workstream was abandoned, and nothing
+		// cancelled it.
+		ctx := context.Background()
+		cfg, err := config.Load(f.opts.Config)
+		must(t, err)
+		repo, err := trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
+		must(t, err)
+		defer repo.Close()
+		th, err := repo.Thread(stream, architectAgent)
+		must(t, err)
+		second := th.Turns[0].Request
+		second.ID, second.TurnID, second.At = "request_draft-1-2", "draft-1-2", f.clock.Now()
+		_, err = repo.EnqueueTurn(ctx, second)
+		must(t, err)
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: abandonTransition}
+		_, err = repo.SetFeatureStateUnless(ctx, h, AbandonedState, "Superseded", AbandonedState, DeliveredState)
+		must(t, err)
+		ops, err := repo.Operations(stream)
+		must(t, err)
+		var op coreadapter.Operation
+		for _, o := range ops {
+			if o.Operation.Action == DraftAction {
+				op = o.Operation
+			}
+		}
+		result, err := (&drafter{s: f.s, repository: repo}).Apply(ctx, op)
+		if err != nil || result.Outcome != "failed" || result.Evidence != evidence {
+			t.Fatalf("result %+v: %v", result, err)
+		}
+		if got := f.runs(); !slices.Equal(got, []string{"draft-1-1"}) {
+			t.Fatalf("backend runs %v", got)
+		}
+		th, err = repo.Thread(stream, architectAgent)
+		must(t, err)
+		if len(th.Turns) != 2 || th.Turns[1].Response == nil || !th.Turns[1].Response.Result.Cancelled || th.Turns[1].Response.Actor != abandonActor || th.Turns[1].Response.Failure != cancelReason {
+			t.Fatalf("thread: %+v", th)
+		}
+	})
 }
 
 func TestSchedulerLeavesArchitectTurnsToTheDrafter(t *testing.T) {
