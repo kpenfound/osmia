@@ -115,7 +115,7 @@ func TestZeroProjectStart(t *testing.T) {
 func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	opts, clone := projectFixture(t)
 	var bound []config.ProjectID
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		bound = append(bound, r.Project())
 		return &completedRunner{}, nil
 	}

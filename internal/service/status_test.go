@@ -83,7 +83,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	}
 	views := filepath.Join(cfg.Root.String(), "views")
 	must(t, os.Mkdir(views, 0700))
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		turns := &isolation.Turns{Workspaces: &demoWorkspaces{directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: engine,
 			Grants: map[string]coreadapter.Capabilities{"chief_of_staff": {Tools: []string{"notes_read", status.ToolName}}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {

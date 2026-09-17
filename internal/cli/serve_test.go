@@ -18,12 +18,14 @@ import (
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/busybees/core/agent/agenttest/enforcertest"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/status"
 )
 
 // launches is the process-launch seam every serve in these tests runs its
 // role turns through: core's fake enforcer, which starts no process.
-var launches = &launchEngine{}
+var launches = &launchEngine{runs: map[string]*enforcertest.Turn{}}
 
 // production is serve's own enforcement, which TestMain replaces.
 var production = enforcement
@@ -47,6 +49,8 @@ const refusal = "this platform cannot hold the claude sandbox"
 type launchEngine struct {
 	mu    sync.Mutex
 	turns []string
+	// runs holds the turn the agent ran under each name.
+	runs map[string]*enforcertest.Turn
 }
 
 func (e *launchEngine) Enforcer(settings coreadapter.ExecutionSettings) (agent.Enforcer, error) {
@@ -54,6 +58,7 @@ func (e *launchEngine) Enforcer(settings coreadapter.ExecutionSettings) (agent.E
 		Agent: func(_ context.Context, turn *enforcertest.Turn) (*agent.Result, error) {
 			e.mu.Lock()
 			e.turns = append(e.turns, turn.Request.Name)
+			e.runs[turn.Request.Name] = turn
 			e.mu.Unlock()
 			return &agent.Result{ClaudeID: "session-" + turn.Request.Name, ResultText: "Noted", NumTurns: 1}, nil
 		}}
@@ -63,16 +68,16 @@ func (e *launchEngine) Enforcer(settings coreadapter.ExecutionSettings) (agent.E
 	return f, nil
 }
 
-// await waits until the agent has run a turn named name.
-func (e *launchEngine) await(t *testing.T, name string) {
+// await waits until the agent has run a turn named name and returns it.
+func (e *launchEngine) await(t *testing.T, name string) *enforcertest.Turn {
 	t.Helper()
 	deadline := time.Now().Add(time.Minute)
 	for {
 		e.mu.Lock()
-		ran := slices.Contains(e.turns, name)
+		turn := e.runs[name]
 		e.mu.Unlock()
-		if ran {
-			return
+		if turn != nil {
+			return turn
 		}
 		if time.Now().After(deadline) {
 			e.mu.Lock()
@@ -87,6 +92,7 @@ func (e *launchEngine) reset() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.turns = nil
+	e.runs = map[string]*enforcertest.Turn{}
 }
 
 func (e *launchEngine) ran(name string) bool {
@@ -164,8 +170,38 @@ func TestServeRunsRoleTurns(t *testing.T) {
 
 			var sent service.ConversationEntry
 			must(t, json.Unmarshal([]byte(successful(t, root, "send", string(handed.Workstream), "Start with uploads.", "--json")), &sent))
-			launches.await(t, sent.Turn)
+			chief(t, launches.await(t, sent.Turn), root, string(added.Project.ID), string(handed.Workstream))
 		})
+	}
+}
+
+// chief checks the boundary serve gives a chief-of-staff thread turn: its
+// session directory under the thread's, an empty workspace of its own and
+// only its status and question tools.
+func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream string) {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(root)
+	must(t, err)
+	threads := filepath.Join(resolved, "threads", project, workstream) + string(filepath.Separator)
+	if !strings.HasPrefix(turn.Request.SessionDir, threads) {
+		t.Fatalf("session directory %s is not under %s", turn.Request.SessionDir, threads)
+	}
+	workspace := filepath.Join(resolved, "workspaces", project, workstream)
+	entries, err := os.ReadDir(workspace)
+	if err != nil || len(entries) != 0 || turn.Request.Workspace.Directory() != workspace {
+		t.Fatalf("workspace %s (%v): %v, %v", turn.Request.Workspace.Directory(), err, entries, workspace)
+	}
+	granted := append([]string{status.ToolName}, questions.ChiefTools...)
+	var tools []string
+	for _, allowed := range turn.Request.Profile.AllowedTools {
+		server, tool, ok := strings.Cut(strings.TrimPrefix(allowed, "mcp__"), "__")
+		if !ok || !turn.Policy.Allows("mcp__"+server+"__"+tool) {
+			t.Fatalf("allowed tool %s is outside the policy", allowed)
+		}
+		tools = append(tools, tool)
+	}
+	if !slices.Equal(tools, granted) || slices.Contains(tools, "file_read") {
+		t.Fatalf("chief tools %v, want %v", tools, granted)
 	}
 }
 

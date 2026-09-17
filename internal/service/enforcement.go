@@ -43,19 +43,18 @@ var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName
 // role turn through e. Thread turns are granted to the chief of staff only;
 // a turn of any other role fails with a recorded reason. Each role's sandbox
 // comes from its configuration, and a sandbox the platform cannot enforce
-// fails the turn with core's reason.
+// fails the turn with core's reason. Thread turns take the chief of staff's
+// sandbox and the root from the configuration the service has loaded, and
+// record UTC times.
 func Enforce(opts Options, e Enforcement) Options {
 	opts.Librarian = &Librarian{Engine: e.Engine, Hosts: e.Hosts}
 	opts.Architect = &Architect{Engine: e.Engine, Hosts: e.Hosts}
-	now := opts.Reconciliation.Now
-	if now == nil {
-		now = time.Now
+	clock := opts.Reconciliation.Now
+	if clock == nil {
+		clock = time.Now
 	}
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
-		cfg, err := config.Load(opts.Config)
-		if err != nil {
-			return nil, err
-		}
+	now := func() time.Time { return clock().UTC() }
+	opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
 		root := cfg.Root.String()
 		views := filepath.Join(root, "views")
 		if err := os.MkdirAll(views, 0700); err != nil {
