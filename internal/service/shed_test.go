@@ -76,6 +76,10 @@ func (f *shedFixture) awaitShed(t *testing.T, stream config.WorkstreamID, want s
 		if state.Value == want {
 			return
 		}
+		// A round ends once: another ending never becomes the wanted one.
+		if (strings.HasPrefix(state.Value, "heard-") || strings.HasPrefix(state.Value, "failed-")) && strings.TrimLeft(state.Value, "headfil-") == strings.TrimLeft(want, "headfil-") {
+			t.Fatalf("workstream %s shed ended %q, want %q", stream, state.Value, want)
+		}
 		if time.Now().After(deadline) {
 			feature, _ := f.repository().Workflow(stream, trace.FeatureSubject)
 			t.Fatalf("workstream %s stayed %q with shed %q, want %q", stream, feature.Value, state.Value, want)
