@@ -31,6 +31,7 @@ func abandonCall(t *testing.T, s *Service, id config.WorkstreamID, body string) 
 }
 
 func TestAbandonHandedWorkstream(t *testing.T) {
+	t.Parallel()
 	f := newHandInFixture(t)
 	ctx := context.Background()
 	out := f.handIn(t, HandInRequest{Key: "k", Stdin: ptr("# Design\n")})
@@ -84,6 +85,7 @@ func TestAbandonHandedWorkstream(t *testing.T) {
 }
 
 func TestAbandonRefusals(t *testing.T) {
+	t.Parallel()
 	f := newHandInFixture(t)
 	ctx := context.Background()
 	delivered := f.handIn(t, HandInRequest{Key: "d", Stdin: ptr("delivered")}).Workstream
@@ -125,6 +127,7 @@ func TestAbandonRefusals(t *testing.T) {
 // the waiting one never runs, and neither do turns queued later, before or
 // after a restart.
 func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "ab-")
 	must(t, err)
@@ -260,6 +263,7 @@ func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 // TestAbandonedTurnOperationDoesNotRun applies a turn operation of an
 // abandoned workstream: the turn completes as cancelled without a backend call.
 func TestAbandonedTurnOperationDoesNotRun(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "ao-")
 	must(t, err)

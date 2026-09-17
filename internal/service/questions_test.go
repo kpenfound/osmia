@@ -44,6 +44,7 @@ func toolNames(ctx context.Context, tools *mcp.ClientSession) ([]string, error) 
 // service restarts with open, answered-but-undelivered and escalated
 // questions. Nothing is lost and nothing runs twice.
 func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "qa-")
 	must(t, err)
@@ -439,6 +440,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 // An answer recorded in an abandoned workstream stays undelivered, while
 // another workstream's answer is queued with its asker's role profile.
 func TestAnswersAreNotDeliveredToAbandonedWorkstreams(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "qb-")
 	must(t, err)

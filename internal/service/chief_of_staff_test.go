@@ -43,6 +43,7 @@ func chiefOfStaffAgents(t *testing.T, s *Service, id config.WorkstreamID) []trac
 }
 
 func TestStartGivesExistingWorkstreamsOneChiefOfStaffThread(t *testing.T) {
+	t.Parallel()
 	opts, clone := projectFixture(t)
 	home := filepath.Dir(opts.Config.Root)
 	s, c := start(t, opts)

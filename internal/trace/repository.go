@@ -103,7 +103,9 @@ func (r *Repository) Close() error {
 	defer r.mu.Unlock()
 	var err error
 	if r.lock != nil {
-		err = r.lock.Close()
+		// A child process forked but not yet executed shares the open file,
+		// so closing alone would leave the lock held until it executes.
+		err = errors.Join(syscall.Flock(int(r.lock.Fd()), syscall.LOCK_UN), r.lock.Close())
 		r.lock = nil
 	}
 	return errors.Join(err, r.dir.Close())

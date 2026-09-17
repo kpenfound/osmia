@@ -106,7 +106,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	defer func() {
 		if err != nil {
-			lock.Close()
+			unlock(lock)
 		}
 	}()
 	info, err := lock.Stat()
@@ -228,7 +228,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.err = errors.Join(s.err, s.stop(active))
 		s.cleanupSocket()
 		s.store.Close()
-		s.lock.Close()
+		unlock(s.lock)
 		close(s.done)
 	}()
 	return s, nil
@@ -484,4 +484,12 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		return nil, nil, err
 	}
 	return repository, controller, nil
+}
+
+// unlock releases the root ownership lock before closing its file. A child
+// process forked but not yet executed shares the open file, and closing alone
+// would leave the lock held until that child executes.
+func unlock(lock *os.File) {
+	syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	lock.Close()
 }

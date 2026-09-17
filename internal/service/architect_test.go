@@ -483,11 +483,24 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 }
 
 func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
+	t.Parallel()
 	f := newArchitectFixture(t)
 	defer f.stop(t)
 	// Draft 1 delivers no plan through the tool but leaves bytes that are not
 	// UTF-8 text where the service reads the delivery; draft 2 a plan with a
-	// cycle and an unaddressed criterion; draft 3 a valid plan.
+	// cycle and an unaddressed criterion; draft 3 a valid plan. Drafts 2 and 3
+	// start only once the test has seen the draft before them rejected.
+	seen1, seen2 := make(chan struct{}), make(chan struct{})
+	wait := func(ctx context.Context, seen <-chan struct{}) error {
+		select {
+		case <-seen:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(demoTimeout):
+			return errors.New("the test did not observe the previous draft")
+		}
+	}
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec},
 		func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
 			output := filepath.Join(filepath.Dir(req.SessionDir), "output")
@@ -498,6 +511,9 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 		})
 	f.script("draft-2-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: cyclicPlan},
 		func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
+			if err := wait(ctx, seen1); err != nil {
+				return err
+			}
 			var problems []error
 			for _, want := range []string{"Draft 1 was not accepted:", "draft 1 of the spec and plan is invalid:\n- plan.json is not UTF-8 text", "draft/spec.md and draft/plan.json: your previous draft", "Deliver corrected files"} {
 				if !strings.Contains(req.Prompt, want) {
@@ -517,6 +533,9 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 		})
 	f.script("draft-3-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan},
 		func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
+			if err := wait(ctx, seen2); err != nil {
+				return err
+			}
 			var problems []error
 			for _, want := range []string{"Draft 2 was not accepted:", `unit "dedupe": dependency cycle dedupe -> resume -> dedupe`, "spec#2: no unit addresses this criterion"} {
 				if !strings.Contains(req.Prompt, want) {
@@ -538,6 +557,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	if docs := f.documents(t, stream, plan.PlanDocument); len(docs) != 0 {
 		t.Fatalf("plan after draft 1: %+v", docs)
 	}
+	close(seen1)
 	f.await(t, stream, draftAt("invalid-2"))
 	if docs := f.documents(t, stream, plan.PlanDocument); len(docs) != 1 || docs[0].Content != cyclicPlan || docs[0].Revision != 1 {
 		t.Fatalf("plan after draft 2: %+v", docs)
@@ -545,6 +565,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	if feature, err := f.repository().Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != HandedState {
 		t.Fatalf("feature state %+v %v", feature, err)
 	}
+	close(seen2)
 	f.await(t, stream, sketched)
 	if runs := f.runs(); !slices.Equal(runs, []string{"draft-1-1", "draft-2-1", "draft-3-1"}) {
 		t.Fatalf("backend runs %v", runs)
@@ -601,6 +622,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 }
 
 func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
+	t.Parallel()
 	f := newArchitectFixture(t)
 	defer f.stop(t)
 	ctx := context.Background()
@@ -710,6 +732,7 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 }
 
 func TestArchitectRedraftsAfterAFailedTurn(t *testing.T) {
+	t.Parallel()
 	f := newArchitectFixture(t)
 	defer f.stop(t)
 	f.engine.mu.Lock()
@@ -759,6 +782,7 @@ func TestArchitectRedraftsAfterAFailedTurn(t *testing.T) {
 }
 
 func TestArchitectDraftWaitsForARunner(t *testing.T) {
+	t.Parallel()
 	f := newArchitectFixture(t)
 	ctx := context.Background()
 	entered := make(chan struct{})
@@ -853,6 +877,7 @@ func TestArchitectDraftWaitsForARunner(t *testing.T) {
 }
 
 func TestArchitectDraftsBeforeTheScheduleHook(t *testing.T) {
+	t.Parallel()
 	opts, clone, engine, sessions, clock := newArchitectOptions(t)
 	var repository atomic.Pointer[trace.Repository]
 	var mu sync.Mutex
@@ -905,6 +930,7 @@ func TestArchitectDraftsBeforeTheScheduleHook(t *testing.T) {
 }
 
 func TestArchitectDraftSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	for _, crash := range []string{"during-turn", "captured", "completed", "recorded", "moved"} {
 		t.Run(crash, func(t *testing.T) {
 			f := newArchitectFixture(t)
@@ -1052,6 +1078,7 @@ func TestArchitectDraftSurvivesRestart(t *testing.T) {
 }
 
 func TestAbandonStopsTheArchitectDraft(t *testing.T) {
+	t.Parallel()
 	const evidence = "draft 1 failed: the workstream was abandoned, so the architect runs no turn for it"
 	// blocked scripts the first turn to run until its context is cancelled.
 	blocked := func(f *architectFixture) chan struct{} {
@@ -1189,6 +1216,7 @@ func TestAbandonStopsTheArchitectDraft(t *testing.T) {
 }
 
 func TestSchedulerLeavesArchitectTurnsToTheDrafter(t *testing.T) {
+	t.Parallel()
 	f := newArchitectFixture(t)
 	defer f.stop(t)
 	ctx := context.Background()

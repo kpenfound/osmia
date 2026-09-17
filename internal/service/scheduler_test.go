@@ -61,6 +61,7 @@ func turnOperations(t *testing.T, repo *trace.Repository) map[string]trace.Opera
 }
 
 func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "sc-")
 	must(t, err)
@@ -188,6 +189,7 @@ func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
 }
 
 func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "sp-")
 	must(t, err)
@@ -265,6 +267,7 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 }
 
 func TestServiceParksWaitingThreadAcrossRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "sw-")
 	must(t, err)
@@ -351,6 +354,7 @@ func TestServiceParksWaitingThreadAcrossRestart(t *testing.T) {
 }
 
 func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "sc-")
 	must(t, err)

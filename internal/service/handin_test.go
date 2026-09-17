@@ -184,6 +184,7 @@ func (f *handInFixture) checkHanded(t *testing.T, out HandInResponse, key, name,
 }
 
 func TestHandInFileURLAndStdin(t *testing.T) {
+	t.Parallel()
 	f := newHandInFixture(t)
 	design := filepath.Join(f.home, "design.md")
 	content := "# Design\n\nNo trailing newline, a tab\tand unicode: é"
@@ -221,6 +222,7 @@ func TestHandInFileURLAndStdin(t *testing.T) {
 }
 
 func TestHandInRetryReturnsTheSameWorkstream(t *testing.T) {
+	t.Parallel()
 	f := newHandInFixture(t)
 	design := filepath.Join(f.home, "design.md")
 	must(t, os.WriteFile(design, []byte("design"), 0600))
@@ -270,6 +272,7 @@ func TestHandInRetryReturnsTheSameWorkstream(t *testing.T) {
 }
 
 func TestHandInFinishesAnInterruptedHandIn(t *testing.T) {
+	t.Parallel()
 	f := newHandInFixture(t)
 	ctx := context.Background()
 	owner := trace.Actor{Kind: "owner", ID: "local"}
@@ -300,6 +303,7 @@ func TestHandInFinishesAnInterruptedHandIn(t *testing.T) {
 }
 
 func TestHandInRefusalsWriteNothing(t *testing.T) {
+	t.Parallel()
 	f := newHandInFixture(t)
 	design := filepath.Join(f.home, "design.md")
 	must(t, os.WriteFile(design, []byte("design"), 0600))
@@ -372,6 +376,7 @@ func TestHandInRefusalsWriteNothing(t *testing.T) {
 }
 
 func TestHandInStatusCodes(t *testing.T) {
+	t.Parallel()
 	f := newHandInFixture(t)
 	body := `{"project":"` + string(f.project) + `","key":"k","stdin":"text"}`
 	if code := handInStatus(t, f.s, body); code != http.StatusOK {
@@ -418,6 +423,7 @@ func TestHandInCredentialsStayInTheService(t *testing.T) {
 }
 
 func TestHandInRefusesAFIFOWithoutBlocking(t *testing.T) {
+	t.Parallel()
 	f := newHandInFixture(t)
 	fifo := filepath.Join(f.home, "design.fifo")
 	must(t, syscall.Mkfifo(fifo, 0600))
@@ -441,6 +447,7 @@ func TestHandInRefusesAFIFOWithoutBlocking(t *testing.T) {
 }
 
 func TestHandInFetchDoesNotHoldOtherHandIns(t *testing.T) {
+	t.Parallel()
 	f := newHandInFixture(t)
 	url := "https://github.com/owner/repo/issues/12"
 	release := make(chan struct{})

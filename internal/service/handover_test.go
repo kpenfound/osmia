@@ -68,6 +68,7 @@ func (h *handoverChief) turn(ctx context.Context, req agent.Request, _ *agent.Tu
 // TestM2HandInToSketchedPlan demonstrates the M2 hand-in: see
 // docs/m2-demonstration.md.
 func TestM2HandInToSketchedPlan(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts, clone, engine, sessions, clock := newArchitectOptions(t)
 	home := filepath.Dir(clone)

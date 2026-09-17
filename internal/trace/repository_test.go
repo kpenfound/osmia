@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -648,6 +649,27 @@ func TestCreateSeededRecordsEntityMap(t *testing.T) {
 		t.Fatalf("file: %q, %v", data, err)
 	}
 	if err := r.checkHistory(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCloseReleasesALockItsDescriptorsShare(t *testing.T) {
+	r, root, p := create(t)
+	// A duplicate descriptor shares the lock the way a child process forked
+	// but not yet executed does.
+	dup, err := syscall.Dup(int(r.lock.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(dup)
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Open(root, p)
+	if err != nil {
+		t.Fatalf("reopen after close: %v", err)
+	}
+	if err := again.Close(); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -82,6 +83,7 @@ func mutation(t *testing.T, c *Client, method, kind string, input any) {
 	}
 }
 func TestRoundTrip(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	s, c := start(t, opts)
 	ctx := context.Background()
@@ -140,6 +142,7 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 func TestRootContention(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	s, c := start(t, opts)
 	before, err := os.Lstat(s.Socket())
@@ -163,6 +166,7 @@ func TestRootContention(t *testing.T) {
 	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
 }
 func TestStaleSocket(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	path := filepath.Join(opts.Config.Root, "osmia.sock")
 	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
@@ -174,6 +178,7 @@ func TestStaleSocket(t *testing.T) {
 	must(t, err)
 }
 func TestForeignLiveSocket(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	path := filepath.Join(opts.Config.Root, "osmia.sock")
 	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
@@ -195,6 +200,7 @@ func TestForeignLiveSocket(t *testing.T) {
 	conn.Close()
 }
 func TestSocketAndLockArtifacts(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"file", "symlink", "lock-symlink"} {
 		t.Run(kind, func(t *testing.T) {
 			opts := fixture(t)
@@ -222,6 +228,7 @@ func TestSocketAndLockArtifacts(t *testing.T) {
 	}
 }
 func TestInvalidDiskRetainsView(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	s, c := start(t, opts)
 	ctx := context.Background()
@@ -277,6 +284,7 @@ func assertCode(t *testing.T, err error, code Code) {
 	}
 }
 func TestErrors(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	s, c := start(t, opts)
 	ctx := context.Background()
@@ -302,6 +310,7 @@ func TestErrors(t *testing.T) {
 	assertCode(t, c.Do(ctx, "GET", Prefix+"/health", nil, nil), Unavailable)
 }
 func TestConcurrentAcknowledgementsSurvive(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	for i := 0; i < 24; i++ {
 		opts.Workstreams = append(opts.Workstreams, config.WorkstreamID(fmt.Sprintf("w_%032x", i)))
@@ -347,6 +356,7 @@ func TestConcurrentAcknowledgementsSurvive(t *testing.T) {
 	}
 }
 func TestCancellationClosesInflightAndReleasesRoot(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	s, err := Start(ctx, opts)
@@ -380,6 +390,7 @@ func TestCancellationClosesInflightAndReleasesRoot(t *testing.T) {
 }
 
 func TestShutdownDrainsAcceptedMutation(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	s, _ := start(t, opts)
 	conn, err := net.Dial("unix", s.Socket())
@@ -412,6 +423,7 @@ func TestShutdownDrainsAcceptedMutation(t *testing.T) {
 	}
 }
 func TestFailedStartupAndConfiguredSocket(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	path := filepath.Join(opts.Config.Root, "runtime.json")
 	must(t, os.WriteFile(path, []byte("not json"), 0600))
@@ -442,6 +454,7 @@ func TestFailedStartupAndConfiguredSocket(t *testing.T) {
 }
 
 func TestStaleDiagnosticsDoNotExposeDiskValues(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	must(t, os.WriteFile(filepath.Join(opts.Config.Root, "runtime.json"), []byte(`{"version":1,"profiles":{"secret-role":"secret-profile"}}`), 0600))
 	_, c := start(t, opts)
@@ -455,4 +468,18 @@ func TestStaleDiagnosticsDoNotExposeDiskValues(t *testing.T) {
 	if bytes.Contains(data, []byte("secret-")) {
 		t.Fatal("stale disk values leaked")
 	}
+}
+
+func TestCloseReleasesTheRootWhileItsLockIsShared(t *testing.T) {
+	t.Parallel()
+	opts := fixture(t)
+	s, err := Start(context.Background(), opts)
+	must(t, err)
+	// A duplicate descriptor shares the lock the way a child process forked
+	// but not yet executed does.
+	dup, err := syscall.Dup(int(s.lock.Fd()))
+	must(t, err)
+	defer syscall.Close(dup)
+	must(t, s.Close())
+	start(t, opts)
 }
