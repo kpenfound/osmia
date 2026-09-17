@@ -13,15 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// Sealing is what a recorded ratification triggers: the seal of the ratified
-// spec and plan, and everything the workstream needs to start building. The
-// gate records the owner's approval and calls it; it owns no state of its own.
-// Sealing the same revisions again is what a retry does, so an implementation
-// makes the seal idempotent.
-type Sealing interface {
-	Seal(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, revision shed.Pin) error
-}
-
 // presentPacket records the workstream's ratification packet as the next
 // revision of shed/round-<n>/packet.json whenever it differs from the packet
 // already recorded. A workstream whose debate has neither concluded nor been
@@ -140,7 +131,7 @@ func (s *Service) ratify(ctx context.Context, raw string, req RatifyRequest) (Ra
 		// The revisions are approved already, so the gate records nothing
 		// again and asks for the sealing: that is how a sealing that failed,
 		// and a service stop between the record and the call, is retried.
-		return s.seal(ctx, o, ratified[i], fmt.Sprintf("workstream %s is ratified at %s already; the sealing is asked for again", o.stream, asked))
+		return s.seal(ctx, o, ratified[i], fmt.Sprintf("workstream %s is ratified at %s already", o.stream, asked))
 	}
 	entries, err := Dissent(o.repository, o.stream)
 	if err != nil {
@@ -168,19 +159,41 @@ func (s *Service) ratify(ctx context.Context, raw string, req RatifyRequest) (Ra
 	return s.seal(ctx, o, record, reason)
 }
 
-// seal triggers the sealing of a recorded ratification and reports whether it
-// started. The ratification is on the record whatever the sealing does, so a
-// sealing that fails is answered as a failure of the sealing alone and the
-// owner asks for it again by ratifying the same revisions again.
+// seal asks for the sealing of a recorded ratification and reports its state:
+// requested by this call, or pending or running already. The ratification is
+// on the record whatever the sealing does; a sealing that failed, and one a
+// service stop left unasked, is asked for again this way.
 func (s *Service) seal(ctx context.Context, o *shedOwner, record shed.Ratification, detail string) (RatifyResponse, *APIError) {
 	out := RatifyResponse{Project: o.project, Workstream: o.stream, Round: record.Round, Spec: record.Revision.Spec, Plan: record.Revision.Plan, Detail: detail}
-	if s.options.Sealing == nil {
-		return out, nil
+	z := &sealer{s: s, repository: o.repository}
+	failed := &APIError{Internal, fmt.Sprintf("cannot read the sealings of workstream %s; check the trace repository", o.stream)}
+	op, requested, err := z.sealing(o.stream, record)
+	if err != nil {
+		return RatifyResponse{}, failed
 	}
-	if err := s.options.Sealing.Seal(ctx, o.project, o.stream, record.Revision); err != nil {
-		return out, &APIError{Internal, fmt.Sprintf("%s is ratified for workstream %s and the sealing did not start; ratify again to ask for it", record.Revision, o.stream)}
+	if !requested || op.Result != nil {
+		k, err := z.request(ctx, o.stream, record)
+		if err != nil && !errors.Is(err, trace.ErrConflict) {
+			return RatifyResponse{}, &APIError{Internal, fmt.Sprintf("%s is ratified for workstream %s and the sealing could not be asked for; ratify again to ask for it", record.Revision, o.stream)}
+		}
+		if err == nil {
+			out.Sealing, out.Detail = "requested", fmt.Sprintf("%s; sealing %d is requested", detail, k)
+			return out, nil
+		}
+		// The controller asked for it first; report that one.
+		if op, requested, err = z.sealing(o.stream, record); err != nil || !requested {
+			return RatifyResponse{}, failed
+		}
 	}
-	out.Sealed = true
+	in, err := decodeSeal(op.Operation)
+	if err != nil {
+		return RatifyResponse{}, failed
+	}
+	state, reason, _ := progress(op)
+	out.Sealing, out.Detail = state, fmt.Sprintf("%s; sealing %d is %s", detail, in.Seal, state)
+	if reason != "" {
+		out.Detail += " after a failed attempt: " + reason
+	}
 	return out, nil
 }
 

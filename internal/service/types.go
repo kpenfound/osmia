@@ -193,15 +193,15 @@ type RatifyRequest struct {
 }
 
 // RatifyResponse reports a recorded ratification: the revisions it approves,
-// the round it was given in, the dispositions it stood on and whether the
-// sealing operation was triggered.
+// the round it was given in, and the state of its sealing: requested by this
+// call, or pending or running from an earlier one.
 type RatifyResponse struct {
 	Project    config.ProjectID    `json:"project"`
 	Workstream config.WorkstreamID `json:"workstream"`
 	Round      int                 `json:"round"`
 	Spec       int                 `json:"spec"`
 	Plan       int                 `json:"plan"`
-	Sealed     bool                `json:"sealed"`
+	Sealing    string              `json:"sealing"`
 	Detail     string              `json:"detail"`
 }
 

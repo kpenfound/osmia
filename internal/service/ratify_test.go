@@ -2,11 +2,9 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -18,40 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-// sealed is a ratification the fake sealing was asked for.
-type sealed struct {
-	project  config.ProjectID
-	stream   config.WorkstreamID
-	revision shed.Pin
-}
-
-// fakeSealing keeps what a passing ratification triggered, and fails while it
-// is told to.
-type fakeSealing struct {
-	mu    sync.Mutex
-	err   error
-	calls []sealed
-}
-
-func (s *fakeSealing) Seal(_ context.Context, project config.ProjectID, stream config.WorkstreamID, revision shed.Pin) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.calls = append(s.calls, sealed{project, stream, revision})
-	return s.err
-}
-
-func (s *fakeSealing) fail(err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.err = err
-}
-
-func (s *fakeSealing) sealed() []sealed {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return slices.Clone(s.calls)
-}
 
 // awaitPacket waits until the packet the API serves recommends what the
 // dissent record now calls for, and returns it. A workstream at its decision
@@ -184,10 +148,10 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 
 	ratified, err := f.c.Ratify(ctx, stream, 1, 1)
 	must(t, err)
-	if ratified.Round != 1 || ratified.Spec != 1 || ratified.Plan != 1 || ratified.Sealed || ratified.Workstream != stream {
+	if ratified.Round != 1 || ratified.Spec != 1 || ratified.Plan != 1 || ratified.Sealing != "requested" || ratified.Workstream != stream {
 		t.Fatalf("ratification %+v", ratified)
 	}
-	if want := "the owner ratified spec.md revision 1 and plan.json revision 1 after round 1, over 1 objection the owner disposed of"; ratified.Detail != want {
+	if want := "the owner ratified spec.md revision 1 and plan.json revision 1 after round 1, over 1 objection the owner disposed of; sealing 1 is requested"; ratified.Detail != want {
 		t.Fatalf("detail %q, want %q", ratified.Detail, want)
 	}
 	record := f.ratification(t, stream, 1)
@@ -198,13 +162,15 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 	if moves := f.ownerMoves(t, stream); !slices.Equal(moves, []string{"overruled-1", "ruled-1", "overruled-1", "ratified-1"}) {
 		t.Fatalf("owner subject went %v", moves)
 	}
-	// The gate changes no state of its own: sealing moves the workstream on.
+	// The gate changes no state of its own: sealing moves the workstream
+	// on, and this clone has no upstream remote to seal from, so the sealing
+	// stays pending and the workstream in the shed.
 	f.stillInShed(t, stream)
-	// Ratifying the same revisions again records nothing again and asks for
-	// the sealing, which this service does not have.
+	// Ratifying the same revisions again records nothing again and reports
+	// the sealing already asked for.
 	again, err := f.c.Ratify(ctx, stream, 1, 1)
 	must(t, err)
-	if again.Sealed || again.Round != 1 || again.Detail != fmt.Sprintf("workstream %s is ratified at %s already; the sealing is asked for again", stream, shed.Pin{Spec: 1, Plan: 1}) {
+	if (again.Sealing != "pending" && again.Sealing != "running") || again.Round != 1 || !strings.HasPrefix(again.Detail, fmt.Sprintf("workstream %s is ratified at %s already; sealing 1 is %s", stream, shed.Pin{Spec: 1, Plan: 1}, again.Sealing)) {
 		t.Fatalf("ratifying twice %+v", again)
 	}
 	if docs := f.documents(t, stream, shed.RatificationDocumentID(1)); len(docs) != 1 {
@@ -391,16 +357,16 @@ func TestRedraftIsAskedForOncePerConclusionAndWaitsForARunner(t *testing.T) {
 }
 
 // Debate the owner skipped is a decision point of its own: the packet says so,
-// and a passing ratification triggers the sealing.
+// and a passing ratification asks for the sealing, which seals it.
 func TestSkippedDebateIsRatifiedAndSeals(t *testing.T) {
 	t.Parallel()
 	f := newDebateFixture(t, 1, 1)
 	ctx := context.Background()
-	sealing := &fakeSealing{}
 	f.stop(t)
-	f.opts.Committee, f.opts.Sealing = nil, sealing
+	f.opts.Committee = nil
 	f.start(t)
 	defer f.stop(t)
+	f.upstream(t)
 	stream := f.handIn(t, "design", handedDesign)
 	f.await(t, stream, sketched)
 
@@ -426,50 +392,17 @@ func TestSkippedDebateIsRatifiedAndSeals(t *testing.T) {
 		t.Fatalf("the notice of the skipped debate %q", notice)
 	}
 
-	// The sealing that fails leaves the ratification recorded and says so.
-	sealing.fail(errors.New("the seal was not written"))
-	_, err := f.c.Ratify(ctx, stream, 1, 1)
-	if !failed(err, Internal) || !strings.Contains(err.Error(), "the sealing did not start") {
-		t.Fatalf("a sealing that failed: %v", err)
-	}
-	if record := f.ratification(t, stream, 1); record.Revision != (shed.Pin{Spec: 1, Plan: 1}) {
-		t.Fatalf("the ratification of a failed sealing %+v", record)
-	}
-	if calls := sealing.sealed(); len(calls) != 1 || calls[0] != (sealed{f.project, stream, shed.Pin{Spec: 1, Plan: 1}}) {
-		t.Fatalf("sealing was asked for %+v", calls)
-	}
-	// Ratifying the same revisions again is how the owner asks for the
-	// sealing that failed, and it is reported once it starts.
-	if _, err := f.c.Ratify(ctx, stream, 1, 1); !failed(err, Internal) {
-		t.Fatalf("a sealing that failed again: %v", err)
-	}
-	sealing.fail(nil)
-	retried, err := f.c.Ratify(ctx, stream, 1, 1)
+	ratified, err := f.c.Ratify(ctx, stream, 1, 1)
 	must(t, err)
-	if !retried.Sealed || retried.Round != 1 || retried.Spec != 1 || retried.Plan != 1 {
-		t.Fatalf("the retried sealing %+v", retried)
-	}
-	if calls := sealing.sealed(); len(calls) != 3 || calls[2] != (sealed{f.project, stream, shed.Pin{Spec: 1, Plan: 1}}) {
-		t.Fatalf("sealing was asked for %+v", calls)
-	}
-	if docs := f.documents(t, stream, shed.RatificationDocumentID(1)); len(docs) != 1 {
-		t.Fatalf("the retries recorded %+v", docs)
-	}
-
-	// The next workstream's ratification triggers the sealing it reports.
-	other := f.handIn(t, "second", handedDesign)
-	f.await(t, other, sketched)
-	if _, err := f.c.ShedSkip(ctx, other); err != nil {
-		t.Fatal(err)
-	}
-	f.awaitPacket(t, other, "ratify: no objection stands")
-	ratified, err := f.c.Ratify(ctx, other, 1, 1)
-	must(t, err)
-	if !ratified.Sealed {
+	if ratified.Sealing != "requested" || ratified.Round != 1 || ratified.Spec != 1 || ratified.Plan != 1 {
 		t.Fatalf("ratification %+v", ratified)
 	}
-	if calls := sealing.sealed(); len(calls) != 4 || calls[3].stream != other {
-		t.Fatalf("sealing was asked for %+v", calls)
+	if record := f.ratification(t, stream, 1); record.Revision != (shed.Pin{Spec: 1, Plan: 1}) || len(record.Dissent) != 0 {
+		t.Fatalf("the ratification %+v", record)
+	}
+	f.awaitFeature(t, stream, RatifiedState)
+	if docs := f.documents(t, stream, shed.RatificationDocumentID(1)); len(docs) != 1 {
+		t.Fatalf("the ratification was recorded %d times", len(docs))
 	}
 }
 
