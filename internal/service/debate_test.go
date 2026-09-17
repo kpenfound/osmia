@@ -1176,3 +1176,34 @@ func TestDebateWithoutACommitteeRunnerStillRepliesAndConcludes(t *testing.T) {
 		t.Fatalf("round 2 ran: %v", ran)
 	}
 }
+
+// A workstream that entered the shed and has had no round asks for none in a
+// service without a committee runner, and gets round 1 from one that has it.
+func TestFirstRoundWaitsForACommitteeRunner(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 1)
+	ctx := context.Background()
+	runner := f.opts.Committee
+	f.stop(t)
+	f.opts.Committee = nil
+	f.start(t)
+	stream := f.handIn(t, "design", handedDesign)
+	f.await(t, stream, sketched)
+	// What a stopped service with a runner got to: the committee and the move
+	// into the shed, not the round.
+	d := &debate{s: f.s, repository: f.repository()}
+	must(t, d.ensureCommittee(ctx, stream, 1))
+	_, err := f.repository().MoveFeatureState(ctx, d.header(InShedState, stream, SketchedState, f.clock.Now()), SketchedState, InShedState, "planted")
+	must(t, err)
+	must(t, d.Pass(ctx))
+	if moves := f.shedMoves(t, stream); len(moves) != 0 || len(f.roundOperations(t, stream)) != 0 {
+		t.Fatalf("a round was requested without a committee runner: %v", moves)
+	}
+	f.stop(t)
+
+	f.member(1, 1, 1, silent)
+	f.opts.Committee = runner
+	f.start(t)
+	defer f.stop(t)
+	f.awaitShed(t, stream, "concluded-1")
+}
