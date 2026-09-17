@@ -34,8 +34,9 @@ type Options struct {
 	ShutdownTimeout time.Duration
 	Reconciliation  reconcile.Options
 	// Threads binds the runner-boundary reconciler to the trace this service
-	// owns. It is called each time a project's trace opens, at startup and when
-	// a project is added, and replaces any runner adapter in Reconciliation.
+	// owns and the configuration it has loaded. It is called each time a
+	// project's trace opens, at startup and when a project is added, and
+	// replaces any runner adapter in Reconciliation.
 	// With Threads set, the service also dispatches every queued workstream turn
 	// on its own, never more than one turn per thread in flight and within the
 	// configured capacity, replacing Reconciliation.Schedule. A runtime pause
@@ -44,7 +45,7 @@ type Options struct {
 	// workstream's chief of staff as queued turns, one per event window, and
 	// each recorded answer to a question is queued on its asker's thread.
 	// Callers must not close the repository.
-	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
+	Threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error)
 	// Librarian supplies the execution boundary of the librarian's
 	// knowledge-base extraction turns. Without it every extraction fails with
 	// a recorded reason and the project stays usable.
@@ -448,7 +449,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		hooks = append(hooks, options.Schedule)
 	}
 	if threads != nil {
-		bound, err := threads(repository)
+		bound, err := threads(repository, cfg)
 		if err != nil {
 			repository.Close()
 			return nil, nil, err

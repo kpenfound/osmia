@@ -160,6 +160,11 @@ func TestTurnConfigurationCanOnlyNarrow(t *testing.T) {
 	if len(h.requests[0].Tools) != 1 || h.requests[0].Tools[0].Name != "file_read" || engine.Requests[0].Grants.Mounts[0].Access == agent.ReadWrite {
 		t.Fatal("configuration widened grant")
 	}
+	// The host is told the turn's execution settings, which decide where the
+	// turn reaches its server from.
+	if want := (a.ExecutionSettings{Mode: "container", Image: "fixture-image"}); !reflect.DeepEqual(h.requests[0].Execution, want) {
+		t.Fatalf("host request execution %+v, want %+v", h.requests[0].Execution, want)
+	}
 	// Removing every requested tool also removes the MCP endpoint and token.
 	r.Select = func(ctx context.Context, scope a.Scope) (Selection, error) {
 		selected, err := selectBase(ctx, scope)

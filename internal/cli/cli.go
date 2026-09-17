@@ -113,6 +113,9 @@ func parse(args []string) (o options, err error) {
 	return o, nil
 }
 
+// enforcement is what serve runs role turns through.
+var enforcement = service.CoreEnforcement
+
 // Run reads hand-in input from stdin, writes results to stdout and
 // diagnostics to stderr, and returns a documented exit code. Client execution
 // never loads configuration or opens runtime files.
@@ -166,7 +169,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return 2
 	}
 	if cmd == "serve" {
-		if err := service.Run(ctx, service.Options{Config: config.Options{Root: root.String()}}); err != nil {
+		if err := service.Run(ctx, service.Enforce(service.Options{Config: config.Options{Root: root.String()}}, enforcement())); err != nil {
 			// Startup errors may contain raw TOML values or paths; do not echo them.
 			fmt.Fprintln(stderr, "service startup failed: check root/configuration/runtime permissions and validity; stop any existing owner before starting; socket must be unused or stale")
 			return 6

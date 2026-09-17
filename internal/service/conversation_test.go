@@ -85,7 +85,7 @@ func conversationFixture(t *testing.T, prefix string) (Options, *config.Config) 
 
 // runChief binds the fake chief of staff through the thread dispatcher.
 func runChief(opts *Options, cfg *config.Config, turns *chiefTurns) {
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: opts.Reconciliation.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(cfg.Root.String(), "sessions", in.Agent, in.Turn)}, nil

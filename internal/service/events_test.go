@@ -68,7 +68,7 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	})
 	var bound sync.Mutex
 	var live *trace.Repository
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		bound.Lock()
 		live = r
 		bound.Unlock()

@@ -448,8 +448,36 @@ These messages name the workstream or project. A rejected message is not
 recorded. Messages are accepted without a turn reconciler, but only a service
 with `Options.Threads` runs them.
 
+## Running turns
+
+`osmia serve` starts the service with `service.Enforce(opts,
+service.CoreEnforcement())`, which sets `Options.Librarian`,
+`Options.Architect` and `Options.Threads`, so a served project runs real role
+turns: extraction after `project add`, drafting after a hand-in, and every
+queued chief-of-staff turn. All three use one `Enforcement`:
+
+| Part | Production value |
+|---|---|
+| `Engine` | `coreadapter.CoreEngine`: each role's enforcer for its configured `sandbox` and `image` |
+| `Hosts` | `coreadapter.MCPHost` serving host turns with `CoreTransport` and container turns with `ContainerTransport` |
+
+`Options.Threads` binds the thread dispatcher to isolated turns that grant only
+the chief of staff, with `set_status`, `answer`, `escalate`, `relay_ruling`,
+`route_amendment` and `propose_charter`. A thread turn of any other role fails with the recorded
+reason `role has no service grant`. The chief of staff's workspace is an empty
+directory, `workspaces/<project-id>/<workstream-id>` under the root; its context
+is in the prompt. Its session directories are under
+`threads/<project-id>/<workstream-id>/<agent-id>/<turn-id>`. Its sandbox, image
+and the root come from the configuration the service loaded at startup, like
+every other role's; an edited configuration on disk takes effect on restart.
+Thread turns record UTC times.
+
+A role whose sandbox the platform cannot enforce, such as `claude` on Linux,
+fails each of its turns with core's reason, recorded like any failed turn. The
+service keeps running and the other roles' turns still run.
+
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
-opened, each time a project's trace opens: at startup and when a project is
+opened and the configuration it loaded, each time a project's trace opens: at startup and when a project is
 added. It replaces any runner adapter in `Options.Reconciliation` for every
 runner operation except the librarian's `kb-extract` action and the
 architect's `architect-draft` action, which the service reconciles itself. The [thread dispatcher](trace.md#turn-dispatch) is the

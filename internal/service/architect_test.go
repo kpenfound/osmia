@@ -1237,7 +1237,7 @@ func TestSchedulerLeavesArchitectTurnsToTheDrafter(t *testing.T) {
 	// without running the architect's isolated turn path, the draft still runs
 	// through the drafter and the scheduler publishes no operation for it.
 	opts, clone, engine, sessions, clock := newArchitectOptions(t)
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		return &completedRunner{}, nil
 	}
 	f2 := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}

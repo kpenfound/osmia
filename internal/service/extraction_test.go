@@ -776,7 +776,7 @@ func TestSchedulerLeavesLibrarianTurnsToTheExtractor(t *testing.T) {
 	// The bound thread reconciler would complete any turn operation the
 	// scheduler published for the librarian without running the librarian's
 	// isolated turn path.
-	f.opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	f.opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		return &completedRunner{}, nil
 	}
 	f.script("extract-1-1", map[string]string{"output/kb/trace.md": "# trace\n", "output/kb/entities.json": refined}, nil)

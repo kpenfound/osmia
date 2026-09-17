@@ -87,7 +87,7 @@ func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
 	turns := &blockingTurns{fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply("first"), reply("second"))}, hooks: map[string]func(context.Context){}}
 	var bound sync.Mutex
 	var live *trace.Repository
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		bound.Lock()
 		live = r
 		bound.Unlock()
@@ -211,7 +211,7 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Answer"}}
 	turns := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply)}
 	lives := make(chan *trace.Repository, 1)
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		lives <- r
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
@@ -291,7 +291,7 @@ func TestServiceParksWaitingThreadAcrossRestart(t *testing.T) {
 	answered := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Thanks"}}
 	turns := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](waiting, answered)}
 	lives := make(chan *trace.Repository, 1)
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		lives <- r
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
@@ -404,7 +404,7 @@ func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
 		turns.hooks[id] = func(ctx context.Context) { started <- id; block(ctx) }
 	}
 	lives := make(chan *trace.Repository, 1)
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		lives <- r
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {

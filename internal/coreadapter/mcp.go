@@ -5,8 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"os/exec"
+	"runtime"
 	"slices"
+	"strings"
 
+	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/busybees/core/mcphost"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -17,7 +22,10 @@ import (
 type MCPTransport interface {
 	Start(context.Context, *mcp.Server) (Endpoint, Lease, error)
 }
-type MCPHost struct{ Transport MCPTransport }
+
+// MCPHost serves a turn's scoped tools with Transport, or with Container for
+// a turn in the container mode when Container is set.
+type MCPHost struct{ Transport, Container MCPTransport }
 
 var _ MCPHosts = (*MCPHost)(nil)
 
@@ -29,10 +37,14 @@ func (h *MCPHost) Host(ctx context.Context, req HostRequest) (HostedMCP, error) 
 	if err != nil {
 		return HostedMCP{}, err
 	}
-	if h.Transport == nil {
+	transport := h.Transport
+	if req.Execution.Mode == agent.SandboxContainer && h.Container != nil {
+		transport = h.Container
+	}
+	if transport == nil {
 		return HostedMCP{}, unsupported("MCP transport", "no transport supplied")
 	}
-	endpoint, lease, err := h.Transport.Start(ctx, server)
+	endpoint, lease, err := transport.Start(ctx, server)
 	if err != nil {
 		return HostedMCP{}, err
 	}
@@ -125,4 +137,44 @@ func (t CoreTransport) Start(ctx context.Context, server *mcp.Server) (Endpoint,
 	}
 	return Endpoint{URL: url, BearerTokenEnvironment: TokenEnvironment, Token: endpoint.Token},
 		&releaseLease{release: func(context.Context) error { return lease.Close() }}, nil
+}
+
+// ContainerHost is the name a container turn reaches the host by. Core's
+// container sessions resolve it on macOS and Linux.
+const ContainerHost = "host.docker.internal"
+
+// hostOS is the platform ContainerTransport listens for.
+var hostOS = runtime.GOOS
+
+// ContainerTransport is the CoreTransport of container turns: each server
+// listens where a container reaches the host, the loopback on macOS and the
+// bridge gateway of the container engine on Linux, and its URL names
+// ContainerHost. engine is the container engine's executable, asked for the
+// gateway when a turn starts.
+func ContainerTransport(engine string) CoreTransport {
+	return CoreTransport{Via: ContainerHost, Serve: func(ctx context.Context, server *mcp.Server) (mcphost.Endpoint, mcphost.Lease, error) {
+		if hostOS != "linux" {
+			return mcphost.Start(ctx, server)
+		}
+		gateway, err := bridgeGateway(ctx, engine)
+		if err != nil {
+			return mcphost.Endpoint{}, nil, err
+		}
+		return mcphost.StartOn(ctx, server, net.JoinHostPort(gateway, "0"))
+	}}
+}
+
+// bridgeGateway asks engine for the gateway address of its bridge network.
+// TODO: core decides the same address for its own MCP server; remove this
+// once busybees/core exports it.
+func bridgeGateway(ctx context.Context, engine string) (string, error) {
+	out, err := exec.CommandContext(ctx, engine, "network", "inspect", "bridge", "--format", "{{(index .IPAM.Config 0).Gateway}}").Output()
+	if err != nil {
+		return "", fmt.Errorf("find the address a container reaches the host by (%s network inspect bridge): %w", engine, err)
+	}
+	gateway := strings.TrimSpace(string(out))
+	if net.ParseIP(gateway) == nil {
+		return "", fmt.Errorf("%s network inspect bridge reported %q, not an address", engine, gateway)
+	}
+	return gateway, nil
 }

@@ -79,7 +79,7 @@ func TestM2HandInToSketchedPlan(t *testing.T) {
 
 	chief := &handoverChief{prompts: map[string][]string{}, written: map[string]string{}}
 	engine.turns["*"] = chief.turn
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		turns := &isolation.Turns{Workspaces: stagedWorkspaces{}, Views: isolation.Views{Directory: filepath.Join(root, "views")}, Engine: engine,
 			Grants: map[string]coreadapter.Capabilities{trace.ChiefOfStaff: {Tools: []string{status.ToolName}}},
 			Select: func(_ context.Context, scope coreadapter.Scope) (isolation.Selection, error) {

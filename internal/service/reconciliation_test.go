@@ -159,7 +159,10 @@ func TestServiceThreadsErrorReleasesTrace(t *testing.T) {
 	runnerIntent(t, opts)
 	failure := errors.New("threads unavailable")
 	var bound *trace.Repository
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) { bound = r; return nil, failure }
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
+		bound = r
+		return nil, failure
+	}
 	s, err := Start(context.Background(), opts)
 	if s != nil {
 		s.Close()
@@ -188,7 +191,7 @@ func TestServiceThreadsReplaceRunnerAdapter(t *testing.T) {
 	adapters := map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: forbidden}
 	opts.Reconciliation = reconcile.Options{Now: func() time.Time { return now }, Ticks: ticks, Adapters: adapters}
 	threads := &completedRunner{}
-	opts.Threads = func(*trace.Repository) (coreadapter.Reconciler, error) { return threads, nil }
+	opts.Threads = func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error) { return threads, nil }
 	s, err := Start(context.Background(), opts)
 	must(t, err)
 	select {
