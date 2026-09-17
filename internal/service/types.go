@@ -218,6 +218,50 @@ type StatusView struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// InboxResponse lists the escalations waiting for the owner's ruling, by
+// inbox number.
+type InboxResponse struct {
+	Entries []InboxEntry `json:"entries"`
+}
+
+// InboxEntry is one escalation: the questions the chief of staff sent the
+// owner as one ask. Number is what osmia answer accepts. Question is the chief
+// of staff's rephrasing and Asked holds the questions as their askers put them.
+type InboxEntry struct {
+	Number         int                 `json:"number"`
+	Workstream     config.WorkstreamID `json:"workstream"`
+	Batch          string              `json:"batch"`
+	Question       string              `json:"question"`
+	Blocked        string              `json:"blocked"`
+	Options        []string            `json:"options"`
+	Recommendation string              `json:"recommendation"`
+	EscalatedAt    time.Time           `json:"escalated_at"`
+	Asked          []InboxQuestion     `json:"asked"`
+}
+
+// InboxQuestion is one question of an escalation as its asker put it.
+type InboxQuestion struct {
+	ID       string `json:"id"`
+	AskedBy  string `json:"asked_by"`
+	Unit     string `json:"unit,omitempty"`
+	Question string `json:"question"`
+}
+
+// AnswerRequest is the owner's ruling on an inbox entry.
+type AnswerRequest struct {
+	Text string `json:"text"`
+}
+
+// AnswerResponse reports a recorded ruling and the questions it covers.
+type AnswerResponse struct {
+	Number     int                 `json:"number"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	Batch      string              `json:"batch"`
+	Questions  []string            `json:"questions"`
+	Ruling     string              `json:"ruling"`
+	At         time.Time           `json:"at"`
+}
+
 // SendRequest is an owner message to a workstream's chief of staff.
 type SendRequest struct {
 	Text string `json:"text"`

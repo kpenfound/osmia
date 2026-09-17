@@ -49,6 +49,7 @@ type Bundle struct {
 	Missing   []MissingProse   `json:"missing"`
 	Entities  Entities         `json:"entities"`
 	Decisions []Decision       `json:"decisions"`
+	Notices   []Notice         `json:"notices"`
 }
 
 // Charter is the recorded charter revision and its citable rules.
@@ -99,7 +100,22 @@ type Decision struct {
 	QuestionRevision int                 `json:"question_revision"`
 	At               time.Time           `json:"at"`
 	Decision         string              `json:"decision"`
+	OwnerResponse    string              `json:"owner_response,omitempty"`
 	ReturnedAnswer   string              `json:"returned_answer"`
+	Scope            string              `json:"scope,omitempty"`
+}
+
+// Notice is an owner ruling the chief of staff relayed with scope notify. It
+// applies to the whole project, so every bundle on the project carries it,
+// whatever workstream recorded it and whatever the bundle's scope. A ruling
+// relayed to a batch of questions is one notice.
+type Notice struct {
+	Source     string              `json:"source"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	Record     string              `json:"record"`
+	Revision   int                 `json:"revision"`
+	At         time.Time           `json:"at"`
+	Text       string              `json:"text"`
 }
 
 // Files is the provider that reads only the project's local files and trace.
@@ -119,7 +135,8 @@ func (Files) Mode(config.ProjectID) Mode { return ModeFile }
 
 // Assemble reads the charter through the trace, which first records any
 // unrecorded owner edit, then the knowledge base, the entity map and the
-// rulings, in that order.
+// rulings, in that order. The notices are the project's rulings with scope
+// notify, ordered as the decisions are.
 func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Scope) (Bundle, error) {
 	if f.Repository == nil {
 		return Bundle{}, errors.New("file context provider has no trace")
@@ -132,7 +149,7 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 	if f.Now != nil {
 		now = f.Now
 	}
-	b := Bundle{Project: project, Mode: ModeFile, Scope: scope, Knowledge: []Prose{}, Missing: []MissingProse{}, Decisions: []Decision{}}
+	b := Bundle{Project: project, Mode: ModeFile, Scope: scope, Knowledge: []Prose{}, Missing: []MissingProse{}, Decisions: []Decision{}, Notices: []Notice{}}
 	doc, err := repo.Charter(ctx, now().UTC())
 	if err != nil {
 		return Bundle{}, fmt.Errorf("charter: %w", err)
@@ -155,6 +172,20 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 	}
 	if b.Decisions, err = decisions(repo, scope.Workstream); err != nil {
 		return Bundle{}, fmt.Errorf("decisions: %w", err)
+	}
+	all, err := decisions(repo, "")
+	if err != nil {
+		return Bundle{}, fmt.Errorf("notices: %w", err)
+	}
+	for _, d := range all {
+		// One relay gives every ruling of its batch the same text at the same
+		// time; it is one notice, sourced from the first of them.
+		same := func(n Notice) bool {
+			return n.Workstream == d.Workstream && n.At.Equal(d.At) && n.Text == d.ReturnedAnswer
+		}
+		if d.Scope == trace.ScopeNotify && !slices.ContainsFunc(b.Notices, same) {
+			b.Notices = append(b.Notices, Notice{Source: d.Source, Workstream: d.Workstream, Record: d.Record, Revision: d.Revision, At: d.At, Text: d.ReturnedAnswer})
+		}
 	}
 	return b, nil
 }
@@ -289,7 +320,7 @@ func decisions(repo *trace.Repository, stream config.WorkstreamID) ([]Decision, 
 			latest[r.ID] = r
 		}
 		for _, r := range latest {
-			out = append(out, Decision{Source: trace.RecordPath(r), Workstream: ws, Record: r.ID, Revision: r.Revision, QuestionID: r.QuestionID, QuestionRevision: r.QuestionRevision, At: r.At, Decision: r.Decision, ReturnedAnswer: r.ReturnedAnswer})
+			out = append(out, Decision{Source: trace.RecordPath(r), Workstream: ws, Record: r.ID, Revision: r.Revision, QuestionID: r.QuestionID, QuestionRevision: r.QuestionRevision, At: r.At, Decision: r.Decision, OwnerResponse: r.OwnerResponse, ReturnedAnswer: r.ReturnedAnswer, Scope: r.Scope})
 		}
 	}
 	slices.SortFunc(out, func(x, y Decision) int {

@@ -3,6 +3,7 @@ package trace
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -18,18 +19,42 @@ import (
 const (
 	QuestionOpen      = "open"
 	QuestionEscalated = "escalated"
+	QuestionRuled     = "ruled"
 	QuestionAnswered  = "answered"
 )
 
-// DecisionAnswer is the Decision of a ruling the chief of staff recorded by
-// answering from the record.
-const DecisionAnswer = "answer"
+// The Decision of a ruling: DecisionAnswer when the chief of staff answered
+// from the record, DecisionRuling when the owner ruled on an escalation.
+const (
+	DecisionAnswer = "answer"
+	DecisionRuling = "ruling"
+)
+
+// The Scope of a relayed owner ruling. A local ruling reaches only the askers;
+// a notify ruling is also a notice to the whole project.
+const (
+	ScopeLocal  = "local"
+	ScopeNotify = "notify"
+)
+
+// ErrInboxEntry reports an inbox number no escalation of the project carries.
+var ErrInboxEntry = errors.New("no such inbox entry")
+
+// ErrRuled reports an inbox entry that already has the owner's ruling.
+var ErrRuled = errors.New("inbox entry already has the owner's ruling")
+
+func validRulingScope(r Ruling) bool {
+	if r.Scope == "" {
+		return true
+	}
+	return (r.Scope == ScopeLocal || r.Scope == ScopeNotify) && present(r.ReturnedAnswer)
+}
 
 // QuestionSubject is the workflow subject holding one question's state.
 func QuestionSubject(id string) string { return "question_" + id }
 
 func (e Escalation) valid(id string) bool {
-	if !key(e.Batch) || !slices.Contains(e.Questions, id) || !present(e.Blocked) || !present(e.Recommendation) {
+	if !key(e.Batch) || e.Inbox < 1 || !slices.Contains(e.Questions, id) || !present(e.Blocked) || !present(e.Recommendation) {
 		return false
 	}
 	for _, q := range e.Questions {
@@ -136,13 +161,9 @@ func (r *Repository) questionTurn(ctx context.Context, agent string, scope corea
 	return q, log, v, records, err
 }
 
-func questionTransition(h Header, id, from, to, reason string) Transaction {
+func questionTransition(v *workflowView, h Header, id, from, to, reason string) Transaction {
 	h.Schema, h.ID, h.Revision = "osmia.trace.transition", QuestionSubject(id)+"_"+to, 1
-	version := uint64(0)
-	if from != "" {
-		version = 1
-	}
-	return Transaction{ExpectedVersion: version, Transition: Transition{Header: h, Subject: QuestionSubject(id), From: from, To: to, Reason: reason}}
+	return Transaction{ExpectedVersion: v.states[QuestionSubject(id)].Version, Transition: Transition{Header: h, Subject: QuestionSubject(id), From: from, To: to, Reason: reason}}
 }
 
 // Ask records text as the workstream's next question, numbered from 1, asked
@@ -182,7 +203,7 @@ func (r *Repository) Ask(ctx context.Context, agent string, scope coreadapter.Sc
 	if err := validate(question); err != nil {
 		return Question{}, err
 	}
-	tx := questionTransition(h, id, "", QuestionOpen, fmt.Sprintf("The %s asked question %s", scope.Role, id))
+	tx := questionTransition(v, h, id, "", QuestionOpen, fmt.Sprintf("The %s asked question %s", scope.Role, id))
 	tx.Events = []Event{Notice(tx.Transition.ID, "question", fmt.Sprintf("Question %s is open, asked by the %s: %s", id, scope.Role, strings.TrimSpace(text)))}
 	files, _, err := r.stage(stream, log, v, []Record{question}, tx)
 	if err != nil {
@@ -207,6 +228,8 @@ func openQuestion(existing []QuestionState, id string) (QuestionState, error) {
 			return q, nil
 		case QuestionEscalated:
 			return q, refused("question %s is escalated to the owner; only the owner's ruling answers it", id)
+		case QuestionRuled:
+			return q, refused("question %s has the owner's ruling; relay it with relay_ruling", id)
 		case QuestionAnswered:
 			return q, refused("question %s is already answered", id)
 		default:
@@ -260,7 +283,7 @@ func (r *Repository) AnswerQuestion(ctx context.Context, agent string, scope cor
 			return Ruling{}, fmt.Errorf("%w: ruling %s already exists", ErrConflict, id)
 		}
 	}
-	tx := questionTransition(h, id, QuestionOpen, QuestionAnswered, fmt.Sprintf("The chief of staff answered question %s citing %s", id, strings.Join(citations, ", ")))
+	tx := questionTransition(v, h, id, QuestionOpen, QuestionAnswered, fmt.Sprintf("The chief of staff answered question %s citing %s", id, strings.Join(citations, ", ")))
 	files, _, err := r.stage(stream, log, v, []Record{ruling}, tx)
 	if err != nil {
 		return Ruling{}, err
@@ -284,7 +307,7 @@ type EscalationRequest struct {
 
 // EscalateQuestions marks every listed open question escalated in one commit:
 // each gets a revision carrying the rephrasing and the escalation, whose
-// batch ID it returns. A turn of another role fails. Unless every question is
+// batch ID it returns. The escalation takes the project's next inbox number. A turn of another role fails. Unless every question is
 // open, none is escalated and the request is refused with *QuestionRefused.
 func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope coreadapter.Scope, req EscalationRequest, at time.Time) (string, error) {
 	r.mu.Lock()
@@ -310,7 +333,7 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 	}
 	stream := config.WorkstreamID(scope.Workstream)
 	existing := questions(records, v, stream)
-	escalation := &Escalation{Batch: "escalation_" + req.Questions[0], Questions: slices.Clone(req.Questions), Blocked: req.Blocked, Options: slices.Clone(req.Options), Recommendation: req.Recommendation}
+	escalation := &Escalation{Batch: "escalation_" + req.Questions[0], Inbox: nextInbox(records), Questions: slices.Clone(req.Questions), Blocked: req.Blocked, Options: slices.Clone(req.Options), Recommendation: req.Recommendation}
 	var revisions []Record
 	var txs []Transaction
 	for i, id := range req.Questions {
@@ -329,7 +352,7 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 			return "", err
 		}
 		revisions = append(revisions, next)
-		txs = append(txs, questionTransition(next.Header, id, QuestionOpen, QuestionEscalated, fmt.Sprintf("The chief of staff escalated question %s to the owner in %s", id, escalation.Batch)))
+		txs = append(txs, questionTransition(v, next.Header, id, QuestionOpen, QuestionEscalated, fmt.Sprintf("The chief of staff escalated question %s to the owner in %s", id, escalation.Batch)))
 	}
 	files, _, err := r.stage(stream, log, v, revisions, txs...)
 	if err != nil {

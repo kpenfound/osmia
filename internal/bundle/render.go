@@ -88,7 +88,24 @@ func (b Bundle) Render() string {
 	for _, d := range b.Decisions {
 		line("- %s (record %s revision %d, question %s revision %d)", d.Source, d.Record, d.Revision, d.QuestionID, d.QuestionRevision)
 		line("  decision: %s", indent(d.Decision))
-		line("  answer: %s", indent(d.ReturnedAnswer))
+		if d.OwnerResponse != "" {
+			line("  owner: %s", indent(d.OwnerResponse))
+		}
+		if d.ReturnedAnswer == "" {
+			line("  answer: waiting for the chief of staff to relay the ruling")
+		} else {
+			line("  answer: %s", indent(d.ReturnedAnswer))
+		}
+	}
+
+	line("")
+	line("## Notices")
+	if len(b.Notices) == 0 {
+		line("No project-wide notices.")
+	}
+	for _, n := range b.Notices {
+		line("- %s (record %s revision %d, workstream %s)", n.Source, n.Record, n.Revision, n.Workstream)
+		line("  notice: %s", indent(n.Text))
 	}
 	return w.String()
 }

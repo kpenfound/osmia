@@ -38,7 +38,7 @@ does not infer authority, readiness or workflow transitions from them.
 | `Document` | `documents.jsonl` and its document path | Path and complete content of each revision; a handed document also records its source |
 | `Transition` | `events.jsonl` | Subject, prior/resulting state and reason |
 | `Question` | `questions/<id>/question.jsonl` | Asking actor, its thread and turn, the question as asked, and once escalated the owner-facing text and the escalation; see [questions](#questions) |
-| `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer, citations and affected references |
+| `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer, scope, citations and affected references; a ruling holds a returned answer, an owner response or both, and a scope only with a returned answer; see [questions](#questions) |
 | `Agent` | `agents/<id>/identity.jsonl` | Stable role/thread identity and backend session at that revision |
 | `TurnRequest` | `agents/<agent-id>/log.jsonl` | Thread/turn identity, accepted profile, system prompt, request and caller-supplied context |
 | `TurnResponse` | `agents/<agent-id>/log.jsonl` | Exact request revision, thread/turn identity, adapter result and any execution failure |
@@ -512,9 +512,10 @@ one returns `{"stored":true,"revision":n}`. Turn isolation grants the tool to
 A role's question, the chief of staff's one choice for it and the answer's
 way back are records under `workstreams/<id>/questions/<n>/`, where `n` counts
 the workstream's questions from 1. Each question also has a workflow subject,
-`trace.QuestionSubject(n)` (`question_<n>`), whose state is `open`, `answered`
-or `escalated`. The state leaves `open` once, so a question gets exactly one
-choice. Every write below is one commit through the journaled publication
+`trace.QuestionSubject(n)` (`question_<n>`), whose state is `open`, `answered`,
+`escalated` or, once the owner ruled on an escalation, `ruled`. The state
+leaves `open` once, so a question gets exactly one choice; an escalated
+question moves on to `ruled` and then `answered`. Every write below is one commit through the journaled publication
 boundary: the records, the transition in `events.jsonl` and any event appear
 together or not at all. Each write requires the calling scope to name this
 service session's active, uncaptured turn, as `SetStatus` does, and a scope of
@@ -526,7 +527,7 @@ the agent, and writes nothing.
 | --- | --- | --- |
 | `Ask(ctx, agent, scope, text, at)` | Revision 1 of `Question` `n`: `asked_by` (the agent), `thread`, `turn` and the scope's unit, with `question` as asked. | `question_<n>_open`, from nothing to `open`, with one `notice` event for the chief of staff: `Question <n> is open, asked by the <role>: <question>`. |
 | `AnswerQuestion(ctx, agent, scope, n, text, citations, at)` | Revision 1 of `Ruling` `n`: `question_id`, the question's latest revision, `decision` `answer`, `returned_answer` and `citations`. | `question_<n>_answered`, `open` to `answered`. |
-| `EscalateQuestions(ctx, agent, scope, request, at)` | For every listed question, its next `Question` revision: `sent_to_owner` holds the rephrasing and `escalation` holds `batch`, the batch's `questions`, `blocked`, `options` and `recommendation`. The batch ID is `escalation_` and the first listed question. | `question_<n>_escalated` for each, `open` to `escalated`. |
+| `EscalateQuestions(ctx, agent, scope, request, at)` | For every listed question, its next `Question` revision: `sent_to_owner` holds the rephrasing and `escalation` holds `batch`, the batch's `questions`, `blocked`, `options` and `recommendation`. The batch ID is `escalation_` and the first listed question. `inbox` is the escalation's inbox number: one more than the highest of the project's escalations, in any workstream, so it is unique in the project and never reused. | `question_<n>_escalated` for each, `open` to `escalated`. |
 
 In every record the actor is the calling agent, the cause is its turn
 request's ID and the depth is one more than the request's.
@@ -537,7 +538,8 @@ tools pass on as tool errors. `Ask` refuses an empty question, and a second
 question from a turn that already asked one. `AnswerQuestion` and
 `EscalateQuestions` refuse a question that does not exist, is already
 answered, is escalated (`question <n> is escalated to the owner; only the
-owner's ruling answers it`), or was not asked through `ask` and so has no
+owner's ruling answers it`), is ruled (`question <n> has the owner's ruling;
+relay it with relay_ruling`), or was not asked through `ask` and so has no
 workflow subject. An escalated question therefore cannot then be answered by
 the chief of staff. An answer needs text and at least one citation; an open
 question that already has a ruling record with its number fails with
@@ -550,10 +552,42 @@ the question as asked, its latest revision, the subject's state and the latest
 revision of its ruling. An escalated question has no ruling, so it still
 counts as open in the [workstream status](#workstream-status).
 
+### The owner's ruling
+
+`Inbox()` returns every escalation of the project as an `InboxEntry`, by inbox
+number: the workstream, the batch, the rephrasing, what is blocked, the
+options, the recommendation, when it was escalated, the batch's questions in
+the order they were escalated and their shared state. Entries stay listed
+after they are ruled on; the [service's inbox](service.md#inbox-and-rulings)
+shows those still `escalated`.
+
+| Call | Records | Transition |
+| --- | --- | --- |
+| `Rule(ctx, number, text, owner, at)` | For every question of inbox entry `number`, revision 1 of `Ruling` `n`: `question_id`, the question's latest revision, `decision` `ruling` and `owner_response`, the text as given. The actor is `owner`, the cause `question_<n>_escalated` and the depth one more than the escalation's. | `question_<n>_ruled` for each, `escalated` to `ruled`. The first carries one `notice` event for the chief of staff: `The owner ruled on inbox entry <number>, <batch> (questions <n>, …): <text>`. |
+| `RelayRuling(ctx, agent, scope, n, text, reach, at)` | For every question in the batch of question `n`, revision 2 of its ruling: the owner's revision with `returned_answer`, the text the askers receive, and `scope`, `local` or `notify`. The actor is the calling agent, the cause its turn request's ID and the depth one more than the request's. | `question_<n>_answered` for each, `ruled` to `answered`. |
+
+Each is one commit, so the ruling and its event, and the relay of a whole
+batch, appear together or not at all. `Rule` needs no turn scope: it is the
+owner's write. It fails with `ErrInboxEntry` for a number no escalation
+carries, with `ErrRuled` for an entry that is no longer `escalated`, whether
+its ruling was relayed or not, and with an ordinary error for blank text;
+each writes nothing. `RelayRuling` fails with an ordinary error for a turn
+that is not the chief of staff's. It refuses, with `*QuestionRefused`, a
+question that does not exist, one that is already answered, one without the
+owner's ruling (`question <n> has no ruling from the owner to relay`), blank
+text and a scope other than `local` and `notify`.
+
+A ruling counts from revision 1, so a ruled question no longer counts as open
+in the [workstream status](#workstream-status). A `notify` ruling is a notice
+in every later [bundle](context.md) on the project; a `local` one reaches only
+the askers.
+
+### Tools and delivery
+
 `internal/questions` holds the tools. `questions.Tools(repository, agent,
 scope, now)` returns the memory tools of one claimed turn by role: `ask` for
-every role but the chief of staff, and `answer`, `escalate`, `route_amendment`
-and `propose_charter` for the chief of staff. The
+every role but the chief of staff, and `answer`, `escalate`, `relay_ruling`,
+`route_amendment` and `propose_charter` for the chief of staff. The
 [role grant](isolation.md#capabilities) enforces the same split whatever the
 service grants. Unknown input fields are rejected. A refusal is an ordinary
 tool result, `{"recorded":false,"reason":"…"}`, so the agent reads why.
@@ -563,6 +597,7 @@ tool result, `{"recorded":false,"reason":"…"}`, so the agent reads why.
 | `ask` | `question` | `{"recorded":true,"question":"<n>","next":"…"}` |
 | `answer` | `question`, `text`, `citations` | `{"recorded":true,"question":"<n>","next":"…"}` |
 | `escalate` | `questions`, `rephrasing`, `blocked`, `options`, `recommendation` | `{"recorded":true,"batch":"escalation_<n>","questions":[…]}` |
+| `relay_ruling` | `question`, `text`, `scope` (`local` or `notify`) | `{"recorded":true,"questions":[…],"scope":"…","next":"…"}`, naming every question of the batch |
 | `route_amendment`, `propose_charter` | any object | Always `{"recorded":false,"reason":"reserved until amendments and standing rulings (M4)"}`; they read and write nothing. |
 
 Before `answer` records anything, `questions.Resolve` checks every citation
@@ -594,7 +629,10 @@ result. It forwards resume checks to the wrapped runner.
 (`questions.TurnID`) with request ID `request_answer_<n>`, actor
 `service`/`questions` and cause `question_<n>_answered`. The prompt is
 `questions.Prompt`: the question number, the question as asked, the answer and
-the citations. The turn carries the asking turn's unit and system prompt and
+the citations. For the owner's ruling it opens `The owner ruled on your
+question <n>. The chief of staff relays the ruling.` instead of `Answer to
+your question <n>.`, and the answer is the relayed text. A ruled question is
+not delivered until the relay moves it to `answered`. The turn carries the asking turn's unit and system prompt and
 the profile `Profile(role)` returns at delivery. The tools only record; this
 pass is the one path that delivers. A question whose thread already holds its
 answer turn is skipped, so a repeated pass or a restart between the record and
