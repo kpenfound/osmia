@@ -468,7 +468,8 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 			repository.Close()
 			return nil, nil, err
 		}
-		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), Profile: s.chiefProfile(cfg), System: s.chiefEventsPrompt(cfg.Project.ID, repository)})
+		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), Profile: s.chiefProfile(cfg), System: s.chiefEventsPrompt(cfg.Project.ID, repository),
+			Skip: func(stream config.WorkstreamID) (bool, error) { return abandoned(repository, stream) }})
 		if err != nil {
 			repository.Close()
 			return nil, nil, err

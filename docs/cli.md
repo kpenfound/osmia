@@ -27,7 +27,10 @@ osmia status --json
 ```
 
 The [onboarding walkthrough](m2-onboarding.md) runs `project add`, `handin`,
-`status` and `project remove` in order for a new project.
+`status` and `project remove` in order for a new project. The
+[chief-of-staff walkthrough](m2-chief-of-staff.md) runs `send`,
+`conversation`, `status`, `inbox` and `answer` on an onboarded project, across
+a service restart.
 
 ## Commands and flags
 

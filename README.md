@@ -51,6 +51,10 @@ from `osmia project add` to a ready charter and a local knowledge base.
 The [M2 hand-in demonstration](docs/m2-demonstration.md) takes handed
 material to a validated spec and plan with a fake architect and chief of staff.
 
+The [M2 chief-of-staff demonstration](docs/m2-chief-of-staff.md) takes a
+worker's question through the chief of staff, the owner's inbox and ruling,
+and back to the worker, across a service restart.
+
 The [charter reference](docs/charter.md) documents the charter template, the
 numbered-rule format and how owner edits are recorded.
 

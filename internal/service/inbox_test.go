@@ -76,6 +76,14 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 		// The prompt replays the thread's earlier turns, so the newest event is
 		// matched first.
 		case strings.Contains(req.Prompt, ", escalation_1 (questions 1, 2): Both are part of the contract."):
+			select {
+			case <-relayed:
+				// The cancelled relaying turn left its event unacknowledged, so
+				// a later lifetime delivers it again.
+				f.mu.Unlock()
+				return questionResult(req, "session-chief", "Already relayed"), nil
+			default:
+			}
 			if strings.Contains(req.SystemPrompt, "  notice: ") {
 				f.problem("a notice before any notify ruling:\n%s", req.SystemPrompt)
 			}
@@ -315,11 +323,12 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	}
 	stop(s, c)
 
-	// Fifth lifetime: everything is delivered, and nothing runs again.
+	// Fifth lifetime: everything is delivered, and nothing runs again. The
+	// cancelled relaying turn's events were delivered once more.
 	s, c, repo = lifetime()
 	f.clock.Advance(24 * time.Hour)
 	f.settle(t, s)
-	if got := runs(); !reflect.DeepEqual(got, map[string]int{"build": 1, "review": 1, "build_other": 1, "events": 4, "answer_1": 2, "answer_2": 1}) {
+	if got := runs(); !reflect.DeepEqual(got, map[string]int{"build": 1, "review": 1, "build_other": 1, "events": 5, "answer_1": 2, "answer_2": 1}) {
 		t.Fatalf("runs: %v", got)
 	}
 	if got := turnsOf(repo, stream, "agent_reviewer"); len(got) != 2 {

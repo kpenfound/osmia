@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,6 +156,80 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 		}
 		if !e.Acknowledged {
 			t.Fatalf("unacknowledged %+v", e)
+		}
+	}
+	if notices != 2 {
+		t.Fatalf("outbox %+v", entries)
+	}
+}
+
+func TestAbandonedWorkstreamEventsAreNotDelivered(t *testing.T) {
+	ctx := context.Background()
+	home, err := os.MkdirTemp("", "eva-")
+	must(t, err)
+	t.Cleanup(func() { os.RemoveAll(home) })
+	opts := fixtureAt(t, home)
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	root := cfg.Root.String()
+
+	clock := &fixedClock{now: demoStart}
+	owner := trace.Actor{Kind: "owner", ID: "local"}
+	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
+	must(t, err)
+	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
+	for i, to := range []string{HandedState, AbandonedState} {
+		h := trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "feature_" + to, Project: project, Workstream: stream, At: clock.Now().Add(time.Duration(i) * time.Second), Actor: owner, Cause: "owner"}
+		_, err := repo.SetFeatureState(ctx, h, to, "Owner moved the feature to "+to)
+		must(t, err)
+	}
+	must(t, repo.Close())
+
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
+		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turnsFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+			return coreadapter.SessionResult{}, errors.New("no turn may run")
+		}), Now: clock.Now},
+			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
+				return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(root, "sessions", in.Agent, in.Turn)}, nil
+			}}, nil
+	}
+	ticks := make(chan time.Time)
+	opts.Reconciliation.Now, opts.Reconciliation.Ticks = clock.Now, ticks
+	// Each restart after an event turn was queued would cancel it and queue
+	// another; the window is closed in every lifetime.
+	for range 2 {
+		s, err := Start(ctx, opts)
+		must(t, err)
+		clock.Advance(time.Hour)
+		for range 3 {
+			select {
+			case ticks <- clock.Now():
+			case <-time.After(demoTimeout):
+				s.Close()
+				t.Fatal("service did not finish its pass")
+			}
+		}
+		must(t, s.Close())
+	}
+
+	repo, err = trace.Open(cfg.Root, cfg.Project)
+	must(t, err)
+	defer repo.Close()
+	th, err := repo.ChiefOfStaffThread(stream)
+	must(t, err)
+	if len(th.Turns) != 0 {
+		t.Fatalf("event turns of an abandoned workstream: %+v", th.Turns)
+	}
+	entries, err := repo.Outbox(stream)
+	must(t, err)
+	notices := 0
+	for _, e := range entries {
+		if e.Event.Kind != trace.NoticeKind {
+			continue
+		}
+		notices++
+		if e.Acknowledged || len(e.History) != 0 {
+			t.Fatalf("event of an abandoned workstream was handled: %+v", e)
 		}
 	}
 	if notices != 2 {

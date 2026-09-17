@@ -716,15 +716,26 @@ The turn's system prompt names the workstream, carries
 [context bundle](context.md) assembled from the local files and trace when the
 turn is queued, which is the chief of staff's whole context for a question.
 
-Delivery claims every event with one new attempt token, queues the turn
-`events.TurnID(token)`, then acknowledges the events. A crash or restart at any
-point neither loses nor repeats an event: an event with a claim whose turn is
-already on the chief-of-staff thread is acknowledged without another turn, and
-any other unacknowledged event is delivered in the next window. A claim whose
-lease ran out before its acknowledgement is settled the same way. A
-failing store call, chief-of-staff profile lookup or bundle assembly stops the loop, as the
-scheduler's errors do; an event another claim holds is skipped and retried on a
-later pass.
+Delivery claims every event with one new attempt token and queues the turn
+`events.TurnID(token)`. An event stays unacknowledged until that turn
+completes. Each pass looks at the chief-of-staff turns an unacknowledged
+event's claims name:
+
+| Turn | What the pass does |
+|---|---|
+| `done` (see the conversation `state` column) | Acknowledges the event, without another turn |
+| Queued or running | Leaves the event alone, even when its claim's lease ran out |
+| `failed`, including a turn a restart interrupted, or no turn | Releases a claim of this service session that still holds the event, then delivers the event again in a new turn with a new token, together with any other pending event |
+
+So an event reaches the chief of staff until a turn carrying it succeeds: a
+turn that fails or that a stop interrupts is not retried, but its events go
+out once more in one new turn, and a restart at any point neither loses an
+event nor delivers it twice alongside a turn still in flight. An event
+claimed by this session with no turn yet, left by a pass that stopped before
+queueing it, is released and delivered in the next turn. An abandoned
+workstream's events are not delivered and stay unacknowledged. A failing store call, chief-of-staff profile lookup or bundle assembly
+stops the loop, as the scheduler's errors do; an event another claim holds is
+skipped and retried on a later pass.
 
 ### Questions
 
@@ -759,7 +770,9 @@ relayed ruling on each asker's original thread.
 
 Questions, choices and deliveries are derived from the trace on every pass. A
 restart with an open question delivers its event once the window closes and
-asks nothing again. A restart between a recorded answer and its delivery
+asks nothing again. An open question whose event turn failed, or was
+interrupted by a stop, reaches the chief of staff again in a new event turn.
+A restart between a recorded answer and its delivery
 queues the answer turn once. An escalated question stays escalated and its
 asker stays parked until the owner rules. A restart after the owner's ruling
 delivers its event once the window closes; a restart after the relay queues
