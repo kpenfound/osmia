@@ -299,9 +299,6 @@ func checkPolicy(p agent.Policy, iso Isolation, settings ExecutionSettings, gran
 	}
 	var servers []string
 	for _, tool := range grants.Tools {
-		if !p.Allows(tool) {
-			return unsupported("session policy", "granted tool "+tool+" is not allowed")
-		}
 		servers = append(servers, strings.TrimPrefix(tool, "mcp__"))
 	}
 	if !slices.Equal(p.MCPServers, servers) {

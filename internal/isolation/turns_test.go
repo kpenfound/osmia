@@ -266,6 +266,24 @@ func TestServiceTurnFailureCleanup(t *testing.T) {
 	}
 }
 
+// tokenless hosts a turn's server without a bearer token.
+type tokenless struct{ *host }
+
+func (h tokenless) Host(ctx context.Context, req a.HostRequest) (a.HostedMCP, error) {
+	hosted, err := h.host.Host(ctx, req)
+	hosted.Endpoint.Token = ""
+	return hosted, err
+}
+
+func TestHostWithoutTokenNeverStarts(t *testing.T) {
+	r, _, h, engine, input := fixture(t, "committee", "container")
+	r.Grants["committee"] = a.Capabilities{Tools: []string{"file_read"}}
+	r.Hosts = tokenless{h}
+	if _, err := r.Run(context.Background(), input); err == nil || len(engine.Enforcers) != 0 || h.released != 1 {
+		t.Fatalf("err=%v enforcers=%d released=%d", err, len(engine.Enforcers), h.released)
+	}
+}
+
 func TestPreparedInputCannotInjectBoundary(t *testing.T) {
 	for _, mutate := range []func(*a.PreparedTurn){
 		func(p *a.PreparedTurn) { p.MCP = []a.Endpoint{{URL: "http://rogue"}} },
