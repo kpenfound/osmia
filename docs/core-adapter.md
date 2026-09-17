@@ -23,12 +23,12 @@ Capabilities describe this pinned version, based on its public API and README.
 | Osmia port | Core package / primitive | Boundary and upstream gaps |
 |---|---|---|
 | `Turns` | `agent.Runner`, `Request`, `Result`, backend implementations | Runs a prepared turn and returns backend identity, final response, outcome, cost knowledge and failure detail. Resume is backend-dependent: the pinned Codex path ignores `ResumeID`. Uniform resumable backends are an upstream gap. Osmia owns log replay, turn queues and profile selection. |
-| `Sandboxes` | `agent.Profile`, sandbox/container primitives; `vcs.Workspace` | Core supplies execution settings and mounts. **Upstream gap:** no verified enforcement boundary covering VCS executable denial, metadata protection, clean host environment, delivery-credential exclusion and repository-tool escalation. The contract separates required isolation from verified isolation; flags or prompts are not verification. Unsupported requirements must fail before launch. |
+| `Sandboxes` | `agent.Grants`, `Runner.Verify`, `ContainerBoundary`; `vcs.Workspace` | Core verifies a request against its complete grants (environment allowlist, tools, mounts, VCS) before starting anything and shadows VCS executables when VCS is not granted. The contract separates required isolation from verified isolation; flags or prompts are not verification. Unsupported requirements must fail before launch. |
 | `MCPHosts` | `mcphost.Registry`, role policies, transports | Hosts supplied role-scoped tools with explicit capabilities. Osmia supplies handlers, fixed routes and outcome validation. No workflow handlers are inherited from busybees. |
 | `Workspaces` | `vcs.Provider`, `Workspace`, `Directory` | Caller owns acquisition and lifetime across turns. Core exposes the provider interface but **no reusable concrete git-worktree provider** in the public module; that implementation is an upstream gap. The lease port neither commits nor rebases nor delivers. |
 | `Reviews` | `review.Runner`, `Bundle`, `ReadArtifact`, findings | Accepts supplied context and diff; retains partial artifacts, findings and session accounting. Core does not bind approval to spec/plan/candidate revisions: Osmia carries that identity and owns approval checks. Interactive review threads belong to Osmia. |
 | `Retries` | `ops.ClassifyFailure`, `RetryPolicy.Decide`, `SelectModel` | Classification and bounded retry advice only; no sleeping or dispatch. **Upstream gap:** model fallback selection does not resolve named profiles across agent binaries. Osmia resolves its profile graph and supplies the selected profile. |
-| `Ledger` | `ops.Ledger`, `Spend` | Accounting storage and totals only. Core append is not an idempotent transaction with workflow state. **Upstream gaps:** strict reads (core skips malformed lines) and explicit cost knowledge. A temporary strict reader fails closed; cost knowledge is encoded in opaque work tags. Attempt reconciliation and durable trace integration belong to Osmia. |
+| `Ledger` | `ops.Ledger`, `Spend` | Accounting storage and totals only. Core append is not an idempotent transaction with workflow state. **Upstream gaps:** strict reads (core ignores a malformed final line) and explicit cost knowledge. A temporary strict reader fails closed; cost knowledge is encoded in opaque work tags. Attempt reconciliation and durable trace integration belong to Osmia. |
 | `Budgets` | `ops.EvaluateWindow` | Numeric threshold/window primitives; pauses, scope selection and degradation responses belong to Osmia. `BudgetRequest` receives already-selected spend. The adapter retains no episode state; the caller supplies the previous threshold state. |
 | `Capacity` | `ops.SharedPool` | All-or-none slot claims. Core's queued-member FIFO order is not Osmia's stage/workstream scheduling policy. The adapter serializes multi-pool claims and rolls back on refusal. Members leave immediately, retaining no FIFO reservation; caller ordering remains authoritative. |
 | `Wakeups` | `ops.NewWake`, `Wake.Signal`, `Wake.Drain` | Coalescing hints plus caller ticks. Signals coalesce in a one-element channel. The adapter returns after one hint or tick; core’s callback-loop `Wake.Wait` is not this port’s contract. Neither this hint nor core’s lossy bus substitutes for the durable outbox or authoritative state reconciliation. |
@@ -47,7 +47,7 @@ provider/MCP credential references. Implementations must deny VCS tools,
 writable VCS metadata, inherited environment and delivery credentials. Read-only
 roles cannot gain write, execution or fetch access through repository tools.
 `internal/isolation.Turns` prepares fresh views and role grants;
-`BoundaryExecutor` checks a stopped engine's established policy before launch.
+`CoreExecutor` runs each turn through core with grants it verifies before launch.
 The [turn isolation reference](isolation.md) describes that integration and its
 limitations. Data types and fake engine reports provide no OS security guarantee.
 
@@ -68,30 +68,26 @@ priority, owner gates, durable queues/logs/outbox and VCS delivery outside core.
 core's profile name; the selected backend/model/effort and limits remain explicit.
 MCP endpoints receive deterministic names, and granted tools are allow-listed
 under those server names (`mcp__<server>__<tool>`), the form the backend matches;
-granted tools without a service endpoint fail translation. The pinned core
-forwards the allow list to Claude only, so other backends are bounded by the
-scoped MCP registry alone. History is prepended as supplied by the caller, and
-resume requests are rejected for incompatible backends or malformed references. `TurnRunner.CheckResume` also requires the enforcing executor to
+granted tools without a service endpoint fail translation. Core restricts
+built-in tools for Claude only, so `CoreExecutor` refuses other backends: they
+would need every built-in tool granted. History is prepended as supplied by the caller, and
+resume requests are rejected for incompatible backends or malformed references. `TurnRunner.CheckResume` also requires the executor to
 implement `ResumeChecker`: it verifies saved-session availability and the exact
 previous/next profile capabilities. An executor without this capability selects
 owned-log replay. The pinned Codex backend always selects replay. Empty outcome
 allowlists accept nothing, including when core's nil list would accept everything.
 
-`SessionExecutor` is the core-facing seam for an enforcing execution boundary.
-Its capability check runs before the execution attempt. Its environment is the
-complete caller allowlist, with literal values; its generic mounts are exactly
-`ExecutionSettings.Mounts`. No VCS workspace resources or VCS environment are
-forwarded, and core's VCS access flag is always false. This is translation, not
-proof of filesystem isolation: the executor must enforce the verified sandbox's
-capabilities, including read-only access and denial of repository-tool escalation.
+`SessionExecutor` is the core-facing execution seam. Its capability check runs
+before the execution attempt. Its environment is the complete caller allowlist,
+with literal values; its generic mounts are exactly `ExecutionSettings.Mounts`.
+No VCS workspace resources or VCS environment are forwarded, and core's VCS
+access flag is always false.
 
-**Live execution is unavailable through `CoreExecutor` at this pin.** Core's
-public runner inherits host environment variables and automatically forwards some
-container credentials; its process/backend abstraction is private. `CoreExecutor`
-therefore returns a typed unsupported-environment error before launch. It does not
-change the process-global environment or treat the VCS flag as isolation. A
-reusable clean-environment execution extension belongs upstream in core. The
-fake executor tests validate request translation, not actual isolation. Unresolved
+`CoreExecutor` is the implementation. It runs the turn through an `Engine`
+(`*agent.Runner` in production) with grants built from the verified isolation
+and refuses a turn core's `Verify` reports outside them; see
+[container verification](isolation.md#container-verification). The fake engine
+tests validate request translation and grants, not actual isolation. Unresolved
 credential references, unsupported sandbox/backend modes, cost caps, and backend
 turn limits or resume modes that core ignores also fail before execution.
 
@@ -132,8 +128,8 @@ this adapter. The result's verdict is empty: findings confer no approval.
 Every phase runs through the supplied concurrency-safe `Turns` implementation,
 with its own turn suffix and session directory. The template must describe a
 verified read-only workspace, denying execution, writes, network and VCS access.
-The enforcing executor still owns tool-level isolation; `CoreExecutor` remains
-unsupported. Core's generic review agent does not bypass the execution boundary.
+The executor owns tool-level isolation. Core's generic review agent does not
+bypass the execution boundary.
 Transferred leases are released once after every phase finishes, including on
 failure, with cancellation removed from the cleanup context.
 
@@ -168,8 +164,8 @@ numeric total and remain separately counted. `Read` returns the decoded scope
 and attempts. `Spend` selects workstreams and an inclusive lower time bound,
 then uses core's sum. Missing files represent no entries; malformed records,
 invalid metadata, file/scan errors and numeric overflow return errors without
-partial totals. A temporary strict scan is required until core exposes a
-fail-closed read mode; its permissive `ReadLedger` cannot meet this contract.
+partial totals. A temporary strict scan is required because core's
+`ReadLedger`, which otherwise fails closed, ignores a malformed final line.
 
 `BudgetAdapter` uses `EvaluateWindow` on caller-selected spend. It reaches a
 positive limit at equality and releases strictly below the supplied resume

@@ -201,7 +201,7 @@ matter, what breaks when you touch what, and the decisions behind it) and
 IDs, and says that `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md` are inputs
 it must not repeat. The turn's profile is the librarian's effective binding at
 the time the turn is accepted; its sandbox settings come from the role's
-configuration.
+configuration and must name a `container`.
 
 ### Output and recording
 

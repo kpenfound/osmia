@@ -7,7 +7,7 @@ file copying, MCP hosting, execution verification and cleanup failures are captu
 in the owned turn response and survive reopening the trace repository.
 
 The service supplies a workspace provider, a view directory under the Osmia root,
-role grants, a scope selector, an MCP host factory and an isolation engine. These
+role grants, a scope selector, an MCP host factory and an execution engine. These
 are Go dependencies, not repository or profile configuration. This path is an
 in-process integration; the local API dispatches no workstream turns. The
 librarian's [knowledge-base extraction](knowledge-base.md#extraction) is the
@@ -35,8 +35,8 @@ The service closes the execution boundary, MCP host, view and provider lease, in
 that order, using a non-cancelled cleanup context. Cleanup errors accompany the
 turn result. Views and MCP credentials are fresh on every turn, including resumed
 threads; backend state is not an authority to reuse a prior grant. The thread
-runner's resume check is forwarded to the enforcing engine through the same
-boundary executor; an engine that cannot verify a saved session selects replay.
+runner's resume check is forwarded to the execution engine through the same
+executor; an engine that cannot verify a saved session selects replay.
 
 ## Capabilities
 
@@ -67,34 +67,42 @@ Only literal `LANG`, `LC_ALL` and `TZ` values may be supplied as public environm
 The service generates `OSMIA_MCP_TOKEN` for a turn's authenticated HTTP MCP host.
 There is no environment inheritance, shell expansion or lookup of host provider,
 GitHub, SSH-agent or cloud/delivery credentials. Unresolved credential references
-fail closed. Provider transport/authentication is the enforcing engine's concern;
+fail closed. Provider transport/authentication is the execution engine's concern;
 it must not give tools general network access or delivery credentials.
 
-## Host and container verification
+## Container verification
 
-`coreadapter.BoundaryExecutor` accepts host (`none`) or container execution and
-constructs one mount: the exact canonical view path, read-only for a read-only
-grant. Extra mounts and domain overrides are rejected. The view is checked again
-for symlinks, special files and VCS metadata before construction. The engine must
-also enforce these restrictions during execution, including path-resolution races
-and nested/alternate mounts; checking path strings alone cannot establish them.
+`coreadapter.CoreExecutor` runs a turn through busybees/core with `agent.Grants`
+built from the verified isolation alone:
 
-The engine prepares a stopped boundary and inspects its established policy before
-the adapter calls `Run`. The inspected mount set, permissions and environment must
-match exactly. Mandatory restrictions cover VCS executables (including shell
-indirection), host files, inherited environment, delivery credentials, tool
-additions, configuration discovery and privilege escalation. Repository tool/skill
-configuration can be present as selected data but must never be loaded as executable
-configuration. Backend session/log directories are service-owned and are not
-additional writable agent mounts. Model-provider and scoped MCP transport must not
-be usable as a general fetch proxy. Missing engines, incomplete inspection or any
-policy mismatch fail before the runtime starts.
+| Grant | Value |
+|---|---|
+| `Mounts` | the exact canonical view path with the view's access; the session directory read-only; for a read-only view, a writable `work` directory inside the session directory, where the session starts, because core runs every session in a writable directory |
+| `Env` | the names of the service environment, which is the complete environment |
+| `Tools` | one `mcp__osmia_<i>` server per scoped endpoint and no built-in tool |
+| `VCS` | not granted |
 
-**No production enforcing engine is supplied at the current core pin.**
-`CoreExecutor` continues to reject launch because core inherits host environment
-and does not expose the required enforcing backend/process boundary. The local
-adapter is ready for an engine with verifiable restrictions; it does not make an
-unrestricted core runner safe. The hermetic engine fixture tests construction,
-permission checks, cleanup and durable failures, not actual OS sandboxing.
+Only `container` execution is accepted. Core's host boundaries cannot keep these
+grants: `none` needs the whole filesystem writable and VCS granted, and `claude`
+reads the whole filesystem. Extra mounts and domain overrides are rejected. The
+view is checked again for symlinks, special files and VCS metadata before
+construction.
+
+The executor first asks the engine's `Verify` for the turn core would run and
+refuses it unless it matches the grants: VCS not granted and `gh`, `git`, `hg`,
+`jj` and `svn` shadowed by stand-ins; no built-in tools; no write directories;
+an environment of the service variables plus the container's `HOME`; and binds
+of the granted mounts only, including the view. Core then verifies the request
+again before it starts anything, and refuses a variable, tool, MCP server or
+mount the grants do not name, VCS access, and a writable mount holding VCS
+metadata. A request field the grants do not describe (VCS environment, skills,
+container-use environment, network domains, a different sandbox or image, a
+different allow list, or an MCP entry other than a service-authenticated HTTP
+endpoint) is refused before verification. Every refusal is an `UnsupportedError`
+returned before the runtime starts.
+
+`*agent.Runner` is the production engine. The hermetic engine fixture verifies
+requests with core's own container boundary and records them; it tests
+construction, permission checks and durable failures, not actual OS sandboxing.
 `os.Root`, MCP filtering and profile flags are application restrictions and are
 not, by themselves, an OS security sandbox.
