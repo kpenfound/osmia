@@ -185,7 +185,7 @@ func TestAbandonedWorkstreamEventsAreNotDelivered(t *testing.T) {
 	}
 	must(t, repo.Close())
 
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turnsFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 			return coreadapter.SessionResult{}, errors.New("no turn may run")
 		}), Now: clock.Now},
