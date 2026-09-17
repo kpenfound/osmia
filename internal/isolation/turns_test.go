@@ -126,7 +126,7 @@ func TestServiceTurnsApplyRoleCeilingAndFreshViews(t *testing.T) {
 					t.Fatal("service lifecycle incomplete")
 				}
 				for _, req := range engine.Requests {
-					if (req.Grants.Mounts[0].Access == agent.ReadWrite) != writable || req.Grants.VCS || len(req.Grants.Mounts) != 2 {
+					if (req.Grants.Mounts[0].Access == agent.ReadWrite) != writable || req.Grants.VCS || len(req.Grants.Mounts) != map[bool]int{true: 2, false: 3}[writable] {
 						t.Fatal("role boundary missing")
 					}
 					if _, err := os.Stat(req.Grants.Mounts[0].Path); !errors.Is(err, os.ErrNotExist) {

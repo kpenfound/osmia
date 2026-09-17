@@ -2,6 +2,7 @@ package coreadapter
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"maps"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/kpenfound/busybees/core/agent"
+	"github.com/kpenfound/busybees/core/vcs"
 )
 
 // Engine starts sessions inside the boundary their grants describe.
@@ -26,10 +28,10 @@ var _ Engine = (*agent.Runner)(nil)
 
 // CoreExecutor binds one turn to a service-selected isolation and runs it
 // through core with grants built from that isolation alone: the view as the
-// only writable or readable mount besides the session directory, the service
-// environment as the complete allowlist, the scoped MCP servers as the only
-// tools, and no VCS. Only container sessions are accepted, because a host
-// session reads the whole filesystem.
+// only mount besides the session's own directory, the service environment as
+// the complete allowlist, the scoped MCP servers as the only tools, and no
+// VCS. Only container sessions are accepted, because a host session reads the
+// whole filesystem.
 type CoreExecutor struct {
 	Required Isolation
 	Runner   Engine
@@ -135,11 +137,11 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	if req.SessionDir == "" {
 		return nil, unsupported("execution request", "session directory is required")
 	}
-	if err := os.MkdirAll(req.SessionDir, 0o700); err != nil {
-		return nil, err
-	}
 	grants, err := coreGrants(iso, req.SessionDir, slices.Collect(maps.Keys(req.Profile.MCP)))
 	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(req.SessionDir, 0o700); err != nil {
 		return nil, err
 	}
 	// Core refuses whatever the grants do not cover. These are the request
@@ -158,6 +160,15 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 			return nil, unsupported("MCP", "only service-authenticated HTTP endpoints are permitted")
 		}
 	}
+	if iso.Workspace.Access == ReadOnly {
+		// Core runs a session in a writable directory; a read-only view is
+		// mounted beside an empty scratch directory the session starts in.
+		scratch := grants.Mounts[len(grants.Mounts)-1].Path
+		if err = os.Mkdir(scratch, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+			return nil, err
+		}
+		req.Workspace = vcs.Directory(scratch)
+	}
 	req.Grants = &grants
 	turn, err := e.Runner.Verify(req)
 	if err != nil {
@@ -173,8 +184,12 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 }
 
 // coreGrants are the complete capabilities of a turn in iso: the view with its
-// access, the session directory read-only, the service environment and one
-// MCP server grant per scoped endpoint, without built-in tools or VCS.
+// access, the session directory read-only, a writable scratch directory inside
+// it when the view is read-only, the service environment and one MCP server
+// grant per scoped endpoint, without built-in tools or VCS.
+// scratchDirectory is the session subdirectory a read-only turn starts in.
+const scratchDirectory = "work"
+
 func coreGrants(iso Isolation, sessionDir string, servers []string) (agent.Grants, error) {
 	access := agent.ReadOnly
 	if iso.Workspace.Access == ReadWrite {
@@ -188,6 +203,9 @@ func coreGrants(iso Isolation, sessionDir string, servers []string) (agent.Grant
 		Env:    slices.Sorted(maps.Keys(iso.Environment)),
 		Tools:  []string{},
 		Mounts: []agent.Mount{{Path: iso.Workspace.Directory, Access: access}, {Path: session, Access: agent.ReadOnly}},
+	}
+	if access == agent.ReadOnly {
+		grants.Mounts = append(grants.Mounts, agent.Mount{Path: filepath.Join(session, scratchDirectory), Access: agent.ReadWrite})
 	}
 	for _, server := range slices.Sorted(slices.Values(servers)) {
 		grants.Tools = append(grants.Tools, "mcp__"+server)

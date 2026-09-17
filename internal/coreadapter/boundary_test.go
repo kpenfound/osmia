@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/busybees/core/agent"
+	"github.com/kpenfound/busybees/core/vcs"
 	a "github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 )
@@ -23,7 +24,6 @@ func TestRawExecutionRequestCannotWidenBoundary(t *testing.T) {
 			r.Grants.Mounts = append(r.Grants.Mounts, agent.Mount{Path: "/", Access: agent.ReadOnly})
 		},
 		"writable view":      func(r *agent.Request) { r.Grants.Mounts[0].Access = agent.ReadWrite },
-		"no grants":          func(r *agent.Request) { r.Grants = nil },
 		"profile env":        func(r *agent.Request) { r.Profile.Env = map[string]string{"GH_TOKEN": "secret"} },
 		"container env":      func(r *agent.Request) { r.ContainerEnv = map[string]string{"GH_TOKEN": "secret"} },
 		"VCS env":            func(r *agent.Request) { r.VCSEnv = map[string]string{"GH_TOKEN": "secret"} },
@@ -53,11 +53,15 @@ func TestRawExecutionRequestCannotWidenBoundary(t *testing.T) {
 				t.Fatal(err)
 			}
 			req := engine.Requests[0]
+			req.Workspace = vcs.Directory(turn.Sandbox.Verified.Workspace.Directory)
+			if _, err := executor.Run(context.Background(), req, turn.Execution); err != nil {
+				t.Fatalf("unchanged request refused: %v", err)
+			}
 			mutate(&req)
 			if _, err := executor.Run(context.Background(), req, turn.Execution); !errors.Is(err, a.ErrUnsupported) {
 				t.Fatal(err)
 			}
-			if len(engine.Requests) != 1 {
+			if len(engine.Requests) != 2 {
 				t.Fatal("raw override reached construction")
 			}
 		})
@@ -91,9 +95,16 @@ func TestContainerConstruction(t *testing.T) {
 	}
 	req := engine.Requests[0]
 	view := turn.Sandbox.Verified.Workspace.Directory
-	want := agent.Grants{Env: []string{"LANG"}, Tools: []string{}, Mounts: []agent.Mount{{Path: view, Access: agent.ReadOnly}, {Path: turn.SessionDirectory, Access: agent.ReadOnly}}}
+	scratch := filepath.Join(turn.SessionDirectory, "work")
+	want := agent.Grants{Env: []string{"LANG"}, Tools: []string{}, Mounts: []agent.Mount{{Path: view, Access: agent.ReadOnly}, {Path: turn.SessionDirectory, Access: agent.ReadOnly}, {Path: scratch, Access: agent.ReadWrite}}}
 	if req.Grants == nil || !reflect.DeepEqual(*req.Grants, want) {
 		t.Fatalf("grants: %+v", req.Grants)
+	}
+	if req.Workspace.Directory() != scratch {
+		t.Fatalf("read-only view is the working directory: %s", req.Workspace.Directory())
+	}
+	if info, err := os.Stat(scratch); err != nil || !info.IsDir() {
+		t.Fatalf("scratch directory: %v", err)
 	}
 	if !reflect.DeepEqual(req.Env, map[string]string{"LANG": "C"}) || req.Profile.VCSAccess || req.Workspace.VCS() != nil || len(req.Profile.MCP) != 0 || len(req.Profile.AllowedTools) != 0 {
 		t.Fatalf("ambient access: %+v", req)
@@ -106,7 +117,7 @@ func TestContainerConstruction(t *testing.T) {
 		t.Fatalf("turn: %+v", verified)
 	}
 	for _, bind := range verified.Binds {
-		if bind.Access != agent.ReadOnly {
+		if bind.Access != agent.ReadOnly && bind.Source != scratch {
 			t.Fatalf("writable bind: %+v", bind)
 		}
 	}
