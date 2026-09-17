@@ -401,6 +401,9 @@ func (z *sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return coreadapter.OperationResult{}, fmt.Errorf("feature branch %s: %w", branch, err)
 	}
+	if err := z.s.step("seal-branch-created"); err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	record := seal.Seal{Version: seal.Version, Seal: in.Seal, Round: in.Round, Revision: in.pin(), SpecHash: seal.SpecHash(spec.Content),
 		Base: seal.Base{Remote: remote, Branch: cfg.Project.BaseBranch, Commit: base}, Branch: branch, Workspace: ws.Directory(), Footprints: footprints}
 	// The branch stays whatever happens next; the record and the state are
@@ -412,6 +415,9 @@ func (z *sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		return fail("the owner abandoned the workstream; its feature branch " + branch + " stays in the clone")
 	}
 	if err := z.record(ctx, stream, record, op.ID); err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if err := z.s.step("seal-recorded"); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	reason := fmt.Sprintf("sealed %s at %s of %s/%s (%s); feature branch %s is checked out in %s; the footprints of %s are recorded",

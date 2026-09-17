@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -428,6 +429,128 @@ func TestSealingSealsTheLatestRatificationOnly(t *testing.T) {
 		t.Fatalf("seal operations %+v", ops)
 	}
 
+}
+
+// The branch is created before the seal is recorded, and what happens between
+// the two is honoured: an abandonment leaves the branch in the clone and
+// records nothing, and a crash leaves the next attempt to resume from the
+// branch it finds.
+func TestSealingChecksAbandonmentAndResumesAfterTheBranchIsCreated(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 1)
+	ctx := context.Background()
+	f.stop(t)
+	f.opts.Committee = nil
+	f.start(t)
+	defer f.stop(t)
+	commit := f.upstream(t)
+	home := filepath.Dir(f.clone)
+	skipped := func(key string) config.WorkstreamID {
+		stream := f.handIn(t, key, handedDesign)
+		f.await(t, stream, sketched)
+		if _, err := f.c.ShedSkip(ctx, stream); err != nil {
+			t.Fatal(err)
+		}
+		f.awaitPacket(t, stream, "ratify: no objection stands")
+		return stream
+	}
+	gone := skipped("first")
+	abandoned := make(chan error, 1)
+	f.s.boundary = func(name string) error {
+		if name == "seal-branch-created" && len(abandoned) == 0 {
+			_, err := f.c.Abandon(ctx, gone, "Not needed after all.")
+			abandoned <- err
+		}
+		return nil
+	}
+	if _, err := f.c.Ratify(ctx, gone, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	f.awaitSealMove(t, gone, "failed-1")
+	must(t, <-abandoned)
+	branch := "osmia/" + string(gone)
+	if got := f.transition(t, gone, "seal-1-failed"); got.Reason != fmt.Sprintf("sealing 1 of spec.md revision 1 and plan.json revision 1 failed: the owner abandoned the workstream; its feature branch %s stays in the clone", branch) {
+		t.Fatalf("the failure %+v", got)
+	}
+	if tip := strings.TrimSpace(demoGit(t, home, "-C", f.clone, "rev-parse", "refs/heads/"+branch)); tip != commit {
+		t.Fatalf("the abandoned workstream's branch is at %q, want %s", tip, commit)
+	}
+	if _, _, found, err := seal.Latest(f.repository(), gone); err != nil || found {
+		t.Fatalf("seal of the abandoned workstream: %v %v", found, err)
+	}
+	if state, err := f.repository().Workflow(gone, trace.FeatureSubject); err != nil || state.Value != AbandonedState {
+		t.Fatalf("feature %+v %v", state, err)
+	}
+
+	// A crash after the branch is created: the attempt is retried, and the
+	// retry resumes from the branch rather than creating another.
+	stream := skipped("second")
+	crashed := make(chan struct{}, 1)
+	f.s.boundary = func(name string) error {
+		if name == "seal-branch-created" && len(crashed) == 0 {
+			crashed <- struct{}{}
+			return errors.New("crash")
+		}
+		return nil
+	}
+	if _, err := f.c.Ratify(ctx, stream, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	f.awaitFeature(t, stream, RatifiedState)
+	f.s.boundary = nil
+	ops := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, stream) })
+	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
+		t.Fatalf("seal operations %+v", ops)
+	}
+	var observed []string
+	retries := 0
+	for _, a := range ops[0].History {
+		switch a.Kind {
+		case "observe":
+			observed = append(observed, a.Observation.Evidence)
+		case "retry":
+			retries++
+			if !strings.Contains(a.Failure, "crash") {
+				t.Fatalf("retry %+v", a)
+			}
+		}
+	}
+	branch = "osmia/" + string(stream)
+	if retries != 1 || !slices.Equal(observed, []string{"the clone has no feature branch " + branch, fmt.Sprintf("the clone has feature branch %s; the sealing resumes from it", branch)}) {
+		t.Fatalf("%d retries, observed %q", retries, observed)
+	}
+	record, _, found, err := seal.Latest(f.repository(), stream)
+	must(t, err)
+	if !found || record.Base.Commit != commit || record.Seal != 1 {
+		t.Fatalf("the seal %+v", record)
+	}
+	if out := demoGit(t, home, "-C", f.clone, "worktree", "list", "--porcelain"); strings.Count(out, "worktree ") != 3 {
+		t.Fatalf("worktrees:\n%s", out)
+	}
+
+	// A crash after the seal is recorded and before the state moves: the
+	// retry records no second seal and moves the state.
+	third := skipped("third")
+	recorded := make(chan struct{}, 1)
+	f.s.boundary = func(name string) error {
+		if name == "seal-recorded" && len(recorded) == 0 {
+			recorded <- struct{}{}
+			return errors.New("crash")
+		}
+		return nil
+	}
+	if _, err := f.c.Ratify(ctx, third, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	f.awaitFeature(t, third, RatifiedState)
+	f.s.boundary = nil
+	if docs := f.documents(t, third, seal.DocumentID); len(docs) != 1 || docs[0].Revision != 1 {
+		t.Fatalf("seal documents after the crash %+v", docs)
+	}
+	ops = awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, third) })
+	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" || slices.IndexFunc(ops[0].History, func(a trace.OperationAction) bool { return a.Kind == "retry" }) < 0 {
+		t.Fatalf("seal operations %+v", ops)
+	}
 }
 
 // A footprint the entity map no longer resolves when the seal is taken is a
