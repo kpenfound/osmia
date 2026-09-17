@@ -96,9 +96,14 @@ const TokenEnvironment = "OSMIA_MCP_TOKEN"
 // CoreTransport serves each server with core's MCP host: Serve, or
 // mcphost.Start when Serve is nil, which listens on a fresh loopback port and
 // requires a fresh bearer token. The endpoint carries that token and names
-// TokenEnvironment as the variable the turn reads it from. Releasing the lease
-// stops the server.
-type CoreTransport struct{ Serve mcphost.StartFunc }
+// TokenEnvironment as the variable the turn reads it from. Its URL is the
+// listener's own address, which a host turn reaches; when Via is set, the URL
+// names Via as the host instead, such as host.docker.internal for a container
+// turn under Docker Desktop. Releasing the lease stops the server.
+type CoreTransport struct {
+	Serve mcphost.StartFunc
+	Via   string
+}
 
 var _ MCPTransport = CoreTransport{}
 
@@ -114,6 +119,10 @@ func (t CoreTransport) Start(ctx context.Context, server *mcp.Server) (Endpoint,
 	if endpoint.URL == "" || endpoint.Token == "" {
 		return Endpoint{}, nil, errors.Join(errors.New("MCP host returned no URL or token"), lease.Close())
 	}
-	return Endpoint{URL: endpoint.URL, BearerTokenEnvironment: TokenEnvironment, Token: endpoint.Token},
+	url := endpoint.URL
+	if t.Via != "" {
+		url = endpoint.Via(t.Via)
+	}
+	return Endpoint{URL: url, BearerTokenEnvironment: TokenEnvironment, Token: endpoint.Token},
 		&releaseLease{release: func(context.Context) error { return lease.Close() }}, nil
 }

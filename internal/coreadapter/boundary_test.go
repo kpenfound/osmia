@@ -290,9 +290,10 @@ func TestNewEnforcer(t *testing.T) {
 	}
 }
 
-// Host enforcers are told apart by the policy of a session they prepare
-// under a confiner that allows everything and starts nothing.
-func TestNewHostEnforcerKinds(t *testing.T) {
+// Enforcers are told apart by the policy of a session they prepare: a host
+// kind under a confiner that allows everything and starts nothing, a
+// container with VCS granted, which Prepare does not look into the image for.
+func TestNewEnforcerKinds(t *testing.T) {
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -313,6 +314,18 @@ func TestNewHostEnforcerKinds(t *testing.T) {
 		if err := session.Release(context.Background()); err != nil {
 			t.Fatal(err)
 		}
+	}
+	e, err := a.NewEnforcer(agent.Runner{DockerBin: "/nonexistent/docker"}, a.ExecutionSettings{Mode: "container", Image: "fixture-image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := e.Prepare(context.Background(), agent.Grants{Tools: []string{}, VCS: true, Mounts: []agent.Mount{{Path: dir, Access: agent.ReadOnly}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Release(context.Background())
+	if p := session.Policy(); p.Sandbox != "container" || p.Image != "fixture-image" {
+		t.Fatalf("container enforcer prepared a %s session of image %q", p.Sandbox, p.Image)
 	}
 }
 

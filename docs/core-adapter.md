@@ -115,8 +115,15 @@ hidden and unknown names cannot reach a
 handler. `CoreTransport` serves the registry with `mcphost.Start`: a fresh
 loopback port and a fresh bearer token per turn. The endpoint carries the token
 and names `OSMIA_MCP_TOKEN` as the variable the turn reads it from; releasing the
-lease stops the server. Tests use in-memory SDK transports and fake
-execution/providers; they launch no agents, container engines or VCS processes.
+lease stops the server. A host turn gets the listener's loopback URL. A container
+turn cannot reach the host's loopback by that address: the caller sets
+`CoreTransport.Via` to the host name the container reaches the host by (Docker
+Desktop's `host.docker.internal`), and the URL names that host with the
+listener's port. On Linux a container reaches the host only on the bridge
+gateway, so `Serve` is `mcphost.StartOn` bound to that address. Service tests use
+in-memory SDK transports, and the `CoreTransport` tests serve on a loopback port;
+execution and providers are faked, and no test launches an agent, container
+engine or VCS process.
 
 ## Review evidence
 

@@ -98,8 +98,8 @@ it cannot (confined `claude` on Linux, or a platform without a confiner), core's
 `ErrUnsupported` is returned, wrapped in `coreadapter.ErrUnsupported` with core's
 reason, and recorded as the turn's failure. The executor then reads the prepared
 session's policy and refuses the turn unless it matches the grants: the sandbox
-and image are the role's; the view is readable and writable exactly when the
-role writes files; the provider workspace the view was copied from is not
+and image are the role's; the view is always readable, and writable exactly
+when the role writes files; the provider workspace the view was copied from is not
 writable; VCS is not granted and `gh`, `git`, `hg`, `jj` and `svn` are denied;
 no built-in tool is granted; and the MCP servers are exactly the scoped
 endpoints. A mismatch is an `UnsupportedError` with capability

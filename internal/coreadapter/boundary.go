@@ -40,22 +40,35 @@ func (e CoreEngine) Enforcer(settings ExecutionSettings) (agent.Enforcer, error)
 // an UnsupportedError. Whether the platform can enforce the mode is decided by
 // the enforcer's Prepare.
 func NewEnforcer(r agent.Runner, settings ExecutionSettings) (agent.Enforcer, error) {
+	if err := checkMode(settings); err != nil {
+		return nil, err
+	}
+	switch settings.Mode {
+	case agent.SandboxClaude:
+		return agent.NewHostClaude(r), nil
+	case agent.SandboxContainer:
+		return agent.NewContainer(r, settings.Image), nil
+	}
+	return agent.NewHostNone(r), nil
+}
+
+// checkMode refuses settings no enforcer is built for: a host mode with an
+// image, a container without one, or a mode other than none, claude and
+// container.
+func checkMode(settings ExecutionSettings) error {
 	switch settings.Mode {
 	case agent.SandboxNone, agent.SandboxClaude:
 		if settings.Image != "" {
-			return nil, unsupported("isolation mode", "a host session runs no image")
+			return unsupported("isolation mode", "a host session runs no image")
 		}
-		if settings.Mode == agent.SandboxClaude {
-			return agent.NewHostClaude(r), nil
-		}
-		return agent.NewHostNone(r), nil
+		return nil
 	case agent.SandboxContainer:
 		if settings.Image == "" {
-			return nil, unsupported("container", "image is required")
+			return unsupported("container", "image is required")
 		}
-		return agent.NewContainer(r, settings.Image), nil
+		return nil
 	}
-	return nil, unsupported("isolation mode", fmt.Sprintf("%q is not none, claude or container", settings.Mode))
+	return unsupported("isolation mode", fmt.Sprintf("%q is not none, claude or container", settings.Mode))
 }
 
 // CoreExecutor binds one turn to a service-selected isolation and runs it
@@ -81,15 +94,8 @@ func (e CoreExecutor) Check(ctx context.Context, iso Isolation, settings Executi
 	if e.Runner == nil {
 		return unsupported("execution engine", "no core runner supplied")
 	}
-	switch {
-	case settings.Mode == agent.SandboxContainer && settings.Image == "":
-		return unsupported("container", "image is required")
-	case settings.Mode == agent.SandboxNone || settings.Mode == agent.SandboxClaude:
-		if settings.Image != "" {
-			return unsupported("isolation mode", "a host session runs no image")
-		}
-	case settings.Mode != agent.SandboxContainer:
-		return unsupported("isolation mode", fmt.Sprintf("%q is not none, claude or container", settings.Mode))
+	if err := checkMode(settings); err != nil {
+		return err
 	}
 	if len(settings.Mounts) != 0 || len(settings.Domains) != 0 {
 		return unsupported("execution overrides", "extra mounts and network domains are not granted")
@@ -123,7 +129,7 @@ func PublicEnvironment(env map[string]string) error {
 			return unsupported("environment", "NUL value")
 		}
 		switch key {
-		case "LANG", "LC_ALL", "TZ", "OSMIA_MCP_TOKEN":
+		case "LANG", "LC_ALL", "TZ", TokenEnvironment:
 		default:
 			return unsupported("environment", "variable is not on the service allowlist")
 		}
@@ -191,7 +197,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	}
 	for _, endpoint := range req.Profile.MCP {
 		parsed, parseErr := url.Parse(endpoint.URL)
-		if parseErr != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || endpoint.Type != "http" || endpoint.Command != "" || len(endpoint.Args) != 0 || len(endpoint.Env) != 0 || len(endpoint.EnvVars) != 0 || len(endpoint.Headers) != 0 || endpoint.BearerTokenEnv != "OSMIA_MCP_TOKEN" || req.Env["OSMIA_MCP_TOKEN"] == "" {
+		if parseErr != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || endpoint.Type != "http" || endpoint.Command != "" || len(endpoint.Args) != 0 || len(endpoint.Env) != 0 || len(endpoint.EnvVars) != 0 || len(endpoint.Headers) != 0 || endpoint.BearerTokenEnv != TokenEnvironment || req.Env[TokenEnvironment] == "" {
 			return nil, unsupported("MCP", "only service-authenticated HTTP endpoints are permitted")
 		}
 	}

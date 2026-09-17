@@ -167,6 +167,26 @@ func TestCoreTransportServesUntilReleased(t *testing.T) {
 	}
 }
 
+func TestCoreTransportAdvertisesVia(t *testing.T) {
+	ctx := context.Background()
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	endpoint, lease, err := (CoreTransport{Via: "host.docker.internal"}).Start(ctx, server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release(ctx)
+	parsed, err := url.Parse(endpoint.URL)
+	if err != nil || parsed.Scheme != "http" || parsed.Hostname() != "host.docker.internal" || parsed.Port() == "" || parsed.Path != mcphost.EndpointPath {
+		t.Fatalf("endpoint: %+v", endpoint)
+	}
+	// The server listens on the loopback port the URL names.
+	conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", parsed.Port()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+}
+
 func TestCoreTransportRejectsAnEndpointWithoutToken(t *testing.T) {
 	closed := false
 	start := func(ctx context.Context, srv *mcp.Server) (mcphost.Endpoint, mcphost.Lease, error) {
