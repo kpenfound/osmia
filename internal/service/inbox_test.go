@@ -72,14 +72,8 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		f.mu.Lock()
 		switch {
-		case strings.Contains(req.Prompt, "Where does state live?") && strings.Contains(req.Prompt, "Is the log format fixed?") && strings.Contains(req.Prompt, "is open"):
-			defer f.mu.Unlock()
-			return questionResult(req, "session-chief", "Escalated"), f.use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1", "2"},
-				"rephrasing": "Are state files and the log format part of the contract?", "blocked": "The upload unit and its review.", "options": []string{"Both fixed", "Both free"}, "recommendation": "Both fixed."})
-		case strings.Contains(req.Prompt, "is open, asked by the mason: May I add a dependency?"):
-			defer f.mu.Unlock()
-			return questionResult(req, "session-chief", "Escalated"), f.use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1"},
-				"rephrasing": "May the index unit add a dependency?", "blocked": "The index unit.", "options": []string{}, "recommendation": "No."})
+		// The prompt replays the thread's earlier turns, so the newest event is
+		// matched first.
 		case strings.Contains(req.Prompt, ", escalation_1 (questions 1, 2): Both are part of the contract."):
 			if strings.Contains(req.SystemPrompt, "  notice: ") {
 				f.problem("a notice before any notify ruling:\n%s", req.SystemPrompt)
@@ -89,6 +83,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 				{"question": "1", "text": "Again.", "scope": "local"},
 			} {
 				if err := f.use(ctx, tools, "relay", "relay_ruling", args); err != nil {
+					f.problem("relay_ruling: %v", err)
 					f.mu.Unlock()
 					return nil, err
 				}
@@ -105,6 +100,14 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 				f.problem("event turn system prompt lacks the notice:\n%s", req.SystemPrompt)
 			}
 			return questionResult(req, "session-chief", "Relayed"), f.use(ctx, tools, "relay-local", "relay_ruling", map[string]any{"question": "1", "text": "Add no dependency.", "scope": "local"})
+		case strings.Contains(req.Prompt, "Where does state live?") && strings.Contains(req.Prompt, "Is the log format fixed?") && strings.Contains(req.Prompt, "is open"):
+			defer f.mu.Unlock()
+			return questionResult(req, "session-chief", "Escalated"), f.use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1", "2"},
+				"rephrasing": "Are state files and the log format part of the contract?", "blocked": "The upload unit and its review.", "options": []string{"Both fixed", "Both free"}, "recommendation": "Both fixed."})
+		case strings.Contains(req.Prompt, "is open, asked by the mason: May I add a dependency?"):
+			defer f.mu.Unlock()
+			return questionResult(req, "session-chief", "Escalated"), f.use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1"},
+				"rephrasing": "May the index unit add a dependency?", "blocked": "The index unit.", "options": []string{}, "recommendation": "No."})
 		}
 		f.problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
 		f.mu.Unlock()
@@ -237,14 +240,15 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 		t.Fatalf("restart after the ruling ran: %v", got)
 	}
 	f.clock.Advance(time.Minute)
+	deadline := time.After(demoTimeout)
 	for waiting := true; waiting; {
 		select {
 		case f.ticks <- f.clock.Now():
 		case <-relayed:
 			waiting = false
-		case <-time.After(demoTimeout):
+		case <-deadline:
 			s.Close()
-			t.Fatal("chief of staff did not relay the ruling")
+			t.Fatalf("chief of staff did not relay the ruling; runs %v, fake agents saw %v", runs(), f.problems)
 		}
 	}
 	if got := states(repo, stream); !reflect.DeepEqual(got, map[string]string{"1": trace.QuestionAnswered, "2": trace.QuestionAnswered}) {
@@ -339,6 +343,9 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 		`{"recorded":false,"reason":"question 1 is already answered"}`,
 	}; !slices.Equal(got, want) {
 		t.Fatalf("relay results: %v", got)
+	}
+	if got := f.results["escalate"]; !slices.Equal(got, []string{`{"recorded":true,"batch":"escalation_1","questions":["1","2"]}`, `{"recorded":true,"batch":"escalation_1","questions":["1"]}`}) {
+		t.Fatalf("escalation results: %v", got)
 	}
 	if got := f.results["relay-local"]; !slices.Equal(got, []string{`{"recorded":true,"questions":["1"],"scope":"local","next":"The ruling is delivered to each asker as its next turn."}`}) {
 		t.Fatalf("local relay result: %v", got)
