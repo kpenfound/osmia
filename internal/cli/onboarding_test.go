@@ -333,9 +333,18 @@ func TestM2ProjectOnboarding(t *testing.T) {
 	}
 
 	// 3. Hand-in is refused while the charter is empty.
-	code, out, diag := invoke(t, root, "handin", string(id))
+	design := filepath.Join(home, "design.md")
+	must(t, os.WriteFile(design, []byte("# Upload API\n"), 0600))
+	code, out, diag := invoke(t, root, "handin", string(id), design)
 	if code != 4 || out != "" || !strings.Contains(diag, "charter_empty") || !strings.Contains(diag, added.Project.Charter) {
 		t.Fatalf("hand-in with an empty charter: %d %q %q", code, out, diag)
+	}
+	var all struct {
+		Status service.StatusResponse
+	}
+	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
+	if len(all.Status.Workstreams) != 0 {
+		t.Fatalf("a refused hand-in created workstreams: %+v", all.Status.Workstreams)
 	}
 
 	// 4. The owner writes rules; status records the edit and shows the

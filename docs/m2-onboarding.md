@@ -61,11 +61,11 @@ hashes match: onboarding never writes to the clone.
 ### 3. Hand-in waits for the charter
 
 ```sh
-osmia handin p_…
+osmia handin p_… design.md
 ```
 
 The command fails with `charter_empty` (exit 4). The message names the
-project and the path of its `charter.md`.
+project and the path of its `charter.md`. No workstream is created.
 
 ### 4. Write the charter
 
