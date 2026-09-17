@@ -113,7 +113,7 @@ func newQuestionFixture(t *testing.T, prefix, global, charter string, askers []q
 	must(t, os.Mkdir(views, 0700))
 	// Every role is granted every question tool; the role decides what it sees.
 	every := append([]string{"file_read", questions.AskTool}, questions.ChiefTools...)
-	f.opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	f.opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		f.lives <- r
 		turns := &isolation.Turns{Workspaces: &demoWorkspaces{directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: f.engine,
 			Grants: map[string]coreadapter.Capabilities{"mason": {Tools: every}, "reviewer": {Tools: every}, trace.ChiefOfStaff: {Tools: every}},

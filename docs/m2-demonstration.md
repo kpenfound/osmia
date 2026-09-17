@@ -82,7 +82,8 @@ drafting rules.
 
 ## Limits
 
-`osmia serve` does not configure an architect runner or chief-of-staff
-turns, so the test injects both through `Options.Architect` and
-`Options.Threads`. The fake chief of staff writes its status only through the
-production `set_status` tool.
+The test drives the service package directly, so it injects the architect and
+the chief of staff through `Options.Architect` and `Options.Threads`;
+`osmia serve` builds both from core's enforcers (see
+[running turns](service.md#running-turns)). The fake chief of staff writes its
+status only through the production `set_status` tool.

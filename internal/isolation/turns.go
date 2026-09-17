@@ -191,7 +191,7 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 		if r.Hosts == nil {
 			return result, errors.New("service MCP host is required for granted tools")
 		}
-		hosted, hostErr := r.Hosts.Host(ctx, coreadapter.HostRequest{Scope: input.Scope, Capabilities: capabilities, Tools: approved})
+		hosted, hostErr := r.Hosts.Host(ctx, coreadapter.HostRequest{Scope: input.Scope, Capabilities: capabilities, Tools: approved, Execution: prepared.Execution})
 		if hostErr != nil {
 			return result, hostErr
 		}

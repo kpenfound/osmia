@@ -33,7 +33,9 @@ The [onboarding walkthrough](m2-onboarding.md) runs `project add`, `handin`,
 
 - `serve [--root PATH]` validates and starts the foreground service. SIGINT and
   SIGTERM drain requests and release ownership and the socket. A live owner is
-  refused; a provably stale socket is recovered automatically.
+  refused; a provably stale socket is recovered automatically. The service
+  runs the librarian, architect and chief-of-staff turns in each role's
+  configured sandbox; see [running turns](service.md#running-turns).
 - `status` shows health, loaded configuration digest/root, the active project
   and its trace path (or that none is configured), its charter state (ready or
   empty, rule count, recorded revision and numbering diagnostics), its latest
@@ -105,9 +107,8 @@ The [onboarding walkthrough](m2-onboarding.md) runs `project add`, `handin`,
   the trace path and the next step: writing the charter in
   `<trace>/charter.md`. The extraction runs in the service after the command
   returns; `status` shows its state, and the project is usable whether it
-  succeeds or fails. `osmia serve` has no librarian runner, so there the
-  extraction fails with the recorded reason "this service has no agent runner
-  for the librarian"; `osmia project extract` starts a new attempt. Operation
+  succeeds or fails; after a failure `osmia project extract` starts a new
+  attempt. Operation
   stays single-project: adding another project while one is active is refused
   and the error names the active project. Repeating the active project's exact registration
   returns it again.
@@ -141,9 +142,7 @@ The [onboarding walkthrough](m2-onboarding.md) runs `project add`, `handin`,
   the service cannot fetch fails with `internal` (exit 5). A refused hand-in
   creates nothing. See [service](service.md#hand-in) for what is
   recorded. The service then asks the architect for the spec and plan; see
-  [architect drafting](service.md#architect-drafting). `osmia serve` has no
-  architect runner, so there the workstream stays `handed` and is not
-  drafted.
+  [architect drafting](service.md#architect-drafting).
 - `pause <all|project-id|workstream-id> [--hard] [--reason TEXT]` stores an
   operator pause; the default mode is soft.
 - `resume <all|project-id|workstream-id>` clears that scope's pause. Parent pauses

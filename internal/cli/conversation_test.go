@@ -58,7 +58,7 @@ func withConversation(t *testing.T) service.Options {
 	must(t, repo.CreateWorkstream(ctx, quiet, written, owner))
 	must(t, repo.Close())
 	opts.Reconciliation.Now = ticking()
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: answering{}, Now: opts.Reconciliation.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(cfg.Root.String(), "sessions", in.Agent, in.Turn)}, nil

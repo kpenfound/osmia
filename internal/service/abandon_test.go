@@ -159,7 +159,7 @@ func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 	turns := &blockingTurns{fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply, reply)}, hooks: map[string]func(context.Context){}}
 	var bound sync.Mutex
 	var live *trace.Repository
-	opts.Threads = func(r *trace.Repository) (coreadapter.Reconciler, error) {
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		bound.Lock()
 		live = r
 		bound.Unlock()
