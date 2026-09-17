@@ -8,8 +8,10 @@ in the owned turn response and survive reopening the trace repository.
 
 The service supplies a workspace provider, a view directory under the Osmia root,
 role grants, a scope selector, an MCP host factory and an isolation engine. These
-are Go dependencies, not repository or profile configuration. This M1 path is an
-in-process integration; the local API does not dispatch agent turns.
+are Go dependencies, not repository or profile configuration. This path is an
+in-process integration; the local API dispatches no workstream turns. The
+librarian's [knowledge-base extraction](knowledge-base.md#extraction) is the
+service's own use of it.
 
 ## Files and lifetime
 

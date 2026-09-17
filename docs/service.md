@@ -47,6 +47,7 @@ client to release idle connections. API version 1 uses snake_case JSON fields.
 | GET | `/conversation/<workstream-id>` | `ConversationResponse`: the workstream's conversation with its chief of staff |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
+| POST | `/projects/extract` | `ProjectExtractRequest`: project; returns `ExtractionResponse` |
 | POST | `/handin` | `HandInRequest`: project, key, and one of path, url and stdin; returns `HandInResponse` |
 | PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason, source |
 | DELETE | `/runtime/pause` | `ClearPauseRequest`: scope, project, workstream |
@@ -84,7 +85,7 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 | --- | --- | --- |
 | `malformed_input` | 400 | Malformed, ambiguous, unknown-field or oversized JSON |
 | `validation` | 422 | Invalid override or unavailable reference |
-| `conflict` | 409 | Runtime file changed outside the store, or a hand-in key reused for other input |
+| `conflict` | 409 | Runtime file changed outside the store, an extraction requested while one is pending or running, or a hand-in key reused for other input |
 | `unsupported` | 501 | Unknown path/method or later-milestone operation, including POST `/reload` |
 | `restart_required` | 409 | PUT `/config/root` or `/config/listen` |
 | `unavailable` | 503 | Service shutting down; also the client's code for transport failure |
@@ -140,6 +141,18 @@ the file. A configured project with no trace repository has no charter state
 and no charter diagnostic. The project view returned by `POST` and `DELETE /v1/projects` carries
 no charter state.
 
+`/config` also reports the project's latest
+[knowledge-base extraction](knowledge-base.md#extraction) as `extraction`:
+its number, its `state` (`pending`, `running`, `succeeded` or `failed`), the
+time of its last recorded activity and, when it failed or is waiting to
+retry, the `reason`. It is absent for a project whose trace has no librarian
+workstream, and an unreadable state adds an `extraction` diagnostic with code
+`internal`. Registration requests extraction 1; `POST /v1/projects/extract`
+requests the next one and returns it as `pending`. A malformed project ID
+returns `validation`, an ID that is not the active project `not_found`, a
+project without a trace `internal`, and a request while an extraction is
+pending or running `conflict`, naming the extraction to wait for.
+
 ## Hand-in
 
 `POST /v1/handin` creates a workstream from one input. The request carries the
@@ -185,7 +198,9 @@ workstream; retry with the same key.
 ## Workstream status
 
 `GET /v1/status` lists each workstream of the active project in trace manifest
-order, and `GET /v1/status/<workstream-id>` returns one. Each
+order, except the librarian's, which carries no feature (see
+[extraction](knowledge-base.md#extraction)), and
+`GET /v1/status/<workstream-id>` returns one. Each
 `WorkstreamStatus` carries the chief of staff's latest
 [status](trace.md#workstream-status) next to the facts the service owns:
 
@@ -241,7 +256,8 @@ that the owner did not send are not listed. Each entry has:
 
 `POST` returns the message's entry, whose state is `queued`. A malformed
 workstream ID, a workstream the active trace does not hold (or no trace at
-all), or empty text returns `validation`. No configured project returns
+all), the librarian's workstream (which status leaves out too, and whose chief
+of staff never gets a turn), or empty text returns `validation`. No configured project returns
 `no_project`. A trace that cannot be read or written, a `chief_of_staff` profile that cannot be used, or a
 bundle that cannot be assembled, returns `internal`.
 These messages name the workstream or project. A rejected message is not
@@ -250,10 +266,17 @@ with `Options.Threads` runs them.
 
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
 opened, each time a project's trace opens: at startup and when a project is
-added. It replaces any runner adapter in `Options.Reconciliation`. The [thread dispatcher](trace.md#turn-dispatch) is the
+added. It replaces any runner adapter in `Options.Reconciliation` for every
+runner operation except the librarian's `kb-extract` action, which the service
+reconciles itself. The [thread dispatcher](trace.md#turn-dispatch) is the
 intended binding; it receives the service-owned repository handle, which callers
 must not close. The [M1 demonstration](m1-demonstration.md) uses this path with
 fake engines.
+
+`Options.Librarian` supplies the isolation engine and MCP host factory the
+librarian's extraction turns run in. Without it every extraction fails with a
+recorded reason, so a service without an enforcing engine still registers
+projects and reports the failure in status.
 
 With `Options.Threads` set, the service also runs queued workstream turns on its
 own and delivers outbox events to each chief of staff (see
@@ -287,7 +310,10 @@ existing operation, as the [turn dispatch](trace.md#turn-dispatch) table
 describes: it is neither dispatched again nor lost. `scheduler.Options.Admit` is
 the dispatch gate after capacity.
 
-The service's gate holds a turn that a pause in `runtime.Effective` covers:
+The service's gate declines every turn of the librarian's workstream: the
+service's own `kb-extract` reconciler runs those, staged in the librarian's
+view, and a librarian turn the scheduler found queued gets no turn operation.
+The gate holds a turn that a pause in `runtime.Effective` covers:
 a `factory` pause, a `project` pause on the active project, or a `workstream`
 pause on the turn's workstream. Chief-of-staff turns are never held, so the
 chief of staff stays reachable while everything is paused. A held turn gets no

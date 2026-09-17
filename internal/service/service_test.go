@@ -65,7 +65,12 @@ func start(t *testing.T, opts Options) (*Service, *Client) {
 	s, err := Start(context.Background(), opts)
 	must(t, err)
 	c := NewClient(s.Socket())
-	t.Cleanup(func() { c.Close(); s.Close() })
+	t.Cleanup(func() {
+		c.Close()
+		if err := s.Close(); err != nil {
+			t.Logf("service close: %v", err)
+		}
+	})
 	return s, c
 }
 func mutation(t *testing.T, c *Client, method, kind string, input any) {

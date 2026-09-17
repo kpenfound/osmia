@@ -32,7 +32,8 @@ func (s *Service) now() time.Time {
 }
 
 // conversationTrace resolves raw to a workstream of the active project and
-// returns the project's open trace.
+// returns the project's open trace. The librarian's workstream is unknown
+// here as it is in status: its chief of staff never gets a turn.
 func (s *Service) conversationTrace(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
 	id, err := config.ParseWorkstreamID(raw)
 	if err != nil {
@@ -52,7 +53,7 @@ func (s *Service) conversationTrace(raw string) (config.ProjectID, config.Workst
 	if err != nil {
 		return "", "", nil, &APIError{Internal, fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", cfg.Project.ID)}
 	}
-	if !slices.Contains(streams, id) {
+	if !slices.Contains(streams, id) || id == librarianWorkstream(cfg.Project.ID) {
 		return "", "", nil, unknown
 	}
 	return cfg.Project.ID, id, active.repository, nil

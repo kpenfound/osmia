@@ -23,6 +23,7 @@ type publication struct {
 	Parent  string   `json:"parent"`
 	Commit  string   `json:"commit"`
 	Paths   []string `json:"paths"`
+	Removed []string `json:"removed,omitempty"`
 }
 
 func (r *Repository) boundary(name string) error {
@@ -36,6 +37,12 @@ func (r *Repository) boundary(name string) error {
 // ref. The journal makes interrupted ordinary-file materialization recoverable.
 // The repository lock must be held by the caller.
 func (r *Repository) publish(ctx context.Context, files map[string][]byte) error {
+	return r.publishTree(ctx, files, nil)
+}
+
+// publishTree is publish with paths that leave the tree: they are removed from
+// the commit and, once the ref is published, from disk.
+func (r *Repository) publishTree(ctx context.Context, files map[string][]byte, removed []string) error {
 	parent, err := r.readFile(".git/refs/heads/main")
 	if err != nil {
 		return err
@@ -45,6 +52,8 @@ func (r *Repository) publish(ctx context.Context, files map[string][]byte) error
 		p.Paths = append(p.Paths, name)
 	}
 	sort.Strings(p.Paths)
+	p.Removed = append([]string{}, removed...)
+	sort.Strings(p.Removed)
 	index := ".git/osmia-index-" + rand.Text()
 	defer r.dir.Remove(index)
 	defer r.dir.Remove(index + ".lock")
@@ -61,6 +70,11 @@ func (r *Repository) publish(ctx context.Context, files map[string][]byte) error
 			return err
 		}
 		if _, err := git(nil, "update-index", "--add", "--cacheinfo", "100644,"+oid+","+name); err != nil {
+			return err
+		}
+	}
+	for _, name := range p.Removed {
+		if _, err := git(nil, "update-index", "--force-remove", name); err != nil {
 			return err
 		}
 	}
@@ -163,18 +177,9 @@ func (r *Repository) recoverPublication(ctx context.Context) error {
 		return fmt.Errorf("invalid workflow publication journal")
 	}
 	seen := map[string]bool{}
-	for _, name := range p.Paths {
-		parts := strings.Split(name, "/")
-		workflowPath := len(parts) == 3 && (parts[2] == "workflow.json" || parts[2] == "events.jsonl")
-		agentPath := len(parts) == 5 && parts[2] == "agents" && key(parts[3]) && (parts[4] == "identity.jsonl" || parts[4] == "log.jsonl")
-		notesPath := len(parts) == 2 && parts[0] == "notes" && strings.HasSuffix(parts[1], ".md") && key(strings.TrimSuffix(parts[1], ".md"))
-		if ((!workflowPath && !agentPath) || parts[0] != "workstreams") && !notesPath || seen[name] {
+	for _, name := range append(append([]string{}, p.Paths...), p.Removed...) {
+		if err := publicationPath(name); err != nil || seen[name] {
 			return fmt.Errorf("invalid workflow publication path %q", name)
-		}
-		if !notesPath {
-			if _, err := config.ParseWorkstreamID(parts[1]); err != nil {
-				return err
-			}
 		}
 		if err := r.checked(name); err != nil {
 			return err
@@ -208,6 +213,14 @@ func (r *Repository) recoverPublication(ctx context.Context) error {
 				return err
 			}
 		}
+		for _, name := range p.Removed {
+			if err := r.dir.Remove(name); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			if err := r.boundary("removed:" + path.Base(name)); err != nil {
+				return err
+			}
+		}
 	default:
 		return fmt.Errorf("workflow publication ref differs from both journal identities")
 	}
@@ -218,4 +231,30 @@ func (r *Repository) recoverPublication(ctx context.Context) error {
 		return err
 	}
 	return syncDir(r.dir, ".git")
+}
+
+// publicationPath accepts the ordinary files the publication journal may
+// materialize or remove: workflow, transition and owned agent files of a
+// workstream, private role notes, and project documents other than the charter.
+func publicationPath(name string) error {
+	parts := strings.Split(name, "/")
+	switch {
+	case parts[0] == "workstreams" && len(parts) >= 2:
+		if _, err := config.ParseWorkstreamID(parts[1]); err != nil {
+			return err
+		}
+		if len(parts) == 3 && (parts[2] == "workflow.json" || parts[2] == "events.jsonl") {
+			return nil
+		}
+		if len(parts) == 5 && parts[2] == "agents" && key(parts[3]) && (parts[4] == "identity.jsonl" || parts[4] == "log.jsonl") {
+			return nil
+		}
+	case len(parts) == 2 && parts[0] == "notes" && strings.HasSuffix(parts[1], ".md") && key(strings.TrimSuffix(parts[1], ".md")):
+		return nil
+	case name == "documents.jsonl" || name == EntitiesPath:
+		return nil
+	case len(parts) == 2 && parts[0] == "kb" && strings.HasSuffix(parts[1], ".md") && key(strings.TrimSuffix(parts[1], ".md")):
+		return nil
+	}
+	return fmt.Errorf("invalid workflow publication path %q", name)
 }

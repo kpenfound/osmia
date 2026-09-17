@@ -44,6 +44,10 @@ type Options struct {
 	// workstream's chief of staff as queued turns, one per event window.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository) (coreadapter.Reconciler, error)
+	// Librarian supplies the execution boundary of the librarian's
+	// knowledge-base extraction turns. Without it every extraction fails with
+	// a recorded reason and the project stays usable.
+	Librarian *Librarian
 	// Issues fetches issue URLs handed in. It defaults to the GitHub REST API
 	// with the service's GITHUB_TOKEN environment variable, which no session
 	// receives.
@@ -291,7 +295,7 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	if !cfg.HasProject() {
 		return nil, nil
 	}
-	repository, controller, err := openReconciliation(cfg, s.options.Reconciliation, s.options.Threads, s.unpaused(cfg.Project.ID), s.chiefProfile(cfg))
+	repository, controller, err := s.openReconciliation(cfg)
 	if err != nil || repository == nil {
 		return nil, err
 	}
@@ -302,11 +306,17 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	return &activeProject{repository: repository, controller: controller, done: make(chan error, 1)}, nil
 }
 
-// unpaused admits the project's queued turns that no runtime pause in force
-// holds. The store is read on every pass, so a cleared pause lets held turns
-// run on the loop's next periodic pass.
-func (s *Service) unpaused(project config.ProjectID) func(context.Context, scheduler.Candidate) (bool, error) {
+// admit is the scheduler's gate. It declines every turn of the librarian's
+// workstream, which the service's extractor runs itself in the librarian's
+// staged view, and holds the project's other queued turns that a runtime
+// pause in force covers. The store is read on every pass, so a cleared pause
+// lets held turns run on the loop's next periodic pass.
+func (s *Service) admit(project config.ProjectID) func(context.Context, scheduler.Candidate) (bool, error) {
+	librarian := librarianWorkstream(project)
 	return func(_ context.Context, c scheduler.Candidate) (bool, error) {
+		if c.Workstream == librarian {
+			return false, nil
+		}
 		st, _ := s.store.Effective()
 		return !scheduler.Held(st.Pauses, project, c), nil
 	}
@@ -384,8 +394,13 @@ func (s *Service) stop(active *activeProject) error {
 }
 
 // openReconciliation leaves trace creation to project registration; an existing
-// trace must open cleanly before the service can report readiness.
-func openReconciliation(cfg *config.Config, options reconcile.Options, threads func(*trace.Repository) (coreadapter.Reconciler, error), admit func(context.Context, scheduler.Candidate) (bool, error), profile func() (coreadapter.Profile, error)) (*trace.Repository, *reconcile.Controller, error) {
+// trace must open cleanly before the service can report readiness. The runner
+// boundary is served by the bound thread reconciler for turns and by the
+// service's extractor for knowledge-base extraction; the scheduler's gate holds
+// turns that a runtime pause covers, and outbox events are delivered to each
+// workstream's chief of staff before the scheduler runs.
+func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, error) {
+	options, threads := s.options.Reconciliation, s.options.Threads
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
 	if err != nil {
 		return nil, nil, err
@@ -405,26 +420,26 @@ func openReconciliation(cfg *config.Config, options reconcile.Options, threads f
 	if options.Worker == "" {
 		options.Worker = "local-operations"
 	}
+	adapters := maps.Clone(options.Adapters)
+	if adapters == nil {
+		adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{}
+	}
+	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: &extractor{s: s, repository: repository}}
 	if threads != nil {
-		runner, err := threads(repository)
+		bound, err := threads(repository)
 		if err != nil {
 			repository.Close()
 			return nil, nil, err
 		}
-		adapters := maps.Clone(options.Adapters)
-		if adapters == nil {
-			adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{}
-		}
-		adapters[coreadapter.RunnerBoundary] = runner
-		options.Adapters = adapters
+		runner.turns = bound
 		limits := cfg.Capacity
 		limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
-		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: admit, Capacity: &limits})
+		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg.Project.ID), Capacity: &limits})
 		if err != nil {
 			repository.Close()
 			return nil, nil, err
 		}
-		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), Profile: profile})
+		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), Profile: s.chiefProfile(cfg)})
 		if err != nil {
 			repository.Close()
 			return nil, nil, err
@@ -436,6 +451,8 @@ func openReconciliation(cfg *config.Config, options reconcile.Options, threads f
 			return dispatch.Pass(ctx)
 		}
 	}
+	adapters[coreadapter.RunnerBoundary] = runner
+	options.Adapters = adapters
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
 		repository.Close()

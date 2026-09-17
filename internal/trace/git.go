@@ -74,6 +74,11 @@ func (r *Repository) gitBytes(ctx context.Context, input []byte, index string, a
 	cmd.Stdin = bytes.NewReader(input)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		// A cancelled context kills the command; report the cancellation
+		// rather than the signal so callers recognize it.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("trace git %s: %w", args[0], ctxErr)
+		}
 		return nil, fmt.Errorf("trace git %s: %w: %s", args[0], err, out)
 	}
 	return out, nil

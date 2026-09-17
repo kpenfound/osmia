@@ -91,6 +91,13 @@ func (c *Client) RemoveProject(ctx context.Context, id config.ProjectID) (Projec
 	return v, err
 }
 
+// ExtractProject starts a new knowledge-base extraction of the active project.
+func (c *Client) ExtractProject(ctx context.Context, id config.ProjectID) (ExtractionResponse, error) {
+	var v ExtractionResponse
+	err := c.Do(ctx, "POST", Prefix+"/projects/extract", ProjectExtractRequest{Project: id}, &v)
+	return v, err
+}
+
 // HandIn hands work to a project and returns the workstream it created.
 func (c *Client) HandIn(ctx context.Context, req HandInRequest) (HandInResponse, error) {
 	var v HandInResponse

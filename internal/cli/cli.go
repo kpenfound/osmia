@@ -25,6 +25,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   status [workstream-id] [--json]
   project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH [--base-branch NAME] [--json]
   project remove <project-id> [--json]
+  project extract <project-id> [--json]
   handin <project-id> <path|issue-url|-> [--json]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
@@ -145,7 +146,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "profiles":
 		valid = len(a) == 0 || len(a) == 3 && a[0] == "set" || len(a) == 2 && a[0] == "clear"
 	case "project":
-		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove")
+		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract")
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	if !valid || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd == "serve" && (o.json || o.socket != "") {
@@ -179,6 +180,21 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
 		return 4
+	}
+	if cmd == "project" && a[0] == "extract" {
+		id, err := config.ParseProjectID(a[1])
+		if err != nil {
+			return invalid()
+		}
+		result, err := c.ExtractProject(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Extraction %d of project %s (%s) started\nFollow it with osmia status\n", result.Extraction.Extraction, result.Project.ID, result.Project.Name)
+		return 0
 	}
 	if cmd == "project" {
 		var result service.ProjectResponse
@@ -468,6 +484,13 @@ func showProject(w io.Writer, p *service.ProjectView) {
 		for _, d := range c.Diagnostics {
 			fmt.Fprintf(w, "  charter.md:%d: %s\n", d.Line, d.Message)
 		}
+	}
+	if x := p.Extraction; x != nil {
+		line := fmt.Sprintf("Knowledge base: extraction %d %s at %s", x.Extraction, x.State, x.At.UTC().Format(time.RFC3339))
+		if x.Reason != "" {
+			line += ": " + x.Reason
+		}
+		fmt.Fprintln(w, line)
 	}
 }
 func diagnostics(w io.Writer, ds []service.Diagnostic) {

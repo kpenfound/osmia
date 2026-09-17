@@ -243,6 +243,20 @@ func TestConversationRejections(t *testing.T) {
 		t.Fatalf("rejected messages were recorded: %+v", th.Turns)
 	}
 
+	// The librarian's workstream is in the trace but not in status, and its
+	// chief of staff never gets a turn: it is unknown to the conversation too.
+	librarian, err := ensureLibrarianThread(ctx, s.active.repository, demoStart, ownerActor)
+	must(t, err)
+	_, err = c.Send(ctx, librarian, "hello")
+	expect(err, Validation, "workstream "+string(librarian)+" is not in the active project")
+	_, err = c.Conversation(ctx, librarian)
+	expect(err, Validation, "workstream "+string(librarian)+" is not in the active project")
+	th, err = s.active.repository.ChiefOfStaffThread(librarian)
+	must(t, err)
+	if len(th.Turns) != 0 {
+		t.Fatalf("a message to the librarian's workstream was recorded: %+v", th.Turns)
+	}
+
 	// Without a trace the workstream is unknown.
 	unbound := fixture(t)
 	_, c = start(t, unbound)
