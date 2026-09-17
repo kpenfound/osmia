@@ -55,6 +55,7 @@ func queueChiefTurn(t *testing.T, repo *trace.Repository, turn string, at time.T
 }
 
 func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "cs-")
 	must(t, err)
@@ -218,6 +219,7 @@ func sameStatuses(got, want []WorkstreamStatus) bool {
 }
 
 func TestStatusErrors(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
 	_, c := start(t, opts)
@@ -253,6 +255,7 @@ func TestStatusErrors(t *testing.T) {
 }
 
 func TestStatusReportsUnreadableTrace(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "cu-")
 	must(t, err)
@@ -284,6 +287,7 @@ func TestStatusReportsUnreadableTrace(t *testing.T) {
 }
 
 func TestStatusViewCarriesTraceFacts(t *testing.T) {
+	t.Parallel()
 	at := demoStart
 	stored := &trace.Status{Header: trace.Header{Revision: 4, At: at}, StatusContent: trace.StatusContent{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}}}
 	state := "building"

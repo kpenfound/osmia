@@ -35,6 +35,7 @@ func apiError(t *testing.T, err error, code Code, message string) {
 // ruling, after the relay and with the answer turns queued but not run. Each
 // asker resumes exactly once on the thread that asked.
 func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newQuestionFixture(t, "qi-", "", "# Charter\n\n1. Keep state in files under the root.\n", []questionAsker{
 		{stream, demoAgent, demoThread, "mason", "build"}, {stream, "agent_reviewer", "thread_reviewer", "reviewer", "review"}, {quiet, "agent_other", "thread_other", "mason", "build_other"},
@@ -359,6 +360,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 // ruling, and a service without a trace or without a project has an empty
 // inbox.
 func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "qj-")
 	must(t, err)

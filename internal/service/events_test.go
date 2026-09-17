@@ -32,6 +32,7 @@ func (c *fixedClock) Now() time.Time          { c.mu.Lock(); defer c.mu.Unlock()
 func (c *fixedClock) Advance(d time.Duration) { c.mu.Lock(); defer c.mu.Unlock(); c.now = c.now.Add(d) }
 
 func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "ev-")
 	must(t, err)

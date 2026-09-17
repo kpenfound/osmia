@@ -173,6 +173,7 @@ func questionResult(req agent.Request, id, text string) *agent.Result {
 // service restarts with open, answered-but-undelivered and escalated
 // questions. Nothing is lost and nothing runs twice.
 func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newQuestionFixture(t, "qa-", "[capacity]\nmasons = 1\n", "# Charter\n\n1. Keep state in files under the root.\n", []questionAsker{
 		{stream, demoAgent, demoThread, "mason", "build"}, {stream, "agent_mason2", "thread_mason2", "mason", "build2"}, {stream, "agent_reviewer", "thread_reviewer", "reviewer", "review"},
@@ -494,6 +495,7 @@ func claimTurn(t *testing.T, repo *trace.Repository, home string, ws config.Work
 // An answer recorded in an abandoned workstream stays undelivered, while
 // another workstream's answer is queued with its asker's role profile.
 func TestAnswersAreNotDeliveredToAbandonedWorkstreams(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "qb-")
 	must(t, err)

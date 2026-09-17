@@ -485,6 +485,7 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 }
 
 func TestProjectAddSeedsTrackedFiles(t *testing.T) {
+	t.Parallel()
 	f := newLibrarianFixture(t)
 	ctx := context.Background()
 	tracked := f.trackedSeed(t)
@@ -519,6 +520,7 @@ func TestProjectAddSeedsTrackedFiles(t *testing.T) {
 }
 
 func TestExtractionRefusesInvalidOutput(t *testing.T) {
+	t.Parallel()
 	f := newLibrarianFixture(t)
 	ctx := context.Background()
 	seed, err := kb.Seed(f.clone)
@@ -582,6 +584,7 @@ func TestExtractionRefusesInvalidOutput(t *testing.T) {
 }
 
 func TestExtractionSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	f := newLibrarianFixture(t)
 	ctx := context.Background()
 	seed, err := kb.Seed(f.clone)
@@ -693,6 +696,7 @@ func TestExtractionSurvivesRestart(t *testing.T) {
 }
 
 func TestExtractionStateWhileRetrying(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "xs-")
 	must(t, err)
@@ -763,6 +767,7 @@ func TestExtractionStateWhileRetrying(t *testing.T) {
 }
 
 func TestSchedulerLeavesLibrarianTurnsToTheExtractor(t *testing.T) {
+	t.Parallel()
 	f := newLibrarianFixture(t)
 	ctx := context.Background()
 	seed, err := kb.Seed(f.clone)
@@ -827,6 +832,7 @@ func TestSchedulerLeavesLibrarianTurnsToTheExtractor(t *testing.T) {
 }
 
 func TestExtractionRecordsPersistedOutputAfterRestart(t *testing.T) {
+	t.Parallel()
 	for _, completed := range []bool{true, false} {
 		name := "captured"
 		if completed {

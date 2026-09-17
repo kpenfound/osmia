@@ -36,6 +36,12 @@ type Repository struct {
 	session         string
 	wake            *coreadapter.WakeAdapter
 	failPublication func(string) error
+	// gitMu guards what the handle remembers about the Git store: the tree
+	// listing of the commit treeHead and the object files already flushed.
+	gitMu    sync.Mutex
+	tree     map[string]string
+	treeHead string
+	synced   map[string]bool
 }
 
 func location(root config.Root, project config.Project) (string, error) {
@@ -97,7 +103,9 @@ func (r *Repository) Close() error {
 	defer r.mu.Unlock()
 	var err error
 	if r.lock != nil {
-		err = r.lock.Close()
+		// A child process forked but not yet executed shares the open file,
+		// so closing alone would leave the lock held until it executes.
+		err = errors.Join(syscall.Flock(int(r.lock.Fd()), syscall.LOCK_UN), r.lock.Close())
 		r.lock = nil
 	}
 	return errors.Join(err, r.dir.Close())
@@ -384,9 +392,6 @@ func (r *Repository) CreateWorkstream(ctx context.Context, id config.WorkstreamI
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := r.checkGit(); err != nil {
-		return err
-	}
 	if err := r.checkHistory(ctx); err != nil {
 		return err
 	}
@@ -595,9 +600,6 @@ func (r *Repository) append(ctx context.Context, v Record, writeDocument bool) e
 		return fmt.Errorf("record belongs to a different project")
 	}
 	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := r.checkGit(); err != nil {
 		return err
 	}
 	if err := r.checkHistory(ctx); err != nil {

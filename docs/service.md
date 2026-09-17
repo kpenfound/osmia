@@ -12,7 +12,9 @@ The root and its top-level configuration must already exist; a project is not
 required, and one is registered through the API (see below). The service
 acquires an exclusive advisory lock on `<root>/.service.lock` before loading
 state or touching the socket. Root aliases resolve to the same lock. The lock file remains on disk:
-closing its descriptor releases ownership, including after process termination;
+`Close` unlocks it before closing its descriptor, so ownership is released at
+once even while a child process still shares the descriptor, and process
+termination releases it too;
 unlinking it would allow competing owners to lock different inodes. Operators must
 not remove it while the service is running. A second owner fails with an actionable
 startup error and leaves the first owner's state alone.

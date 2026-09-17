@@ -48,6 +48,9 @@ func (r *Repository) publishTree(ctx context.Context, files map[string][]byte, r
 		return err
 	}
 	p := publication{Version: 1, Parent: strings.TrimSpace(string(parent))}
+	if err := r.checkGit(); err != nil {
+		return err
+	}
 	for name := range files {
 		p.Paths = append(p.Paths, name)
 	}
@@ -129,32 +132,57 @@ func (r *Repository) publishTree(ctx context.Context, files map[string][]byte, r
 	return r.recoverPublication(context.WithoutCancel(ctx))
 }
 
+// syncObjects flushes every object this handle has not flushed yet, and the
+// directories that hold them. The first call flushes the whole store, which
+// covers objects an earlier process wrote without publishing them.
 func (r *Repository) syncObjects() error {
-	var dirs []string
+	r.gitMu.Lock()
+	defer r.gitMu.Unlock()
+	if r.synced == nil {
+		r.synced = map[string]bool{}
+	}
+	var dirs, files []string
+	changed := map[string]bool{}
 	err := fs.WalkDir(r.dir.FS(), ".git/objects", func(name string, e fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if err := r.checked(name); err != nil {
+		if err := r.checkedEntry(name, e); err != nil {
 			return err
 		}
 		if e.IsDir() {
 			dirs = append(dirs, name)
 			return nil
 		}
+		if r.synced[name] {
+			return nil
+		}
 		f, err := r.dir.Open(name)
 		if err != nil {
 			return err
 		}
-		return errors.Join(f.Sync(), f.Close())
+		if err := errors.Join(f.Sync(), f.Close()); err != nil {
+			return err
+		}
+		files = append(files, name)
+		for dir := path.Dir(name); dir != ".git"; dir = path.Dir(dir) {
+			changed[dir] = true
+		}
+		return nil
 	})
 	if err != nil {
 		return err
 	}
 	for i := len(dirs) - 1; i >= 0; i-- {
+		if !changed[dirs[i]] {
+			continue
+		}
 		if err := syncDir(r.dir, dirs[i]); err != nil {
 			return err
 		}
+	}
+	for _, name := range files {
+		r.synced[name] = true
 	}
 	return nil
 }
@@ -199,6 +227,9 @@ func (r *Repository) recoverPublication(ctx context.Context) error {
 			return err
 		}
 		if err := r.boundary("recovery-ref-synced"); err != nil {
+			return err
+		}
+		if err := r.checkGit(); err != nil {
 			return err
 		}
 		for _, name := range p.Paths {

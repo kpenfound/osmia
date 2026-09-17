@@ -483,6 +483,7 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 }
 
 func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
+	t.Parallel()
 	f := newArchitectFixture(t)
 	defer f.stop(t)
 	// Draft 1 delivers no plan through the tool but leaves bytes that are not
@@ -621,6 +622,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 }
 
 func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
+	t.Parallel()
 	f := newArchitectFixture(t)
 	defer f.stop(t)
 	ctx := context.Background()
@@ -730,6 +732,7 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 }
 
 func TestArchitectRedraftsAfterAFailedTurn(t *testing.T) {
+	t.Parallel()
 	f := newArchitectFixture(t)
 	defer f.stop(t)
 	f.engine.mu.Lock()
@@ -779,6 +782,7 @@ func TestArchitectRedraftsAfterAFailedTurn(t *testing.T) {
 }
 
 func TestArchitectDraftWaitsForARunner(t *testing.T) {
+	t.Parallel()
 	f := newArchitectFixture(t)
 	ctx := context.Background()
 	entered := make(chan struct{})
@@ -873,6 +877,7 @@ func TestArchitectDraftWaitsForARunner(t *testing.T) {
 }
 
 func TestArchitectDraftsBeforeTheScheduleHook(t *testing.T) {
+	t.Parallel()
 	opts, clone, engine, sessions, clock := newArchitectOptions(t)
 	var repository atomic.Pointer[trace.Repository]
 	var mu sync.Mutex
@@ -925,6 +930,7 @@ func TestArchitectDraftsBeforeTheScheduleHook(t *testing.T) {
 }
 
 func TestArchitectDraftSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	for _, crash := range []string{"during-turn", "captured", "completed", "recorded", "moved"} {
 		t.Run(crash, func(t *testing.T) {
 			f := newArchitectFixture(t)
@@ -1072,6 +1078,7 @@ func TestArchitectDraftSurvivesRestart(t *testing.T) {
 }
 
 func TestAbandonStopsTheArchitectDraft(t *testing.T) {
+	t.Parallel()
 	const evidence = "draft 1 failed: the workstream was abandoned, so the architect runs no turn for it"
 	// blocked scripts the first turn to run until its context is cancelled.
 	blocked := func(f *architectFixture) chan struct{} {
@@ -1209,6 +1216,7 @@ func TestAbandonStopsTheArchitectDraft(t *testing.T) {
 }
 
 func TestSchedulerLeavesArchitectTurnsToTheDrafter(t *testing.T) {
+	t.Parallel()
 	f := newArchitectFixture(t)
 	defer f.stop(t)
 	ctx := context.Background()

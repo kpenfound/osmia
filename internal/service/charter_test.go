@@ -54,6 +54,7 @@ func charterRevisionCount(t *testing.T, s *Service) int {
 }
 
 func TestHandInCharterGate(t *testing.T) {
+	t.Parallel()
 	opts, clone := projectFixture(t)
 	s, c := start(t, opts)
 	ctx := context.Background()
@@ -146,6 +147,7 @@ func TestHandInCharterGate(t *testing.T) {
 }
 
 func TestContextProviderReadsActiveProject(t *testing.T) {
+	t.Parallel()
 	opts, clone := projectFixture(t)
 	s, c := start(t, opts)
 	ctx := context.Background()

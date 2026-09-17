@@ -81,6 +81,7 @@ func activeProjects(t *testing.T, root string) []string {
 }
 
 func TestZeroProjectStart(t *testing.T) {
+	t.Parallel()
 	opts, _ := projectFixture(t)
 	s, c := start(t, opts)
 	ctx := context.Background()
@@ -113,6 +114,7 @@ func TestZeroProjectStart(t *testing.T) {
 }
 
 func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
+	t.Parallel()
 	opts, clone := projectFixture(t)
 	var bound []config.ProjectID
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
@@ -268,6 +270,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 }
 
 func TestProjectAddValidation(t *testing.T) {
+	t.Parallel()
 	opts, clone := projectFixture(t)
 	_, c := start(t, opts)
 	ctx := context.Background()
@@ -324,6 +327,7 @@ func TestProjectAddValidation(t *testing.T) {
 }
 
 func TestProjectAddRecoversAtEachStep(t *testing.T) {
+	t.Parallel()
 	steps := []string{"journal-written", "project-config-written", "trace-created", "active-project-listed", "journal-removed"}
 	for _, step := range steps {
 		for _, mode := range []string{"restart", "retry"} {
@@ -430,6 +434,7 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 }
 
 func TestInterruptedAddWithDifferentRequestIsRefused(t *testing.T) {
+	t.Parallel()
 	opts, clone := projectFixture(t)
 	s, c := start(t, opts)
 	ctx := context.Background()
@@ -457,6 +462,7 @@ func TestInterruptedAddWithDifferentRequestIsRefused(t *testing.T) {
 }
 
 func TestStartupRecoveryFailureIsDiagnosed(t *testing.T) {
+	t.Parallel()
 	opts, clone := projectFixture(t)
 	root := opts.Config.Root
 	s, c := start(t, opts)
@@ -501,6 +507,7 @@ func TestStartupRecoveryFailureIsDiagnosed(t *testing.T) {
 }
 
 func TestJournalForAnotherProjectIsRefused(t *testing.T) {
+	t.Parallel()
 	opts, clone := projectFixture(t)
 	root := opts.Config.Root
 	s, c := start(t, opts)
@@ -550,6 +557,7 @@ func TestJournalForAnotherProjectIsRefused(t *testing.T) {
 }
 
 func TestStartupRecoveryReloadFailureIsDiagnosed(t *testing.T) {
+	t.Parallel()
 	opts, clone := projectFixture(t)
 	root := opts.Config.Root
 	s, c := start(t, opts)

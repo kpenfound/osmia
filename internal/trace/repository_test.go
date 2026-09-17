@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -380,6 +383,126 @@ func TestSymlinksAndGitRedirection(t *testing.T) {
 		})
 	}
 }
+func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
+	for _, mode := range []string{"config", "alternates", "hardlink"} {
+		// Records and workflow publications run Git even when the handle has
+		// listed HEAD's tree; a read runs Git once HEAD has moved since then,
+		// and to finish a publication that stopped after its ref moved.
+		for _, op := range []string{"record", "publish", "read", "recover"} {
+			t.Run(mode+"/"+op, func(t *testing.T) {
+				r, _, p := create(t)
+				ctx := context.Background()
+				var err error
+				switch op {
+				case "read":
+					err = r.Append(ctx, specimens()[0])
+				case "recover":
+					injected := errors.New("injected publication failure")
+					r.failPublication = func(step string) error {
+						if step == "ref-published" {
+							return injected
+						}
+						return nil
+					}
+					if _, err := r.SetFeatureState(ctx, header("transition", "handed"), "handed", "the owner handed a design"); !errors.Is(err, injected) {
+						t.Fatalf("injection not reached: %v", err)
+					}
+					r.failPublication = nil
+				default:
+					_, err = r.Workflow(streamID, FeatureSubject)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				git := filepath.Join(r.directory, ".git")
+				if err := os.MkdirAll(filepath.Join(git, "objects", "info"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				want := ""
+				switch mode {
+				case "config":
+					err = os.WriteFile(filepath.Join(git, "config"), []byte(gitConfig+"[core]\n\tbare = true\n"), 0600)
+					want = "differs from the isolated local configuration"
+				case "alternates":
+					err = os.WriteFile(filepath.Join(git, "objects", "info", "alternates"), []byte(filepath.Join(p.Clone, ".git", "objects")+"\n"), 0600)
+					want = "external Git storage is forbidden"
+				case "hardlink":
+					sentinel := filepath.Join(p.Clone, "sentinel")
+					if err := os.WriteFile(sentinel, []byte("untouched"), 0600); err != nil {
+						t.Fatal(err)
+					}
+					err = os.Link(sentinel, filepath.Join(git, "objects", "info", "linked"))
+					want = "hardlink aliases are forbidden"
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				ref := filepath.Join(git, "refs", "heads", "main")
+				before, err := os.ReadFile(ref)
+				if err != nil {
+					t.Fatal(err)
+				}
+				switch op {
+				case "record":
+					err = r.Append(ctx, specimens()[0])
+				case "publish":
+					_, err = r.SetFeatureState(ctx, header("transition", "handed"), "handed", "the owner handed a design")
+				default:
+					_, err = r.Workflow(streamID, FeatureSubject)
+				}
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("%s with a tampered store: %v", op, err)
+				}
+				if after, err := os.ReadFile(ref); err != nil || string(after) != string(before) {
+					t.Fatalf("Git committed with a tampered store: %s %v", after, err)
+				}
+				if _, err := os.Stat(filepath.Join(r.directory, publicationFile)); op == "recover" && err != nil {
+					t.Fatalf("recovery finished with a tampered store: %v", err)
+				}
+			})
+		}
+	}
+}
+func TestCheckedEntryAcceptsAVanishedFile(t *testing.T) {
+	r, _, _ := create(t)
+	name := ".git/tmp_obj_vanished"
+	if err := os.WriteFile(filepath.Join(r.directory, name), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := fs.ReadDir(r.dir.FS(), ".git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry fs.DirEntry
+	for _, e := range entries {
+		if e.Name() == path.Base(name) {
+			entry = e
+		}
+	}
+	if entry == nil {
+		t.Fatal("entry not listed")
+	}
+	// The file is removed between the directory listing and the check.
+	if err := os.Remove(filepath.Join(r.directory, name)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.checkedEntry(name, entry); err != nil {
+		t.Fatalf("vanished entry: %v", err)
+	}
+}
+func TestHeadTreeRefusesAnInvalidRef(t *testing.T) {
+	for _, ref := range []string{"main~1", "-p", "HEAD", strings.Repeat("a", 39)} {
+		t.Run(ref, func(t *testing.T) {
+			r, _, _ := create(t)
+			if err := os.WriteFile(filepath.Join(r.directory, ".git", "refs", "heads", "main"), []byte(ref+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.Workflow(streamID, FeatureSubject); err == nil || !strings.Contains(err.Error(), "invalid trace HEAD") {
+				t.Fatalf("ref %q: %v", ref, err)
+			}
+		})
+	}
+}
 func TestGitEnvironmentAndExistingRepositories(t *testing.T) {
 	root, p := fixture(t)
 	t.Setenv("GIT_DIR", filepath.Join(p.Clone, ".git"))
@@ -648,6 +771,27 @@ func TestCreateSeededRecordsEntityMap(t *testing.T) {
 		t.Fatalf("file: %q, %v", data, err)
 	}
 	if err := r.checkHistory(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCloseReleasesALockItsDescriptorsShare(t *testing.T) {
+	r, root, p := create(t)
+	// A duplicate descriptor shares the lock the way a child process forked
+	// but not yet executed does.
+	dup, err := syscall.Dup(int(r.lock.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(dup)
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Open(root, p)
+	if err != nil {
+		t.Fatalf("reopen after close: %v", err)
+	}
+	if err := again.Close(); err != nil {
 		t.Fatal(err)
 	}
 }

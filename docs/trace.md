@@ -100,9 +100,10 @@ described in [charter](charter.md).
 
 ## Failure and ownership boundaries
 
-One handle holds an exclusive process lock until `Close`; concurrent calls on
-that handle serialize. External writers must not modify or move the repository
-while it is open. Files use root-confined operations and temporary-file replacement
+One handle holds an exclusive process lock until `Close`, which unlocks it before
+closing the descriptor, so a child process that still shares the descriptor does
+not keep it held. Concurrent calls on that handle serialize. External writers
+must not modify or move the repository while it is open. Files use root-confined operations and temporary-file replacement
 with file and directory sync. Existing symlinks, hardlink aliases, special files,
 absolute/traversal paths, unsupported schema versions, unknown or duplicate JSON
 fields, invalid provenance and inconsistent revision identities are rejected.
@@ -113,6 +114,9 @@ no global/system configuration, and disabled hooks. It hashes supplied bytes usi
 plumbing commands, bypassing attributes and filters. Only trace-owned files enter
 its commits; project configuration is left in place. Linked worktrees, redirected
 object stores, Git symlinks and changes to the isolated `.git/config` are rejected.
+These checks walk `.git` once before each operation's Git commands. The handle
+keeps the file list of the commit HEAD names, so a read that finds HEAD
+unchanged since that listing runs no Git and does not walk `.git`.
 A local Git executable is required for trace and workflow operations. The service owns
 this executable access; runtime agents receive no trace-repository handle.
 
@@ -168,7 +172,8 @@ claim, acknowledgement and release history, sorted by event ID. Each entry's
 `At` is its transition's timestamp.
 
 The repository serializes calls under its exclusive process lock. Publication
-writes immutable Git objects using a private index, syncs the objects, writes and
+writes immutable Git objects using a private index, syncs the objects the handle
+has not synced yet (every object on its first publication), writes and
 syncs a recovery journal under `.git`, then atomically replaces and syncs the
 branch ref. That ref is the visibility boundary. Ordinary workflow, transition,
 question and owned agent files are materialized from the committed objects before the journal is removed.

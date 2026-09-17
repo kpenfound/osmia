@@ -119,6 +119,7 @@ func states(list ConversationResponse) []string {
 }
 
 func TestConversationRunsMessagesInOrder(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "cv-")
 	turns := &chiefTurns{hold: make(chan struct{}), entered: make(chan struct{})}
@@ -212,6 +213,7 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 }
 
 func TestConversationRejections(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts, _ := conversationFixture(t, "cr-")
 	s, c := start(t, opts)
@@ -272,6 +274,7 @@ func TestConversationRejections(t *testing.T) {
 }
 
 func TestConversationUsesProfileOverride(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts, _ := conversationFixture(t, "co-")
 	file := filepath.Join(opts.Config.Root, "config.toml")
@@ -290,6 +293,7 @@ func TestConversationUsesProfileOverride(t *testing.T) {
 }
 
 func TestConversationUsesOverrideOutsideFallbackChain(t *testing.T) {
+	t.Parallel()
 	opts, _ := conversationFixture(t, "cf-")
 	s, c := start(t, opts)
 	mutation(t, c, "PUT", "profile", ProfileRequest{trace.ChiefOfStaff, "other"})
@@ -303,6 +307,7 @@ func TestConversationUsesOverrideOutsideFallbackChain(t *testing.T) {
 }
 
 func TestConversationMessageRunsOnceAcrossRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "cx-")
 	// First lifetime: no turn runner, so the message is acknowledged and the
@@ -351,6 +356,7 @@ func TestConversationMessageRunsOnceAcrossRestart(t *testing.T) {
 }
 
 func TestConversationUnusableProfileIsInternal(t *testing.T) {
+	t.Parallel()
 	opts, _ := conversationFixture(t, "cu-")
 	s, c := start(t, opts)
 	s.mu.Lock()
@@ -371,6 +377,7 @@ func TestConversationUnusableProfileIsInternal(t *testing.T) {
 }
 
 func TestConversationListsInterruptedTurnAsFailed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "ci-")
 	s, c := start(t, opts)

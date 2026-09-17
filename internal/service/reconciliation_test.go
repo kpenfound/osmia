@@ -41,6 +41,7 @@ func (r *interruptedRunner) Apply(ctx context.Context, _ coreadapter.Operation) 
 }
 
 func TestServiceResumesClaimedOperationWithoutWakeup(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
@@ -98,6 +99,7 @@ func TestServiceResumesClaimedOperationWithoutWakeup(t *testing.T) {
 }
 
 func TestServiceRejectsLockedTrace(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
@@ -152,6 +154,7 @@ func runnerIntent(t *testing.T, opts Options) config.Root {
 }
 
 func TestServiceThreadsErrorReleasesTrace(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	runnerIntent(t, opts)
 	failure := errors.New("threads unavailable")
@@ -179,6 +182,7 @@ func TestServiceThreadsErrorReleasesTrace(t *testing.T) {
 }
 
 func TestServiceThreadsReplaceRunnerAdapter(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	runnerIntent(t, opts)
 	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
