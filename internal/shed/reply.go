@@ -34,8 +34,8 @@ type Answer struct {
 // Reply is the architect's one reply to a round: its answers to the dissent
 // that stood once the round was heard, and the revision its redraft recorded,
 // if it redrafted. Revision is what the round debated. Problems is why a
-// redraft was given up as invalid, and Failure why the architect's turn did
-// not end normally; what it answered before failing is kept.
+// redraft was given up, and Failure why the architect's turn did not end
+// normally; what it answered before failing is kept.
 type Reply struct {
 	Version  int      `json:"version"`
 	Round    int      `json:"round"`

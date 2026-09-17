@@ -20,8 +20,10 @@ func prose(p string) bool {
 // revision is recorded or none is. A kb/<subsystem>.md revision with empty
 // content records the subsystem's removal, and its file is deleted. The
 // charter is owner-edited and handed input is immutable, so neither can be
-// recorded this way. Revisions are checked against the recorded history
-// before anything is written.
+// recorded this way, and a revision of spec.md or plan.json is refused with
+// ErrConflict while the file holds an owner edit no revision records: the
+// edit is read and recorded first. Revisions are checked against the recorded
+// history before anything is written.
 func (r *Repository) RecordDocuments(ctx context.Context, docs []Document) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -83,6 +85,17 @@ func (r *Repository) RecordDocuments(ctx context.Context, docs []Document) error
 		paths[d.Path] = true
 		if err := revision(previous[recordKey(d)], d); err != nil {
 			return err
+		}
+		// The owner edits spec.md and plan.json directly. Writing over an
+		// edit OwnerDocuments has not recorded would lose it.
+		if prev, ok := previous[recordKey(d)].(Document); ok && ownerEditable[d.ID] == d.Path {
+			current, err := r.readFile(prefix + d.Path)
+			if err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			if err == nil && string(current) != prev.Content {
+				return fmt.Errorf("%w: %w: %s has an unrecorded owner edit; read it first", ErrConflict, ErrOwnerEdit, d.Path)
+			}
 		}
 		if err := publicationPath(prefix + d.Path); err != nil {
 			return err

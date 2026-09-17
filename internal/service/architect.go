@@ -747,17 +747,23 @@ func (d *drafter) record(ctx context.Context, operation string, stream config.Wo
 
 // validate returns every problem with the recorded draft.
 func (d *drafter) validate(specDoc, planDoc trace.Document) ([]string, error) {
-	spec := plan.ParseSpec(specDoc.Content)
 	entities, err := kb.Load(d.repository)
 	if err != nil {
 		return nil, err
 	}
-	graph, parseErr := plan.Parse([]byte(planDoc.Content))
+	return validateDraft(specDoc.Content, planDoc.Content, entities), nil
+}
+
+// validateDraft returns every problem with a spec and a plan against the
+// entity map. It reads nothing, so a caller that already holds the trace can
+// use it.
+func validateDraft(spec, graph string, entities kb.Map) []string {
+	parsed, parseErr := plan.Parse([]byte(graph))
 	if parseErr != nil {
-		graph = plan.Plan{Version: plan.Version}
+		parsed = plan.Plan{Version: plan.Version}
 	}
 	var out []string
-	for _, p := range plan.Validate(spec, graph, entities) {
+	for _, p := range plan.Validate(plan.ParseSpec(spec), parsed, entities) {
 		if parseErr == nil || p.Kind == plan.SpecProblem {
 			out = append(out, p.Error())
 		}
@@ -765,7 +771,7 @@ func (d *drafter) validate(specDoc, planDoc trace.Document) ([]string, error) {
 	if parseErr != nil {
 		out = append(out, plan.PlanPath+": "+parseErr.Error())
 	}
-	return out, nil
+	return out
 }
 
 // sketch moves the workstream from handed to sketched for a valid draft. The

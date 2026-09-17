@@ -40,6 +40,21 @@ const (
 	// its reply is recorded, concluded-<n> once debate ended after round n,
 	// and failed-<n> when round n ended without a record or a reply.
 	shedSubject = "shed"
+	// ownerSubject is the workflow subject that tracks the owner's own part
+	// in the shed, one value per action: objected-<n>, ruled-<n>, more-<n>,
+	// skipped and invalid-edit. The debate controller reads it and writes it
+	// only to report an invalid owner edit, so an owner action never races a
+	// round for the shed subject.
+	ownerSubject = "shed-owner"
+	// skippedValue is the owner-subject value of the action that skips
+	// debate, and skipTransition the transition that records it. A later
+	// action moves the subject on; the skip itself is the transition, and it
+	// stands as long as the workstream is in the shed.
+	skippedValue   = "skipped"
+	skipTransition = "shed-owner-skip"
+	// invalidEditValue is the owner-subject value of an owner edit that was
+	// read, found invalid and not recorded.
+	invalidEditValue = "invalid-edit"
 	// maxRoundAttempts bounds the turns one member may start in one round
 	// after service stops interrupt earlier ones: the librarian's bound.
 	maxRoundAttempts = maxExtractionAttempts
@@ -130,9 +145,19 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 	if feature.Value != SketchedState && feature.Value != InShedState {
 		return nil
 	}
-	pin, err := d.latestPin(stream)
+	skipped, err := skippedDebate(d.repository, stream)
 	if err != nil {
 		return err
+	}
+	pin, err := d.ownerEdits(ctx, stream)
+	if err != nil {
+		return err
+	}
+	// A skipped debate runs no committee turn, so the workstream needs
+	// neither a committee nor a round; it waits in the shed for the owner to
+	// ratify both documents.
+	if skipped {
+		return nil
 	}
 	if feature.Value == SketchedState {
 		if d.s.options.Committee == nil {
@@ -180,19 +205,39 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 		return d.request(ctx, stream, state, roundInput{Round: 1, Spec: latest.Spec, Plan: latest.Plan}, InShedState)
 	}
 	kind, n, ok := shedState(state.Value)
-	if !ok || kind != "heard" && kind != "replied" {
+	if !ok || kind != "heard" && kind != "replied" && kind != "concluded" {
 		return nil
+	}
+	requests, err := shed.Requests(d.repository, stream)
+	if err != nil {
+		return err
+	}
+	configured := d.s.current().Shed.MaxRounds
+	limit := shed.Limit(configured, requests)
+	if kind == "concluded" {
+		// Debate resumes only where the owner asked for further rounds after
+		// this conclusion; the cap bounds how many of them run.
+		if n >= limit || !slices.ContainsFunc(requests, func(m shed.More) bool { return m.Round == n }) {
+			return nil
+		}
+		if d.s.options.Committee == nil {
+			return nil
+		}
+		return d.request(ctx, stream, state, roundInput{Round: n + 1, Spec: latest.Spec, Plan: latest.Plan}, shed.MoreDocumentID(n))
 	}
 	records, err := shed.Records(d.repository, stream)
 	if err != nil {
 		return err
 	}
-	open := shed.DissentRecord(records)
+	rulings, err := shed.AllRulings(d.repository, stream)
+	if err != nil {
+		return err
+	}
+	open := shed.DissentRecord(records, rulings)
 	round, _ := roundIDs(n)
-	limit := d.s.current().Shed.MaxRounds
 	switch {
-	case len(open) == 0:
-		return d.conclude(ctx, stream, state, n, round+"-heard", unopposed(records, n), open)
+	case len(shed.Standing(open)) == 0:
+		return d.conclude(ctx, stream, state, n, round+"-heard", unopposed(records, open, n), open)
 	case kind == "heard":
 		// The reply waits for a service that can run the architect.
 		if d.s.options.Architect == nil {
@@ -206,7 +251,7 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 		return d.requestReply(ctx, stream, state, roundInput{Round: n, Spec: records[i].Revision.Spec, Plan: records[i].Revision.Plan}, len(open))
 	case n >= limit:
 		reply, _ := replyIDs(n)
-		return d.conclude(ctx, stream, state, n, reply+"-replied", fmt.Sprintf("debate stopped after round %d, at the shed.max_rounds cap of %d, with %s; the cap approves nothing", n, limit, standing(open)), open)
+		return d.conclude(ctx, stream, state, n, reply+"-replied", fmt.Sprintf("debate stopped after round %d, %s, with %s; the cap approves nothing", n, bound(configured, requests, limit), standing(open)), open)
 	}
 	if d.s.options.Committee == nil {
 		return nil
@@ -215,13 +260,26 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 	return d.request(ctx, stream, state, roundInput{Round: n + 1, Spec: latest.Spec, Plan: latest.Plan}, reply+"-replied")
 }
 
-// unopposed is why a debate with no open dissent concludes after round n. It
+// bound names what stopped the debate at its last round: the configured cap,
+// or the rounds the owner asked for once they have, which replace it.
+func bound(configured int, requests []shed.More, limit int) string {
+	if len(requests) == 0 {
+		return fmt.Sprintf("at the shed.max_rounds cap of %d", configured)
+	}
+	return fmt.Sprintf("at round %d, the last of the further rounds the owner asked for", limit)
+}
+
+// unopposed is why a debate with nothing standing concludes after round n. It
 // is consensus only among the members whose turns ended normally: a round in
-// which every turn failed reviewed nothing, and the reason says so.
-func unopposed(records []shed.Record, n int) string {
+// which every turn failed reviewed nothing, and the reason says so. Dissent
+// the owner dismissed is not agreement either.
+func unopposed(records []shed.Record, open []shed.Entry, n int) string {
+	if len(open) > 0 {
+		return fmt.Sprintf("debate concluded after round %d: the owner dismissed every objection that stood", n)
+	}
 	members, failed := 0, 0
 	for _, r := range records {
-		if r.Round == n {
+		if r.Round == n && !r.Owned() {
 			members++
 			if r.Failure != "" {
 				failed++
@@ -238,14 +296,18 @@ func unopposed(records []shed.Record, n int) string {
 }
 
 // Dissent returns the workstream's dissent record, computed from the recorded
-// rounds alone: every objection that stands, with its kind, its member, the
-// part it names and whether it blocks.
+// rounds and the owner's rulings: every objection that stands, with its kind,
+// its member, the part it names, what the owner ruled and whether it blocks.
 func Dissent(repository *trace.Repository, stream config.WorkstreamID) ([]shed.Entry, error) {
 	records, err := shed.Records(repository, stream)
 	if err != nil {
 		return nil, err
 	}
-	return shed.DissentRecord(records), nil
+	rulings, err := shed.AllRulings(repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	return shed.DissentRecord(records, rulings), nil
 }
 
 // standing counts the open dissent and how much of it blocks.
@@ -274,7 +336,15 @@ func (d *debate) conclude(ctx context.Context, stream config.WorkstreamID, state
 		if e.Blocking {
 			weight = "blocking"
 		}
-		fmt.Fprintf(&body, "\n- %s (%s, %s, by %s in round %d on %s, against %s): %s", e.ID, e.Kind, weight, e.Member, e.Round, e.Part, e.Revision, e.Argument)
+		if e.Disposition != "" {
+			weight = string(e.Disposition) + ", " + weight
+		}
+		// The owner's own objection names no part.
+		about := " on " + e.Part
+		if e.Part == "" {
+			about = ""
+		}
+		fmt.Fprintf(&body, "\n- %s (%s, %s, by %s in round %d%s, against %s): %s", e.ID, e.Kind, weight, e.Member, e.Round, about, e.Revision, e.Argument)
 	}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: d.header(id, stream, cause, d.s.now()), Subject: shedSubject, From: state.Value, To: fmt.Sprintf("concluded-%d", n), Reason: reason},
@@ -288,8 +358,8 @@ func (d *debate) header(id string, stream config.WorkstreamID, cause string, at 
 }
 
 // latestPin returns the latest recorded revisions of the spec and the plan.
-func (d *debate) latestPin(stream config.WorkstreamID) (shed.Pin, error) {
-	docs, err := trace.Read[trace.Document](d.repository, stream)
+func latestPin(repository *trace.Repository, stream config.WorkstreamID) (shed.Pin, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
 		return shed.Pin{}, err
 	}
@@ -545,7 +615,7 @@ func (d *debate) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	}
 	// A round whose files are committed was heard, whatever happened to the
 	// workstream since: only a round without a record fails on abandonment.
-	heard := slices.ContainsFunc(recorded, func(r shed.Record) bool { return r.Round == in.Round })
+	heard := slices.ContainsFunc(recorded, func(r shed.Record) bool { return r.Round == in.Round && !r.Owned() })
 	if !heard {
 		gone, err := abandoned(d.repository, stream)
 		if err != nil {
@@ -931,7 +1001,7 @@ func (d *debate) stage(ctx context.Context, clone string, stream config.Workstre
 // recorded is what the workstream's shed already holds: a round with files in
 // it only moves.
 func (d *debate) record(ctx context.Context, operation string, stream config.WorkstreamID, in roundInput, records, recorded []shed.Record) (coreadapter.OperationResult, error) {
-	if !slices.ContainsFunc(recorded, func(r shed.Record) bool { return r.Round == in.Round }) {
+	if !slices.ContainsFunc(recorded, func(r shed.Record) bool { return r.Round == in.Round && !r.Owned() }) {
 		at := d.s.now()
 		var docs []trace.Document
 		for _, r := range records {
@@ -952,7 +1022,7 @@ func (d *debate) record(ctx context.Context, operation string, stream config.Wor
 	}
 	var objections, concessions, failed int
 	for _, r := range recorded {
-		if r.Round == in.Round {
+		if r.Round == in.Round && !r.Owned() {
 			objections, concessions = objections+len(r.Objections), concessions+len(r.Concessions)
 			if r.Failure != "" {
 				failed++

@@ -29,6 +29,10 @@ const usage = `Usage: osmia <command> [--root PATH]
   project extract <project-id> [--json]
   handin <project-id> <path|issue-url|-> [--json]
   abandon <workstream-id> <reason> [--json]
+  shed object <workstream-id> <argument> [--json]
+  shed rule <workstream-id> <objection-id> <sustain|dismiss> [note] [--json]
+  shed skip <workstream-id> [--json]
+  shed more <workstream-id> <rounds> [--json]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
   inbox [--json]
@@ -156,6 +160,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) >= 2 && a[0] == "set" || len(a) == 1 && a[0] == "clear"
 	case "profiles":
 		valid = len(a) == 0 || len(a) == 3 && a[0] == "set" || len(a) == 2 && a[0] == "clear"
+	case "shed":
+		valid = len(a) >= 2 && (a[0] == "object" && len(a) == 3 || a[0] == "rule" && (len(a) == 4 || len(a) == 5) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3)
 	case "project":
 		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract")
 	}
@@ -186,7 +192,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "status" && len(a) == 1)
 	}
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
@@ -300,6 +306,41 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Workstream %s abandoned\nReason: %s\n", result.Workstream, result.Reason)
+		return 0
+	}
+	if cmd == "shed" {
+		id, err := config.ParseWorkstreamID(a[1])
+		if err != nil {
+			return invalid()
+		}
+		var result service.ShedResponse
+		switch a[0] {
+		case "object":
+			result, err = c.ShedObject(ctx, id, a[2])
+		case "rule":
+			note := ""
+			if len(a) == 5 {
+				note = a[4]
+			}
+			result, err = c.ShedRule(ctx, id, a[2], a[3], note)
+		case "skip":
+			result, err = c.ShedSkip(ctx, id)
+		case "more":
+			// A count that is not a number is a usage error; one out of range
+			// is the service's to refuse, naming shed.max_rounds.
+			n, convErr := strconv.Atoi(a[2])
+			if convErr != nil {
+				return invalid()
+			}
+			result, err = c.ShedMore(ctx, id, n)
+		}
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Shed of workstream %s: %s\n%s\n", result.Workstream, result.Action, result.Detail)
 		return 0
 	}
 	if cmd == "send" || cmd == "conversation" {

@@ -18,6 +18,10 @@ osmia conversation w_0123456789abcdef0123456789abcdef
 osmia inbox
 osmia answer 1 "Resume uploads; never restart them."
 osmia abandon w_0123456789abcdef0123456789abcdef "Superseded by the new upload design."
+osmia shed object w_0123456789abcdef0123456789abcdef "The plan never names the retry budget."
+osmia shed rule w_0123456789abcdef0123456789abcdef agent_committee_1-r1-1 dismiss "We accept the risk."
+osmia shed skip w_0123456789abcdef0123456789abcdef
+osmia shed more w_0123456789abcdef0123456789abcdef 2
 osmia pause all --reason "Away for the weekend"
 osmia resume all
 osmia profiles
@@ -98,6 +102,34 @@ a service restart.
   empty reason, or a workstream the active project does not hold, fails with
   `validation` (exit 4); a delivered or already abandoned workstream fails
   with `conflict` (exit 5). See [abandoning](service.md#abandoning).
+- `shed object <workstream-id> <argument>` adds your own objection to the
+  current round of a workstream's debate. The argument is one argument; quote
+  it. It is recorded as yours, stands in the dissent record and blocks, and the
+  architect answers it in its reply to the round. Dismiss it with `shed rule`
+  when it is settled.
+- `shed rule <workstream-id> <objection-id> <sustain|dismiss> [note]` rules on
+  one objection that stands. `sustain` makes it block whatever its kind, until
+  its member concedes it after a redraft; `dismiss` records your disposition
+  and it blocks no longer. The note is optional and is one argument; quote it.
+  An objection that does not stand fails with `not_found` (exit 4).
+- `shed skip <workstream-id>` skips debate for a `sketched` or `in-shed`
+  workstream. No further committee or architect turn starts; the workstream
+  still needs your ratification of the spec and the plan. A running round, or a
+  debate already skipped, fails with `conflict` (exit 5).
+- `shed more <workstream-id> <rounds>` asks for that many further rounds once
+  debate has concluded, between 1 and `shed.max_rounds`; what you ask for is
+  what runs, and it replaces the cap. Debate resumes from the conclusion. A
+  debate still running or never concluded fails with `conflict` (exit 5), a
+  count out of range with `validation` (exit 4), and a count that is not a
+  number is a usage error (exit 2).
+- Editing the documents needs no command. You edit `spec.md` and `plan.json` in
+  the workstream's directory under the trace yourself. The service records what
+  you changed as a new revision of yours before any turn reads it, and the next
+  round debates it. The two are one draft: if what you leave does not validate,
+  neither file is recorded and neither is debated, your chief of staff reports
+  the problems, and the recorded revisions stay. Until you correct them, a
+  redraft by the architect of a file you edited is given up rather than written
+  over your edit. See [the owner in the shed](service.md#the-owner-in-the-shed).
 - `project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH
   [--base-branch NAME]` registers a project with the running service: it
   validates the request, generates the project ID, writes

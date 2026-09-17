@@ -406,11 +406,38 @@ func (d *debate) recordReply(ctx context.Context, operation string, stream confi
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	docs = append(docs, trace.Document{Header: header(shed.ReplyDocumentID(reply.Round), 1), Path: shed.ReplyPath(reply.Round), Content: string(data)})
-	if err := d.repository.RecordDocuments(ctx, docs); err != nil {
+	replyDoc := trace.Document{Header: header(shed.ReplyDocumentID(reply.Round), 1), Path: shed.ReplyPath(reply.Round), Content: string(data)}
+	err = d.repository.RecordDocuments(ctx, append(docs, replyDoc))
+	if errors.Is(err, trace.ErrOwnerEdit) && reply.Redraft != nil {
+		// The owner has edited a file the redraft changes and the edit is not
+		// recorded yet. The redraft must not write over it, so it is given up
+		// like an invalid one and the reply is recorded on its own.
+		if reply, replyDoc, err = d.withoutRedraft(stream, reply, header); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		err = d.repository.RecordDocuments(ctx, []trace.Document{replyDoc})
+	}
+	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	return d.replied(ctx, operation, stream, reply)
+}
+
+// withoutRedraft gives up a redraft the owner's own unrecorded edit stands in
+// the way of: the reply keeps its answers, records why the redraft was given
+// up, and the revision the round debated stays.
+func (d *debate) withoutRedraft(stream config.WorkstreamID, reply shed.Reply, header func(string, int) trace.Header) (shed.Reply, trace.Document, error) {
+	edited, err := d.repository.OwnerEdits(stream)
+	if err != nil {
+		return reply, trace.Document{}, err
+	}
+	reply.Redraft = nil
+	reply.Problems = append(reply.Problems, fmt.Sprintf("the redraft is not recorded: the owner has edited %s and the edit is not recorded yet, so the redraft would write over it", strings.Join(edited, " and ")))
+	data, err := shed.EncodeReply(reply)
+	if err != nil {
+		return reply, trace.Document{}, err
+	}
+	return reply, trace.Document{Header: header(shed.ReplyDocumentID(reply.Round), 1), Path: shed.ReplyPath(reply.Round), Content: string(data)}, nil
 }
 
 // replied moves the shed to replied-<n> for a recorded reply, with a reason
@@ -423,7 +450,7 @@ func (d *debate) replied(ctx context.Context, operation string, stream config.Wo
 	case reply.Redraft != nil:
 		reason += " and redrafted: " + reply.Redraft.String()
 	case len(reply.Problems) > 0:
-		reason += fmt.Sprintf("; its redraft was given up as invalid and %s stays:\n- %s", reply.Revision, strings.Join(reply.Problems, "\n- "))
+		reason += fmt.Sprintf("; its redraft was given up and %s stays:\n- %s", reply.Revision, strings.Join(reply.Problems, "\n- "))
 	default:
 		reason += " and left " + reply.Revision.String() + " as it is"
 	}
@@ -468,13 +495,18 @@ func (d *debate) endReply(ctx context.Context, operation string, stream config.W
 	return outcome, nil
 }
 
-// standingAfter returns the dissent that stood once round n was heard.
+// standingAfter returns the dissent that stood once round n was heard, and
+// that the owner has not dismissed: what the architect answers.
 func (d *debate) standingAfter(stream config.WorkstreamID, n int) ([]shed.Entry, error) {
 	records, err := d.earlier(stream, n+1)
 	if err != nil {
 		return nil, err
 	}
-	return shed.DissentRecord(records), nil
+	rulings, err := shed.AllRulings(d.repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	return shed.Standing(shed.DissentRecord(records, rulings)), nil
 }
 
 // enqueueReply accepts the next architect turn of the reply, fixing its
@@ -489,7 +521,7 @@ func (d *debate) enqueueReply(ctx context.Context, cfg *config.Config, stream co
 	if err != nil {
 		return err
 	}
-	latest, err := d.latestPin(stream)
+	latest, err := latestPin(d.repository, stream)
 	if err != nil {
 		return err
 	}
@@ -684,7 +716,16 @@ func replyPrompt(in roundInput, latest shed.Pin, open []shed.Entry, problems []s
 		if e.Blocking {
 			weight = "blocking"
 		}
-		fmt.Fprintf(&b, "- %s (%s, %s, by %s in round %d on %s, citing %s): %s\n", e.ID, e.Kind, weight, e.Member, e.Round, e.Part, strings.Join(e.Citations, ", "), e.Argument)
+		// The owner's own objection names no part and cites nothing.
+		about := " on " + e.Part
+		if e.Part == "" {
+			about = ""
+		}
+		citing := ", citing " + strings.Join(e.Citations, ", ")
+		if len(e.Citations) == 0 {
+			citing = ""
+		}
+		fmt.Fprintf(&b, "- %s (%s, %s, by %s in round %d%s%s): %s\n", e.ID, e.Kind, weight, e.Member, e.Round, about, citing, e.Argument)
 	}
 	fmt.Fprintf(&b, `
 What each kind asks of you:
@@ -692,6 +733,7 @@ What each kind asks of you:
 - size: split the unit by what it addresses. It blocks until its member concedes it.
 - proof: name a proof that can show the criterion. It blocks until its member concedes it.
 - fit: advice to the owner. It never blocks; answer it.
+- owner: the owner's own objection. It blocks until the owner disposes of it; answer it as you would a member's.
 
 Your view holds:
 - spec.md and plan.json: the latest recorded revision, %s.

@@ -49,10 +49,17 @@ Only documents can be project-scoped. Project document paths are `charter.md`,
 `kb/entities.json`, `kb/<name>.md` and `notes/<role>.md`; workstream document paths
 are `spec.md`, `plan.json`, `handed/<name>` and the shed records
 `shed/round-<n>/<agent>.json`, where `<n>` is a positive round number without
-leading zeros and `<agent>` is the committee member's agent ID, and
+leading zeros and `<agent>` is the committee member's agent ID,
 `shed/round-<n>/reply.json`, the architect's
-[reply to the round](service.md#the-architects-reply). Handed inputs
-are immutable.
+[reply to the round](service.md#the-architects-reply), and the three files of
+[the owner's own part](service.md#the-owner-in-the-shed) in a round:
+`shed/round-<n>/owner.json`, the owner's objections, a record of the same shape
+as a member's; `shed/round-<n>/rulings.json`, what the owner ruled about the
+objections that stand; and `shed/round-<n>/more.json`, the further rounds the
+owner asked for after debate concluded at round `n`. Handed inputs
+are immutable. `spec.md` and `plan.json` are owner-edited: a revision of either
+is recorded with the actor `owner`/`local` and the cause `owner-edit` when the
+file differs from the latest recorded revision, as the charter is.
 Only a handed document carries a `source`: `file:` and the absolute path it was
 read from, the issue URL, or `stdin`.
 Document paths retain one record identity. Agent role and thread IDs stay stable
@@ -92,9 +99,10 @@ trace accounting does not change the operational ledger adapter's file format.
 
 ## Charter
 
-The owner edits `charter.md` directly, so it is the one tracked file allowed to
-differ from committed history; appending any other record neither refuses nor
-commits such an edit. `Charter(ctx, at)` is the only way to read the charter:
+The owner edits `charter.md` directly, so it is one of the tracked files
+allowed to differ from committed history, with a workstream's
+[`spec.md` and `plan.json`](#owner-edited-workstream-documents); appending any
+other record neither refuses nor commits such an edit. `Charter(ctx, at)` is the only way to read the charter:
 it returns the latest recorded revision (document ID `charter`) after
 recording `charter.md` as a new revision by the owner (`owner`/`local`, cause
 `owner-edit`) when the file differs from the latest revision. A read without an
@@ -103,6 +111,28 @@ the recorded bytes, so an edit saved meanwhile is recorded by the next read.
 `Append` of a project `charter.md` revision is refused with `ErrConflict`
 unless the file matches the latest recorded revision. The rule format is
 described in [charter](charter.md).
+
+## Owner-edited workstream documents
+
+A workstream's `spec.md` and `plan.json` are the owner's to edit in place too.
+`OwnerDocuments(ctx, stream, at, check)` returns the latest recorded revision
+of both, by record ID, after recording each file that differs as a new
+revision by the owner (`owner`/`local`, cause `owner-edit`, depth 0). A read
+without an edit records nothing, the files themselves are not rewritten, and
+the commits take the recorded bytes, as for the charter.
+
+The two are one draft, so they are refused and recorded together: `check` is
+given the content of both as the files leave them, by record ID, and may
+refuse the edit, in which case neither file is recorded, both latest recorded
+revisions stay current, and the error wraps `ErrOwnerEdit`. It runs while the
+repository is held, so it must not read the trace. A workstream that records
+neither document has nothing the owner may edit, and is reported as missing.
+
+`OwnerEdits(stream)` names the files that hold an edit no revision records.
+`RecordDocuments` refuses a revision of one of them with `ErrConflict` and
+`ErrOwnerEdit` while its file does, so an agent's draft never writes over an
+owner edit that has not been read yet. Which reads happen when is in
+[the owner in the shed](service.md#the-owner-in-the-shed).
 
 ## Failure and ownership boundaries
 
