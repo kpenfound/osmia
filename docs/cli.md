@@ -13,6 +13,7 @@ osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clon
 osmia project extract p_0123456789abcdef0123456789abcdef
 osmia project remove p_0123456789abcdef0123456789abcdef
 osmia handin p_0123456789abcdef0123456789abcdef design.md
+osmia handin p_0123456789abcdef0123456789abcdef small-fix.md --skip-debate
 osmia send w_0123456789abcdef0123456789abcdef "Start with the upload API."
 osmia conversation w_0123456789abcdef0123456789abcdef
 osmia inbox
@@ -194,7 +195,7 @@ a service restart.
   `active_projects` and closes its runtime state. The trace directory and the
   clone are kept. Adding the same upstream again afterwards creates a new
   project ID and a new trace; see [configuration](configuration.md#project-registration).
-- `handin <project-id> <path|issue-url|->` hands one input to the active
+- `handin <project-id> <path|issue-url|-> [--skip-debate]` hands one input to the active
   project and creates a workstream in state `handed`. The input is a file
   (made absolute by the client and read by the service), a GitHub issue URL
   (`https://github.com/OWNER/REPO/issues/NUMBER`, fetched by the service), or
@@ -212,7 +213,11 @@ a service restart.
   the service cannot fetch fails with `internal` (exit 5). A refused hand-in
   creates nothing. See [service](service.md#hand-in) for what is
   recorded. The service then asks the architect for the spec and plan; see
-  [architect drafting](service.md#architect-drafting).
+  [architect drafting](service.md#architect-drafting). With `--skip-debate`
+  the hand-in also skips debate, for small work: once the architect's draft is
+  valid, the workstream enters the shed without a committee, no round runs, and
+  the spec and the plan wait for your `ratify`. The output then ends with
+  `Debate: skipped; ratify the spec and the plan once they are drafted`.
 - `pause <all|project-id|workstream-id> [--hard] [--reason TEXT]` stores an
   operator pause; the default mode is soft.
 - `resume <all|project-id|workstream-id>` clears that scope's pause. Parent pauses
@@ -266,7 +271,8 @@ project response: the project view (ID, name, upstream, fork, clone, base
 branch, trace and charter paths) and `next_step`; `project extract` returns
 the project view and the pending extraction. `handin` returns the API's
 hand-in response: `project`, `workstream`, `state`, `handed` (the absolute
-path of the copy) and `source`. Output is one JSON value plus
+path of the copy), `source`, and `skip_debate` when the hand-in skipped
+debate. Output is one JSON value plus
 newline, without progress text. Profile map keys are sorted in human output and
 JSON. The responses are separate API requests, not an atomic snapshot.
 

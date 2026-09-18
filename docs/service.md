@@ -53,7 +53,7 @@ client to release idle connections. API version 1 uses snake_case JSON fields.
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
 | POST | `/projects/extract` | `ProjectExtractRequest`: project; returns `ExtractionResponse` |
 | POST | `/abandon/<workstream-id>` | `AbandonRequest`: reason; returns `AbandonResponse` |
-| POST | `/handin` | `HandInRequest`: project, key, and one of path, url and stdin; returns `HandInResponse` |
+| POST | `/handin` | `HandInRequest`: project, key, one of path, url and stdin, optional skip_debate; returns `HandInResponse` |
 | PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason, source |
 | DELETE | `/runtime/pause` | `ClearPauseRequest`: scope, project, workstream |
 | PUT | `/runtime/priority` | `PriorityRequest`: project, workstreams |
@@ -163,8 +163,8 @@ pending or running `conflict`, naming the extraction to wait for.
 `POST /v1/handin` creates a workstream from one input. The request carries the
 project ID, a `key` that identifies the request, and exactly one of `path` (a
 clean absolute path to a regular file the service reads), `url` (a GitHub issue,
-`https://github.com/OWNER/REPO/issues/NUMBER`) and `stdin` (the input text).
-Checks run in this order, and a refused request writes nothing:
+`https://github.com/OWNER/REPO/issues/NUMBER`) and `stdin` (the input text),
+and optionally `skip_debate`. Checks run in this order, and a refused request writes nothing:
 
 1. A malformed project ID returns `validation`. An ID that is not the active
    project, including a removed one, returns `not_found`; an active project
@@ -192,12 +192,24 @@ source. The same transaction queues a notice for the chief of staff. `<name>`
 is the file's base name, or `input` when the trace does not accept that name,
 `issue-<number>.md` for an issue and `stdin` for stdin.
 
+With `skip_debate` true the hand-in also records the owner's
+[skip of debate](#skip-debate) before the handed state: the `shed-owner`
+transition `shed-owner-skip` to `skipped`, with the owner as actor, cause
+`handin`, the handed document's timestamp and the reason `the owner skipped
+debate at hand-in; the workstream still needs the owner's ratification of the
+spec and the plan`, which the [packet](#the-packet) carries as its conclusion.
+The reason of the handed transition then ends with `and skipped debate`. The
+architect still drafts; the shed controller then
+[enters the shed](#entering-the-shed) without a committee, and no round runs.
+
 The response is a `HandInResponse`: `project`, `workstream`, `state`
-(`handed`), `handed` (the absolute path of the copy) and `source`. A request
+(`handed`), `handed` (the absolute path of the copy), `source`, and
+`skip_debate` when the hand-in skipped debate. A request
 repeating a key returns the same response without reading the input again or
 writing anything; a hand-in interrupted part way is finished by the retry. The
 same key with another source, or other stdin text, returns `conflict` naming
-the key and the workstream. A storage failure returns `internal` and names the
+the key and the workstream, and so does the same key with another
+`skip_debate` than the hand-in recorded. A storage failure returns `internal` and names the
 workstream; retry with the same key. The next reconciliation pass asks the
 architect for the workstream's spec and plan; see
 [architect drafting](#architect-drafting).
@@ -331,7 +343,8 @@ overruled. The round limit is `shed.max_rounds` until the owner asks for
 [further rounds](#more-debate) or for a redraft, and the last round they asked
 for from then on. Only a workstream in feature state `in-shed` takes a step, so an abandoned
 workstream's debate stays where it stopped. A debate the owner skipped takes no
-step at all. A step that runs turns waits for
+step at all, except that a `sketched` workstream whose debate was skipped at
+[hand-in](#hand-in) enters the shed without a committee. A step that runs turns waits for
 the runner of those turns: entering the shed and every round for
 `Options.Committee`, the reply and the redraft for `Options.Architect`.
 Concluding runs no turn and waits for neither, so a service with an architect
@@ -351,6 +364,15 @@ controller creates the workstream's committee and moves it `sketched ->
 in-shed`: transition `in-shed`, actor `service`/`shed`, cause `sketched`, with
 the reason `spec.md revision <s> and plan.json revision <p> enter the shed with
 a committee of <N>` and the usual state notice for the chief of staff.
+
+A `sketched` workstream whose debate the owner skipped at hand-in gets no
+committee and runs no round. The controller moves it `sketched -> in-shed`
+with transition `in-shed`, actor `service`/`shed`, cause `shed-owner-skip`,
+the reason `spec.md revision <s> and plan.json revision <p> enter the shed
+without a committee: the owner skipped debate`, and a notice that asks the
+chief of staff to present the [packet](#the-packet), as the notice of
+`osmia shed skip` does. A skip through `osmia shed skip` moves the workstream
+itself.
 
 The committee is a fixed set of durable threads of the workstream:
 `agent_committee_1` to `agent_committee_<N>` (role `committee`, threads
@@ -625,7 +647,7 @@ an owner action never races a running round:
 | `more-<n>` | The owner asked for further rounds after debate concluded at round `n`. |
 | `redraft-<n>` | The owner asked the architect for a redraft after debate concluded at round `n`. |
 | `ratified-<n>` | The owner [ratified](#the-ratification-gate) the spec and the plan in round `n`. |
-| `skipped` | The owner skipped debate. No committee turn starts again. |
+| `skipped` | The owner skipped debate, in the shed or at [hand-in](#hand-in). No committee turn starts again. |
 | `invalid-edit` | An owner edit was read, found invalid and not recorded. |
 
 The round an action is recorded under is the round the `shed` state has
@@ -717,7 +739,9 @@ it debated.
 `sketched` workstream enters the shed without a committee; one already in the
 shed stays there. No further committee turn or architect reply starts, and the
 workstream still needs the owner's ratification of both documents. It is
-refused while a round or a reply is running, and on a debate already skipped.
+refused while a round or a reply is running, and on a debate already skipped,
+including one skipped at [hand-in](#hand-in) with `skip_debate`, which skips
+debate before round 1 can start.
 
 ### More debate
 
