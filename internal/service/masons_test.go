@@ -31,7 +31,7 @@ const masonRoles = chiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = 
 const masonWrote = "internal/trace/built.go"
 
 // fakeMasons plays every mason turn of the fixture. Each turn checks that it
-// holds its view's file tools alone, records what it saw and writes
+// holds its view's file tools and ask alone, records what it saw and writes
 // masonWrote into its view.
 type fakeMasons struct {
 	mu       sync.Mutex
@@ -50,7 +50,7 @@ func (m *fakeMasons) turn(ctx context.Context, req agent.Request, _ *agent.Turn,
 	for _, tool := range listed.Tools {
 		names = append(names, tool.Name)
 	}
-	if slices.Sort(names); !slices.Equal(names, []string{"file_read", "file_write"}) {
+	if slices.Sort(names); !slices.Equal(names, []string{"ask", "file_read", "file_write"}) {
 		m.problems = append(m.problems, fmt.Sprintf("mason tools %v", names))
 	}
 	view := req.Workspace.Directory()
