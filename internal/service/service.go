@@ -45,8 +45,10 @@ type Options struct {
 	// workstream's chief of staff as queued turns, one per event window, and
 	// each recorded answer to a question is queued on its asker's thread.
 	// The mason controller starts the ready units of building workstreams,
-	// one implementing unit per workstream within capacity.masons, and queues
-	// each started unit's first mason turn for the scheduler.
+	// one implementing or waiting unit per workstream within capacity.masons,
+	// and queues each started unit's first mason turn for the scheduler. It
+	// parks a unit in waiting when its mason asks, and resumes it once the
+	// answer is queued as the mason's next turn.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error)
 	// Librarian supplies the execution boundary of the librarian's

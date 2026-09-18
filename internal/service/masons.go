@@ -139,7 +139,7 @@ func (m *masons) Pass(ctx context.Context) error {
 
 // follow moves a unit between implementing and waiting as its mason's thread
 // says, and returns the unit's state. An implementing unit whose mason's
-// latest turn is complete and asked a question moves to waiting; a waiting
+// latest turn asked a question moves to waiting; a waiting
 // unit whose mason's latest turn delivers the answer to one of its questions
 // moves back to implementing. The workspace is left as it is either way. A
 // unit whose state moved since it was read is left to the next pass.
@@ -161,7 +161,7 @@ func (m *masons) follow(ctx context.Context, stream config.WorkstreamID, unit st
 	switch state.Value {
 	case UnitImplementing:
 		q := askedBy(asked, th.Identity.ThreadID, last.Request.TurnID)
-		if q == "" || last.CompletedAt.IsZero() {
+		if q == "" {
 			return state.Value, nil
 		}
 		to, id, cause = UnitWaiting, fmt.Sprintf("%s-%s-%s", subject, UnitWaiting, q), trace.QuestionSubject(q)+"_"+trace.QuestionOpen
