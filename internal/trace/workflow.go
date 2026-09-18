@@ -262,15 +262,26 @@ func (r *Repository) transact(ctx context.Context, tx Transaction) (WorkflowStat
 		}
 		return WorkflowState{Version: old.ExpectedVersion + 1, Value: old.Transition.To}, nil
 	}
-	files, states, err := r.stage(stream, log, v, nil, tx)
+	states, err := r.commitWorkflow(ctx, stream, log, v, tx)
 	if err != nil {
 		return WorkflowState{}, err
 	}
+	return states[0], nil
+}
+
+// commitWorkflow requires r.mu. It publishes txs, applied in order to the loaded
+// workflow of stream, as one commit, wakes the workflow's waiters and
+// returns the state each transaction produced.
+func (r *Repository) commitWorkflow(ctx context.Context, stream config.WorkstreamID, log workflowLog, v *workflowView, txs ...Transaction) ([]WorkflowState, error) {
+	files, states, err := r.stage(stream, log, v, nil, txs...)
+	if err != nil {
+		return nil, err
+	}
 	if err := r.publish(ctx, files); err != nil {
-		return WorkflowState{}, err
+		return nil, err
 	}
 	_ = r.wake.Notify(context.Background())
-	return states[0], nil
+	return states, nil
 }
 
 // stage requires r.mu. It applies txs in order to the loaded workflow of
@@ -356,6 +367,18 @@ func (r *Repository) Workflow(stream config.WorkstreamID, subject string) (Workf
 		return WorkflowState{}, fmt.Errorf("invalid workflow subject")
 	}
 	return v.states[subject], nil
+}
+
+// WorkflowStates returns the state of every subject of the workstream's
+// workflow that has one, by subject.
+func (r *Repository) WorkflowStates(stream config.WorkstreamID) (map[string]WorkflowState, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, v, err := r.loadWorkflow(stream)
+	if err != nil {
+		return nil, err
+	}
+	return v.states, nil
 }
 
 // Outbox returns all entries and their retained delivery history, ordered by ID.

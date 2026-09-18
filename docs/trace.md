@@ -200,7 +200,15 @@ subject from its current state and records a notice of the change in the same
 transaction; a retry with the same header, state and reason returns the
 committed state. `MoveFeatureState(ctx, header, from, to, reason)` does the
 same from an expected current state and refuses any other with `ErrConflict`,
-except for the retry of a committed transition. Local operation intents also
+except for the retry of a committed transition.
+`MoveFeatureStateWith(ctx, header, from, to, reason, transactions...)` is
+`MoveFeatureState` that records the given transactions of other subjects in
+the same commit, after the feature's; a retry of the committed feature
+transition records none of them again. `UnitSubject(unit)` names the subject
+holding a plan unit's state: `unit-<unit-id>`, or `unit_` and 32 hexadecimal
+digits of the ID's SHA-256 for an ID longer than 64 characters.
+`WorkflowStates(stream)` returns the current state of every subject that has
+one. Local operation intents also
 carry the operation described below. Callers retain the complete
 request across retries, including timestamps and event order. An identical retry
 returns its original resulting state even if later transactions exist. Reusing a
@@ -524,7 +532,8 @@ returned as `*StatusRejected` and stores nothing. The actor is the agent, the
 cause is the turn request's ID and the depth is one more than the request's.
 
 `Repository.Statuses()` lists every workstream in manifest order with its
-latest status (nil before the first), its feature state and its open question
+latest status (nil before the first), its feature state, the state of every
+workflow subject read in the same pass (`Subjects`) and its open question
 count. The feature state is the current value of the `feature` workflow
 subject (`FeatureSubject`), empty until a transition records one. A question
 is open while no ruling names it. A damaged record fails the whole read.

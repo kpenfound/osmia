@@ -187,7 +187,7 @@ func TestSealingRecordsTheSealAndCreatesTheFeatureBranch(t *testing.T) {
 	if out.Sealing != "requested" || !strings.HasSuffix(out.Detail, "; the sealing is asked for") {
 		t.Fatalf("ratification %+v", out)
 	}
-	f.awaitFeature(t, stream, RatifiedState)
+	f.awaitFeature(t, stream, BuildingState)
 
 	// The operation ran once, to success, and is acknowledged.
 	ops := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, stream) })
@@ -262,12 +262,12 @@ func TestSealingRecordsTheSealAndCreatesTheFeatureBranch(t *testing.T) {
 	}
 	status, err := f.c.Status(ctx, stream)
 	must(t, err)
-	if status.State == nil || *status.State != RatifiedState {
+	if status.State == nil || *status.State != BuildingState {
 		t.Fatalf("status %+v", status)
 	}
-	// A ratified workstream is past the shed.
-	if _, err := f.c.Ratify(ctx, stream, 1, 1); !failed(err, Conflict) || !strings.Contains(err.Error(), "is ratified; the owner takes part in the shed while it is in-shed or sketched") {
-		t.Fatalf("ratifying a ratified workstream: %v", err)
+	// A sealed workstream is past the shed.
+	if _, err := f.c.Ratify(ctx, stream, 1, 1); !failed(err, Conflict) || !strings.Contains(err.Error(), "is building; the owner takes part in the shed while it is in-shed or sketched") {
+		t.Fatalf("ratifying a sealed workstream: %v", err)
 	}
 	if docs := f.documents(t, stream, seal.DocumentID); len(docs) != 1 {
 		t.Fatalf("seal documents after: %+v", docs)
@@ -316,7 +316,7 @@ func TestSealingRetriesAFailedFetch(t *testing.T) {
 	}
 
 	commit := f.upstream(t)
-	f.awaitFeature(t, stream, RatifiedState)
+	f.awaitFeature(t, stream, BuildingState)
 	ops := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, stream) })
 	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
 		t.Fatalf("seal operations %+v", ops)
@@ -394,7 +394,7 @@ func TestSealingResumesFromTheBranchTheCloneHolds(t *testing.T) {
 	if got := f.transition(t, stream, shed.RatificationDocumentID(1)+"-2"); got.To != "ratified-1" || got.Reason != "the owner ratified spec.md revision 1 and plan.json revision 1 after round 1 again; sealing 1 failed and the sealing is asked for again" {
 		t.Fatalf("the second ratification %+v", got)
 	}
-	f.awaitFeature(t, stream, RatifiedState)
+	f.awaitFeature(t, stream, BuildingState)
 	ops = awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, stream) })
 	if len(ops) != 2 || ops[1].Result == nil || ops[1].Result.Outcome != "succeeded" {
 		t.Fatalf("seal operations %+v", ops)
@@ -444,7 +444,7 @@ func TestSealingSealsTheLatestRatificationOnly(t *testing.T) {
 		t.Fatalf("the failure %+v", got)
 	}
 	commit := f.upstream(t)
-	f.awaitFeature(t, stream, RatifiedState)
+	f.awaitFeature(t, stream, BuildingState)
 	if moves := f.sealMoves(t, stream); !slices.Equal(moves, []string{"sealing-1", "failed-1", "sealing-2"}) && !slices.Equal(moves, []string{"sealing-1", "sealing-2", "sealing-2"}) {
 		t.Fatalf("seal subject went %v", moves)
 	}
@@ -525,7 +525,7 @@ func TestSealingChecksAbandonmentAndResumesAfterTheBranchIsCreated(t *testing.T)
 	if _, err := f.c.Ratify(ctx, stream, 1, 1); err != nil {
 		t.Fatal(err)
 	}
-	f.awaitFeature(t, stream, RatifiedState)
+	f.awaitFeature(t, stream, BuildingState)
 	f.s.boundary = nil
 	ops := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, stream) })
 	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
@@ -571,7 +571,7 @@ func TestSealingChecksAbandonmentAndResumesAfterTheBranchIsCreated(t *testing.T)
 	if _, err := f.c.Ratify(ctx, third, 1, 1); err != nil {
 		t.Fatal(err)
 	}
-	f.awaitFeature(t, third, RatifiedState)
+	f.awaitFeature(t, third, BuildingState)
 	f.s.boundary = nil
 	if docs := f.documents(t, third, seal.DocumentID); len(docs) != 1 || docs[0].Revision != 1 {
 		t.Fatalf("seal documents after the crash %+v", docs)
@@ -651,7 +651,7 @@ func TestSealingIsAskedForAfterARestartAndSealsFromSketched(t *testing.T) {
 
 	f.start(t)
 	defer f.stop(t)
-	f.awaitFeature(t, stream, RatifiedState)
+	f.awaitFeature(t, stream, BuildingState)
 	f.awaitSealMove(t, gone, "failed-1")
 	if got := f.transition(t, gone, "seal-1-failed"); got.Reason != "sealing 1 of spec.md revision 1 and plan.json revision 1 failed: the workstream is abandoned, not in the shed" {
 		t.Fatalf("the failure %+v", got)
@@ -777,7 +777,7 @@ func TestStaleSealingFailureLeavesTheSubjectToTheLaterOne(t *testing.T) {
 	commit := f.upstream(t)
 	f.start(t)
 	defer f.stop(t)
-	f.awaitFeature(t, stream, RatifiedState)
+	f.awaitFeature(t, stream, BuildingState)
 	ops := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, stream) })
 	if len(ops) != 3 || ops[0].Result.Outcome != "failed" || ops[1].Result.Outcome != "failed" || ops[2].Result.Outcome != "succeeded" {
 		t.Fatalf("seal operations %+v", ops)

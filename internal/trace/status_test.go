@@ -192,7 +192,7 @@ func TestStatusesReportsServiceFacts(t *testing.T) {
 		}
 	}
 	got := statusOf(t, r)
-	if got.State != "handed" || got.OpenQuestions != 1 || got.Status != nil {
+	if got.State != "handed" || got.OpenQuestions != 1 || got.Status != nil || len(got.Subjects) != 1 || got.Subjects[FeatureSubject] != (WorkflowState{Version: 1, Value: "handed"}) {
 		t.Fatalf("facts: %+v", got)
 	}
 }

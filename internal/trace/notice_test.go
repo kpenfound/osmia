@@ -3,6 +3,8 @@ package trace
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -127,5 +129,71 @@ func TestSetFeatureStateUnlessRefusesListedStates(t *testing.T) {
 	}
 	if _, err := r.SetFeatureStateUnless(ctx, h2, "abandoned", "gone", "abandoned"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMoveFeatureStateWithRecordsTheOthersInTheSameCommit(t *testing.T) {
+	r, _, _ := create(t)
+	ctx := context.Background()
+	if _, err := r.SetFeatureState(ctx, header("transition", "ratified"), "ratified", "Sealed"); err != nil {
+		t.Fatal(err)
+	}
+	unit := func(id, subject, from, to string, version uint64) Transaction {
+		return Transaction{ExpectedVersion: version, Transition: Transition{Header: header("transition", id), Subject: subject, From: from, To: to, Reason: "unit " + to}}
+	}
+	a, b := UnitSubject("a"), UnitSubject("b")
+	with := []Transaction{unit("unit-a-planned", a, "", "planned", 0), unit("unit-a-ready", a, "planned", "ready", 1), unit("unit-b-planned", b, "", "planned", 0)}
+
+	// A feature transaction among the others is refused, and so is the
+	// whole commit when one of them does not apply.
+	if _, err := r.MoveFeatureStateWith(ctx, header("transition", "building"), "ratified", "building", "Built", unit("again", FeatureSubject, "building", "delivered", 2)); err == nil || !strings.Contains(err.Error(), "must be of another subject") {
+		t.Fatalf("a feature transaction among the others: %v", err)
+	}
+	if _, err := r.MoveFeatureStateWith(ctx, header("transition", "building"), "ratified", "building", "Built", unit("unit-a-ready", a, "planned", "ready", 1)); !errors.Is(err, ErrConflict) {
+		t.Fatalf("a transaction that does not apply: %v", err)
+	}
+	if states, err := r.WorkflowStates(streamID); err != nil || len(states) != 1 || states[FeatureSubject] != (WorkflowState{Version: 1, Value: "ratified"}) {
+		t.Fatalf("states after the refusals %+v: %v", states, err)
+	}
+
+	state, err := r.MoveFeatureStateWith(ctx, header("transition", "building"), "ratified", "building", "Built", with...)
+	if err != nil || state != (WorkflowState{Version: 2, Value: "building"}) {
+		t.Fatalf("state %v: %v", state, err)
+	}
+	want := map[string]WorkflowState{FeatureSubject: state, a: {Version: 2, Value: "ready"}, b: {Version: 1, Value: "planned"}}
+	if states, err := r.WorkflowStates(streamID); err != nil || !reflect.DeepEqual(states, want) {
+		t.Fatalf("states %+v: %v", states, err)
+	}
+	// A retry of the feature transition records nothing more.
+	if again, err := r.MoveFeatureStateWith(ctx, header("transition", "building"), "ratified", "building", "Built", with...); err != nil || again != state {
+		t.Fatalf("retry %v: %v", again, err)
+	}
+	transitions, err := Read[Transition](r, streamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, tr := range transitions {
+		ids = append(ids, tr.ID)
+	}
+	if !slices.Equal(ids, []string{"ratified", "building", "unit-a-planned", "unit-a-ready", "unit-b-planned"}) {
+		t.Fatalf("transitions %v", ids)
+	}
+	if entries := ready(t, r, at); len(entries) != 2 || !strings.Contains(entries[0].Event.Body+entries[1].Event.Body, "changed from ratified to building: Built") {
+		t.Fatalf("entries %+v", entries)
+	}
+}
+
+func TestUnitSubjectIsAKey(t *testing.T) {
+	if got := UnitSubject("resume-read"); got != "unit-resume-read" {
+		t.Fatalf("subject %q", got)
+	}
+	long := strings.Repeat("u", 128)
+	got := UnitSubject(long)
+	if !strings.HasPrefix(got, "unit_") || len(got) != 37 || !key(got+"-planned") || got == UnitSubject(long[:127]) {
+		t.Fatalf("subject of a long ID %q", got)
+	}
+	if edge := UnitSubject(strings.Repeat("u", 64)); edge != "unit-"+strings.Repeat("u", 64) || !key(edge+"-planned") {
+		t.Fatalf("subject of a 64-character ID %q", edge)
 	}
 }

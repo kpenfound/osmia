@@ -34,6 +34,14 @@ func (r *Repository) MoveFeatureState(ctx context.Context, h Header, from, to, r
 	return r.setFeatureState(ctx, h, &from, to, reason, nil)
 }
 
+// MoveFeatureStateWith is MoveFeatureState that records the given
+// transactions of other subjects of the workstream in the same commit, after
+// the feature's. A retry of the same feature transition returns the state it
+// committed and records nothing more.
+func (r *Repository) MoveFeatureStateWith(ctx context.Context, h Header, from, to, reason string, with ...Transaction) (WorkflowState, error) {
+	return r.setFeatureState(ctx, h, &from, to, reason, nil, with...)
+}
+
 // SetFeatureStateUnless is SetFeatureState, except that it refuses with
 // ErrFeatureState, writing nothing, when the current state is one of refused,
 // even for a retry of a transition that already committed.
@@ -42,13 +50,13 @@ func (r *Repository) SetFeatureStateUnless(ctx context.Context, h Header, to, re
 	return r.setFeatureState(ctx, h, nil, to, reason, refused)
 }
 
-func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string, to, reason string, refused []string) (WorkflowState, error) {
+func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string, to, reason string, refused []string, with ...Transaction) (WorkflowState, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return WorkflowState{}, err
 	}
-	_, v, err := r.loadWorkflow(h.Workstream)
+	log, v, err := r.loadWorkflow(h.Workstream)
 	if err != nil {
 		return WorkflowState{}, err
 	}
@@ -71,7 +79,17 @@ func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string
 	if state.Value != "" {
 		body = fmt.Sprintf("Workstream state changed from %s to %s: %s", state.Value, to, reason)
 	}
-	return r.transact(ctx, Transaction{ExpectedVersion: state.Version,
+	tx := Transaction{ExpectedVersion: state.Version,
 		Transition: Transition{Header: h, Subject: FeatureSubject, From: state.Value, To: to, Reason: reason},
-		Events:     []Event{Notice(h.ID, "state", body)}})
+		Events:     []Event{Notice(h.ID, "state", body)}}
+	for _, other := range with {
+		if other.Transition.Subject == FeatureSubject {
+			return WorkflowState{}, fmt.Errorf("a transaction recorded with the feature state must be of another subject")
+		}
+	}
+	states, err := r.commitWorkflow(ctx, h.Workstream, log, v, append([]Transaction{tx}, with...)...)
+	if err != nil {
+		return WorkflowState{}, err
+	}
+	return states[0], nil
 }

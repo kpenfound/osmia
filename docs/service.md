@@ -377,7 +377,7 @@ workstream does.
 ## The shed: debate
 
 The shed controller runs in every reconciliation pass after the architect
-controller, before the sealing controller, event delivery and the scheduler. It moves a `sketched`
+controller, before the sealing and building controllers, event delivery and the scheduler. It moves a `sketched`
 workstream into the shed and runs its debate to a conclusion: a round of the
 committee, the architect's one reply to it, and the next round against what
 the architect redrafted, until no dissent stands or the debate reaches its
@@ -1104,6 +1104,54 @@ workstream keeps its state:
   the feature branch's name the service did not create, or one whose history
   upstream no longer holds; move it away and ratify again.
 
+## Building
+
+A sealed workstream is built unit by unit. The building controller runs in
+every reconciliation pass after the sealing controller. For every `ratified`
+workstream whose latest `seal.json` revision no build was asked for, it
+publishes the operation `build` (input `seal`, the sealing's number) on the
+repository boundary, with the transition `build-<k>` (actor
+`service`/`building`, cause `seal-<revision>` of the seal document) that moves
+the workflow subject `build` to `requested-<k>` with the reason `seal <k> is
+recorded; the build records the state of every unit of the sealed plan and
+moves the workstream to building`.
+
+The operation reads the plan revision the seal names and, in one commit,
+records each unit's state on its own workflow subject, `unit-<unit-id>` (see
+[`UnitSubject`](trace.md#atomic-workflow-state-and-outbox)), and moves the
+feature state from `ratified` to `building` with the chief of staff's notice.
+Every transition has the actor `service`/`building` and the operation ID as
+its cause:
+
+- `unit-<id>-planned` moves each unit from no state to `planned`, with the
+  reason `unit <id> is in the plan of seal <k>`, followed by ` and waits for
+  <ids> to merge` for a unit with dependencies.
+- `unit-<id>-ready` then moves each unit that depends on no unit from
+  `planned` to `ready`, with the reason `unit <id> is ready: it depends on no
+  unit`. A unit becomes `ready` once every unit it depends on has merged; no
+  unit has merged when the build runs, so a unit with dependencies stays
+  `planned`.
+- `building` moves the feature state, with the reason `seal <k> is recorded;
+  the states of the <n> units of its plan are recorded: ready <ids>; planned
+  <id> (waiting for <ids>), ...` (`none` for an empty list). The operation's
+  result carries it as evidence.
+
+The unit states are those of design §5.2: `planned`, `ready`,
+`implementing`, `reviewing`, `approved` and `merged`, plus `waiting` and
+`contested`. The build records `planned` and `ready`.
+
+A build is idempotent by its operation: its inspection finds the move to
+`building` it caused and completes the operation with it, and an attempt that
+finds that move records nothing more. The build fails, recording no
+transition and with the reason as its result (`building on seal <k> failed:
+<why>`), when the workstream is no longer `ratified` (`the workstream is
+<state>, not ratified`, as after the owner abandoned it), when a later seal
+replaced its seal (`it is not the latest seal of the workstream`), when the
+sealed plan does not parse (`the sealed plan does not parse: <error>`), and
+when the workflow changed between its reads and its commit, because the owner
+moved the workstream or a unit already has a state (`the workflow changed
+while the build ran; the workstream is <state>`).
+
 ## Abandoning
 
 `POST /v1/abandon/<workstream-id>` abandons a workstream of the active project
@@ -1150,16 +1198,22 @@ order, except the librarian's, which carries no feature (see
 | --- | --- |
 | `workstream`, `project` | The workstream and its project |
 | `state` | The feature workflow state, or `null` before one is recorded |
+| `units` | One `{"unit", "state"}` per unit of the sealed plan, in plan order, once the [build](#building) recorded their states; empty before |
 | `open_questions` | Questions in the workstream without a ruling |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
 | `status` | `null` until the chief of staff writes one; otherwise `goal`, `attention` (empty when nothing needs the owner), `note`, `agents`, `revision` and `updated_at` |
 
 Without an active project or its trace, the list is empty. If the trace
 cannot be read, the list is empty and carries a `workstreams` diagnostic with
-code `internal`. For one workstream, a malformed ID returns `validation`, no
-configured project returns `no_project`, a workstream the active trace does not
-hold (or no trace at all) returns `not_found`, and an unreadable trace returns
-`internal`; these messages name the workstream or project.
+code `internal`. A workstream whose sealed plan cannot be read is listed with
+no `units`, and the list carries a `units` diagnostic with code `internal`
+naming it (`cannot read the unit states of workstream <id>; check the trace
+repository`); the other workstreams are listed as ever. For one workstream, a
+malformed ID returns `validation`, no configured project returns
+`no_project`, a workstream the active trace does not hold (or no trace at all)
+returns `not_found`, and an unreadable trace, or unit states of that
+workstream that cannot be read, returns `internal`; these messages name the
+workstream or project.
 
 ## Inbox and rulings
 
@@ -1305,7 +1359,8 @@ replaces any `Schedule` hook in `Options.Reconciliation`; without
 `Options.Threads` that hook runs. In both cases the
 [architect controller](#architect-drafting), then the
 [shed controller](#the-shed-debate), then the
-[sealing controller](#sealing) run first.
+[sealing controller](#sealing), then the
+[building controller](#building) run first.
 
 A pass reconciles its pending operations in stage order, across workstreams,
 so the factory finishes work before it widens it: the turns the scheduler
