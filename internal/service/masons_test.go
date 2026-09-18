@@ -419,42 +419,61 @@ func TestUnitWorkspaceFailureBlocksItsWorkstreamAlone(t *testing.T) {
 	}
 }
 
-// An implementing unit whose first mason turn is not queued and whose spec
-// no longer matches its seal gets no turn: it is recorded blocked and holds
-// no mason slot, which goes to the next workstream.
-func TestImplementingUnitWithAStaleSpecHoldsNoSlot(t *testing.T) {
+// An implementing unit whose first mason turn is not queued gets no turn
+// when its spec no longer matches its seal or its workspace cannot be
+// opened: it is recorded blocked and holds no mason slot, which goes to the
+// next workstream.
+func TestBlockedImplementingUnitHoldsNoSlot(t *testing.T) {
 	t.Parallel()
-	f, masons := newMasonFixture(t, 1, validPlan)
-	defer func() { f.stop(t) }()
-	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
-	a, _ := f.builtAs(t, "first")
-	b, _ := f.builtAs(t, "second")
-	stale, other := lowHigh(a, b)
-	f.stop(t)
+	const waits = "unit resume is implementing and its mason's first turn is not queued"
+	for _, tc := range []struct {
+		name  string
+		plant func(t *testing.T, f *shedFixture, stream config.WorkstreamID)
+		check func(reason string) bool
+	}{
+		{"stale spec", func(t *testing.T, f *shedFixture, stream config.WorkstreamID) { f.editSpec(t, stream, staleSpec) },
+			func(reason string) bool { return reason == staleReason(waits) }},
+		{"workspace", func(t *testing.T, f *shedFixture, stream config.WorkstreamID) {
+			squatter := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(stream), "resume")
+			must(t, os.MkdirAll(squatter, 0700))
+			must(t, os.WriteFile(filepath.Join(squatter, "notes"), []byte("mine\n"), 0600))
+		}, func(reason string) bool { return strings.HasPrefix(reason, waits+": its workspace cannot be opened: ") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f, masons := newMasonFixture(t, 1, validPlan)
+			defer func() { f.stop(t) }()
+			factory := runtime.Target{Scope: "factory"}
+			mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+			a, _ := f.builtAs(t, "first")
+			b, _ := f.builtAs(t, "second")
+			blocked, other := lowHigh(a, b)
+			f.stop(t)
 
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	states, err := repo.WorkflowStates(stale)
-	must(t, err)
-	subject := trace.UnitSubject("resume")
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: masonTransitionID("resume"), Revision: 1, Project: f.project, Workstream: stale, Unit: "resume", At: f.clock.Now(), Actor: masonActor, Cause: subject + "-" + UnitReady}
-	_, err = repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: states[subject].Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitReady, To: UnitImplementing, Reason: "planted"}})
-	must(t, errors.Join(err, repo.Close()))
-	f.editSpec(t, stale, staleSpec)
+			repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+			must(t, err)
+			states, err := repo.WorkflowStates(blocked)
+			must(t, err)
+			subject := trace.UnitSubject("resume")
+			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: masonTransitionID("resume"), Revision: 1, Project: f.project, Workstream: blocked, Unit: "resume", At: f.clock.Now(), Actor: masonActor, Cause: subject + "-" + UnitReady}
+			_, err = repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: states[subject].Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitReady, To: UnitImplementing, Reason: "planted"}})
+			must(t, errors.Join(err, repo.Close()))
+			tc.plant(t, f, blocked)
 
-	f.start(t)
-	mutation(t, f.c, "DELETE", "pause", factory)
-	f.awaitMasonRan(t, other, "resume")
-	settle()
-	masons.check(t)
-	if got, want := f.blocks(t, stale, "resume"), []string{staleReason("unit resume is implementing and its mason's first turn is not queued")}; !slices.Equal(got, want) {
-		t.Fatalf("blocked %q, want %q", got, want)
+			f.start(t)
+			mutation(t, f.c, "DELETE", "pause", factory)
+			f.awaitMasonRan(t, other, "resume")
+			settle()
+			masons.check(t)
+			if got := f.blocks(t, blocked, "resume"); len(got) != 1 || !tc.check(got[0]) {
+				t.Fatalf("blocked %q", got)
+			}
+			if _, err := f.repository().Thread(blocked, masonAgent("resume")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("the blocked unit has a mason thread: %v", err)
+			}
+			f.checkUnits(t, blocked, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
+		})
 	}
-	if _, err := f.repository().Thread(stale, masonAgent("resume")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the blocked unit has a mason thread: %v", err)
-	}
-	f.checkUnits(t, stale, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
 }
 
 // Units are taken in the plan's dependency order: a unit follows the units
