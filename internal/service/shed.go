@@ -166,6 +166,11 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 	// neither a committee nor a round; it waits in the shed for the owner to
 	// ratify both documents, with the packet that asks them to.
 	if skipped {
+		if feature.Value == SketchedState {
+			if err := d.enterSkipped(ctx, stream, feature, pin); err != nil {
+				return err
+			}
+		}
 		return d.presentPacket(ctx, stream, true)
 	}
 	if feature.Value == SketchedState {
@@ -196,6 +201,36 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 	// The packet is presented once the step of this pass concluded the
 	// debate, and follows every owner action that changes what it says.
 	return d.presentPacket(ctx, stream, false)
+}
+
+// enterSkipped moves a sketched workstream whose debate the owner skipped at
+// hand-in into the shed without a committee, and asks the chief of staff to
+// present the packet: a skip recorded before the workstream was sketched told
+// the chief of staff nothing about the drafted documents. A skip through the
+// shed API moves the workstream itself. A workstream that moved meanwhile is
+// left to the next pass.
+func (d *debate) enterSkipped(ctx context.Context, stream config.WorkstreamID, feature trace.WorkflowState, pin shed.Pin) error {
+	transitions, err := trace.Read[trace.Transition](d.repository, stream)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == skipTransition && t.Cause == handInTransition }) {
+		return nil
+	}
+	entries, err := Dissent(d.repository, stream)
+	if err != nil {
+		return err
+	}
+	h := d.header(InShedState, stream, skipTransition, d.s.now())
+	reason := fmt.Sprintf("%s enter the shed without a committee: the owner skipped debate", pin)
+	body := fmt.Sprintf("Workstream state changed from %s to %s: %s.\n%s", SketchedState, InShedState, reason, presentation(shed.Recommend(entries)))
+	_, err = d.repository.Transact(ctx, trace.Transaction{ExpectedVersion: feature.Version,
+		Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, From: SketchedState, To: InShedState, Reason: reason},
+		Events:     []trace.Event{trace.Notice(h.ID, "state", body)}})
+	if errors.Is(err, trace.ErrConflict) {
+		return nil
+	}
+	return err
 }
 
 // step derives what the debate needs next from the shed state and the

@@ -170,3 +170,57 @@ func TestHandInKeys(t *testing.T) {
 		t.Fatalf("workstream %q", stream)
 	}
 }
+
+// TestHandInSkipDebate hands in with --skip-debate: the request carries the
+// skip, the output says so and the trace records the owner's skip of debate.
+func TestHandInSkipDebate(t *testing.T) {
+	root, project, home := handInFixture(t)
+	design := filepath.Join(home, "design.md")
+	must(t, os.WriteFile(design, []byte("# Design\n"), 0600))
+
+	text := successful(t, root, "handin", string(project), design, "--skip-debate")
+	lines := strings.Split(text, "\n")
+	stream, ok := strings.CutPrefix(lines[0], "Workstream ")
+	stream, ok2 := strings.CutSuffix(stream, " handed in to project "+string(project))
+	if !ok || !ok2 || len(lines) != 6 || lines[1] != "State: handed" || lines[3] != "Source: file:"+design ||
+		lines[4] != "Debate: skipped; ratify the spec and the plan once they are drafted" || lines[5] != "" {
+		t.Fatalf("hand-in output:\n%s", text)
+	}
+	skips := func(stream string) []trace.Transition {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(root, "projects", string(project), "workstreams", stream, "events.jsonl"))
+		must(t, err)
+		var out []trace.Transition
+		for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+			var tr trace.Transition
+			must(t, json.Unmarshal([]byte(line), &tr))
+			if tr.ID == "shed-owner-skip" {
+				out = append(out, tr)
+			}
+		}
+		return out
+	}
+	if got := skips(stream); len(got) != 1 || got[0].Subject != "shed-owner" || got[0].To != "skipped" || got[0].Cause != "handin" ||
+		got[0].Reason != "the owner skipped debate at hand-in; the workstream still needs the owner's ratification of the spec and the plan" {
+		t.Fatalf("skip transitions %+v", got)
+	}
+
+	var result service.HandInResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "handin", string(project), design, "--skip-debate", "--json")), &result))
+	if !result.SkipDebate || result.State != "handed" || len(skips(string(result.Workstream))) != 1 {
+		t.Fatalf("JSON hand-in %+v", result)
+	}
+	// Without the flag nothing is skipped and the output is unchanged.
+	var debated service.HandInResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "handin", string(project), design, "--json")), &debated))
+	if debated.SkipDebate || debated.Workstream == result.Workstream || len(skips(string(debated.Workstream))) != 0 {
+		t.Fatalf("hand-in without the flag %+v", debated)
+	}
+
+	for _, args := range [][]string{{"handin", string(project), design, "--skip-debate=true"}, {"status", "--skip-debate"}, {"shed", "skip", "w_0123456789abcdef0123456789abcdef", "--skip-debate"}} {
+		code, out, diag := invokeInput(t, root, "", args...)
+		if code != 2 || out != "" || diag != "invalid arguments; use osmia --help\n" {
+			t.Errorf("%v: %d %q %q", args, code, out, diag)
+		}
+	}
+}

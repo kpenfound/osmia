@@ -27,7 +27,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH [--base-branch NAME] [--json]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
-  handin <project-id> <path|issue-url|-> [--json]
+  handin <project-id> <path|issue-url|-> [--skip-debate] [--json]
   abandon <workstream-id> <reason> [--json]
   shed object <workstream-id> <argument> [--json]
   shed rule <workstream-id> <objection-id> <sustain|dismiss> [note] [--json]
@@ -52,6 +52,7 @@ type options struct {
 	root, socket, reason                string
 	upstream, fork, clone, baseBranch   string
 	json, hard, reasonSet, help, target bool
+	skipDebate                          bool
 	args                                []string
 }
 
@@ -101,7 +102,7 @@ func parse(args []string) (o options, err error) {
 				o.baseBranch = value
 				o.target = true
 			}
-		case "--json", "--hard", "--help", "-h":
+		case "--json", "--hard", "--skip-debate", "--help", "-h":
 			if has {
 				return o, errors.New("boolean flags take no value")
 			}
@@ -110,6 +111,8 @@ func parse(args []string) (o options, err error) {
 				o.json = true
 			case "--hard":
 				o.hard = true
+			case "--skip-debate":
+				o.skipDebate = true
 			default:
 				o.help = true
 			}
@@ -173,7 +176,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract")
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
-	if !valid || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd == "serve" && (o.json || o.socket != "") {
+	if !valid || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && o.skipDebate || cmd == "serve" && (o.json || o.socket != "") {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -261,7 +264,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			fmt.Fprintln(stderr, "cannot generate a hand-in key")
 			return 1
 		}
-		req := service.HandInRequest{Project: id, Key: key}
+		req := service.HandInRequest{Project: id, Key: key, SkipDebate: o.skipDebate}
 		switch input := a[1]; {
 		case input == "-":
 			data, err := io.ReadAll(io.LimitReader(stdin, service.MaxHandedBytes+1))
@@ -298,6 +301,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Workstream %s handed in to project %s\nState: %s\nHanded: %s\nSource: %s\n", result.Workstream, result.Project, result.State, result.Handed, result.Source)
+		if result.SkipDebate {
+			fmt.Fprintln(stdout, "Debate: skipped; ratify the spec and the plan once they are drafted")
+		}
 		return 0
 	}
 	if cmd == "abandon" {
