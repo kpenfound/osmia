@@ -39,7 +39,7 @@ The [onboarding walkthrough](m2-onboarding.md) runs `project add`, `handin`,
 [chief-of-staff walkthrough](m2-chief-of-staff.md) runs `send`,
 `conversation`, `status`, `inbox` and `answer` on an onboarded project, across
 a service restart. The [M2 exit demonstration](m2-exit.md) runs
-`handin`, `abandon`, `shed skip`, `shed overrule`, `ratify`, `inbox` and
+`handin` (with and without `--skip-debate`), `abandon`, `shed overrule`, `ratify`, `inbox` and
 `answer` through their API calls, from hand-in to a sealed feature branch.
 
 ## Commands and flags

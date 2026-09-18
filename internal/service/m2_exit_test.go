@@ -18,22 +18,21 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/status"
-	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // The M2 exit demonstration: on an onboarded project, the owner hands in four
 // designs. One is debated to consensus after a redraft, one reaches the round
-// cap with a charter veto the owner overrules, one skips debate and one is
-// abandoned. Each ratified plan is sealed with a feature branch on the clone,
-// across a restart in the middle of one sealing, and a question asked during
+// cap with a charter veto the owner overrules, one is handed in with debate
+// skipped and one, also handed in with debate skipped, is abandoned. Each
+// ratified plan is sealed with a feature branch on the clone, across a restart
+// in the middle of one sealing, and a question a committee member asks during
 // the shed is answered through the inbox. See docs/m2-exit.md.
 
 // exitDemoRoles runs every role in a container, the only sandbox the fake
@@ -46,9 +45,6 @@ image = "fixture-image"
 sandbox = "container"
 image = "fixture-image"
 [roles.chief_of_staff]
-sandbox = "container"
-image = "fixture-image"
-[roles.mason]
 sandbox = "container"
 image = "fixture-image"
 [capacity]
@@ -198,7 +194,7 @@ func exitAttention(recommendation string) string {
 	return "Ratify the spec and plan: no objection stands."
 }
 
-// chief is the fake chief of staff. It escalates the mason's question,
+// chief is the fake chief of staff. It escalates the committee's question,
 // relays the owner's ruling, and makes every packet it is told of the
 // attention item of its status.
 func (d *exitDemo) chief(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -217,9 +213,9 @@ func (d *exitDemo) chief(ctx context.Context, req agent.Request, _ *agent.Turn, 
 			d.problem("%s of %q: %s %v", name, title, out, err)
 		}
 	}
-	if strings.Contains(req.Prompt, "Question 1 is open, asked by the mason: "+exitQuestion) {
+	if strings.Contains(req.Prompt, "Question 1 is open, asked by the committee: "+exitQuestion) {
 		call("escalate", map[string]any{"questions": []string{"1"}, "rephrasing": "Does deletion end an upload's retention period?",
-			"blocked": "The mason's reading of the retention design.", "options": []string{"Deletion ends it", "Retention runs thirty days whatever happens"}, "recommendation": "Deletion ends it."})
+			"blocked": "The committee's reading of the retention design.", "options": []string{"Deletion ends it", "Retention runs thirty days whatever happens"}, "recommendation": "Deletion ends it."})
 	}
 	if strings.Contains(req.Prompt, "escalation_1 (questions 1): "+exitRuling) {
 		call("relay_ruling", map[string]any{"question": "1", "text": exitRelayed, "scope": "local"})
@@ -248,32 +244,9 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 
 	// Production wiring: one engine runs the librarian, the architect, the
-	// committee and the chief of staff. The fixture adds a mason with its ask
-	// tool, which no M2 command creates.
+	// committee and the chief of staff.
 	hosts := &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}}
 	opts = Enforce(opts, Enforcement{Engine: engine, Hosts: hosts})
-	committee := opts.Committee
-	production := opts.Threads
-	opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
-		bound, err := production(r, cfg)
-		if err != nil {
-			return nil, err
-		}
-		turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*isolation.Turns)
-		turns.Grants = maps.Clone(turns.Grants)
-		turns.Grants["mason"] = coreadapter.Capabilities{Tools: []string{questions.AskTool}}
-		chief := turns.Scoped
-		turns.Scoped = func(ctx context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-			if scope.Role == trace.ChiefOfStaff {
-				return chief(ctx, scope)
-			}
-			return questions.Tools(r, demoAgent, scope, clock.Now)
-		}
-		return bound, nil
-	}
-	// The first service runs no committee, so a sketched workstream stays
-	// sketched until the owner skips its debate.
-	opts.Committee = nil
 	f := &shedFixture{architectFixture: &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}, members: 2}
 
 	// The fake agents.
@@ -293,26 +266,24 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	d.plays[exitTitle(exitCapped)] = map[string]demoTurn{
 		"draft-1-1":                          d.drafts(map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil),
 		roundTurnID(1, committeeAgent(1), 1): d.debates([]objection{chargeVeto}),
-		roundTurnID(1, committeeAgent(2), 1): quiet,
-		replyTurnID(1, 1):                    d.drafts(nil, map[string]string{cappedVeto: "The reviewer's judgement is the right proof here."}),
-		roundTurnID(2, committeeAgent(1), 1): quiet,
-		roundTurnID(2, committeeAgent(2), 1): quiet,
-		replyTurnID(2, 1):                    d.drafts(nil, nil),
-		// The mason asks while the workstream is in the shed, and hears back.
-		"ask": func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		// The second member asks while the workstream is in the shed, which
+		// parks the round until the answer arrives.
+		roundTurnID(1, committeeAgent(2), 1): func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			if stream, ok := d.streamOf(exitCapped); !ok {
-				d.problem("the mason asked before its workstream was known")
+				d.problem("the member asked before its workstream was known")
 			} else if state, err := f.repository().Workflow(stream, trace.FeatureSubject); err != nil || state.Value != InShedState {
-				d.problem("the mason asked with the workstream %q %v, not in the shed", state.Value, err)
+				d.problem("the member asked with the workstream %q %v, not in the shed", state.Value, err)
 			}
 			if out, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": exitQuestion}); err != nil || !strings.Contains(out, `"recorded":true`) {
 				d.problem("ask: %s %v", out, err)
 			}
-			return questionResult(req, "session-ask", "Asked"), nil
+			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Asked", SessionDir: req.SessionDir, NumTurns: 2}, nil
 		},
-		"answer_1": func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
-			return questionResult(req, "session-ask", "Understood"), nil
-		},
+		questions.TurnID("1"):                quiet,
+		replyTurnID(1, 1):                    d.drafts(nil, map[string]string{cappedVeto: "The reviewer's judgement is the right proof here."}),
+		roundTurnID(2, committeeAgent(1), 1): quiet,
+		roundTurnID(2, committeeAgent(2), 1): quiet,
+		replyTurnID(2, 1):                    d.drafts(nil, nil),
 	}
 	d.plays[exitTitle(exitSmall)] = map[string]demoTurn{"draft-1-1": d.drafts(map[string]string{plan.SpecPath: exitSmallSpec, plan.PlanPath: exitSmallPlan}, nil)}
 	d.plays[exitTitle(exitAbandoned)] = map[string]demoTurn{"draft-1-1": d.drafts(map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)}
@@ -390,22 +361,37 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	}
 	commit := f.upstream(t)
 
-	// 2. Four hand-ins, each drafted by the architect to sketched.
-	handIn := func(key, design string) config.WorkstreamID {
+	// 2. Four hand-ins, each drafted by the architect to sketched. The small
+	// and the quotas designs are handed in with debate skipped.
+	handIn := func(key, design string, skip bool) config.WorkstreamID {
 		t.Helper()
-		out, err := f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: key, Stdin: ptr(design)})
+		out, err := f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: key, Stdin: ptr(design), SkipDebate: skip})
 		must(t, err)
-		if out.State != HandedState {
+		if out.State != HandedState || out.SkipDebate != skip {
 			t.Fatalf("hand-in %+v", out)
 		}
 		return out.Workstream
 	}
-	debated, capped, small, gone := handIn("debated", exitDebated), handIn("capped", exitCapped), handIn("small", exitSmall), handIn("abandoned", exitAbandoned)
+	debated, capped := handIn("debated", exitDebated, false), handIn("capped", exitCapped, false)
+	small, gone := handIn("small", exitSmall, true), handIn("abandoned", exitAbandoned, true)
 	d.mu.Lock()
 	d.streams = map[string]config.WorkstreamID{exitTitle(exitDebated): debated, exitTitle(exitCapped): capped, exitTitle(exitSmall): small, exitTitle(exitAbandoned): gone}
 	d.mu.Unlock()
+	// Once sketched, every workstream enters the shed: two with the
+	// committee, two without one because their debate is skipped.
 	for _, stream := range []config.WorkstreamID{debated, capped, small, gone} {
-		f.await(t, stream, sketched)
+		f.awaitFeature(t, stream, InShedState)
+		if moved := f.transition(t, stream, SketchedState); moved.From != HandedState || moved.Actor != draftingActor {
+			t.Fatalf("the move to sketched %+v", moved)
+		}
+	}
+	for stream, want := range map[config.WorkstreamID]string{
+		debated: "spec.md revision 1 and plan.json revision 1 enter the shed with a committee of 2",
+		small:   "spec.md revision 1 and plan.json revision 1 enter the shed without a committee: the owner skipped debate",
+	} {
+		if enter := f.transition(t, stream, InShedState); enter.From != SketchedState || enter.Reason != want {
+			t.Fatalf("workstream %s entered the shed %+v", stream, enter)
+		}
 	}
 	list, err := f.c.Statuses(ctx)
 	must(t, err)
@@ -413,28 +399,21 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 		t.Fatalf("statuses: %+v", list)
 	}
 	for _, st := range list.Workstreams {
-		if st.State == nil || *st.State != SketchedState {
+		if st.State == nil || *st.State != InShedState {
 			t.Fatalf("status of %s: %+v", st.Workstream, st)
 		}
 	}
-	if moved := f.transition(t, debated, SketchedState); moved.From != HandedState || moved.Actor != draftingActor {
-		t.Fatalf("the move to sketched %+v", moved)
-	}
 
-	// 3. The fourth workstream is abandoned. Its trace stays.
+	// 3. The fourth workstream is abandoned before it is ratified. Its trace
+	// stays.
 	abandoned, err := f.c.Abandon(ctx, gone, "Quotas wait for the billing work.")
 	must(t, err)
 	if abandoned.State != AbandonedState || abandoned.Reason != "Quotas wait for the billing work." {
 		t.Fatalf("abandon %+v", abandoned)
 	}
 
-	// 4. The small workstream skips debate and is ratified explicitly.
-	if _, err := f.c.Ratify(ctx, small, 1, 1); !failed(err, Conflict) || !strings.Contains(err.Error(), "debate is not skipped") {
-		t.Fatalf("ratifying before the skip: %v", err)
-	}
-	if _, err := f.c.ShedSkip(ctx, small); err != nil {
-		t.Fatal(err)
-	}
+	// 4. The small workstream skipped debate at hand-in and is ratified
+	// explicitly.
 	packet := f.awaitPacket(t, small, "ratify: no objection stands")
 	if !packet.Skipped || packet.Revision != (shed.Pin{Spec: 1, Plan: 1}) || len(packet.Dissent) != 0 {
 		t.Fatalf("the skipped debate's packet %+v", packet)
@@ -447,27 +426,13 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	if s := sealOf(small); s.Base.Commit != commit || s.SpecHash != seal.SpecHash(exitSmallSpec) || len(s.Footprints) != 1 || s.Footprints[0].Unit != "message" || branchAt(small) != commit {
 		t.Fatalf("the small workstream's seal %+v", s)
 	}
-	f.stop(t)
+	if ran := slices.DeleteFunc(d.runs(exitTitle(exitSmall)), func(name string) bool { return name == "events" }); !slices.Equal(ran, []string{"draft-1-1"}) {
+		t.Fatalf("the small workstream ran %v", ran)
+	}
 
-	// 5. With the service stopped, the fixture gives the retention workstream
-	// a mason with one queued turn.
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: f.project, Workstream: capped, At: clock.Now(), Actor: ownerActor, Cause: "workstream_created"}
-	must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: "mason", ThreadID: demoThread}))
-	h.Schema, h.ID, h.Cause, h.Depth = "osmia.trace.turn-request", "request_ask", "message_ask", 1
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: demoAgent, ThreadID: demoThread, TurnID: "ask",
-		Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the mason.", Prompt: "Read the retention design."})
-	must(t, err)
-	must(t, repo.Close())
-
-	// 6. The service starts again with its committee. Both debated
-	// workstreams enter the shed, and the abandoned one stays where it is.
-	f.opts.Committee = committee
-	f.start(t)
-
-	// The mason's question is escalated, and the owner answers it through
-	// the inbox.
+	// 5. A member of the retention workstream's committee asks in round 1.
+	// The chief of staff escalates the question, and the owner answers it
+	// through the inbox.
 	var entry InboxEntry
 	deadline := time.Now().Add(demoTimeout)
 	for {
@@ -482,30 +447,29 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	asker := committeeAgent(2)
 	if entry.Number != 1 || entry.Workstream != capped || entry.Batch != "escalation_1" || entry.Question != "Does deletion end an upload's retention period?" ||
-		len(entry.Asked) != 1 || entry.Asked[0] != (InboxQuestion{ID: "1", AskedBy: demoAgent, Question: exitQuestion}) {
+		len(entry.Asked) != 1 || entry.Asked[0] != (InboxQuestion{ID: "1", AskedBy: asker, Question: exitQuestion}) {
 		t.Fatalf("inbox entry %+v", entry)
+	}
+	if state, err := f.repository().Workflow(capped, shedSubject); err != nil || state.Value != "waiting-1" {
+		t.Fatalf("the retention shed while the question is open: %+v %v", state, err)
 	}
 	if _, err := f.c.Answer(ctx, entry.Number, exitRuling); err != nil {
 		t.Fatal(err)
 	}
-	deadline = time.Now().Add(demoTimeout)
-	for {
-		th, err := f.repository().Thread(capped, demoAgent)
-		must(t, err)
-		if len(th.Turns) == 2 && th.Turns[1].Request.TurnID == "answer_1" && th.Turns[1].Status() == "idle" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the mason's thread %+v", th.Turns)
-		}
-		time.Sleep(100 * time.Millisecond)
+	// 6. The ruling reaches the member as its next turn, and round 1 resumes.
+	f.awaitShed(t, capped, "heard-1", "concluded-2")
+	th, err := f.repository().Thread(capped, asker)
+	must(t, err)
+	if len(th.Turns) < 2 || th.Turns[1].Request.TurnID != questions.TurnID("1") || th.Turns[1].Status() != "idle" {
+		t.Fatalf("the member's thread %+v", th.Turns)
 	}
 	d.mu.Lock()
-	answered := d.prompts[exitTitle(exitCapped)+"/answer_1"]
+	answered := d.prompts[exitTitle(exitCapped)+"/"+questions.TurnID("1")]
 	d.mu.Unlock()
 	if !strings.Contains(answered, "You asked:\n"+exitQuestion+"\n\nAnswer:\n"+exitRelayed) {
-		t.Fatalf("the mason heard:\n%s", answered)
+		t.Fatalf("the member heard:\n%s", answered)
 	}
 	if inbox, err := f.c.Inbox(ctx); err != nil || len(inbox.Entries) != 0 {
 		t.Fatalf("inbox after the answer %+v %v", inbox, err)
@@ -553,6 +517,9 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	// 8. The second workstream: the veto still stands at the cap, so
 	// ratification is refused until the owner overrules it.
 	f.awaitShed(t, capped, "concluded-2")
+	if moves := f.shedMoves(t, capped); len(moves) < 4 || !slices.Equal(moves[:4], []string{"round-1", "waiting-1", "round-1", "heard-1"}) {
+		t.Fatalf("shed of the retention workstream went %v", moves)
+	}
 	if end := f.transition(t, capped, "shed-concluded-2"); end.Reason != "debate stopped after round 2, at the shed.max_rounds cap of 2, with 1 objection standing, 1 of them blocking; the cap approves nothing" {
 		t.Fatalf("the conclusion %+v", end)
 	}
@@ -612,7 +579,7 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	if branchAt(capped) != commit {
 		t.Fatal("the feature branch is not where the stopped sealing left it")
 	}
-	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	if _, _, found, err := seal.Latest(repo, capped); err != nil || found {
 		t.Fatalf("a seal before the restart: %v %v", found, err)
