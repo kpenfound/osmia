@@ -593,6 +593,100 @@ func TestAskingTurnInterruptedByAStopStillParksTheRound(t *testing.T) {
 	}
 }
 
+// An answer queued behind a turn a crashed service left reserved runs once
+// that turn is abandoned: the round is heard with the answer, not held behind
+// the reservation. The reservation is planted between lifetimes: a stop
+// completes the turn it interrupts, a crash does not.
+func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p := &faults{}
+	f, _ := newAskingFixture(t, 1, 1, p)
+	defer f.stop(t)
+	member := committeeAgent(1)
+	asked := make(chan struct{})
+	asking := f.member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+		if err := asks(p, "1")(ctx, req, verified, tools); err != nil {
+			return err
+		}
+		close(asked)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	answering := f.answer("1", silent)
+	stream := f.handIn(t, "design", handedDesign)
+	select {
+	case <-asked:
+	case <-time.After(demoTimeout):
+		t.Fatal("the member never asked")
+	}
+	f.stop(t)
+	// Between lifetimes a second attempt is reserved on the member's thread
+	// as a crash would leave it, the chief of staff answers, and the answer
+	// is queued behind the reservation.
+	cfg, err := config.Load(f.opts.Config)
+	must(t, err)
+	repo, err := trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
+	must(t, err)
+	th, err := repo.Thread(stream, member)
+	must(t, err)
+	if len(th.Turns) != 1 || th.Turns[0].Status() != "interrupted" {
+		t.Fatalf("asking turn after the stop: %+v", th.Turns)
+	}
+	reserved := roundTurnID(1, member, 2)
+	second := th.Turns[0].Request
+	second.ID, second.TurnID, second.At = "request_"+reserved, reserved, f.clock.Now()
+	_, err = repo.EnqueueTurn(ctx, second)
+	must(t, err)
+	home := filepath.Dir(f.clone)
+	_, err = repo.ClaimTurn(ctx, stream, member, "token_"+reserved, filepath.Join(home, reserved), f.clock.Now())
+	must(t, err)
+	chiefHeader := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_planted", Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "planted"}
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: chiefHeader, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "planted", Profile: second.Profile, Prompt: "Answer"})
+	must(t, err)
+	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token_planted", filepath.Join(home, "planted"), f.clock.Now())
+	must(t, err)
+	chiefScope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: trace.ChiefOfStaff, Turn: "planted", Role: trace.ChiefOfStaff}
+	_, err = repo.AnswerQuestion(ctx, trace.ChiefOfStaff, chiefScope, "1", askedAnswer, []string{"charter#1"}, f.clock.Now())
+	must(t, err)
+	// The chief of staff's planted turn is abandoned as a crashed one would be:
+	// by the next session to open the trace.
+	must(t, repo.Close())
+	repo, err = trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
+	must(t, err)
+	must(t, repo.AbandonTurn(ctx, stream, trace.ChiefOfStaff, "planted", f.clock.Now()))
+	planted, err := repo.Questions(stream)
+	must(t, err)
+	if len(planted) != 1 || planted[0].State != trace.QuestionAnswered {
+		t.Fatalf("planted questions: %+v", planted)
+	}
+	if delivered, err := questions.Deliver(ctx, repo, planted[0], func(string) (coreadapter.Profile, error) {
+		return coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, nil
+	}, f.clock.Now()); err != nil || !delivered {
+		t.Fatalf("deliver: %t %v", delivered, err)
+	}
+	if th, err := repo.Thread(stream, member); err != nil || len(th.Turns) != 3 || th.Turns[1].Claim == nil || th.Turns[1].Response != nil || th.Turns[2].Request.TurnID != answering {
+		t.Fatalf("planted thread: %+v %v", th, err)
+	}
+	must(t, repo.Close())
+	f.start(t)
+	f.awaitShed(t, stream, "concluded-1")
+	p.check(t)
+	if moves, want := f.shedMoves(t, stream), []string{"round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
+		t.Fatalf("shed went %v, want %v", moves, want)
+	}
+	th = f.thread(t, stream, member)
+	if len(th.Turns) != 3 || th.Turns[1].Request.TurnID != reserved || th.Turns[1].Status() != "interrupted" || th.Turns[2].Request.TurnID != answering || th.Turns[2].Status() != "idle" {
+		t.Fatalf("asker's thread: %+v", th)
+	}
+	if ran := f.ran(); ran[asking] != 1 || ran[answering] != 1 || ran[reserved] != 0 || ran[roundTurnID(1, member, 3)] != 0 {
+		t.Fatalf("turns ran: %v", ran)
+	}
+	if mine := f.record(t, stream, member); mine.Turn != asking || !mine.Silent() {
+		t.Fatalf("record: %+v", mine)
+	}
+}
+
 // A turn that asked and then failed parks the round too: the answer runs on
 // the member's thread, and the record is what the chain ended with.
 func TestTurnThatFailedAfterAskingParksTheRound(t *testing.T) {

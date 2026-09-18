@@ -918,22 +918,46 @@ func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream
 				attempts++
 			}
 		}
-		var last, claimed *trace.QueuedTurn
+		// Turns run in sequence, so the oldest unfinished turn of the chain is
+		// the one to drive: the answer to a question may be queued behind the
+		// turn that asked it while a service stop left that turn unfinished.
+		var last, pending *trace.QueuedTurn
 		if len(turns) > 0 {
 			last = &turns[len(turns)-1]
 		}
-		// A claimed turn without a response is running, or a service stop
-		// interrupted it; the answer to a question it asked may be queued
-		// after it.
-		if i := slices.IndexFunc(turns, func(q trace.QueuedTurn) bool { return q.Claim != nil && q.Response == nil }); i >= 0 {
-			claimed = &turns[i]
+		if i := slices.IndexFunc(turns, func(q trace.QueuedTurn) bool { return q.CompletedAt.IsZero() }); i >= 0 {
+			pending = &turns[i]
 		}
 		switch {
-		case claimed != nil:
+		case pending != nil && pending.Claim != nil && pending.Response == nil:
 			if t.Status != "interrupted" {
-				return empty, "", errors.New("committee turn " + claimed.Request.TurnID + " is still running")
+				return empty, "", errors.New("committee turn " + pending.Request.TurnID + " is still running")
 			}
-			if err := d.repository.AbandonTurn(ctx, stream, member, claimed.Request.TurnID, d.s.now()); err != nil {
+			if err := d.repository.AbandonTurn(ctx, stream, member, pending.Request.TurnID, d.s.now()); err != nil {
+				return empty, "", err
+			}
+		case pending != nil:
+			gone, err := abandoned(d.repository, stream)
+			if err != nil {
+				return empty, "", err
+			}
+			if gone && pending.Response == nil {
+				if _, err := d.repository.CancelTurns(ctx, stream, d.s.now(), abandonActor, cancelReason); err != nil {
+					return empty, "", err
+				}
+				continue
+			}
+			// Completing a captured turn runs no member.
+			turnCtx := running
+			if pending.Response != nil {
+				turnCtx = ctx
+			} else if d.s.options.Committee == nil {
+				return empty, "", errNoCommittee
+			}
+			if _, err := d.dispatch(turnCtx, stream, in, member, pending.Request.TurnID); err != nil {
+				return empty, "", err
+			}
+			if err := os.RemoveAll(filepath.Join(d.turnDirectory(stream, pending.Request.TurnID), "workspace")); err != nil {
 				return empty, "", err
 			}
 		case last == nil || last.Status() == "interrupted":
@@ -955,30 +979,6 @@ func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream
 				return empty, "", errNoCommittee
 			}
 			if err := d.enqueue(ctx, cfg, stream, in, member, attempts+1, operation, asked); err != nil {
-				return empty, "", err
-			}
-		case last.CompletedAt.IsZero():
-			gone, err := abandoned(d.repository, stream)
-			if err != nil {
-				return empty, "", err
-			}
-			if gone && last.Response == nil {
-				if _, err := d.repository.CancelTurns(ctx, stream, d.s.now(), abandonActor, cancelReason); err != nil {
-					return empty, "", err
-				}
-				continue
-			}
-			// Completing a captured turn runs no member.
-			turnCtx := running
-			if last.Response != nil {
-				turnCtx = ctx
-			} else if d.s.options.Committee == nil {
-				return empty, "", errNoCommittee
-			}
-			if _, err := d.dispatch(turnCtx, stream, in, member, last.Request.TurnID); err != nil {
-				return empty, "", err
-			}
-			if err := os.RemoveAll(filepath.Join(d.turnDirectory(stream, last.Request.TurnID), "workspace")); err != nil {
 				return empty, "", err
 			}
 		default:
