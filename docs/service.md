@@ -1179,11 +1179,28 @@ from <feature-branch> at <commit>`. It then creates the unit's mason thread,
 `mason-<id>` with the role `mason`, and queues its first turn,
 `mason-<id>-implement`, with the role's profile, the unit's bundle in its
 prompt and the transition as its cause. The scheduler dispatches that turn
-like any other thread turn. A unit whose spec no longer matches its seal is not
-started, and nothing is recorded for it. A unit moves to `implementing` once:
-the transition ID is fixed and a unit already `implementing` is never started
+like any other thread turn. A unit moves to `implementing` once: the
+transition ID is fixed and a unit already `implementing` is never started
 again. A unit found `implementing` without its first mason turn, as after a
 stop between the two, gets its workspace and that turn on the next pass.
+
+A unit is blocked when its spec no longer matches its seal (the bundle
+refuses it) or when its workspace cannot be opened, as when a directory the
+clone does not know is in its place. A blocked `ready` unit is not started and
+stays `ready`, with no workspace or thread made for it; a blocked
+`implementing` unit gets no turn. Either way the unit takes no mason slot, its
+workstream starts no other unit, the other workstreams go on, and the
+controller tries again on every pass, so the unit starts once the cause is
+gone. Why is recorded on the workflow subject `blocked-mason-<id>`
+(`blocked-mason_<hash>` for a unit whose subject is hashed): the transition
+`<subject>-<k>` moves it to `blocked-<k>` (actor `service`/`mason`) with a
+notice for the chief of staff, `The mason controller is blocked: <reason>. It
+tries again on every pass.` A reason the subject's latest transition already
+records is not recorded again. The reasons are `unit <id> stays ready: its
+mason bundle cannot be assembled: spec does not match its seal: ...` and
+`unit <id> stays ready: its workspace cannot be opened: <error>`, and for an
+`implementing` unit the same two with `unit <id> is implementing and its
+mason's first turn is not queued` in place of `unit <id> stays ready`.
 
 ### Unit workspaces
 

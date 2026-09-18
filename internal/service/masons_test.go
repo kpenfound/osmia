@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -84,8 +85,8 @@ func (m *fakeMasons) check(t *testing.T) {
 
 // newMasonFixture is a debate fixture whose service runs thread turns
 // through the production reconciler with capacity.masons set to masons, and
-// whose architect drafts plan, and whose clone has its upstream. Every mason turn is played by the returned
-// fake masons.
+// whose architect drafts plan, and whose clone has its upstream. Every
+// mason turn is played by the returned fake masons.
 func newMasonFixture(t *testing.T, masons int, drafted string) (*shedFixture, *fakeMasons) {
 	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, masonRoles, func(opts *Options) {
@@ -241,22 +242,28 @@ func TestMasonSlotsFollowPriorityAndPause(t *testing.T) {
 	f.stop(t)
 	f.start(t)
 
-	mutation(t, f.c, "PUT", "priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{second, first}})
-	mutation(t, f.c, "DELETE", "pause", factory)
-	f.awaitMasonRan(t, second, "resume")
-	settle()
-	if got := masonTransitions(t, f, first); len(got) != 0 {
-		t.Fatalf("%s started a unit with no mason slot free: %+v", first, got)
+	// The priority order goes against the workstream ID order, which would
+	// otherwise break the tie.
+	hi, lo := first, second
+	if hi < lo {
+		hi, lo = lo, hi
 	}
-	f.checkUnits(t, first, []UnitStatus{{Unit: "resume", State: UnitReady}, {Unit: "dedupe", State: UnitPlanned}})
+	mutation(t, f.c, "PUT", "priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{hi, lo}})
+	mutation(t, f.c, "DELETE", "pause", factory)
+	f.awaitMasonRan(t, hi, "resume")
+	settle()
+	if got := masonTransitions(t, f, lo); len(got) != 0 {
+		t.Fatalf("%s started a unit with no mason slot free: %+v", lo, got)
+	}
+	f.checkUnits(t, lo, []UnitStatus{{Unit: "resume", State: UnitReady}, {Unit: "dedupe", State: UnitPlanned}})
 
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: second}, Mode: "soft", Source: "operator"})
-	f.awaitMasonRan(t, first, "resume")
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: hi}, Mode: "soft", Source: "operator"})
+	f.awaitMasonRan(t, lo, "resume")
 	masons.check(t)
-	if got, want := masonTransitions(t, f, first), []transitionMove{started("resume", f.startedReason(t, first, "resume"))}; !reflect.DeepEqual(got, want) {
+	if got, want := masonTransitions(t, f, lo), []transitionMove{started("resume", f.startedReason(t, lo, "resume"))}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
-	f.checkUnits(t, second, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
+	f.checkUnits(t, hi, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
 }
 
 // A unit moved to implementing whose mason turn was never queued, as after
@@ -295,6 +302,159 @@ func TestImplementingUnitGetsItsMasonTurnAfterARestart(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(workspace, masonWrote)); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// staleSpec is validSpec as the owner edits it after the seal.
+const staleSpec = validSpec + "9. Something new.\n"
+
+// editSpec writes the workstream's spec.md on disk, as the owner does.
+func (f *shedFixture) editSpec(t *testing.T, stream config.WorkstreamID, content string) {
+	t.Helper()
+	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.SpecPath), []byte(content), 0600))
+}
+
+// blocks returns the reasons the mason controller recorded the unit of the
+// workstream blocked for, checking each has a notice for the chief of staff.
+func (f *shedFixture) blocks(t *testing.T, stream config.WorkstreamID, unit string) []string {
+	t.Helper()
+	var out []string
+	for _, tr := range allTransitions(t, f.trace, stream) {
+		if tr.Subject != blockedSubject(unit) {
+			continue
+		}
+		if tr.Actor != masonActor || tr.ID != fmt.Sprintf("%s-%d", blockedSubject(unit), len(out)+1) || tr.To != fmt.Sprintf("blocked-%d", len(out)+1) {
+			t.Fatalf("blocked transition %+v", tr)
+		}
+		if body := f.notice(t, stream, tr.ID); body != "The mason controller is blocked: "+tr.Reason+". It tries again on every pass." {
+			t.Fatalf("notice %q", body)
+		}
+		out = append(out, tr.Reason)
+	}
+	return out
+}
+
+// staleReason is the reason a unit is blocked for when spec.md revision 2
+// is staleSpec.
+func staleReason(prefix string) string {
+	return prefix + ": its mason bundle cannot be assembled: spec does not match its seal: spec.md revision 2 hashes to " + seal.SpecHash(staleSpec) + ", seal 1 records " + seal.SpecHash(validSpec)
+}
+
+// A ready unit whose spec no longer matches its seal is not started: it
+// stays ready with no workspace and no mason thread, and why is recorded
+// once, with a notice for the chief of staff, however many passes find it
+// so. Once the owner puts the sealed spec back, the unit starts.
+func TestStaleSpecLeavesTheUnitReady(t *testing.T) {
+	t.Parallel()
+	f, masons := newMasonFixture(t, 4, validPlan)
+	defer f.stop(t)
+	factory := runtime.Target{Scope: "factory"}
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+	stream, _ := f.builtAs(t, "design")
+	f.editSpec(t, stream, staleSpec)
+	mutation(t, f.c, "DELETE", "pause", factory)
+	settle()
+	settle()
+
+	if got := masonTransitions(t, f, stream); len(got) != 1 || got[0].Subject != blockedSubject("resume") {
+		t.Fatalf("mason transitions %+v", got)
+	}
+	if got, want := f.blocks(t, stream, "resume"), []string{staleReason("unit resume stays ready")}; !slices.Equal(got, want) {
+		t.Fatalf("blocked %q, want %q", got, want)
+	}
+	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitReady}, {Unit: "dedupe", State: UnitPlanned}})
+	if _, err := os.Stat(filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(stream), "resume")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the blocked unit has a workspace: %v", err)
+	}
+	if _, err := f.repository().Thread(stream, masonAgent("resume")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the blocked unit has a mason thread: %v", err)
+	}
+
+	f.editSpec(t, stream, validSpec)
+	f.awaitMasonRan(t, stream, "resume")
+	masons.check(t)
+	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
+}
+
+// lowHigh returns the two workstreams in workstream ID order, the order in
+// which workstreams equal in priority are offered a mason slot.
+func lowHigh(a, b config.WorkstreamID) (config.WorkstreamID, config.WorkstreamID) {
+	if b < a {
+		return b, a
+	}
+	return a, b
+}
+
+// A unit whose workspace cannot be opened, here because a directory the
+// clone does not know is in its place, stays ready and is recorded blocked,
+// and the service keeps running: the mason slot goes to the next workstream,
+// whose unit starts.
+func TestUnitWorkspaceFailureBlocksItsWorkstreamAlone(t *testing.T) {
+	t.Parallel()
+	f, masons := newMasonFixture(t, 1, validPlan)
+	defer f.stop(t)
+	factory := runtime.Target{Scope: "factory"}
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+	a, _ := f.builtAs(t, "first")
+	b, _ := f.builtAs(t, "second")
+	broken, other := lowHigh(a, b)
+	squatter := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(broken), "resume")
+	must(t, os.MkdirAll(squatter, 0700))
+	must(t, os.WriteFile(filepath.Join(squatter, "notes"), []byte("mine\n"), 0600))
+	mutation(t, f.c, "DELETE", "pause", factory)
+	f.awaitMasonRan(t, other, "resume")
+	settle()
+	masons.check(t)
+
+	reasons := f.blocks(t, broken, "resume")
+	if len(reasons) != 1 || !strings.HasPrefix(reasons[0], "unit resume stays ready: its workspace cannot be opened: ") {
+		t.Fatalf("blocked %q", reasons)
+	}
+	f.checkUnits(t, broken, []UnitStatus{{Unit: "resume", State: UnitReady}, {Unit: "dedupe", State: UnitPlanned}})
+	f.checkUnits(t, other, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
+	if data, err := os.ReadFile(filepath.Join(squatter, "notes")); err != nil || string(data) != "mine\n" {
+		t.Fatalf("the directory in the workspace's place changed: %q %v", data, err)
+	}
+	if _, err := f.c.Health(context.Background()); err != nil {
+		t.Fatalf("the service stopped: %v", err)
+	}
+}
+
+// An implementing unit whose first mason turn is not queued and whose spec
+// no longer matches its seal gets no turn: it is recorded blocked and holds
+// no mason slot, which goes to the next workstream.
+func TestImplementingUnitWithAStaleSpecHoldsNoSlot(t *testing.T) {
+	t.Parallel()
+	f, masons := newMasonFixture(t, 1, validPlan)
+	defer func() { f.stop(t) }()
+	factory := runtime.Target{Scope: "factory"}
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+	a, _ := f.builtAs(t, "first")
+	b, _ := f.builtAs(t, "second")
+	stale, other := lowHigh(a, b)
+	f.stop(t)
+
+	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	states, err := repo.WorkflowStates(stale)
+	must(t, err)
+	subject := trace.UnitSubject("resume")
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: masonTransitionID("resume"), Revision: 1, Project: f.project, Workstream: stale, Unit: "resume", At: f.clock.Now(), Actor: masonActor, Cause: subject + "-" + UnitReady}
+	_, err = repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: states[subject].Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitReady, To: UnitImplementing, Reason: "planted"}})
+	must(t, errors.Join(err, repo.Close()))
+	f.editSpec(t, stale, staleSpec)
+
+	f.start(t)
+	mutation(t, f.c, "DELETE", "pause", factory)
+	f.awaitMasonRan(t, other, "resume")
+	settle()
+	masons.check(t)
+	if got, want := f.blocks(t, stale, "resume"), []string{staleReason("unit resume is implementing and its mason's first turn is not queued")}; !slices.Equal(got, want) {
+		t.Fatalf("blocked %q, want %q", got, want)
+	}
+	if _, err := f.repository().Thread(stale, masonAgent("resume")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the blocked unit has a mason thread: %v", err)
+	}
+	f.checkUnits(t, stale, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
 }
 
 // Units are taken in the plan's dependency order: a unit follows the units

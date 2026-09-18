@@ -61,7 +61,10 @@ type building struct {
 // Pass starts the ready units capacity allows, the highest-priority
 // workstream first and, among equals, the one that started a unit least
 // recently. A paused workstream starts none, and its implementing unit takes
-// no mason slot.
+// no mason slot. A unit that cannot start, or an implementing unit whose
+// first turn cannot be queued, is blocked: the reason is recorded, the unit
+// takes no mason slot and its workstream starts nothing else, and the other
+// workstreams go on.
 func (m *masons) Pass(ctx context.Context) error {
 	streams, err := m.repository.Workstreams()
 	if err != nil {
@@ -91,12 +94,13 @@ func (m *masons) Pass(ctx context.Context) error {
 			if b.states[trace.UnitSubject(u.ID)].Value != UnitImplementing {
 				continue
 			}
-			if !paused(stream) {
-				implementing++
-			}
 			busy = true
-			if err := m.resume(ctx, stream, u.ID); err != nil {
+			queued, err := m.resume(ctx, stream, u.ID)
+			if err != nil {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
+			}
+			if queued && !paused(stream) {
+				implementing++
 			}
 		}
 		if !busy && !paused(stream) {
@@ -221,23 +225,27 @@ func (m *masons) bundle(ctx context.Context, stream config.WorkstreamID, unit st
 }
 
 // start moves a ready unit to implementing and queues its mason's first
-// turn. The unit's bundle is assembled and its workspace opened first, so a
-// unit whose spec no longer matches its seal is not started: start reports
-// false and records nothing. A unit whose state moved since it was read is
-// left to the next pass.
+// turn. The unit's bundle is assembled and its workspace opened first: a
+// unit whose spec no longer matches its seal, or whose workspace cannot be
+// opened, stays ready, and start records why it is blocked and reports false.
+// A unit whose state moved since it was read is left to the next pass.
 func (m *masons) start(ctx context.Context, b building, unit string) (bool, error) {
+	subject := trace.UnitSubject(unit)
+	stays := fmt.Sprintf("unit %s stays ready", unit)
 	mason, err := m.bundle(ctx, b.stream, unit)
 	if errors.Is(err, bundle.ErrStaleSpec) {
-		return false, nil
+		return false, m.block(ctx, b.stream, unit, subject+"-"+UnitReady, fmt.Sprintf("%s: its mason bundle cannot be assembled: %v", stays, err))
 	}
 	if err != nil {
 		return false, err
 	}
 	w, base, err := newUnitWorkspaces(m.cfg).open(ctx, b.stream, unit)
+	if err != nil && ctx.Err() == nil {
+		return false, m.block(ctx, b.stream, unit, subject+"-"+UnitReady, fmt.Sprintf("%s: its workspace cannot be opened: %v", stays, err))
+	}
 	if err != nil {
 		return false, err
 	}
-	subject := trace.UnitSubject(unit)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: masonTransitionID(unit), Revision: 1, Project: m.repository.Project(), Workstream: b.stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: subject + "-" + UnitReady}
 	tr := trace.Transition{Header: h, Subject: subject, From: UnitReady, To: UnitImplementing,
 		Reason: fmt.Sprintf("unit %s is the next ready unit of the plan of seal %d; its mason works in the unit's workspace on %s, created from %s at %s", unit, mason.Seal, w.Branch, featureBranch(b.stream), base)}
@@ -251,31 +259,79 @@ func (m *masons) start(ctx context.Context, b building, unit string) (bool, erro
 
 // resume queues the first turn of an implementing unit's mason when it is
 // not queued yet, as after a stop between the unit's move and the turn,
-// opening the unit's workspace first when it is missing.
-func (m *masons) resume(ctx context.Context, stream config.WorkstreamID, unit string) error {
+// opening the unit's workspace first when it is missing. It reports whether
+// the turn is queued: a unit whose workspace cannot be opened, or whose spec
+// no longer matches its seal, gets no turn, and resume records why it is
+// blocked.
+func (m *masons) resume(ctx context.Context, stream config.WorkstreamID, unit string) (bool, error) {
 	queued, err := m.queued(stream, unit)
 	if err != nil || queued {
-		return err
+		return queued, err
 	}
+	moved := masonTransitionID(unit)
+	waits := fmt.Sprintf("unit %s is implementing and its mason's first turn is not queued", unit)
 	if _, _, err := newUnitWorkspaces(m.cfg).open(ctx, stream, unit); err != nil {
-		return err
+		if ctx.Err() != nil {
+			return false, err
+		}
+		return false, m.block(ctx, stream, unit, moved, fmt.Sprintf("%s: its workspace cannot be opened: %v", waits, err))
 	}
 	transitions, err := trace.Read[trace.Transition](m.repository, stream)
 	if err != nil {
-		return err
+		return false, err
 	}
-	i := slices.IndexFunc(transitions, func(t trace.Transition) bool { return t.ID == masonTransitionID(unit) })
+	i := slices.IndexFunc(transitions, func(t trace.Transition) bool { return t.ID == moved })
 	if i < 0 {
-		return fmt.Errorf("transition %s is missing", masonTransitionID(unit))
+		return false, fmt.Errorf("transition %s is missing", moved)
 	}
 	mason, err := m.bundle(ctx, stream, unit)
 	if errors.Is(err, bundle.ErrStaleSpec) {
-		return nil
+		return false, m.block(ctx, stream, unit, moved, fmt.Sprintf("%s: its mason bundle cannot be assembled: %v", waits, err))
 	}
+	if err != nil {
+		return false, err
+	}
+	return true, m.enqueue(ctx, stream, unit, mason, transitions[i])
+}
+
+// blockedSubject is the workflow subject that records why a unit is
+// blocked: blocked-mason-<unit>, or blocked-mason_<hash> for a unit whose
+// subject is hashed.
+func blockedSubject(unit string) string { return "blocked-" + masonAgent(unit) }
+
+// block records why a unit is blocked, with a notice for the chief of staff:
+// the transition <blocked-subject>-<k> moves blockedSubject to blocked-<k>. A
+// reason the subject's latest transition already records is not recorded
+// again, so a unit that stays blocked for the same reason is reported once.
+func (m *masons) block(ctx context.Context, stream config.WorkstreamID, unit, cause, reason string) error {
+	subject := blockedSubject(unit)
+	state, err := m.repository.Workflow(stream, subject)
 	if err != nil {
 		return err
 	}
-	return m.enqueue(ctx, stream, unit, mason, transitions[i])
+	k := 1
+	if state.Value != "" {
+		if _, err := fmt.Sscanf(state.Value, "blocked-%d", &k); err != nil {
+			return fmt.Errorf("subject %s is %q", subject, state.Value)
+		}
+		transitions, err := trace.Read[trace.Transition](m.repository, stream)
+		if err != nil {
+			return err
+		}
+		last := fmt.Sprintf("%s-%d", subject, k)
+		if slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == last && t.Reason == reason }) {
+			return nil
+		}
+		k++
+	}
+	id := fmt.Sprintf("%s-%d", subject, k)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: cause}
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: fmt.Sprintf("blocked-%d", k), Reason: reason},
+		Events: []trace.Event{trace.Notice(id, "chief", "The mason controller is blocked: "+reason+". It tries again on every pass.")}}
+	if _, err := m.repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
+		return err
+	}
+	return nil
 }
 
 // queued reports whether the unit's mason has its first turn.
