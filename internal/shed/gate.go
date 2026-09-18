@@ -155,7 +155,7 @@ func Recommend(entries []Entry) string {
 		return fmt.Sprintf("do not ratify yet: ratification is blocked by %s (%s); overrule or sustain each one, or ask for a redraft",
 			Objections(len(blocked)), strings.Join(ids, ", "))
 	case len(entries) > 0:
-		return fmt.Sprintf("ratify: nothing blocks, and %s stand as advice on the record", Objections(len(entries)))
+		return fmt.Sprintf("ratify: nothing blocks, and %s %s as advice on the record", Objections(len(entries)), stand(len(entries)))
 	}
 	return "ratify: no objection stands"
 }
@@ -166,6 +166,14 @@ func Objections(n int) string {
 		return "1 objection"
 	}
 	return strconv.Itoa(n) + " objections"
+}
+
+// stand agrees the verb with a count of objections.
+func stand(n int) string {
+	if n == 1 {
+		return "stands"
+	}
+	return "stand"
 }
 
 // PacketRound returns the round whose ratification packet a workstream path

@@ -371,7 +371,7 @@ func standing(open []shed.Entry) string {
 			blocking++
 		}
 	}
-	return fmt.Sprintf("%d objections standing, %d of them blocking", len(open), blocking)
+	return fmt.Sprintf("%s standing, %d of them blocking", shed.Objections(len(open)), blocking)
 }
 
 // conclude ends the debate after round n. The workstream stays in the shed:
