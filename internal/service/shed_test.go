@@ -19,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -45,12 +46,22 @@ func newShedFixture(t *testing.T, members int) *shedFixture {
 // architect's replies are silent unless a test scripts them.
 func newDebateFixture(t *testing.T, members, rounds int) *shedFixture {
 	t.Helper()
+	return newDebateFixtureWith(t, members, rounds, "", nil)
+}
+
+// newDebateFixtureWith is newDebateFixture with extra configuration appended
+// and prepare, when given, adjusting the options before the service starts.
+func newDebateFixtureWith(t *testing.T, members, rounds int, extra string, prepare func(*Options)) *shedFixture {
+	t.Helper()
 	opts, clone, engine, sessions, clock := newArchitectOptions(t)
 	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 	must(t, err)
-	_, err = fmt.Fprintf(configFile, "[roles.committee]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[capacity]\ncommittee = %d\n[shed]\nmax_rounds = %d\n", members, rounds)
+	_, err = fmt.Fprintf(configFile, "[roles.committee]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[capacity]\ncommittee = %d\n[shed]\nmax_rounds = %d\n%s", members, rounds, extra)
 	must(t, errors.Join(err, configFile.Close()))
 	opts.Committee = &Committee{Engine: engine, Hosts: opts.Architect.Hosts}
+	if prepare != nil {
+		prepare(&opts)
+	}
 	f := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
 	f.start(t)
 	added, err := f.c.AddProject(context.Background(), request(clone))
@@ -179,8 +190,8 @@ func (b *barrier) wait(ctx context.Context) error {
 type seen struct{ spec, plan, prompt string }
 
 // checkCommitteeBoundary makes the negative assertions from inside a member's
-// turn: the role reads files and contributes, and nothing carries notes,
-// write, execute, network or VCS access.
+// turn: the role reads files, contributes and asks, and nothing carries
+// notes, write, execute, network or VCS access.
 func checkCommitteeBoundary(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession, clone string) error {
 	var problems []error
 	fail := func(format string, args ...any) { problems = append(problems, fmt.Errorf(format, args...)) }
@@ -193,10 +204,10 @@ func checkCommitteeBoundary(ctx context.Context, req agent.Request, verified *ag
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if want := []string{shed.ConcedeTool, "file_read", shed.ObjectTool}; !slices.Equal(names, want) {
+	if want := []string{questions.AskTool, shed.ConcedeTool, "file_read", shed.ObjectTool}; !slices.Equal(names, want) {
 		fail("role tools %v, want %v", names, want)
 	}
-	for _, name := range []string{"file_write", "shell", "exec", "fetch", "git_push", DraftTool, "set_status", "notes_read", "notes_write", "ask", "answer"} {
+	for _, name := range []string{"file_write", "shell", "exec", "fetch", "git_push", DraftTool, "set_status", "notes_read", "notes_write", "answer", "escalate", shed.ReplyTool} {
 		if _, err := callTool(ctx, tools, name, map[string]any{"path": "x", "content": "y"}); err == nil {
 			fail("runtime called %s", name)
 		}
@@ -223,7 +234,7 @@ func checkCommitteeBoundary(ctx context.Context, req agent.Request, verified *ag
 			fail("runtime environment exposes %s", key)
 		}
 	}
-	for _, want := range []string{"Round 1 of the shed", "spec.md revision 1 and plan.json revision 1", "charter#<n>", "spec#<n>", "plan#<unit>", "kb/<subsystem>.md", "kb/entities.json#<entity>", "veto", "advice", "split", "proof", shed.ObjectTool} {
+	for _, want := range []string{"Round 1 of the shed", "spec.md revision 1 and plan.json revision 1", "charter#<n>", "spec#<n>", "plan#<unit>", "kb/<subsystem>.md", "kb/entities.json#<entity>", "veto", "advice", "split", "proof", shed.ObjectTool, "Call " + questions.AskTool + " when something you must know"} {
 		if !strings.Contains(req.Prompt, want) {
 			fail("prompt lacks %q", want)
 		}
@@ -231,7 +242,7 @@ func checkCommitteeBoundary(ctx context.Context, req agent.Request, verified *ag
 	if strings.Contains(req.Prompt, "still stand") {
 		fail("round 1 lists earlier objections:\n%s", req.Prompt)
 	}
-	if !strings.Contains(req.SystemPrompt, "member of the committee") || !strings.Contains(req.SystemPrompt, "no tool that writes, runs or fetches") {
+	if !strings.Contains(req.SystemPrompt, "member of the committee") || !strings.Contains(req.SystemPrompt, "no tool that writes, runs or fetches") || !strings.Contains(req.SystemPrompt, "call "+questions.AskTool+": the round waits for the answer") {
 		fail("system prompt: %q", req.SystemPrompt)
 	}
 	return errors.Join(problems...)

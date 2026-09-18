@@ -427,6 +427,27 @@ func TestConcedeOnALaterRevisionBeforeTheTurnEnds(t *testing.T) {
 	}
 }
 
+// The turn that delivers the answer to a member's question continues the
+// attempt that asked: it is given what the member contributed before asking,
+// numbers its objections after them and may concede them.
+func TestToolsContinueTheContributionsTheTurnIsGiven(t *testing.T) {
+	f := setup(t)
+	var saved shed.Record
+	turn := f.turn(t, 1, alice, nil, &saved)
+	first := shed.Objection{ID: shed.ObjectionID(1, alice, 1), Kind: shed.Fit, Part: "spec#1", Argument: "It restarts.", Citations: []string{"charter#1"}}
+	turn.Record.Objections = []shed.Objection{first}
+	both := tools(t, turn)
+	if recorded, id := call(t, both[shed.ObjectTool], input{"proof", "spec#2", "No unit shows it.", []string{"spec#2"}}); !recorded || id != shed.ObjectionID(1, alice, 2) {
+		t.Fatalf("object after a kept objection: %v %q", recorded, id)
+	}
+	if recorded, reason := call(t, both[shed.ConcedeTool], map[string]string{"objection": first.ID, "reason": "The answer settles it."}); !recorded {
+		t.Fatalf("concede the kept objection: %s", reason)
+	}
+	if len(saved.Objections) != 2 || !reflect.DeepEqual(saved.Objections[0], first) || len(saved.Concessions) != 1 || saved.Concessions[0].Objection != first.ID {
+		t.Fatalf("saved %+v", saved)
+	}
+}
+
 func TestToolsKeepNothingWhenSavingFails(t *testing.T) {
 	f := setup(t)
 	var saved shed.Record
@@ -461,6 +482,9 @@ func TestToolsRequireTheirDependenciesAndAValidTurn(t *testing.T) {
 		"round":    func(turn *shed.Turn) { turn.Record.Round = 0 },
 		"member":   func(turn *shed.Turn) { turn.Record.Member = "" },
 		"revision": func(turn *shed.Turn) { turn.Record.Revision = shed.Pin{} },
+		"contributions": func(turn *shed.Turn) {
+			turn.Record.Objections = []shed.Objection{{ID: shed.ObjectionID(1, bob, 1), Kind: shed.Fit, Part: "spec#1", Argument: "x", Citations: []string{"charter#1"}}}
+		},
 	} {
 		turn := f.turn(t, 1, alice, nil, &saved)
 		mutate(&turn)

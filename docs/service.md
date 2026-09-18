@@ -318,6 +318,7 @@ the trace says it is:
 | `shed` state | Open dissent | Next step |
 | --- | --- | --- |
 | none | | Round 1, against the latest revisions. |
+| `waiting-<n>` | | Round `n` [again](#a-members-question), against its own revision, once every member that asked has its answer queued; nothing while one still waits. |
 | `heard-<n>` | none | [Conclude](#concluding-the-debate) by consensus. |
 | `heard-<n>` | some | Ask the architect for [its reply](#the-architects-reply) to round `n`. |
 | `replied-<n>` | some, `n` below the round limit | Round `n+1`, against the latest revisions. |
@@ -364,7 +365,8 @@ The workflow subject `shed` tracks the debate, with transitions by
 
 | `shed` state | Meaning |
 | --- | --- |
-| `round-<n>` | Round `n` is requested: transition `shed-round-<n>` published a `shed-round` operation whose input pins the round to one revision of `spec.md` and one of `plan.json`. Every round pins the latest revisions when it is requested. |
+| `round-<n>` | Round `n` is requested: transition `shed-round-<n>` published a `shed-round` operation whose input pins the round to one revision of `spec.md` and one of `plan.json`. Every round pins the latest revisions when it is requested. A round resumed after a member's question is in this state again, requested by transition `shed-round-<n>-resume-<k>`. |
+| `waiting-<n>` | Round `n` is parked: a member's turn asked a question, and the round waits for the answer. Transition `shed-round-<n>-waiting-<k>` and the operation's result, outcome `waiting`, name the members that wait and their questions. |
 | `heard-<n>` | Every member's turn of round `n` has ended and its record is committed. Transition `shed-round-<n>-heard` and the operation's result carry the same summary: members heard, objections, concessions, failed turns and how many objections stand. |
 | `reply-<n>` | The architect's reply to round `n` is requested: transition `shed-reply-<n>`, caused by `shed-round-<n>-heard`, published a `shed-reply` operation pinned to the revision the round debated. Its reason counts the objections that stand. |
 | `replied-<n>` | The architect's reply to round `n` is recorded. Transition `shed-reply-<n>-replied` and the operation's result carry the same summary: how many objections it answered, and whether it redrafted, left the revision as it is, gave up an invalid redraft or failed. |
@@ -392,12 +394,13 @@ Each turn gets a read-only private copy of a view staged under
 | `repo/` | The tracked files of the owner's clone. |
 | `shed/round-<k>/` | The records of the earlier rounds, the architect's reply to each as `reply.json`, and the owner's own files of the round. |
 
-A member gets `file_read`, `object` and `concede` and nothing else: no notes,
-no write, execute, network or VCS capability. `object` and `concede` are
-memory tools that only the `committee` role can hold. The prompt names the
-round, the pinned revision, the view, the two tests and the judgement, and the
-citation forms; from round 2 on it lists the member's own objections that
-still stand, with their IDs.
+A member gets `file_read`, `object`, `concede` and `ask` and nothing else: no
+notes, no write, execute, network or VCS capability. `object` and `concede`
+are memory tools that only the `committee` role can hold; `ask` is the
+[question tool](trace.md#tools-and-delivery) every role but the chief of staff
+holds. The prompt names the round, the pinned revision, the view, the two
+tests and the judgement, the citation forms and when to ask; from round 2 on
+it lists the member's own objections that still stand, with their IDs.
 
 `object` takes `kind`, `part`, `argument` and `citations`:
 
@@ -427,11 +430,54 @@ from an earlier round or from this turn. A contribution that is invalid is an
 ordinary result, `{"recorded":false,"reason":...}`, so the member reads why
 and can correct it within the turn; it takes no ID and is not kept.
 
+### A member's question
+
+A member that calls `ask` ends its turn with the outcome `waiting`, like any
+other asker: the question is recorded with a notice for the chief of staff,
+the thread parks and the member's slot is free. The round does not conclude
+without the member. Once every member's turn has ended and one of them is
+waiting, the operation parks the round instead of recording it: transition
+`shed-round-<n>-waiting-<k>` moves the shed to `waiting-<n>` with the reason
+`round <n> against <revision> is parked: <agent> waits for the answer to
+question <q>` (one clause per waiting member, joined by `; `), and the
+operation ends with the outcome `waiting` and that reason as evidence. `k`
+counts the round's parks from 1. Nothing is recorded, no reply is requested
+and the workstream stays `in-shed`, however long the answer takes: a question
+has no timeout, and a restart finds the round parked and leaves it so.
+
+The [answer](trace.md#tools-and-delivery) is queued as turn `answer_<q>` on the
+member's thread, with the asking turn's system prompt. Once every waiting
+member has its answer queued, the shed controller requests the round again:
+transition `shed-round-<n>-resume-<k>`, caused by the park it follows, moves
+the shed from `waiting-<n>` back to `round-<n>` with the reason `round <n>
+against <revision> resumes: every member that asked has its answer` and
+publishes a `shed-round` operation whose input pins the round's own revision,
+whatever the owner edited since, and carries `resume: <k>`. The resumed
+operation runs the queued answer turn through the same turn path, with the
+same view and tools, and records the round once every member has ended. The
+answer turn continues the attempt that asked: it holds what the member
+contributed before asking, its objections are numbered after them, it may
+concede any of them, and the member's record names the attempt as its turn. A
+member that asks again in its answer turn parks the round again, with the next
+`k`. A service stop that interrupts an answer turn is recovered like one that
+interrupts an attempt: the member's next attempt, while attempts remain,
+carries the answers the member received in the round under `The answers to
+the questions you asked in this round:`.
+
+The owner's actions in the shed keep working while a round is parked, the
+ones that need no conclusion as during a running round; [skipping
+debate](#skip-debate) is allowed too, since a parked round holds no turn, and
+a skipped round never resumes. Abandoning the workstream while a round is
+parked cancels nothing, since nothing runs: the answer is not delivered, and
+the shed stays `waiting-<n>`, as the shed of an abandoned workstream stays
+wherever it stopped.
+
 ### The record
 
-The tools keep a turn's contributions in the turn's service-owned directory.
-Once every member's turn has ended, the operation records one document per
-member with `RecordDocuments`, all in one commit:
+The tools keep a turn's contributions in the turn's service-owned directory
+of the attempt they belong to. Once every member's turn has ended, the
+operation records one document per member with `RecordDocuments`, all in one
+commit:
 `shed/round-<n>/<agent>.json`, record ID `shed-round-<n>-<agent>`, actor
 `agent`/`<agent>`, cause the operation ID. The file holds the round, the
 member, the pinned `revision` (`spec` and `plan`), the turn, the `objections`
@@ -472,8 +518,8 @@ and no member reports a confidence.
 Recovery keys on the trace: a restart during the round finds the turns that
 ended in their threads and runs only the members that had not finished, each
 up to three attempts; one between the record and the transition finds the
-round's files and records nothing again; a recorded outcome completes the
-operation without running a member.
+round's files and records nothing again; a recorded outcome, the park of a
+round included, completes the operation without running a member.
 
 [Abandoning](#abandoning) the workstream cancels the members' running turns.
 The round of an abandoned workstream records no file and ends `failed-<n>`
@@ -718,6 +764,8 @@ it debated.
 shed stays there. No further committee turn or architect reply starts, and the
 workstream still needs the owner's ratification of both documents. It is
 refused while a round or a reply is running, and on a debate already skipped.
+A round [parked on a member's question](#a-members-question) is not running:
+the skip is recorded and the round never resumes.
 
 ### More debate
 
