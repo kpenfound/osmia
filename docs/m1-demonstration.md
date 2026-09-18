@@ -9,8 +9,9 @@ transport and workspace provider are fakes. The test uses no network, live
 model or real container, and it runs in a temporary root with a local Git
 repository as the target clone. The [M2 hand-in demonstration](m2-demonstration.md)
 follows the same pattern from handed material to a sketched spec and plan,
-and the [M2 chief-of-staff demonstration](m2-chief-of-staff.md) from a
-worker's question to the owner's ruling.
+the [M2 chief-of-staff demonstration](m2-chief-of-staff.md) from a
+worker's question to the owner's ruling, and the
+[M2 exit demonstration](m2-exit.md) from hand-in to a ratified, sealed plan.
 
 ## Running it
 

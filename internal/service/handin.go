@@ -29,6 +29,9 @@ const MaxHandedBytes = 512 << 10
 const (
 	handedDocument   = "handed"
 	handInTransition = "handin"
+	// handInSkipReason is why a hand-in that skipped debate recorded its
+	// skip; the ratification packet carries it as its conclusion.
+	handInSkipReason = "the owner skipped debate at hand-in; the workstream still needs the owner's ratification of the spec and the plan"
 	// HandedState is the feature state of a newly handed workstream.
 	HandedState = "handed"
 )
@@ -130,6 +133,7 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 	}
 	exists := slices.Contains(streams, stream)
 	var doc *trace.Document
+	var handed, skipped bool
 	if exists {
 		docs, err := trace.Read[trace.Document](repository, stream)
 		if err != nil {
@@ -140,9 +144,27 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 				doc = &d
 			}
 		}
+		transitions, err := trace.Read[trace.Transition](repository, stream)
+		if err != nil {
+			return h.failed("reading")
+		}
+		handed = slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == handInTransition })
+		// Only the skip the hand-in recorded counts: a later skip through the
+		// shed is the owner's action on the workstream, not part of the request.
+		skipped = slices.ContainsFunc(transitions, skippedAtHandIn)
 	}
 	if doc != nil && (doc.Source != h.source || req.Stdin != nil && doc.Content != *req.Stdin) {
 		return HandInResponse{}, false, &APIError{Conflict, fmt.Sprintf("key %s already handed in other input as workstream %s; use a new key", req.Key, stream)}
+	}
+	// Whether debate is skipped is part of the request: a retry asks for what
+	// the recorded hand-in did, and a hand-in interrupted before recording
+	// its skip records it on the retry.
+	if (handed || skipped) && skipped != req.SkipDebate {
+		did := "without skipping debate"
+		if skipped {
+			did = "skipping debate"
+		}
+		return HandInResponse{}, false, &APIError{Conflict, fmt.Sprintf("key %s already handed in workstream %s %s; use a new key", req.Key, stream, did)}
 	}
 	if doc == nil && content == nil {
 		return HandInResponse{}, false, nil
@@ -163,15 +185,28 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 			return h.failed("copying the input into")
 		}
 	}
+	// The skip is recorded as the owner's skip of debate before the handed
+	// state, so the debate controller never finds the workstream without it.
+	// It carries the handed document's timestamp like the transition below.
+	if req.SkipDebate && !skipped {
+		tx := trace.Transaction{Transition: trace.Transition{Header: ownerHeader(skipTransition, req.Project, stream, handInTransition, doc.At), Subject: ownerSubject, To: skippedValue, Reason: handInSkipReason}}
+		if _, err := repository.Transact(ctx, tx); err != nil {
+			return h.failed("recording the skipped debate of")
+		}
+	}
 	// The transition carries the handed document's timestamp, so a retry
 	// repeats the committed transition exactly.
 	header := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: handInTransition, Revision: 1, Project: req.Project, Workstream: stream, At: doc.At, Actor: ownerActor, Cause: handInTransition}
-	state, err := repository.SetFeatureState(ctx, header, HandedState, "the owner handed in "+doc.Path+" from "+h.source)
+	reason := "the owner handed in " + doc.Path + " from " + h.source
+	if req.SkipDebate {
+		reason += " and skipped debate"
+	}
+	state, err := repository.SetFeatureState(ctx, header, HandedState, reason)
 	if err != nil {
 		return h.failed("recording the handed state of")
 	}
 	return HandInResponse{Project: req.Project, Workstream: stream, State: state.Value,
-		Handed: filepath.Join(h.trace, "workstreams", string(stream), filepath.FromSlash(doc.Path)), Source: h.source}, true, nil
+		Handed: filepath.Join(h.trace, "workstreams", string(stream), filepath.FromSlash(doc.Path)), Source: h.source, SkipDebate: req.SkipDebate}, true, nil
 }
 
 // handInSource returns the recorded source of the request's input and the

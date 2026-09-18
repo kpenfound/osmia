@@ -55,6 +55,11 @@ The [M2 chief-of-staff demonstration](docs/m2-chief-of-staff.md) takes a
 worker's question through the chief of staff, the owner's inbox and ruling,
 and back to the worker, across a service restart.
 
+The [M2 exit demonstration](docs/m2-exit.md) hands in four designs and takes
+them through debate, the owner's overrule, a skipped debate and an abandon to
+sealed, ratified plans with feature branches, across a restart in the middle
+of a sealing.
+
 The [charter reference](docs/charter.md) documents the charter template, the
 numbered-rule format and how owner edits are recorded.
 

@@ -117,7 +117,7 @@ the cap as the debate's round limit.
 
 `capacity.committee` is the size of each workstream's committee, not a pool
 shared across workstreams: a workstream that
-[enters the shed](service.md#entering-the-shed) gets that many committee
+[enters the shed](service.md#entering-the-shed) for debate gets that many committee
 members, and all of them run at the same time in every round, whatever other
 workstreams run and outside `capacity.per_workstream`. Two workstreams in the
 shed run two committees at once. The committee is fixed when the workstream

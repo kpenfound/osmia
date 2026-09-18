@@ -131,8 +131,9 @@ func shedState(value string) (kind string, n int, ok bool) {
 }
 
 // debate is the shed controller. Its pass moves every sketched workstream
-// into the shed with its committee and derives the debate's next step from
-// the trace: a round, the architect's reply to it, or the conclusion. Its
+// into the shed with its committee, or without one when the owner skipped
+// debate at hand-in, and derives the debate's next step from the trace: a
+// round, the architect's reply to it, or the conclusion. Its
 // reconciler runs each round operation: one turn per member, in parallel
 // against the pinned revision, and the record of what each contributed.
 type debate struct {
@@ -166,7 +167,9 @@ func (d *debate) Pass(ctx context.Context) error {
 // reconcile gives a sketched workstream its committee and moves it to
 // in-shed, then takes the next step of a workstream in the shed. Every other
 // feature state needs nothing. A service without a committee runner leaves a
-// sketched workstream where it is, waiting for a service that has one.
+// sketched workstream where it is, waiting for a service that has one, except
+// one whose debate the owner skipped at hand-in: it needs no committee and
+// enters the shed without one.
 func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) error {
 	feature, err := d.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -187,6 +190,11 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 	// neither a committee nor a round; it waits in the shed for the owner to
 	// ratify both documents, with the packet that asks them to.
 	if skipped {
+		if feature.Value == SketchedState {
+			if err := d.enterSkipped(ctx, stream, feature, pin); err != nil {
+				return err
+			}
+		}
 		return d.presentPacket(ctx, stream, true)
 	}
 	if feature.Value == SketchedState {
@@ -217,6 +225,41 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 	// The packet is presented once the step of this pass concluded the
 	// debate, and follows every owner action that changes what it says.
 	return d.presentPacket(ctx, stream, false)
+}
+
+// skippedAtHandIn reports whether t is the skip of debate a hand-in recorded.
+func skippedAtHandIn(t trace.Transition) bool {
+	return t.ID == skipTransition && t.Cause == handInTransition
+}
+
+// enterSkipped moves a sketched workstream whose debate the owner skipped at
+// hand-in into the shed without a committee, and asks the chief of staff to
+// present the packet: a skip recorded before the workstream was sketched told
+// the chief of staff nothing about the drafted documents. A skip through the
+// shed API moves the workstream itself. A workstream that moved meanwhile is
+// left to the next pass.
+func (d *debate) enterSkipped(ctx context.Context, stream config.WorkstreamID, feature trace.WorkflowState, pin shed.Pin) error {
+	transitions, err := trace.Read[trace.Transition](d.repository, stream)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(transitions, skippedAtHandIn) {
+		return nil
+	}
+	entries, err := Dissent(d.repository, stream)
+	if err != nil {
+		return err
+	}
+	h := d.header(InShedState, stream, skipTransition, d.s.now())
+	reason := fmt.Sprintf("%s enter the shed without a committee: the owner skipped debate", pin)
+	body := fmt.Sprintf("Workstream state changed from %s to %s: %s.\n%s", SketchedState, InShedState, reason, presentation(shed.Recommend(entries)))
+	_, err = d.repository.Transact(ctx, trace.Transaction{ExpectedVersion: feature.Version,
+		Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, From: SketchedState, To: InShedState, Reason: reason},
+		Events:     []trace.Event{trace.Notice(h.ID, "state", body)}})
+	if errors.Is(err, trace.ErrConflict) {
+		return nil
+	}
+	return err
 }
 
 // step derives what the debate needs next from the shed state and the
