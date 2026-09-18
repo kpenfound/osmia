@@ -100,6 +100,60 @@ func (g *Git) Ancestor(ctx context.Context, commit, tip string) (bool, error) {
 	return err == nil, err
 }
 
+// MergeBase returns the best common ancestor of two commits.
+func (g *Git) MergeBase(ctx context.Context, a, b string) (string, error) {
+	return g.run(ctx, "merge-base", a, b)
+}
+
+// identity is the author and committer of the commits the service makes.
+var identity = []string{"GIT_AUTHOR_NAME=Osmia", "GIT_AUTHOR_EMAIL=osmia@localhost", "GIT_COMMITTER_NAME=Osmia", "GIT_COMMITTER_EMAIL=osmia@localhost"}
+
+// Snapshot commits the worktree's full tree, untracked files included and
+// files the repository ignores left out, on top of the commit the worktree is
+// on, moves the worktree's branch to it and returns it. The owner's own
+// excludes file does not apply, so what the snapshot holds depends on the
+// repository alone. A worktree whose tree is the one of its commit is not
+// committed again: its commit is the snapshot. The worktree must descend from
+// base, which is checked before anything is committed.
+func (g *Git) Snapshot(ctx context.Context, w Worktree, base string) (string, error) {
+	if w.Path == "" {
+		return "", errors.New("no workspace to snapshot")
+	}
+	head, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return "", err
+	}
+	descends, err := g.Ancestor(ctx, base, head)
+	if err != nil {
+		return "", err
+	}
+	if !descends {
+		return "", fmt.Errorf("workspace %s is at %s, which does not descend from %s", w.Path, head, base)
+	}
+	if _, err := g.runIn(ctx, w.Path, []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.excludesFile", "GIT_CONFIG_VALUE_0=" + os.DevNull}, "add", "--all"); err != nil {
+		return "", err
+	}
+	tree, err := g.runIn(ctx, w.Path, nil, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	current, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", head+"^{tree}")
+	if err != nil {
+		return "", err
+	}
+	if tree == current {
+		return head, nil
+	}
+	commit, err := g.runIn(ctx, w.Path, identity, "commit-tree", "--no-gpg-sign", "-p", head, "-m", "Snapshot of "+w.Branch, tree)
+	if err != nil {
+		return "", err
+	}
+	if _, err := g.runIn(ctx, w.Path, identity, "update-ref", "-m", "osmia: snapshot", "HEAD", commit, head); err != nil {
+		return "", err
+	}
+	return commit, nil
+}
+
 // listed is one entry of the clone's worktree list.
 type listed struct {
 	path, branch string
@@ -277,7 +331,12 @@ func (g *Git) run(ctx context.Context, args ...string) (string, error) {
 }
 
 func (g *Git) runEnv(ctx context.Context, extra []string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", g.Clone, "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "gc.auto=0"}, args...)...)
+	return g.runIn(ctx, g.Clone, extra, args...)
+}
+
+// runIn runs Git the way run does, in dir rather than the clone.
+func (g *Git) runIn(ctx context.Context, dir string, extra []string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "gc.auto=0"}, args...)...)
 	cmd.Env = []string{"GIT_TERMINAL_PROMPT=0", "LC_ALL=C"}
 	for _, name := range []string{"PATH", "HOME", "SSH_AUTH_SOCK", "GIT_SSH_COMMAND", "GIT_SSH", "XDG_CONFIG_HOME", "TMPDIR"} {
 		if value, ok := os.LookupEnv(name); ok {

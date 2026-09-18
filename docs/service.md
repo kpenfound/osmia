@@ -1152,6 +1152,45 @@ when the workflow changed between its reads and its commit, because the owner
 moved the workstream or a unit already has a state (`the workflow changed
 while the build ran; the workstream is <state>`).
 
+### Unit workspaces
+
+The service can give each unit of a workstream a workspace of its own: a Git
+worktree of the clone at `<root>/units/<project-id>/<workstream-id>/<unit-id>`,
+on the branch `osmia-unit/<workstream-id>/<unit-id>`, created from the tip of
+the workstream's feature branch. Its name follows from the workstream and the
+unit alone, so a service started again finds the same worktree, and the feature
+branch commit it descends from is its base. Opening a unit's workspace again
+returns it as it is. Nothing in the service removes a unit's workspace, and
+pruning forgets only worktrees whose directories are gone. A unit of a
+workstream without a feature branch has no workspace: `the clone has no
+feature branch <branch>`.
+
+A unit's workspace can be lent to a mason turn of that unit alone, and only
+once it exists (`unit <unit-id> of workstream <workstream-id> has no
+workspace`); a turn of another role, or one without a workstream and unit, is
+refused with `a unit workspace is lent to a mason turn of a unit alone`. The
+lease never removes the workspace. Such a turn works on a
+[private view](isolation.md) of every file of the workspace but its `.git`,
+under the turn's [isolation](isolation.md#enforced-execution): no VCS
+executable, no VCS metadata readable or writable, and no environment but the
+service's. A workspace whose tree holds a symlink or a special file anywhere
+cannot be lent to a mason turn: the view refuses it with `symlinks and special
+files are not exposed`. Whatever the turn's result, the view can be copied back
+into the workspace: the workspace then holds exactly the view's regular files
+and directories, with each file's owner execute bit. VCS metadata the turn
+wrote into its view is not copied back, and the workspace's own `.git` is left
+as it is.
+
+The service can snapshot a unit's workspace as its candidate: a commit of the
+worktree's whole tree, untracked files included and files the repository
+ignores left out, on top of the commit the worktree is on, by `Osmia
+<osmia@localhost>`. The owner's own excludes file does not apply. The unit's
+branch moves to the candidate. A workspace with nothing new since its last
+snapshot is not committed again: its commit is the candidate. A workspace
+that does not descend from the feature branch is refused before anything is
+committed: `workspace <path> is at <commit>, which does not descend from
+<branch>`.
+
 ## Abandoning
 
 `POST /v1/abandon/<workstream-id>` abandons a workstream of the active project

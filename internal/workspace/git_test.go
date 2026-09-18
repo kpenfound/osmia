@@ -318,3 +318,115 @@ func TestFetchPutsSSHInBatchModeUnlessTheOwnerConfiguredIt(t *testing.T) {
 		os.Unsetenv(name)
 	}
 }
+
+// A snapshot commits the worktree's whole tree on top of its commit: changes,
+// deletions and untracked files, not what the repository ignores nor what the
+// clone's own excludes file names. The worktree's branch moves to it, and a
+// worktree with nothing new is its own snapshot.
+func TestSnapshotCommitsExactlyTheWorktreeOnTopOfItsBase(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base := git(t, "-C", f.scratch, "rev-parse", "HEAD")
+	git(t, "-C", f.clone, "branch", "osmia/w1", base)
+	acquired, err := f.provider.Acquire(ctx, vcs.Request{Name: "w1/u1", Ref: "osmia/w1", Branch: "osmia-unit/w1/u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := acquired.(Worktree)
+	excludes := filepath.Join(t.TempDir(), "excludes")
+	put := func(name, content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(ws.Path, name)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(ws.Path, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(excludes, []byte("mine\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, "-C", f.clone, "config", "core.excludesFile", excludes)
+	put("README", "widgets, changed\n")
+	put("src/added.go", "package src\n")
+	put(".gitignore", "build/\n")
+	put("build/out", "ignored\n")
+	put("mine", "the owner's excludes do not apply\n")
+	changes := func(from, to string) string {
+		t.Helper()
+		return git(t, "-C", f.clone, "diff-tree", "-r", "--name-status", "--no-renames", from, to)
+	}
+	first, err := f.provider.Snapshot(ctx, ws, "osmia/w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := changes(base, first), "A\t.gitignore\nM\tREADME\nA\tmine\nA\tsrc/added.go"; got != want {
+		t.Fatalf("the snapshot's changes:\n%s\nwant\n%s", got, want)
+	}
+	if got := git(t, "-C", f.clone, "log", "-1", "--format=%P %an <%ae> %cn <%ce>", first); got != base+" Osmia <osmia@localhost> Osmia <osmia@localhost>" {
+		t.Fatalf("the snapshot's parent and identity: %s", got)
+	}
+	if descends, err := f.provider.Ancestor(ctx, "osmia/w1", first); err != nil || !descends {
+		t.Fatalf("the snapshot descends from the feature branch: %v %v", descends, err)
+	}
+	if tip, _, err := f.provider.Branch(ctx, "osmia-unit/w1/u1"); err != nil || tip != first {
+		t.Fatalf("the unit branch is at %s, %v; want %s", tip, err, first)
+	}
+	if status := git(t, "-C", ws.Path, "status", "--porcelain"); status != "" {
+		t.Fatalf("the worktree after its snapshot:\n%s", status)
+	}
+	if data, err := os.ReadFile(filepath.Join(ws.Path, "build/out")); err != nil || string(data) != "ignored\n" {
+		t.Fatalf("the ignored file after the snapshot: %q %v", data, err)
+	}
+	again, err := f.provider.Snapshot(ctx, ws, "osmia/w1")
+	if err != nil || again != first {
+		t.Fatalf("a snapshot of an unchanged worktree: %s %v; want %s", again, err, first)
+	}
+	if err := os.Remove(filepath.Join(ws.Path, "src/added.go")); err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.provider.Snapshot(ctx, ws, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := changes(first, second); got != "D\tsrc/added.go" {
+		t.Fatalf("the second snapshot's changes:\n%s", got)
+	}
+	if parent := git(t, "-C", f.clone, "rev-parse", second+"^"); parent != first {
+		t.Fatalf("the second snapshot's parent is %s, want %s", parent, first)
+	}
+}
+
+// A worktree that does not descend from the base it is snapshotted against
+// is refused before anything is committed.
+func TestSnapshotRefusesAWorktreeThatDoesNotDescendFromItsBase(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base := git(t, "-C", f.scratch, "rev-parse", "HEAD")
+	moved := f.advance(t, "next")
+	if _, err := f.provider.Fetch(ctx, "upstream", "main"); err != nil {
+		t.Fatal(err)
+	}
+	acquired, err := f.provider.Acquire(ctx, vcs.Request{Name: "w1/u1", Ref: base, Branch: "osmia-unit/w1/u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := acquired.(Worktree)
+	if err := os.WriteFile(filepath.Join(ws.Path, "added"), []byte("x\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.provider.Snapshot(ctx, ws, moved); err == nil || !strings.Contains(err.Error(), "at "+base+", which does not descend from "+moved) {
+		t.Fatalf("a snapshot against a base the worktree does not descend from: %v", err)
+	}
+	if tip, _, err := f.provider.Branch(ctx, "osmia-unit/w1/u1"); err != nil || tip != base {
+		t.Fatalf("the branch after a refused snapshot is at %s, %v", tip, err)
+	}
+	if status := git(t, "-C", ws.Path, "status", "--porcelain"); status != "?? added" {
+		t.Fatalf("the worktree after a refused snapshot:\n%s", status)
+	}
+	if _, err := f.provider.Snapshot(ctx, Worktree{}, base); err == nil || !strings.Contains(err.Error(), "no workspace to snapshot") {
+		t.Fatalf("a snapshot of no workspace: %v", err)
+	}
+}
