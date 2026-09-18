@@ -532,7 +532,8 @@ returned as `*StatusRejected` and stores nothing. The actor is the agent, the
 cause is the turn request's ID and the depth is one more than the request's.
 
 `Repository.Statuses()` lists every workstream in manifest order with its
-latest status (nil before the first), its feature state and its open question
+latest status (nil before the first), its feature state, the state of every
+workflow subject read in the same pass (`Subjects`) and its open question
 count. The feature state is the current value of the `feature` workflow
 subject (`FeatureSubject`), empty until a transition records one. A question
 is open while no ruling names it. A damaged record fails the whole read.

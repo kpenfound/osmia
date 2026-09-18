@@ -82,21 +82,14 @@ func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string
 	tx := Transaction{ExpectedVersion: state.Version,
 		Transition: Transition{Header: h, Subject: FeatureSubject, From: state.Value, To: to, Reason: reason},
 		Events:     []Event{Notice(h.ID, "state", body)}}
-	if len(with) == 0 {
-		return r.transact(ctx, tx)
-	}
 	for _, other := range with {
 		if other.Transition.Subject == FeatureSubject {
 			return WorkflowState{}, fmt.Errorf("a transaction recorded with the feature state must be of another subject")
 		}
 	}
-	files, states, err := r.stage(h.Workstream, log, v, nil, append([]Transaction{tx}, with...)...)
+	states, err := r.commitWorkflow(ctx, h.Workstream, log, v, append([]Transaction{tx}, with...)...)
 	if err != nil {
 		return WorkflowState{}, err
 	}
-	if err := r.publish(ctx, files); err != nil {
-		return WorkflowState{}, err
-	}
-	_ = r.wake.Notify(context.Background())
 	return states[0], nil
 }

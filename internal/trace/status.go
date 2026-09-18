@@ -132,11 +132,13 @@ func latestStatus(records []Record, stream config.WorkstreamID) *Status {
 
 // WorkstreamStatus is a workstream's latest status with the facts the trace
 // owns. Status is nil until the chief of staff first writes one. State is the
-// FeatureSubject workflow state, empty until one is recorded. OpenQuestions
-// counts questions without a ruling.
+// FeatureSubject workflow state, empty until one is recorded, and Subjects
+// the state of every workflow subject that has one, read with it.
+// OpenQuestions counts questions without a ruling.
 type WorkstreamStatus struct {
 	Workstream    config.WorkstreamID
 	State         string
+	Subjects      map[string]WorkflowState
 	OpenQuestions int
 	Status        *Status
 }
@@ -174,7 +176,7 @@ func (r *Repository) Statuses() ([]WorkstreamStatus, error) {
 				open++
 			}
 		}
-		out = append(out, WorkstreamStatus{Workstream: stream, State: view.states[FeatureSubject].Value, OpenQuestions: open, Status: latestStatus(records, stream)})
+		out = append(out, WorkstreamStatus{Workstream: stream, State: view.states[FeatureSubject].Value, Subjects: view.states, OpenQuestions: open, Status: latestStatus(records, stream)})
 	}
 	return out, nil
 }

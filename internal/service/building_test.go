@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -257,18 +258,26 @@ func TestBuildInterruptedAfterItsCommitIsNotRecordedTwice(t *testing.T) {
 	}
 }
 
-// A build that finds its seal replaced, a sealed plan that does not parse, a
-// workflow that changed or a workstream no longer ratified fails with the
-// reason and records nothing; a later seal of a ratified workstream is built
-// by a build of its own.
+// A build that finds its seal replaced, a unit that already has a state, a
+// sealed plan that does not parse or a workstream no longer ratified fails
+// with the reason and records nothing. The pass asks once for the build of
+// the latest seal and never for an abandoned workstream's. Status reports a
+// workstream whose sealed plan cannot be read with no units and a diagnostic
+// that names it, and every other workstream as ever.
 func TestBuildFailsWithoutRecording(t *testing.T) {
 	t.Parallel()
 	f := newDebateFixture(t, 1, 1)
 	ctx := context.Background()
-	f.upstream(t)
-	stream, _ := f.built(t)
+	f.stop(t)
+	f.opts.Committee = nil
+	f.start(t)
+	stream := f.handIn(t, "design", handedDesign)
+	f.await(t, stream, sketched)
+	other := f.handIn(t, "other", handedDesign)
+	f.await(t, other, sketched)
 	f.stop(t)
 
+	// The workstream is planted ratified on seal 1, unbuilt.
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	b := &builder{s: f.s, repository: repo}
@@ -277,7 +286,18 @@ func TestBuildFailsWithoutRecording(t *testing.T) {
 	}
 	_, err = repo.SetFeatureState(ctx, h("planted-ratified"), RatifiedState, "planted")
 	must(t, err)
-	recorded := len(buildTransitions(t, f.trace, stream))
+	record := func(k, planRevision int, docs ...trace.Document) {
+		t.Helper()
+		_, doc, _, err := seal.Latest(repo, stream)
+		must(t, err)
+		content, err := seal.Encode(seal.Seal{Version: seal.Version, Seal: k, Round: 1, Revision: shed.Pin{Spec: 1, Plan: planRevision}, SpecHash: seal.SpecHash(validSpec),
+			Base: seal.Base{Remote: "upstream", Branch: "main", Commit: "0123456789abcdef0123456789abcdef01234567"}, Branch: "osmia/" + string(stream), Workspace: "/planted"})
+		must(t, err)
+		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: seal.DocumentID, Revision: doc.Revision + 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: sealingActor, Cause: "planted"}, Path: seal.Path, Content: string(content)})
+		must(t, repo.RecordDocuments(ctx, docs))
+	}
+	record(1, 1)
+	var recorded int
 	apply := func(k int, want string) {
 		t.Helper()
 		got, err := b.Apply(ctx, f.buildOperation(stream, k))
@@ -291,26 +311,15 @@ func TestBuildFailsWithoutRecording(t *testing.T) {
 	}
 	apply(2, "building on seal 2 failed: it is not the latest seal of the workstream")
 
-	// A later seal of the same plan: its units have states already.
-	record := func(s seal.Seal, docs ...trace.Document) {
-		t.Helper()
-		_, doc, _, err := seal.Latest(repo, stream)
-		must(t, err)
-		content, err := seal.Encode(s)
-		must(t, err)
-		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: seal.DocumentID, Revision: doc.Revision + 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: sealingActor, Cause: "planted"}, Path: seal.Path, Content: string(content)})
-		must(t, repo.RecordDocuments(ctx, docs))
-	}
-	latest, _, _, err := seal.Latest(repo, stream)
+	// A unit of the sealed plan has a state already: the commit refuses it.
+	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h("planted-unit"), Subject: trace.UnitSubject("dedupe"), To: UnitPlanned, Reason: "planted"}})
 	must(t, err)
-	latest.Seal = 2
-	record(latest)
-	apply(2, "building on seal 2 failed: the workflow changed while the build ran; the workstream is ratified")
+	recorded = len(buildTransitions(t, f.trace, stream))
+	apply(1, "building on seal 1 failed: the workflow changed while the build ran; the workstream is ratified")
 
 	// A seal of a plan revision that does not parse.
-	latest.Seal, latest.Revision.Plan = 3, 2
-	record(latest, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.PlanDocument, Revision: 2, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: "planted"}, Path: plan.PlanPath, Content: "not a plan"})
-	apply(3, "building on seal 3 failed: the sealed plan does not parse: ")
+	record(2, 2, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.PlanDocument, Revision: 2, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: "planted"}, Path: plan.PlanPath, Content: "not a plan"})
+	apply(2, "building on seal 2 failed: the sealed plan does not parse: ")
 
 	// The pass asks for the build of the latest seal once.
 	must(t, b.Pass(ctx))
@@ -321,14 +330,14 @@ func TestBuildFailsWithoutRecording(t *testing.T) {
 			requests = append(requests, tr.From+"->"+tr.To)
 		}
 	}
-	if !slices.Equal(requests, []string{"->requested-1", "requested-1->requested-3"}) {
+	if !slices.Equal(requests, []string{"->requested-2"}) {
 		t.Fatalf("build requests %v", requests)
 	}
 	recorded++
 
 	_, err = repo.SetFeatureState(ctx, h(abandonTransition), AbandonedState, "Not needed.")
 	must(t, err)
-	apply(3, "building on seal 3 failed: the workstream is abandoned, not ratified")
+	apply(2, "building on seal 2 failed: the workstream is abandoned, not ratified")
 	// An abandoned workstream is asked for no build.
 	must(t, b.Pass(ctx))
 	if n := len(buildTransitions(t, f.trace, stream)); n != recorded {
@@ -336,16 +345,27 @@ func TestBuildFailsWithoutRecording(t *testing.T) {
 	}
 	must(t, repo.Close())
 
-	// Status cannot list the units of a seal whose plan does not parse.
+	// Status cannot list the units of a seal whose plan does not parse, and
+	// says so for that workstream alone.
 	f.start(t)
 	defer f.stop(t)
 	message := "cannot read the unit states of workstream " + string(stream) + "; check the trace repository"
 	if _, err := f.c.Status(ctx, stream); !failed(err, Internal) || !strings.Contains(err.Error(), message) {
 		t.Fatalf("status of the workstream: %v", err)
 	}
+	healthy, err := f.c.Status(ctx, other)
+	must(t, err)
+	if healthy.State == nil || *healthy.State != SketchedState || !reflect.DeepEqual(healthy.Units, []UnitStatus{}) {
+		t.Fatalf("status of the other workstream %+v", healthy)
+	}
 	list, err := f.c.Statuses(ctx)
 	must(t, err)
-	if len(list.Workstreams) != 0 || !reflect.DeepEqual(list.Diagnostics, []Diagnostic{{"workstreams", Internal, message}}) {
+	if len(list.Workstreams) != 2 || !reflect.DeepEqual(list.Diagnostics, []Diagnostic{{"units", Internal, message}}) {
 		t.Fatalf("status list %+v", list)
+	}
+	for _, w := range list.Workstreams {
+		if !reflect.DeepEqual(w.Units, []UnitStatus{}) {
+			t.Fatalf("units of %s: %+v", w.Workstream, w.Units)
+		}
 	}
 }

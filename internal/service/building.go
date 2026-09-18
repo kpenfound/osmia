@@ -251,7 +251,7 @@ func (b *builder) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	if !found || latest.Seal != in.Seal {
 		return fail("it is not the latest seal of the workstream")
 	}
-	graph, err := b.plan(stream, latest.Revision.Plan)
+	graph, err := sealedPlan(b.repository, stream, latest.Revision.Plan)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -300,9 +300,9 @@ func (b *builder) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	return fail(fmt.Sprintf("the workflow changed while the build ran; the workstream is %s", featureState(moved.Value)))
 }
 
-// plan returns the given revision of the workstream's plan.
-func (b *builder) plan(stream config.WorkstreamID, revision int) (trace.Document, error) {
-	docs, err := trace.Read[trace.Document](b.repository, stream)
+// sealedPlan returns the given revision of the workstream's plan.
+func sealedPlan(repository *trace.Repository, stream config.WorkstreamID, revision int) (trace.Document, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
 		return trace.Document{}, err
 	}
@@ -327,23 +327,19 @@ type UnitStatus struct {
 	State string `json:"state"`
 }
 
-// unitStates returns the recorded states of the units of the workstream's
-// sealed plan, in plan order: none before a seal is recorded or before the
-// build recorded them.
-func unitStates(repository *trace.Repository, stream config.WorkstreamID) ([]UnitStatus, error) {
+// unitStates returns the states, taken from the given workflow states, of
+// the units of the workstream's sealed plan, in plan order: none before a
+// seal is recorded or before the build recorded them.
+func unitStates(repository *trace.Repository, stream config.WorkstreamID, states map[string]trace.WorkflowState) ([]UnitStatus, error) {
 	latest, _, found, err := seal.Latest(repository, stream)
 	if err != nil || !found {
 		return nil, err
 	}
-	graph, err := (&builder{repository: repository}).plan(stream, latest.Revision.Plan)
+	graph, err := sealedPlan(repository, stream, latest.Revision.Plan)
 	if err != nil {
 		return nil, err
 	}
 	p, err := plan.Parse([]byte(graph.Content))
-	if err != nil {
-		return nil, err
-	}
-	states, err := repository.WorkflowStates(stream)
 	if err != nil {
 		return nil, err
 	}
