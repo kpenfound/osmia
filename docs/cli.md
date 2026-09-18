@@ -147,12 +147,16 @@ a service restart.
   blocks and you have not overruled it, when the plan does not validate, when
   the revisions are not the current ones, and when the workstream is not in the
   shed: all `conflict` (exit 5). What passes records your approval of those
-  revisions, and asks a service that can seal to seal them; the command says
-  whether the sealing started. Ratifying revisions you have ratified already
-  records nothing again and asks for the sealing again, which is how a sealing
-  that failed is retried. A workstream with no packet yet fails with
-  `not_found` (exit 4). See
-  [the ratification gate](service.md#the-ratification-gate).
+  revisions, which asks the service to seal them: it fetches upstream, records
+  the seal and the plan's footprints, creates the feature branch in its own
+  workspace on your clone and moves the workstream to `ratified`. The command
+  prints the recorded detail, which says the sealing is asked for. Ratifying
+  revisions you have ratified already records nothing while their sealing is
+  asked for, pending or running, and says which; once it has failed, the same
+  command asks for the sealing again, which is how you retry one after putting
+  right what failed it. A workstream with no packet yet fails with `not_found`
+  (exit 4). See [the ratification gate](service.md#the-ratification-gate) and
+  [sealing](service.md#sealing).
 - Editing the documents needs no command. You edit `spec.md` and `plan.json` in
   the workstream's directory under the trace yourself. The service records what
   you changed as a new revision of yours before any turn reads it, and the next

@@ -275,7 +275,7 @@ func publicationPath(name string) error {
 		if _, err := config.ParseWorkstreamID(parts[1]); err != nil {
 			return err
 		}
-		if len(parts) == 3 && (parts[2] == "workflow.json" || parts[2] == "events.jsonl" || parts[2] == "documents.jsonl" || parts[2] == "spec.md" || parts[2] == "plan.json") {
+		if len(parts) == 3 && (parts[2] == "workflow.json" || parts[2] == "events.jsonl" || parts[2] == "documents.jsonl" || parts[2] == "spec.md" || parts[2] == "plan.json" || parts[2] == "seal.json") {
 			return nil
 		}
 		if len(parts) == 5 && parts[2] == "agents" && key(parts[3]) && (parts[4] == "identity.jsonl" || parts[4] == "log.jsonl") {

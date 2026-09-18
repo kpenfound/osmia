@@ -356,7 +356,7 @@ func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
 		return n
 	}
 	created := commits()
-	first := []Document{streamDocument("spec", "spec.md", "# Spec\n", 1), streamDocument("plan", "plan.json", "{\"version\":1,\"units\":[]}\n", 1)}
+	first := []Document{streamDocument("spec", "spec.md", "# Spec\n", 1), streamDocument("plan", "plan.json", "{\"version\":1,\"units\":[]}\n", 1), streamDocument("seal", "seal.json", "{\"seal\":1}\n", 1)}
 	if err := r.RecordDocuments(ctx, first); err != nil {
 		t.Fatal(err)
 	}
@@ -364,14 +364,14 @@ func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
 		t.Fatalf("commits after one record: %d, %d before it", got, created)
 	}
 	streamDir := filepath.Join(dir, "workstreams", string(streamID))
-	for name, want := range map[string]string{"spec.md": "# Spec\n", "plan.json": "{\"version\":1,\"units\":[]}\n"} {
+	for name, want := range map[string]string{"spec.md": "# Spec\n", "plan.json": "{\"version\":1,\"units\":[]}\n", "seal.json": "{\"seal\":1}\n"} {
 		data, err := os.ReadFile(filepath.Join(streamDir, name))
 		if err != nil || string(data) != want {
 			t.Fatalf("%s on disk: %q %v", name, data, err)
 		}
 	}
 	docs, err := Read[Document](r, streamID)
-	if err != nil || len(docs) != 3 || docs[1].ID != "spec" || docs[2].ID != "plan" {
+	if err != nil || len(docs) != 4 || docs[1].ID != "spec" || docs[2].ID != "plan" || docs[3].ID != "seal" {
 		t.Fatalf("revisions: %+v %v", docs, err)
 	}
 	if project, err := Read[Document](r, ""); err != nil || len(project) != 1 {
@@ -422,7 +422,7 @@ func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if docs, err := Read[Document](reopened, streamID); err != nil || len(docs) != 5 {
+	if docs, err := Read[Document](reopened, streamID); err != nil || len(docs) != 6 {
 		t.Fatalf("reopen: %d %v", len(docs), err)
 	}
 }

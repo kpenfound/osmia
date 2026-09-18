@@ -108,9 +108,17 @@ func TestPacketPresentsWhatBlocksFirstAndRecommends(t *testing.T) {
 	if round, ok := shed.PacketRound(shed.PacketPath(2)); !ok || round != 2 {
 		t.Fatalf("the path of the packet of round 2 reads back as %d %v", round, ok)
 	}
-	for _, path := range []string{shed.RulingsPath(2), shed.Path(2, alice), "shed/round-0/packet.json", "shed/packet.json", "packet.json"} {
+	for _, path := range []string{shed.RulingsPath(2), shed.Path(2, alice), shed.RatificationPath(2), "shed/round-0/packet.json", "shed/packet.json", "packet.json"} {
 		if _, ok := shed.PacketRound(path); ok {
 			t.Fatalf("%s reads back as a packet", path)
+		}
+	}
+	if round, ok := shed.RatificationRound(shed.RatificationPath(3)); !ok || round != 3 {
+		t.Fatalf("the path of the ratification of round 3 reads back as %d %v", round, ok)
+	}
+	for _, path := range []string{shed.PacketPath(3), shed.Path(3, alice), "shed/round-0/ratification.json", "ratification.json"} {
+		if _, ok := shed.RatificationRound(path); ok {
+			t.Fatalf("%s reads back as a ratification", path)
 		}
 	}
 }

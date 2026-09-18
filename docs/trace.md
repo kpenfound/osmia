@@ -47,7 +47,8 @@ does not infer authority, readiness or workflow transitions from them.
 
 Only documents can be project-scoped. Project document paths are `charter.md`,
 `kb/entities.json`, `kb/<name>.md` and `notes/<role>.md`; workstream document paths
-are `spec.md`, `plan.json`, `handed/<name>` and the shed records
+are `spec.md`, `plan.json`, `seal.json`, the [seal](service.md#sealing) of a
+ratified workstream, `handed/<name>` and the shed records
 `shed/round-<n>/<agent>.json`, where `<n>` is a positive round number without
 leading zeros and `<agent>` is the committee member's agent ID,
 `shed/round-<n>/reply.json`, the architect's

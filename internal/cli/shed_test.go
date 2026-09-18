@@ -106,19 +106,20 @@ func TestShedCommands(t *testing.T) {
 	if out := successful(t, root, "shed", "overrule", stream, objection); !strings.Contains(out, "overruled") {
 		t.Fatalf("overrule without a reason %q", out)
 	}
-	// ratify pins the revisions it read from the packet, and no sealing runs
-	// in this service.
+	// ratify pins the revisions it read from the packet and asks for the
+	// sealing. This fixture's clone is no Git repository, so the sealing
+	// never completes and the workstream stays in the shed.
 	var ratified service.RatifyResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "ratify", stream, "--json")), &ratified))
-	if ratified.Spec != 1 || ratified.Plan != 1 || ratified.Round != 1 || ratified.Sealed || ratified.Workstream != stream {
+	if ratified.Spec != 1 || ratified.Plan != 1 || ratified.Round != 1 || ratified.Sealing != "requested" || ratified.Workstream != stream || !strings.HasSuffix(ratified.Detail, "; the sealing is asked for") {
 		t.Fatalf("ratify --json %+v", ratified)
 	}
-	// Ratifying the same revisions again asks for the sealing, and the
-	// command says whether it started.
+	// Ratifying the same revisions again reports the sealing asked for,
+	// pending or running as the loop has it at the time.
 	want := "Workstream " + stream + " ratified: spec.md revision 1 and plan.json revision 1\nworkstream " + stream +
-		" is ratified at spec.md revision 1 and plan.json revision 1 already; the sealing is asked for again\nsealing did not start\n"
-	if out := successful(t, root, "ratify", stream); out != want {
-		t.Fatalf("ratify output %q, want %q", out, want)
+		" is ratified at spec.md revision 1 and plan.json revision 1 already; "
+	if out := successful(t, root, "ratify", stream); !strings.HasPrefix(out, want) || !strings.HasSuffix(out, "\n") {
+		t.Fatalf("ratify output %q, want a prefix %q", out, want)
 	}
 
 	// Refusals reach the owner with the service's own message.

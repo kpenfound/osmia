@@ -181,31 +181,40 @@ func extractionState(r *trace.Repository) (*ExtractionState, error) {
 	if latest == nil {
 		return nil, nil
 	}
-	state := &ExtractionState{Extraction: n, State: "pending", At: latest.Transition.At}
-	for _, a := range latest.History {
-		state.At = a.At
+	state := &ExtractionState{Extraction: n}
+	state.State, state.Reason, state.At = progress(*latest)
+	return state, nil
+}
+
+// progress derives an operation's state from its record: running while a
+// live claim has started the effect, pending while it is queued or waiting to
+// retry (with the retry's reason), otherwise its result's outcome, with the
+// failure's evidence as the reason. The time is the record's last action up to
+// the result, which fixes it: a later acknowledgement does not move it.
+func progress(record trace.OperationRecord) (state, reason string, at time.Time) {
+	state, at = "pending", record.Transition.At
+	for _, a := range record.History {
+		at = a.At
 		if a.Kind == "result" {
-			// The result fixes the extraction's time; a later acknowledgement
-			// must not move it.
 			break
 		}
 		switch a.Kind {
 		case "retry":
-			state.Reason = a.Failure
+			reason = a.Failure
 		case "claim":
-			state.Reason = ""
+			reason = ""
 		}
 	}
 	switch {
-	case latest.Result != nil:
-		state.State, state.Reason = latest.Result.Outcome, ""
-		if state.State == "failed" {
-			state.Reason = latest.Result.Evidence
+	case record.Result != nil:
+		state, reason = record.Result.Outcome, ""
+		if state == "failed" {
+			reason = record.Result.Evidence
 		}
-	case latest.EffectStarted && latest.Claim != nil:
-		state.State, state.Reason = "running", ""
+	case record.EffectStarted && record.Claim != nil:
+		state, reason = "running", ""
 	}
-	return state, nil
+	return state, reason, at
 }
 
 // projectExtraction reports the active project's latest extraction.

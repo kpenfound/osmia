@@ -377,11 +377,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.json {
 			return output(stdout, stderr, result)
 		}
-		sealed := "sealing did not start"
-		if result.Sealed {
-			sealed = "sealing started"
-		}
-		fmt.Fprintf(stdout, "Workstream %s ratified: spec.md revision %d and plan.json revision %d\n%s\n%s\n", result.Workstream, result.Spec, result.Plan, result.Detail, sealed)
+		fmt.Fprintf(stdout, "Workstream %s ratified: spec.md revision %d and plan.json revision %d\n%s\n", result.Workstream, result.Spec, result.Plan, result.Detail)
 		return 0
 	}
 	if cmd == "send" || cmd == "conversation" {
