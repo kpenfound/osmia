@@ -21,6 +21,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -284,7 +285,7 @@ func checkArchitectBoundary(ctx context.Context, req agent.Request, verified *ag
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if want := []string{DraftTool, "file_read"}; !slices.Equal(names, want) {
+	if want := []string{questions.AskTool, DraftTool, "file_read"}; !slices.Equal(names, want) {
 		fail("role tools %v, want %v", names, want)
 	}
 	for _, name := range []string{"file_write", "shell", "git_push", "set_status", "notes_read", "notes_write"} {

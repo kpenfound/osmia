@@ -230,6 +230,6 @@ The [trace reference](trace.md) documents these records, and the
 
 ## Limits
 
-- The architect has no `ask` tool in M2, so only the committee asks during
-  the shed.
+- The demonstration's architect asks nothing, so only the committee asks
+  during the shed.
 - The restart is a stop at a test fault point, not a crash of the process.

@@ -224,17 +224,22 @@ keeps the workflow subject `draft`, whose transitions are recorded in
 
 | `draft` state | Meaning |
 | --- | --- |
-| `drafting-<n>` | Draft `n` is requested: transition `draft-<n>` published an `architect-draft` operation, which the reconciliation loop runs. |
+| `drafting-<n>` | Draft `n` is requested: transition `draft-<n>` published an `architect-draft` operation, which the reconciliation loop runs. A draft resumed after the architect's question is in this state again, requested by transition `draft-<n>-resume-<k>`. |
+| `waiting-<n>` | Draft `n` is parked: the architect's turn asked a question, and the draft waits for the answer. Transition `draft-<n>-waiting-<k>` and the operation's result, outcome `waiting`, name the question. |
 | `invalid-<n>` | Draft `n` was recorded and failed validation. Transition `draft-<n>-invalid` lists every problem in its reason, and the operation's result carries the same text. |
 | `failed-<n>` | Draft `n` ran no valid turn: the architect's turn failed, service stops interrupted it three times, the workstream was abandoned, or the workstream left `handed` before the draft was presented. Transition `draft-<n>-failed` holds the reason. |
 | `exhausted` | Three drafts were not accepted. Transition `draft-exhausted` records it (`none of the architect's 3 drafts of the spec and plan was accepted; ...`) with a notice for the chief of staff naming the count and quoting the last draft's outcome, and nothing more is requested. |
 
 Draft 1 is requested as soon as the workstream is handed, with the hand-in
 transition as cause; after `invalid-<n>` or `failed-<n>` with `n` below three,
-draft `n+1` is requested with that outcome's transition as cause. A draft in
-progress, an exhausted workstream and a workstream in any other feature state
-need nothing. The bound is the librarian's: three drafts per workstream and
-three turns per draft.
+draft `n+1` is requested with that outcome's transition as cause. After
+`waiting-<n>`, draft `n` is requested again once the answer is queued; see
+[the architect's question](#the-architects-question). A draft in progress, a
+parked draft whose answer is not queued, an exhausted workstream and a
+workstream in any other feature state need nothing. The bound is the
+librarian's: three drafts per workstream and three attempts per draft. The
+turn that delivers the answer to the architect's question continues its
+attempt and spends none.
 
 ### The turn
 
@@ -258,11 +263,12 @@ turn a read-only private copy of it:
 | `context.md` | The rendered [context bundle](context.md) for the whole project, with the workstream's decisions. |
 | `draft/spec.md`, `draft/plan.json` | The latest recorded draft, once one is recorded. |
 
-The architect gets `file_read` and `draft_write` and nothing else: no notes
+The architect gets `file_read`, `draft_write` and `ask` and nothing else: no notes
 (they are the project's, not the workstream's), no write, execute, network or
 VCS capability, and no other context source. `draft_write` takes `path` (`spec.md` or `plan.json`) and
-`content` (UTF-8 text of at most 512 KiB) and stores the file in the turn's
-service-owned directory; it is a memory tool, so the read-only role holds it.
+`content` (UTF-8 text of at most 512 KiB) and stores the file in the
+service-owned directory of the attempt the turn belongs to; it is a memory
+tool, so the read-only role holds it.
 The prompt names the view, asks for `spec.md` with the intended behaviour,
 what the feature must not do and a `## Acceptance criteria` section holding
 a numbered list, and for `plan.json` in the [plan format](trace.md#planjson)
@@ -311,6 +317,63 @@ drafts it. A draft already requested stays pending: applying it returns
 run a turn, the operation is retried, and no draft is spent. A captured turn is
 still completed and its draft recorded, since that runs no architect.
 
+### The architect's question
+
+An architect that calls `ask`, while drafting or while [replying or
+redrafting](#the-architects-reply) in the shed, ends its turn with the outcome
+`waiting`, like any other asker: the question is recorded with a notice for
+the chief of staff, the thread parks and the architect's slot is free. What
+the asking turn ended with does not matter: a turn that asked and then failed,
+or that a service stop interrupted, waits for its answer all the same.
+
+A draft that asks is parked: transition `draft-<n>-waiting-<k>` moves `draft`
+to `waiting-<n>` with the reason `draft <n> is parked: the architect waits for
+the answer to question <q>`, and the operation ends with the outcome `waiting`
+and that reason as evidence. `k` counts the draft's parks from 1. Nothing is
+recorded and the workstream stays `handed`, however long the answer takes: a
+question has no timeout, and a restart finds the draft parked and leaves it
+so. The [answer](trace.md#tools-and-delivery) is queued as turn `answer_<q>`
+on the architect's thread; once it is, the controller requests the draft
+again: transition `draft-<n>-resume-<k>`, caused by the park it follows, moves
+`draft` back to `drafting-<n>` with the reason `draft <n> resumes: the
+architect's question is answered` and publishes an `architect-draft` operation
+whose input carries `resume: <k>`. The draft number does not advance, and
+neither the park nor the answer turn spends one of the three drafts or one of
+the three attempts.
+
+The answer turn continues the attempt that asked: it runs through the same
+turn path with the same tools, and what it delivers with `draft_write` joins
+what the asking turn delivered. The files the attempt delivered are recorded
+once its last turn ends normally. An architect that asks again in its answer
+turn parks the draft again, with the next `k`. A service stop that interrupts
+an answer turn is recovered like one that interrupts an attempt: the draft's
+next attempt, while attempts remain, carries the answers the architect
+received in the draft under `The answers to the questions you asked in this
+draft:`.
+
+A reply or redraft that asks parks the same way, in the shed: transition
+`shed-reply-<n>-waiting-<k>` or `shed-redraft-<n>-waiting-<k>` moves the shed
+to `asked-<n>` with the reason `the reply to round <n> is parked: the
+architect waits for the answer to question <q>` (or `the redraft after round
+<n> ...`), and the operation ends `waiting`. Nothing is recorded, and the
+debate neither concludes nor starts another round while the shed is
+`asked-<n>`. Once the answer is queued, transition `shed-reply-<n>-resume-<k>`
+or `shed-redraft-<n>-resume-<k>` moves the shed back to `reply-<n>` or
+`redraft-<n>` with the reason `the reply to round <n> resumes: the architect's
+question is answered` and publishes the operation again, pinned to the
+revision the parked one was, with `resume: <k>`. The answer turn keeps the
+answers given before asking, may answer again, and delivers into the same
+attempt's redraft; the reply names the last turn that ended. The owner's
+actions in the shed keep working while the architect's question is open, and
+[skipping debate](#skip-debate) is allowed, since a parked reply holds no
+turn; a skipped reply never resumes.
+
+Abandoning the workstream while a draft or reply is parked cancels nothing,
+since nothing runs: the answer is not delivered, and `draft` stays
+`waiting-<n>`, or the shed `asked-<n>`. A turn that asked while the workstream
+was abandoned fails the draft or the reply as any turn of an abandoned
+workstream does.
+
 ## The shed: debate
 
 The shed controller runs in every reconciliation pass after the architect
@@ -331,6 +394,7 @@ the trace says it is:
 | --- | --- | --- |
 | none | | Round 1, against the latest revisions. |
 | `waiting-<n>` | | Round `n` [again](#a-members-question), against its own revision, once every member that asked has its answer queued; nothing while one still waits. |
+| `asked-<n>` | | The architect's parked reply or redraft after round `n` [again](#the-architects-question), against its own revision, once its answer is queued; nothing before. |
 | `heard-<n>` | none | [Conclude](#concluding-the-debate) by consensus. |
 | `heard-<n>` | some | Ask the architect for [its reply](#the-architects-reply) to round `n`. |
 | `replied-<n>` | some, `n` below the round limit | Round `n+1`, against the latest revisions. |
@@ -390,7 +454,8 @@ The workflow subject `shed` tracks the debate, with transitions by
 | `round-<n>` | Round `n` is requested: transition `shed-round-<n>` published a `shed-round` operation whose input pins the round to one revision of `spec.md` and one of `plan.json`. Every round pins the latest revisions when it is requested. A round resumed after a member's question is in this state again, requested by transition `shed-round-<n>-resume-<k>`. |
 | `waiting-<n>` | Round `n` is parked: a member's turn asked a question, and the round waits for the answer. Transition `shed-round-<n>-waiting-<k>` and the operation's result, outcome `waiting`, name the members that wait and their questions. |
 | `heard-<n>` | Every member's turn of round `n` has ended and its record is committed. Transition `shed-round-<n>-heard` and the operation's result carry the same summary: members heard, objections, concessions, failed turns and how many objections stand. |
-| `reply-<n>` | The architect's reply to round `n` is requested: transition `shed-reply-<n>`, caused by `shed-round-<n>-heard`, published a `shed-reply` operation pinned to the revision the round debated. Its reason counts the objections that stand. |
+| `reply-<n>` | The architect's reply to round `n` is requested: transition `shed-reply-<n>`, caused by `shed-round-<n>-heard`, published a `shed-reply` operation pinned to the revision the round debated. Its reason counts the objections that stand. A reply resumed after the architect's question is in this state again, requested by transition `shed-reply-<n>-resume-<k>`. |
+| `asked-<n>` | The architect's reply to round `n`, or its redraft after it, is parked on the architect's question. Transition `shed-reply-<n>-waiting-<k>` or `shed-redraft-<n>-waiting-<k>` and the operation's result, outcome `waiting`, name the question. |
 | `replied-<n>` | The architect's reply to round `n` is recorded. Transition `shed-reply-<n>-replied` and the operation's result carry the same summary: how many objections it answered, and whether it redrafted, left the revision as it is, gave up an invalid redraft or failed. |
 | `concluded-<n>` | Debate ended after round `n`. Transition `shed-concluded-<n>` holds why. |
 | `failed-<n>` | Round `n` ended without a record, or its reply without one, because the workstream was abandoned. Transition `shed-round-<n>-failed` or `shed-reply-<n>-failed` holds the reason. |
@@ -584,7 +649,8 @@ The turn gets a read-only private copy of a view staged under
 | `shed/round-<k>/` | Every member's record of every round so far, the architect's earlier replies and redrafts, and the owner's own files of the round. |
 | `redraft/spec.md`, `redraft/plan.json` | After an invalid redraft, the files of it the architect delivered. |
 
-The architect gets `file_read`, `reply` and `draft_write` and nothing else.
+The architect gets `file_read`, `reply`, `draft_write` and `ask` and nothing
+else; see [the architect's question](#the-architects-question).
 `reply` is a memory tool only the `architect` role can hold. It takes
 `objection`, the ID of an objection that stood once the round was heard, and
 `answer`; answering an objection again replaces the earlier answer, and an
@@ -755,7 +821,8 @@ recorded in `shed/round-<n>/redraft.json` against the round it concluded at,
 with the revisions it was made against and the owner's note, and makes the
 round limit `n+1`. The controller then asks the architect for the redraft as
 one turn (state `redraft-<n>`, operation `shed-redraft`, transition
-`shed-redraft-<n>`), recorded as `shed/round-<n>/redrafted.json` with the
+`shed-redraft-<n>`, or `shed-redraft-<n>-resume-<k>` for a redraft resumed
+after the architect's question), recorded as `shed/round-<n>/redrafted.json` with the
 revisions it wrote, as its reply to a round is recorded; the shed moves to
 `redrafted-<n>` and round `n+1` debates what the architect wrote, whether the
 redraft changed anything or not. The turn carries the owner's note and the
@@ -794,8 +861,9 @@ workstream still needs the owner's ratification of both documents. It is
 refused while a round or a reply is running, and on a debate already skipped,
 including one skipped at [hand-in](#hand-in) with `skip_debate`, which skips
 debate before round 1 can start. A round [parked on a member's
-question](#a-members-question) is not running: the skip is recorded and the
-round never resumes.
+question](#a-members-question), and a reply or redraft [parked on the
+architect's](#the-architects-question), is not running: the skip is recorded
+and it never resumes.
 
 ### More debate
 

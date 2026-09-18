@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -38,7 +40,9 @@ const (
 	// DraftTool is the tool the architect delivers spec.md and plan.json with.
 	DraftTool = "draft_write"
 	// draftSubject is the workflow subject that tracks the architect's drafts
-	// of one workstream: drafting-<n>, invalid-<n>, failed-<n> or exhausted.
+	// of one workstream: drafting-<n>, waiting-<n> while draft n waits for the
+	// answer to the architect's question, invalid-<n>, failed-<n> or
+	// exhausted.
 	draftSubject = "draft"
 	// maxDrafts bounds the drafts the service asks the architect for on one
 	// workstream, and maxDraftAttempts the turns one draft may start after
@@ -60,18 +64,39 @@ type Architect struct {
 	Hosts  coreadapter.MCPHosts
 }
 
+// draftInput numbers the draft an operation runs. Resume numbers the
+// operation that runs the draft again after it parked on the architect's
+// question, from 1; the draft's own operation has none.
 type draftInput struct {
-	Draft int `json:"draft"`
+	Draft  int `json:"draft"`
+	Resume int `json:"resume,omitempty"`
+}
+
+// runIDs returns the transition and event of the operation that runs the
+// draft: the draft's own, or the resumption the input numbers.
+func (in draftInput) runIDs() (transition, event string) {
+	if in.Resume == 0 {
+		return draftIDs(in.Draft)
+	}
+	transition = fmt.Sprintf("draft-%d-resume-%d", in.Draft, in.Resume)
+	return transition, trace.EventID(transition, "run")
+}
+
+// parkedID is the transition that parks the draft the operation runs: the
+// k-th park of draft n follows its k-1-th resumption.
+func (in draftInput) parkedID() string {
+	return fmt.Sprintf("draft-%d-waiting-%d", in.Draft, in.Resume+1)
 }
 
 func draftIDs(n int) (transition, event string) {
 	transition = fmt.Sprintf("draft-%d", n)
 	return transition, trace.EventID(transition, "run")
 }
-func draftTurnID(n, attempt int) string { return fmt.Sprintf("draft-%d-%d", n, attempt) }
+func draftTurnPrefix(n int) string      { return fmt.Sprintf("draft-%d-", n) }
+func draftTurnID(n, attempt int) string { return draftTurnPrefix(n) + strconv.Itoa(attempt) }
 
-// draftState splits a draft-subject value into its kind (drafting, invalid or
-// failed) and draft number.
+// draftState splits a draft-subject value into its kind (drafting, waiting,
+// invalid or failed) and draft number.
 func draftState(value string) (kind string, n int, ok bool) {
 	i := strings.LastIndexByte(value, '-')
 	if i < 0 {
@@ -79,7 +104,7 @@ func draftState(value string) (kind string, n int, ok bool) {
 	}
 	n, err := strconv.Atoi(value[i+1:])
 	kind = value[:i]
-	return kind, n, err == nil && n > 0 && (kind == "drafting" || kind == "invalid" || kind == "failed")
+	return kind, n, err == nil && n > 0 && (kind == "drafting" || kind == "waiting" || kind == "invalid" || kind == "failed")
 }
 
 // drafter is the architect controller. Its pass asks the architect for a
@@ -121,7 +146,9 @@ func (d *drafter) Pass(ctx context.Context) error {
 
 // reconcile requests the first draft of a handed workstream, the next draft
 // after an invalid or failed one while drafts remain, and tells the chief of
-// staff once they are exhausted. A draft in progress and a workstream in any
+// staff once they are exhausted. A draft parked on the architect's question
+// resumes once the answer is queued on the architect's thread. A draft in
+// progress, a parked draft whose answer is not queued and a workstream in any
 // other feature state need nothing.
 func (d *drafter) reconcile(ctx context.Context, stream config.WorkstreamID) error {
 	feature, err := d.repository.Workflow(stream, trace.FeatureSubject)
@@ -139,14 +166,16 @@ func (d *drafter) reconcile(ctx context.Context, stream config.WorkstreamID) err
 		if err := d.ensureThread(ctx, stream); err != nil {
 			return err
 		}
-		return d.request(ctx, stream, state, 1, handInTransition, "the workstream was handed in; the architect is asked for draft 1 of the spec and plan")
+		return d.request(ctx, stream, state, draftInput{Draft: 1}, handInTransition, "the workstream was handed in; the architect is asked for draft 1 of the spec and plan")
 	}
 	kind, n, ok := draftState(state.Value)
 	switch {
 	case !ok || kind == "drafting":
 		return nil
+	case kind == "waiting":
+		return d.resume(ctx, stream, state, n)
 	case n < maxDrafts:
-		return d.request(ctx, stream, state, n+1, fmt.Sprintf("draft-%d-%s", n, kind), fmt.Sprintf("draft %d was %s; the architect is asked for draft %d", n, kind, n+1))
+		return d.request(ctx, stream, state, draftInput{Draft: n + 1}, fmt.Sprintf("draft-%d-%s", n, kind), fmt.Sprintf("draft %d was %s; the architect is asked for draft %d", n, kind, n+1))
 	}
 	last, err := d.transition(stream, fmt.Sprintf("draft-%d-%s", n, kind))
 	if err != nil {
@@ -189,19 +218,64 @@ func (d *drafter) ensureThread(ctx context.Context, stream config.WorkstreamID) 
 	return d.repository.CreateThread(ctx, identity)
 }
 
-// request publishes draft n as a durable operation.
-func (d *drafter) request(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, n int, cause, reason string) error {
-	transition, event := draftIDs(n)
-	input, err := json.Marshal(draftInput{Draft: n})
+// request publishes the draft the input numbers as a durable operation.
+func (d *drafter) request(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, in draftInput, cause, reason string) error {
+	transition, event := in.runIDs()
+	input, err := json.Marshal(in)
 	if err != nil {
 		return err
 	}
+	body := fmt.Sprintf("Draft %d of the spec and plan", in.Draft)
+	if in.Resume > 0 {
+		body += ", resumed"
+	}
 	op := coreadapter.Operation{ID: trace.OperationID(d.repository.Project(), stream, event), Boundary: coreadapter.RunnerBoundary, Action: DraftAction, Input: input}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: d.header(transition, stream, cause, d.s.now()), Subject: draftSubject, From: state.Value, To: fmt.Sprintf("drafting-%d", n), Reason: reason},
-		Events:     []trace.Event{{ID: event, Kind: "draft", Body: fmt.Sprintf("Draft %d of the spec and plan", n), Operation: &op}}}
+		Transition: trace.Transition{Header: d.header(transition, stream, cause, d.s.now()), Subject: draftSubject, From: state.Value, To: fmt.Sprintf("drafting-%d", in.Draft), Reason: reason},
+		Events:     []trace.Event{{ID: event, Kind: "draft", Body: body, Operation: &op}}}
 	_, err = d.repository.Transact(ctx, tx)
 	return err
+}
+
+// resume requests draft n again once the answer to the architect's question
+// is queued on its thread, caused by the transition that parked the draft.
+func (d *drafter) resume(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, n int) error {
+	chain, asked, err := d.chain(stream, n)
+	if err != nil {
+		return err
+	}
+	if len(chain) > 0 && askedBy(asked, architectThread, chain[len(chain)-1].Request.TurnID) != "" {
+		return nil
+	}
+	transitions, err := trace.Read[trace.Transition](d.repository, stream)
+	if err != nil {
+		return err
+	}
+	var parks []trace.Transition
+	for _, t := range transitions {
+		if t.Subject == draftSubject && strings.HasPrefix(t.ID, fmt.Sprintf("draft-%d-waiting-", n)) {
+			parks = append(parks, t)
+		}
+	}
+	if len(parks) == 0 {
+		return fmt.Errorf("draft %d is parked without a parking transition", n)
+	}
+	return d.request(ctx, stream, state, draftInput{Draft: n, Resume: len(parks)}, parks[len(parks)-1].ID, fmt.Sprintf("draft %d resumes: the architect's question is answered", n))
+}
+
+// chain returns the architect's turns of draft n in thread order, its
+// attempts and the turns that answered their questions, with the
+// workstream's questions.
+func (d *drafter) chain(stream config.WorkstreamID, n int) ([]trace.QueuedTurn, []trace.QuestionState, error) {
+	t, err := d.repository.Thread(stream, architectAgent)
+	if err != nil {
+		return nil, nil, err
+	}
+	asked, err := d.repository.Questions(stream)
+	if err != nil {
+		return nil, nil, err
+	}
+	return chainTurns(t, askChain(t, draftTurnPrefix(n), asked)), asked, nil
 }
 
 func decodeDraft(op coreadapter.Operation) (draftInput, error) {
@@ -217,17 +291,20 @@ func decodeDraft(op coreadapter.Operation) (draftInput, error) {
 	if in.Draft < 1 {
 		return in, errors.New("draft operation requires a positive draft number")
 	}
+	if in.Resume < 0 {
+		return in, errors.New("draft operation input carries an invalid resumption number")
+	}
 	return in, nil
 }
 
 // stream returns the workstream a draft operation belongs to: the one whose
 // run event derives the operation ID.
-func (d *drafter) stream(op coreadapter.Operation, n int) (config.WorkstreamID, error) {
+func (d *drafter) stream(op coreadapter.Operation, in draftInput) (config.WorkstreamID, error) {
 	streams, err := d.repository.Workstreams()
 	if err != nil {
 		return "", err
 	}
-	_, event := draftIDs(n)
+	_, event := in.runIDs()
 	for _, stream := range streams {
 		if trace.OperationID(d.repository.Project(), stream, event) == op.ID {
 			return stream, nil
@@ -236,17 +313,21 @@ func (d *drafter) stream(op coreadapter.Operation, n int) (config.WorkstreamID, 
 	return "", fmt.Errorf("draft operation %s belongs to no workstream", op.ID)
 }
 
-// outcome returns the recorded terminal result of draft n: succeeded when the
-// operation moved the workstream to sketched, failed when the draft's invalid
-// or failed transition is recorded, nil before either.
+// outcome returns the recorded terminal result of the operation that runs
+// draft n: succeeded when the operation moved the workstream to sketched,
+// failed when the draft's invalid or failed transition is recorded, waiting
+// when the operation parked the draft on the architect's question, nil before
+// any of them.
 func (d *drafter) outcome(stream config.WorkstreamID, n int, operation string) (*coreadapter.OperationResult, error) {
 	transitions, err := trace.Read[trace.Transition](d.repository, stream)
 	if err != nil {
 		return nil, err
 	}
-	invalid, failed := fmt.Sprintf("draft-%d-invalid", n), fmt.Sprintf("draft-%d-failed", n)
+	invalid, failed, parked := fmt.Sprintf("draft-%d-invalid", n), fmt.Sprintf("draft-%d-failed", n), fmt.Sprintf("draft-%d-waiting-", n)
 	for _, t := range transitions {
 		switch {
+		case t.Subject == draftSubject && strings.HasPrefix(t.ID, parked) && t.Cause == operation:
+			return &coreadapter.OperationResult{Outcome: questions.Waiting, Evidence: t.Reason}, nil
 		case t.Subject == trace.FeatureSubject && t.To == SketchedState && t.Cause == operation:
 			return &coreadapter.OperationResult{Outcome: "succeeded", Evidence: t.Reason}, nil
 		case t.Subject == draftSubject && (t.ID == invalid || t.ID == failed):
@@ -254,18 +335,6 @@ func (d *drafter) outcome(stream config.WorkstreamID, n int, operation string) (
 		}
 	}
 	return nil, nil
-}
-
-// draftTurns returns the turns of draft n in attempt order.
-func draftTurns(t trace.Thread, n int) []trace.QueuedTurn {
-	prefix := fmt.Sprintf("draft-%d-", n)
-	var out []trace.QueuedTurn
-	for _, q := range t.Turns {
-		if strings.HasPrefix(q.Request.TurnID, prefix) {
-			out = append(out, q)
-		}
-	}
-	return out
 }
 
 // Inspect reads the recorded transitions and the architect thread. A recorded
@@ -277,7 +346,7 @@ func (d *drafter) Inspect(_ context.Context, op coreadapter.Operation) (coreadap
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
-	stream, err := d.stream(op, in.Draft)
+	stream, err := d.stream(op, in)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -292,7 +361,10 @@ func (d *drafter) Inspect(_ context.Context, op coreadapter.Operation) (coreadap
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
-	turns := draftTurns(t, in.Draft)
+	turns, _, err := d.chain(stream, in.Draft)
+	if err != nil {
+		return coreadapter.Observation{}, err
+	}
 	if len(turns) == 0 {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "no architect turn has run"}, nil
 	}
@@ -316,9 +388,13 @@ var errNoArchitect = errors.New("this service has no agent runner for the archit
 
 // Apply drives the draft to a terminal result: it abandons a turn a previous
 // service stop interrupted, starts a new turn while attempts remain, runs the
-// pending turn through the dispatcher, and records a completed turn's draft.
-// Abandoning the workstream cancels the running turn, and the draft of an
-// abandoned workstream fails without starting another.
+// pending turn, an attempt or the answer to the architect's question, through
+// the dispatcher, and records a completed turn's draft. A turn that asked a
+// question, whatever it ended with, parks the draft instead: the draft moves
+// to waiting-<n>, the operation ends waiting, and the controller requests the
+// draft again once the answer is queued. Abandoning the workstream cancels
+// the running turn, and the draft of an abandoned workstream fails without
+// starting another.
 // A failed turn and an invalid draft are terminal failures recorded as draft
 // transitions; storage errors and a missing architect runner leave the
 // operation pending for another attempt.
@@ -327,7 +403,7 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	stream, err := d.stream(op, in.Draft)
+	stream, err := d.stream(op, in)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -355,41 +431,37 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		turns := draftTurns(t, n)
-		var last *trace.QueuedTurn
-		if len(turns) > 0 {
-			last = &turns[len(turns)-1]
+		asked, err := d.repository.Questions(stream)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		origins := askChain(t, draftTurnPrefix(n), asked)
+		chain := chainTurns(t, origins)
+		tries := attempts(chain, origins)
+		// Turns run in sequence, so the oldest unfinished turn of the chain is
+		// the one to drive: the answer to a question may be queued behind the
+		// turn that asked it while a service stop left that turn unfinished.
+		var last, pending *trace.QueuedTurn
+		if len(chain) > 0 {
+			last = &chain[len(chain)-1]
+		}
+		if i := slices.IndexFunc(chain, func(q trace.QueuedTurn) bool { return q.CompletedAt.IsZero() }); i >= 0 {
+			pending = &chain[i]
 		}
 		switch {
-		case last != nil && last.Claim != nil && last.Response == nil:
+		case pending != nil && pending.Claim != nil && pending.Response == nil:
 			if t.Status != "interrupted" {
-				return coreadapter.OperationResult{}, errors.New("architect turn " + last.Request.TurnID + " is still running")
+				return coreadapter.OperationResult{}, errors.New("architect turn " + pending.Request.TurnID + " is still running")
 			}
-			if err := d.repository.AbandonTurn(ctx, stream, architectAgent, last.Request.TurnID, d.s.now()); err != nil {
+			if err := d.repository.AbandonTurn(ctx, stream, architectAgent, pending.Request.TurnID, d.s.now()); err != nil {
 				return coreadapter.OperationResult{}, err
 			}
-		case last == nil || last.Status() == "interrupted":
-			if gone, err := abandoned(d.repository, stream); err != nil || gone {
-				if err != nil {
-					return coreadapter.OperationResult{}, err
-				}
-				return d.terminal(ctx, op.ID, stream, n, "failed", fmt.Sprintf("draft %d failed: the workstream was abandoned, so the architect runs no turn for it", n))
-			}
-			if len(turns) >= maxDraftAttempts {
-				return d.terminal(ctx, op.ID, stream, n, "failed", fmt.Sprintf("draft %d failed: the architect turn was interrupted %d times by service stops", n, len(turns)))
-			}
-			if d.s.options.Architect == nil {
-				return coreadapter.OperationResult{}, errNoArchitect
-			}
-			if err := d.enqueue(ctx, cfg, stream, n, len(turns)+1, op.ID); err != nil {
-				return coreadapter.OperationResult{}, err
-			}
-		case last.CompletedAt.IsZero():
+		case pending != nil:
 			gone, err := abandoned(d.repository, stream)
 			if err != nil {
 				return coreadapter.OperationResult{}, err
 			}
-			if gone && last.Response == nil {
+			if gone && pending.Response == nil {
 				if _, err := d.repository.CancelTurns(ctx, stream, d.s.now(), abandonActor, cancelReason); err != nil {
 					return coreadapter.OperationResult{}, err
 				}
@@ -397,19 +469,44 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 			}
 			// Completing a captured turn runs no architect.
 			turnCtx := running
-			if last.Response != nil {
+			if pending.Response != nil {
 				turnCtx = ctx
 			} else if d.s.options.Architect == nil {
 				return coreadapter.OperationResult{}, errNoArchitect
 			}
-			if _, err := d.dispatch(turnCtx, stream, last.Request.TurnID); err != nil {
+			if _, err := d.dispatch(turnCtx, stream, pending.Request.TurnID); err != nil {
 				return coreadapter.OperationResult{}, err
 			}
-			if err := os.RemoveAll(filepath.Join(d.turnDirectory(stream, last.Request.TurnID), "workspace")); err != nil {
+			if err := os.RemoveAll(filepath.Join(d.turnDirectory(stream, pending.Request.TurnID), "workspace")); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+		case last != nil && askedBy(asked, architectThread, last.Request.TurnID) != "":
+			if gone, err := abandoned(d.repository, stream); err != nil || gone {
+				if err != nil {
+					return coreadapter.OperationResult{}, err
+				}
+				return d.terminal(ctx, op.ID, stream, n, "failed", fmt.Sprintf("draft %d failed: the workstream was abandoned, so the architect runs no turn for it", n))
+			}
+			id := askedBy(asked, architectThread, last.Request.TurnID)
+			return d.park(ctx, op.ID, stream, in, fmt.Sprintf("draft %d is parked: the architect waits for the answer to question %s", n, id))
+		case last == nil || last.Status() == "interrupted":
+			if gone, err := abandoned(d.repository, stream); err != nil || gone {
+				if err != nil {
+					return coreadapter.OperationResult{}, err
+				}
+				return d.terminal(ctx, op.ID, stream, n, "failed", fmt.Sprintf("draft %d failed: the workstream was abandoned, so the architect runs no turn for it", n))
+			}
+			if len(tries) >= maxDraftAttempts {
+				return d.terminal(ctx, op.ID, stream, n, "failed", fmt.Sprintf("draft %d failed: the architect turn was interrupted %d times by service stops", n, len(tries)))
+			}
+			if d.s.options.Architect == nil {
+				return coreadapter.OperationResult{}, errNoArchitect
+			}
+			if err := d.enqueue(ctx, cfg, stream, n, len(tries)+1, op.ID, received(t, origins, asked)); err != nil {
 				return coreadapter.OperationResult{}, err
 			}
 		case last.Status() == "idle":
-			return d.record(ctx, op.ID, stream, n, *last)
+			return d.record(ctx, op.ID, stream, n, origins[last.Request.TurnID])
 		default:
 			reason := last.Response.Failure
 			if reason == "" {
@@ -424,6 +521,20 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 // transition, invalid-<n> or failed-<n>, and returns the failed result. The
 // transition already recorded is returned as it is.
 func (d *drafter) terminal(ctx context.Context, operation string, stream config.WorkstreamID, n int, kind, reason string) (coreadapter.OperationResult, error) {
+	return d.end(ctx, operation, stream, n, fmt.Sprintf("draft-%d-%s", n, kind), fmt.Sprintf("%s-%d", kind, n), coreadapter.OperationResult{Outcome: "failed", Evidence: reason})
+}
+
+// park records that the architect's question parks the draft the operation
+// runs, moving it to waiting-<n>, and returns the waiting result. The
+// transition already recorded is returned as it is.
+func (d *drafter) park(ctx context.Context, operation string, stream config.WorkstreamID, in draftInput, reason string) (coreadapter.OperationResult, error) {
+	return d.end(ctx, operation, stream, in.Draft, in.parkedID(), fmt.Sprintf("waiting-%d", in.Draft), coreadapter.OperationResult{Outcome: questions.Waiting, Evidence: reason})
+}
+
+// end moves draft n from drafting-<n> to the given state with the given
+// transition and returns result. A draft no longer in progress returns what
+// the operation recorded.
+func (d *drafter) end(ctx context.Context, operation string, stream config.WorkstreamID, n int, id, to string, result coreadapter.OperationResult) (coreadapter.OperationResult, error) {
 	state, err := d.repository.Workflow(stream, draftSubject)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -436,17 +547,18 @@ func (d *drafter) terminal(ctx context.Context, operation string, stream config.
 		return *result, nil
 	}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: d.header(fmt.Sprintf("draft-%d-%s", n, kind), stream, operation, d.s.now()), Subject: draftSubject, From: state.Value, To: fmt.Sprintf("%s-%d", kind, n), Reason: reason}}
+		Transition: trace.Transition{Header: d.header(id, stream, operation, d.s.now()), Subject: draftSubject, From: state.Value, To: to, Reason: result.Evidence}}
 	if _, err := d.repository.Transact(ctx, tx); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	return coreadapter.OperationResult{Outcome: "failed", Evidence: reason}, nil
+	return result, nil
 }
 
 // enqueue accepts the architect turn of one draft attempt, fixing its profile
 // and prompts. The turn of a later draft lists why the previous one was not
-// accepted.
-func (d *drafter) enqueue(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, n, attempt int, operation string) error {
+// accepted, and a later attempt repeats the answers the architect received
+// in the draft, whose turns a service stop interrupted.
+func (d *drafter) enqueue(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, n, attempt int, operation string, answers []string) error {
 	profile, _, err := d.s.roleExecution(cfg, architectRole)
 	if err != nil {
 		return err
@@ -472,7 +584,7 @@ func (d *drafter) enqueue(ctx context.Context, cfg *config.Config, stream config
 	}
 	turn := draftTurnID(n, attempt)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: draftingActor, Cause: operation, Depth: 1},
-		AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: architectSystemPrompt(cfg.Project), Prompt: architectPrompt(handed.Path, n, previous, drafted)}
+		AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: architectSystemPrompt(cfg.Project), Prompt: architectPrompt(handed.Path, n, previous, drafted, answers)}
 	_, err = d.repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -521,7 +633,7 @@ func (d *drafter) turnDirectory(stream config.WorkstreamID, turn string) string 
 
 // dispatch runs the turn through the thread dispatcher and runner.
 func (d *drafter) dispatch(ctx context.Context, stream config.WorkstreamID, turn string) (coreadapter.OperationResult, error) {
-	dispatcher := thread.Dispatcher{Runner: thread.Runner{Store: d.repository, Turns: d.turns(stream), Now: d.s.now}, Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	dispatcher := thread.Dispatcher{Runner: thread.Runner{Store: d.repository, Turns: &questions.Turns{Turns: d.turns(stream), Repository: d.repository}, Now: d.s.now}, Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(d.turnDirectory(in.Workstream, in.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 	}}
@@ -534,9 +646,11 @@ func (d *drafter) dispatch(ctx context.Context, stream config.WorkstreamID, turn
 
 // turns is the architect's isolated turn path: a read-only private view of
 // the handed input, the charter and the context bundle, the file reading
-// tool and the delivery tool, and no notes, write, execute, network or VCS
-// capability: notes are the project's, and would carry one workstream's
-// drafting into another's.
+// tool, the delivery tool and the question tool, and no notes, write,
+// execute, network or VCS capability: notes are the project's, and would
+// carry one workstream's drafting into another's. A turn that asks ends
+// waiting, so its thread parks and its slot is free while the answer is
+// found.
 func (d *drafter) turns(stream config.WorkstreamID) *isolation.Turns {
 	var engine coreadapter.Engine
 	var hosts coreadapter.MCPHosts
@@ -547,21 +661,50 @@ func (d *drafter) turns(stream config.WorkstreamID) *isolation.Turns {
 		Workspaces: stagedWorkspaces{},
 		Views:      isolation.Views{Directory: filepath.Join(d.s.current().Root.String(), "views")},
 		Select:     d.selectView,
-		Grants:     map[string]coreadapter.Capabilities{architectRole: {Tools: []string{"file_read", DraftTool}}},
+		Grants:     map[string]coreadapter.Capabilities{architectRole: {Tools: []string{"file_read", DraftTool, questions.AskTool}}},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Workstream != string(stream) {
 				return nil, errors.New("turn scope denied")
 			}
-			return []coreadapter.Tool{d.draftTool(scope)}, nil
+			origin, err := d.continued(stream, scope.Turn)
+			if err != nil {
+				return nil, err
+			}
+			ask, err := questions.Tools(d.repository, architectAgent, scope, d.s.now)
+			if err != nil {
+				return nil, err
+			}
+			return append([]coreadapter.Tool{d.draftTool(scope, origin)}, ask...), nil
 		},
 		Hosts:  hosts,
 		Engine: engine,
 	}
 }
 
-// draftTool delivers one of the two draft files into the claimed turn's
-// output directory, which the service records once the turn completes.
-func (d *drafter) draftTool(scope coreadapter.Scope) coreadapter.Tool {
+// continued returns the architect's turn the given turn continues: the turn
+// itself, or, for the turn that delivers the answer to a question, the turn
+// that asked it, followed back to a turn that answers none.
+func (d *drafter) continued(stream config.WorkstreamID, turn string) (string, error) {
+	asked, err := d.repository.Questions(stream)
+	if err != nil {
+		return "", err
+	}
+	for {
+		i := slices.IndexFunc(asked, func(q trace.QuestionState) bool {
+			return q.Asked.Thread == architectThread && questions.TurnID(q.Asked.ID) == turn
+		})
+		if i < 0 {
+			return turn, nil
+		}
+		turn = asked[i].Asked.Turn
+	}
+}
+
+// draftTool delivers one of the two draft files into the output directory of
+// the attempt the claimed turn continues, which the service records once the
+// attempt completes: the turn that delivers the answer to the architect's
+// question adds to what the turn that asked it delivered.
+func (d *drafter) draftTool(scope coreadapter.Scope, attempt string) coreadapter.Tool {
 	return coreadapter.Tool{Name: DraftTool, Description: "Deliver spec.md or plan.json. The service records the delivered files as the draft; only they are kept.", Effect: coreadapter.ToolMemory,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","enum":["spec.md","plan.json"]},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`),
 		Handle: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -580,7 +723,7 @@ func (d *drafter) draftTool(scope coreadapter.Scope) coreadapter.Tool {
 			if scope.Role != architectRole || scope.Project != string(d.repository.Project()) {
 				return nil, errors.New("turn scope denied")
 			}
-			directory := filepath.Join(d.turnDirectory(config.WorkstreamID(scope.Workstream), scope.Turn), "output")
+			directory := filepath.Join(d.turnDirectory(config.WorkstreamID(scope.Workstream), attempt), "output")
 			if err := os.MkdirAll(directory, 0700); err != nil {
 				return nil, err
 			}
@@ -686,11 +829,11 @@ func (d *drafter) delivered(stream config.WorkstreamID, turn string) (map[string
 	return files, problems, nil
 }
 
-// record ingests the completed turn's draft as architect-authored revisions
+// record ingests the completed attempt's draft as architect-authored revisions
 // of spec.md and plan.json in one commit, keyed by the operation, then
 // validates the recorded draft: a valid one moves the workstream to sketched,
 // an invalid one is recorded with its problems.
-func (d *drafter) record(ctx context.Context, operation string, stream config.WorkstreamID, n int, last trace.QueuedTurn) (coreadapter.OperationResult, error) {
+func (d *drafter) record(ctx context.Context, operation string, stream config.WorkstreamID, n int, attempt string) (coreadapter.OperationResult, error) {
 	latest, err := d.latest(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -698,7 +841,7 @@ func (d *drafter) record(ctx context.Context, operation string, stream config.Wo
 	ingested := latest[plan.SpecDocument].Cause == operation || latest[plan.PlanDocument].Cause == operation
 	var problems []string
 	if !ingested {
-		files, undelivered, err := d.delivered(stream, last.Request.TurnID)
+		files, undelivered, err := d.delivered(stream, attempt)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
@@ -800,10 +943,10 @@ func (d *drafter) sketch(ctx context.Context, operation string, stream config.Wo
 }
 
 func architectSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the architect of the %s project (%s). You draft one workstream's feature spec and plan from what the owner handed in, the project's charter and its knowledge base, in the vocabulary the knowledge base gives the project. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them.", p.Name, p.Upstream, DraftTool)
+	return fmt.Sprintf("You are the architect of the %s project (%s). You draft one workstream's feature spec and plan from what the owner handed in, the project's charter and its knowledge base, in the vocabulary the knowledge base gives the project. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them. When your view does not settle something you must know, call %s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.", p.Name, p.Upstream, DraftTool, questions.AskTool)
 }
 
-func architectPrompt(handedPath string, n int, previous string, drafted bool) string {
+func architectPrompt(handedPath string, n int, previous string, drafted bool, answers []string) string {
 	var b strings.Builder
 	draft := ""
 	switch {
@@ -825,6 +968,10 @@ Deliver two files with %s; only what you deliver is kept.
 1. spec.md, in Markdown: the intended behaviour, what the feature must not do, and a section headed "## Acceptance criteria" holding the acceptance criteria as a numbered list ("1. ...", "2. ..."), numbered from 1 without gaps or repeats. Each criterion is one statement that can be shown to hold; the plan cites it as spec#<n>.
 2. plan.json: the directed graph of units, as {"version": 1, "units": [...]}. Each unit is {"id": "...", "title": "...", "addresses": [{"criterion": "spec#<n>", "proof": {"kind": "...", "name": "..."}}], "depends_on": ["..."], "footprint": ["..."]}. An id is 1 to 128 letters, digits, '_' or '-', starting with a letter or digit. addresses names every criterion the unit will show to hold and how: kind is new-test, existing-test, scripted-check or reviewer-judgement, and name is the test, the check or what the reviewer will judge. depends_on lists the ids of the units it must wait for, and the dependencies form no cycle. footprint lists the entities the unit will touch, by ID or alias from context.md, at least one per unit.
 
-The draft is accepted only when every criterion in spec.md is addressed by at least one unit with a named proof, every citation names a criterion the spec has, every dependency names a unit in the plan without forming a cycle, and every footprint resolves against the entity map. How finely the work is cut into units is your call.`, handedPath, draft, DraftTool)
+The draft is accepted only when every criterion in spec.md is addressed by at least one unit with a named proof, every citation names a criterion the spec has, every dependency names a unit in the plan without forming a cycle, and every footprint resolves against the entity map. How finely the work is cut into units is your call.
+
+Call %s when something you must know to draft is not in your view: the draft waits for the answer, which arrives as your next turn.
+`, handedPath, draft, DraftTool, questions.AskTool)
+	b.WriteString(answered("draft", answers))
 	return b.String()
 }
