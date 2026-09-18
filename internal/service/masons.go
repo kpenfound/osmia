@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -37,10 +38,11 @@ func masonTransitionID(unit string) string {
 	return trace.UnitSubject(unit) + "-" + UnitImplementing
 }
 
-// masons is the mason controller. Its pass first moves each implementing
-// unit whose mason reported done to reviewing, with the unit's workspace
-// snapshotted as its candidate. It then starts ready units: in each building
-// workstream with no implementing unit, while fewer units than
+// masons is the mason controller. Its pass parks and resumes units on their
+// masons' questions, and moves each implementing unit whose mason reported
+// done to reviewing, with the unit's workspace snapshotted as its candidate.
+// It then starts ready units: in each building workstream with no
+// implementing or waiting unit, while fewer units than
 // capacity.masons are implementing, it moves the first ready unit in the
 // plan's dependency order to implementing, and queues its mason's first turn
 // with the unit's bundle in the unit's own workspace. The scheduler then runs
@@ -60,12 +62,15 @@ type building struct {
 	started time.Time
 }
 
-// Pass moves the units whose mason reported done to reviewing, which frees
-// their mason slots, then starts the ready units capacity allows, the
-// highest-priority workstream first and, among equals, the one that started a
-// unit least recently. A paused workstream starts none, and its implementing unit takes
-// no mason slot. A unit that cannot start, or an implementing unit whose
-// first turn cannot be queued or whose candidate cannot be made, is blocked: the reason is recorded, the unit
+// Pass follows the implementing and waiting units' questions and moves the
+// units whose mason reported done to reviewing, which frees their mason
+// slots, then starts the ready units capacity allows, the highest-priority
+// workstream first and, among equals, the one that started a unit least
+// recently. A waiting unit takes no mason slot, and its workstream starts no
+// other unit. A paused workstream starts none, and its implementing unit
+// takes no mason slot. A unit that cannot start, or an implementing unit
+// whose first turn cannot be queued or whose candidate cannot be made, is
+// blocked: the reason is recorded, the unit
 // takes no mason slot and its workstream starts nothing else, and the other
 // workstreams go on.
 func (m *masons) Pass(ctx context.Context) error {
@@ -94,7 +99,16 @@ func (m *masons) Pass(ctx context.Context) error {
 		}
 		busy := false
 		for _, u := range b.plan.Units {
-			if b.states[trace.UnitSubject(u.ID)].Value != UnitImplementing {
+			state := b.states[trace.UnitSubject(u.ID)]
+			if state.Value != UnitImplementing && state.Value != UnitWaiting {
+				continue
+			}
+			value, err := m.follow(ctx, stream, u.ID, state)
+			if err != nil {
+				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
+			}
+			if value != UnitImplementing {
+				busy = true
 				continue
 			}
 			moved, blocked, err := m.finish(ctx, b, u.ID)
@@ -138,6 +152,58 @@ func (m *masons) Pass(ctx context.Context) error {
 	return nil
 }
 
+// follow moves a unit between implementing and waiting as its mason's thread
+// says, and returns the unit's state. An implementing unit whose mason's
+// latest turn asked a question moves to waiting; a waiting
+// unit whose mason's latest turn delivers the answer to one of its questions
+// moves back to implementing. The workspace is left as it is either way. A
+// unit whose state moved since it was read is left to the next pass.
+func (m *masons) follow(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) (string, error) {
+	th, err := m.repository.Thread(stream, masonAgent(unit))
+	if errors.Is(err, os.ErrNotExist) || err == nil && len(th.Turns) == 0 {
+		return state.Value, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	asked, err := m.repository.Questions(stream)
+	if err != nil {
+		return "", err
+	}
+	last := th.Turns[len(th.Turns)-1]
+	subject := trace.UnitSubject(unit)
+	var to, id, cause, reason string
+	switch state.Value {
+	case UnitImplementing:
+		q := askedBy(asked, th.Identity.ThreadID, last.Request.TurnID)
+		if q == "" {
+			return state.Value, nil
+		}
+		to, id, cause = UnitWaiting, fmt.Sprintf("%s-%s-%s", subject, UnitWaiting, q), trace.QuestionSubject(q)+"_"+trace.QuestionOpen
+		reason = fmt.Sprintf("unit %s is waiting: its mason asked question %s; the unit's workspace is kept and it takes no mason slot until the answer arrives", unit, q)
+	case UnitWaiting:
+		i := slices.IndexFunc(asked, func(q trace.QuestionState) bool {
+			return q.Asked.Thread == th.Identity.ThreadID && questions.TurnID(q.Asked.ID) == last.Request.TurnID
+		})
+		if i < 0 {
+			return state.Value, nil
+		}
+		q := asked[i].Asked.ID
+		to, id, cause = UnitImplementing, fmt.Sprintf("%s-%s-%s", subject, UnitImplementing, q), trace.QuestionSubject(q)+"_"+trace.QuestionAnswered
+		reason = fmt.Sprintf("unit %s resumes implementing: the answer to question %s is its mason's next turn", unit, q)
+	default:
+		return state.Value, nil
+	}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: cause}
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: to, Reason: reason}}
+	if _, err := m.repository.Transact(ctx, tx); errors.Is(err, trace.ErrConflict) {
+		return state.Value, nil
+	} else if err != nil {
+		return "", err
+	}
+	return to, nil
+}
+
 // read returns the workstream's unit states and sealed plan when it is
 // building, and when it last started a unit.
 func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
@@ -167,7 +233,7 @@ func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
 	}
 	b := building{stream: stream, states: states, plan: p}
 	for _, t := range transitions {
-		if t.Actor == masonActor && t.To == UnitImplementing && t.At.After(b.started) {
+		if t.Actor == masonActor && t.From == UnitReady && t.To == UnitImplementing && t.At.After(b.started) {
 			b.started = t.At
 		}
 	}
@@ -383,7 +449,7 @@ func (m *masons) enqueue(ctx context.Context, stream config.WorkstreamID, unit s
 }
 
 func masonSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are a mason of the %s project (%s). You build one unit of a ratified plan in a workspace of its own, whose files are your view. You hold no version control tool: the service records your work. Build what the sealed spec says, for the criteria of your unit, and put in place the proofs the plan names for them.", p.Name, p.Upstream)
+	return fmt.Sprintf("You are a mason of the %s project (%s). You build one unit of a ratified plan in a workspace of its own, whose files are your view. You hold no version control tool: the service records your work. Build what the sealed spec says, for the criteria of your unit, and put in place the proofs the plan names for them. When your view and the spec do not settle something you must know, call %s: your unit waits for the answer, which arrives as your next turn, and your workspace is kept.", p.Name, p.Upstream, questions.AskTool)
 }
 
 func masonPrompt(m bundle.Mason) string {

@@ -40,8 +40,9 @@ func CoreEnforcement() Enforcement {
 var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName}, questions.ChiefTools...)}
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
-// its view of its unit's workspace, and report its unit done.
-var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", doneTool}, WriteFiles: true, Execute: true}
+// its view of its unit's workspace, ask the chief of staff and report its
+// unit done.
+var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, doneTool}, WriteFiles: true, Execute: true}
 
 // Enforce returns opts with Librarian, Architect, Committee and Threads
 // running every role turn through e. Thread turns are granted to the chief of
@@ -95,7 +96,8 @@ func Enforce(opts Options, e Enforcement) Options {
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				if scope.Role == masonRole {
-					return []coreadapter.Tool{reports.tool(r, scope)}, nil
+					ask, err := questions.Tools(r, masonAgent(scope.Unit), scope, now)
+					return append(ask, reports.tool(r, scope)), err
 				}
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil
