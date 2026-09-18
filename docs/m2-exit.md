@@ -227,8 +227,7 @@ The [trace reference](trace.md) documents these records, and the
 - The first service runs no committee. With a committee, a sketched
   workstream enters the shed and round 1 starts in the same pass, so the
   owner has no moment to skip debate before a round has run.
-- The architect has no `ask` tool in M2, and the demonstration's committee
-  asks nothing, so the question during the shed comes from a mason thread the
-  test fixture creates, as in the
-  [chief-of-staff demonstration](m2-chief-of-staff.md).
+- The demonstration's architect and committee ask nothing, so the question
+  during the shed comes from a mason thread the test fixture creates, as in
+  the [chief-of-staff demonstration](m2-chief-of-staff.md).
 - The restart is a stop at a test fault point, not a crash of the process.
