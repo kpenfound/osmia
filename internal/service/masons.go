@@ -1,0 +1,327 @@
+package service
+
+import (
+	"cmp"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/kpenfound/osmia/internal/bundle"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/scheduler"
+	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/trace"
+)
+
+var masonActor = trace.Actor{Kind: "service", ID: "mason"}
+
+// masonAgent returns the agent and thread ID of a unit's mason: mason-<unit>,
+// or mason_<hash> for a unit whose subject is hashed.
+func masonAgent(unit string) string {
+	return "mason" + strings.TrimPrefix(trace.UnitSubject(unit), "unit")
+}
+
+// masonTurnID returns the ID of the first turn of a unit's mason, the one
+// that starts the unit.
+func masonTurnID(unit string) string { return masonAgent(unit) + "-implement" }
+
+// masonTransitionID returns the ID of the transition that moves a unit from
+// ready to implementing.
+func masonTransitionID(unit string) string {
+	return trace.UnitSubject(unit) + "-" + UnitImplementing
+}
+
+// masons is the mason controller. Its pass starts ready units: in each
+// building workstream with no implementing unit, while fewer units than
+// capacity.masons are implementing, it moves the first ready unit in the
+// plan's dependency order to implementing, and queues its mason's first turn
+// with the unit's bundle in the unit's own workspace. The scheduler then runs
+// that turn.
+type masons struct {
+	s          *Service
+	cfg        *config.Config
+	repository *trace.Repository
+}
+
+// building is one building workstream as a pass reads it.
+type building struct {
+	stream config.WorkstreamID
+	states map[string]trace.WorkflowState
+	plan   plan.Plan
+	// started is when the workstream last started a unit, zero when never.
+	started time.Time
+}
+
+// Pass starts the ready units capacity allows, the highest-priority
+// workstream first and, among equals, the one that started a unit least
+// recently. A paused workstream starts none, and its implementing unit takes
+// no mason slot.
+func (m *masons) Pass(ctx context.Context) error {
+	streams, err := m.repository.Workstreams()
+	if err != nil {
+		return err
+	}
+	librarian := librarianWorkstream(m.repository.Project())
+	state, _ := m.s.store.Effective()
+	paused := func(stream config.WorkstreamID) bool { return scheduler.Paused(state.Pauses, m.cfg.Project.ID, stream) }
+	implementing := 0
+	var idle []building
+	for _, stream := range streams {
+		if stream == librarian {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		b, found, err := m.read(stream)
+		if err != nil {
+			return fmt.Errorf("workstream %s masons: %w", stream, err)
+		}
+		if !found {
+			continue
+		}
+		busy := false
+		for _, u := range b.plan.Units {
+			if b.states[trace.UnitSubject(u.ID)].Value != UnitImplementing {
+				continue
+			}
+			if !paused(stream) {
+				implementing++
+			}
+			busy = true
+			if err := m.resume(ctx, stream, u.ID); err != nil {
+				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
+			}
+		}
+		if !busy && !paused(stream) {
+			idle = append(idle, b)
+		}
+	}
+	for _, b := range startOrder(idle, state.Priorities, m.cfg.Project.ID) {
+		if implementing >= m.cfg.Capacity.Masons {
+			return nil
+		}
+		unit, ok := nextReady(b)
+		if !ok {
+			continue
+		}
+		started, err := m.start(ctx, b, unit)
+		if err != nil {
+			return fmt.Errorf("workstream %s unit %s: %w", b.stream, unit, err)
+		}
+		if started {
+			implementing++
+		}
+	}
+	return nil
+}
+
+// read returns the workstream's unit states and sealed plan when it is
+// building, and when it last started a unit.
+func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
+	feature, err := m.repository.Workflow(stream, trace.FeatureSubject)
+	if err != nil || feature.Value != BuildingState {
+		return building{}, false, err
+	}
+	latest, _, found, err := seal.Latest(m.repository, stream)
+	if err != nil || !found {
+		return building{}, false, err
+	}
+	graph, err := sealedPlan(m.repository, stream, latest.Revision.Plan)
+	if err != nil {
+		return building{}, false, err
+	}
+	p, err := plan.Parse([]byte(graph.Content))
+	if err != nil {
+		return building{}, false, err
+	}
+	states, err := m.repository.WorkflowStates(stream)
+	if err != nil {
+		return building{}, false, err
+	}
+	transitions, err := trace.Read[trace.Transition](m.repository, stream)
+	if err != nil {
+		return building{}, false, err
+	}
+	b := building{stream: stream, states: states, plan: p}
+	for _, t := range transitions {
+		if t.Actor == masonActor && t.To == UnitImplementing && t.At.After(b.started) {
+			b.started = t.At
+		}
+	}
+	return b, true, nil
+}
+
+// startOrder sorts the workstreams by the project's priority order, those
+// it does not name last, then by when each last started a unit, least
+// recently first, then by ID.
+func startOrder(streams []building, priorities []runtime.Priority, project config.ProjectID) []building {
+	rank := map[config.WorkstreamID]int{}
+	for _, p := range priorities {
+		if p.Project == project {
+			for i, stream := range p.Workstreams {
+				rank[stream] = i + 1
+			}
+		}
+	}
+	order := func(stream config.WorkstreamID) int {
+		if r, ok := rank[stream]; ok {
+			return r
+		}
+		return len(rank) + 1
+	}
+	slices.SortFunc(streams, func(a, b building) int {
+		return cmp.Or(cmp.Compare(order(a.stream), order(b.stream)), a.started.Compare(b.started), strings.Compare(string(a.stream), string(b.stream)))
+	})
+	return streams
+}
+
+// nextReady returns the first ready unit of the workstream in its plan's
+// dependency order.
+func nextReady(b building) (string, bool) {
+	for _, u := range dependencyOrder(b.plan) {
+		if b.states[trace.UnitSubject(u.ID)].Value == UnitReady {
+			return u.ID, true
+		}
+	}
+	return "", false
+}
+
+// dependencyOrder returns the plan's units so that every unit follows the
+// units it depends on, each place going to the earliest unit in the plan
+// whose dependencies are all placed.
+func dependencyOrder(p plan.Plan) []plan.Unit {
+	placed := map[string]bool{}
+	var out []plan.Unit
+	for len(out) < len(p.Units) {
+		i := slices.IndexFunc(p.Units, func(u plan.Unit) bool {
+			return !placed[u.ID] && !slices.ContainsFunc(u.DependsOn, func(d string) bool { return !placed[d] })
+		})
+		if i < 0 {
+			// A sealed plan has no cycle.
+			return out
+		}
+		placed[p.Units[i].ID] = true
+		out = append(out, p.Units[i])
+	}
+	return out
+}
+
+// bundle assembles the mason bundle of one unit, from the service's files
+// and this trace.
+func (m *masons) bundle(ctx context.Context, stream config.WorkstreamID, unit string) (bundle.Mason, error) {
+	files := bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }, Now: m.s.now}
+	return files.Mason(ctx, m.repository.Project(), stream, unit)
+}
+
+// start moves a ready unit to implementing and queues its mason's first
+// turn. The unit's bundle is assembled and its workspace opened first, so a
+// unit whose spec no longer matches its seal is not started: start reports
+// false and records nothing. A unit whose state moved since it was read is
+// left to the next pass.
+func (m *masons) start(ctx context.Context, b building, unit string) (bool, error) {
+	mason, err := m.bundle(ctx, b.stream, unit)
+	if errors.Is(err, bundle.ErrStaleSpec) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	w, base, err := newUnitWorkspaces(m.cfg).open(ctx, b.stream, unit)
+	if err != nil {
+		return false, err
+	}
+	subject := trace.UnitSubject(unit)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: masonTransitionID(unit), Revision: 1, Project: m.repository.Project(), Workstream: b.stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: subject + "-" + UnitReady}
+	tr := trace.Transition{Header: h, Subject: subject, From: UnitReady, To: UnitImplementing,
+		Reason: fmt.Sprintf("unit %s is the next ready unit of the plan of seal %d; its mason works in the unit's workspace on %s, created from %s at %s", unit, mason.Seal, w.Branch, featureBranch(b.stream), base)}
+	if _, err := m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr}); errors.Is(err, trace.ErrConflict) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, m.enqueue(ctx, b.stream, unit, mason, tr)
+}
+
+// resume queues the first turn of an implementing unit's mason when it is
+// not queued yet, as after a stop between the unit's move and the turn,
+// opening the unit's workspace first when it is missing.
+func (m *masons) resume(ctx context.Context, stream config.WorkstreamID, unit string) error {
+	queued, err := m.queued(stream, unit)
+	if err != nil || queued {
+		return err
+	}
+	if _, _, err := newUnitWorkspaces(m.cfg).open(ctx, stream, unit); err != nil {
+		return err
+	}
+	transitions, err := trace.Read[trace.Transition](m.repository, stream)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(transitions, func(t trace.Transition) bool { return t.ID == masonTransitionID(unit) })
+	if i < 0 {
+		return fmt.Errorf("transition %s is missing", masonTransitionID(unit))
+	}
+	mason, err := m.bundle(ctx, stream, unit)
+	if errors.Is(err, bundle.ErrStaleSpec) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return m.enqueue(ctx, stream, unit, mason, transitions[i])
+}
+
+// queued reports whether the unit's mason has its first turn.
+func (m *masons) queued(stream config.WorkstreamID, unit string) (bool, error) {
+	t, err := m.repository.Thread(stream, masonAgent(unit))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(t.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == masonTurnID(unit) }), nil
+}
+
+// enqueue creates the unit's mason thread when it is missing and queues its
+// first turn, caused by the unit's move to implementing and stamped with its
+// time, with the unit's bundle in the prompt.
+func (m *masons) enqueue(ctx context.Context, stream config.WorkstreamID, unit string, mason bundle.Mason, moved trace.Transition) error {
+	agent := masonAgent(unit)
+	if _, err := m.repository.Thread(stream, agent); errors.Is(err, os.ErrNotExist) {
+		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: agent, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: moved.At, Actor: masonActor, Cause: moved.ID}, Role: masonRole, ThreadID: agent}
+		if err := m.repository.CreateThread(ctx, identity); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	profile, _, err := m.s.roleExecution(m.cfg, masonRole)
+	if err != nil {
+		return err
+	}
+	turn := masonTurnID(unit)
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: moved.At, Actor: masonActor, Cause: moved.ID, Depth: 1},
+		AgentID: agent, ThreadID: agent, TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(m.cfg.Project), Prompt: masonPrompt(mason)}
+	_, err = m.repository.EnqueueTurn(ctx, req)
+	return err
+}
+
+func masonSystemPrompt(p config.Project) string {
+	return fmt.Sprintf("You are a mason of the %s project (%s). You build one unit of a ratified plan in a workspace of its own, whose files are your view. You hold no version control tool: the service records your work. Build what the sealed spec says, for the criteria of your unit, and put in place the proofs the plan names for them.", p.Name, p.Upstream)
+}
+
+func masonPrompt(m bundle.Mason) string {
+	return fmt.Sprintf(`Build unit %s of this workstream.
+
+Your view holds the project's files as the feature branch had them when the unit started, with the work done on the unit since. Make each of the unit's criteria below hold, and put in place and pass the proof the plan names for it. Stay within the unit's footprint. The spec below is the one the owner ratified; build against it.
+
+%s`, m.Unit, m.Render())
+}

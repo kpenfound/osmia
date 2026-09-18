@@ -111,6 +111,14 @@ func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		for _, role := range []string{"mason", "reviewer"} {
 			turns.Grants[role] = coreadapter.Capabilities{Tools: []string{questions.AskTool}}
 		}
+		// The fake workers build no unit: each works in the empty directory
+		// the chief of staff is handed, with no workspace to copy back to.
+		turns.Workspaces, turns.Capture = stagedWorkspaces{}, nil
+		selectChief := turns.Select
+		turns.Select = func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
+			scope.Role = trace.ChiefOfStaff
+			return selectChief(ctx, scope)
+		}
 		chief := turns.Scoped
 		turns.Scoped = func(ctx context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Role == trace.ChiefOfStaff {

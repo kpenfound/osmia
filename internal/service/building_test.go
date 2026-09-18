@@ -46,6 +46,19 @@ func (f *architectFixture) buildOperations(t *testing.T, stream config.Workstrea
 // building.
 func buildTransitions(t *testing.T, directory string, stream config.WorkstreamID) []trace.Transition {
 	t.Helper()
+	var out []trace.Transition
+	for _, tr := range allTransitions(t, directory, stream) {
+		if tr.Actor == buildingActor || tr.Subject == buildSubject || tr.To == BuildingState {
+			out = append(out, tr)
+		}
+	}
+	return out
+}
+
+// allTransitions returns every transition of the workstream's events.jsonl,
+// in the order it holds them.
+func allTransitions(t *testing.T, directory string, stream config.WorkstreamID) []trace.Transition {
+	t.Helper()
 	data, err := os.ReadFile(filepath.Join(directory, "workstreams", string(stream), "events.jsonl"))
 	must(t, err)
 	var out []trace.Transition
@@ -55,7 +68,7 @@ func buildTransitions(t *testing.T, directory string, stream config.WorkstreamID
 		}
 		var tr trace.Transition
 		must(t, json.Unmarshal(line, &tr))
-		if tr.Schema == "osmia.trace.transition" && (tr.Subject == buildSubject || strings.HasPrefix(tr.Subject, "unit-") || tr.To == BuildingState) {
+		if tr.Schema == "osmia.trace.transition" {
 			out = append(out, tr)
 		}
 	}
@@ -83,7 +96,13 @@ func moves(t *testing.T, transitions []trace.Transition) []transitionMove {
 // workstream once its build is acknowledged.
 func (f *shedFixture) built(t *testing.T) (config.WorkstreamID, trace.OperationRecord) {
 	t.Helper()
-	stream := f.handInSkipping(t, "design")
+	return f.builtAs(t, "design")
+}
+
+// builtAs is built with the design handed in under key.
+func (f *shedFixture) builtAs(t *testing.T, key string) (config.WorkstreamID, trace.OperationRecord) {
+	t.Helper()
+	stream := f.handInSkipping(t, key)
 	f.awaitPacket(t, stream, "ratify: no objection stands")
 	f.awaitFeature(t, stream, InShedState)
 	if _, err := f.c.Ratify(context.Background(), stream, 1, 1); err != nil {

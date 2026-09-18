@@ -39,13 +39,18 @@ func CoreEnforcement() Enforcement {
 // question tools. The chief of staff reads its context from the prompt.
 var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName}, questions.ChiefTools...)}
 
+// masonGrant is what a mason thread turn may do: read, write and execute in
+// its view of its unit's workspace.
+var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write"}, WriteFiles: true, Execute: true}
+
 // Enforce returns opts with Librarian, Architect, Committee and Threads
-// running every role turn through e. Thread turns are granted to the chief of staff only;
-// a turn of any other role fails with a recorded reason. Each role's sandbox
-// comes from its configuration, and a sandbox the platform cannot enforce
-// fails the turn with core's reason. Thread turns take the chief of staff's
-// sandbox and the root from the configuration the service has loaded, and
-// record UTC times.
+// running every role turn through e. Thread turns are granted to the chief of
+// staff and the mason only; a turn of any other role fails with a recorded
+// reason. A mason turn works on a view of its unit's workspace, copied back
+// into the workspace after the turn. Each role's sandbox comes from its
+// configuration, and a sandbox the platform cannot enforce fails the turn with
+// core's reason. Thread turns take their role's sandbox and the root from the
+// configuration the service has loaded, and record UTC times.
 func Enforce(opts Options, e Enforcement) Options {
 	opts.Librarian = &Librarian{Engine: e.Engine, Hosts: e.Hosts}
 	opts.Architect = &Architect{Engine: e.Engine, Hosts: e.Hosts}
@@ -62,14 +67,19 @@ func Enforce(opts Options, e Enforcement) Options {
 			return nil, err
 		}
 		project := string(r.Project())
+		units := newUnitWorkspaces(cfg)
 		turns := &isolation.Turns{
-			Workspaces: stagedWorkspaces{},
+			Workspaces: threadWorkspaces{units: units},
 			Views:      isolation.Views{Directory: views},
-			Grants:     map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant},
-			Select: func(_ context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
+			Grants:     map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant},
+			Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 				role, ok := cfg.Roles[scope.Role]
 				if !ok || scope.Project != project {
 					return isolation.Selection{}, errors.New("view selection denied")
+				}
+				execution := coreadapter.ExecutionSettings{Mode: role.Sandbox, Image: role.Image}
+				if scope.Role == masonRole {
+					return units.selection(ctx, scope, execution)
 				}
 				// The chief of staff is handed an empty workspace.
 				workspace := filepath.Join(root, "workspaces", project, scope.Workstream)
@@ -78,10 +88,13 @@ func Enforce(opts Options, e Enforcement) Options {
 				}
 				return isolation.Selection{
 					Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace},
-					Execution: coreadapter.ExecutionSettings{Mode: role.Sandbox, Image: role.Image},
+					Execution: execution,
 				}, nil
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
+				if scope.Role != trace.ChiefOfStaff {
+					return nil, nil
+				}
 				set, err := status.Tool(r, trace.ChiefOfStaff, scope, now)
 				if err != nil {
 					return nil, err
@@ -91,6 +104,12 @@ func Enforce(opts Options, e Enforcement) Options {
 			},
 			Hosts:  e.Hosts,
 			Engine: e.Engine,
+			Capture: func(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView, result coreadapter.SessionResult) error {
+				if scope.Role != masonRole {
+					return nil
+				}
+				return units.capture(ctx, scope, view, result)
+			},
 		}
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: &questions.Turns{Turns: turns, Repository: r}, Now: now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
@@ -99,4 +118,15 @@ func Enforce(opts Options, e Enforcement) Options {
 			}}, nil
 	}
 	return opts
+}
+
+// threadWorkspaces lends a mason turn its unit's workspace and every other
+// thread turn the directory its selection stages.
+type threadWorkspaces struct{ units unitWorkspaces }
+
+func (w threadWorkspaces) Acquire(ctx context.Context, req coreadapter.WorkspaceRequest) (coreadapter.WorkspaceLease, error) {
+	if req.Scope.Role == masonRole {
+		return w.units.Acquire(ctx, req)
+	}
+	return stagedWorkspaces{}.Acquire(ctx, req)
 }

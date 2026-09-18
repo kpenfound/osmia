@@ -1152,9 +1152,42 @@ when the workflow changed between its reads and its commit, because the owner
 moved the workstream or a unit already has a state (`the workflow changed
 while the build ran; the workstream is <state>`).
 
+### Starting units
+
+With `Options.Threads` set, the mason controller runs in every reconciliation
+pass, before event delivery and the scheduler. It starts units of `building`
+workstreams, at most one `implementing` unit per workstream, while fewer than
+`capacity.masons` units are `implementing` in workstreams no pause covers. A
+workstream a runtime pause covers (a `factory` pause, a `project` pause on the
+active project or a `workstream` pause on it) starts no unit, and its
+`implementing` unit takes no mason slot, so the slot goes to a workstream that
+is not paused.
+
+A free slot goes first to the workstream earliest in the project's priority
+order (`PUT /v1/runtime/priority`), then to those it does not name; among
+equals, to the workstream that started a unit least recently, one that never
+did first, then in workstream ID order. In that workstream the controller takes
+the first `ready` unit in the plan's dependency order: every unit follows the
+units it depends on, and otherwise keeps its place in the plan.
+
+Starting a unit assembles its mason bundle from the sealed spec and plan, opens
+the unit's workspace, then records the transition `unit-<id>-implementing`
+from `ready` to `implementing` (actor `service`/`mason`, cause
+`unit-<id>-ready`) with the reason `unit <id> is the next ready unit of the plan
+of seal <k>; its mason works in the unit's workspace on <unit-branch>, created
+from <feature-branch> at <commit>`. It then creates the unit's mason thread,
+`mason-<id>` with the role `mason`, and queues its first turn,
+`mason-<id>-implement`, with the role's profile, the unit's bundle in its
+prompt and the transition as its cause. The scheduler dispatches that turn
+like any other thread turn. A unit whose spec no longer matches its seal is not
+started, and nothing is recorded for it. A unit moves to `implementing` once:
+the transition ID is fixed and a unit already `implementing` is never started
+again. A unit found `implementing` without its first mason turn, as after a
+stop between the two, gets its workspace and that turn on the next pass.
+
 ### Unit workspaces
 
-The service can give each unit of a workstream a workspace of its own: a Git
+The service gives each unit of a workstream a workspace of its own: a Git
 worktree of the clone at `<root>/units/<project-id>/<workstream-id>/<unit-id>`,
 on the branch `osmia-unit/<workstream-id>/<unit-id>`, created from the tip of
 the workstream's feature branch. Its name follows from the workstream and the
@@ -1165,7 +1198,7 @@ pruning forgets only worktrees whose directories are gone. A unit of a
 workstream without a feature branch has no workspace: `the clone has no
 feature branch <branch>`.
 
-A unit's workspace can be lent to a mason turn of that unit alone, and only
+A unit's workspace is lent to a mason turn of that unit alone, and only
 once it exists (`unit <unit-id> of workstream <workstream-id> has no
 workspace`); a turn of another role, or one without a workstream and unit, is
 refused with `a unit workspace is lent to a mason turn of a unit alone`. The
@@ -1175,7 +1208,7 @@ under the turn's [isolation](isolation.md#enforced-execution): no VCS
 executable, no VCS metadata readable or writable, and no environment but the
 service's. A workspace whose tree holds a symlink or a special file anywhere
 cannot be lent to a mason turn: the view refuses it with `symlinks and special
-files are not exposed`. Whatever the turn's result, the view can be copied back
+files are not exposed`. Whatever the turn's result, the view is copied back
 into the workspace: the workspace then holds exactly the view's regular files
 and directories, with each file's owner execute bit. VCS metadata the turn
 wrote into its view is not copied back, and the workspace's own `.git` is left
@@ -1363,8 +1396,11 @@ sketched, and every queued chief-of-staff turn. All four use one `Enforcement`:
 
 `Options.Threads` binds the thread dispatcher to isolated turns that grant only
 the chief of staff, with `set_status`, `answer`, `escalate`, `relay_ruling`,
-`route_amendment` and `propose_charter`. A thread turn of any other role fails with the recorded
-reason `role has no service grant`. The chief of staff's workspace is an empty
+`route_amendment` and `propose_charter`, and the mason, which may write and
+execute in its view and holds `file_read` and `file_write`. A thread turn of any other role
+fails with the recorded reason `role has no service grant`. A mason turn works
+on a view of its [unit's workspace](#unit-workspaces), which is copied back into
+the workspace after the turn. The chief of staff's workspace is an empty
 directory, `workspaces/<project-id>/<workstream-id>` under the root; its context
 is in the prompt. Its session directories are under
 `threads/<project-id>/<workstream-id>/<agent-id>/<turn-id>`. Its sandbox, image
@@ -1391,10 +1427,11 @@ librarian's extraction turns run in. Without it every extraction fails with a
 recorded reason, so a service without an execution engine still registers
 projects and reports the failure in status.
 
-With `Options.Threads` set, the service also runs queued workstream turns on its
-own and delivers outbox events to each chief of staff (see
-[event delivery](#event-delivery)). Event delivery followed by the scheduler
-replaces any `Schedule` hook in `Options.Reconciliation`; without
+With `Options.Threads` set, the service also starts ready units (see
+[starting units](#starting-units)), runs queued workstream turns on its own and
+delivers outbox events to each chief of staff (see
+[event delivery](#event-delivery)). The mason controller, event delivery and
+the scheduler, in that order, replace any `Schedule` hook in `Options.Reconciliation`; without
 `Options.Threads` that hook runs. In both cases the
 [architect controller](#architect-drafting), then the
 [shed controller](#the-shed-debate), then the

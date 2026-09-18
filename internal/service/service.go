@@ -44,6 +44,9 @@ type Options struct {
 	// clearing it lets them run. Outbox events are delivered to each
 	// workstream's chief of staff as queued turns, one per event window, and
 	// each recorded answer to a question is queued on its asker's thread.
+	// The mason controller starts the ready units of building workstreams,
+	// one implementing unit per workstream within capacity.masons, and queues
+	// each started unit's first mason turn for the scheduler.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error)
 	// Librarian supplies the execution boundary of the librarian's
@@ -425,9 +428,9 @@ func (s *Service) stop(active *activeProject) error {
 // boundary by the service's sealer for sealings and its builder for builds;
 // the architect controller, then the shed controller, then the sealing
 // controller, then the building controller run at the start of every pass, and the pass reconciles operations in stagePriority order. With
-// Options.Threads, outbox events are then delivered to each workstream's
-// chief of staff, recorded answers are queued on their askers' threads, and
-// the scheduler runs, whose gate holds turns that a runtime pause covers;
+// Options.Threads, the mason controller then starts ready units, outbox
+// events are delivered to each workstream's chief of staff, recorded answers
+// are queued on their askers' threads, and the scheduler runs, whose gate holds turns that a runtime pause covers;
 // without it, the configured Schedule hook runs instead.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, error) {
 	options, threads := s.options.Reconciliation, s.options.Threads
@@ -483,7 +486,8 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 			repository.Close()
 			return nil, nil, err
 		}
-		hooks = append(hooks, deliver.Pass, s.answers(cfg, repository).Pass, dispatch.Pass)
+		units := &masons{s: s, cfg: cfg, repository: repository}
+		hooks = append(hooks, units.Pass, deliver.Pass, s.answers(cfg, repository).Pass, dispatch.Pass)
 	}
 	options.Schedule = func(ctx context.Context) error {
 		for _, hook := range hooks {
