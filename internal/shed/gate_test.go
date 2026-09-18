@@ -89,6 +89,9 @@ func TestPacketPresentsWhatBlocksFirstAndRecommends(t *testing.T) {
 	if got := shed.Recommend([]shed.Entry{advice, settled}); got != "ratify: nothing blocks, and 2 objections stand as advice on the record" {
 		t.Fatalf("recommendation with nothing blocking: %q", got)
 	}
+	if got := shed.Recommend([]shed.Entry{advice}); got != "ratify: nothing blocks, and 1 objection stands as advice on the record" {
+		t.Fatalf("recommendation %q for one objection", got)
+	}
 	if got := shed.Recommend(nil); got != "ratify: no objection stands" {
 		t.Fatalf("recommendation with no dissent: %q", got)
 	}

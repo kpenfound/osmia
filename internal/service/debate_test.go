@@ -1176,7 +1176,7 @@ func TestDebateWithoutACommitteeRunnerStillRepliesAndConcludes(t *testing.T) {
 	f.start(t)
 	defer f.stop(t)
 	f.awaitShed(t, stream, "concluded-1")
-	if end, want := f.transition(t, stream, "shed-concluded-1"), "debate stopped after round 1, at the shed.max_rounds cap of 1, with 1 objections standing, 1 of them blocking; the cap approves nothing"; end.Reason != want {
+	if end, want := f.transition(t, stream, "shed-concluded-1"), "debate stopped after round 1, at the shed.max_rounds cap of 1, with 1 objection standing, 1 of them blocking; the cap approves nothing"; end.Reason != want {
 		t.Fatalf("conclusion %q, want %q", end.Reason, want)
 	}
 	if ran := f.ran(); ran[roundTurnID(2, committeeAgent(1), 1)] != 0 {

@@ -607,7 +607,7 @@ members failed, so no objection stands and nobody agreed`. Otherwise it ends
 at the cap, once the reply to the round limit is recorded: caused by
 `shed-reply-<n>-replied`, with the reason `debate stopped after round <n>, at
 the shed.max_rounds cap of <max>, with <k> objections standing, <b> of them
-blocking; the cap approves nothing`. The round limit is `shed.max_rounds`, read
+blocking; the cap approves nothing` (`1 objection standing` for one). The round limit is `shed.max_rounds`, read
 from the loaded configuration when the step is taken, until the owner asks for
 [further rounds](#more-debate) or for a [redraft](#redraft); from then on it is
 the last round they asked for, and the reason names it instead: `at round <n>,
@@ -786,7 +786,8 @@ packet. A packet holds:
   first, each marked `blocking` or advisory and carrying the owner's
   disposition where there is one;
 - `recommendation`: `ratify: no objection stands`, `ratify: nothing blocks, and
-  <k> objections stand as advice on the record`, or `do not ratify yet:
+  <k> objections stand as advice on the record` (`1 objection stands` for
+  one), or `do not ratify yet:
   ratification is blocked by <k> objections (<ids>); overrule or sustain each
   one, or ask for a redraft`.
 
