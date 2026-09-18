@@ -31,7 +31,9 @@ and reject absolute paths, traversal, symlinks and metadata components. The
 read-only view also rejects writes in the handler. Files added by a writable role
 remain inside that turn's view. The optional service `Capture` callback can inspect
 or snapshot output before cleanup, including partial output from failed execution.
-There is no automatic copy-back, commit, branch landing or delivery.
+`Turns` itself copies nothing back and makes no commit, branch landing or
+delivery; the service's [unit workspaces](service.md#unit-workspaces) use
+`Capture` to copy a mason turn's view back into its unit's workspace.
 
 The service closes the MCP host, view and provider lease, in that order, using a
 non-cancelled cleanup context. Cleanup errors accompany the
