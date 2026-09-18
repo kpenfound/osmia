@@ -146,7 +146,7 @@ func TestMoveFeatureStateWithRecordsTheOthersInTheSameCommit(t *testing.T) {
 
 	// A feature transaction among the others is refused, and so is the
 	// whole commit when one of them does not apply.
-	if _, err := r.MoveFeatureStateWith(ctx, header("transition", "building"), "ratified", "building", "Built", unit("again", FeatureSubject, "ratified", "delivered", 1)); err == nil || !strings.Contains(err.Error(), "must be of another subject") {
+	if _, err := r.MoveFeatureStateWith(ctx, header("transition", "building"), "ratified", "building", "Built", unit("again", FeatureSubject, "building", "delivered", 2)); err == nil || !strings.Contains(err.Error(), "must be of another subject") {
 		t.Fatalf("a feature transaction among the others: %v", err)
 	}
 	if _, err := r.MoveFeatureStateWith(ctx, header("transition", "building"), "ratified", "building", "Built", unit("unit-a-ready", a, "planned", "ready", 1)); !errors.Is(err, ErrConflict) {
