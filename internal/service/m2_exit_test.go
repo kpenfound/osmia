@@ -118,6 +118,11 @@ func (d *exitDemo) route(ctx context.Context, req agent.Request, verified *agent
 	if err != nil {
 		return nil, err
 	}
+	if strings.HasPrefix(req.Name, "mason-") {
+		// A building workstream starts its first ready unit. The
+		// demonstration ends at ratification, so the mason builds nothing.
+		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Nothing built", SessionDir: req.SessionDir, NumTurns: 1}, nil
+	}
 	d.mu.Lock()
 	play := d.plays[title][req.Name]
 	d.ran[title] = append(d.ran[title], req.Name)
@@ -607,7 +612,8 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	if s := sealOf(capped); s.Base.Commit != commit || s.Revision != (shed.Pin{Spec: 1, Plan: 1}) || branchAt(capped) != commit {
 		t.Fatalf("the capped seal %+v", s)
 	}
-	if out := demoGit(t, home, "-C", clone, "worktree", "list", "--porcelain"); strings.Count(out, "worktree ") != 4 {
+	// Unit workspaces, which building opens as units start, are left out.
+	if out := demoGit(t, home, "-C", clone, "worktree", "list", "--porcelain"); strings.Count(out, "worktree ")-strings.Count(out, "worktree "+filepath.Join(f.opts.Config.Root, unitsDirectory)+string(filepath.Separator)) != 4 {
 		t.Fatalf("worktrees:\n%s", out)
 	}
 	// Nothing is pushed: upstream has its main branch alone.
