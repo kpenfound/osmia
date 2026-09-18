@@ -746,12 +746,13 @@ func TestAbandonFailsARunningRound(t *testing.T) {
 func TestRoundOperationInputIsValidated(t *testing.T) {
 	t.Parallel()
 	for name, op := range map[string]coreadapter.Operation{
-		"another action":   {Boundary: coreadapter.RunnerBoundary, Action: thread.TurnAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1}`)},
-		"another boundary": {Boundary: "vcs", Action: RoundAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1}`)},
-		"unknown field":    {Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1,"extra":1}`)},
-		"no round":         {Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":0,"spec":1,"plan":1}`)},
-		"no spec revision": {Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":1,"spec":0,"plan":1}`)},
-		"no plan revision": {Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":1,"spec":1}`)},
+		"another action":      {Boundary: coreadapter.RunnerBoundary, Action: thread.TurnAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1}`)},
+		"another boundary":    {Boundary: "vcs", Action: RoundAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1}`)},
+		"unknown field":       {Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1,"extra":1}`)},
+		"no round":            {Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":0,"spec":1,"plan":1}`)},
+		"no spec revision":    {Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":1,"spec":0,"plan":1}`)},
+		"no plan revision":    {Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":1,"spec":1}`)},
+		"negative resumption": {Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1,"resume":-1}`)},
 	} {
 		if _, err := decodeRound(op); err == nil {
 			t.Errorf("%s: decoded", name)
@@ -759,6 +760,9 @@ func TestRoundOperationInputIsValidated(t *testing.T) {
 	}
 	if in, err := decodeRound(coreadapter.Operation{Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":2,"spec":3,"plan":4}`)}); err != nil || in != (roundInput{Round: 2, Spec: 3, Plan: 4}) {
 		t.Fatalf("decoded %+v %v", in, err)
+	}
+	if in, err := decodeRound(coreadapter.Operation{Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":2,"spec":3,"plan":4,"resume":2}`)}); err != nil || in != (roundInput{Round: 2, Spec: 3, Plan: 4, Resume: 2}) {
+		t.Fatalf("decoded resumption %+v %v", in, err)
 	}
 }
 

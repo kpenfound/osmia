@@ -457,15 +457,19 @@ and can correct it within the turn; it takes no ID and is not kept.
 A member that calls `ask` ends its turn with the outcome `waiting`, like any
 other asker: the question is recorded with a notice for the chief of staff,
 the thread parks and the member's slot is free. The round does not conclude
-without the member. Once every member's turn has ended and one of them is
-waiting, the operation parks the round instead of recording it: transition
+without the member. Once every member's turn has ended and one of them
+asked, the operation parks the round instead of recording it: transition
 `shed-round-<n>-waiting-<k>` moves the shed to `waiting-<n>` with the reason
 `round <n> against <revision> is parked: <agent> waits for the answer to
 question <q>` (one clause per waiting member, joined by `; `), and the
 operation ends with the outcome `waiting` and that reason as evidence. `k`
 counts the round's parks from 1. Nothing is recorded, no reply is requested
 and the workstream stays `in-shed`, however long the answer takes: a question
-has no timeout, and a restart finds the round parked and leaves it so.
+has no timeout, and a restart finds the round parked and leaves it so. What
+the asking turn ended with does not matter: a turn that asked and then failed,
+or that a service stop interrupted, waits for its answer like one that ended
+waiting, since the answer is delivered on the thread that asked; the member
+gets no new attempt, and what the turn contributed before asking is kept.
 
 The [answer](trace.md#tools-and-delivery) is queued as turn `answer_<q>` on the
 member's thread, with the asking turn's system prompt. Once every waiting

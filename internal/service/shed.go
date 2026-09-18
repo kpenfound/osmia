@@ -573,9 +573,9 @@ func (d *debate) request(ctx context.Context, stream config.WorkstreamID, state 
 }
 
 // resume requests round n again once every member whose last turn of the
-// round ended waiting has its answer queued on its thread. The resumption is
-// pinned to the round's own revision and caused by the transition that parked
-// it. A member still waiting parks the round as it is.
+// round asked a question has its answer queued on its thread. The resumption
+// is pinned to the round's own revision and caused by the transition that
+// parked it. A member still waiting parks the round as it is.
 func (d *debate) resume(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, n int) error {
 	members, err := d.committee(stream)
 	if err != nil {
@@ -590,7 +590,7 @@ func (d *debate) resume(ctx context.Context, stream config.WorkstreamID, state t
 		if err != nil {
 			return err
 		}
-		if turns := roundTurns(t, n, asked); len(turns) > 0 && turns[len(turns)-1].Status() == questions.Waiting {
+		if turns := roundTurns(t, n, asked); len(turns) > 0 && askedBy(asked, t.Identity.ThreadID, turns[len(turns)-1].Request.TurnID) != "" {
 			return nil
 		}
 	}
@@ -891,10 +891,12 @@ func (d *debate) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 
 // member drives one member's turn of the round to its end and returns what
 // the member contributed, with the ID of the question the member waits on
-// when its last turn asked one. It abandons a turn a previous service stop
-// interrupted, starts a new turn while attempts remain and runs the pending
-// turn, the next attempt or the answer to the member's question, through the
-// dispatcher.
+// when its last turn asked one, whatever that turn ended with: a question is
+// answered on the thread it was asked on, so a turn that asked and then
+// failed or was interrupted waits for its answer like one that ended waiting.
+// It abandons a turn a previous service stop interrupted, starts a new turn
+// while attempts remain and runs the pending turn, the next attempt or the
+// answer to the member's question, through the dispatcher.
 func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream config.WorkstreamID, operation string, in roundInput, member string) (shed.Record, string, error) {
 	empty := shed.Record{Version: shed.Version, Round: in.Round, Member: member, Revision: in.pin()}
 	for {
@@ -916,19 +918,31 @@ func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream
 				attempts++
 			}
 		}
-		var last *trace.QueuedTurn
+		var last, claimed *trace.QueuedTurn
 		if len(turns) > 0 {
 			last = &turns[len(turns)-1]
 		}
+		// A claimed turn without a response is running, or a service stop
+		// interrupted it; the answer to a question it asked may be queued
+		// after it.
+		if i := slices.IndexFunc(turns, func(q trace.QueuedTurn) bool { return q.Claim != nil && q.Response == nil }); i >= 0 {
+			claimed = &turns[i]
+		}
 		switch {
-		case last != nil && last.Claim != nil && last.Response == nil:
+		case claimed != nil:
 			if t.Status != "interrupted" {
-				return empty, "", errors.New("committee turn " + last.Request.TurnID + " is still running")
+				return empty, "", errors.New("committee turn " + claimed.Request.TurnID + " is still running")
 			}
-			if err := d.repository.AbandonTurn(ctx, stream, member, last.Request.TurnID, d.s.now()); err != nil {
+			if err := d.repository.AbandonTurn(ctx, stream, member, claimed.Request.TurnID, d.s.now()); err != nil {
 				return empty, "", err
 			}
 		case last == nil || last.Status() == "interrupted":
+			if last != nil {
+				if id := askedBy(asked, t.Identity.ThreadID, last.Request.TurnID); id != "" {
+					record, err := d.contributed(stream, roundChain(t, in.Round, asked)[last.Request.TurnID], empty)
+					return record, id, err
+				}
+			}
 			if gone, err := abandoned(d.repository, stream); err != nil || gone {
 				empty.Failure = "the workstream was abandoned, so the member ran no turn"
 				return empty, "", err
@@ -972,10 +986,8 @@ func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream
 			if err != nil {
 				return empty, "", err
 			}
-			if last.Status() == questions.Waiting {
-				if id := askedBy(asked, t.Identity.ThreadID, last.Request.TurnID); id != "" {
-					return record, id, nil
-				}
+			if id := askedBy(asked, t.Identity.ThreadID, last.Request.TurnID); id != "" {
+				return record, id, nil
 			}
 			if last.Status() != "idle" {
 				record.Failure = "the turn ended with status " + last.Status()

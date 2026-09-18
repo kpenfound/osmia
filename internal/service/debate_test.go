@@ -954,6 +954,7 @@ func TestReplyOperationInputIsValidated(t *testing.T) {
 		"unknown field":    {Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1,"extra":1}`)},
 		"no round":         {Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: json.RawMessage(`{"round":0,"spec":1,"plan":1}`)},
 		"no revision":      {Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: json.RawMessage(`{"round":1}`)},
+		"a resumption":     {Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1,"resume":1}`)},
 	} {
 		if _, err := decodeShed(op, ReplyAction); err == nil {
 			t.Errorf("%s: decoded", name)
