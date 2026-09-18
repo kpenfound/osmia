@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/kpenfound/busybees/core/vcs"
@@ -119,8 +120,10 @@ func (u unitWorkspaces) Acquire(ctx context.Context, req coreadapter.WorkspaceRe
 	return coreadapter.WorkspaceLease{Workspace: coreadapter.Workspace{ID: unitName(stream, scope.Unit), Directory: w.Path, Access: req.Access}, Lease: noLease{}}, nil
 }
 
-// paths selects every entry at the top of a unit's workspace but its VCS
-// metadata, so a mason turn's view is all of the workspace's files.
+// paths selects every directory and regular file at the top of a unit's
+// workspace but its VCS metadata, so a mason turn's view is all of the
+// workspace's files but its symlinks and special files, which a view never
+// holds.
 func (u unitWorkspaces) paths(w workspace.Worktree) ([]string, error) {
 	entries, err := os.ReadDir(w.Path)
 	if err != nil {
@@ -128,7 +131,7 @@ func (u unitWorkspaces) paths(w workspace.Worktree) ([]string, error) {
 	}
 	var paths []string
 	for _, entry := range entries {
-		if !isolation.VCSMetadata(entry.Name()) {
+		if !isolation.VCSMetadata(entry.Name()) && (entry.IsDir() || entry.Type().IsRegular()) {
 			paths = append(paths, entry.Name())
 		}
 	}
@@ -151,8 +154,9 @@ func (u unitWorkspaces) selection(ctx context.Context, scope coreadapter.Scope, 
 }
 
 // capture copies a mason turn's view back into its unit's workspace, whatever
-// the turn's result: the workspace then holds exactly the view's files, and
-// its VCS metadata is left as it is.
+// the turn's result: the workspace then holds the view's files, and its VCS
+// metadata, symlinks and special files, and the directories that hold them, are
+// left as they are; a view entry in their place is not copied back.
 func (u unitWorkspaces) capture(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView, _ coreadapter.SessionResult) error {
 	stream := config.WorkstreamID(scope.Workstream)
 	w, _, found, err := u.find(ctx, stream, scope.Unit)
@@ -166,9 +170,10 @@ func (u unitWorkspaces) capture(ctx context.Context, scope coreadapter.Scope, vi
 }
 
 // mirror makes dst hold the regular files and directories of src, and
-// nothing else outside its VCS metadata, which it leaves as it is. VCS
-// metadata, symlinks and special files in src are not copied. A file keeps its
-// owner's execute bit.
+// nothing else outside what it keeps. It keeps dst's VCS metadata, symlinks
+// and special files as they are, and the directories that hold them; an entry
+// of src in their place is not copied. VCS metadata, symlinks and special files
+// in src are not copied. A file keeps its owner's execute bit.
 func mirror(src, dst string) error {
 	from, err := os.OpenRoot(src)
 	if err != nil {
@@ -180,7 +185,10 @@ func mirror(src, dst string) error {
 		return err
 	}
 	defer to.Close()
-	err = fs.WalkDir(from.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
+	if _, err := prune(from, to, ".", true); err != nil {
+		return err
+	}
+	return fs.WalkDir(from.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil || name == "." {
 			return err
 		}
@@ -188,21 +196,23 @@ func mirror(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		if !copied(name, info) {
+		skip := func() error {
 			if info.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
 		}
+		if !copied(name, info) {
+			return skip()
+		}
+		// What prune left in the way of this entry is what dst keeps.
 		existing, err := to.Lstat(name)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 		case err != nil:
 			return err
 		case existing.IsDir() != info.IsDir() || !existing.IsDir() && !existing.Mode().IsRegular():
-			if err := to.RemoveAll(name); err != nil {
-				return err
-			}
+			return skip()
 		}
 		if info.IsDir() {
 			return to.MkdirAll(name, 0755)
@@ -220,34 +230,55 @@ func mirror(src, dst string) error {
 		}
 		return to.Chmod(name, perm)
 	})
+}
+
+// prune removes from the directory dir of dst every regular file and
+// directory that src does not hold as the same kind of entry, and reports
+// whether dir still holds anything. inSrc tells whether src holds dir as a
+// directory. It keeps VCS metadata, symlinks and special files, and the
+// directories that hold them.
+func prune(from, to *os.Root, dir string, inSrc bool) (bool, error) {
+	entries, err := fs.ReadDir(to.FS(), dir)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return fs.WalkDir(to.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
-		if err != nil || name == "." {
-			return err
+	kept := false
+	for _, entry := range entries {
+		name := path.Join(dir, entry.Name())
+		info, err := to.Lstat(name)
+		if err != nil {
+			return false, err
 		}
-		if isolation.VCSMetadata(entry.Name()) {
-			if entry.IsDir() {
-				return fs.SkipDir
+		if isolation.VCSMetadata(entry.Name()) || !info.IsDir() && !info.Mode().IsRegular() {
+			kept = true
+			continue
+		}
+		var source fs.FileInfo
+		if inSrc {
+			if source, err = from.Lstat(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return false, err
 			}
-			return nil
 		}
-		info, err := from.Lstat(name)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
+		same := source != nil && copied(name, source) && source.IsDir() == info.IsDir()
+		if !info.IsDir() {
+			if same {
+				kept = true
+			} else if err := to.Remove(name); err != nil {
+				return false, err
+			}
+			continue
 		}
-		if err == nil && copied(name, info) {
-			return nil
+		holds, err := prune(from, to, name, same)
+		if err != nil {
+			return false, err
 		}
-		if err := to.RemoveAll(name); err != nil {
-			return err
+		if same || holds {
+			kept = true
+		} else if err := to.Remove(name); err != nil {
+			return false, err
 		}
-		if entry.IsDir() {
-			return fs.SkipDir
-		}
-		return nil
-	})
+	}
+	return kept, nil
 }
 
 // copied reports whether mirror copies an entry of its source: a directory

@@ -1206,13 +1206,16 @@ lease never removes the workspace. Such a turn works on a
 [private view](isolation.md) of every file of the workspace but its `.git`,
 under the turn's [isolation](isolation.md#enforced-execution): no VCS
 executable, no VCS metadata readable or writable, and no environment but the
-service's. A workspace whose tree holds a symlink or a special file anywhere
-cannot be lent to a mason turn: the view refuses it with `symlinks and special
-files are not exposed`. Whatever the turn's result, the view is copied back
-into the workspace: the workspace then holds exactly the view's regular files
-and directories, with each file's owner execute bit. VCS metadata the turn
-wrote into its view is not copied back, and the workspace's own `.git` is left
-as it is.
+service's. The view leaves out the workspace's symlinks and special files, at
+the top and nested, so the turn never sees them. Whatever the turn's result,
+the view is copied back into the workspace: the workspace then holds the
+view's regular files and directories, with each file's owner execute bit, and
+nothing else but what it keeps. VCS metadata, symlinks and special files the turn put into its
+view are not copied back. The workspace's own `.git`, symlinks and special
+files are left as they are, and so are the directories holding them, even when
+the turn removed such a directory from its view; a file or directory the turn
+put in the place of one of them is not copied back. A candidate snapshot
+therefore records the workspace's symlinks unchanged.
 
 The service can snapshot a unit's workspace as its candidate: a commit of the
 worktree's whole tree, untracked files included and files the repository

@@ -77,8 +77,9 @@ func checkPath(root *os.Root, name string, missing bool) error {
 }
 
 // Create copies explicitly selected files or directories into a new private view.
-// Selecting a directory excludes VCS entries at every depth; explicitly selecting
-// metadata, a symlink or an unsupported file type fails the entire acquisition.
+// Selecting a directory excludes VCS entries, symlinks and special files at every
+// depth; explicitly selecting metadata, a symlink or an unsupported file type
+// fails the entire acquisition.
 func (v Views) Create(ctx context.Context, source coreadapter.Workspace, paths []string) (_ *FileView, err error) {
 	if source.Access != coreadapter.ReadOnly && source.Access != coreadapter.ReadWrite {
 		return nil, errors.New("invalid view access")
@@ -136,6 +137,9 @@ func (v Views) Create(ctx context.Context, source coreadapter.Workspace, paths [
 				if entry.IsDir() {
 					return fs.SkipDir
 				}
+				return nil
+			}
+			if name != selected && !entry.IsDir() && !entry.Type().IsRegular() {
 				return nil
 			}
 			if err := checkPath(src, name, false); err != nil {
