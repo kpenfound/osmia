@@ -111,23 +111,27 @@ type CharterState struct {
 // HandInRequest hands work to a project. Exactly one of Path (an absolute
 // path to a file), URL (a GitHub issue URL) and Stdin (the input itself) is
 // set. Key identifies the request: a retry with the same key returns the same
-// workstream.
+// workstream. SkipDebate asks for the workstream's debate to be skipped: its
+// spec and plan go to the owner's ratification without a committee.
 type HandInRequest struct {
-	Project config.ProjectID `json:"project"`
-	Key     string           `json:"key"`
-	Path    string           `json:"path,omitempty"`
-	URL     string           `json:"url,omitempty"`
-	Stdin   *string          `json:"stdin,omitempty"`
+	Project    config.ProjectID `json:"project"`
+	Key        string           `json:"key"`
+	Path       string           `json:"path,omitempty"`
+	URL        string           `json:"url,omitempty"`
+	Stdin      *string          `json:"stdin,omitempty"`
+	SkipDebate bool             `json:"skip_debate,omitempty"`
 }
 
 // HandInResponse names the workstream a hand-in created. Handed is the path
 // of the copied input; Source is where it came from, as recorded.
+// SkipDebate reports that the hand-in skipped the workstream's debate.
 type HandInResponse struct {
 	Project    config.ProjectID    `json:"project"`
 	Workstream config.WorkstreamID `json:"workstream"`
 	State      string              `json:"state"`
 	Handed     string              `json:"handed"`
 	Source     string              `json:"source"`
+	SkipDebate bool                `json:"skip_debate,omitempty"`
 }
 
 // AbandonRequest abandons a workstream for the owner's reason.

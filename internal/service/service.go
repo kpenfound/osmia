@@ -57,9 +57,10 @@ type Options struct {
 	// requested redrafts wait.
 	Architect *Architect
 	// Committee supplies the execution boundary of the committee's shed
-	// turns. Without it no workstream enters the shed and no round is
-	// requested, a round already requested stays pending, and sketched
-	// workstreams and replied rounds wait. The architect's replies and the
+	// turns. Without it no round is requested, a round already requested
+	// stays pending, and sketched workstreams and replied rounds wait; only a
+	// workstream whose debate the owner skipped at hand-in enters the shed,
+	// without a committee. The architect's replies and the
 	// debate's conclusion need no committee runner.
 	Committee *Committee
 	// Issues fetches issue URLs handed in. It defaults to the GitHub REST API
