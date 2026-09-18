@@ -32,7 +32,8 @@ const masonWrote = "internal/trace/built.go"
 
 // fakeMasons plays every mason turn of the fixture. Each turn checks that it
 // holds its view's file tools and done alone, records what it saw, writes
-// masonWrote into its view and then plays what play holds for the turn.
+// masonWrote into its view and then plays what play holds for the turn,
+// which ends the turn failed by returning errFailTurn.
 type fakeMasons struct {
 	mu       sync.Mutex
 	runs     map[string][]agent.Request
@@ -62,7 +63,9 @@ func (m *fakeMasons) turn(ctx context.Context, req agent.Request, _ *agent.Turn,
 	stream := sessionStream(req)
 	m.runs[stream] = append(m.runs[stream], req)
 	if play := m.play[req.Name]; play != nil {
-		if err := play(ctx, req, tools); err != nil {
+		if err := play(ctx, req, tools); errors.Is(err, errFailTurn) {
+			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Crashed", SessionDir: req.SessionDir, NumTurns: 1, IsError: true, ErrorSubtype: "execution"}, nil
+		} else if err != nil {
 			m.problems = append(m.problems, fmt.Sprintf("%s: %v", req.Name, err))
 		}
 	}
@@ -78,6 +81,9 @@ func sessionStream(req agent.Request) string {
 	}
 	return ""
 }
+
+// errFailTurn is what a fake mason's play returns to end its turn failed.
+var errFailTurn = errors.New("the turn fails")
 
 // requests returns the mason turns that ran in the workstream.
 func (m *fakeMasons) requests(stream config.WorkstreamID) []agent.Request {

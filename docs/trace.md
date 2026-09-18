@@ -56,8 +56,10 @@ leading zeros and `<agent>` is the committee member's agent ID,
 `shed/round-<n>/redrafted.json`, its
 [redraft](service.md#redraft) at the owner's request, a record of the same
 shape as a reply, `shed/round-<n>/packet.json`, the
-[ratification packet](service.md#the-packet) the chief of staff presents, and
-the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
+[ratification packet](service.md#the-packet) the chief of staff presents,
+`units/<unit>/report.json`, a unit's
+[report and candidate](service.md#finishing-units), where `<unit>` is the unit
+ID, and the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
 round: `shed/round-<n>/owner.json`, the owner's objections, a record of the
 same shape as a member's; `shed/round-<n>/rulings.json`, what the owner ruled
 and overruled about the objections that stand; `shed/round-<n>/more.json`, the
@@ -96,6 +98,12 @@ disk. The [knowledge-base extraction](knowledge-base.md#extraction) records
 each pass this way, [architect drafting](service.md#architect-drafting)
 records each draft's `spec.md` and `plan.json`, and a
 [committee round](service.md#the-record) records one file per member.
+
+`RecordDocumentsWith(ctx, documents, transactions...)` records document
+revisions of one workstream the same way and applies the workflow
+transactions in the same commit: after a failure either all of it is recorded
+or none of it. A unit's report and its move to `reviewing` are recorded this
+way.
 
 `Read[trace.Document](repository, workstreamID)` enumerates typed revisions;
 `Get[trace.Document](repository, workstreamID, id, revision)` retrieves one.

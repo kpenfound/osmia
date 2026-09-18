@@ -113,7 +113,7 @@ func (f *shedFixture) checkCandidate(t *testing.T, stream config.WorkstreamID, r
 // unit's workspace as its candidate, records the report with the candidate
 // as units/<unit>/report.json and moves the unit to reviewing, whatever
 // outcome the mason gave. That frees the workstream to start its next ready
-// unit. A mason whose reports were all refused leaves its unit
+// unit. A turn that fails after its report was accepted leaves its unit
 // implementing.
 func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	t.Parallel()
@@ -153,15 +153,32 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		}
 		return nil
 	}
+	dedupeReport := CriterionReport{Criterion: "spec#2", Done: "skip acknowledged chunks", Evidence: "no chunk is sent twice", Proof: "internal/trace/built.go"}
 	masons.play[masonTurnID("dedupe")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built", "criteria": []any{}}); err != nil || recorded || reason != "the report misses spec#2: report on every criterion of unit dedupe" {
 			return fmt.Errorf("incomplete report: recorded %t, reason %q (%v)", recorded, reason, err)
 		}
-		return nil
+		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built", "criteria": []any{criterionArgs(dedupeReport)}}); err != nil || !recorded {
+			return fmt.Errorf("complete report: reason %q (%v)", reason, err)
+		}
+		return errFailTurn
 	}
 	stream, _ := f.builtAs(t, "design")
 	f.awaitUnit(t, stream, "resume", UnitReviewing)
-	f.awaitMasonRan(t, stream, "dedupe")
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		th, err := f.repository().Thread(stream, masonAgent("dedupe"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		if err == nil && len(th.Turns) > 0 && !th.Turns[0].CompletedAt.IsZero() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the mason of unit dedupe never ran")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	settle()
 	masons.check(t)
 	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitReviewing}, {Unit: "dedupe", State: UnitImplementing}})
@@ -203,13 +220,15 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
 
+	// A turn that failed after its report was accepted does not finish its
+	// unit.
 	if got := f.reports(t, stream, "dedupe"); len(got) != 0 {
-		t.Fatalf("the refused report was recorded: %+v", got)
+		t.Fatalf("the failed turn's report was recorded: %+v", got)
 	}
 	th, err = f.repository().Thread(stream, masonAgent("dedupe"))
 	must(t, err)
-	if turn := th.Turns[0]; turn.Status() != "idle" || turn.Response.Result.Outcome != nil {
-		t.Fatalf("the refused mason's turn ended %s with %+v", turn.Status(), turn.Response.Result.Outcome)
+	if turn := th.Turns[0]; turn.Status() != "failed" || turn.Response.Result.Outcome == nil || turn.Response.Result.Outcome.Status != masonDone {
+		t.Fatalf("the failing mason's turn ended %s with %+v", turn.Status(), turn.Response.Result.Outcome)
 	}
 
 	// A unit that is no longer implementing takes no report.

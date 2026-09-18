@@ -236,7 +236,7 @@ func (t *reportingTurns) CheckResume(ctx context.Context, previous, next coreada
 }
 
 // reported returns the report of the unit's mason when the last turn of its
-// thread ended with done, and that turn's response.
+// thread ended cleanly with done, and that turn.
 func (m *masons) reported(stream config.WorkstreamID, unit string) (MasonReport, trace.QueuedTurn, bool, error) {
 	th, err := m.repository.Thread(stream, masonAgent(unit))
 	if errors.Is(err, os.ErrNotExist) || err == nil && len(th.Turns) == 0 {
