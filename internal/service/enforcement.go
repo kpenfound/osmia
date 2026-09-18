@@ -40,16 +40,18 @@ func CoreEnforcement() Enforcement {
 var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName}, questions.ChiefTools...)}
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
-// its view of its unit's workspace, and ask the chief of staff.
-var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool}, WriteFiles: true, Execute: true}
+// its view of its unit's workspace, ask the chief of staff and report its
+// unit done.
+var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, doneTool}, WriteFiles: true, Execute: true}
 
 // Enforce returns opts with Librarian, Architect, Committee and Threads
 // running every role turn through e. Thread turns are granted to the chief of
 // staff and the mason only; a turn of any other role fails with a recorded
 // reason. A mason turn works on a view of its unit's workspace, copied back
-// into the workspace after the turn. Each role's sandbox comes from its
-// configuration, and a sandbox the platform cannot enforce fails the turn with
-// core's reason. Thread turns take their role's sandbox and the root from the
+// into the workspace after the turn, and a mason turn whose done the service
+// accepted ends with the outcome done and the mason's report. Each role's
+// sandbox comes from its configuration, and a sandbox the platform cannot
+// enforce fails the turn with core's reason. Thread turns take their role's sandbox and the root from the
 // configuration the service has loaded, and record UTC times.
 func Enforce(opts Options, e Enforcement) Options {
 	opts.Librarian = &Librarian{Engine: e.Engine, Hosts: e.Hosts}
@@ -68,6 +70,7 @@ func Enforce(opts Options, e Enforcement) Options {
 		}
 		project := string(r.Project())
 		units := newUnitWorkspaces(cfg)
+		reports := &masonReports{}
 		turns := &isolation.Turns{
 			Workspaces: threadWorkspaces{units: units},
 			Views:      isolation.Views{Directory: views},
@@ -93,7 +96,8 @@ func Enforce(opts Options, e Enforcement) Options {
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				if scope.Role == masonRole {
-					return questions.Tools(r, masonAgent(scope.Unit), scope, now)
+					ask, err := questions.Tools(r, masonAgent(scope.Unit), scope, now)
+					return append(ask, reports.tool(r, scope)), err
 				}
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil
@@ -114,7 +118,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				return units.capture(ctx, scope, view, result)
 			},
 		}
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: &questions.Turns{Turns: turns, Repository: r}, Now: now},
+		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: &questions.Turns{Turns: &reportingTurns{Turns: turns, reports: reports}, Repository: r}, Now: now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				directory := filepath.Join(root, "threads", project, string(in.Workstream), in.Agent, in.Turn)
 				return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)

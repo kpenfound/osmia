@@ -1238,6 +1238,52 @@ and the workstream's questions on every pass, so a parked unit, its question
 and its answer survive a restart, and a unit whose state moved since the pass
 read it is left to the next pass.
 
+### Finishing units
+
+A mason turn ends its unit's work with the Osmia tool `done`, which only the
+mason holds. It takes `outcome`, what the unit's work now does, and
+`criteria`, one entry for every criterion the unit addresses in the sealed
+plan: `criterion` as the plan cites it (`spec#<n>`), `done` (what the mason
+did), `evidence` (why the criterion holds) and `proof` (where the proof
+lives). No argument names a state, and the outcome is text: whatever it
+says, an accepted report sends the unit to `reviewing`, never further.
+
+A report the service refuses is an ordinary tool result,
+`{"recorded":false,"reason":"<reason>"}`, so the mason reads why, fixes the
+report and calls `done` again in the same turn. The unit does not move and
+the turn does not fail. The reasons are `outcome is required: say what the
+unit's work now does`, `unit <id> does not address criterion "<criterion>";
+report on <criteria> alone`, `criterion <criterion> is reported twice`,
+`criterion <criterion> has no done|evidence|proof`, `the report misses
+<criteria>: report on every criterion of unit <id>`, `unit <id> is <state>,
+not implementing`, `this turn already reported its unit done; end the turn`
+once one report was accepted. Input the tool's schema refuses, such as an
+argument the tool does not take, a missing field or a value of the wrong type,
+comes back as a tool error before the report is checked; the unit does not
+move and the turn goes on.
+A turn whose report was accepted ends with the outcome `done`, whose report is
+the mason's report as JSON. A turn that ends without an accepted report, or
+fails after one, leaves its unit `implementing`.
+
+On its next pass the mason controller finishes each `implementing` unit whose
+mason thread's last turn ended cleanly with `done`. It snapshots the unit's workspace
+as the unit's [candidate](#unit-workspaces), then records, in one commit, the
+next revision `<k>` of the document `units/<id>/report.json` (ID
+`unit-<id>-report`, actor `service`/`mason`, cause the turn's response) and the
+transition `unit-<id>-reviewing-<k>` from `implementing` to `reviewing` with
+the reason `the mason of unit <id> reported done on turn <turn>; its candidate
+is <commit> on <unit-branch>, from <feature-branch> at <base>, and its report is
+units/<id>/report.json revision <k>`. The document holds `unit`, `turn`,
+`seal`, `outcome`, `criteria`, `branch`, `base` (the feature branch commit the
+workspace descends from) and `candidate`. A unit in `reviewing` takes no mason
+slot, so its workstream can start its next `ready` unit.
+
+A unit whose candidate cannot be made, as when the feature branch moved on
+past the commit its workspace is at, stays `implementing` and is [blocked](#starting-units) with the reason `unit
+<id> stays implementing: its mason reported done, and its candidate cannot be
+made: <error>`: it takes no mason slot, its workstream starts no other unit,
+and the next pass tries again.
+
 ### Unit workspaces
 
 The service gives each unit of a workstream a workspace of its own: a Git
@@ -1453,7 +1499,8 @@ sketched, and every queued chief-of-staff turn. All four use one `Enforcement`:
 `Options.Threads` binds the thread dispatcher to isolated turns that grant only
 the chief of staff, with `set_status`, `answer`, `escalate`, `relay_ruling`,
 `route_amendment` and `propose_charter`, and the mason, which may write and
-execute in its view and holds `file_read`, `file_write` and `ask`. A thread turn of any other role
+execute in its view and holds `file_read`, `file_write`, `ask` and
+[`done`](#finishing-units). A thread turn of any other role
 fails with the recorded reason `role has no service grant`. A mason turn works
 on a view of its [unit's workspace](#unit-workspaces), which is copied back into
 the workspace after the turn. The chief of staff's workspace is an empty

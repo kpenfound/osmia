@@ -43,7 +43,7 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 	if now := dispatcher.Runner.Now(); now.Location() != time.UTC {
 		t.Fatalf("thread clock %v is not UTC", now)
 	}
-	turns := dispatcher.Runner.Turns.(*questions.Turns).Turns.(*isolation.Turns)
+	turns := dispatcher.Runner.Turns.(*questions.Turns).Turns.(*reportingTurns).Turns.(*isolation.Turns)
 	scope := coreadapter.Scope{Project: string(cfg.Project.ID), Workstream: string(stream), Role: trace.ChiefOfStaff}
 	selection, err := turns.Select(context.Background(), scope)
 	must(t, err)

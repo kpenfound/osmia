@@ -258,10 +258,16 @@ func documentPath(p string, stream bool) error {
 	if !stream && (p == "charter.md" || p == "kb/entities.json" || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && (p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || shedPath(parts)) {
+	if stream && (p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || shedPath(parts) || unitPath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)
+}
+
+// unitPath reports whether parts name a unit record of a workstream,
+// units/<unit>/report.json, where the unit is a key.
+func unitPath(parts []string) bool {
+	return len(parts) == 3 && parts[0] == "units" && key(parts[1]) && parts[2] == "report.json"
 }
 
 var shedRound = regexp.MustCompile(`^round-[1-9][0-9]{0,8}$`)

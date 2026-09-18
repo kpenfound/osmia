@@ -31,12 +31,15 @@ const masonRoles = chiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = 
 const masonWrote = "internal/trace/built.go"
 
 // fakeMasons plays every mason turn of the fixture. Each turn checks that it
-// holds its view's file tools and ask alone, records what it saw and writes
-// masonWrote into its view.
+// holds its view's file tools, ask and done alone, records what it saw,
+// writes masonWrote into its view and then plays what play holds for the
+// turn, which ends the turn failed by returning errFailTurn.
 type fakeMasons struct {
 	mu       sync.Mutex
 	runs     map[string][]agent.Request
 	problems []string
+	// play holds, by turn ID, what the turn does after writing masonWrote.
+	play map[string]func(context.Context, agent.Request, *mcp.ClientSession) error
 }
 
 func (m *fakeMasons) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -50,22 +53,37 @@ func (m *fakeMasons) turn(ctx context.Context, req agent.Request, _ *agent.Turn,
 	for _, tool := range listed.Tools {
 		names = append(names, tool.Name)
 	}
-	if slices.Sort(names); !slices.Equal(names, []string{"ask", "file_read", "file_write"}) {
+	if slices.Sort(names); !slices.Equal(names, []string{"ask", doneTool, "file_read", "file_write"}) {
 		m.problems = append(m.problems, fmt.Sprintf("mason tools %v", names))
 	}
 	view := req.Workspace.Directory()
 	if err := os.WriteFile(filepath.Join(view, masonWrote), []byte("package trace\n"), 0644); err != nil {
 		m.problems = append(m.problems, err.Error())
 	}
-	// Session directories are threads/<project>/<workstream>/...
-	parts := strings.Split(filepath.ToSlash(req.SessionDir), "/")
-	stream := ""
-	if i := slices.Index(parts, "threads"); i >= 0 && i+2 < len(parts) {
-		stream = parts[i+2]
-	}
+	stream := sessionStream(req)
 	m.runs[stream] = append(m.runs[stream], req)
+	if play := m.play[req.Name]; play != nil {
+		if err := play(ctx, req, tools); errors.Is(err, errFailTurn) {
+			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Crashed", SessionDir: req.SessionDir, NumTurns: 1, IsError: true, ErrorSubtype: "execution"}, nil
+		} else if err != nil {
+			m.problems = append(m.problems, fmt.Sprintf("%s: %v", req.Name, err))
+		}
+	}
 	return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Built", SessionDir: req.SessionDir, NumTurns: 2}, nil
 }
+
+// sessionStream returns the workstream of a thread turn, from its session
+// directory threads/<project>/<workstream>/...
+func sessionStream(req agent.Request) string {
+	parts := strings.Split(filepath.ToSlash(req.SessionDir), "/")
+	if i := slices.Index(parts, "threads"); i >= 0 && i+2 < len(parts) {
+		return parts[i+2]
+	}
+	return ""
+}
+
+// errFailTurn is what a fake mason's play returns to end its turn failed.
+var errFailTurn = errors.New("the turn fails")
 
 // requests returns the mason turns that ran in the workstream.
 func (m *fakeMasons) requests(stream config.WorkstreamID) []agent.Request {
@@ -98,7 +116,7 @@ func newMasonFixture(t *testing.T, masons int, drafted string) (*shedFixture, *f
 	})
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: drafted}, nil)
 	f.upstream(t)
-	fake := &fakeMasons{runs: map[string][]agent.Request{}}
+	fake := &fakeMasons{runs: map[string][]agent.Request{}, play: map[string]func(context.Context, agent.Request, *mcp.ClientSession) error{}}
 	chief := &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
 	f.engine.mu.Lock()
 	defer f.engine.mu.Unlock()
@@ -205,7 +223,7 @@ func TestMasonStartsOneReadyUnitPerWorkstream(t *testing.T) {
 		t.Fatalf("mason turns run %d times", len(runs))
 	}
 	run := runs[0]
-	for _, want := range []string{"Build unit resume of this workstream.", "# Unit resume\n", "title: Resume from the last chunk\n", "seal: 1\n", "- spec#1: ", "  proof: new-test TestResume\n", "## Spec\n"} {
+	for _, want := range []string{"Build unit resume of this workstream.", "# Unit resume\n", "title: Resume from the last chunk\n", "seal: 1\n", "- spec#1: ", "  proof: new-test TestResume\n", "## Spec\n", "call done with the outcome of your work and a report on every criterion of the unit", "Then end your turn."} {
 		if !strings.Contains(run.Prompt, want) {
 			t.Fatalf("mason prompt lacks %q:\n%s", want, run.Prompt)
 		}
