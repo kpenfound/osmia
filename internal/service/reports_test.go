@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -224,16 +225,24 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 
 // A unit whose mason reported done but whose workspace cannot be
 // snapshotted, here because the worktree's index is locked, stays
-// implementing with nothing recorded but why it is blocked, and its
-// workstream starts nothing else. Once the lock is gone, the next pass
-// moves it to reviewing with its candidate.
+// implementing with nothing recorded but why it is blocked: its workstream
+// starts nothing else, and its mason slot goes to the next workstream. Once
+// the lock is gone, the next pass moves it to reviewing with its candidate.
 func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	t.Parallel()
-	f, masons := newMasonFixture(t, 4, independentPlan)
+	f, masons := newMasonFixture(t, 1, independentPlan)
 	defer f.stop(t)
+	factory := runtime.Target{Scope: "factory"}
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+	a, _ := f.builtAs(t, "first")
+	b, _ := f.builtAs(t, "second")
+	blocked, other := lowHigh(a, b)
 	var lock string
 	masons.play[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
-		workspace := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), sessionStream(req), "resume")
+		if sessionStream(req) != string(blocked) {
+			return nil
+		}
+		workspace := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(blocked), "resume")
 		gitfile, err := os.ReadFile(filepath.Join(workspace, ".git"))
 		if err != nil {
 			return err
@@ -244,39 +253,31 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 		}
 		return reportDone("Built")(ctx, req, tools)
 	}
-	stream, _ := f.builtAs(t, "design")
-	f.awaitMasonRan(t, stream, "resume")
-	deadline := time.Now().Add(demoTimeout)
-	for len(f.blocks(t, stream, "resume")) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("the unit was never blocked")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	mutation(t, f.c, "DELETE", "pause", factory)
+	f.awaitMasonRan(t, other, "resume")
 	settle()
 	masons.check(t)
 	const prefix = "unit resume stays implementing: its mason reported done, and its candidate cannot be made: "
-	if got := f.blocks(t, stream, "resume"); len(got) != 1 || !strings.HasPrefix(got[0], prefix) || !strings.Contains(got[0], "index.lock") {
+	if got := f.blocks(t, blocked, "resume"); len(got) != 1 || !strings.HasPrefix(got[0], prefix) || !strings.Contains(got[0], "index.lock") {
 		t.Fatalf("blocked %q", got)
 	}
-	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
-	if got := f.reports(t, stream, "resume"); len(got) != 0 {
+	f.checkUnits(t, blocked, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
+	if got := f.reports(t, blocked, "resume"); len(got) != 0 {
 		t.Fatalf("reports %+v", got)
 	}
-	if _, err := f.repository().Thread(stream, masonAgent("dedupe")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := f.repository().Thread(blocked, masonAgent("dedupe")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the workstream started another unit: %v", err)
 	}
 
 	masons.mu.Lock()
 	must(t, os.Remove(lock))
 	masons.mu.Unlock()
-	f.awaitUnit(t, stream, "resume", UnitReviewing)
-	docs := f.reports(t, stream, "resume")
+	f.awaitUnit(t, blocked, "resume", UnitReviewing)
+	docs := f.reports(t, blocked, "resume")
 	if len(docs) != 1 {
 		t.Fatalf("reports %+v", docs)
 	}
 	var report UnitReport
 	must(t, json.Unmarshal([]byte(docs[0].Content), &report))
-	f.checkCandidate(t, stream, report)
-	f.awaitMasonRan(t, stream, "dedupe")
+	f.checkCandidate(t, blocked, report)
 }
