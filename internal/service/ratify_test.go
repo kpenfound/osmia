@@ -41,21 +41,6 @@ func (f *shedFixture) awaitPacket(t *testing.T, stream config.WorkstreamID, reco
 	}
 }
 
-// skipNotice returns the notice the skipped debate told the chief of staff
-// with.
-func (f *shedFixture) skipNotice(t *testing.T, stream config.WorkstreamID) trace.OutboxEntry {
-	t.Helper()
-	outbox, err := f.repository().Outbox(stream)
-	must(t, err)
-	for _, entry := range outbox {
-		if entry.TransitionID == skipTransition {
-			return entry
-		}
-	}
-	t.Fatalf("workstream %s has no notice of its skipped debate", stream)
-	return trace.OutboxEntry{}
-}
-
 func (f *shedFixture) ratification(t *testing.T, stream config.WorkstreamID, round int) shed.Ratification {
 	t.Helper()
 	docs := f.documents(t, stream, shed.RatificationDocumentID(round))
@@ -356,9 +341,10 @@ func TestRedraftIsAskedForOncePerConclusionAndWaitsForARunner(t *testing.T) {
 	f.opts.Architect = architect
 }
 
-// Debate the owner skipped is a decision point of its own: the packet says so,
-// and a passing ratification asks for the sealing, which seals it.
-func TestSkippedDebateIsRatifiedAndSeals(t *testing.T) {
+// A sketched workstream whose debate is not skipped is ratified nowhere, and
+// it has no packet. Without a committee it stays sketched until the owner
+// skips its debate through the shed.
+func TestSketchedWorkstreamIsNotRatified(t *testing.T) {
 	t.Parallel()
 	f := newDebateFixture(t, 1, 1)
 	ctx := context.Background()
@@ -366,20 +352,40 @@ func TestSkippedDebateIsRatifiedAndSeals(t *testing.T) {
 	f.opts.Committee = nil
 	f.start(t)
 	defer f.stop(t)
-	f.upstream(t)
 	stream := f.handIn(t, "design", handedDesign)
 	f.await(t, stream, sketched)
-
-	// A sketched workstream whose debate is not skipped is ratified nowhere.
 	if _, err := f.c.Ratify(ctx, stream, 1, 1); !failed(err, Conflict) || !strings.Contains(err.Error(), "the workstream is sketched and debate is not skipped: it is ratified in the shed") {
 		t.Fatalf("ratifying a sketched workstream: %v", err)
 	}
 	if _, err := f.c.Packet(ctx, stream); !failed(err, NotFound) {
 		t.Fatalf("the packet of a workstream at no decision point: %v", err)
 	}
+	// The owner skips debate through the shed, and the chief of staff is told
+	// to present the packet.
 	if _, err := f.c.ShedSkip(ctx, stream); err != nil {
 		t.Fatal(err)
 	}
+	f.awaitPacket(t, stream, "ratify: no objection stands")
+	outbox, err := f.repository().Outbox(stream)
+	must(t, err)
+	if !slices.ContainsFunc(outbox, func(e trace.OutboxEntry) bool {
+		return e.TransitionID == skipTransition && strings.Contains(e.Event.Body, presentation("ratify: no objection stands"))
+	}) {
+		t.Fatalf("the chief of staff was not told of the skipped debate: %+v", outbox)
+	}
+}
+
+// Debate the owner skipped at hand-in is a decision point of its own, with a
+// committee configured: the packet says so, and a passing ratification asks
+// for the sealing, which seals it.
+func TestSkippedDebateIsRatifiedAndSeals(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 1)
+	defer f.stop(t)
+	ctx := context.Background()
+	f.upstream(t)
+	stream := f.handInSkipping(t, "design")
+
 	packet := f.awaitPacket(t, stream, "ratify: no objection stands")
 	if !packet.Skipped || packet.Round != 1 || packet.Revision != (shed.Pin{Spec: 1, Plan: 1}) || len(packet.Dissent) != 0 {
 		t.Fatalf("the packet of a skipped debate %+v", packet)
@@ -388,7 +394,8 @@ func TestSkippedDebateIsRatifiedAndSeals(t *testing.T) {
 		t.Fatalf("conclusion %q, want %q", packet.Conclusion, want)
 	}
 	// The chief of staff is asked to present it, as it is at a conclusion.
-	if notice := f.skipNotice(t, stream).Event.Body; !strings.Contains(notice, presentation("ratify: no objection stands")) {
+	f.awaitFeature(t, stream, InShedState)
+	if notice := f.notice(t, stream, InShedState); !strings.Contains(notice, presentation("ratify: no objection stands")) {
 		t.Fatalf("the notice of the skipped debate %q", notice)
 	}
 
@@ -404,6 +411,7 @@ func TestSkippedDebateIsRatifiedAndSeals(t *testing.T) {
 	if docs := f.documents(t, stream, shed.RatificationDocumentID(1)); len(docs) != 1 {
 		t.Fatalf("the ratification was recorded %d times", len(docs))
 	}
+	f.debatedNothing(t, stream)
 }
 
 // A skip waits for the architect's redraft: the turn is dispatched and runs to

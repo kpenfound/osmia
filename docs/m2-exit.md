@@ -39,12 +39,10 @@ workstreams apart by the first line of what was handed:
 | --- | --- |
 | `# Resumable uploads` | Debated to consensus after a redraft, then ratified |
 | `# Upload retention` | Debated to the round cap with a charter veto standing, overruled, then ratified across a restart |
-| `# Upload error names the chunk` | Small: debate is skipped, then ratified |
-| `# Upload quotas` | Abandoned |
+| `# Upload error names the chunk` | Small: handed in with debate skipped, then ratified |
+| `# Upload quotas` | Handed in with debate skipped, then abandoned |
 
-The service runs three times. The first service runs no committee, so a
-sketched workstream stays sketched until the owner acts on it. The second and
-third run the committee as `osmia serve` does.
+The service runs twice, both times with the committee, as `osmia serve` does.
 
 ## The walkthrough
 
@@ -68,12 +66,23 @@ writes two numbered rules into `charter.md`:
 `internal.trace` resolves to its paths from the local map alone, and every
 plan footprint in the demonstration names it.
 
-### 2. Hand-in to `sketched`
+### 2. Hand-in to the shed
 
-Each hand-in returns the state `handed`. The fake architect's first draft of
-each is valid, so all four workstreams move from `handed` to `sketched`, by
-`service`/`architect-drafting`. `osmia status` lists four sketched
-workstreams.
+```sh
+osmia handin p_… - < resumable.md
+osmia handin p_… - < retention.md
+osmia handin p_… - --skip-debate < chunk-error.md
+osmia handin p_… - --skip-debate < quotas.md
+```
+
+Each hand-in returns the state `handed`, and the two with `--skip-debate`
+report that debate is skipped. The fake architect's first draft of each is
+valid, so all four workstreams move from `handed` to `sketched`, by
+`service`/`architect-drafting`, and from there into the shed. The two debated
+workstreams enter it
+`with a committee of 2`; the two that skipped debate enter it
+`without a committee: the owner skipped debate`. `osmia status` lists four
+workstreams `in-shed`.
 
 ### 3. Abandoning the fourth workstream
 
@@ -81,37 +90,29 @@ workstreams.
 osmia abandon w_… "Quotas wait for the billing work."
 ```
 
-The workstream is `abandoned`. Its trace stays: `handed/stdin`, `spec.md` and
-`plan.json` are still committed.
+The workstream is `abandoned` before anyone ratifies it. Its trace stays:
+`handed/stdin`, `spec.md` and `plan.json` are still committed.
 
-### 4. Skipping debate on the small workstream
+### 4. The small workstream, with debate skipped
 
 ```sh
-osmia shed skip w_…
 osmia ratify w_…
 ```
 
-Before the skip, `POST /v1/ratify/w_…` with `{"spec": 1, "plan": 1}` is
-refused because the workstream is sketched and its debate is not skipped.
-After the skip, the packet (`GET /v1/packet/w_…`) is marked skipped, names spec revision 1 and plan
-revision 1, holds no dissent and recommends `ratify: no objection stands`. The
-chief of staff is told to present it. The fake chief of staff makes the
-recommendation the attention item of its status, which `osmia status w_…`
-shows: `Ratify the spec and plan: no objection stands.` The explicit
-ratification is sealed, and the workstream moves to `ratified`.
+The packet (`GET /v1/packet/w_…`) is marked skipped, names spec revision 1
+and plan revision 1, holds no dissent and recommends
+`ratify: no objection stands`. The chief of staff is told to present it. The
+fake chief of staff makes the recommendation the attention item of its
+status, which `osmia status w_…` shows:
+`Ratify the spec and plan: no objection stands.` The explicit ratification is
+sealed, and the workstream moves to `ratified`. The workstream ran no turn
+but its draft.
 
-### 5. A mason in the retention workstream
+### 5. A committee member asks during the shed
 
-The service is stopped. The test fixture gives the retention workstream a
-mason thread with one queued turn, the way the
-[chief-of-staff demonstration](m2-chief-of-staff.md) creates its workers. The
-service then starts again with its committee.
-
-### 6. A question asked during the shed
-
-The retention workstream enters the shed, and the mason's turn runs while
-the workstream is `in-shed`. The mason calls `ask`:
-`Do deleted uploads count against the retention period?` The chief of staff
+In round 1 of the retention shed, the second member calls `ask`:
+`Do deleted uploads count against the retention period?` while the
+workstream is `in-shed`. The round parks at `waiting-1`. The chief of staff
 escalates the question with a rephrasing, what is blocked, two options and a
 recommendation. The owner answers it:
 
@@ -120,10 +121,15 @@ osmia inbox
 osmia answer 1 "No. The period starts at upload and deletion ends it."
 ```
 
-The inbox entry is number 1, batch `escalation_1`, with the mason's question
-as asked. After the answer the inbox is empty. The chief of staff relays the
-ruling with the scope `local`, and the mason's next turn, `answer_1`, receives
-it on its own thread.
+The inbox entry is number 1, batch `escalation_1`, with the member's question
+as asked. After the answer the inbox is empty.
+
+### 6. The round concludes after the answer
+
+The chief of staff relays the ruling with the scope `local`, and the member's
+next turn on its own thread, `answer_1`, receives it. Round 1 resumes, and the
+retention shed goes `round-1, waiting-1, round-1, heard-1` before it carries
+on to round 2.
 
 ### 7. Consensus after a redraft
 
@@ -199,9 +205,9 @@ Nothing is pushed.
 
 ### 11. The abandoned workstream
 
-Across both restarts, the abandoned workstream runs no architect or committee
-turn after its first draft. It never enters the shed, gets no committee and
-has no feature branch or workspace.
+Across the restart, the abandoned workstream runs no architect or committee
+turn after its first draft. Its debate was skipped, so its shed records no
+round and it gets no committee. It has no feature branch or workspace.
 
 ## Inspecting the record
 
@@ -217,17 +223,13 @@ Paths below are relative to
 | `shed/round-<n>/ratification.json` | The ratified revisions, the dispositions and the dissent record |
 | `seal.json` | The seal |
 | `events.jsonl` | The feature, shed, owner and seal transitions with their actors and reasons |
-| `questions/1/` | The mason's question, the escalation, the owner's ruling and what was relayed |
+| `questions/1/` | The committee member's question, the escalation, the owner's ruling and what was relayed |
 
 The [trace reference](trace.md) documents these records, and the
 [service reference](service.md) documents the shed, ratification and sealing.
 
 ## Limits
 
-- The first service runs no committee. With a committee, a sketched
-  workstream enters the shed and round 1 starts in the same pass, so the
-  owner has no moment to skip debate before a round has run.
-- The demonstration's architect and committee ask nothing, so the question
-  during the shed comes from a mason thread the test fixture creates, as in
-  the [chief-of-staff demonstration](m2-chief-of-staff.md).
+- The demonstration's architect asks nothing, so only the committee asks
+  during the shed.
 - The restart is a stop at a test fault point, not a crash of the process.
