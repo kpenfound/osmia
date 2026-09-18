@@ -177,7 +177,7 @@ func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 	ops := f.acknowledgedRoundOperations(t, stream)
 	parked := fmt.Sprintf("round 1 against %s is parked: %s waits for the answer to question 1", pinOne, member)
 	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "waiting" || ops[0].Result.Evidence != parked {
-		t.Fatalf("round operations: %+v", ops)
+		t.Fatalf("round operations: %v", results(ops))
 	}
 	park := f.transition(t, stream, "shed-round-1-waiting-1")
 	if park.From != "round-1" || park.To != "waiting-1" || park.Cause != ops[0].Operation.ID || park.Reason != parked || park.Actor != shedActor {
@@ -237,9 +237,11 @@ func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 	}
 	ops = f.acknowledgedRoundOperations(t, stream)
 	slices.SortFunc(ops, func(a, b trace.OperationRecord) int { return strings.Compare(a.Result.Outcome, b.Result.Outcome) })
-	heard := fmt.Sprintf("round 1 against %s: 2 members heard, 2 objections, 2 concessions, 0 failed turns; 0 objections stand", pinOne)
+	// The owner's objection is the one that stands in the record; the ruling
+	// that dismissed it is read at the conclusion.
+	heard := fmt.Sprintf("round 1 against %s: 2 members heard, 2 objections, 2 concessions, 0 failed turns; 1 objections stand", pinOne)
 	if len(ops) != 2 || ops[0].Result.Outcome != "succeeded" || ops[0].Result.Evidence != heard || ops[1].Result.Outcome != "waiting" || !ops[0].Acknowledged || !ops[1].Acknowledged {
-		t.Fatalf("round operations: %+v", ops)
+		t.Fatalf("round operations: %v", results(ops))
 	}
 	if in, err := decodeRound(ops[0].Operation); err != nil || in != (roundInput{Round: 1, Spec: 1, Plan: 1, Resume: 1}) {
 		t.Fatalf("resumption input %+v %v", in, err)
@@ -325,6 +327,20 @@ func TestOwnerSkipsDebateWhileARoundIsParked(t *testing.T) {
 		t.Fatal("the skip is not recorded")
 	}
 	f.stillInShed(t, stream)
+}
+
+// results renders acknowledged operations with their results, which %v
+// prints as pointers.
+func results(ops []trace.OperationRecord) []string {
+	var out []string
+	for _, o := range ops {
+		result := "no result"
+		if o.Result != nil {
+			result = fmt.Sprintf("%+v", *o.Result)
+		}
+		out = append(out, fmt.Sprintf("%s acknowledged %t: %s", o.Operation.ID, o.Acknowledged, result))
+	}
+	return out
 }
 
 func skippedOn(t *testing.T, f *shedFixture, stream config.WorkstreamID) bool {
