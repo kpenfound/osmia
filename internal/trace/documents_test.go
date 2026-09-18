@@ -3,6 +3,7 @@ package trace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -480,4 +481,83 @@ func TestShedRecordsAreWorkstreamDocuments(t *testing.T) {
 			t.Fatalf("%s committed as %q", d.Path, got)
 		}
 	}
+}
+
+func unitReport(content string, revision int) Document {
+	h := header("document", "unit-parser-report")
+	h.Revision, h.Unit = revision, "parser"
+	return Document{Header: h, Path: "units/parser/report.json", Content: content}
+}
+
+// A unit report and the transitions recorded with it are one commit, and a
+// refused transition records neither.
+func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	dir, err := root.ProjectTrace(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := gitOutput(t, r, "rev-list", "--count", "HEAD")
+	refused := [][]Transaction{
+		{transaction("stale", 3, "", "reviewing", 0)},
+		{func() Transaction {
+			tx := transaction("elsewhere", 0, "", "reviewing", 0)
+			tx.Transition.Workstream = legacyStream
+			return tx
+		}()},
+	}
+	for i, txs := range refused {
+		if _, err := r.RecordDocumentsWith(ctx, []Document{unitReport("{}\n", 1)}, txs...); err == nil {
+			t.Fatalf("batch %d accepted", i)
+		}
+		if got := gitOutput(t, r, "rev-list", "--count", "HEAD"); got != before {
+			t.Fatalf("batch %d committed: %s", i, got)
+		}
+	}
+	if _, err := r.RecordDocumentsWith(ctx, []Document{projectDocument("subsystem-trace", "kb/trace.md", "# trace\n", 1)}); err == nil {
+		t.Fatal("project documents recorded with a workflow")
+	}
+	states, err := r.RecordDocumentsWith(ctx, []Document{unitReport("{\"turn\":1}\n", 1)}, transaction("reviewing", 0, "", "reviewing", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []WorkflowState{{Version: 1, Value: "reviewing"}}; !reflect.DeepEqual(states, want) {
+		t.Fatalf("states %+v", states)
+	}
+	if got := gitOutput(t, r, "rev-list", "--count", "HEAD"); got != fmt.Sprint(mustAtoi(t, before)+1) {
+		t.Fatalf("commits %s, %s before", got, before)
+	}
+	files := gitOutput(t, r, "show", "--name-only", "--format=", "HEAD")
+	for _, want := range []string{"workstreams/" + string(streamID) + "/units/parser/report.json", "workstreams/" + string(streamID) + "/events.jsonl", "workstreams/" + string(streamID) + "/documents.jsonl"} {
+		if !strings.Contains(files, want) {
+			t.Fatalf("the commit lacks %s:\n%s", want, files)
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), "units", "parser", "report.json")); err != nil || string(data) != "{\"turn\":1}\n" {
+		t.Fatalf("report file %q %v", data, err)
+	}
+	if got, err := r.Workflow(streamID, "feature"); err != nil || got.Value != "reviewing" {
+		t.Fatalf("workflow %+v %v", got, err)
+	}
+	if _, err := Get[Document](r, streamID, "unit-parser-report", 1); err != nil {
+		t.Fatal(err)
+	}
+	// Only units/<unit>/report.json is a unit document.
+	for _, path := range []string{"units/parser/other.json", "units/parser", "units/../report.json", "units/a/b/report.json"} {
+		d := unitReport("{}\n", 2)
+		d.ID, d.Path = "unit-other", path
+		if err := r.RecordDocuments(ctx, []Document{d}); err == nil {
+			t.Fatalf("path %s accepted", path)
+		}
+	}
+}
+
+func mustAtoi(t *testing.T, s string) int {
+	t.Helper()
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
 }

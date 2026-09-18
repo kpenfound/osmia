@@ -37,8 +37,10 @@ func masonTransitionID(unit string) string {
 	return trace.UnitSubject(unit) + "-" + UnitImplementing
 }
 
-// masons is the mason controller. Its pass starts ready units: in each
-// building workstream with no implementing unit, while fewer units than
+// masons is the mason controller. Its pass first moves each implementing
+// unit whose mason reported done to reviewing, with the unit's workspace
+// snapshotted as its candidate. It then starts ready units: in each building
+// workstream with no implementing unit, while fewer units than
 // capacity.masons are implementing, it moves the first ready unit in the
 // plan's dependency order to implementing, and queues its mason's first turn
 // with the unit's bundle in the unit's own workspace. The scheduler then runs
@@ -58,11 +60,12 @@ type building struct {
 	started time.Time
 }
 
-// Pass starts the ready units capacity allows, the highest-priority
-// workstream first and, among equals, the one that started a unit least
-// recently. A paused workstream starts none, and its implementing unit takes
+// Pass moves the units whose mason reported done to reviewing, which frees
+// their mason slots, then starts the ready units capacity allows, the
+// highest-priority workstream first and, among equals, the one that started a
+// unit least recently. A paused workstream starts none, and its implementing unit takes
 // no mason slot. A unit that cannot start, or an implementing unit whose
-// first turn cannot be queued, is blocked: the reason is recorded, the unit
+// first turn cannot be queued or whose candidate cannot be made, is blocked: the reason is recorded, the unit
 // takes no mason slot and its workstream starts nothing else, and the other
 // workstreams go on.
 func (m *masons) Pass(ctx context.Context) error {
@@ -94,10 +97,19 @@ func (m *masons) Pass(ctx context.Context) error {
 			if b.states[trace.UnitSubject(u.ID)].Value != UnitImplementing {
 				continue
 			}
-			busy = true
-			queued, err := m.resume(ctx, stream, u.ID)
+			moved, blocked, err := m.finish(ctx, b, u.ID)
 			if err != nil {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
+			}
+			if moved {
+				continue
+			}
+			busy = true
+			queued := false
+			if !blocked {
+				if queued, err = m.resume(ctx, stream, u.ID); err != nil {
+					return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
+				}
 			}
 			if queued && !paused(stream) {
 				implementing++
@@ -377,7 +389,7 @@ func masonSystemPrompt(p config.Project) string {
 func masonPrompt(m bundle.Mason) string {
 	return fmt.Sprintf(`Build unit %s of this workstream.
 
-Your view holds the project's files as the feature branch had them when the unit started, with the work done on the unit since. Make each of the unit's criteria below hold, and put in place and pass the proof the plan names for it. Stay within the unit's footprint. The spec below is the one the owner ratified; build against it.
+Your view holds the project's files as the feature branch had them when the unit started, with the work done on the unit since. Make each of the unit's criteria below hold, and put in place and pass the proof the plan names for it. Stay within the unit's footprint. The spec below is the one the owner ratified; build against it. When every criterion of the unit holds and its proof is in place and passing, call done with the outcome of your work and a report on every criterion of the unit: what you did, the evidence that it holds and where its proof lives. Then end your turn.
 
 %s`, m.Unit, m.Render())
 }
