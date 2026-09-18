@@ -186,8 +186,8 @@ func (d *exitDemo) debates(raise []objection, concede ...string) demoTurn {
 	}
 }
 
-// attention is what the fake chief of staff puts in front of the owner for a
-// packet's recommendation, in words.
+// exitAttention is what the fake chief of staff puts in front of the owner for
+// a packet's recommendation, in words.
 func exitAttention(recommendation string) string {
 	switch {
 	case strings.HasPrefix(recommendation, "do not ratify yet"):
@@ -482,7 +482,7 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if entry.Workstream != capped || entry.Batch != "escalation_1" || entry.Question != "Does deletion end an upload's retention period?" ||
+	if entry.Number != 1 || entry.Workstream != capped || entry.Batch != "escalation_1" || entry.Question != "Does deletion end an upload's retention period?" ||
 		len(entry.Asked) != 1 || entry.Asked[0] != (InboxQuestion{ID: "1", AskedBy: demoAgent, Question: exitQuestion}) {
 		t.Fatalf("inbox entry %+v", entry)
 	}
@@ -553,7 +553,7 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	// 8. The second workstream: the veto still stands at the cap, so
 	// ratification is refused until the owner overrules it.
 	f.awaitShed(t, capped, "concluded-2")
-	if end := f.transition(t, capped, "shed-concluded-2"); !strings.HasPrefix(end.Reason, "debate stopped after round 2, at the shed.max_rounds cap of 2, with 1 ") || !strings.HasSuffix(end.Reason, ", 1 of them blocking; the cap approves nothing") {
+	if end := f.transition(t, capped, "shed-concluded-2"); end.Reason != "debate stopped after round 2, at the shed.max_rounds cap of 2, with 1 objection standing, 1 of them blocking; the cap approves nothing" {
 		t.Fatalf("the conclusion %+v", end)
 	}
 	blocked := fmt.Sprintf("do not ratify yet: ratification is blocked by 1 objection (%s); overrule or sustain each one, or ask for a redraft", cappedVeto)
@@ -566,9 +566,8 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	if _, err := f.c.ShedOverrule(ctx, capped, cappedVeto, exitOverrule); err != nil {
 		t.Fatal(err)
 	}
-	advice := shed.Recommend(f.dissent(t, capped))
-	packet = f.awaitPacket(t, capped, advice)
-	if !strings.HasPrefix(advice, "ratify: nothing blocks") || len(packet.Dissent) != 1 || packet.Dissent[0].Disposition != shed.Overruled || packet.Dissent[0].Revision != (shed.Pin{Spec: 1, Plan: 1}) {
+	packet = f.awaitPacket(t, capped, "ratify: nothing blocks, and 1 objection stands as advice on the record")
+	if len(packet.Dissent) != 1 || packet.Dissent[0].Disposition != shed.Overruled || packet.Dissent[0].Revision != (shed.Pin{Spec: 1, Plan: 1}) {
 		t.Fatalf("the packet after the overrule %+v", packet)
 	}
 	// The overrule is recorded against the revision the veto was made on.
@@ -659,6 +658,9 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	}
 	if moves := f.shedMoves(t, gone); len(moves) != 0 {
 		t.Fatalf("the abandoned workstream's shed went %v", moves)
+	}
+	if threads, err := f.repository().Threads(gone); err != nil || slices.ContainsFunc(threads, func(th trace.Thread) bool { return th.Identity.Role == committeeRole }) {
+		t.Fatalf("the abandoned workstream has a committee: %+v %v", threads, err)
 	}
 	for _, path := range []string{"handed/stdin", plan.SpecPath, plan.PlanPath} {
 		demoGit(t, home, "-C", f.trace, "cat-file", "blob", "HEAD:workstreams/"+string(gone)+"/"+path)

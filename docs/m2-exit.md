@@ -149,8 +149,9 @@ item. The ratification is sealed.
 
 In the retention shed, the first member raises the same charter veto. The
 architect answers it without a redraft, and round 2 changes nothing. Debate
-stops at `concluded-2`, at the `shed.max_rounds` cap of 2 with the veto
-blocking, and the cap approves nothing. The packet recommends
+stops at `concluded-2`: `debate stopped after round 2, at the
+shed.max_rounds cap of 2, with 1 objection standing, 1 of them blocking; the
+cap approves nothing`. The packet recommends
 `do not ratify yet: ratification is blocked by 1 objection (…); overrule or
 sustain each one, or ask for a redraft`, and the chief of staff's attention
 item reads `A charter veto blocks the plan: overrule it, sustain it or ask
@@ -164,8 +165,8 @@ osmia ratify w_…
 
 Ratification is refused, naming the objection: `… blocks and has no
 disposition`. The overrule is recorded in `shed/round-2/rulings.json`, against
-spec revision 1 and plan revision 1, and the packet then recommends ratifying
-with the objection kept as advice on the record. The ratification records the
+spec revision 1 and plan revision 1, and the packet then recommends
+`ratify: nothing blocks, and 1 objection stands as advice on the record`. The ratification records the
 disposition in `shed/round-2/ratification.json`.
 
 ### 9. A restart in the middle of ratification
