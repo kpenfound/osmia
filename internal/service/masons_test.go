@@ -143,6 +143,19 @@ func (f *shedFixture) awaitMasonRan(t *testing.T, stream config.WorkstreamID, un
 	}
 }
 
+// awaitMasonTransition waits until the mason controller records a
+// transition in the workstream.
+func (f *shedFixture) awaitMasonTransition(t *testing.T, stream config.WorkstreamID) {
+	t.Helper()
+	deadline := time.Now().Add(demoTimeout)
+	for len(masonTransitions(t, f, stream)) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("the mason controller of %s never recorded a transition", stream)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // startedReason is the reason a unit of the fixture's plan is started with.
 func (f *shedFixture) startedReason(t *testing.T, stream config.WorkstreamID, unit string) string {
 	t.Helper()
@@ -352,6 +365,8 @@ func TestStaleSpecLeavesTheUnitReady(t *testing.T) {
 	stream, _ := f.builtAs(t, "design")
 	f.editSpec(t, stream, staleSpec)
 	mutation(t, f.c, "DELETE", "pause", factory)
+	f.awaitMasonTransition(t, stream)
+	// Further passes find the unit still blocked and record nothing more.
 	settle()
 	settle()
 
