@@ -2,6 +2,8 @@ package trace
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"time"
@@ -18,6 +20,18 @@ const StatusRole = "chief_of_staff"
 
 // FeatureSubject is the workflow subject holding a workstream's feature state.
 const FeatureSubject = "feature"
+
+// UnitSubject returns the workflow subject holding the state of the plan unit
+// with the given ID: unit-<id>, or unit_ and a hash of the ID for an ID longer
+// than 64 characters, so that the subject and the IDs of its transitions stay
+// keys.
+func UnitSubject(unit string) string {
+	if len(unit) <= 64 {
+		return "unit-" + unit
+	}
+	sum := sha256.Sum256([]byte(unit))
+	return "unit_" + hex.EncodeToString(sum[:16])
+}
 
 // StatusContent is what the chief of staff writes. Attention may be empty;
 // Agents holds one line per active agent and may be empty.
@@ -118,11 +132,13 @@ func latestStatus(records []Record, stream config.WorkstreamID) *Status {
 
 // WorkstreamStatus is a workstream's latest status with the facts the trace
 // owns. Status is nil until the chief of staff first writes one. State is the
-// FeatureSubject workflow state, empty until one is recorded. OpenQuestions
-// counts questions without a ruling.
+// FeatureSubject workflow state, empty until one is recorded, and Subjects
+// the state of every workflow subject that has one, read with it.
+// OpenQuestions counts questions without a ruling.
 type WorkstreamStatus struct {
 	Workstream    config.WorkstreamID
 	State         string
+	Subjects      map[string]WorkflowState
 	OpenQuestions int
 	Status        *Status
 }
@@ -160,7 +176,7 @@ func (r *Repository) Statuses() ([]WorkstreamStatus, error) {
 				open++
 			}
 		}
-		out = append(out, WorkstreamStatus{Workstream: stream, State: view.states[FeatureSubject].Value, OpenQuestions: open, Status: latestStatus(records, stream)})
+		out = append(out, WorkstreamStatus{Workstream: stream, State: view.states[FeatureSubject].Value, Subjects: view.states, OpenQuestions: open, Status: latestStatus(records, stream)})
 	}
 	return out, nil
 }
