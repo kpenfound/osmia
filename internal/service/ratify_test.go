@@ -342,7 +342,8 @@ func TestRedraftIsAskedForOncePerConclusionAndWaitsForARunner(t *testing.T) {
 }
 
 // A sketched workstream whose debate is not skipped is ratified nowhere, and
-// it has no packet. Without a committee it stays sketched.
+// it has no packet. Without a committee it stays sketched until the owner
+// skips its debate through the shed.
 func TestSketchedWorkstreamIsNotRatified(t *testing.T) {
 	t.Parallel()
 	f := newDebateFixture(t, 1, 1)
@@ -358,6 +359,19 @@ func TestSketchedWorkstreamIsNotRatified(t *testing.T) {
 	}
 	if _, err := f.c.Packet(ctx, stream); !failed(err, NotFound) {
 		t.Fatalf("the packet of a workstream at no decision point: %v", err)
+	}
+	// The owner skips debate through the shed, and the chief of staff is told
+	// to present the packet.
+	if _, err := f.c.ShedSkip(ctx, stream); err != nil {
+		t.Fatal(err)
+	}
+	f.awaitPacket(t, stream, "ratify: no objection stands")
+	outbox, err := f.repository().Outbox(stream)
+	must(t, err)
+	if !slices.ContainsFunc(outbox, func(e trace.OutboxEntry) bool {
+		return e.TransitionID == skipTransition && strings.Contains(e.Event.Body, presentation("ratify: no objection stands"))
+	}) {
+		t.Fatalf("the chief of staff was not told of the skipped debate: %+v", outbox)
 	}
 }
 
