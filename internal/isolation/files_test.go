@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	a "github.com/kpenfound/osmia/internal/coreadapter"
@@ -110,6 +111,48 @@ func TestViewsRejectTraversalSymlinksAndMetadataWrites(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(outside, "secret")); string(data) != "private" {
 		t.Fatal("outside file modified")
+	}
+}
+
+// A selected directory's symlinks are left out of the view at every depth,
+// whether they point inside the source, outside it or at a directory; the
+// view holds the rest. Selecting one of them explicitly still fails.
+func TestViewsSkipSymlinksInASelectedDirectory(t *testing.T) {
+	source, outside, views := t.TempDir(), t.TempDir(), Views{Directory: t.TempDir()}
+	put(t, source, "src/file", "data")
+	put(t, source, "src/nested/code", "code")
+	put(t, outside, "secret", "private")
+	for link, target := range map[string]string{"src/readme": "file", "src/nested/escape": outside, "src/nested/up": ".."} {
+		if err := os.Symlink(target, filepath.Join(source, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	v, err := views.Create(context.Background(), a.Workspace{Directory: source, Access: a.ReadWrite}, []string{"src"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Release(context.Background())
+	var held []string
+	if err := filepath.WalkDir(v.workspace.Directory, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(v.workspace.Directory, path)
+		if entry.Type()&os.ModeSymlink != 0 {
+			rel += " (symlink)"
+		}
+		held = append(held, filepath.ToSlash(rel))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{".", "src", "src/file", "src/nested", "src/nested/code"}; !slices.Equal(held, want) {
+		t.Fatalf("the view holds %v, want %v", held, want)
+	}
+	for _, link := range []string{"src/readme", "src/nested/escape", "src/nested/up"} {
+		if _, err := views.Create(context.Background(), a.Workspace{Directory: source, Access: a.ReadWrite}, []string{link}); err == nil || err.Error() != "symlinks and special files are not exposed" {
+			t.Fatalf("explicitly selecting %s: %v", link, err)
+		}
 	}
 }
 

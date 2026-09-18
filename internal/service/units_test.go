@@ -306,25 +306,78 @@ func TestUnitWorkspaceIsLentToItsMasonAlone(t *testing.T) {
 	}
 }
 
-// A workspace whose tree holds a symlink cannot be lent to a mason turn: the
-// turn fails before it runs, and the workspace keeps the link.
-func TestMasonTurnIsRefusedAWorkspaceHoldingASymlink(t *testing.T) {
+// A mason turn runs in a workspace whose feature branch tracks symlinks, at
+// the top and nested, without seeing them. The workspace and the candidate
+// keep them unchanged, even where the turn put a file or a directory in their
+// place, and a directory the turn removed stays for the link it holds. A
+// symlink the turn plants in its view reaches neither.
+func TestMasonTurnKeepsTheWorkspaceSymlinks(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newUnitsFixture(t)
+	clone := f.cfg.Project.Clone
+	links := map[string]string{"CLAUDE.md": "README", "docs/readme": "../README", "lib": "docs"}
+	for link, target := range links {
+		must(t, os.Symlink(target, filepath.Join(clone, link)))
+	}
+	demoGit(t, f.home, "-C", clone, "add", "CLAUDE.md", "docs/readme", "lib")
+	demoGit(t, f.home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "--quiet", "-m", "links")
+	demoGit(t, f.home, "-C", clone, "branch", "--force", featureBranch(stream))
+	base := strings.TrimSpace(demoGit(t, f.home, "-C", clone, "rev-parse", "HEAD"))
 	units := f.units()
 	w, _, err := units.open(ctx, stream, "u1")
 	must(t, err)
-	must(t, os.Symlink("../README", filepath.Join(w.Path, "docs", "readme")))
-	ran := false
-	_, err = f.masonTurn(ctx, t, units, coreadapter.ExecutionSettings{Mode: agent.SandboxNone}, func(context.Context, *enforcertest.Turn) (*agent.Result, error) {
-		ran = true
-		return &agent.Result{}, nil
-	})
-	if err == nil || !strings.Contains(err.Error(), "symlinks and special files are not exposed") || ran {
-		t.Fatalf("a mason turn in a workspace holding a symlink: ran %v, %v", ran, err)
+	var problems []string
+	mason := func(_ context.Context, turn *enforcertest.Turn) (*agent.Result, error) {
+		view := turn.Request.Workspace.Directory()
+		for link := range links {
+			if _, err := os.Lstat(filepath.Join(view, link)); !errors.Is(err, fs.ErrNotExist) {
+				problems = append(problems, "the view holds "+link)
+			}
+		}
+		if err := turn.WriteFile(filepath.Join(view, "README"), []byte("widgets, built\n")); err != nil {
+			problems = append(problems, "writing the view: "+err.Error())
+		}
+		must(t, os.RemoveAll(filepath.Join(view, "docs")))
+		// A file where the workspace keeps a directory for the link it holds.
+		must(t, os.WriteFile(filepath.Join(view, "docs"), []byte("see the wiki\n"), 0600))
+		must(t, os.Symlink("README", filepath.Join(view, "planted")))
+		must(t, os.Symlink("../README", filepath.Join(view, "bin", "planted")))
+		// Files and directories where the workspace keeps its links.
+		must(t, os.WriteFile(filepath.Join(view, "CLAUDE.md"), []byte("in place of the link\n"), 0600))
+		must(t, os.MkdirAll(filepath.Join(view, "lib"), 0700))
+		must(t, os.WriteFile(filepath.Join(view, "lib", "code"), []byte("through the link\n"), 0600))
+		return &agent.Result{ResultText: "built"}, nil
 	}
-	if target, err := os.Readlink(filepath.Join(w.Path, "docs", "readme")); err != nil || target != "../README" {
-		t.Fatalf("the workspace's link after the refused turn: %q %v", target, err)
+	result, err := f.masonTurn(ctx, t, units, coreadapter.ExecutionSettings{Mode: agent.SandboxNone}, mason)
+	if err != nil || result.FinalResponse != "built" {
+		t.Fatalf("the mason turn: %+v %v", result, err)
+	}
+	if len(problems) != 0 {
+		t.Fatalf("the mason turn:\n%s", strings.Join(problems, "\n"))
+	}
+	for link, want := range links {
+		if target, err := os.Readlink(filepath.Join(w.Path, link)); err != nil || target != want {
+			t.Fatalf("the workspace's %s after the turn: %q %v", link, target, err)
+		}
+	}
+	for _, name := range []string{"planted", "bin/planted", "docs/guide", "lib/code"} {
+		if _, err := os.Lstat(filepath.Join(w.Path, name)); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("%s in the workspace after the turn: %v", name, err)
+		}
+	}
+	if info, err := os.Lstat(filepath.Join(w.Path, "docs")); err != nil || !info.IsDir() {
+		t.Fatalf("the workspace's docs after the turn: %v %v", info, err)
+	}
+	candidate, err := units.snapshot(ctx, stream, "u1")
+	must(t, err)
+	if got := strings.TrimSpace(demoGit(t, f.home, "-C", clone, "diff-tree", "-r", "--name-status", base, candidate)); got != "M\tREADME\nD\tdocs/guide" {
+		t.Fatalf("the candidate's changes:\n%s", got)
+	}
+	for link, want := range links {
+		entry := strings.Fields(demoGit(t, f.home, "-C", clone, "ls-tree", candidate, link))
+		if target := demoGit(t, f.home, "-C", clone, "cat-file", "blob", candidate+":"+link); len(entry) == 0 || entry[0] != "120000" || target != want {
+			t.Fatalf("%s in the candidate: %v -> %q", link, entry, target)
+		}
 	}
 }

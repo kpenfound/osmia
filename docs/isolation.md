@@ -20,9 +20,11 @@ and chief-of-staff thread turns through it; see
 The provider lease belongs to the service and must exclude concurrent source
 writers while copying. The selector names explicit relative files or directories.
 Each turn gets a fresh private copy in service storage disjoint from the provider
-workspace. Selecting a directory recursively includes its files, excluding `.git`,
-`.jj`, `.hg` and `.svn` at every depth. Explicit metadata selection, traversal,
-symlinks and special files fail acquisition. Executable owner bits are preserved;
+workspace. Selecting a directory recursively includes its directories and regular
+files, excluding `.git`, `.jj`, `.hg` and `.svn`, symlinks and special files at
+every depth; a view never holds a symlink. Explicitly selecting metadata, a
+symlink or a special file, or a path through traversal or a symlink, fails
+acquisition with no view left behind. Executable owner bits are preserved;
 group/world access is removed. No hard links to source files are created.
 
 The runtime receives only the copied directory, never the provider workspace,
