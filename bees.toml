@@ -169,7 +169,6 @@ effort = "low"
 profile = "default"
 # Text appended to every role's base prompt.
 prompt = """
-Read AGENTS.md before planning or implementing Osmia.
 docs/design.md is the source of truth for feature scope and behavior.
 docs/design.md is large and you should search for keywords rather than using cat.
 Work only within the configured milestone; do not bring later milestones forward.
@@ -225,7 +224,7 @@ profile = "manager_dumb"
 [roles.developer]
 profile = "coder_medium"
 prompt = """
-Validate changes with dagger check using DAGGER_X_RELEASE from this configuration.
+Validate changes with dagger check.
 ONLY RUN TESTS INSIDE DAGGER. DO NOT TEST WITH go test ON THE HOST.
 Your tests must NEVER execute real agents, containers or docker. They must be faked.
 """
