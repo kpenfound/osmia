@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -243,10 +244,11 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 }
 
 // A unit whose mason reported done but whose workspace cannot be
-// snapshotted, here because the worktree's index is locked, stays
-// implementing with nothing recorded but why it is blocked: its workstream
-// starts nothing else, and its mason slot goes to the next workstream. Once
-// the lock is gone, the next pass moves it to reviewing with its candidate.
+// snapshotted, here because the feature branch moved on past the commit its
+// workspace is at, stays implementing with nothing recorded but why it is
+// blocked: its workstream starts nothing else, and its mason slot goes to the
+// next workstream. Once the feature branch is back, the next pass moves it
+// to reviewing with its candidate.
 func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	t.Parallel()
 	f, masons := newMasonFixture(t, 1, independentPlan)
@@ -256,19 +258,26 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	a, _ := f.builtAs(t, "first")
 	b, _ := f.builtAs(t, "second")
 	blocked, other := lowHigh(a, b)
-	var lock string
+	feature := "refs/heads/" + featureBranch(blocked)
+	git := func(args ...string) (string, error) {
+		out, err := exec.Command("git", append([]string{"-C", f.clone, "-c", "user.name=Owner", "-c", "user.email=owner@localhost"}, args...)...).CombinedOutput()
+		return strings.TrimSpace(string(out)), err
+	}
+	var tip string
 	masons.play[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if sessionStream(req) != string(blocked) {
 			return nil
 		}
-		workspace := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(blocked), "resume")
-		gitfile, err := os.ReadFile(filepath.Join(workspace, ".git"))
-		if err != nil {
+		var err error
+		if tip, err = git("rev-parse", feature); err != nil {
 			return err
 		}
-		lock = filepath.Join(strings.TrimSpace(strings.TrimPrefix(string(gitfile), "gitdir:")), "index.lock")
-		if err := os.WriteFile(lock, nil, 0600); err != nil {
-			return err
+		moved, err := git("commit-tree", "-p", tip, "-m", "moved on", tip+"^{tree}")
+		if err != nil {
+			return fmt.Errorf("%s: %w", moved, err)
+		}
+		if out, err := git("update-ref", feature, moved, tip); err != nil {
+			return fmt.Errorf("%s: %w", out, err)
 		}
 		return reportDone("Built")(ctx, req, tools)
 	}
@@ -276,8 +285,8 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	f.awaitMasonRan(t, other, "resume")
 	settle()
 	masons.check(t)
-	const prefix = "unit resume stays implementing: its mason reported done, and its candidate cannot be made: "
-	if got := f.blocks(t, blocked, "resume"); len(got) != 1 || !strings.HasPrefix(got[0], prefix) || !strings.Contains(got[0], "index.lock") {
+	const prefix = "unit resume stays implementing: its mason reported done, and its candidate cannot be made: workspace "
+	if got := f.blocks(t, blocked, "resume"); len(got) != 1 || !strings.HasPrefix(got[0], prefix) || !strings.HasSuffix(got[0], ", which does not descend from "+featureBranch(blocked)) {
 		t.Fatalf("blocked %q", got)
 	}
 	f.checkUnits(t, blocked, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
@@ -289,8 +298,11 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	}
 
 	masons.mu.Lock()
-	must(t, os.Remove(lock))
+	out, err := git("update-ref", feature, tip)
 	masons.mu.Unlock()
+	if err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
 	f.awaitUnit(t, blocked, "resume", UnitReviewing)
 	docs := f.reports(t, blocked, "resume")
 	if len(docs) != 1 {

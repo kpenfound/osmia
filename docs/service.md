@@ -1240,8 +1240,8 @@ units/<id>/report.json revision <k>`. The document holds `unit`, `turn`,
 workspace descends from) and `candidate`. A unit in `reviewing` takes no mason
 slot, so its workstream can start its next `ready` unit.
 
-A unit whose candidate cannot be made, as when its worktree's index is locked,
-stays `implementing` and is [blocked](#starting-units) with the reason `unit
+A unit whose candidate cannot be made, as when the feature branch moved on
+past the commit its workspace is at, stays `implementing` and is [blocked](#starting-units) with the reason `unit
 <id> stays implementing: its mason reported done, and its candidate cannot be
 made: <error>`: it takes no mason slot, its workstream starts no other unit,
 and the next pass tries again.
