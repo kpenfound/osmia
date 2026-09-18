@@ -145,12 +145,8 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 	if err != nil {
 		return Bundle{}, err
 	}
-	now := time.Now
-	if f.Now != nil {
-		now = f.Now
-	}
 	b := Bundle{Project: project, Mode: ModeFile, Scope: scope, Knowledge: []Prose{}, Missing: []MissingProse{}, Decisions: []Decision{}, Notices: []Notice{}}
-	doc, err := repo.Charter(ctx, now().UTC())
+	doc, err := repo.Charter(ctx, f.now().UTC())
 	if err != nil {
 		return Bundle{}, fmt.Errorf("charter: %w", err)
 	}
