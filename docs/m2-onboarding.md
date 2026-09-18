@@ -10,7 +10,7 @@ nothing. It runs in a temporary root with a local Git repository as the clone.
 ## Running it
 
 ```sh
-DAGGER_X_RELEASE=v1.0.0-beta.13 dagger check
+dagger check
 ```
 
 The test runs as part of the `internal/cli` package tests. It removes its

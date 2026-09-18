@@ -47,7 +47,7 @@ git_email = "penfoundapps@gmail.com"
 poll_interval = "2m"
 # Concurrent developer workers. Each runs a sequential developer <-> reviewer
 # loop for one issue; reviewer concurrency follows developer concurrency.
-max_developers = 3
+max_developers = 2
 # Minimum time between QA runs. QA only runs when something was merged.
 qa_interval = "4h"
 # GitHub logins and/or org/team slugs the factory turns to when it needs a
@@ -135,7 +135,7 @@ sandbox = "none"
 [profiles.coder_smart]
 agent = "claude"
 model = "fable"
-effort = "high"
+effort = "medium"
 
 [profiles.coder_medium]
 agent = "claude"
@@ -206,7 +206,7 @@ disallowed_tools = ["Artifact", "Bash(go test *)", "Bash(docker *)"]
 # MCP servers, git). $VARS are expanded from the bees environment. Roles can
 # add or override entries in [roles.<name>.env].
 [global.env]
-DAGGER_X_RELEASE = "v1.0.0-beta.13"
+DAGGER_X_RELEASE = "v1.0.0-beta.14"
 
 
 #===============================================================================
