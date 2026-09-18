@@ -1155,9 +1155,11 @@ while the build ran; the workstream is <state>`).
 ### Starting units
 
 With `Options.Threads` set, the mason controller runs in every reconciliation
-pass, before event delivery and the scheduler. It starts units of `building`
-workstreams, at most one `implementing` unit per workstream, while fewer than
-`capacity.masons` units are `implementing` in workstreams no pause covers. A
+pass, after answer delivery and before the scheduler. It first
+[parks and resumes](#a-masons-question) units on their masons' questions.
+It then starts units of `building` workstreams, at most one `implementing` or
+`waiting` unit per workstream, while fewer than `capacity.masons` units are
+`implementing` in workstreams no pause covers. A
 workstream a runtime pause covers (a `factory` pause, a `project` pause on the
 active project or a `workstream` pause on it) starts no unit, and its
 `implementing` unit takes no mason slot, so the slot goes to a workstream that
@@ -1166,7 +1168,7 @@ is not paused.
 A free slot goes first to the workstream earliest in the project's priority
 order (`PUT /v1/runtime/priority`), then to those it does not name; among
 equals, to the workstream that started a unit least recently, one that never
-did first, then in workstream ID order. In that workstream the controller takes
+did first (a unit resuming from `waiting` is not a start), then in workstream ID order. In that workstream the controller takes
 the first `ready` unit in the plan's dependency order: every unit follows the
 units it depends on, and otherwise keeps its place in the plan.
 
@@ -1179,9 +1181,8 @@ from <feature-branch> at <commit>`. It then creates the unit's mason thread,
 `mason-<id>` with the role `mason`, and queues its first turn,
 `mason-<id>-implement`, with the role's profile, the unit's bundle in its
 prompt and the transition as its cause. The scheduler dispatches that turn
-like any other thread turn. A unit moves to `implementing` once: the
-transition ID is fixed and a unit already `implementing` is never started
-again. A unit found `implementing` without its first mason turn, as after a
+like any other thread turn. A unit is started once: the transition ID is
+fixed and a unit already `implementing` or `waiting` is never started again. A unit found `implementing` without its first mason turn, as after a
 stop between the two, gets its workspace and that turn on the next pass.
 
 A unit is blocked when its spec no longer matches its seal (the bundle
@@ -1201,6 +1202,41 @@ mason bundle cannot be assembled: spec does not match its seal: ...` and
 `unit <id> stays ready: its workspace cannot be opened: <error>`, and for an
 `implementing` unit the same two with `unit <id> is implementing and its
 mason's first turn is not queued` in place of `unit <id> stays ready`.
+
+### A mason's question
+
+A mason holds `ask`. Its question is recorded and reaches the chief of staff
+through [event delivery](#event-delivery) like any other
+[question](#questions), and the mason's turn ends with the outcome `waiting`,
+which parks its thread. The mason controller then records
+the transition `unit-<id>-waiting-<q>` from `implementing` to `waiting` (actor
+`service`/`mason`, cause `question_<q>_open`) with the reason `unit <id> is
+waiting: its mason asked question <q>; the unit's workspace is kept and it
+takes no mason slot until the answer arrives`. The unit's workspace stays as the turn
+left it. A `waiting` unit takes no mason slot, so a free slot goes to another
+workstream, and its own workstream starts no other unit. This narrows design
+§5.2, where other units of the workstream continue while one waits: with one
+unit at a time per workstream, a sibling started meanwhile would leave the
+workstream two `implementing` units once the answer arrives. Nothing times the
+question out.
+
+The chief of staff answers the question or escalates it to the owner, whose
+ruling it relays. The answer is then queued as the mason's next turn on its
+thread, `answer_<q>`, with the asking turn's system prompt, on a view of the
+same workspace. In the same pass, before the scheduler dispatches that turn,
+the mason controller records `unit-<id>-implementing-<q>` from `waiting` back
+to `implementing` (cause `question_<q>_answered`) with the reason `unit <id>
+resumes implementing: the answer to question <q> is its mason's next turn`. A
+unit resumes whatever the free slots, so more than `capacity.masons` units can
+be `implementing` for a while; the scheduler still runs at most
+`capacity.masons` mason turns at once, and no unit starts until fewer units
+are `implementing`. A mason that asks again in its answer turn parks the unit
+again, on the transition named after its new question.
+
+Parking and resuming are derived from the unit's state, the mason's thread
+and the workstream's questions on every pass, so a parked unit, its question
+and its answer survive a restart, and a unit whose state moved since the pass
+read it is left to the next pass.
 
 ### Unit workspaces
 
@@ -1417,7 +1453,7 @@ sketched, and every queued chief-of-staff turn. All four use one `Enforcement`:
 `Options.Threads` binds the thread dispatcher to isolated turns that grant only
 the chief of staff, with `set_status`, `answer`, `escalate`, `relay_ruling`,
 `route_amendment` and `propose_charter`, and the mason, which may write and
-execute in its view and holds `file_read` and `file_write`. A thread turn of any other role
+execute in its view and holds `file_read`, `file_write` and `ask`. A thread turn of any other role
 fails with the recorded reason `role has no service grant`. A mason turn works
 on a view of its [unit's workspace](#unit-workspaces), which is copied back into
 the workspace after the turn. The chief of staff's workspace is an empty
@@ -1448,10 +1484,11 @@ recorded reason, so a service without an execution engine still registers
 projects and reports the failure in status.
 
 With `Options.Threads` set, the service also starts ready units (see
-[starting units](#starting-units)), runs queued workstream turns on its own and
+[starting units](#starting-units)), runs queued workstream turns on its own,
 delivers outbox events to each chief of staff (see
-[event delivery](#event-delivery)). The mason controller, event delivery and
-the scheduler, in that order, replace any `Schedule` hook in `Options.Reconciliation`; without
+[event delivery](#event-delivery)) and queues answers on their askers' threads
+(see [questions](#questions)). Event delivery, answer delivery, the mason
+controller and the scheduler, in that order, replace any `Schedule` hook in `Options.Reconciliation`; without
 `Options.Threads` that hook runs. In both cases the
 [architect controller](#architect-drafting), then the
 [shed controller](#the-shed-debate), then the

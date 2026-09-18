@@ -39,7 +39,7 @@ const (
 )
 
 var (
-	openQuestion = regexp.MustCompile(`Question (\d+) is open, asked by the (?:committee|architect): `)
+	openQuestion = regexp.MustCompile(`Question (\d+) is open, asked by the (?:committee|architect|mason): `)
 	ownerRuled   = regexp.MustCompile(`The owner ruled on inbox entry \d+, \S+ \(questions ([^)]+)\): `)
 )
 
