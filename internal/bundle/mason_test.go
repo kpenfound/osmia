@@ -31,12 +31,19 @@ func document(id, path, content string) trace.Document {
 // workstream.
 func sealed(t *testing.T) fixture {
 	t.Helper()
+	return sealedWith(t, masonPlan)
+}
+
+// sealedWith records the spec, the given plan and a seal of both in the
+// first workstream.
+func sealedWith(t *testing.T, planContent string) fixture {
+	t.Helper()
 	f := setup(t)
 	ctx := context.Background()
 	if err := f.repo.CreateWorkstream(ctx, first, timestamp, owner); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.repo.RecordDocuments(ctx, []trace.Document{document(plan.SpecDocument, plan.SpecPath, masonSpec), document(plan.PlanDocument, plan.PlanPath, masonPlan)}); err != nil {
+	if err := f.repo.RecordDocuments(ctx, []trace.Document{document(plan.SpecDocument, plan.SpecPath, masonSpec), document(plan.PlanDocument, plan.PlanPath, planContent)}); err != nil {
 		t.Fatal(err)
 	}
 	content, err := seal.Encode(seal.Seal{Version: seal.Version, Seal: 1, Round: 1, Revision: shed.Pin{Spec: 1, Plan: 1}, SpecHash: seal.SpecHash(masonSpec),
@@ -128,5 +135,48 @@ func TestMasonBundleRefusals(t *testing.T) {
 	}
 	if _, err := g.mason("resume"); err == nil || err.Error() != "workstream "+string(first)+" is not sealed" {
 		t.Fatalf("unsealed err = %v", err)
+	}
+}
+
+func TestMasonBundleReadsTheSealedPlan(t *testing.T) {
+	t.Parallel()
+	f := sealed(t)
+	edited := strings.Replace(masonPlan, `"footprint": ["cmd"]`, `"footprint": ["internal"]`, 1)
+	if err := os.WriteFile(filepath.Join(f.dir, "workstreams", string(first), plan.PlanPath), []byte(edited), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := f.mason("dedupe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Plan.Revision != 1 || m.Plan.Content != masonPlan || !reflect.DeepEqual(m.Footprint, []string{"cmd"}) {
+		t.Fatalf("plan revision %d footprint %v, want the sealed plan", m.Plan.Revision, m.Footprint)
+	}
+}
+
+func TestMasonBundleNamesTheSealedSpecRevision(t *testing.T) {
+	t.Parallel()
+	f := sealed(t)
+	path := filepath.Join(f.dir, "workstreams", string(first), plan.SpecPath)
+	for _, content := range []string{masonSpec + "4. Later.\n", masonSpec} {
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		f.mason("resume")
+	}
+	m, err := f.mason("resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Spec.Revision != 1 || !strings.Contains(m.Render(), "spec: spec.md (record spec revision 1, ") {
+		t.Fatalf("spec revision = %d, want the sealed 1", m.Spec.Revision)
+	}
+}
+
+func TestMasonBundleRefusesAnUnknownCriterion(t *testing.T) {
+	t.Parallel()
+	f := sealedWith(t, strings.Replace(masonPlan, `"spec#2"`, `"spec#9"`, 1))
+	if _, err := f.mason("dedupe"); err == nil || err.Error() != `unit "dedupe" cites spec#9, which spec.md revision 1 does not hold` {
+		t.Fatalf("err = %v", err)
 	}
 }

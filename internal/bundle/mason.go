@@ -99,7 +99,7 @@ func (f Files) Mason(ctx context.Context, project config.ProjectID, stream confi
 	m := Mason{
 		Workstream: stream,
 		Seal:       s.Seal,
-		Spec:       SealedDocument{Source: spec.Path, Record: spec.ID, Revision: spec.Revision, Hash: s.SpecHash, Content: spec.Content},
+		Spec:       SealedDocument{Source: spec.Path, Record: spec.ID, Revision: s.Revision.Spec, Hash: s.SpecHash, Content: spec.Content},
 		Plan:       SealedDocument{Source: planDoc.Path, Record: planDoc.ID, Revision: planDoc.Revision, Content: planDoc.Content},
 		Unit:       u.ID,
 		Title:      u.Title,
