@@ -130,7 +130,7 @@ func (g *Git) Snapshot(ctx context.Context, w Worktree, base string) (string, er
 	if !descends {
 		return "", fmt.Errorf("workspace %s is at %s, which does not descend from %s", w.Path, head, base)
 	}
-	if _, err := g.runIn(ctx, w.Path, nil, "-c", "core.excludesFile="+os.DevNull, "add", "--all"); err != nil {
+	if _, err := g.runIn(ctx, w.Path, []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.excludesFile", "GIT_CONFIG_VALUE_0=" + os.DevNull}, "add", "--all"); err != nil {
 		return "", err
 	}
 	tree, err := g.runIn(ctx, w.Path, nil, "write-tree")

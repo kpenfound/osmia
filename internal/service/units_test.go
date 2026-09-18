@@ -18,7 +18,7 @@ import (
 )
 
 // unitsFixture is a service configuration whose clone holds the feature
-// branch of stream, one commit with README, LICENSE and bin/run.
+// branch of stream, one commit with README, LICENSE, bin/run and docs/guide.
 type unitsFixture struct {
 	cfg        *config.Config
 	home, base string
@@ -37,7 +37,9 @@ func newUnitsFixture(t *testing.T) unitsFixture {
 	must(t, os.MkdirAll(filepath.Join(clone, "bin"), 0755))
 	must(t, os.WriteFile(filepath.Join(clone, "bin", "run"), []byte("#!/bin/sh\n"), 0755))
 	must(t, os.WriteFile(filepath.Join(clone, "LICENSE"), []byte("MIT\n"), 0644))
-	demoGit(t, home, "-C", clone, "add", "README", "bin/run", "LICENSE")
+	must(t, os.MkdirAll(filepath.Join(clone, "docs"), 0755))
+	must(t, os.WriteFile(filepath.Join(clone, "docs", "guide"), []byte("guide\n"), 0644))
+	demoGit(t, home, "-C", clone, "add", "README", "bin/run", "LICENSE", "docs/guide")
 	demoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "--quiet", "-m", "base")
 	demoGit(t, home, "-C", clone, "branch", featureBranch(stream))
 	return unitsFixture{cfg: cfg, home: home, base: strings.TrimSpace(demoGit(t, home, "-C", clone, "rev-parse", "HEAD"))}
@@ -68,6 +70,18 @@ func TestUnitWorkspaceIsFoundAgainAfterARestart(t *testing.T) {
 		t.Fatalf("the workspace's files: %q %v", data, err)
 	}
 	must(t, os.WriteFile(filepath.Join(w.Path, "work"), []byte("in progress\n"), 0644))
+	// The feature branch and the unit's branch both move on: the base stays
+	// the commit the workspace was created from.
+	candidate, err := units.snapshot(ctx, stream, "u1")
+	must(t, err)
+	clone := f.cfg.Project.Clone
+	demoGit(t, f.home, "-C", clone, "checkout", "--quiet", featureBranch(stream))
+	must(t, os.WriteFile(filepath.Join(clone, "NEWS"), []byte("later\n"), 0644))
+	demoGit(t, f.home, "-C", clone, "add", "NEWS")
+	demoGit(t, f.home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "--quiet", "-m", "later")
+	if tip, _, err := units.git.Branch(ctx, featureBranch(stream)); err != nil || tip == f.base || candidate == f.base {
+		t.Fatalf("the feature branch at %s and the candidate %s have not moved from %s: %v", tip, candidate, f.base, err)
+	}
 
 	restarted := f.units()
 	found, foundBase, ok, err := restarted.find(ctx, stream, "u1")
@@ -121,12 +135,37 @@ func (e masonEngine) Enforcer(settings coreadapter.ExecutionSettings) (agent.Enf
 	return &enforcertest.Enforcer{Sandbox: settings.Mode, Image: settings.Image, Agent: e}, nil
 }
 
+// masonTurn runs a mason turn of unit u1 through isolation.Turns the way the
+// service lends it its unit's workspace, with mason playing the agent.
+func (f unitsFixture) masonTurn(ctx context.Context, t *testing.T, units unitWorkspaces, execution coreadapter.ExecutionSettings, mason masonEngine) (coreadapter.SessionResult, error) {
+	t.Helper()
+	turns := &isolation.Turns{
+		Workspaces: units,
+		Views:      isolation.Views{Directory: filepath.Join(f.cfg.Root.String(), "views")},
+		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
+			w, _, _, err := units.find(ctx, config.WorkstreamID(scope.Workstream), scope.Unit)
+			if err != nil {
+				return isolation.Selection{}, err
+			}
+			paths, err := units.paths(w)
+			return isolation.Selection{Paths: paths, Execution: execution}, err
+		},
+		Grants:  map[string]coreadapter.Capabilities{masonRole: {WriteFiles: true, Execute: true}},
+		Engine:  mason,
+		Capture: units.capture,
+	}
+	must(t, os.MkdirAll(turns.Views.Directory, 0700))
+	input := coreadapter.PreparedTurn{Scope: coreadapter.Scope{Project: string(project), Workstream: string(stream), Unit: "u1", Thread: "mason-u1", Turn: "turn-1", Role: masonRole},
+		Profile: coreadapter.Profile{Backend: agent.AgentClaude}, SessionDirectory: filepath.Join(f.home, "session"), Prompt: "Build u1"}
+	return turns.Run(ctx, input)
+}
+
 // A mason turn in a unit's workspace works on a copy of its files alone: it
 // can neither read nor write the clone's or the worktree's VCS metadata, has
 // no VCS executable and none of the host's credentials, and VCS metadata or a
 // symlink it plants in its copy never reaches the workspace. What it wrote,
-// removed and made executable or not is in the workspace after the turn,
-// ready to be snapshotted.
+// removed, turned from a file into a directory or back, and made executable
+// or not is in the workspace after the turn, ready to be snapshotted.
 func TestMasonTurnGetsTheUnitWorkspaceFilesOnly(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_host")
 	t.Setenv("GH_TOKEN", "ghp_host")
@@ -188,33 +227,22 @@ func TestMasonTurnGetsTheUnitWorkspaceFilesOnly(t *testing.T) {
 				must(t, os.MkdirAll(filepath.Join(view, "src", ".git"), 0700))
 				must(t, os.WriteFile(filepath.Join(view, "src", ".git", "config"), []byte("[core]\n"), 0600))
 				must(t, os.Symlink(filepath.Join(clone, ".git"), filepath.Join(view, "escape")))
-				must(t, os.Remove(filepath.Join(view, "LICENSE")))
 				must(t, os.Chmod(filepath.Join(view, "bin", "run"), 0600))
+				must(t, os.MkdirAll(filepath.Join(view, "tools"), 0700))
+				must(t, os.WriteFile(filepath.Join(view, "tools", "build"), []byte("#!/bin/sh\n"), 0700))
+				// A file becomes a directory and a directory a file.
+				must(t, os.Remove(filepath.Join(view, "LICENSE")))
+				must(t, os.MkdirAll(filepath.Join(view, "LICENSE"), 0700))
+				must(t, os.WriteFile(filepath.Join(view, "LICENSE", "MIT"), []byte("MIT\n"), 0600))
+				must(t, os.RemoveAll(filepath.Join(view, "docs")))
+				must(t, os.WriteFile(filepath.Join(view, "docs"), []byte("see the wiki\n"), 0600))
 				return &agent.Result{ResultText: "built"}, nil
 			}
 			execution := coreadapter.ExecutionSettings{Mode: mode}
 			if mode == agent.SandboxContainer {
 				execution.Image = "fixture-image"
 			}
-			turns := &isolation.Turns{
-				Workspaces: units,
-				Views:      isolation.Views{Directory: filepath.Join(f.cfg.Root.String(), "views")},
-				Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
-					w, _, _, err := units.find(ctx, config.WorkstreamID(scope.Workstream), scope.Unit)
-					if err != nil {
-						return isolation.Selection{}, err
-					}
-					paths, err := units.paths(w)
-					return isolation.Selection{Paths: paths, Execution: execution}, err
-				},
-				Grants:  map[string]coreadapter.Capabilities{masonRole: {WriteFiles: true, Execute: true}},
-				Engine:  masonEngine(mason),
-				Capture: units.capture,
-			}
-			must(t, os.MkdirAll(turns.Views.Directory, 0700))
-			input := coreadapter.PreparedTurn{Scope: coreadapter.Scope{Project: string(project), Workstream: string(stream), Unit: "u1", Thread: "mason-u1", Turn: "turn-1", Role: masonRole},
-				Profile: coreadapter.Profile{Backend: agent.AgentClaude}, SessionDirectory: filepath.Join(f.home, "session"), Prompt: "Build u1"}
-			result, err := turns.Run(ctx, input)
+			result, err := f.masonTurn(ctx, t, units, execution, mason)
 			if err != nil || result.FinalResponse != "built" {
 				t.Fatalf("the mason turn: %+v %v", result, err)
 			}
@@ -224,18 +252,22 @@ func TestMasonTurnGetsTheUnitWorkspaceFilesOnly(t *testing.T) {
 			if after, err := os.ReadFile(dotgit); err != nil || string(after) != string(pointer) {
 				t.Fatalf("the workspace's .git after the turn: %q %v", after, err)
 			}
-			for _, name := range []string{"escape", "src/.git", "LICENSE"} {
+			for _, name := range []string{"escape", "src/.git", "docs/guide"} {
 				if _, err := os.Lstat(filepath.Join(w.Path, name)); !errors.Is(err, fs.ErrNotExist) {
 					t.Fatalf("%s in the workspace after the turn: %v", name, err)
 				}
 			}
 			candidate, err := units.snapshot(ctx, stream, "u1")
 			must(t, err)
-			if got := strings.TrimSpace(demoGit(t, f.home, "-C", clone, "diff-tree", "-r", "--name-status", f.base, candidate)); got != "D\tLICENSE\nM\tREADME\nM\tbin/run\nA\tsrc/added.go" {
-				t.Fatalf("the candidate after the turn:\n%s", got)
+			changes := strings.Split(strings.TrimSpace(demoGit(t, f.home, "-C", clone, "diff-tree", "-r", "--name-status", "--no-renames", f.base, candidate)), "\n")
+			slices.Sort(changes)
+			if want := []string{"A\tLICENSE/MIT", "A\tdocs", "A\tsrc/added.go", "A\ttools/build", "D\tLICENSE", "D\tdocs/guide", "M\tREADME", "M\tbin/run"}; !slices.Equal(changes, want) {
+				t.Fatalf("the candidate after the turn:\n%s\nwant\n%s", strings.Join(changes, "\n"), strings.Join(want, "\n"))
 			}
-			if got := strings.Fields(demoGit(t, f.home, "-C", clone, "ls-tree", candidate, "bin/run"))[0]; got != "100644" {
-				t.Fatalf("bin/run is %s in the candidate, want 100644", got)
+			for name, want := range map[string]string{"bin/run": "100644", "tools/build": "100755", "README": "100644", "docs": "100644"} {
+				if got := strings.Fields(demoGit(t, f.home, "-C", clone, "ls-tree", candidate, name))[0]; got != want {
+					t.Fatalf("%s is %s in the candidate, want %s", name, got, want)
+				}
 			}
 		})
 	}
@@ -271,5 +303,28 @@ func TestUnitWorkspaceIsLentToItsMasonAlone(t *testing.T) {
 	missing := coreadapter.Scope{Workstream: string(stream), Unit: "u2", Role: masonRole}
 	if _, err := units.Acquire(ctx, coreadapter.WorkspaceRequest{Scope: missing, Access: coreadapter.ReadWrite}); err == nil || err.Error() != "unit u2 of workstream "+string(stream)+" has no workspace" {
 		t.Fatalf("lending a workspace never opened: %v", err)
+	}
+}
+
+// A workspace whose tree holds a symlink cannot be lent to a mason turn: the
+// turn fails before it runs, and the workspace keeps the link.
+func TestMasonTurnIsRefusedAWorkspaceHoldingASymlink(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newUnitsFixture(t)
+	units := f.units()
+	w, _, err := units.open(ctx, stream, "u1")
+	must(t, err)
+	must(t, os.Symlink("../README", filepath.Join(w.Path, "docs", "readme")))
+	ran := false
+	_, err = f.masonTurn(ctx, t, units, coreadapter.ExecutionSettings{Mode: agent.SandboxNone}, func(context.Context, *enforcertest.Turn) (*agent.Result, error) {
+		ran = true
+		return &agent.Result{}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "symlinks and special files are not exposed") || ran {
+		t.Fatalf("a mason turn in a workspace holding a symlink: ran %v, %v", ran, err)
+	}
+	if target, err := os.Readlink(filepath.Join(w.Path, "docs", "readme")); err != nil || target != "../README" {
+		t.Fatalf("the workspace's link after the refused turn: %q %v", target, err)
 	}
 }
