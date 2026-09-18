@@ -153,6 +153,8 @@ The test injects fake engines and an in-memory MCP transport into
 `service.Enforce`, the function `osmia serve` uses to build role turns. The
 chief of staff therefore runs with the production grant, tools, workspace
 and session directory. `osmia serve` grants thread turns to the chief of
-staff only. So that its fake workers can ask, the test grants the mason and
+staff and to the mason, whose turn works in its unit's workspace with
+`file_read` and `file_write`. So that its fake workers can ask, the test grants the mason and
 reviewer roles `ask` and gives their turns the ask tool as the asking agent.
-The chief of staff's grant and tools are unchanged.
+The fake workers build no unit, so each works in the empty directory the chief
+of staff is handed. The chief of staff's grant and tools are unchanged.

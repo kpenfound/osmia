@@ -39,8 +39,10 @@ type unitWorkspaces struct{ git *workspace.Git }
 
 var _ coreadapter.Workspaces = unitWorkspaces{}
 
-func (s *Service) unitWorkspaces() unitWorkspaces {
-	cfg := s.current()
+func (s *Service) unitWorkspaces() unitWorkspaces { return newUnitWorkspaces(s.current()) }
+
+// newUnitWorkspaces returns the unit workspaces of the configured project.
+func newUnitWorkspaces(cfg *config.Config) unitWorkspaces {
 	return unitWorkspaces{git: &workspace.Git{Clone: cfg.Project.Clone, Directory: filepath.Join(cfg.Root.String(), unitsDirectory, string(cfg.Project.ID))}}
 }
 
@@ -134,6 +136,21 @@ func (u unitWorkspaces) paths(w workspace.Worktree) ([]string, error) {
 		}
 	}
 	return paths, nil
+}
+
+// selection selects the whole of the turn's unit workspace, but its VCS
+// metadata, as the mason turn's view, run with execution.
+func (u unitWorkspaces) selection(ctx context.Context, scope coreadapter.Scope, execution coreadapter.ExecutionSettings) (isolation.Selection, error) {
+	stream := config.WorkstreamID(scope.Workstream)
+	w, _, found, err := u.find(ctx, stream, scope.Unit)
+	if err != nil {
+		return isolation.Selection{}, err
+	}
+	if !found {
+		return isolation.Selection{}, fmt.Errorf("unit %s of workstream %s has no workspace", scope.Unit, stream)
+	}
+	paths, err := u.paths(w)
+	return isolation.Selection{Paths: paths, Execution: execution}, err
 }
 
 // capture copies a mason turn's view back into its unit's workspace, whatever

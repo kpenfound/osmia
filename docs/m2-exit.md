@@ -106,8 +106,7 @@ fake chief of staff makes the recommendation the attention item of its
 status, which `osmia status w_…` shows:
 `Ratify the spec and plan: no objection stands.` The explicit ratification is
 sealed, and the workstream moves to `ratified`, then to `building`. The
-workstream ran no turn
-but its draft.
+workstream ran no architect or committee turn but its draft.
 
 ### 5. A committee member asks during the shed
 
@@ -200,9 +199,9 @@ For each ratified workstream, `seal.json` holds:
 - each unit's footprint, resolved to entities and paths.
 
 For the resumable-uploads workstream, those units are `resume-read`,
-`resume-write` and `dedupe`. The clone has four worktrees: its own and one
-per ratified workstream, each on its feature branch at the sealed commit.
-Nothing is pushed.
+`resume-write` and `dedupe`. Besides the unit workspaces building opens, the
+clone has four worktrees: its own and one per ratified workstream, each on its
+feature branch at the sealed commit. Nothing is pushed.
 
 ### 11. The abandoned workstream
 
@@ -231,6 +230,8 @@ The [trace reference](trace.md) documents these records, and the
 
 ## Limits
 
+- Each `building` workstream [starts its first ready unit](service.md#starting-units).
+  The demonstration ends at ratification: its fake mason builds nothing.
 - The demonstration's architect asks nothing, so only the committee asks
   during the shed.
 - The restart is a stop at a test fault point, not a crash of the process.

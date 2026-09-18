@@ -13,6 +13,12 @@ func Held(pauses []runtime.Pause, project config.ProjectID, c Candidate) bool {
 	if c.Thread.Identity.Role == trace.ChiefOfStaff {
 		return false
 	}
+	return Paused(pauses, project, c.Workstream)
+}
+
+// Paused reports whether a pause in force covers the workstream of the
+// project: a factory pause, a pause on the project or one on the workstream.
+func Paused(pauses []runtime.Pause, project config.ProjectID, stream config.WorkstreamID) bool {
 	for _, p := range pauses {
 		switch p.Target.Scope {
 		case "factory":
@@ -22,7 +28,7 @@ func Held(pauses []runtime.Pause, project config.ProjectID, c Candidate) bool {
 				return true
 			}
 		case "workstream":
-			if p.Target.Project == project && p.Target.Workstream == c.Workstream {
+			if p.Target.Project == project && p.Target.Workstream == stream {
 				return true
 			}
 		}
