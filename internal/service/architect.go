@@ -238,12 +238,8 @@ func (d *drafter) request(ctx context.Context, stream config.WorkstreamID, state
 }
 
 // resume requests draft n again once the answer to the architect's question
-// is queued on its thread, caused by the transition that parked the draft. A
-// service without an architect runner requests nothing.
+// is queued on its thread, caused by the transition that parked the draft.
 func (d *drafter) resume(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, n int) error {
-	if d.s.options.Architect == nil {
-		return nil
-	}
 	chain, asked, err := d.chain(stream, n)
 	if err != nil {
 		return err
@@ -976,11 +972,6 @@ The draft is accepted only when every criterion in spec.md is addressed by at le
 
 Call %s when something you must know to draft is not in your view: the draft waits for the answer, which arrives as your next turn.
 `, handedPath, draft, DraftTool, questions.AskTool)
-	if len(answers) > 0 {
-		b.WriteString("\nThe answers to the questions you asked in this draft:\n")
-		for _, a := range answers {
-			b.WriteString("\n" + a)
-		}
-	}
+	b.WriteString(answered("draft", answers))
 	return b.String()
 }

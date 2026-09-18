@@ -714,8 +714,9 @@ func (d *debate) standingAfter(stream config.WorkstreamID, n int) ([]shed.Entry,
 // enqueueReply accepts the next architect turn of the reply, or of the
 // redraft the owner asked for, fixing its profile and prompts. turns holds
 // one turn per earlier attempt. A turn that follows an invalid redraft lists
-// why it was not accepted, and one that follows interrupted turns repeats the
-// answers the architect received in the operation.
+// why it was not accepted. Every new attempt, whether it follows an
+// interrupted turn or an invalid redraft, repeats the answers the architect
+// received in the operation.
 func (d *debate) enqueueReply(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in roundInput, turns []trace.QueuedTurn, operation string, answers []string) error {
 	profile, _, err := d.s.roleExecution(cfg, architectRole)
 	if err != nil {
@@ -744,10 +745,7 @@ func (d *debate) enqueueReply(ctx context.Context, cfg *config.Config, stream co
 		prompt = redraftPrompt(in, latest, open, problems, asked.Note)
 	}
 	if len(answers) > 0 {
-		prompt += "\n\nThe answers to the questions you asked in this " + in.answering() + ":\n"
-		for _, a := range answers {
-			prompt += "\n" + a
-		}
+		prompt += "\n" + answered(in.answering(), answers)
 	}
 	turn := in.turnID(len(turns) + 1)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: shedActor, Cause: operation, Depth: 1},

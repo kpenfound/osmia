@@ -79,3 +79,18 @@ func received(t trace.Thread, origins map[string]string, asked []trace.QuestionS
 	}
 	return out
 }
+
+// answered is the prompt block that repeats the answers an attempt's
+// predecessors received in the round, draft, reply or redraft named by what;
+// empty without answers.
+func answered(what string, answers []string) string {
+	if len(answers) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\nThe answers to the questions you asked in this " + what + ":\n")
+	for _, a := range answers {
+		b.WriteString("\n" + a)
+	}
+	return b.String()
+}

@@ -885,12 +885,7 @@ func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream
 			return empty, "", err
 		}
 		turns := roundTurns(t, in.Round, asked)
-		attempts := 0
-		for _, q := range turns {
-			if strings.HasPrefix(q.Request.TurnID, roundTurnPrefix(in.Round, member)) {
-				attempts++
-			}
-		}
+		tries := len(attempts(turns, roundChain(t, in.Round, asked)))
 		// Turns run in sequence, so the oldest unfinished turn of the chain is
 		// the one to drive: the answer to a question may be queued behind the
 		// turn that asked it while a service stop left that turn unfinished.
@@ -944,14 +939,14 @@ func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream
 				empty.Failure = "the workstream was abandoned, so the member ran no turn"
 				return empty, "", err
 			}
-			if attempts >= maxRoundAttempts {
-				empty.Failure = fmt.Sprintf("the member's turn was interrupted %d times by service stops", attempts)
+			if tries >= maxRoundAttempts {
+				empty.Failure = fmt.Sprintf("the member's turn was interrupted %d times by service stops", tries)
 				return empty, "", nil
 			}
 			if d.s.options.Committee == nil {
 				return empty, "", errNoCommittee
 			}
-			if err := d.enqueue(ctx, cfg, stream, in, member, attempts+1, operation, asked); err != nil {
+			if err := d.enqueue(ctx, cfg, stream, in, member, tries+1, operation, asked); err != nil {
 				return empty, "", err
 			}
 		default:
@@ -1357,11 +1352,6 @@ An objection that is refused comes back with the reason; correct it and call aga
 			fmt.Fprintf(&b, "- %s (%s, %s, made against %s): %s\n", s.ID, s.Kind, s.Part, s.Revision, s.Argument)
 		}
 	}
-	if len(answers) > 0 {
-		b.WriteString("\nThe answers to the questions you asked in this round:\n")
-		for _, a := range answers {
-			b.WriteString("\n" + a)
-		}
-	}
+	b.WriteString(answered("round", answers))
 	return b.String()
 }

@@ -236,8 +236,10 @@ draft `n+1` is requested with that outcome's transition as cause. After
 `waiting-<n>`, draft `n` is requested again once the answer is queued; see
 [the architect's question](#the-architects-question). A draft in progress, a
 parked draft whose answer is not queued, an exhausted workstream and a
-workstream in any other feature state need nothing. The bound is the librarian's: three drafts per workstream and
-three turns per draft.
+workstream in any other feature state need nothing. The bound is the
+librarian's: three drafts per workstream and three attempts per draft. The
+turn that delivers the answer to the architect's question continues its
+attempt and spends none.
 
 ### The turn
 
@@ -452,7 +454,7 @@ The workflow subject `shed` tracks the debate, with transitions by
 | `round-<n>` | Round `n` is requested: transition `shed-round-<n>` published a `shed-round` operation whose input pins the round to one revision of `spec.md` and one of `plan.json`. Every round pins the latest revisions when it is requested. A round resumed after a member's question is in this state again, requested by transition `shed-round-<n>-resume-<k>`. |
 | `waiting-<n>` | Round `n` is parked: a member's turn asked a question, and the round waits for the answer. Transition `shed-round-<n>-waiting-<k>` and the operation's result, outcome `waiting`, name the members that wait and their questions. |
 | `heard-<n>` | Every member's turn of round `n` has ended and its record is committed. Transition `shed-round-<n>-heard` and the operation's result carry the same summary: members heard, objections, concessions, failed turns and how many objections stand. |
-| `reply-<n>` | The architect's reply to round `n` is requested: transition `shed-reply-<n>`, caused by `shed-round-<n>-heard`, published a `shed-reply` operation pinned to the revision the round debated. Its reason counts the objections that stand. |
+| `reply-<n>` | The architect's reply to round `n` is requested: transition `shed-reply-<n>`, caused by `shed-round-<n>-heard`, published a `shed-reply` operation pinned to the revision the round debated. Its reason counts the objections that stand. A reply resumed after the architect's question is in this state again, requested by transition `shed-reply-<n>-resume-<k>`. |
 | `asked-<n>` | The architect's reply to round `n`, or its redraft after it, is parked on the architect's question. Transition `shed-reply-<n>-waiting-<k>` or `shed-redraft-<n>-waiting-<k>` and the operation's result, outcome `waiting`, name the question. |
 | `replied-<n>` | The architect's reply to round `n` is recorded. Transition `shed-reply-<n>-replied` and the operation's result carry the same summary: how many objections it answered, and whether it redrafted, left the revision as it is, gave up an invalid redraft or failed. |
 | `concluded-<n>` | Debate ended after round `n`. Transition `shed-concluded-<n>` holds why. |
@@ -819,7 +821,8 @@ recorded in `shed/round-<n>/redraft.json` against the round it concluded at,
 with the revisions it was made against and the owner's note, and makes the
 round limit `n+1`. The controller then asks the architect for the redraft as
 one turn (state `redraft-<n>`, operation `shed-redraft`, transition
-`shed-redraft-<n>`), recorded as `shed/round-<n>/redrafted.json` with the
+`shed-redraft-<n>`, or `shed-redraft-<n>-resume-<k>` for a redraft resumed
+after the architect's question), recorded as `shed/round-<n>/redrafted.json` with the
 revisions it wrote, as its reply to a round is recorded; the shed moves to
 `redrafted-<n>` and round `n+1` debates what the architect wrote, whether the
 redraft changed anything or not. The turn carries the owner's note and the
