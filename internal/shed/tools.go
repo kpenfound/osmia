@@ -43,8 +43,9 @@ const PartForms = "spec#<n> (an acceptance criterion), plan#<unit> (a unit), spe
 type Turn struct {
 	Repository *trace.Repository
 	Stream     config.WorkstreamID
-	// Record names the round, the member, the pinned revision and the turn;
-	// the tools add the contributions.
+	// Record names the round, the member, the pinned revision and the turn,
+	// and holds what the member contributed in this round before the turn,
+	// when an earlier turn of the round asked a question; the tools add to it.
 	Record Record
 	// Spec and Plan are the pinned revisions the member reads.
 	Spec plan.Spec
@@ -79,7 +80,6 @@ func Tools(t Turn) ([]coreadapter.Tool, error) {
 		return nil, errors.New("shed tools require a trace, a clock and a place to keep contributions")
 	}
 	t.Record.Version = Version
-	t.Record.Objections, t.Record.Concessions = nil, nil
 	if err := t.Record.check(); err != nil {
 		return nil, err
 	}

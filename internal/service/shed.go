@@ -20,6 +20,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -35,7 +36,8 @@ const (
 	// committee debates.
 	InShedState = "in-shed"
 	// shedSubject is the workflow subject that tracks a workstream's debate:
-	// round-<n> while the committee runs, heard-<n> once its contributions
+	// round-<n> while the committee runs, waiting-<n> while round n waits
+	// for the answer to a member's question, heard-<n> once its contributions
 	// are recorded, reply-<n> while the architect answers, replied-<n> once
 	// its reply is recorded, redraft-<n> while the architect writes the
 	// redraft the owner asked for after round n and redrafted-<n> once it is
@@ -74,17 +76,36 @@ type Committee struct {
 }
 
 // roundInput pins a round to the revisions of spec.md and plan.json every
-// member reads. Redraft distinguishes the architect's redraft at the owner's
-// request from its reply to the round: it comes from the operation's action,
-// not from its recorded input.
+// member reads. Resume numbers the operation that runs the round again after
+// it parked on a member's question, from 1; the round's own operation has
+// none. Redraft distinguishes the architect's redraft at the owner's request
+// from its reply to the round: it comes from the operation's action, not from
+// its recorded input.
 type roundInput struct {
 	Round   int  `json:"round"`
 	Spec    int  `json:"spec"`
 	Plan    int  `json:"plan"`
+	Resume  int  `json:"resume,omitempty"`
 	Redraft bool `json:"-"`
 }
 
 func (in roundInput) pin() shed.Pin { return shed.Pin{Spec: in.Spec, Plan: in.Plan} }
+
+// runIDs returns the transition and event of the operation that runs the
+// round: the round's own, or the resumption the input numbers.
+func (in roundInput) runIDs() (transition, event string) {
+	if in.Resume == 0 {
+		return roundIDs(in.Round)
+	}
+	transition = fmt.Sprintf("shed-round-%d-resume-%d", in.Round, in.Resume)
+	return transition, trace.EventID(transition, "run")
+}
+
+// parkedID is the transition that parks the round the operation runs: the
+// k-th park of round n follows its k-1-th resumption.
+func (in roundInput) parkedID() string {
+	return fmt.Sprintf("shed-round-%d-waiting-%d", in.Round, in.Resume+1)
+}
 
 func committeeAgent(i int) string  { return "agent_committee_" + strconv.Itoa(i) }
 func committeeThread(i int) string { return "thread_committee_" + strconv.Itoa(i) }
@@ -100,7 +121,7 @@ func roundTurnID(n int, agent string, attempt int) string {
 
 // shedStates are the kinds of shed-subject value, each followed by the round
 // it is about.
-var shedStates = []string{"round", "heard", "reply", "replied", "redraft", "redrafted", "concluded", "failed"}
+var shedStates = []string{"round", "waiting", "heard", "reply", "replied", "redraft", "redrafted", "concluded", "failed"}
 
 // shedState splits a shed-subject value into its kind and round number.
 func shedState(value string) (kind string, n int, ok bool) {
@@ -242,16 +263,19 @@ func (d *debate) enterSkipped(ctx context.Context, stream config.WorkstreamID, f
 }
 
 // step derives what the debate needs next from the shed state and the
-// recorded rounds. No round yet: round 1. A heard round with no open dissent
-// concludes the debate by consensus; one with open dissent gets the
-// architect's reply. After the reply, the next round runs against the latest
-// revision unless shed.max_rounds rounds have run, which concludes the debate
-// with its dissent open. A conclusion the owner followed with a request for a
-// redraft gets that redraft, and the round after it debates what the architect
-// wrote. A round, a reply or a redraft in progress, a concluded debate the
-// owner has not answered and a failed round need nothing. A round waits for a
-// service that can run the committee and a reply or redraft for one that can
-// run the architect; concluding runs no turn and waits for neither.
+// recorded rounds. No round yet: round 1. A round parked on a member's
+// question resumes once every member that asked has its answer queued. A
+// heard round with no open dissent concludes the debate by consensus; one
+// with open dissent gets the architect's reply. After the reply, the next
+// round runs against the latest revision unless shed.max_rounds rounds have
+// run, which concludes the debate with its dissent open. A conclusion the
+// owner followed with a request for a redraft gets that redraft, and the round
+// after it debates what the architect wrote. A round, a reply or a redraft in
+// progress, a parked round whose answers are not all queued, a concluded
+// debate the owner has not answered and a failed round need nothing. A round
+// waits for a service that can run the committee and a reply or redraft for
+// one that can run the architect; concluding runs no turn and waits for
+// neither.
 func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest shed.Pin) error {
 	state, err := d.repository.Workflow(stream, shedSubject)
 	if err != nil {
@@ -264,8 +288,14 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 		return d.request(ctx, stream, state, roundInput{Round: 1, Spec: latest.Spec, Plan: latest.Plan}, InShedState)
 	}
 	kind, n, ok := shedState(state.Value)
-	if !ok || kind != "heard" && kind != "replied" && kind != "concluded" && kind != "redrafted" {
+	if !ok || kind != "waiting" && kind != "heard" && kind != "replied" && kind != "concluded" && kind != "redrafted" {
 		return nil
+	}
+	if kind == "waiting" {
+		if d.s.options.Committee == nil {
+			return nil
+		}
+		return d.resume(ctx, stream, state, n)
 	}
 	requests, err := shed.Requests(d.repository, stream)
 	if err != nil {
@@ -520,20 +550,95 @@ func (d *debate) committee(stream config.WorkstreamID) ([]string, error) {
 	return members, nil
 }
 
-// request publishes a round as a durable operation.
+// request publishes a round, or the resumption of a parked one, as a durable
+// operation.
 func (d *debate) request(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, in roundInput, cause string) error {
-	transition, event := roundIDs(in.Round)
+	transition, event := in.runIDs()
 	input, err := encodeRound(in)
 	if err != nil {
 		return err
 	}
 	op := coreadapter.Operation{ID: trace.OperationID(d.repository.Project(), stream, event), Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: input}
 	reason := fmt.Sprintf("the committee is asked for round %d against %s", in.Round, in.pin())
+	body := fmt.Sprintf("Committee round %d against %s", in.Round, in.pin())
+	if in.Resume > 0 {
+		reason = fmt.Sprintf("round %d against %s resumes: every member that asked has its answer", in.Round, in.pin())
+		body = fmt.Sprintf("Committee round %d against %s, resumed", in.Round, in.pin())
+	}
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: d.header(transition, stream, cause, d.s.now()), Subject: shedSubject, From: state.Value, To: fmt.Sprintf("round-%d", in.Round), Reason: reason},
-		Events:     []trace.Event{{ID: event, Kind: "shed-round", Body: fmt.Sprintf("Committee round %d against %s", in.Round, in.pin()), Operation: &op}}}
+		Events:     []trace.Event{{ID: event, Kind: "shed-round", Body: body, Operation: &op}}}
 	_, err = d.repository.Transact(ctx, tx)
 	return err
+}
+
+// resume requests round n again once every member whose last turn of the
+// round asked a question has its answer queued on its thread. The resumption
+// is pinned to the round's own revision and caused by the transition that
+// parked it. A member still waiting parks the round as it is.
+func (d *debate) resume(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, n int) error {
+	members, err := d.committee(stream)
+	if err != nil {
+		return err
+	}
+	asked, err := d.repository.Questions(stream)
+	if err != nil {
+		return err
+	}
+	for _, member := range members {
+		t, err := d.repository.Thread(stream, member)
+		if err != nil {
+			return err
+		}
+		if turns := roundTurns(t, n, asked); len(turns) > 0 && askedBy(asked, t.Identity.ThreadID, turns[len(turns)-1].Request.TurnID) != "" {
+			return nil
+		}
+	}
+	in, err := d.requested(stream, n)
+	if err != nil {
+		return err
+	}
+	parks, err := d.parks(stream, n)
+	if err != nil {
+		return err
+	}
+	if len(parks) == 0 {
+		return fmt.Errorf("round %d is parked without a parking transition", n)
+	}
+	in.Resume = len(parks)
+	return d.request(ctx, stream, state, in, parks[len(parks)-1].ID)
+}
+
+// requested returns the input round n was requested with: its pinned revision.
+func (d *debate) requested(stream config.WorkstreamID, n int) (roundInput, error) {
+	ops, err := d.repository.Operations(stream)
+	if err != nil {
+		return roundInput{}, err
+	}
+	_, event := roundIDs(n)
+	id := trace.OperationID(d.repository.Project(), stream, event)
+	for _, o := range ops {
+		if o.Operation.ID == id {
+			return decodeRound(o.Operation)
+		}
+	}
+	return roundInput{}, fmt.Errorf("round %d has no recorded operation", n)
+}
+
+// parks returns the transitions that parked round n, in order.
+func (d *debate) parks(stream config.WorkstreamID, n int) ([]trace.Transition, error) {
+	transitions, err := trace.Read[trace.Transition](d.repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	round, _ := roundIDs(n)
+	var out []trace.Transition
+	for _, t := range transitions {
+		if t.Subject == shedSubject && strings.HasPrefix(t.ID, round+"-waiting-") {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 func encodeRound(in roundInput) (json.RawMessage, error) { return json.Marshal(in) }
@@ -555,13 +660,16 @@ func decodeShed(op coreadapter.Operation, action string) (roundInput, error) {
 	if in.Round < 1 || in.Spec < 1 || in.Plan < 1 {
 		return in, fmt.Errorf("%s operation requires a positive round and pinned revisions", action)
 	}
+	if in.Resume < 0 || in.Resume > 0 && action != RoundAction {
+		return in, fmt.Errorf("%s operation input carries an invalid resumption number", action)
+	}
 	return in, nil
 }
 
 // stream returns the workstream a round operation belongs to: the one whose
 // run event derives the operation ID.
-func (d *debate) stream(op coreadapter.Operation, n int) (config.WorkstreamID, error) {
-	_, event := roundIDs(n)
+func (d *debate) stream(op coreadapter.Operation, in roundInput) (config.WorkstreamID, error) {
+	_, event := in.runIDs()
 	return d.owner(op, event)
 }
 
@@ -579,10 +687,11 @@ func (d *debate) owner(op coreadapter.Operation, event string) (config.Workstrea
 	return "", fmt.Errorf("%s operation %s belongs to no workstream", op.Action, op.ID)
 }
 
-// outcome returns the recorded terminal result of round n: succeeded once
-// the committee was heard, failed when the round's failed transition is
-// recorded, nil before either.
-func (d *debate) outcome(stream config.WorkstreamID, n int) (*coreadapter.OperationResult, error) {
+// outcome returns the recorded terminal result of the operation that runs
+// round n: succeeded once the committee was heard, failed when the round's
+// failed transition is recorded, waiting when the operation parked the round
+// on a member's question, nil before any of them.
+func (d *debate) outcome(stream config.WorkstreamID, n int, operation string) (*coreadapter.OperationResult, error) {
 	transitions, err := trace.Read[trace.Transition](d.repository, stream)
 	if err != nil {
 		return nil, err
@@ -595,21 +704,58 @@ func (d *debate) outcome(stream config.WorkstreamID, n int) (*coreadapter.Operat
 			return &coreadapter.OperationResult{Outcome: "succeeded", Evidence: t.Reason}, nil
 		case t.ID == round+"-failed":
 			return &coreadapter.OperationResult{Outcome: "failed", Evidence: t.Reason}, nil
+		case strings.HasPrefix(t.ID, round+"-waiting-") && t.Cause == operation:
+			return &coreadapter.OperationResult{Outcome: questions.Waiting, Evidence: t.Reason}, nil
 		}
 	}
 	return nil, nil
 }
 
-// roundTurns returns the member's turns of round n in attempt order.
-func roundTurns(t trace.Thread, n int) []trace.QueuedTurn {
+// roundChain maps every turn of the member's round n to the attempt it
+// continues: an attempt turn to itself, and the turn that delivers the answer
+// to a question one of them asked to that attempt. asked is the workstream's
+// questions, oldest first, so a question asked in an answer turn follows the
+// question that turn answered.
+func roundChain(t trace.Thread, n int, asked []trace.QuestionState) map[string]string {
 	prefix := roundTurnPrefix(n, t.Identity.ID)
-	var out []trace.QueuedTurn
+	origins := map[string]string{}
 	for _, q := range t.Turns {
 		if strings.HasPrefix(q.Request.TurnID, prefix) {
+			origins[q.Request.TurnID] = q.Request.TurnID
+		}
+	}
+	for _, q := range asked {
+		if q.Asked.Thread != t.Identity.ThreadID {
+			continue
+		}
+		if origin, ok := origins[q.Asked.Turn]; ok {
+			origins[questions.TurnID(q.Asked.ID)] = origin
+		}
+	}
+	return origins
+}
+
+// roundTurns returns the member's turns of round n in thread order: its
+// attempts and the turns that answered their questions.
+func roundTurns(t trace.Thread, n int, asked []trace.QuestionState) []trace.QueuedTurn {
+	origins := roundChain(t, n, asked)
+	var out []trace.QueuedTurn
+	for _, q := range t.Turns {
+		if _, ok := origins[q.Request.TurnID]; ok {
 			out = append(out, q)
 		}
 	}
 	return out
+}
+
+// askedBy returns the ID of the question the thread's turn asked, or nothing.
+func askedBy(asked []trace.QuestionState, thread, turn string) string {
+	for _, q := range asked {
+		if q.Asked.Thread == thread && q.Asked.Turn == turn {
+			return q.Asked.ID
+		}
+	}
+	return ""
 }
 
 // Inspect reads the recorded transitions and the committee threads. A
@@ -621,11 +767,11 @@ func (d *debate) Inspect(_ context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
-	stream, err := d.stream(op, in.Round)
+	stream, err := d.stream(op, in)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
-	result, err := d.outcome(stream, in.Round)
+	result, err := d.outcome(stream, in.Round, op.ID)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -636,12 +782,16 @@ func (d *debate) Inspect(_ context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
+	asked, err := d.repository.Questions(stream)
+	if err != nil {
+		return coreadapter.Observation{}, err
+	}
 	for _, member := range members {
 		t, err := d.repository.Thread(stream, member)
 		if err != nil {
 			return coreadapter.Observation{}, err
 		}
-		turns := roundTurns(t, in.Round)
+		turns := roundTurns(t, in.Round, asked)
 		if len(turns) == 0 {
 			continue
 		}
@@ -660,21 +810,24 @@ var errNoCommittee = errors.New("this service has no agent runner for the commit
 // the same time against the pinned revision; once all have ended, each
 // member's contributions are recorded as one file of the round, in one
 // commit, and the shed moves to heard-<n>. A member whose turn failed is
-// recorded with the failure and what it contributed before it. Abandoning
-// the workstream cancels the running turns and fails a round that has no
-// record; a round whose files are committed is heard all the same. Storage
-// errors and a missing committee runner leave the operation pending for
-// another attempt, which finds the turns that already ended in the threads.
+// recorded with the failure and what it contributed before it. A member
+// whose turn asked a question parks the round instead: the shed moves to
+// waiting-<n>, the operation ends waiting, and the controller requests the
+// round again once the answers are queued. Abandoning the workstream cancels
+// the running turns and fails a round that has no record; a round whose files
+// are committed is heard all the same. Storage errors and a missing committee
+// runner leave the operation pending for another attempt, which finds the
+// turns that already ended in the threads.
 func (d *debate) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	in, err := decodeRound(op)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	stream, err := d.stream(op, in.Round)
+	stream, err := d.stream(op, in)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	if result, err := d.outcome(stream, in.Round); err != nil || result != nil {
+	if result, err := d.outcome(stream, in.Round, op.ID); err != nil || result != nil {
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
@@ -694,13 +847,14 @@ func (d *debate) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	defer cancel()
 	defer d.s.turns.add(stream, cancel)()
 	records := make([]shed.Record, len(members))
+	waiting := make([]string, len(members))
 	failures := make([]error, len(members))
 	var wg sync.WaitGroup
 	for i, member := range members {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			records[i], failures[i] = d.member(ctx, running, cfg, stream, op.ID, in, member)
+			records[i], waiting[i], failures[i] = d.member(ctx, running, cfg, stream, op.ID, in, member)
 		}()
 	}
 	wg.Wait()
@@ -720,82 +874,120 @@ func (d *debate) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 			return coreadapter.OperationResult{}, err
 		}
 		if gone {
-			return d.terminal(ctx, op.ID, stream, in.Round, "failed", fmt.Sprintf("round %d failed: the workstream was abandoned, so the committee is not heard", in.Round))
+			return d.terminal(ctx, op.ID, stream, in, "failed", fmt.Sprintf("round %d failed: the workstream was abandoned, so the committee is not heard", in.Round))
+		}
+		var parked []string
+		for i, member := range members {
+			if waiting[i] != "" {
+				parked = append(parked, fmt.Sprintf("%s waits for the answer to question %s", member, waiting[i]))
+			}
+		}
+		if len(parked) > 0 {
+			return d.terminal(ctx, op.ID, stream, in, questions.Waiting, fmt.Sprintf("round %d against %s is parked: %s", in.Round, in.pin(), strings.Join(parked, "; ")))
 		}
 	}
 	return d.record(ctx, op.ID, stream, in, records, recorded)
 }
 
 // member drives one member's turn of the round to its end and returns what
-// the member contributed. It abandons a turn a previous service stop
-// interrupted, starts a new turn while attempts remain and runs the pending
-// turn through the dispatcher.
-func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream config.WorkstreamID, operation string, in roundInput, member string) (shed.Record, error) {
+// the member contributed, with the ID of the question the member waits on
+// when its last turn asked one, whatever that turn ended with: a question is
+// answered on the thread it was asked on, so a turn that asked and then
+// failed or was interrupted waits for its answer like one that ended waiting.
+// It abandons a turn a previous service stop interrupted, starts a new turn
+// while attempts remain and runs the pending turn, the next attempt or the
+// answer to the member's question, through the dispatcher.
+func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream config.WorkstreamID, operation string, in roundInput, member string) (shed.Record, string, error) {
 	empty := shed.Record{Version: shed.Version, Round: in.Round, Member: member, Revision: in.pin()}
 	for {
 		if err := ctx.Err(); err != nil {
-			return empty, err
+			return empty, "", err
 		}
 		t, err := d.repository.Thread(stream, member)
 		if err != nil {
-			return empty, err
+			return empty, "", err
 		}
-		turns := roundTurns(t, in.Round)
-		var last *trace.QueuedTurn
+		asked, err := d.repository.Questions(stream)
+		if err != nil {
+			return empty, "", err
+		}
+		turns := roundTurns(t, in.Round, asked)
+		attempts := 0
+		for _, q := range turns {
+			if strings.HasPrefix(q.Request.TurnID, roundTurnPrefix(in.Round, member)) {
+				attempts++
+			}
+		}
+		// Turns run in sequence, so the oldest unfinished turn of the chain is
+		// the one to drive: the answer to a question may be queued behind the
+		// turn that asked it while a service stop left that turn unfinished.
+		var last, pending *trace.QueuedTurn
 		if len(turns) > 0 {
 			last = &turns[len(turns)-1]
 		}
+		if i := slices.IndexFunc(turns, func(q trace.QueuedTurn) bool { return q.CompletedAt.IsZero() }); i >= 0 {
+			pending = &turns[i]
+		}
 		switch {
-		case last != nil && last.Claim != nil && last.Response == nil:
+		case pending != nil && pending.Claim != nil && pending.Response == nil:
 			if t.Status != "interrupted" {
-				return empty, errors.New("committee turn " + last.Request.TurnID + " is still running")
+				return empty, "", errors.New("committee turn " + pending.Request.TurnID + " is still running")
 			}
-			if err := d.repository.AbandonTurn(ctx, stream, member, last.Request.TurnID, d.s.now()); err != nil {
-				return empty, err
+			if err := d.repository.AbandonTurn(ctx, stream, member, pending.Request.TurnID, d.s.now()); err != nil {
+				return empty, "", err
 			}
-		case last == nil || last.Status() == "interrupted":
-			if gone, err := abandoned(d.repository, stream); err != nil || gone {
-				empty.Failure = "the workstream was abandoned, so the member ran no turn"
-				return empty, err
-			}
-			if len(turns) >= maxRoundAttempts {
-				empty.Failure = fmt.Sprintf("the member's turn was interrupted %d times by service stops", len(turns))
-				return empty, nil
-			}
-			if d.s.options.Committee == nil {
-				return empty, errNoCommittee
-			}
-			if err := d.enqueue(ctx, cfg, stream, in, member, len(turns)+1, operation); err != nil {
-				return empty, err
-			}
-		case last.CompletedAt.IsZero():
+		case pending != nil:
 			gone, err := abandoned(d.repository, stream)
 			if err != nil {
-				return empty, err
+				return empty, "", err
 			}
-			if gone && last.Response == nil {
+			if gone && pending.Response == nil {
 				if _, err := d.repository.CancelTurns(ctx, stream, d.s.now(), abandonActor, cancelReason); err != nil {
-					return empty, err
+					return empty, "", err
 				}
 				continue
 			}
 			// Completing a captured turn runs no member.
 			turnCtx := running
-			if last.Response != nil {
+			if pending.Response != nil {
 				turnCtx = ctx
 			} else if d.s.options.Committee == nil {
-				return empty, errNoCommittee
+				return empty, "", errNoCommittee
 			}
-			if _, err := d.dispatch(turnCtx, stream, in, member, last.Request.TurnID); err != nil {
-				return empty, err
+			if _, err := d.dispatch(turnCtx, stream, in, member, pending.Request.TurnID); err != nil {
+				return empty, "", err
 			}
-			if err := os.RemoveAll(filepath.Join(d.turnDirectory(stream, last.Request.TurnID), "workspace")); err != nil {
-				return empty, err
+			if err := os.RemoveAll(filepath.Join(d.turnDirectory(stream, pending.Request.TurnID), "workspace")); err != nil {
+				return empty, "", err
+			}
+		case last == nil || last.Status() == "interrupted":
+			if last != nil {
+				if id := askedBy(asked, t.Identity.ThreadID, last.Request.TurnID); id != "" {
+					record, err := d.contributed(stream, roundChain(t, in.Round, asked)[last.Request.TurnID], empty)
+					return record, id, err
+				}
+			}
+			if gone, err := abandoned(d.repository, stream); err != nil || gone {
+				empty.Failure = "the workstream was abandoned, so the member ran no turn"
+				return empty, "", err
+			}
+			if attempts >= maxRoundAttempts {
+				empty.Failure = fmt.Sprintf("the member's turn was interrupted %d times by service stops", attempts)
+				return empty, "", nil
+			}
+			if d.s.options.Committee == nil {
+				return empty, "", errNoCommittee
+			}
+			if err := d.enqueue(ctx, cfg, stream, in, member, attempts+1, operation, asked); err != nil {
+				return empty, "", err
 			}
 		default:
-			record, err := d.contributed(stream, last.Request.TurnID, empty)
+			record, err := d.contributed(stream, roundChain(t, in.Round, asked)[last.Request.TurnID], empty)
 			if err != nil {
-				return empty, err
+				return empty, "", err
+			}
+			if id := askedBy(asked, t.Identity.ThreadID, last.Request.TurnID); id != "" {
+				return record, id, nil
 			}
 			if last.Status() != "idle" {
 				record.Failure = "the turn ended with status " + last.Status()
@@ -803,33 +995,38 @@ func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream
 					record.Failure = last.Response.Failure
 				}
 			}
-			return record, nil
+			return record, "", nil
 		}
 	}
 }
 
-// terminal ends round n with a shed transition, heard-<n> once the committee
-// is recorded or failed-<n> with why it was not, and returns the matching
-// result. The transition already recorded is returned as it is.
-func (d *debate) terminal(ctx context.Context, operation string, stream config.WorkstreamID, n int, kind, reason string) (coreadapter.OperationResult, error) {
+// terminal ends the operation's run of the round with a shed transition:
+// heard-<n> once the committee is recorded, failed-<n> with why it was not,
+// or waiting-<n> with the questions the round waits on; and returns the
+// matching result. The transition already recorded is returned as it is.
+func (d *debate) terminal(ctx context.Context, operation string, stream config.WorkstreamID, in roundInput, kind, reason string) (coreadapter.OperationResult, error) {
 	outcome := coreadapter.OperationResult{Outcome: "failed", Evidence: reason}
-	if kind == "heard" {
+	round, _ := roundIDs(in.Round)
+	id := round + "-" + kind
+	switch kind {
+	case "heard":
 		outcome.Outcome = "succeeded"
+	case questions.Waiting:
+		outcome.Outcome, id = questions.Waiting, in.parkedID()
 	}
 	state, err := d.repository.Workflow(stream, shedSubject)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	if state.Value != fmt.Sprintf("round-%d", n) {
-		result, err := d.outcome(stream, n)
+	if state.Value != fmt.Sprintf("round-%d", in.Round) {
+		result, err := d.outcome(stream, in.Round, operation)
 		if err != nil || result == nil {
-			return coreadapter.OperationResult{}, errors.Join(err, fmt.Errorf("round %d is %q, not in progress", n, state.Value))
+			return coreadapter.OperationResult{}, errors.Join(err, fmt.Errorf("round %d is %q, not in progress", in.Round, state.Value))
 		}
 		return *result, nil
 	}
-	round, _ := roundIDs(n)
 	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: d.header(round+"-"+kind, stream, operation, d.s.now()), Subject: shedSubject, From: state.Value, To: fmt.Sprintf("%s-%d", kind, n), Reason: reason}}
+		Transition: trace.Transition{Header: d.header(id, stream, operation, d.s.now()), Subject: shedSubject, From: state.Value, To: fmt.Sprintf("%s-%d", kind, in.Round), Reason: reason}}
 	if _, err := d.repository.Transact(ctx, tx); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -837,8 +1034,9 @@ func (d *debate) terminal(ctx context.Context, operation string, stream config.W
 }
 
 // enqueue accepts one member's turn of one round attempt, fixing its profile
-// and prompts.
-func (d *debate) enqueue(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in roundInput, member string, attempt int, operation string) error {
+// and prompts. The prompt of a later attempt repeats the answers the member
+// received in the round, whose turns a service stop interrupted.
+func (d *debate) enqueue(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in roundInput, member string, attempt int, operation string, asked []trace.QuestionState) error {
 	profile, _, err := d.s.roleExecution(cfg, committeeRole)
 	if err != nil {
 		return err
@@ -857,9 +1055,16 @@ func (d *debate) enqueue(ctx context.Context, cfg *config.Config, stream config.
 			standing = append(standing, dissent)
 		}
 	}
+	var answers []string
+	origins := roundChain(t, in.Round, asked)
+	for _, q := range asked {
+		if _, ok := origins[q.Asked.Turn]; ok && q.Asked.Thread == t.Identity.ThreadID && q.State == trace.QuestionAnswered && q.Ruling != nil {
+			answers = append(answers, questions.Prompt(q.Asked, *q.Ruling))
+		}
+	}
 	turn := roundTurnID(in.Round, member, attempt)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: shedActor, Cause: operation, Depth: 1},
-		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: committeeSystemPrompt(cfg.Project), Prompt: committeePrompt(in, standing)}
+		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: committeeSystemPrompt(cfg.Project), Prompt: committeePrompt(in, standing, answers)}
 	_, err = d.repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -906,7 +1111,7 @@ func (d *debate) contributed(stream config.WorkstreamID, turn string, empty shed
 
 // dispatch runs the turn through the thread dispatcher and runner.
 func (d *debate) dispatch(ctx context.Context, stream config.WorkstreamID, in roundInput, member, turn string) (coreadapter.OperationResult, error) {
-	dispatcher := thread.Dispatcher{Runner: thread.Runner{Store: d.repository, Turns: d.turns(stream, in), Now: d.s.now}, Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	dispatcher := thread.Dispatcher{Runner: thread.Runner{Store: d.repository, Turns: &questions.Turns{Turns: d.turns(stream, in), Repository: d.repository}, Now: d.s.now}, Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(d.turnDirectory(input.Workstream, input.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 	}}
@@ -919,9 +1124,10 @@ func (d *debate) dispatch(ctx context.Context, stream config.WorkstreamID, in ro
 
 // turns is a committee member's isolated turn path: a read-only private view
 // of the owner's clone, the pinned spec and plan, the handed input, the
-// charter, the context bundle and the earlier rounds, the file reading tool
-// and the two contribution tools, and no notes, write, execute, network or
-// VCS capability.
+// charter, the context bundle and the earlier rounds, the file reading tool,
+// the two contribution tools and the question tool, and no notes, write,
+// execute, network or VCS capability. A turn that asks ends waiting, so its
+// thread parks and its slot is free while the answer is found.
 func (d *debate) turns(stream config.WorkstreamID, in roundInput) *isolation.Turns {
 	var engine coreadapter.Engine
 	var hosts coreadapter.MCPHosts
@@ -934,7 +1140,7 @@ func (d *debate) turns(stream config.WorkstreamID, in roundInput) *isolation.Tur
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			return d.selectView(ctx, scope, in)
 		},
-		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: []string{"file_read", shed.ObjectTool, shed.ConcedeTool}}},
+		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: []string{"file_read", shed.ObjectTool, shed.ConcedeTool, questions.AskTool}}},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Workstream != string(stream) {
 				return nil, errors.New("turn scope denied")
@@ -946,9 +1152,12 @@ func (d *debate) turns(stream config.WorkstreamID, in roundInput) *isolation.Tur
 	}
 }
 
-// tools binds the object and concede tools to the claimed turn: they validate
-// against the pinned revision and keep what the member contributed in the
-// turn's output directory, which the service records once the round ends.
+// tools binds the object, concede and ask tools to the claimed turn: the
+// contributions validate against the pinned revision and are kept in the
+// output directory of the attempt the turn belongs to, which the service
+// records once the round ends. The turn that delivers the answer to a
+// member's question continues the attempt that asked it: it holds what the
+// member contributed before asking and numbers its objections after them.
 func (d *debate) tools(scope coreadapter.Scope, in roundInput) ([]coreadapter.Tool, error) {
 	if scope.Role != committeeRole || scope.Project != string(d.repository.Project()) {
 		return nil, errors.New("turn scope denied")
@@ -961,7 +1170,15 @@ func (d *debate) tools(scope coreadapter.Scope, in roundInput) ([]coreadapter.To
 	i := slices.IndexFunc(threads, func(t trace.Thread) bool {
 		return t.Identity.Role == committeeRole && t.Identity.ThreadID == scope.Thread
 	})
-	if i < 0 || !strings.HasPrefix(scope.Turn, roundTurnPrefix(in.Round, threads[i].Identity.ID)) {
+	if i < 0 {
+		return nil, errors.New("turn scope denied")
+	}
+	asked, err := d.repository.Questions(stream)
+	if err != nil {
+		return nil, err
+	}
+	origin, ok := roundChain(threads[i], in.Round, asked)[scope.Turn]
+	if !ok {
 		return nil, errors.New("turn scope denied")
 	}
 	member := threads[i].Identity.ID
@@ -977,9 +1194,17 @@ func (d *debate) tools(scope coreadapter.Scope, in roundInput) ([]coreadapter.To
 	if err != nil {
 		return nil, err
 	}
-	file := d.contributions(stream, scope.Turn)
-	return shed.Tools(shed.Turn{Repository: d.repository, Stream: stream, Spec: plan.ParseSpec(specDoc.Content), Plan: graph, Earlier: earlier, Now: d.s.now,
-		Record: shed.Record{Round: in.Round, Member: member, Revision: in.pin(), Turn: scope.Turn},
+	sofar, err := d.contributed(stream, origin, shed.Record{Version: shed.Version, Round: in.Round, Member: member, Revision: in.pin()})
+	if err != nil {
+		return nil, err
+	}
+	ask, err := questions.Tools(d.repository, member, scope, d.s.now)
+	if err != nil {
+		return nil, err
+	}
+	file := d.contributions(stream, origin)
+	contribute, err := shed.Tools(shed.Turn{Repository: d.repository, Stream: stream, Spec: plan.ParseSpec(specDoc.Content), Plan: graph, Earlier: earlier, Now: d.s.now,
+		Record: sofar,
 		Save: func(r shed.Record) error {
 			data, err := shed.Encode(r)
 			if err != nil {
@@ -994,6 +1219,10 @@ func (d *debate) tools(scope coreadapter.Scope, in roundInput) ([]coreadapter.To
 			}
 			return os.Rename(file+".tmp", file)
 		}})
+	if err != nil {
+		return nil, err
+	}
+	return append(contribute, ask...), nil
 }
 
 // pinned returns the revisions of spec.md and plan.json the round is pinned to.
@@ -1128,14 +1357,14 @@ func (d *debate) record(ctx context.Context, operation string, stream config.Wor
 		}
 	}
 	reason := fmt.Sprintf("round %d against %s: %d members heard, %d objections, %d concessions, %d failed turns; %d objections stand", in.Round, in.pin(), len(records), objections, concessions, failed, len(shed.OpenDissent(recorded)))
-	return d.terminal(ctx, operation, stream, in.Round, "heard", reason)
+	return d.terminal(ctx, operation, stream, in, "heard", reason)
 }
 
 func committeeSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are a member of the committee that debates one workstream's feature spec and plan for the %s project (%s) before anything is built. You test the draft against the project's charter, the owner's handed design and the decisions the knowledge base holds. You read; you hold no tool that writes, runs or fetches. You contribute only through %s and %s, and every objection cites what it rests on.", p.Name, p.Upstream, shed.ObjectTool, shed.ConcedeTool)
+	return fmt.Sprintf("You are a member of the committee that debates one workstream's feature spec and plan for the %s project (%s) before anything is built. You test the draft against the project's charter, the owner's handed design and the decisions the knowledge base holds. You read; you hold no tool that writes, runs or fetches. You contribute only through %s and %s, and every objection cites what it rests on. When your view does not settle something you must know to judge the revision, call %s: the round waits for the answer, which arrives as your next turn, and your contributions so far are kept.", p.Name, p.Upstream, shed.ObjectTool, shed.ConcedeTool, questions.AskTool)
 }
 
-func committeePrompt(in roundInput, standing []shed.Dissent) string {
+func committeePrompt(in roundInput, standing []shed.Dissent, answers []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `Round %d of the shed. Every member reads the same revision: %s.
 
@@ -1153,12 +1382,18 @@ Apply two tests and one judgement, and call %s once for each thing you find:
 - size: a unit that addresses too many criteria or touches too much of the code and must be split by what it addresses. Name the unit as the part.
 - proof: a criterion whose proof the plan cannot name, or names a proof that cannot show it. Name the criterion as the part.
 
-An objection that is refused comes back with the reason; correct it and call again. Ending your turn without objecting or conceding says you have no new dissent on this revision, and that you accept it in place of any earlier revision you objected to.
-`, in.Round, in.pin(), shed.EntityCitation, shed.ObjectTool)
+An objection that is refused comes back with the reason; correct it and call again. Ending your turn without objecting or conceding says you have no new dissent on this revision, and that you accept it in place of any earlier revision you objected to. Call %s when something you must know to judge the revision is not in your view: the round waits for the answer, which arrives as your next turn.
+`, in.Round, in.pin(), shed.EntityCitation, shed.ObjectTool, questions.AskTool)
 	if len(standing) > 0 {
 		fmt.Fprintf(&b, "\nYour objections that still stand. Call %s for each one that the revision or the debate has settled:\n", shed.ConcedeTool)
 		for _, s := range standing {
 			fmt.Fprintf(&b, "- %s (%s, %s, made against %s): %s\n", s.ID, s.Kind, s.Part, s.Revision, s.Argument)
+		}
+	}
+	if len(answers) > 0 {
+		b.WriteString("\nThe answers to the questions you asked in this round:\n")
+		for _, a := range answers {
+			b.WriteString("\n" + a)
 		}
 	}
 	return b.String()

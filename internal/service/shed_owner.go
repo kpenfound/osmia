@@ -360,7 +360,8 @@ func (s *Service) shedSkip(ctx context.Context, raw string) (ShedResponse, *APIE
 	}
 	// A turn already dispatched runs to its record whatever the owner does
 	// next, and a skipped debate runs no round for what it wrote, so the skip
-	// waits for it.
+	// waits for it. A round parked on a member's question holds no turn: the
+	// skip is recorded and the round never resumes.
 	if kind, n, ok := shedState(o.shed.Value); ok && slices.Contains([]string{"round", "reply", "redraft"}, kind) {
 		running := fmt.Sprintf("round %d", n)
 		if kind != "round" {
