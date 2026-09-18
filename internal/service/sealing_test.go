@@ -286,6 +286,12 @@ func TestSealingRetriesAFailedFetch(t *testing.T) {
 	if docs := f.documents(t, stream, shed.RatificationDocumentID(1)); len(docs) != 1 {
 		t.Fatalf("ratifying again recorded %+v", docs)
 	}
+	// The controller finds the record's sealing asked for and asks for no
+	// other.
+	must(t, (&sealer{s: f.s, repository: f.repository()}).Pass(ctx))
+	if ops := f.sealOperations(t, stream); len(ops) != 1 {
+		t.Fatalf("the pass asked for %+v", ops)
+	}
 	if moves := f.sealMoves(t, stream); !slices.Equal(moves, []string{"sealing-1"}) {
 		t.Fatalf("seal subject went %v", moves)
 	}
