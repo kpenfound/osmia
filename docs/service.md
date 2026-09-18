@@ -1175,9 +1175,9 @@ under the turn's [isolation](isolation.md#enforced-execution): no VCS
 executable, no VCS metadata readable or writable, and no environment but the
 service's. The view leaves out the workspace's symlinks and special files, at
 the top and nested, so the turn never sees them. Whatever the turn's result,
-the view can be copied back into the workspace: the workspace then holds
-exactly the view's regular files and directories, with each file's owner
-execute bit. VCS metadata, symlinks and special files the turn put into its
+the view can be copied back into the workspace: the workspace then holds the
+view's regular files and directories, with each file's owner execute bit, and
+nothing else but what it keeps. VCS metadata, symlinks and special files the turn put into its
 view are not copied back. The workspace's own `.git`, symlinks and special
 files are left as they are, and so are the directories holding them, even when
 the turn removed such a directory from its view; a file or directory the turn

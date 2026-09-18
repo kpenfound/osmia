@@ -339,6 +339,8 @@ func TestMasonTurnKeepsTheWorkspaceSymlinks(t *testing.T) {
 			problems = append(problems, "writing the view: "+err.Error())
 		}
 		must(t, os.RemoveAll(filepath.Join(view, "docs")))
+		// A file where the workspace keeps a directory for the link it holds.
+		must(t, os.WriteFile(filepath.Join(view, "docs"), []byte("see the wiki\n"), 0600))
 		must(t, os.Symlink("README", filepath.Join(view, "planted")))
 		must(t, os.Symlink("../README", filepath.Join(view, "bin", "planted")))
 		// Files and directories where the workspace keeps its links.
@@ -363,6 +365,9 @@ func TestMasonTurnKeepsTheWorkspaceSymlinks(t *testing.T) {
 		if _, err := os.Lstat(filepath.Join(w.Path, name)); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatalf("%s in the workspace after the turn: %v", name, err)
 		}
+	}
+	if info, err := os.Lstat(filepath.Join(w.Path, "docs")); err != nil || !info.IsDir() {
+		t.Fatalf("the workspace's docs after the turn: %v %v", info, err)
 	}
 	candidate, err := units.snapshot(ctx, stream, "u1")
 	must(t, err)

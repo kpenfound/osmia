@@ -137,8 +137,9 @@ func (u unitWorkspaces) paths(w workspace.Worktree) ([]string, error) {
 }
 
 // capture copies a mason turn's view back into its unit's workspace, whatever
-// the turn's result: the workspace then holds exactly the view's files, and
-// its VCS metadata, symlinks and special files are left as they are.
+// the turn's result: the workspace then holds the view's files, and its VCS
+// metadata, symlinks and special files, and the directories that hold them, are
+// left as they are; a view entry in their place is not copied back.
 func (u unitWorkspaces) capture(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView, _ coreadapter.SessionResult) error {
 	stream := config.WorkstreamID(scope.Workstream)
 	w, _, found, err := u.find(ctx, stream, scope.Unit)
