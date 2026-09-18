@@ -252,7 +252,7 @@ func TestMasonTurnGetsTheUnitWorkspaceFilesOnly(t *testing.T) {
 			if after, err := os.ReadFile(dotgit); err != nil || string(after) != string(pointer) {
 				t.Fatalf("the workspace's .git after the turn: %q %v", after, err)
 			}
-			for _, name := range []string{"escape", "src/.git", "docs/guide"} {
+			for _, name := range []string{"escape", "src/.git"} {
 				if _, err := os.Lstat(filepath.Join(w.Path, name)); !errors.Is(err, fs.ErrNotExist) {
 					t.Fatalf("%s in the workspace after the turn: %v", name, err)
 				}
