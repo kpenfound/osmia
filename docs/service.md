@@ -794,10 +794,10 @@ listed in the one refusal:
 
 A workstream that is neither `in-shed` nor `sketched` is refused by the state
 check every owner action of the shed makes, and revisions below 1 with
-`validation`. Revisions already ratified are not recorded again: that call asks
-for the [sealing](#sealing) of the ratification on the record instead, and
-answers with the detail `workstream <id> is ratified at <revisions> already;
-the sealing is asked for again`.
+`validation`. Revisions already ratified are not recorded again while their
+sealing is requested, pending or running: that call reports the sealing the
+record asked for, and records the ratification again only once that sealing
+has failed, as described below.
 
 What passes is recorded in `shed/round-<n>/ratification.json` (actor
 `owner`/`local`, cause `owner-shed`) with the revisions it approves, the
@@ -822,8 +822,10 @@ failed) or `...; sealing <k> is running`. Once that sealing has
 again as the next revision of its file, with the owner subject moving to
 `ratified-<n>` again and the reason `the owner ratified <revisions> after
 round <n> again; sealing <k> failed and the sealing is asked for again`; the
-detail says the same and `sealing` is `requested` again. That is how the owner
-asks for a sealing after one failed, once whatever failed it is put right.
+detail is `workstream <id> is ratified at <revisions> already; sealing <k>
+failed and the sealing is asked for again`, which the CLI prints, and
+`sealing` is `requested` again. That is how the owner asks for a sealing after
+one failed, once whatever failed it is put right.
 
 ### Sealing
 
@@ -847,16 +849,21 @@ tracks a workstream's sealings:
 
 | `seal` state | Meaning |
 | --- | --- |
-| `sealing-<k>` | Sealing `k` is asked for: queued, running or waiting to retry. |
-| `failed-<k>` | Sealing `k` failed for a reason a retry does not put right. |
+| `sealing-<k>` | Sealing `k`, the latest asked for, is queued, running or waiting to retry. |
+| `failed-<k>` | Sealing `k`, the latest asked for, failed for a reason a retry does not put right. |
 
 The request is the transition `seal-<k>` (actor `service`/`sealing`, cause the
 ratification record's transition, `shed-round-<n>-ratification-<r>`) with
 the reason `the owner ratified <revisions> in round <n>; sealing <k> fetches
 upstream, records the seal and the footprints and creates the feature branch`.
-A sealing that succeeds is recorded by the feature state it moves, not by the
-subject. A service stop between the record of a ratification and the request
-leaves nothing owed but the next pass; one after a request leaves the
+`k` is the number after the highest sealing asked for on the workstream,
+whatever the subject reads, so no number is ever reused. A sealing that
+succeeds is recorded by the feature state it moves, not by the subject. A
+sealing that was still queued or retrying when a later one was asked for
+finds itself superseded when it runs: it records its failure (the transition
+`seal-<k>-failed` below) and leaves the subject to the later sealing, moving
+it nowhere. A service stop between the record of a ratification and the
+request leaves nothing owed but the next pass; one after a request leaves the
 operation pending for the next service, which inspects the clone before
 retrying. A ratification whose sealing failed is not asked for again by the
 controller: the owner asks by ratifying again, which records the ratification
@@ -882,8 +889,10 @@ Each attempt, in order:
    branch is created from the fetched commit.
 5. Checks the branch out in the workstream's workspace,
    `<root>/branches/<project-id>/<workstream-id>`, a Git worktree of the
-   clone, unless the clone has that worktree already. A directory in the way
-   that is no worktree of the clone is reported and left alone.
+   clone, unless the clone has that worktree already. That worktree alone is
+   forgotten and made again when its directory is gone; the owner's other
+   worktrees are never pruned. A directory in the way that is no worktree of
+   the clone is reported and left alone.
 6. Records `seal.json` as the workstream document `seal` (actor
    `service`/`sealing`, cause the operation ID), unless this sealing recorded
    it before the attempt was interrupted, and moves the feature state to
@@ -908,23 +917,33 @@ operation records a retry with it and the next attempt starts again from what
 the clone holds, so an interrupted or failed attempt never creates a second
 branch or workspace. The workstream stays in the shed until every step has
 succeeded. Git runs in the clone with hooks disabled and no terminal prompt,
-with the owner's Git configuration and SSH agent in reach, because fetching
-their remotes may need their credentials; no session ever runs it.
+with the owner's Git configuration, SSH agent and SSH command in reach,
+because fetching their remotes may need their credentials; unless the owner
+set `GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand`, the fetch runs SSH in
+batch mode, so a passphrase or an unknown host key fails the fetch instead of
+waiting for a terminal. No session ever runs it.
 
 #### What a sealing refuses
 
-A sealing that finds one of these records `failed-<k>` on the seal subject
-(transition `seal-<k>-failed`, cause `seal-<k>`) with the reason `sealing <k>
-of <revisions> failed: <why>`, a notice for the chief of staff (`The sealing
-of <revisions> failed and the workstream is not ratified: <why>. Once that is
-put right, ratifying the same revisions again asks for the sealing again.`)
-and the failure as the operation's result, and the workstream keeps its state:
+A sealing that finds one of these records the transition `seal-<k>-failed`
+(cause `seal-<k>`) on the seal subject, to `failed-<k>` while the subject
+reads `sealing-<k>` and to the value it already has otherwise, with the
+reason `sealing <k> of <revisions> failed: <why>`, a notice for the chief of
+staff (`The sealing of <revisions> failed and the workstream is not ratified:
+<why>. Once that is put right, ratifying the same revisions again asks for
+the sealing again.`) and the failure as the operation's result, and the
+workstream keeps its state:
 
 - `the workstream is <state>, not in the shed`: it is abandoned, or otherwise
-  past the shed. The check is made again right before the seal is recorded, so
-  an abandonment during the attempt is honoured; a branch the attempt already
-  created stays in the clone, as the design keeps an abandoned workstream's
-  branch.
+  past the shed, when the attempt starts; or it moved while the attempt ran,
+  found when the move to `ratified` refuses.
+- `the owner abandoned the workstream; its feature branch <branch> stays in
+  the clone`: the workstream was abandoned while the attempt ran, found by the
+  check made again right after the branch is created, before the seal is
+  recorded. The branch stays, as the design keeps an abandoned workstream's
+  branch. An abandonment that lands between that check and the record leaves
+  `seal.json` on the abandoned workstream too; the move to `ratified` refuses
+  it all the same, and the workstream stays abandoned.
 - `the owner's latest ratification is of <revisions> in round <n>, not of
   <revisions> in round <n>`: the owner ratified other revisions since, and
   that ratification is sealed instead; `the owner ratified <revisions> in

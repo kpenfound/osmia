@@ -35,9 +35,11 @@ const (
 	// and plan are sealed and whose feature branch exists.
 	RatifiedState = "ratified"
 	// sealSubject is the workflow subject that tracks the sealings of one
-	// workstream: sealing-<k> while sealing k runs or waits to retry, and
-	// failed-<k> once it failed for a reason a retry does not put right. A
-	// sealing that succeeds is recorded by the feature state it moves.
+	// workstream: sealing-<k> while sealing k, the latest asked for, runs
+	// or waits to retry, and failed-<k> once it failed for a reason a retry
+	// does not put right. A sealing that succeeds is recorded by the feature
+	// state it moves, and one that fails after a later sealing was asked for
+	// records its failure without moving the subject.
 	sealSubject = "seal"
 	// branchesDirectory is the directory under the root holding the feature
 	// branch workspaces, by project and workstream.
@@ -202,15 +204,27 @@ func (z *sealer) header(id string, stream config.WorkstreamID, cause string, at 
 }
 
 // request publishes the next sealing of the workstream, of the given
-// ratification record, as a durable operation, and returns its number.
+// ratification record, as a durable operation, and returns its number: the
+// one after the highest asked for, whatever the subject reads.
 func (z *sealer) request(ctx context.Context, stream config.WorkstreamID, r ratification) (int, error) {
 	state, err := z.repository.Workflow(stream, sealSubject)
 	if err != nil {
 		return 0, err
 	}
+	ops, err := z.repository.Operations(stream)
+	if err != nil {
+		return 0, err
+	}
 	k := 1
-	if _, n, ok := sealState(state.Value); ok {
-		k = n + 1
+	for _, o := range ops {
+		if o.Operation.Action != SealAction {
+			continue
+		}
+		in, err := decodeSeal(o.Operation)
+		if err != nil {
+			return 0, err
+		}
+		k = max(k, in.Seal+1)
 	}
 	transition, event := sealIDs(k)
 	input, err := json.Marshal(sealInput{Seal: k, Round: r.Round, Spec: r.Revision.Spec, Plan: r.Revision.Plan, Ratification: r.Recorded})
@@ -406,8 +420,10 @@ func (z *sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	}
 	record := seal.Seal{Version: seal.Version, Seal: in.Seal, Round: in.Round, Revision: in.pin(), SpecHash: seal.SpecHash(spec.Content),
 		Base: seal.Base{Remote: remote, Branch: cfg.Project.BaseBranch, Commit: base}, Branch: branch, Workspace: ws.Directory(), Footprints: footprints}
-	// The branch stays whatever happens next; the record and the state are
-	// the workstream's, and an abandoned one gets neither.
+	// The branch stays whatever happens next. An abandonment up to here
+	// records nothing more; one that lands between this check and the
+	// record leaves seal.json on the abandoned workstream, and the move to
+	// ratified, which expects the state the attempt read, refuses it.
 	if gone, err := abandoned(z.repository, stream); err != nil || gone {
 		if err != nil {
 			return coreadapter.OperationResult{}, err
@@ -483,7 +499,9 @@ func (z *sealer) record(ctx context.Context, stream config.WorkstreamID, record 
 }
 
 // fail records why the sealing failed, tells the chief of staff, and returns
-// the failure as the operation's result.
+// the failure as the operation's result. The subject moves to failed-<k>
+// only while it still reads sealing-<k>: a sealing a later one has replaced
+// records its failure and leaves the subject to the later one.
 func (z *sealer) fail(ctx context.Context, stream config.WorkstreamID, in sealInput, reason string) (coreadapter.OperationResult, error) {
 	transition, _ := sealIDs(in.Seal)
 	id := transition + "-failed"
@@ -491,10 +509,14 @@ func (z *sealer) fail(ctx context.Context, stream config.WorkstreamID, in sealIn
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	to := state.Value
+	if state.Value == fmt.Sprintf("sealing-%d", in.Seal) {
+		to = fmt.Sprintf("failed-%d", in.Seal)
+	}
 	recorded := fmt.Sprintf("sealing %d of %s failed: %s", in.Seal, in.pin(), reason)
 	body := fmt.Sprintf("The sealing of %s failed and the workstream is not ratified: %s. Once that is put right, ratifying the same revisions again asks for the sealing again.", in.pin(), reason)
 	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: z.header(id, stream, transition, z.s.now()), Subject: sealSubject, From: state.Value, To: fmt.Sprintf("failed-%d", in.Seal), Reason: recorded},
+		Transition: trace.Transition{Header: z.header(id, stream, transition, z.s.now()), Subject: sealSubject, From: state.Value, To: to, Reason: recorded},
 		Events:     []trace.Event{trace.Notice(id, "failed", body)}}
 	if _, err := z.repository.Transact(ctx, tx); err != nil {
 		return coreadapter.OperationResult{}, err

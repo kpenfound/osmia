@@ -183,8 +183,8 @@ branch, a relative clone path, a clone that does not exist, is not a directory
 or has no `.git` entry, and a clone nested with the root either way.
 Registration never writes to the clone; seeding only reads it. The service
 writes to the clone once a workstream is ratified, when its
-[sealing](service.md#sealing) fetches upstream and creates the feature
-branch.
+[sealing](service.md#sealing) fetches upstream, creates the feature branch and
+its worktree, and forgets that worktree alone when its directory is gone.
 
 Registration is recoverable. If the service stops at any step, the journal makes
 the next start finish the registration with the same ID, or `osmia project add`

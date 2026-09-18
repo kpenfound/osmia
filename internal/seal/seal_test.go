@@ -1,6 +1,7 @@
 package seal
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -95,13 +96,19 @@ func TestInvalidSealsAreRefused(t *testing.T) {
 		if _, err := Encode(s); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: encoding: %v, want %q", name, err, tc.want)
 		}
-		data, err := Encode(valid())
+		// What Encode refuses to write, Parse refuses to read.
+		data, err := json.Marshal(s)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Parse(data); err != nil {
-			t.Fatalf("%s: parsing the valid seal: %v", name, err)
+		if _, err := Parse(data); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: parsing: %v, want %q", name, err, tc.want)
 		}
+	}
+	if data, err := Encode(valid()); err != nil {
+		t.Fatal(err)
+	} else if _, err := Parse(data); err != nil {
+		t.Fatalf("parsing the valid seal: %v", err)
 	}
 	for name, data := range map[string]string{
 		"unknown field": `{"version":1,"seal":1,"round":1,"revision":{"spec":1,"plan":1},"spec_hash":"` + SpecHash("") + `","base":{"remote":"u","branch":"main","commit":"c"},"branch":"b","workspace":"w","footprints":[],"extra":1}`,

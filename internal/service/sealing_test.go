@@ -657,3 +657,117 @@ func TestSealingIsAskedForAfterARestartAndSealsFromSketched(t *testing.T) {
 		t.Fatalf("seal operations %+v", ops)
 	}
 }
+
+// A sealing that fails after a later one was asked for records its failure
+// and leaves the subject to the later one, and the next sealing takes the
+// number after the highest asked for, whatever the subject reads: the
+// stale failure never makes a number get reused.
+func TestStaleSealingFailureLeavesTheSubjectToTheLaterOne(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 1)
+	ctx := context.Background()
+	f.stop(t)
+	f.opts.Committee = nil
+	f.start(t)
+	stream := f.handIn(t, "design", handedDesign)
+	f.await(t, stream, sketched)
+	if _, err := f.c.ShedSkip(ctx, stream); err != nil {
+		t.Fatal(err)
+	}
+	f.awaitPacket(t, stream, "ratify: no objection stands")
+	// Sealing 1 retries a fetch the clone cannot make while the owner
+	// ratifies new revisions, which asks for sealing 2.
+	if _, err := f.c.Ratify(ctx, stream, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	f.awaitRetry(t, stream, 1, "no remote whose URL names")
+	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.SpecPath), []byte(strings.Replace(validSpec, "never sent again", "not sent twice", 1)), 0600))
+	f.awaitDocument(t, stream, plan.SpecDocument, 2)
+	f.awaitPacket(t, stream, "ratify: no objection stands")
+	if _, err := f.c.Ratify(ctx, stream, 2, 1); err != nil {
+		t.Fatal(err)
+	}
+	f.awaitSealMove(t, stream, "sealing-2")
+	f.stop(t)
+
+	// Sealing 2 fails on a footprint first, then sealing 1 finds itself
+	// superseded.
+	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	z := &sealer{s: f.s, repository: repo}
+	operation := func(k int) trace.OperationRecord {
+		ops, err := repo.Operations(stream)
+		must(t, err)
+		for _, o := range ops {
+			if in, err := decodeSeal(o.Operation); err == nil && in.Seal == k {
+				return o
+			}
+		}
+		t.Fatalf("no sealing %d", k)
+		return trace.OperationRecord{}
+	}
+	entities, err := kb.Load(repo)
+	must(t, err)
+	must(t, kb.Store(ctx, repo, kb.Map{Version: kb.Version, Entities: []kb.Entity{{ID: "other", Name: "Other", Paths: []string{"other/**"}}}}, f.clock.Now(), ownerActor, "test"))
+	result, err := z.Apply(ctx, operation(2).Operation)
+	must(t, err)
+	if result.Outcome != "failed" || !strings.Contains(result.Evidence, "the entity map does not resolve") {
+		t.Fatalf("sealing 2: %+v", result)
+	}
+	result, err = z.Apply(ctx, operation(1).Operation)
+	must(t, err)
+	if result.Outcome != "failed" || result.Evidence != "sealing 1 of spec.md revision 1 and plan.json revision 1 failed: the owner's latest ratification is of spec.md revision 2 and plan.json revision 1 in round 1, not of spec.md revision 1 and plan.json revision 1 in round 1" {
+		t.Fatalf("sealing 1: %+v", result)
+	}
+	transitions, err := trace.Read[trace.Transition](repo, stream)
+	must(t, err)
+	var moves []string
+	for _, tr := range transitions {
+		if tr.Subject == sealSubject {
+			moves = append(moves, tr.To)
+		}
+		if tr.ID == "seal-1-failed" && (tr.From != "failed-2" || tr.To != "failed-2") {
+			t.Fatalf("the stale failure moved the subject: %+v", tr)
+		}
+	}
+	if !slices.Equal(moves, []string{"sealing-1", "sealing-2", "failed-2", "failed-2"}) {
+		t.Fatalf("seal subject went %v", moves)
+	}
+	// The owner puts the map right and ratifies again: the next sealing is
+	// 3, after the highest asked for.
+	must(t, kb.Store(ctx, repo, entities, f.clock.Now(), ownerActor, "test"))
+	latest, found, err := latestRatification(repo, stream)
+	must(t, err)
+	if !found || latest.Recorded != 2 {
+		t.Fatalf("latest ratification %+v %v", latest, found)
+	}
+	content, err := shed.EncodeRatification(latest.Ratification)
+	must(t, err)
+	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.RatificationDocumentID(1), Revision: 3, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: "owner-shed"}, Path: shed.RatificationPath(1), Content: string(content)}}))
+	latest, _, err = latestRatification(repo, stream)
+	must(t, err)
+	k, err := z.request(ctx, stream, latest)
+	must(t, err)
+	if k != 3 {
+		t.Fatalf("the next sealing is %d", k)
+	}
+	must(t, repo.Close())
+
+	// The next service acknowledges the two failures and seals the record.
+	commit := f.upstream(t)
+	f.start(t)
+	defer f.stop(t)
+	f.awaitFeature(t, stream, RatifiedState)
+	ops := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, stream) })
+	if len(ops) != 3 || ops[0].Result.Outcome != "failed" || ops[1].Result.Outcome != "failed" || ops[2].Result.Outcome != "succeeded" {
+		t.Fatalf("seal operations %+v", ops)
+	}
+	record, _, found, err := seal.Latest(f.repository(), stream)
+	must(t, err)
+	if !found || record.Seal != 3 || record.Revision != (shed.Pin{Spec: 2, Plan: 1}) || record.Base.Commit != commit {
+		t.Fatalf("the seal %+v", record)
+	}
+	if moves := f.sealMoves(t, stream); !slices.Equal(moves, []string{"sealing-1", "sealing-2", "failed-2", "failed-2", "sealing-3"}) {
+		t.Fatalf("seal subject went %v", moves)
+	}
+}

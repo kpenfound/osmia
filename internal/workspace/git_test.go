@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -194,6 +195,12 @@ func TestAcquireRecoversWhatAnInterruptionLeft(t *testing.T) {
 	if got := git(t, "-C", ws.Directory(), "rev-parse", "--abbrev-ref", "HEAD"); got != "osmia/w1" {
 		t.Fatalf("the worktree is on %s", got)
 	}
+	// The owner's own worktree whose directory is gone is theirs to prune.
+	mine := filepath.Join(filepath.Dir(f.clone), "mine")
+	git(t, "-C", f.clone, "worktree", "add", "--quiet", "-b", "mine", mine, base)
+	if err := os.RemoveAll(mine); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.RemoveAll(ws.Directory()); err != nil {
 		t.Fatal(err)
 	}
@@ -206,6 +213,25 @@ func TestAcquireRecoversWhatAnInterruptionLeft(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(ws.Directory(), "README")); err != nil {
 		t.Fatal(err)
+	}
+	if out := git(t, "-C", f.clone, "worktree", "list", "--porcelain"); !strings.Contains(out, "worktree "+mine+"\n") || !strings.Contains(out, "prunable") {
+		t.Fatalf("the owner's worktree was forgotten:\n%s", out)
+	}
+	if err := f.provider.Prune(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if out := git(t, "-C", f.clone, "worktree", "list", "--porcelain"); !strings.Contains(out, "worktree "+mine+"\n") {
+		t.Fatalf("Prune forgot the owner's worktree:\n%s", out)
+	}
+	// Prune forgets the provider's own.
+	if err := os.RemoveAll(ws.Directory()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.provider.Prune(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if out := git(t, "-C", f.clone, "worktree", "list", "--porcelain"); strings.Contains(out, "osmia/w1") || !strings.Contains(out, "worktree "+mine+"\n") {
+		t.Fatalf("after Prune:\n%s", out)
 	}
 	stray := filepath.Join(f.provider.Directory, "w2")
 	if err := os.MkdirAll(stray, 0700); err != nil {
@@ -260,5 +286,35 @@ func TestAncestorAndRelease(t *testing.T) {
 	}
 	if err := f.provider.Release(ctx, nil); err == nil {
 		t.Fatal("releasing nothing")
+	}
+}
+
+// SSH runs in batch mode for a fetch unless the owner has an SSH command of
+// their own, in the environment or in their Git configuration.
+func TestFetchPutsSSHInBatchModeUnlessTheOwnerConfiguredIt(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	for _, name := range []string{"GIT_SSH_COMMAND", "GIT_SSH"} {
+		t.Setenv(name, "")
+		os.Unsetenv(name)
+	}
+	env, err := f.provider.sshEnvironment(ctx)
+	if err != nil || !slices.Equal(env, []string{"GIT_SSH_COMMAND=ssh -o BatchMode=yes"}) {
+		t.Fatalf("with nothing configured: %q %v", env, err)
+	}
+	if _, err := f.provider.Fetch(ctx, "upstream", "main"); err != nil {
+		t.Fatalf("a local fetch in batch mode: %v", err)
+	}
+	git(t, "-C", f.clone, "config", "core.sshCommand", "ssh -i mine")
+	if env, err := f.provider.sshEnvironment(ctx); err != nil || env != nil {
+		t.Fatalf("with core.sshCommand: %q %v", env, err)
+	}
+	git(t, "-C", f.clone, "config", "--unset", "core.sshCommand")
+	for _, name := range []string{"GIT_SSH_COMMAND", "GIT_SSH"} {
+		t.Setenv(name, "ssh -i mine")
+		if env, err := f.provider.sshEnvironment(ctx); err != nil || env != nil {
+			t.Fatalf("with %s: %q %v", name, env, err)
+		}
+		os.Unsetenv(name)
 	}
 }
