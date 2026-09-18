@@ -147,7 +147,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	list, err := c.Statuses(ctx)
 	must(t, err)
 	empty := func(w config.WorkstreamID) WorkstreamStatus {
-		return WorkstreamStatus{Workstream: w, Project: project, ContextMode: "file"}
+		return WorkstreamStatus{Workstream: w, Project: project, Units: []UnitStatus{}, ContextMode: "file"}
 	}
 	if want := []WorkstreamStatus{empty(stream), empty(quiet)}; !sameStatuses(list.Workstreams, want) || len(list.Diagnostics) != 0 {
 		t.Fatalf("before the chief of staff wrote: %+v", list)
@@ -198,7 +198,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	}
 	raw := map[string]json.RawMessage{}
 	must(t, c.Do(ctx, "GET", Prefix+"/status/"+string(quiet), nil, &raw))
-	if string(raw["status"]) != "null" || string(raw["state"]) != "null" || string(raw["open_questions"]) != "0" || string(raw["context_mode"]) != `"file"` {
+	if string(raw["status"]) != "null" || string(raw["state"]) != "null" || string(raw["units"]) != "[]" || string(raw["open_questions"]) != "0" || string(raw["context_mode"]) != `"file"` {
 		t.Fatalf("no-status JSON: %v", raw)
 	}
 	engine.mu.Lock()
@@ -292,7 +292,7 @@ func TestStatusViewCarriesTraceFacts(t *testing.T) {
 	stored := &trace.Status{Header: trace.Header{Revision: 4, At: at}, StatusContent: trace.StatusContent{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}}}
 	state := "building"
 	got := statusView(project, bundle.ModeFile, trace.WorkstreamStatus{Workstream: stream, State: state, OpenQuestions: 2, Status: stored})
-	want := WorkstreamStatus{Workstream: stream, Project: project, State: &state, OpenQuestions: 2, ContextMode: "file",
+	want := WorkstreamStatus{Workstream: stream, Project: project, State: &state, Units: []UnitStatus{}, OpenQuestions: 2, ContextMode: "file",
 		Status: &StatusView{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}, Revision: 4, UpdatedAt: at}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)

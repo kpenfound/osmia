@@ -29,7 +29,13 @@ func (s *Service) statuses() ([]WorkstreamStatus, *APIError) {
 		if w.Workstream == librarian {
 			continue
 		}
-		out = append(out, statusView(cfg.Project.ID, mode, w))
+		units, err := unitStates(active.repository, w.Workstream)
+		if err != nil {
+			return nil, &APIError{Internal, fmt.Sprintf("cannot read the unit states of workstream %s; check the trace repository", w.Workstream)}
+		}
+		view := statusView(cfg.Project.ID, mode, w)
+		view.Units = append(view.Units, units...)
+		out = append(out, view)
 	}
 	return out, nil
 }
@@ -64,7 +70,7 @@ func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 }
 
 func statusView(project config.ProjectID, mode bundle.Mode, w trace.WorkstreamStatus) WorkstreamStatus {
-	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, OpenQuestions: w.OpenQuestions, ContextMode: mode}
+	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, Units: []UnitStatus{}, OpenQuestions: w.OpenQuestions, ContextMode: mode}
 	if w.State != "" {
 		state := w.State
 		out.State = &state

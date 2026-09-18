@@ -113,7 +113,7 @@ func TestHandInSkippingDebateIsRatifiedAndSeals(t *testing.T) {
 	if ratified.Sealing != "requested" || ratified.Round != 1 || ratified.Spec != 1 || ratified.Plan != 1 {
 		t.Fatalf("ratification %+v", ratified)
 	}
-	f.awaitFeature(t, stream, RatifiedState)
+	f.awaitFeature(t, stream, BuildingState)
 	ops := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, stream) })
 	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
 		t.Fatalf("seal operations %+v", ops)
@@ -122,7 +122,7 @@ func TestHandInSkippingDebateIsRatifiedAndSeals(t *testing.T) {
 	if len(drafts) != 1 || drafts[0].Result == nil || drafts[0].Result.Outcome != "succeeded" {
 		t.Fatalf("draft operations %+v", drafts)
 	}
-	if moves := f.featureMoves(t, stream); strings.Join(moves, " ") != "handin:handed sketched:sketched in-shed:in-shed ratified:ratified" {
+	if moves := f.featureMoves(t, stream); strings.Join(moves, " ") != "handin:handed sketched:sketched in-shed:in-shed ratified:ratified building:building" {
 		t.Fatalf("feature moves %v", moves)
 	}
 	f.debatedNothing(t, stream)
@@ -167,7 +167,7 @@ func TestHandInSkipSurvivesARestart(t *testing.T) {
 	if _, err := f.c.Ratify(context.Background(), stream, 1, 1); err != nil {
 		t.Fatal(err)
 	}
-	f.awaitFeature(t, stream, RatifiedState)
+	f.awaitFeature(t, stream, BuildingState)
 	awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, stream) })
 	f.debatedNothing(t, stream)
 }

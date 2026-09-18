@@ -422,7 +422,7 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	if out, err := f.c.Ratify(ctx, small, 1, 1); err != nil || out.Sealing != "requested" {
 		t.Fatalf("ratifying the skipped debate: %+v %v", out, err)
 	}
-	f.awaitFeature(t, small, RatifiedState)
+	f.awaitFeature(t, small, BuildingState)
 	if s := sealOf(small); s.Base.Commit != commit || s.SpecHash != seal.SpecHash(exitSmallSpec) || len(s.Footprints) != 1 || s.Footprints[0].Unit != "message" || branchAt(small) != commit {
 		t.Fatalf("the small workstream's seal %+v", s)
 	}
@@ -495,7 +495,7 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	if out, err := f.c.Ratify(ctx, debated, 1, 2); err != nil || out.Sealing != "requested" {
 		t.Fatalf("ratifying the debated workstream: %+v %v", out, err)
 	}
-	f.awaitFeature(t, debated, RatifiedState)
+	f.awaitFeature(t, debated, BuildingState)
 	s := sealOf(debated)
 	if s.Base != (seal.Base{Remote: "upstream", Branch: "main", Commit: commit}) || s.SpecHash != seal.SpecHash(validSpec) || s.Revision != (shed.Pin{Spec: 1, Plan: 2}) || s.Branch != "osmia/"+string(debated) {
 		t.Fatalf("the debated seal %+v", s)
@@ -590,7 +590,7 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	// clone holds.
 	f.start(t)
 	defer f.stop(t)
-	f.awaitFeature(t, capped, RatifiedState)
+	f.awaitFeature(t, capped, BuildingState)
 	record := f.ratification(t, capped, 2)
 	if record.Revision != (shed.Pin{Spec: 1, Plan: 1}) || len(record.Dispositions) != 1 || record.Dispositions[0] != (shed.Ruling{Objection: cappedVeto, Disposition: shed.Overruled, Note: exitOverrule}) {
 		t.Fatalf("the ratification %+v", record)

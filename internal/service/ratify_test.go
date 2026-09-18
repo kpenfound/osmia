@@ -407,7 +407,7 @@ func TestSkippedDebateIsRatifiedAndSeals(t *testing.T) {
 	if record := f.ratification(t, stream, 1); record.Revision != (shed.Pin{Spec: 1, Plan: 1}) || len(record.Dissent) != 0 {
 		t.Fatalf("the ratification %+v", record)
 	}
-	f.awaitFeature(t, stream, RatifiedState)
+	f.awaitFeature(t, stream, BuildingState)
 	if docs := f.documents(t, stream, shed.RatificationDocumentID(1)); len(docs) != 1 {
 		t.Fatalf("the ratification was recorded %d times", len(docs))
 	}

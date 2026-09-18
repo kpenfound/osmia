@@ -670,6 +670,12 @@ func showWorkstreams(w io.Writer, all service.StatusResponse) {
 // showStatus prints one workstream's full status.
 func showStatus(w io.Writer, st service.WorkstreamStatus) {
 	fmt.Fprintf(w, "Workstream: %s %s\n", st.Workstream, facts(st))
+	if len(st.Units) > 0 {
+		fmt.Fprintln(w, "Units:")
+		for _, u := range st.Units {
+			fmt.Fprintf(w, "  %s %s\n", u.Unit, u.State)
+		}
+	}
 	if st.Status == nil {
 		fmt.Fprintln(w, "Status: none yet; the chief of staff has not written one")
 		return

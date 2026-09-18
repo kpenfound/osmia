@@ -61,7 +61,8 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   you), or `no status yet`. Reading the charter records any edit you made to
   it; see [charter](charter.md).
 - `status <workstream-id>` shows one workstream of the active project: the same
-  facts, then the full status (goal, attention, note, one line per active
+  facts, then `Units:` with one line per unit of the sealed plan and its state
+  once the workstream is building, then the full status (goal, attention, note, one line per active
   agent, and when it was written), or `Status: none yet` before the chief of
   staff writes one. A workstream the project does not hold fails with
   `not_found` (exit 4); with no project configured it fails with `no_project`
@@ -152,7 +153,8 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   shed: all `conflict` (exit 5). What passes records your approval of those
   revisions, which asks the service to seal them: it fetches upstream, records
   the seal and the plan's footprints, creates the feature branch in its own
-  workspace on your clone and moves the workstream to `ratified`. The command
+  workspace on your clone and moves the workstream to `ratified`, then to
+  `building` with the state of each unit of the plan recorded. The command
   prints the recorded detail, which says the sealing is asked for. Ratifying
   revisions you have ratified already records nothing while their sealing is
   asked for, pending or running, and says which; once it has failed, the same

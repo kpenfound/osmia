@@ -358,6 +358,18 @@ func (r *Repository) Workflow(stream config.WorkstreamID, subject string) (Workf
 	return v.states[subject], nil
 }
 
+// WorkflowStates returns the state of every subject of the workstream's
+// workflow that has one, by subject.
+func (r *Repository) WorkflowStates(stream config.WorkstreamID) (map[string]WorkflowState, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, v, err := r.loadWorkflow(stream)
+	if err != nil {
+		return nil, err
+	}
+	return v.states, nil
+}
+
 // Outbox returns all entries and their retained delivery history, ordered by ID.
 func (r *Repository) Outbox(stream config.WorkstreamID) ([]OutboxEntry, error) {
 	r.mu.Lock()

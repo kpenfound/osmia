@@ -105,7 +105,8 @@ and plan revision 1, holds no dissent and recommends
 fake chief of staff makes the recommendation the attention item of its
 status, which `osmia status w_…` shows:
 `Ratify the spec and plan: no objection stands.` The explicit ratification is
-sealed, and the workstream moves to `ratified`. The workstream ran no turn
+sealed, and the workstream moves to `ratified`, then to `building`. The
+workstream ran no turn
 but its draft.
 
 ### 5. A committee member asks during the shed
@@ -184,7 +185,7 @@ feature branch and before it records the seal. At that moment the clone holds
 The next service finishes the sealing it finds unfinished. Its inspection
 observes `the clone has feature branch osmia/w_…; the sealing resumes from
 it`. There is one sealing operation, one `seal.json` revision and one feature
-branch, and the workstream is `ratified`.
+branch, and the workstream moves on to `building`.
 
 ### 10. What ratification left behind
 

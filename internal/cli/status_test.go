@@ -94,10 +94,10 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
 	handed := "handed"
-	full := service.WorkstreamStatus{Workstream: stream, Project: project, State: &handed, ContextMode: "file", Status: &service.StatusView{
+	full := service.WorkstreamStatus{Workstream: stream, Project: project, State: &handed, Units: []service.UnitStatus{}, ContextMode: "file", Status: &service.StatusView{
 		Goal: "Ship resumable uploads.", Attention: "Approve the upload plan.", Note: "The plan is drafted. It needs your approval.",
 		Agents: []string{"The architect is waiting for you.", "A reviewer is idle."}, Revision: 1, UpdatedAt: written}}
-	none := service.WorkstreamStatus{Workstream: quiet, Project: project, ContextMode: "file"}
+	none := service.WorkstreamStatus{Workstream: quiet, Project: project, Units: []service.UnitStatus{}, ContextMode: "file"}
 	if !all.Health.Ready || all.Configuration.Project == nil || !reflect.DeepEqual(all.Status, service.StatusResponse{Workstreams: []service.WorkstreamStatus{full, none}, Diagnostics: []service.Diagnostic{}}) {
 		t.Fatalf("status --json: %+v", all.Status)
 	}
@@ -124,7 +124,7 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	}
 	raw := map[string]json.RawMessage{}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json", quiet)), &raw))
-	if string(raw["status"]) != "null" || string(raw["state"]) != "null" || string(raw["context_mode"]) != `"file"` || string(raw["open_questions"]) != "0" {
+	if string(raw["status"]) != "null" || string(raw["state"]) != "null" || string(raw["units"]) != "[]" || string(raw["context_mode"]) != `"file"` || string(raw["open_questions"]) != "0" {
 		t.Fatalf("no status JSON: %v", raw)
 	}
 
@@ -178,6 +178,17 @@ func TestStatusTextWithoutAttentionOrAgents(t *testing.T) {
 		"Updated: 2026-09-16T10:00:00Z (revision 3)\n"; one.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", one.String(), want)
 	}
+	building := "building"
+	st.State, st.Units = &building, []service.UnitStatus{{Unit: "parser", State: "ready"}, {Unit: "validator", State: "planned"}}
+	one.Reset()
+	showStatus(&one, st)
+	if want := "Workstream: " + stream + " state=building open_questions=2 context_mode=file\n" +
+		"Units:\n  parser ready\n  validator planned\n" +
+		"Goal: Ship resumable uploads.\nAttention: none\nNote: Work is starting.\nAgents:\n  none active\n" +
+		"Updated: 2026-09-16T10:00:00Z (revision 3)\n"; one.String() != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", one.String(), want)
+	}
+	st.State, st.Units = nil, nil
 	var all strings.Builder
 	showWorkstreams(&all, service.StatusResponse{Workstreams: []service.WorkstreamStatus{st}, Diagnostics: []service.Diagnostic{{Field: "workstreams", Code: service.Internal, Message: "cannot read"}}})
 	if want := "Workstreams:\n  " + stream + " state=not recorded open_questions=2 context_mode=file\n" +

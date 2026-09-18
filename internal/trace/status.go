@@ -2,6 +2,8 @@ package trace
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"time"
@@ -18,6 +20,18 @@ const StatusRole = "chief_of_staff"
 
 // FeatureSubject is the workflow subject holding a workstream's feature state.
 const FeatureSubject = "feature"
+
+// UnitSubject returns the workflow subject holding the state of the plan unit
+// with the given ID: unit-<id>, or unit_ and a hash of the ID for an ID longer
+// than 64 characters, so that the subject and the IDs of its transitions stay
+// keys.
+func UnitSubject(unit string) string {
+	if len(unit) <= 64 {
+		return "unit-" + unit
+	}
+	sum := sha256.Sum256([]byte(unit))
+	return "unit_" + hex.EncodeToString(sum[:16])
+}
 
 // StatusContent is what the chief of staff writes. Attention may be empty;
 // Agents holds one line per active agent and may be empty.
