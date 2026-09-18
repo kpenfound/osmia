@@ -17,6 +17,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -105,15 +106,28 @@ func (in roundInput) turnID(k int) string {
 	return in.turnPrefix() + strconv.Itoa(k)
 }
 
-// turns returns the operation's turns of the architect thread, in order.
-func (in roundInput) turns(t trace.Thread) []trace.QueuedTurn {
-	var out []trace.QueuedTurn
-	for _, q := range t.Turns {
-		if strings.HasPrefix(q.Request.TurnID, in.turnPrefix()) {
-			out = append(out, q)
-		}
+// runs returns the transition and event of the operation that runs the
+// turn: its own, or the resumption the input numbers.
+func (in roundInput) runs() (transition, event string) {
+	if in.Resume == 0 {
+		return in.ids()
 	}
-	return out
+	id, _ := in.ids()
+	transition = fmt.Sprintf("%s-resume-%d", id, in.Resume)
+	return transition, trace.EventID(transition, "run")
+}
+
+// parked is the transition that parks the architect's answer the operation
+// runs: the k-th park follows the k-1-th resumption.
+func (in roundInput) parked() string {
+	id, _ := in.ids()
+	return fmt.Sprintf("%s-waiting-%d", id, in.Resume+1)
+}
+
+// chain maps the operation's turns of the architect thread to the attempt
+// each continues.
+func (in roundInput) chain(t trace.Thread, asked []trace.QuestionState) map[string]string {
+	return askChain(t, in.turnPrefix(), asked)
 }
 
 func replyIDs(n int) (transition, event string) { return roundInput{Round: n}.ids() }
@@ -148,7 +162,7 @@ func (d *debate) requestAnswer(ctx context.Context, stream config.WorkstreamID, 
 	if err := d.drafter().ensureThread(ctx, stream); err != nil {
 		return err
 	}
-	transition, event := in.ids()
+	transition, event := in.runs()
 	input, err := encodeRound(in)
 	if err != nil {
 		return err
@@ -161,10 +175,69 @@ func (d *debate) requestAnswer(ctx context.Context, stream config.WorkstreamID, 
 	return err
 }
 
-// replyOutcome returns the recorded terminal result of one architect turn of
-// the shed: succeeded once its record is committed, failed when its failed
-// transition is recorded, nil before either.
-func (d *debate) replyOutcome(stream config.WorkstreamID, in roundInput) (*coreadapter.OperationResult, error) {
+// resumeAnswer requests the architect's parked reply or redraft after round
+// n again once the answer to its question is queued on the architect's
+// thread. The resumption is pinned to the revision the parked operation was,
+// and caused by the transition that parked it.
+func (d *debate) resumeAnswer(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, n int) error {
+	transitions, err := trace.Read[trace.Transition](d.repository, stream)
+	if err != nil {
+		return err
+	}
+	var park trace.Transition
+	for _, t := range transitions {
+		if t.Subject == shedSubject {
+			park = t
+		}
+	}
+	in := roundInput{Round: n, Redraft: strings.HasPrefix(park.ID, "shed-redraft-")}
+	id, event := in.ids()
+	if !strings.HasPrefix(park.ID, id+"-waiting-") {
+		return fmt.Errorf("the shed is %s without a parking transition", state.Value)
+	}
+	t, err := d.repository.Thread(stream, architectAgent)
+	if err != nil {
+		return err
+	}
+	asked, err := d.repository.Questions(stream)
+	if err != nil {
+		return err
+	}
+	if turns := chainTurns(t, in.chain(t, asked)); len(turns) > 0 && askedBy(asked, architectThread, turns[len(turns)-1].Request.TurnID) != "" {
+		return nil
+	}
+	ops, err := d.repository.Operations(stream)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(ops, func(o trace.OperationRecord) bool {
+		return o.Operation.ID == trace.OperationID(d.repository.Project(), stream, event)
+	})
+	if i < 0 {
+		return fmt.Errorf("%s has no recorded operation", in.about())
+	}
+	requested, err := decodeShed(ops[i].Operation, in.action())
+	if err != nil {
+		return err
+	}
+	in.Spec, in.Plan = requested.Spec, requested.Plan
+	for _, t := range transitions {
+		if t.Subject == shedSubject && strings.HasPrefix(t.ID, id+"-waiting-") {
+			in.Resume++
+		}
+	}
+	body := fmt.Sprintf("Architect's reply to committee round %d, resumed", n)
+	if in.Redraft {
+		body = fmt.Sprintf("Architect's redraft after round %d, resumed", n)
+	}
+	return d.requestAnswer(ctx, stream, state, in, park.ID, fmt.Sprintf("%s resumes: the architect's question is answered", in.about()), body)
+}
+
+// replyOutcome returns the recorded terminal result of the operation that
+// runs one architect turn of the shed: succeeded once its record is
+// committed, failed when its failed transition is recorded, waiting when the
+// operation parked it on the architect's question, nil before any of them.
+func (d *debate) replyOutcome(stream config.WorkstreamID, in roundInput, operation string) (*coreadapter.OperationResult, error) {
 	transitions, err := trace.Read[trace.Transition](d.repository, stream)
 	if err != nil {
 		return nil, err
@@ -177,6 +250,8 @@ func (d *debate) replyOutcome(stream config.WorkstreamID, in roundInput) (*corea
 			return &coreadapter.OperationResult{Outcome: "succeeded", Evidence: t.Reason}, nil
 		case t.ID == id+"-failed":
 			return &coreadapter.OperationResult{Outcome: "failed", Evidence: t.Reason}, nil
+		case strings.HasPrefix(t.ID, id+"-waiting-") && t.Cause == operation:
+			return &coreadapter.OperationResult{Outcome: questions.Waiting, Evidence: t.Reason}, nil
 		}
 	}
 	return nil, nil
@@ -191,7 +266,7 @@ func (r replier) decode(op coreadapter.Operation) (roundInput, config.Workstream
 		return in, "", fmt.Errorf("unsupported runner operation %q", op.Action)
 	}
 	in.Redraft = op.Action == RedraftAction
-	_, event := in.ids()
+	_, event := in.runs()
 	stream, err := r.owner(op, event)
 	return in, stream, err
 }
@@ -205,7 +280,7 @@ func (r replier) Inspect(_ context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
-	result, err := r.replyOutcome(stream, in)
+	result, err := r.replyOutcome(stream, in, op.ID)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -216,7 +291,11 @@ func (r replier) Inspect(_ context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
-	if turns := in.turns(t); len(turns) > 0 {
+	asked, err := r.repository.Questions(stream)
+	if err != nil {
+		return coreadapter.Observation{}, err
+	}
+	if turns := chainTurns(t, in.chain(t, asked)); len(turns) > 0 {
 		if last := turns[len(turns)-1]; last.Claim != nil && last.Response == nil && t.Status != "interrupted" {
 			return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "architect turn " + last.Request.TurnID + " is running"}, nil
 		}
@@ -229,8 +308,12 @@ func (r replier) Inspect(_ context.Context, op coreadapter.Operation) (coreadapt
 // turn that ends normally with an invalid redraft is followed by another that
 // returns the problems, while redrafts remain, and an invalid redraft is never
 // recorded. The record and a valid redraft are recorded in one commit and the
-// shed moves to replied-<n> or redrafted-<n>. A failed turn and a redraft
-// given up are recorded, so the debate goes on without them. Abandoning the
+// shed moves to replied-<n> or redrafted-<n>. A turn that asked a question,
+// whatever it ended with, parks the answer instead: the shed moves to
+// asked-<n>, the operation ends waiting, and the controller requests it again
+// once the answer is queued; the turn that delivers the answer continues the
+// attempt that asked. A failed turn and a redraft given up are recorded, so
+// the debate goes on without them. Abandoning the
 // workstream cancels the running turn and fails an answer that has no record;
 // one whose file is committed is recorded all the same. Storage errors and a
 // missing architect runner leave the operation pending for another attempt.
@@ -241,7 +324,7 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return none, err
 	}
-	if result, err := d.replyOutcome(stream, in); err != nil || result != nil {
+	if result, err := d.replyOutcome(stream, in, op.ID); err != nil || result != nil {
 		if err != nil {
 			return none, err
 		}
@@ -273,20 +356,66 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		if err != nil {
 			return none, err
 		}
-		turns := in.turns(t)
-		var last *trace.QueuedTurn
-		if len(turns) > 0 {
-			last = &turns[len(turns)-1]
+		asked, err := d.repository.Questions(stream)
+		if err != nil {
+			return none, err
+		}
+		origins := in.chain(t, asked)
+		chain := chainTurns(t, origins)
+		// One turn per attempt, named after the attempt: the answer to a
+		// question continues the attempt that asked it.
+		turns := attempts(chain, origins)
+		// Turns run in sequence, so the oldest unfinished turn of the chain is
+		// the one to drive.
+		var last, pending *trace.QueuedTurn
+		if len(chain) > 0 {
+			last = &chain[len(chain)-1]
+		}
+		if i := slices.IndexFunc(chain, func(q trace.QueuedTurn) bool { return q.CompletedAt.IsZero() }); i >= 0 {
+			pending = &chain[i]
 		}
 		reply := shed.Reply{Version: shed.Version, Round: n, Revision: in.pin()}
 		switch {
-		case last != nil && last.Claim != nil && last.Response == nil:
+		case pending != nil && pending.Claim != nil && pending.Response == nil:
 			if t.Status != "interrupted" {
-				return none, errors.New("architect turn " + last.Request.TurnID + " is still running")
+				return none, errors.New("architect turn " + pending.Request.TurnID + " is still running")
 			}
-			if err := d.repository.AbandonTurn(ctx, stream, architectAgent, last.Request.TurnID, d.s.now()); err != nil {
+			if err := d.repository.AbandonTurn(ctx, stream, architectAgent, pending.Request.TurnID, d.s.now()); err != nil {
 				return none, err
 			}
+		case pending != nil:
+			gone, err := abandoned(d.repository, stream)
+			if err != nil {
+				return none, err
+			}
+			if gone && pending.Response == nil {
+				if _, err := d.repository.CancelTurns(ctx, stream, d.s.now(), abandonActor, cancelReason); err != nil {
+					return none, err
+				}
+				continue
+			}
+			// Completing a captured turn runs no architect.
+			turnCtx := running
+			if pending.Response != nil {
+				turnCtx = ctx
+			} else if d.s.options.Architect == nil {
+				return none, errNoArchitect
+			}
+			if _, err := d.dispatchReply(turnCtx, stream, in, pending.Request.TurnID); err != nil {
+				return none, err
+			}
+			if err := os.RemoveAll(filepath.Join(d.drafter().turnDirectory(stream, pending.Request.TurnID), "workspace")); err != nil {
+				return none, err
+			}
+		case last != nil && askedBy(asked, architectThread, last.Request.TurnID) != "":
+			if gone, err := abandoned(d.repository, stream); err != nil || gone {
+				if err != nil {
+					return none, err
+				}
+				return d.replyFailed(ctx, op.ID, stream, in, abandonedReply(in))
+			}
+			id := askedBy(asked, architectThread, last.Request.TurnID)
+			return d.endReply(ctx, op.ID, stream, in, questions.Waiting, fmt.Sprintf("%s is parked: the architect waits for the answer to question %s", in.about(), id))
 		case last == nil || last.Status() == "interrupted":
 			if gone, err := abandoned(d.repository, stream); err != nil || gone {
 				if err != nil {
@@ -297,54 +426,30 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 			interrupted := len(slices.DeleteFunc(slices.Clone(turns), func(q trace.QueuedTurn) bool { return q.Status() != "interrupted" }))
 			if interrupted >= maxReplyAttempts {
 				reply.Failure = fmt.Sprintf("the architect's turn was interrupted %d times by service stops", interrupted)
-				return d.recordReply(ctx, op.ID, stream, in, turns, reply, nil)
+				return d.recordReply(ctx, op.ID, stream, in, chain, reply, nil)
 			}
 			if d.s.options.Architect == nil {
 				return none, errNoArchitect
 			}
-			if err := d.enqueueReply(ctx, cfg, stream, in, turns, op.ID); err != nil {
-				return none, err
-			}
-		case last.CompletedAt.IsZero():
-			gone, err := abandoned(d.repository, stream)
-			if err != nil {
-				return none, err
-			}
-			if gone && last.Response == nil {
-				if _, err := d.repository.CancelTurns(ctx, stream, d.s.now(), abandonActor, cancelReason); err != nil {
-					return none, err
-				}
-				continue
-			}
-			// Completing a captured turn runs no architect.
-			turnCtx := running
-			if last.Response != nil {
-				turnCtx = ctx
-			} else if d.s.options.Architect == nil {
-				return none, errNoArchitect
-			}
-			if _, err := d.dispatchReply(turnCtx, stream, in, last.Request.TurnID); err != nil {
-				return none, err
-			}
-			if err := os.RemoveAll(filepath.Join(d.drafter().turnDirectory(stream, last.Request.TurnID), "workspace")); err != nil {
+			if err := d.enqueueReply(ctx, cfg, stream, in, turns, op.ID, received(t, origins, asked)); err != nil {
 				return none, err
 			}
 		case last.Status() == "idle":
-			files, problems, err := d.redraft(stream, last.Request.TurnID)
+			files, problems, err := d.redraft(stream, origins[last.Request.TurnID])
 			if err != nil {
 				return none, err
 			}
 			if len(problems) == 0 {
-				return d.recordReply(ctx, op.ID, stream, in, turns, reply, files)
+				return d.recordReply(ctx, op.ID, stream, in, chain, reply, files)
 			}
 			if redrafts(turns) >= maxRedrafts {
 				reply.Problems = problems
-				return d.recordReply(ctx, op.ID, stream, in, turns, reply, nil)
+				return d.recordReply(ctx, op.ID, stream, in, chain, reply, nil)
 			}
 			if d.s.options.Architect == nil {
 				return none, errNoArchitect
 			}
-			if err := d.enqueueReply(ctx, cfg, stream, in, turns, op.ID); err != nil {
+			if err := d.enqueueReply(ctx, cfg, stream, in, turns, op.ID, received(t, origins, asked)); err != nil {
 				return none, err
 			}
 		default:
@@ -352,14 +457,14 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 			if last.Response != nil && last.Response.Failure != "" {
 				reply.Failure = last.Response.Failure
 			}
-			return d.recordReply(ctx, op.ID, stream, in, turns, reply, nil)
+			return d.recordReply(ctx, op.ID, stream, in, chain, reply, nil)
 		}
 	}
 }
 
-// redrafts counts the turns of a reply that ended normally: each delivered
-// what the architect wanted to, so each one after the first followed an
-// invalid redraft.
+// redrafts counts the attempts of a reply that ended normally: each
+// delivered what the architect wanted to, so each one after the first
+// followed an invalid redraft.
 func redrafts(turns []trace.QueuedTurn) int {
 	return len(slices.DeleteFunc(slices.Clone(turns), func(q trace.QueuedTurn) bool { return q.CompletedAt.IsZero() || q.Status() != "idle" }))
 }
@@ -383,12 +488,12 @@ func (d *debate) recordedReply(stream config.WorkstreamID, in roundInput) (*shed
 	return nil, nil
 }
 
-// redraft reads the spec.md and plan.json the turn delivered and validates
+// redraft reads the spec.md and plan.json the attempt delivered and validates
 // them with the latest recorded revision of whichever was not delivered. It
 // returns the delivered files that differ from the latest revision, none when
 // the architect left the revision as it is, and every problem of an invalid
 // redraft.
-func (d *debate) redraft(stream config.WorkstreamID, turn string) (map[string]string, []string, error) {
+func (d *debate) redraft(stream config.WorkstreamID, attempt string) (map[string]string, []string, error) {
 	dr := d.drafter()
 	latest, err := dr.latest(stream)
 	if err != nil {
@@ -401,7 +506,7 @@ func (d *debate) redraft(stream config.WorkstreamID, turn string) (map[string]st
 		path   string
 		latest *trace.Document
 	}{{plan.SpecPath, &specDoc}, {plan.PlanPath, &planDoc}} {
-		data, err := os.ReadFile(filepath.Join(dr.turnDirectory(stream, turn), "output", doc.path))
+		data, err := os.ReadFile(filepath.Join(dr.turnDirectory(stream, attempt), "output", doc.path))
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 		case err != nil:
@@ -560,27 +665,32 @@ func (d *debate) replyFailed(ctx context.Context, operation string, stream confi
 }
 
 // endReply ends the architect's answer with a shed transition, replied-<n>,
-// redrafted-<n> or failed-<n>, and returns the matching result. The transition
-// already recorded is returned as it is.
+// redrafted-<n> or failed-<n>, or parks it at asked-<n> when the kind is
+// waiting, and returns the matching result. The transition already recorded
+// is returned as it is.
 func (d *debate) endReply(ctx context.Context, operation string, stream config.WorkstreamID, in roundInput, kind, reason string) (coreadapter.OperationResult, error) {
 	outcome := coreadapter.OperationResult{Outcome: "failed", Evidence: reason}
-	if kind == in.recorded() {
+	id, _ := in.ids()
+	id, to := id+"-"+kind, fmt.Sprintf("%s-%d", kind, in.Round)
+	switch kind {
+	case in.recorded():
 		outcome.Outcome = "succeeded"
+	case questions.Waiting:
+		outcome.Outcome, id, to = questions.Waiting, in.parked(), fmt.Sprintf("asked-%d", in.Round)
 	}
 	state, err := d.repository.Workflow(stream, shedSubject)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	if state.Value != in.running() {
-		result, err := d.replyOutcome(stream, in)
+		result, err := d.replyOutcome(stream, in, operation)
 		if err != nil || result == nil {
 			return coreadapter.OperationResult{}, errors.Join(err, fmt.Errorf("%s is %q, not in progress", in.about(), state.Value))
 		}
 		return *result, nil
 	}
-	id, _ := in.ids()
 	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: d.header(id+"-"+kind, stream, operation, d.s.now()), Subject: shedSubject, From: state.Value, To: fmt.Sprintf("%s-%d", kind, in.Round), Reason: reason}}
+		Transition: trace.Transition{Header: d.header(id, stream, operation, d.s.now()), Subject: shedSubject, From: state.Value, To: to, Reason: reason}}
 	if _, err := d.repository.Transact(ctx, tx); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -602,9 +712,11 @@ func (d *debate) standingAfter(stream config.WorkstreamID, n int) ([]shed.Entry,
 }
 
 // enqueueReply accepts the next architect turn of the reply, or of the
-// redraft the owner asked for, fixing its profile and prompts. A turn that
-// follows an invalid redraft lists why it was not accepted.
-func (d *debate) enqueueReply(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in roundInput, turns []trace.QueuedTurn, operation string) error {
+// redraft the owner asked for, fixing its profile and prompts. turns holds
+// one turn per earlier attempt. A turn that follows an invalid redraft lists
+// why it was not accepted, and one that follows interrupted turns repeats the
+// answers the architect received in the operation.
+func (d *debate) enqueueReply(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in roundInput, turns []trace.QueuedTurn, operation string, answers []string) error {
 	profile, _, err := d.s.roleExecution(cfg, architectRole)
 	if err != nil {
 		return err
@@ -631,6 +743,12 @@ func (d *debate) enqueueReply(ctx context.Context, cfg *config.Config, stream co
 		}
 		prompt = redraftPrompt(in, latest, open, problems, asked.Note)
 	}
+	if len(answers) > 0 {
+		prompt += "\n\nThe answers to the questions you asked in this " + in.answering() + ":\n"
+		for _, a := range answers {
+			prompt += "\n" + a
+		}
+	}
 	turn := in.turnID(len(turns) + 1)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: shedActor, Cause: operation, Depth: 1},
 		AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: architectSystemPrompt(cfg.Project), Prompt: prompt}
@@ -638,8 +756,8 @@ func (d *debate) enqueueReply(ctx context.Context, cfg *config.Config, stream co
 	return err
 }
 
-// returned names the reply's latest turn that ended normally: the one whose
-// redraft the next turn is returned, empty when no turn has.
+// returned names the reply's latest attempt that ended normally: the one
+// whose redraft the next turn is returned, empty when no attempt has.
 func (d *debate) returned(turns []trace.QueuedTurn) string {
 	for i := len(turns) - 1; i >= 0; i-- {
 		if !turns[i].CompletedAt.IsZero() && turns[i].Status() == "idle" {
@@ -652,7 +770,7 @@ func (d *debate) returned(turns []trace.QueuedTurn) string {
 // dispatchReply runs the turn through the thread dispatcher and runner.
 func (d *debate) dispatchReply(ctx context.Context, stream config.WorkstreamID, in roundInput, turn string) (coreadapter.OperationResult, error) {
 	dr := d.drafter()
-	dispatcher := thread.Dispatcher{Runner: thread.Runner{Store: d.repository, Turns: d.replyPath(stream, in), Now: d.s.now}, Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	dispatcher := thread.Dispatcher{Runner: thread.Runner{Store: d.repository, Turns: &questions.Turns{Turns: d.replyPath(stream, in), Repository: d.repository}, Now: d.s.now}, Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(dr.turnDirectory(input.Workstream, input.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 	}}
@@ -666,8 +784,9 @@ func (d *debate) dispatchReply(ctx context.Context, stream config.WorkstreamID, 
 // replyPath is the architect's isolated turn path for a reply: a read-only
 // private view of the latest spec and plan, the handed input, the charter,
 // the context bundle and the shed's records, the file reading tool, the reply
-// tool and the draft delivery tool, and no notes, write, execute, network or
-// VCS capability.
+// tool, the draft delivery tool and the question tool, and no notes, write,
+// execute, network or VCS capability. A turn that asks ends waiting, so its
+// thread parks and its slot is free while the answer is found.
 func (d *debate) replyPath(stream config.WorkstreamID, in roundInput) *isolation.Turns {
 	var engine coreadapter.Engine
 	var hosts coreadapter.MCPHosts
@@ -681,9 +800,18 @@ func (d *debate) replyPath(stream config.WorkstreamID, in roundInput) *isolation
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			return d.selectReplyView(ctx, scope, in)
 		},
-		Grants: map[string]coreadapter.Capabilities{architectRole: {Tools: []string{"file_read", shed.ReplyTool, DraftTool}}},
+		Grants: map[string]coreadapter.Capabilities{architectRole: {Tools: []string{"file_read", shed.ReplyTool, DraftTool, questions.AskTool}}},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-			if scope.Workstream != string(stream) || scope.Role != architectRole || scope.Project != string(d.repository.Project()) || scope.Thread != architectThread || !strings.HasPrefix(scope.Turn, in.turnPrefix()) {
+			if scope.Workstream != string(stream) || scope.Role != architectRole || scope.Project != string(d.repository.Project()) || scope.Thread != architectThread {
+				return nil, denied
+			}
+			// The turn that delivers the answer to the architect's question
+			// continues the attempt that asked it.
+			attempt, err := d.drafter().continued(stream, scope.Turn)
+			if err != nil {
+				return nil, err
+			}
+			if !strings.HasPrefix(attempt, in.turnPrefix()) {
 				return nil, denied
 			}
 			open, err := d.standingAfter(stream, in.Round)
@@ -710,7 +838,14 @@ func (d *debate) replyPath(stream config.WorkstreamID, in roundInput) *isolation
 					}
 					return os.Rename(file+".tmp", file)
 				}})
-			return append(tools, d.drafter().draftTool(scope)), err
+			if err != nil {
+				return nil, err
+			}
+			ask, err := questions.Tools(d.repository, architectAgent, scope, d.s.now)
+			if err != nil {
+				return nil, err
+			}
+			return append(append(tools, d.drafter().draftTool(scope, attempt)), ask...), nil
 		},
 		Hosts:  hosts,
 		Engine: engine,
@@ -778,7 +913,12 @@ func (d *debate) stageReply(ctx context.Context, stream config.WorkstreamID, in 
 	if err != nil {
 		return nil, err
 	}
-	earlier := slices.DeleteFunc(in.turns(t), func(q trace.QueuedTurn) bool { return q.Request.TurnID == turn })
+	asked, err := d.repository.Questions(stream)
+	if err != nil {
+		return nil, err
+	}
+	origins := in.chain(t, asked)
+	earlier := slices.DeleteFunc(attempts(chainTurns(t, origins), origins), func(q trace.QueuedTurn) bool { return q.Request.TurnID == origins[turn] })
 	if previous := d.returned(earlier); previous != "" {
 		delivered, _, err := d.redraft(stream, previous)
 		if err != nil {

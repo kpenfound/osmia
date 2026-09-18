@@ -19,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -252,7 +253,7 @@ func checkReplyBoundary(ctx context.Context, p *faults, req agent.Request, verif
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if want := []string{DraftTool, "file_read", shed.ReplyTool}; !slices.Equal(names, want) {
+	if want := []string{questions.AskTool, DraftTool, "file_read", shed.ReplyTool}; !slices.Equal(names, want) {
 		p.report("role tools %v, want %v", names, want)
 	}
 	for _, name := range []string{shed.ObjectTool, shed.ConcedeTool, "file_write", "shell", "fetch", "git_push", "notes_write", "set_status"} {
@@ -905,7 +906,7 @@ func TestReplyWaitsForAnArchitectRunner(t *testing.T) {
 	}
 	th, err := f.repository().Thread(stream, architectAgent)
 	must(t, err)
-	if turns := (roundInput{Round: 1}).turns(th); len(turns) != 1 || turns[0].Status() != "interrupted" {
+	if turns := chainTurns(th, (roundInput{Round: 1}).chain(th, nil)); len(turns) != 1 || turns[0].Status() != "interrupted" {
 		t.Fatalf("a turn was queued without a runner: %+v", turns)
 	}
 	f.stop(t)
@@ -948,13 +949,13 @@ func TestReplyInterruptedEveryAttemptIsRecordedAsFailed(t *testing.T) {
 func TestReplyOperationInputIsValidated(t *testing.T) {
 	t.Parallel()
 	for name, op := range map[string]coreadapter.Operation{
-		"another action":   {Boundary: coreadapter.RunnerBoundary, Action: thread.TurnAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1}`)},
-		"a round":          {Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1}`)},
-		"another boundary": {Boundary: "vcs", Action: ReplyAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1}`)},
-		"unknown field":    {Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1,"extra":1}`)},
-		"no round":         {Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: json.RawMessage(`{"round":0,"spec":1,"plan":1}`)},
-		"no revision":      {Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: json.RawMessage(`{"round":1}`)},
-		"a resumption":     {Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1,"resume":1}`)},
+		"another action":        {Boundary: coreadapter.RunnerBoundary, Action: thread.TurnAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1}`)},
+		"a round":               {Boundary: coreadapter.RunnerBoundary, Action: RoundAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1}`)},
+		"another boundary":      {Boundary: "vcs", Action: ReplyAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1}`)},
+		"unknown field":         {Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1,"extra":1}`)},
+		"no round":              {Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: json.RawMessage(`{"round":0,"spec":1,"plan":1}`)},
+		"no revision":           {Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: json.RawMessage(`{"round":1}`)},
+		"a negative resumption": {Boundary: coreadapter.RunnerBoundary, Action: ReplyAction, Input: json.RawMessage(`{"round":1,"spec":1,"plan":1,"resume":-1}`)},
 	} {
 		if _, err := decodeShed(op, ReplyAction); err == nil {
 			t.Errorf("%s: decoded", name)
@@ -985,7 +986,7 @@ func TestReplyToolsAreBoundToTheReplyTurn(t *testing.T) {
 	for _, tool := range tools {
 		names = append(names, tool.Name)
 	}
-	if want := []string{shed.ReplyTool, DraftTool}; !slices.Equal(names, want) {
+	if want := []string{shed.ReplyTool, DraftTool, questions.AskTool}; !slices.Equal(names, want) {
 		t.Fatalf("tools %v, want %v", names, want)
 	}
 	for name, mutate := range map[string]func(*coreadapter.Scope){

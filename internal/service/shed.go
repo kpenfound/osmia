@@ -41,7 +41,8 @@ const (
 	// are recorded, reply-<n> while the architect answers, replied-<n> once
 	// its reply is recorded, redraft-<n> while the architect writes the
 	// redraft the owner asked for after round n and redrafted-<n> once it is
-	// recorded, concluded-<n> once debate ended after round n, and failed-<n>
+	// recorded, asked-<n> while the architect's reply or redraft after round
+	// n waits for the answer to its question, concluded-<n> once debate ended after round n, and failed-<n>
 	// when round n ended without a record or a reply.
 	shedSubject = "shed"
 	// ownerSubject is the workflow subject that tracks the owner's own part
@@ -121,7 +122,7 @@ func roundTurnID(n int, agent string, attempt int) string {
 
 // shedStates are the kinds of shed-subject value, each followed by the round
 // it is about.
-var shedStates = []string{"round", "waiting", "heard", "reply", "replied", "redraft", "redrafted", "concluded", "failed"}
+var shedStates = []string{"round", "waiting", "heard", "reply", "asked", "replied", "redraft", "redrafted", "concluded", "failed"}
 
 // shedState splits a shed-subject value into its kind and round number.
 func shedState(value string) (kind string, n int, ok bool) {
@@ -264,14 +265,15 @@ func (d *debate) enterSkipped(ctx context.Context, stream config.WorkstreamID, f
 
 // step derives what the debate needs next from the shed state and the
 // recorded rounds. No round yet: round 1. A round parked on a member's
-// question resumes once every member that asked has its answer queued. A
+// question resumes once every member that asked has its answer queued, and a
+// reply or redraft parked on the architect's question once its answer is. A
 // heard round with no open dissent concludes the debate by consensus; one
 // with open dissent gets the architect's reply. After the reply, the next
 // round runs against the latest revision unless shed.max_rounds rounds have
 // run, which concludes the debate with its dissent open. A conclusion the
 // owner followed with a request for a redraft gets that redraft, and the round
 // after it debates what the architect wrote. A round, a reply or a redraft in
-// progress, a parked round whose answers are not all queued, a concluded
+// progress, a parked round or answer whose answers are not all queued, a concluded
 // debate the owner has not answered and a failed round need nothing. A round
 // waits for a service that can run the committee and a reply or redraft for
 // one that can run the architect; concluding runs no turn and waits for
@@ -288,7 +290,7 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 		return d.request(ctx, stream, state, roundInput{Round: 1, Spec: latest.Spec, Plan: latest.Plan}, InShedState)
 	}
 	kind, n, ok := shedState(state.Value)
-	if !ok || kind != "waiting" && kind != "heard" && kind != "replied" && kind != "concluded" && kind != "redrafted" {
+	if !ok || kind != "waiting" && kind != "asked" && kind != "heard" && kind != "replied" && kind != "concluded" && kind != "redrafted" {
 		return nil
 	}
 	if kind == "waiting" {
@@ -296,6 +298,12 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 			return nil
 		}
 		return d.resume(ctx, stream, state, n)
+	}
+	if kind == "asked" {
+		if d.s.options.Architect == nil {
+			return nil
+		}
+		return d.resumeAnswer(ctx, stream, state, n)
 	}
 	requests, err := shed.Requests(d.repository, stream)
 	if err != nil {
@@ -660,7 +668,7 @@ func decodeShed(op coreadapter.Operation, action string) (roundInput, error) {
 	if in.Round < 1 || in.Spec < 1 || in.Plan < 1 {
 		return in, fmt.Errorf("%s operation requires a positive round and pinned revisions", action)
 	}
-	if in.Resume < 0 || in.Resume > 0 && action != RoundAction {
+	if in.Resume < 0 {
 		return in, fmt.Errorf("%s operation input carries an invalid resumption number", action)
 	}
 	return in, nil
@@ -712,50 +720,15 @@ func (d *debate) outcome(stream config.WorkstreamID, n int, operation string) (*
 }
 
 // roundChain maps every turn of the member's round n to the attempt it
-// continues: an attempt turn to itself, and the turn that delivers the answer
-// to a question one of them asked to that attempt. asked is the workstream's
-// questions, oldest first, so a question asked in an answer turn follows the
-// question that turn answered.
+// continues.
 func roundChain(t trace.Thread, n int, asked []trace.QuestionState) map[string]string {
-	prefix := roundTurnPrefix(n, t.Identity.ID)
-	origins := map[string]string{}
-	for _, q := range t.Turns {
-		if strings.HasPrefix(q.Request.TurnID, prefix) {
-			origins[q.Request.TurnID] = q.Request.TurnID
-		}
-	}
-	for _, q := range asked {
-		if q.Asked.Thread != t.Identity.ThreadID {
-			continue
-		}
-		if origin, ok := origins[q.Asked.Turn]; ok {
-			origins[questions.TurnID(q.Asked.ID)] = origin
-		}
-	}
-	return origins
+	return askChain(t, roundTurnPrefix(n, t.Identity.ID), asked)
 }
 
 // roundTurns returns the member's turns of round n in thread order: its
 // attempts and the turns that answered their questions.
 func roundTurns(t trace.Thread, n int, asked []trace.QuestionState) []trace.QueuedTurn {
-	origins := roundChain(t, n, asked)
-	var out []trace.QueuedTurn
-	for _, q := range t.Turns {
-		if _, ok := origins[q.Request.TurnID]; ok {
-			out = append(out, q)
-		}
-	}
-	return out
-}
-
-// askedBy returns the ID of the question the thread's turn asked, or nothing.
-func askedBy(asked []trace.QuestionState, thread, turn string) string {
-	for _, q := range asked {
-		if q.Asked.Thread == thread && q.Asked.Turn == turn {
-			return q.Asked.ID
-		}
-	}
-	return ""
+	return chainTurns(t, roundChain(t, n, asked))
 }
 
 // Inspect reads the recorded transitions and the committee threads. A
@@ -1055,13 +1028,7 @@ func (d *debate) enqueue(ctx context.Context, cfg *config.Config, stream config.
 			standing = append(standing, dissent)
 		}
 	}
-	var answers []string
-	origins := roundChain(t, in.Round, asked)
-	for _, q := range asked {
-		if _, ok := origins[q.Asked.Turn]; ok && q.Asked.Thread == t.Identity.ThreadID && q.State == trace.QuestionAnswered && q.Ruling != nil {
-			answers = append(answers, questions.Prompt(q.Asked, *q.Ruling))
-		}
-	}
+	answers := received(t, roundChain(t, in.Round, asked), asked)
 	turn := roundTurnID(in.Round, member, attempt)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: shedActor, Cause: operation, Depth: 1},
 		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: committeeSystemPrompt(cfg.Project), Prompt: committeePrompt(in, standing, answers)}
