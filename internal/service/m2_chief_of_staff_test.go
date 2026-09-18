@@ -106,7 +106,7 @@ func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		// The service grants thread turns to the chief of staff alone. The
 		// fake workers are added here with their ask tool; the chief of staff
 		// keeps the service's grant and tools.
-		turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*isolation.Turns)
+		turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*reportingTurns).Turns.(*isolation.Turns)
 		turns.Grants = maps.Clone(turns.Grants)
 		for _, role := range []string{"mason", "reviewer"} {
 			turns.Grants[role] = coreadapter.Capabilities{Tools: []string{questions.AskTool}}
