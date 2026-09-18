@@ -18,7 +18,7 @@ import (
 )
 
 // unitsFixture is a service configuration whose clone holds the feature
-// branch of stream, one commit with README and bin/run.
+// branch of stream, one commit with README, LICENSE and bin/run.
 type unitsFixture struct {
 	cfg        *config.Config
 	home, base string
@@ -36,7 +36,8 @@ func newUnitsFixture(t *testing.T) unitsFixture {
 	must(t, os.WriteFile(filepath.Join(clone, "README"), []byte("widgets\n"), 0644))
 	must(t, os.MkdirAll(filepath.Join(clone, "bin"), 0755))
 	must(t, os.WriteFile(filepath.Join(clone, "bin", "run"), []byte("#!/bin/sh\n"), 0755))
-	demoGit(t, home, "-C", clone, "add", "README", "bin/run")
+	must(t, os.WriteFile(filepath.Join(clone, "LICENSE"), []byte("MIT\n"), 0644))
+	demoGit(t, home, "-C", clone, "add", "README", "bin/run", "LICENSE")
 	demoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "--quiet", "-m", "base")
 	demoGit(t, home, "-C", clone, "branch", featureBranch(stream))
 	return unitsFixture{cfg: cfg, home: home, base: strings.TrimSpace(demoGit(t, home, "-C", clone, "rev-parse", "HEAD"))}
@@ -123,8 +124,9 @@ func (e masonEngine) Enforcer(settings coreadapter.ExecutionSettings) (agent.Enf
 // A mason turn in a unit's workspace works on a copy of its files alone: it
 // can neither read nor write the clone's or the worktree's VCS metadata, has
 // no VCS executable and none of the host's credentials, and VCS metadata or a
-// symlink it plants in its copy never reaches the workspace. What it wrote is
-// in the workspace after the turn, ready to be snapshotted.
+// symlink it plants in its copy never reaches the workspace. What it wrote,
+// removed and made executable or not is in the workspace after the turn,
+// ready to be snapshotted.
 func TestMasonTurnGetsTheUnitWorkspaceFilesOnly(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_host")
 	t.Setenv("GH_TOKEN", "ghp_host")
@@ -186,7 +188,8 @@ func TestMasonTurnGetsTheUnitWorkspaceFilesOnly(t *testing.T) {
 				must(t, os.MkdirAll(filepath.Join(view, "src", ".git"), 0700))
 				must(t, os.WriteFile(filepath.Join(view, "src", ".git", "config"), []byte("[core]\n"), 0600))
 				must(t, os.Symlink(filepath.Join(clone, ".git"), filepath.Join(view, "escape")))
-				must(t, os.Remove(filepath.Join(view, "bin", "run")))
+				must(t, os.Remove(filepath.Join(view, "LICENSE")))
+				must(t, os.Chmod(filepath.Join(view, "bin", "run"), 0600))
 				return &agent.Result{ResultText: "built"}, nil
 			}
 			execution := coreadapter.ExecutionSettings{Mode: mode}
@@ -221,15 +224,18 @@ func TestMasonTurnGetsTheUnitWorkspaceFilesOnly(t *testing.T) {
 			if after, err := os.ReadFile(dotgit); err != nil || string(after) != string(pointer) {
 				t.Fatalf("the workspace's .git after the turn: %q %v", after, err)
 			}
-			for _, name := range []string{"escape", "src/.git", "bin/run"} {
+			for _, name := range []string{"escape", "src/.git", "LICENSE"} {
 				if _, err := os.Lstat(filepath.Join(w.Path, name)); !errors.Is(err, fs.ErrNotExist) {
 					t.Fatalf("%s in the workspace after the turn: %v", name, err)
 				}
 			}
 			candidate, err := units.snapshot(ctx, stream, "u1")
 			must(t, err)
-			if got := strings.TrimSpace(demoGit(t, f.home, "-C", clone, "diff-tree", "-r", "--name-status", f.base, candidate)); got != "M\tREADME\nD\tbin/run\nA\tsrc/added.go" {
+			if got := strings.TrimSpace(demoGit(t, f.home, "-C", clone, "diff-tree", "-r", "--name-status", f.base, candidate)); got != "D\tLICENSE\nM\tREADME\nM\tbin/run\nA\tsrc/added.go" {
 				t.Fatalf("the candidate after the turn:\n%s", got)
+			}
+			if got := strings.Fields(demoGit(t, f.home, "-C", clone, "ls-tree", candidate, "bin/run"))[0]; got != "100644" {
+				t.Fatalf("bin/run is %s in the candidate, want 100644", got)
 			}
 		})
 	}
