@@ -428,10 +428,9 @@ func (s *Service) stop(active *activeProject) error {
 // boundary by the service's sealer for sealings and its builder for builds;
 // the architect controller, then the shed controller, then the sealing
 // controller, then the building controller run at the start of every pass, and the pass reconciles operations in stagePriority order. With
-// Options.Threads, the mason controller then parks, resumes and starts
-// units, outbox events are delivered to each workstream's chief of staff,
-// recorded answers are queued on their askers' threads, the mason controller
-// resumes the units whose answers were queued, and the scheduler runs, whose gate holds turns that a runtime pause covers;
+// Options.Threads, outbox events are then delivered to each workstream's
+// chief of staff, recorded answers are queued on their askers' threads, the
+// mason controller parks, resumes and starts units, and the scheduler runs, whose gate holds turns that a runtime pause covers;
 // without it, the configured Schedule hook runs instead.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, error) {
 	options, threads := s.options.Reconciliation, s.options.Threads
@@ -488,7 +487,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 			return nil, nil, err
 		}
 		units := &masons{s: s, cfg: cfg, repository: repository}
-		hooks = append(hooks, units.Pass, deliver.Pass, s.answers(cfg, repository).Pass, units.Follow, dispatch.Pass)
+		hooks = append(hooks, deliver.Pass, s.answers(cfg, repository).Pass, units.Pass, dispatch.Pass)
 	}
 	options.Schedule = func(ctx context.Context) error {
 		for _, hook := range hooks {

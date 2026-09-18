@@ -137,41 +137,6 @@ func (m *masons) Pass(ctx context.Context) error {
 	return nil
 }
 
-// Follow parks and resumes the implementing and waiting units of every
-// building workstream on their masons' questions, as Pass does, and starts
-// nothing. It runs after answers are queued, so a unit is implementing again
-// before its mason's answer turn is dispatched.
-func (m *masons) Follow(ctx context.Context) error {
-	streams, err := m.repository.Workstreams()
-	if err != nil {
-		return err
-	}
-	librarian := librarianWorkstream(m.repository.Project())
-	for _, stream := range streams {
-		if stream == librarian {
-			continue
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		b, found, err := m.read(stream)
-		if err != nil {
-			return fmt.Errorf("workstream %s masons: %w", stream, err)
-		}
-		if !found {
-			continue
-		}
-		for _, u := range b.plan.Units {
-			if state := b.states[trace.UnitSubject(u.ID)]; state.Value == UnitImplementing || state.Value == UnitWaiting {
-				if _, err := m.follow(ctx, stream, u.ID, state); err != nil {
-					return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
-				}
-			}
-		}
-	}
-	return nil
-}
-
 // follow moves a unit between implementing and waiting as its mason's thread
 // says, and returns the unit's state. An implementing unit whose mason's
 // latest turn is complete and asked a question moves to waiting; a waiting

@@ -33,12 +33,20 @@ func newAskingMasonFixture(t *testing.T, masons int, drafted string, p *faults) 
 
 // asking wraps the fake masons' turn: in the workstream stream, or in every
 // workstream when stream is empty, the turn asks the question that gets
-// number id before it writes its file.
-func (m *fakeMasons) asking(p *faults, stream config.WorkstreamID, id string) func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
+// number id, then, with a hold, stays open until the hold closes, before it
+// writes its file.
+func (m *fakeMasons) asking(p *faults, stream config.WorkstreamID, id string, hold <-chan struct{}) func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
 	return func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if stream == "" || strings.Contains(filepath.ToSlash(req.SessionDir), "/"+string(stream)+"/") {
 			if err := asks(p, id)(ctx, req, verified, tools); err != nil {
 				return nil, err
+			}
+			if hold != nil {
+				select {
+				case <-hold:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
 			}
 		}
 		return m.turn(ctx, req, verified, tools)
@@ -96,7 +104,10 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	var answered []agent.Request
 	var during []string
 	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("resume")] = masons.asking(p, asking, "1")
+	// The asking turn stays open until the chief of staff escalated its
+	// question, so a unit parked while its mason still works would show.
+	hold := make(chan struct{})
+	f.engine.turns[masonTurnID("resume")] = masons.asking(p, asking, "1", hold)
 	f.engine.mu.Unlock()
 	f.answer("1", func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
 		state, err := f.unitState(asking, "resume")
@@ -114,8 +125,24 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	mutation(t, f.c, "DELETE", "pause", factory)
 
 	// The asking unit parks and its slot goes to the other workstream.
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		asked, err := f.repository().Questions(asking)
+		must(t, err)
+		if len(asked) == 1 && asked[0].State == trace.QuestionEscalated {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("question 1 was never escalated: %+v", asked)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	settle()
+	if got := masonTransitions(t, f, asking); len(got) != 1 {
+		t.Fatalf("the unit moved while its mason's turn ran: %+v", got)
+	}
+	close(hold)
 	f.awaitMasonTransitions(t, asking, 2)
-	f.awaitQuestion(t, asking, "1", trace.QuestionEscalated)
 	f.awaitMasonRan(t, other, "resume")
 	settle()
 	p.check(t)
@@ -155,7 +182,7 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 
 	f.rule(t, "1")
 	f.awaitTurn(t, asking, masonAgent("resume"), questions.TurnID("1"))
-	deadline := time.Now().Add(demoTimeout)
+	deadline = time.Now().Add(demoTimeout)
 	for th := f.thread(t, asking, masonAgent("resume")); len(th.Turns) != 2 || th.Turns[1].CompletedAt.IsZero(); th = f.thread(t, asking, masonAgent("resume")) {
 		if time.Now().After(deadline) {
 			t.Fatalf("the answer turn never completed: %+v", th.Turns)
@@ -189,16 +216,17 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 
 // A mason that asks again in the turn that delivers its answer parks the unit
 // again, and each answer resumes it: every park and resume is its own
-// transition, named after its question.
+// transition, named after its question. While the unit waits, its workstream
+// starts no other unit, though mason slots are free.
 func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 	t.Parallel()
 	p := &faults{}
-	f, masons, c := newAskingMasonFixture(t, 1, validPlan, p)
+	f, masons, c := newAskingMasonFixture(t, 4, independentPlan, p)
 	defer f.stop(t)
 	c.release("1")
 	c.release("2")
 	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("resume")] = masons.asking(p, "", "1")
+	f.engine.turns[masonTurnID("resume")] = masons.asking(p, "", "1", nil)
 	f.engine.mu.Unlock()
 	f.answer("1", asks(p, "2"))
 	f.answer("2", func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error { return nil })
@@ -211,5 +239,8 @@ func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 	if got := masonTransitions(t, f, stream); !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
-	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
+	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
+	if runs := masons.requests(stream); len(runs) != 1 {
+		t.Fatalf("mason turns %d", len(runs))
+	}
 }
