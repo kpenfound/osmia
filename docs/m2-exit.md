@@ -14,10 +14,10 @@ local bare repository as its upstream.
 ## Running it
 
 Tests run only inside Dagger, never with `go test` on the host. The test runs
-as part of `DAGGER_X_RELEASE=v1.0.0-beta.13 dagger check`. To run it alone:
+as part of `dagger check`. To run it alone:
 
 ```sh
-DAGGER_X_RELEASE=v1.0.0-beta.13 dagger core container from --address golang:1.26-bookworm \
+dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
   with-exec --args=go,test,-count=1,-run,TestM2HandInToRatifiedPlan,-v,./internal/service \
