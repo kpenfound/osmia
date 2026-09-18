@@ -218,7 +218,7 @@ func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
 	}
 	b := building{stream: stream, states: states, plan: p}
 	for _, t := range transitions {
-		if t.Actor == masonActor && t.To == UnitImplementing && t.At.After(b.started) {
+		if t.Actor == masonActor && t.From == UnitReady && t.To == UnitImplementing && t.At.After(b.started) {
 			b.started = t.At
 		}
 	}

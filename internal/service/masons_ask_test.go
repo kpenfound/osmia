@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -80,7 +81,9 @@ func resumed(unit, q string) transitionMove {
 // unit. The parked unit and its question survive a restart. The owner's
 // ruling, relayed by the chief of staff, is the mason's next turn on the same
 // thread, in the same workspace, and the unit is implementing again before
-// that turn runs. Every move is recorded by the mason controller.
+// that turn runs, though no mason slot is free. Every move is recorded by the
+// mason controller. A third workstream starts no unit until fewer units than
+// capacity.masons are implementing.
 func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	t.Parallel()
 	p := &faults{}
@@ -90,7 +93,11 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
 	a, _ := f.builtAs(t, "first")
 	b, _ := f.builtAs(t, "second")
-	asking, other := lowHigh(a, b)
+	c, _ := f.builtAs(t, "third")
+	// Among equal workstreams, the slot goes in ID order.
+	ids := []config.WorkstreamID{a, b, c}
+	slices.Sort(ids)
+	asking, other, third := ids[0], ids[1], ids[2]
 
 	var mu sync.Mutex
 	var answered []agent.Request
@@ -137,6 +144,7 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	}
 	f.checkUnits(t, asking, []UnitStatus{{Unit: "resume", State: UnitWaiting}, {Unit: "dedupe", State: UnitReady}})
 	f.checkUnits(t, other, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
+	f.checkUnits(t, third, []UnitStatus{{Unit: "resume", State: UnitReady}, {Unit: "dedupe", State: UnitReady}})
 	q := f.question(t, asking, "1")
 	if q.Asked.AskedBy.ID != masonAgent("resume") || q.Asked.Thread != masonAgent("resume") || q.Asked.Turn != masonTurnID("resume") || q.Asked.Unit != "resume" || q.Asked.Question != askedQuestion {
 		t.Fatalf("question %+v", q.Asked)
@@ -189,6 +197,19 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	if th := f.thread(t, asking, masonAgent("resume")); th.Turns[1].Request.Unit != "resume" || th.Turns[1].Status() != "idle" {
 		t.Fatalf("answer turn %+v", th.Turns[1])
 	}
+
+	// Two units are implementing with one mason slot: the third workstream
+	// waits until fewer than one are, here because pauses take theirs away.
+	f.checkUnits(t, other, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
+	f.checkUnits(t, third, []UnitStatus{{Unit: "resume", State: UnitReady}, {Unit: "dedupe", State: UnitReady}})
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: other}, Mode: "soft", Source: "operator"})
+	settle()
+	if got := masonTransitions(t, f, third); len(got) != 0 {
+		t.Fatalf("%s started a unit while one was implementing with one mason slot: %+v", third, got)
+	}
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: asking}, Mode: "soft", Source: "operator"})
+	f.awaitMasonRan(t, third, "resume")
+	masons.check(t)
 }
 
 // A mason that asks again in the turn that delivers its answer parks the unit
@@ -198,12 +219,12 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 	t.Parallel()
 	p := &faults{}
-	f, masons, c := newAskingMasonFixture(t, 4, independentPlan, p)
+	f, fakes, c := newAskingMasonFixture(t, 4, independentPlan, p)
 	defer f.stop(t)
 	c.release("1")
 	c.release("2")
 	f.engine.mu.Lock()
-	f.engine.turns[masonTurnID("resume")] = masons.asking(p, "", "1")
+	f.engine.turns[masonTurnID("resume")] = fakes.asking(p, "", "1")
 	f.engine.mu.Unlock()
 	f.answer("1", asks(p, "2"))
 	f.answer("2", func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error { return nil })
@@ -211,13 +232,22 @@ func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 	f.awaitMasonTransitions(t, stream, 5)
 	settle()
 	p.check(t)
-	masons.check(t)
+	fakes.check(t)
 	want := []transitionMove{started("resume", f.startedReason(t, stream, "resume")), parked("resume", "1"), resumed("resume", "1"), parked("resume", "2"), resumed("resume", "2")}
 	if got := masonTransitions(t, f, stream); !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
 	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
-	if runs := masons.requests(stream); len(runs) != 1 {
+	if runs := fakes.requests(stream); len(runs) != 1 {
 		t.Fatalf("mason turns %d", len(runs))
+	}
+	// Resuming is no start: the workstream last started a unit when the unit
+	// first moved to implementing, which orders it among equal workstreams.
+	b, found, err := (&masons{s: f.s, repository: f.repository()}).read(stream)
+	must(t, err)
+	for _, tr := range allTransitions(t, f.trace, stream) {
+		if tr.ID == masonTransitionID("resume") && (!found || !b.started.Equal(tr.At)) {
+			t.Fatalf("the workstream last started a unit at %s, want %s", b.started, tr.At)
+		}
 	}
 }

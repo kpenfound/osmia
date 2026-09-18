@@ -1168,7 +1168,7 @@ is not paused.
 A free slot goes first to the workstream earliest in the project's priority
 order (`PUT /v1/runtime/priority`), then to those it does not name; among
 equals, to the workstream that started a unit least recently, one that never
-did first, then in workstream ID order. In that workstream the controller takes
+did first (a unit resuming from `waiting` is not a start), then in workstream ID order. In that workstream the controller takes
 the first `ready` unit in the plan's dependency order: every unit follows the
 units it depends on, and otherwise keeps its place in the plan.
 
@@ -1214,7 +1214,10 @@ the transition `unit-<id>-waiting-<q>` from `implementing` to `waiting` (actor
 waiting: its mason asked question <q>; the unit's workspace is kept and it
 takes no mason slot until the answer arrives`. The unit's workspace stays as the turn
 left it. A `waiting` unit takes no mason slot, so a free slot goes to another
-workstream, and its own workstream starts no other unit. Nothing times the
+workstream, and its own workstream starts no other unit. This narrows design
+§5.2, where other units of the workstream continue while one waits: with one
+unit at a time per workstream, a sibling started meanwhile would leave the
+workstream two `implementing` units once the answer arrives. Nothing times the
 question out.
 
 The chief of staff answers the question or escalates it to the owner, whose
@@ -1481,10 +1484,11 @@ recorded reason, so a service without an execution engine still registers
 projects and reports the failure in status.
 
 With `Options.Threads` set, the service also starts ready units (see
-[starting units](#starting-units)), runs queued workstream turns on its own and
+[starting units](#starting-units)), runs queued workstream turns on its own,
 delivers outbox events to each chief of staff (see
-[event delivery](#event-delivery)). The mason controller, event delivery and
-the scheduler, in that order, replace any `Schedule` hook in `Options.Reconciliation`; without
+[event delivery](#event-delivery)) and queues answers on their askers' threads
+(see [questions](#questions)). Event delivery, answer delivery, the mason
+controller and the scheduler, in that order, replace any `Schedule` hook in `Options.Reconciliation`; without
 `Options.Threads` that hook runs. In both cases the
 [architect controller](#architect-drafting), then the
 [shed controller](#the-shed-debate), then the
