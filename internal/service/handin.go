@@ -149,7 +149,9 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 			return h.failed("reading")
 		}
 		handed = slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == handInTransition })
-		skipped = slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == skipTransition })
+		// Only the skip the hand-in recorded counts: a later skip through the
+		// shed is the owner's action on the workstream, not part of the request.
+		skipped = slices.ContainsFunc(transitions, skippedAtHandIn)
 	}
 	if doc != nil && (doc.Source != h.source || req.Stdin != nil && doc.Content != *req.Stdin) {
 		return HandInResponse{}, false, &APIError{Conflict, fmt.Sprintf("key %s already handed in other input as workstream %s; use a new key", req.Key, stream)}

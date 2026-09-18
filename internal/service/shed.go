@@ -110,8 +110,9 @@ func shedState(value string) (kind string, n int, ok bool) {
 }
 
 // debate is the shed controller. Its pass moves every sketched workstream
-// into the shed with its committee and derives the debate's next step from
-// the trace: a round, the architect's reply to it, or the conclusion. Its
+// into the shed with its committee, or without one when the owner skipped
+// debate at hand-in, and derives the debate's next step from the trace: a
+// round, the architect's reply to it, or the conclusion. Its
 // reconciler runs each round operation: one turn per member, in parallel
 // against the pinned revision, and the record of what each contributed.
 type debate struct {
@@ -145,7 +146,9 @@ func (d *debate) Pass(ctx context.Context) error {
 // reconcile gives a sketched workstream its committee and moves it to
 // in-shed, then takes the next step of a workstream in the shed. Every other
 // feature state needs nothing. A service without a committee runner leaves a
-// sketched workstream where it is, waiting for a service that has one.
+// sketched workstream where it is, waiting for a service that has one, except
+// one whose debate the owner skipped at hand-in: it needs no committee and
+// enters the shed without one.
 func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) error {
 	feature, err := d.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -203,6 +206,11 @@ func (d *debate) reconcile(ctx context.Context, stream config.WorkstreamID) erro
 	return d.presentPacket(ctx, stream, false)
 }
 
+// skippedAtHandIn reports whether t is the skip of debate a hand-in recorded.
+func skippedAtHandIn(t trace.Transition) bool {
+	return t.ID == skipTransition && t.Cause == handInTransition
+}
+
 // enterSkipped moves a sketched workstream whose debate the owner skipped at
 // hand-in into the shed without a committee, and asks the chief of staff to
 // present the packet: a skip recorded before the workstream was sketched told
@@ -214,7 +222,7 @@ func (d *debate) enterSkipped(ctx context.Context, stream config.WorkstreamID, f
 	if err != nil {
 		return err
 	}
-	if !slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == skipTransition && t.Cause == handInTransition }) {
+	if !slices.ContainsFunc(transitions, skippedAtHandIn) {
 		return nil
 	}
 	entries, err := Dissent(d.repository, stream)

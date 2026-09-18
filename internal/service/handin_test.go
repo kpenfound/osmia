@@ -297,7 +297,49 @@ func TestHandInFinishesAnInterruptedHandIn(t *testing.T) {
 	if !transitions[0].At.Equal(at) {
 		t.Fatalf("transition at %v", transitions[0].At)
 	}
-	if len(f.streams(t)) != 2 {
+
+	// Interrupted after the copy, before the skip of debate: the retry records
+	// the skip, then the handed state, both at the copy's timestamp.
+	copied := func(key string) config.WorkstreamID {
+		stream := HandInWorkstream(f.project, key)
+		must(t, r.CreateWorkstream(ctx, stream, at, owner))
+		must(t, r.Append(ctx, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "handed", Revision: 1, Project: f.project, Workstream: stream, At: at, Actor: owner, Cause: "handin"},
+			Path: "handed/stdin", Content: text, Source: "stdin"}))
+		return stream
+	}
+	moves := func(stream config.WorkstreamID) string {
+		transitions, err := trace.Read[trace.Transition](r, stream)
+		must(t, err)
+		var out []string
+		for _, tr := range transitions {
+			if !tr.At.Equal(at) || tr.Actor != owner {
+				t.Fatalf("transition %+v", tr)
+			}
+			out = append(out, tr.ID+":"+tr.Subject+":"+tr.Cause)
+		}
+		return strings.Join(out, " ")
+	}
+	want := "shed-owner-skip:shed-owner:handin handin:feature:handin"
+	stream = copied("unskipped")
+	f.checkHanded(t, f.handIn(t, HandInRequest{Key: "unskipped", Stdin: &text, SkipDebate: true}), "unskipped", "stdin", "stdin", text)
+	if got := moves(stream); got != want {
+		t.Fatalf("transitions %s, want %s", got, want)
+	}
+
+	// Interrupted after the skip, before the handed state: the retry must ask
+	// for the skip, and then finishes the hand-in without skipping again.
+	stream = copied("skipped")
+	_, err = r.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: ownerHeader(skipTransition, f.project, stream, handInTransition, at), Subject: ownerSubject, To: skippedValue, Reason: handInSkipReason}})
+	must(t, err)
+	_, err = f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: "skipped", Stdin: &text})
+	if !failed(err, Conflict) || err.Error() != "conflict: key skipped already handed in workstream "+string(stream)+" skipping debate; use a new key" {
+		t.Fatalf("retry without the skip: %v", err)
+	}
+	f.checkHanded(t, f.handIn(t, HandInRequest{Key: "skipped", Stdin: &text, SkipDebate: true}), "skipped", "stdin", "stdin", text)
+	if got := moves(stream); got != want {
+		t.Fatalf("transitions %s, want %s", got, want)
+	}
+	if len(f.streams(t)) != 4 {
 		t.Fatal(f.streams(t))
 	}
 }

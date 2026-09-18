@@ -345,8 +345,8 @@ for from then on. Only a workstream in feature state `in-shed` takes a step, so 
 workstream's debate stays where it stopped. A debate the owner skipped takes no
 step at all, except that a `sketched` workstream whose debate was skipped at
 [hand-in](#hand-in) enters the shed without a committee. A step that runs turns waits for
-the runner of those turns: entering the shed and every round for
-`Options.Committee`, the reply and the redraft for `Options.Architect`.
+the runner of those turns: entering the shed with a committee and every round
+for `Options.Committee`, the reply and the redraft for `Options.Architect`.
 Concluding runs no turn and waits for neither, so a service with an architect
 runner and no committee runner still answers a heard round and still concludes
 a debate.
@@ -505,8 +505,10 @@ workstream was abandoned still ends `heard-<n>`, so the shed state never
 contradicts the record.
 
 `Options.Committee` supplies the execution engine and MCP host factory the
-committee's turns run in. Without it no workstream enters the shed and no
-round is requested, so a sketched workstream stays `sketched`, and a debate
+committee's turns run in. Without it no round is requested and no workstream
+enters the shed except one whose debate the owner skipped at
+[hand-in](#hand-in), which needs no committee. Any other sketched workstream
+stays `sketched`, and a debate
 whose next step is a round stays `replied-<n>`, until a service with a runner
 starts. A round already requested stays pending: applying it returns `this service has
 no agent runner for the committee` wherever it would start or run a turn, the
