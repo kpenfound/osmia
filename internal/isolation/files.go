@@ -29,7 +29,9 @@ type FileView struct {
 
 func (v *FileView) Workspace() coreadapter.Workspace { return v.workspace }
 
-func metadata(name string) bool {
+// VCSMetadata reports whether a file name is version control metadata, which
+// no view holds.
+func VCSMetadata(name string) bool {
 	switch strings.ToLower(name) {
 	case ".git", ".jj", ".hg", ".svn":
 		return true
@@ -42,7 +44,7 @@ func validPath(name string) error {
 		return errors.New("file view requires a relative path without traversal")
 	}
 	for _, part := range strings.Split(name, "/") {
-		if metadata(part) {
+		if VCSMetadata(part) {
 			return errors.New("VCS metadata is not exposed")
 		}
 	}
@@ -130,7 +132,7 @@ func (v Views) Create(ctx context.Context, source coreadapter.Workspace, paths [
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if metadata(entry.Name()) {
+			if VCSMetadata(entry.Name()) {
 				if entry.IsDir() {
 					return fs.SkipDir
 				}
