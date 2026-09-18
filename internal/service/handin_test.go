@@ -319,9 +319,13 @@ func TestHandInFinishesAnInterruptedHandIn(t *testing.T) {
 		}
 		return strings.Join(out, " ")
 	}
+	// checkHanded expects the handed transition alone, so these check the
+	// skip's transitions in order instead.
 	want := "shed-owner-skip:shed-owner:handin handin:feature:handin"
 	stream = copied("unskipped")
-	f.checkHanded(t, f.handIn(t, HandInRequest{Key: "unskipped", Stdin: &text, SkipDebate: true}), "unskipped", "stdin", "stdin", text)
+	if out := f.handIn(t, HandInRequest{Key: "unskipped", Stdin: &text, SkipDebate: true}); out.Workstream != stream || out.State != HandedState || !out.SkipDebate {
+		t.Fatalf("response %+v", out)
+	}
 	if got := moves(stream); got != want {
 		t.Fatalf("transitions %s, want %s", got, want)
 	}
@@ -335,7 +339,9 @@ func TestHandInFinishesAnInterruptedHandIn(t *testing.T) {
 	if !failed(err, Conflict) || err.Error() != "conflict: key skipped already handed in workstream "+string(stream)+" skipping debate; use a new key" {
 		t.Fatalf("retry without the skip: %v", err)
 	}
-	f.checkHanded(t, f.handIn(t, HandInRequest{Key: "skipped", Stdin: &text, SkipDebate: true}), "skipped", "stdin", "stdin", text)
+	if out := f.handIn(t, HandInRequest{Key: "skipped", Stdin: &text, SkipDebate: true}); out.Workstream != stream || out.State != HandedState || !out.SkipDebate {
+		t.Fatalf("response %+v", out)
+	}
 	if got := moves(stream); got != want {
 		t.Fatalf("transitions %s, want %s", got, want)
 	}
