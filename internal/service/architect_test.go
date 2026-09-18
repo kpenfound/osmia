@@ -889,6 +889,10 @@ func TestArchitectDraftsBeforeTheScheduleHook(t *testing.T) {
 	var repository atomic.Pointer[trace.Repository]
 	var mu sync.Mutex
 	var seen []string
+	// A hand-in can commit between a pass's drafter step and its hook, so a
+	// workstream's first sighting may still be undrafted; a second one means
+	// the drafter had a whole pass and skipped it.
+	undrafted := map[string]bool{}
 	opts.Reconciliation.Schedule = func(context.Context) error {
 		repo := repository.Load()
 		if repo == nil {
@@ -911,7 +915,12 @@ func TestArchitectDraftsBeforeTheScheduleHook(t *testing.T) {
 				return err
 			}
 			mu.Lock()
-			seen = append(seen, draft.Value)
+			key := fmt.Sprint(stream)
+			if draft.Value == "" && !undrafted[key] {
+				undrafted[key] = true
+			} else {
+				seen = append(seen, draft.Value)
+			}
 			mu.Unlock()
 		}
 		return nil
