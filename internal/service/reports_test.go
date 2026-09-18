@@ -26,6 +26,12 @@ import (
 // independentPlan and validPlan addresses.
 var resumeReport = CriterionReport{Criterion: "spec#1", Done: "resume from the last chunk", Evidence: "TestResume passes", Proof: "internal/trace/built_test.go TestResume"}
 
+// newMasonController returns the mason controller of the service's
+// configuration over repository.
+func newMasonController(s *Service, repository *trace.Repository) *masons {
+	return &masons{s: s, cfg: s.cfg, repository: repository}
+}
+
 func criterionArgs(c CriterionReport) map[string]any {
 	return map[string]any{"criterion": c.Criterion, "done": c.Done, "evidence": c.Evidence, "proof": c.Proof}
 }
@@ -108,8 +114,8 @@ func (f *shedFixture) checkCandidate(t *testing.T, stream config.WorkstreamID, r
 // A mason's done is refused, with the reason, for a report with no
 // outcome, one that misses a criterion of the unit, names one the unit does
 // not address or names one twice, or leaves out what was done, the
-// evidence or the proof, and for an argument the tool does not take; the
-// unit does not move and the turn does not fail. A complete report is
+// evidence or the proof; input the tool's schema refuses is a tool error.
+// Either way the unit does not move and the turn does not fail. A complete report is
 // accepted once per turn. Once the turn ends, the service snapshots the
 // unit's workspace as its candidate, records the report with the candidate
 // as units/<unit>/report.json and moves the unit to reviewing, whatever
@@ -119,7 +125,7 @@ func (f *shedFixture) checkCandidate(t *testing.T, stream config.WorkstreamID, r
 func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	t.Parallel()
 	f, masons := newMasonFixture(t, 4, independentPlan)
-	defer f.stop(t)
+	defer func() { f.stop(t) }()
 	blank := resumeReport
 	blank.Evidence = " "
 	other := resumeReport
@@ -142,8 +148,17 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 				return fmt.Errorf("done %v: recorded %t, reason %q, want %q (%v)", r.args, recorded, reason, r.reason, err)
 			}
 		}
-		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "approved", "criteria": complete, "state": UnitApproved}); err != nil || recorded {
-			return fmt.Errorf("done with a state: recorded %t, reason %q (%v)", recorded, reason, err)
+		// Input the schema refuses is a tool error, not a recorded refusal.
+		noProof := criterionArgs(resumeReport)
+		delete(noProof, "proof")
+		for _, args := range []map[string]any{
+			{"outcome": "approved", "criteria": complete, "state": UnitApproved},
+			{"outcome": "Built", "criteria": []any{noProof}},
+			{"outcome": 1, "criteria": complete},
+		} {
+			if text, err := callTool(ctx, tools, doneTool, args); err == nil {
+				return fmt.Errorf("done %v is no tool error: %s", args, text)
+			}
 		}
 		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "approved", "criteria": complete}); err != nil || !recorded {
 			return fmt.Errorf("complete report: reason %q (%v)", reason, err)
@@ -241,6 +256,28 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	if string(out) != `{"recorded":false,"reason":"unit resume is reviewing, not implementing"}` {
 		t.Fatalf("late done %s", out)
 	}
+
+	// A unit whose state moved since the pass read it is left as it is.
+	f.stop(t)
+	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	controller := newMasonController(f.s, repo)
+	b, found, err := controller.read(stream)
+	if err != nil || !found {
+		t.Fatalf("read %v %v", found, err)
+	}
+	subject := trace.UnitSubject("resume")
+	b.states[subject] = trace.WorkflowState{Version: b.states[subject].Version - 1, Value: UnitImplementing}
+	moved, blocked, err := controller.finish(context.Background(), b, "resume")
+	if moved || blocked || err != nil {
+		t.Fatalf("finish on a stale read: moved %t, blocked %t, %v", moved, blocked, err)
+	}
+	docs, err = trace.Read[trace.Document](repo, stream)
+	must(t, errors.Join(err, repo.Close()))
+	if n := len(slices.DeleteFunc(docs, func(d trace.Document) bool { return d.ID != reportDocument("resume") })); n != 1 {
+		t.Fatalf("a stale finish recorded a report: %d revisions", n)
+	}
+	f.start(t)
 }
 
 // A unit whose mason reported done but whose workspace cannot be

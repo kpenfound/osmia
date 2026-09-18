@@ -87,16 +87,18 @@ func (u unitWorkspaces) find(ctx context.Context, stream config.WorkstreamID, un
 }
 
 // snapshot commits what the unit's workspace holds as its candidate, a
-// commit that descends from the feature branch, and returns it.
-func (u unitWorkspaces) snapshot(ctx context.Context, stream config.WorkstreamID, unit string) (string, error) {
-	w, _, found, err := u.find(ctx, stream, unit)
+// commit that descends from the feature branch, and returns it with the
+// workspace and the feature branch commit the workspace descends from.
+func (u unitWorkspaces) snapshot(ctx context.Context, stream config.WorkstreamID, unit string) (workspace.Worktree, string, string, error) {
+	w, base, found, err := u.find(ctx, stream, unit)
 	if err != nil {
-		return "", err
+		return workspace.Worktree{}, "", "", err
 	}
 	if !found {
-		return "", fmt.Errorf("unit %s of workstream %s has no workspace", unit, stream)
+		return workspace.Worktree{}, "", "", fmt.Errorf("unit %s of workstream %s has no workspace", unit, stream)
 	}
-	return u.git.Snapshot(ctx, w, featureBranch(stream))
+	candidate, err := u.git.Snapshot(ctx, w, featureBranch(stream))
+	return w, base, candidate, err
 }
 
 // Acquire lends a mason turn its unit's workspace, which must exist. The

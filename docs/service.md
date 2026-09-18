@@ -1221,8 +1221,10 @@ report on <criteria> alone`, `criterion <criterion> is reported twice`,
 `criterion <criterion> has no done|evidence|proof`, `the report misses
 <criteria>: report on every criterion of unit <id>`, `unit <id> is <state>,
 not implementing`, `this turn already reported its unit done; end the turn`
-once one report was accepted, and `the report is malformed: <error>` for input
-that does not decode. An argument the tool does not take is refused too.
+once one report was accepted. Input the tool's schema refuses, such as an
+argument the tool does not take, a missing field or a value of the wrong type,
+comes back as a tool error before the report is checked; the unit does not
+move and the turn goes on.
 A turn whose report was accepted ends with the outcome `done`, whose report is
 the mason's report as JSON. A turn that ends without an accepted report, or
 fails after one, leaves its unit `implementing`.

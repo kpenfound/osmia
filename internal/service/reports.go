@@ -81,10 +81,10 @@ func turnKey(scope coreadapter.Scope) string {
 	return scope.Workstream + "/" + scope.Thread + "/" + scope.Turn
 }
 
-// tool returns the done tool of the claimed mason turn scope names. A report
-// the service refuses is an ordinary result, {"recorded":false,"reason":...},
-// so the mason reads why, fixes it and calls done again; its unit does not
-// move.
+// tool returns the done tool of the claimed mason turn scope names. Input
+// its schema refuses is a tool error. A report the service refuses is an
+// ordinary result, {"recorded":false,"reason":...}, so the mason reads why,
+// fixes it and calls done again; its unit does not move.
 func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	done := coreadapter.Tool{Name: doneTool, Effect: coreadapter.ToolMemory,
 		Description: "Report your unit's work done, once every criterion of the unit holds and the proof the plan names for it is in place and passing. Give the outcome of your work and, for every criterion of the unit, what you did, the evidence that it holds and where the proof lives. The service records the report, takes your workspace as the unit's candidate and sends it to review; end your turn as soon as this returns.",
@@ -94,10 +94,10 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
 		if err := d.Decode(&report); err != nil {
-			return refuseReport("the report is malformed: %v", err)
+			return nil, fmt.Errorf("tool input: %w", err)
 		}
 		if err := d.Decode(new(any)); err != io.EOF {
-			return refuseReport("the report must be one object")
+			return nil, errors.New("tool input must be one object")
 		}
 		state, err := repository.Workflow(config.WorkstreamID(scope.Workstream), trace.UnitSubject(scope.Unit))
 		if err != nil {
@@ -268,15 +268,7 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 	if err != nil || !found {
 		return false, false, err
 	}
-	units := newUnitWorkspaces(m.cfg)
-	w, base, found, err := units.find(ctx, b.stream, unit)
-	if err == nil && !found {
-		err = fmt.Errorf("unit %s of workstream %s has no workspace", unit, b.stream)
-	}
-	candidate := ""
-	if err == nil {
-		candidate, err = units.snapshot(ctx, b.stream, unit)
-	}
+	w, base, candidate, err := newUnitWorkspaces(m.cfg).snapshot(ctx, b.stream, unit)
 	if err != nil {
 		if ctx.Err() != nil {
 			return false, false, err

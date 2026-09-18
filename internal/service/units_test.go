@@ -72,7 +72,7 @@ func TestUnitWorkspaceIsFoundAgainAfterARestart(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(w.Path, "work"), []byte("in progress\n"), 0644))
 	// The feature branch and the unit's branch both move on: the base stays
 	// the commit the workspace was created from.
-	candidate, err := units.snapshot(ctx, stream, "u1")
+	_, _, candidate, err := units.snapshot(ctx, stream, "u1")
 	must(t, err)
 	clone := f.cfg.Project.Clone
 	demoGit(t, f.home, "-C", clone, "checkout", "--quiet", featureBranch(stream))
@@ -111,14 +111,14 @@ func TestUnitSnapshotIsACandidateOnTheFeatureBranch(t *testing.T) {
 	ctx := context.Background()
 	f := newUnitsFixture(t)
 	units := f.units()
-	if _, err := units.snapshot(ctx, stream, "u1"); err == nil || !strings.Contains(err.Error(), "unit u1 of workstream "+string(stream)+" has no workspace") {
+	if _, _, _, err := units.snapshot(ctx, stream, "u1"); err == nil || !strings.Contains(err.Error(), "unit u1 of workstream "+string(stream)+" has no workspace") {
 		t.Fatalf("a snapshot of a unit without a workspace: %v", err)
 	}
 	w, _, err := units.open(ctx, stream, "u1")
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(w.Path, "README"), []byte("widgets, built\n"), 0644))
 	must(t, os.WriteFile(filepath.Join(w.Path, "added"), []byte("new\n"), 0644))
-	candidate, err := f.units().snapshot(ctx, stream, "u1")
+	_, _, candidate, err := f.units().snapshot(ctx, stream, "u1")
 	must(t, err)
 	if got := strings.TrimSpace(demoGit(t, f.home, "-C", f.cfg.Project.Clone, "diff-tree", "-r", "--name-status", f.base, candidate)); got != "M\tREADME\nA\tadded" {
 		t.Fatalf("the candidate's changes:\n%s", got)
@@ -257,7 +257,7 @@ func TestMasonTurnGetsTheUnitWorkspaceFilesOnly(t *testing.T) {
 					t.Fatalf("%s in the workspace after the turn: %v", name, err)
 				}
 			}
-			candidate, err := units.snapshot(ctx, stream, "u1")
+			_, _, candidate, err := units.snapshot(ctx, stream, "u1")
 			must(t, err)
 			changes := strings.Split(strings.TrimSpace(demoGit(t, f.home, "-C", clone, "diff-tree", "-r", "--name-status", "--no-renames", f.base, candidate)), "\n")
 			slices.Sort(changes)
@@ -369,7 +369,7 @@ func TestMasonTurnKeepsTheWorkspaceSymlinks(t *testing.T) {
 	if info, err := os.Lstat(filepath.Join(w.Path, "docs")); err != nil || !info.IsDir() {
 		t.Fatalf("the workspace's docs after the turn: %v %v", info, err)
 	}
-	candidate, err := units.snapshot(ctx, stream, "u1")
+	_, _, candidate, err := units.snapshot(ctx, stream, "u1")
 	must(t, err)
 	if got := strings.TrimSpace(demoGit(t, f.home, "-C", clone, "diff-tree", "-r", "--name-status", base, candidate)); got != "M\tREADME\nD\tdocs/guide" {
 		t.Fatalf("the candidate's changes:\n%s", got)
