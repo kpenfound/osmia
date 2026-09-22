@@ -525,7 +525,7 @@ bound role tools and are not included in replay context.
 
 The chief of staff keeps one status per workstream (design §6.4). Each
 `Status` revision replaces the previous one as a whole: `goal` and `note` are
-required, `attention` may be empty, and `agents` is a list, possibly empty, of
+required, `attention` is non-empty exactly while an owner gate is open, and `agents` is a list, possibly empty, of
 non-blank lines. The record ID is always `status`, and revisions are numbered
 from one in `workstreams/<id>/status.jsonl`. Status records are never
 project-scoped and carry no unit.
@@ -535,16 +535,21 @@ revision. The scope must name this service session's active, uncaptured turn
 of the agent's thread, and that thread's role must be `chief_of_staff`. Before
 anything is written, `check` receives the content and the identifiers the
 trace holds for the workstream: project and workstream IDs, agent, thread and
-turn IDs, backend session IDs and the turn profiles' models. A check error is
+turn IDs, backend session IDs and the turn profiles' models, plus the open
+owner gates. A check error is
 returned as `*StatusRejected` and stores nothing. The actor is the agent, the
 cause is the turn request's ID and the depth is one more than the request's.
 
 `Repository.Statuses()` lists every workstream in manifest order with its
 latest status (nil before the first), its feature state, the state of every
-workflow subject read in the same pass (`Subjects`) and its open question
+workflow subject read in the same pass (`Subjects`), its owner gates and open question
 count. The feature state is the current value of the `feature` workflow
 subject (`FeatureSubject`), empty until a transition records one. A question
 is open while no ruling names it. A damaged record fails the whole read.
+An escalated inbox batch is one gate until ruled. A recorded ratification
+packet is a gate while its workstream remains in the shed. A contested unit
+is a gate while its unit state is contested. Gates give a kind and reference:
+the inbox number, workstream ID or unit ID respectively.
 
 `internal/status` holds the checks and the tool. `status.Check` is the one
 function that decides whether content is acceptable. Its heuristics reject:

@@ -81,7 +81,7 @@ func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 }
 
 func statusView(project config.ProjectID, mode bundle.Mode, w trace.WorkstreamStatus) WorkstreamStatus {
-	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, Units: []UnitStatus{}, OpenQuestions: w.OpenQuestions, ContextMode: mode}
+	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, Units: []UnitStatus{}, OpenQuestions: w.OpenQuestions, Gates: append([]trace.OwnerGate{}, w.Gates...), ContextMode: mode}
 	if w.State != "" {
 		state := w.State
 		out.State = &state

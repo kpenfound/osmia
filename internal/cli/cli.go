@@ -659,6 +659,9 @@ func showWorkstreams(w io.Writer, all service.StatusResponse) {
 	defer diagnostics(w, all.Diagnostics)
 	for _, st := range all.Workstreams {
 		fmt.Fprintf(w, "  %s %s\n", st.Workstream, facts(st))
+		for _, gate := range st.Gates {
+			fmt.Fprintf(w, "    Gate: %s %s\n", gate.Kind, gate.Reference)
+		}
 		if st.Status == nil {
 			fmt.Fprintln(w, "    no status yet")
 			continue
@@ -670,6 +673,9 @@ func showWorkstreams(w io.Writer, all service.StatusResponse) {
 // showStatus prints one workstream's full status.
 func showStatus(w io.Writer, st service.WorkstreamStatus) {
 	fmt.Fprintf(w, "Workstream: %s %s\n", st.Workstream, facts(st))
+	for _, gate := range st.Gates {
+		fmt.Fprintf(w, "Gate: %s %s\n", gate.Kind, gate.Reference)
+	}
 	if len(st.Units) > 0 {
 		fmt.Fprintln(w, "Units:")
 		for _, u := range st.Units {

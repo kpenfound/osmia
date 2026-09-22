@@ -1391,8 +1391,15 @@ order, except the librarian's, which carries no feature (see
 | `state` | The feature workflow state, or `null` before one is recorded |
 | `units` | One `{"unit", "state"}` per unit of the sealed plan, in plan order, once the [build](#building) recorded their states; empty before |
 | `open_questions` | Questions in the workstream without a ruling |
+| `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, or `contested` with the unit ID; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
 | `status` | `null` until the chief of staff writes one; otherwise `goal`, `attention` (empty when nothing needs the owner), `note`, `agents`, `revision` and `updated_at` |
+
+`set_status` requires a non-empty `attention` while any gate is open and
+refuses a non-empty one when no gate is open. The chief of staff writes the
+wording. A refusal is an ordinary `{"stored":false,"reason":"…"}` result;
+an open-gate reason names its kind and reference. `osmia status` prints the
+gates under each workstream status.
 
 Without an active project or its trace, the list is empty. If the trace
 cannot be read, the list is empty and carries a `workstreams` diagnostic with
