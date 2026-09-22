@@ -186,6 +186,9 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	if x := awaitExtraction(t, c); x.Extraction != 1 || x.State != "failed" || !strings.Contains(x.Reason, "no agent runner") {
 		t.Fatalf("extraction without a runner: %+v", x)
 	}
+	// The result and acknowledgement commits land after the terminal state,
+	// so wait for both before snapshotting the trace below.
+	awaitExtractionAcknowledged(t, s)
 	// The runtime store resolves against the new project without a restart.
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: id}, Mode: "soft", Source: "operator"})
 	mutation(t, c, "PUT", "priority", PriorityRequest{Project: id, Workstreams: []config.WorkstreamID{}})
