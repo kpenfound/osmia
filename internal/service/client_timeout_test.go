@@ -53,12 +53,19 @@ func TestProjectAddOutlivesDefaultWriteTimeout(t *testing.T) {
 	opts.WriteTimeout = 20 * time.Millisecond
 	s, c := start(t, opts)
 	c.addProjectTimeout = time.Second
+	entered := make(chan struct{})
+	handler := s.server.Handler
+	s.server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		handler.ServeHTTP(w, r)
+	})
 	s.projectMu.Lock()
 	result := make(chan error, 1)
 	go func() {
 		_, err := c.AddProject(context.Background(), request(clone))
 		result <- err
 	}()
+	<-entered
 	time.Sleep(100 * time.Millisecond)
 	s.projectMu.Unlock()
 	if err := <-result; err != nil {
