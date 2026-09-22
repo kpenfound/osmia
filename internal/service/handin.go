@@ -179,6 +179,12 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		if err != nil {
 			return h.failed("creating")
 		}
+		// The workstream may be new: the runtime store learns it before the
+		// input is copied, so a retried hand-in resolves it again and a
+		// priority or pause may name it as soon as this hand-in finishes.
+		if err := h.s.resolveRuntime(h.s.current(), repository); err != nil {
+			return h.failed("resolving the runtime workstreams of")
+		}
 		doc = &trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: handedDocument, Revision: 1, Project: req.Project, Workstream: stream, At: now, Actor: ownerActor, Cause: handInTransition},
 			Path: "handed/" + h.name, Content: *content, Source: h.source}
 		if err := repository.Append(ctx, *doc); err != nil {

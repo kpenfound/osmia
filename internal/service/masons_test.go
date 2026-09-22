@@ -329,10 +329,6 @@ func TestMasonSlotsFollowPriorityAndPause(t *testing.T) {
 			t.Fatalf("%s started a unit while the factory was paused: %+v", stream, got)
 		}
 	}
-	// The runtime store learns of workstreams handed in since it opened on
-	// the next start.
-	f.stop(t)
-	f.start(t)
 
 	// The priority order goes against the workstream ID order, which would
 	// otherwise break the tie.
