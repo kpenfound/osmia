@@ -1246,6 +1246,12 @@ and the workstream's questions on every pass, so a parked unit, its question
 and its answer survive a restart, and a unit whose state moved since the pass
 read it is left to the next pass.
 
+If a service stop interrupts a mason turn, its surviving file view is copied
+into the same unit workspace before the interrupted thread claim is released.
+The service then queues one continuation on that thread with the recovered
+files. If the interrupted turn asked a question, the unit waits for the answer
+turn instead. The unit keeps its workspace and is never started as a new unit.
+
 ### Finishing units
 
 A mason turn ends its unit's work with the Osmia tool `done`, which only the

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 
@@ -147,7 +149,15 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	if workspace.Workspace.Access != selected.Workspace.Access {
 		return result, errors.New("provider workspace access differs from service selection")
 	}
-	view, err := r.Views.Create(ctx, workspace.Workspace, selected.Paths)
+	views := r.Views
+	if input.Scope.Role == "mason" {
+		// Keep the view identifiable by its durable turn after a process stop.
+		views.Directory = filepath.Join(views.Directory, input.Scope.Project, input.Scope.Workstream, input.Scope.Thread, input.Scope.Turn)
+		if err := os.MkdirAll(views.Directory, 0700); err != nil {
+			return result, err
+		}
+	}
+	view, err := views.Create(ctx, workspace.Workspace, selected.Paths)
 	if err != nil {
 		return result, err
 	}
