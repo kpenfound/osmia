@@ -112,6 +112,7 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	must(t, os.MkdirAll(viewRoot, 0700))
 	view, err := (isolation.Views{Directory: viewRoot}).Create(ctx, coreadapter.Workspace{Directory: w.Path, Access: coreadapter.ReadWrite}, paths)
 	must(t, err)
+	must(t, os.WriteFile(filepath.Join(viewRoot, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600))
 	changed := filepath.Join(view.Workspace().Directory, masonWrote)
 	must(t, os.WriteFile(changed, []byte("package trace\n// recovered\n"), 0600))
 	if _, err := os.Stat(filepath.Join(w.Path, masonWrote)); !os.IsNotExist(err) {
@@ -141,5 +142,25 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	}
 	if _, _, found, err := units.find(ctx, stream, "resume"); err != nil || !found {
 		t.Fatalf("unit workspace changed after recovery: found %t: %v", found, err)
+	}
+	// A stop while copying the next view leaves no ready marker. Its partial
+	// contents must not replace the complete workspace on another restart.
+	next := th.Turns[1].Request.TurnID
+	partialRoot := filepath.Join(f.s.cfg.Root.String(), "views", string(f.project), string(stream), masonAgent("resume"), next)
+	must(t, os.MkdirAll(partialRoot, 0700))
+	_, err = os.MkdirTemp(partialRoot, "turn-")
+	must(t, err)
+	_, err = repo.ClaimTurn(ctx, stream, masonAgent("resume"), "crashed-again", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), masonAgent("resume"), next), f.clock.Now())
+	must(t, err)
+	must(t, repo.Close())
+	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	defer repo.Close()
+	m.repository = repo
+	must(t, m.Pass(ctx))
+	data, err = os.ReadFile(filepath.Join(w.Path, masonWrote))
+	must(t, err)
+	if string(data) != "package trace\n// recovered\n" {
+		t.Fatalf("partial view replaced the workspace: %q", data)
 	}
 }

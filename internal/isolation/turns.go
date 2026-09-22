@@ -162,6 +162,13 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 		return result, err
 	}
 	defer func() { err = errors.Join(err, view.Release(context.WithoutCancel(ctx))) }()
+	if input.Scope.Role == "mason" {
+		// A stopped copy must never replace a complete unit workspace. This
+		// marker is written only after the view has been fully populated.
+		if err := os.WriteFile(filepath.Join(views.Directory, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600); err != nil {
+			return result, err
+		}
+	}
 	tools := append(fileTools(view), r.Tools...)
 	if r.Scoped != nil {
 		scoped, scopedErr := r.Scoped(ctx, input.Scope)

@@ -189,12 +189,29 @@ func (m *masons) recoverInterrupted(ctx context.Context, stream config.Workstrea
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if len(entries) > 1 {
+	ready, err := os.ReadFile(filepath.Join(dir, "ready"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	views := slices.DeleteFunc(entries, func(entry os.DirEntry) bool { return entry.Name() == "ready" })
+	if len(views) > 1 {
 		return fmt.Errorf("mason turn %s has multiple surviving views", pending.Request.TurnID)
 	}
-	if len(entries) == 1 {
-		if !entries[0].IsDir() || !strings.HasPrefix(entries[0].Name(), "turn-") {
+	if len(views) == 1 {
+		if !views[0].IsDir() || !strings.HasPrefix(views[0].Name(), "turn-") {
 			return fmt.Errorf("mason turn %s has an unexpected view entry", pending.Request.TurnID)
+		}
+		view := filepath.Join(dir, views[0].Name())
+		if string(ready) != views[0].Name() {
+			// The view was not fully copied before the service stopped; no
+			// mason could have run against it yet.
+			if len(ready) != 0 {
+				return fmt.Errorf("mason turn %s has a mismatched ready view", pending.Request.TurnID)
+			}
+			if err := os.RemoveAll(view); err != nil {
+				return err
+			}
+			return m.repository.AbandonTurn(ctx, stream, masonAgent(unit), pending.Request.TurnID, m.s.now())
 		}
 		w, _, found, err := newUnitWorkspaces(m.cfg).find(ctx, stream, unit)
 		if err != nil {
@@ -203,13 +220,15 @@ func (m *masons) recoverInterrupted(ctx context.Context, stream config.Workstrea
 		if !found {
 			return fmt.Errorf("unit %s of workstream %s has no workspace", unit, stream)
 		}
-		view := filepath.Join(dir, entries[0].Name())
 		if err := mirror(view, w.Path); err != nil {
 			return err
 		}
 		if err := os.RemoveAll(view); err != nil {
 			return err
 		}
+	}
+	if err := os.Remove(filepath.Join(dir, "ready")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	return m.repository.AbandonTurn(ctx, stream, masonAgent(unit), pending.Request.TurnID, m.s.now())
 }
@@ -246,8 +265,8 @@ func (m *masons) recoverTurn(ctx context.Context, stream config.WorkstreamID, un
 }
 
 // follow moves a unit between implementing and waiting as its mason's thread
-// says, and returns the unit's state. An implementing unit whose mason's
-// latest turn asked a question moves to waiting; a waiting
+// says, and returns the unit's state. An implementing unit with a question
+// whose waiting transition has not been recorded moves to waiting; a waiting
 // unit whose mason's latest turn delivers the answer to one of its questions
 // moves back to implementing. The workspace is left as it is either way. A
 // unit whose state moved since it was read is left to the next pass.
