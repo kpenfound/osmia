@@ -1177,7 +1177,12 @@ the unit's workspace, then records the transition `unit-<id>-implementing`
 from `ready` to `implementing` (actor `service`/`mason`, cause
 `unit-<id>-ready`) with the reason `unit <id> is the next ready unit of the plan
 of seal <k>; its mason works in the unit's workspace on <unit-branch>, created
-from <feature-branch> at <commit>`. It then creates the unit's mason thread,
+from <feature-branch> at <commit>`. The transition carries one
+[notice](#event-delivery) for the chief of staff, `Unit <id> is implementing:
+its mason works on it in its unit workspace on <unit-branch>.` A unit that
+resumes from `waiting` raises no notice: its question and the answer that
+resumed it are the chief of staff's own choices. It then creates the unit's
+mason thread,
 `mason-<id>` with the role `mason`, and queues its first turn,
 `mason-<id>-implement`, with the role's profile, the unit's bundle in its
 prompt and the transition as its cause. The scheduler dispatches that turn
@@ -1273,7 +1278,10 @@ next revision `<k>` of the document `units/<id>/report.json` (ID
 transition `unit-<id>-reviewing-<k>` from `implementing` to `reviewing` with
 the reason `the mason of unit <id> reported done on turn <turn>; its candidate
 is <commit> on <unit-branch>, from <feature-branch> at <base>, and its report is
-units/<id>/report.json revision <k>`. The document holds `unit`, `turn`,
+units/<id>/report.json revision <k>`. The transition carries one
+[notice](#event-delivery) for the chief of staff, `Unit <id> is reviewing: its
+mason reported done on turn <turn>; its report is units/<id>/report.json
+revision <k>.` The document holds `unit`, `turn`,
 `seal`, `outcome`, `criteria`, `branch`, `base` (the feature branch commit the
 workspace descends from) and `candidate`. A unit in `reviewing` takes no mason
 slot, so its workstream can start its next `ready` unit.

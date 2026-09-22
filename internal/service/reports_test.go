@@ -236,6 +236,16 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
 
+	// The finish and the next start carry one notice each for the chief of
+	// staff, delivered as event turns and acknowledged once they have
+	// completed successfully.
+	reviewNotice := fmt.Sprintf("Unit resume is reviewing: its mason reported done on turn %s; its report is units/resume/report.json revision 1.", masonTurnID("resume"))
+	if body := f.notice(t, stream, reviewingTransitionID("resume", 1)); body != reviewNotice {
+		t.Fatalf("the reviewing notice %q, want %q", body, reviewNotice)
+	}
+	f.awaitEventTurns(t, stream, reviewNotice, "Unit dedupe is implementing: its mason works on it in its unit workspace on "+unitBranch(stream, "dedupe")+".")
+	f.awaitAcknowledgedNotices(t, stream)
+
 	// A turn that failed after its report was accepted does not finish its
 	// unit.
 	if got := f.reports(t, stream, "dedupe"); len(got) != 0 {

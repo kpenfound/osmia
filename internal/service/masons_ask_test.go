@@ -142,6 +142,12 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	if got := masonTransitions(t, f, asking); !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
+	// The question the mason raised is one notice for the chief of staff,
+	// which is how the fake chief saw it and escalated it.
+	opened := "Question 1 is open, asked by the mason: " + askedQuestion
+	if body := f.notice(t, asking, "question_1_open"); body != opened {
+		t.Fatalf("the question notice %q, want %q", body, opened)
+	}
 	f.checkUnits(t, asking, []UnitStatus{{Unit: "resume", State: UnitWaiting}, {Unit: "dedupe", State: UnitReady}})
 	f.checkUnits(t, other, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
 	f.checkUnits(t, third, []UnitStatus{{Unit: "resume", State: UnitReady}, {Unit: "dedupe", State: UnitReady}})
