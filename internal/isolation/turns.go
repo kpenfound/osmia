@@ -31,9 +31,12 @@ type Selection struct {
 type Turns struct {
 	Workspaces coreadapter.Workspaces
 	Views      Views
-	Select     func(context.Context, coreadapter.Scope) (Selection, error)
-	Grants     map[string]coreadapter.Capabilities
-	Tools      []coreadapter.Tool
+	// PreserveMasonViews makes mason views identifiable by durable turn ID so
+	// the service can recover their files after an interrupted process.
+	PreserveMasonViews bool
+	Select             func(context.Context, coreadapter.Scope) (Selection, error)
+	Grants             map[string]coreadapter.Capabilities
+	Tools              []coreadapter.Tool
 	// Scoped supplies trusted handlers bound to one claimed turn, such as private
 	// role notes. They join the same registry and grant checks as Tools.
 	Scoped func(context.Context, coreadapter.Scope) ([]coreadapter.Tool, error)
@@ -150,7 +153,7 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 		return result, errors.New("provider workspace access differs from service selection")
 	}
 	views := r.Views
-	if input.Scope.Role == "mason" {
+	if r.PreserveMasonViews && input.Scope.Role == "mason" {
 		// Keep the view identifiable by its durable turn after a process stop.
 		views.Directory = filepath.Join(views.Directory, input.Scope.Project, input.Scope.Workstream, input.Scope.Thread, input.Scope.Turn)
 		if err := os.MkdirAll(views.Directory, 0700); err != nil {
@@ -162,7 +165,7 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 		return result, err
 	}
 	defer func() { err = errors.Join(err, view.Release(context.WithoutCancel(ctx))) }()
-	if input.Scope.Role == "mason" {
+	if r.PreserveMasonViews && input.Scope.Role == "mason" {
 		// A stopped copy must never replace a complete unit workspace. This
 		// marker is written only after the view has been fully populated.
 		if err := os.WriteFile(filepath.Join(views.Directory, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600); err != nil {
