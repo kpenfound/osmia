@@ -333,6 +333,21 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 	return p, s.step("journal-removed")
 }
 
+// resolveRuntime points the runtime store at cfg and the workstreams of
+// repository, re-reading the trace so overrides may name workstreams created
+// since the last resolve. Without a repository the configured identities
+// stand in. Callers hold their own ordering against configuration changes.
+func (s *Service) resolveRuntime(cfg *config.Config, repository *trace.Repository) error {
+	workstreams := s.options.Workstreams
+	if repository != nil {
+		var err error
+		if workstreams, err = repository.Workstreams(); err != nil {
+			return err
+		}
+	}
+	return s.store.Resolve(runtime.Inputs{Config: cfg, Workstreams: workstreams})
+}
+
 // activate loads the project into the running configuration and opens its
 // trace and reconciliation loop the way startup does.
 func (s *Service) activate(id config.ProjectID) (config.Project, error) {
@@ -352,14 +367,11 @@ func (s *Service) activate(id config.ProjectID) (config.Project, error) {
 	if err != nil {
 		return config.Project{}, err
 	}
-	workstreams := s.options.Workstreams
+	var repository *trace.Repository
 	if active != nil {
-		if workstreams, err = active.repository.Workstreams(); err != nil {
-			active.repository.Close()
-			return config.Project{}, err
-		}
+		repository = active.repository
 	}
-	if err := s.store.Resolve(runtime.Inputs{Config: cfg, Workstreams: workstreams}); err != nil {
+	if err := s.resolveRuntime(cfg, repository); err != nil {
 		if active != nil {
 			active.repository.Close()
 		}

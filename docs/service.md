@@ -67,7 +67,10 @@ after the runtime store acknowledges persistence. DELETE requests carry JSON bod
 See [runtime overrides](runtime.md) for target, mode and reference rules. The service
 accepts workstream IDs from the active trace repository’s validated manifests.
 Without an initialized trace, embedding callers may supply known IDs; the default
-list is empty. The service does not create workstream identities.
+list is empty. The service does not create workstream identities: activating a
+project re-resolves the list from its trace, and a hand-in that creates a
+workstream re-resolves it again, so the new workstream's ID takes an override
+without a restart.
 
 The configuration digest hashes the canonical JSON of the effective loaded
 configuration, including defaults and the resolved socket/project paths, not TOML
