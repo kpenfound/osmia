@@ -37,6 +37,11 @@ All paths start with `/v1`. Shared request, response and error types and a Unix-
 path; it never reads configuration or runtime files. `Do` supports all operations,
 and `Health`, `Configuration` and `Runtime` provide typed read helpers. Close the
 client to release idle connections. API version 1 uses snake_case JSON fields.
+Client calls have a 15-second response budget, including connection and response
+reading. `AddProject` uses a 60-second budget for clone traversal and trace
+seeding. A caller's shorter context deadline takes precedence. The service's
+read-header, read and write timeouts default to 5, 10 and 10 seconds and can be
+set through `Options` by embedders.
 
 | Method | Path after `/v1` | Input / response |
 | --- | --- | --- |
@@ -107,6 +112,10 @@ Project operations compose their messages from the request's fields and
 identities: a validation failure names the field at fault, `project_active`
 names the active project, and an incomplete registration names the project ID
 to finish. They never include raw file contents or parser output.
+Client transport errors use `unavailable`: a timeout reports `no response within
+15s` (or the applicable call budget), a caller context deadline reports `no
+response before caller's context deadline`, and an unreachable or closed socket
+reports `cannot reach Osmia Unix socket`.
 
 Health readiness means the loaded stores can serve requests; disk diagnostics do
 not discard that valid view. Reload application, lifecycle endpoints, streaming,
@@ -125,6 +134,8 @@ cancels and joins the loop before releasing trace ownership.
 
 `POST /v1/projects` registers a project and activates it in the running
 service, opening its new trace and reconciliation loop exactly as startup does.
+Its response write deadline extends to 60 seconds so registration can finish
+beyond the server's default 10-second write timeout.
 `DELETE /v1/projects` removes the active project from configuration, stops its
 loop and releases its trace; the trace and the clone stay on disk. Both edit
 `config.toml` as text and replace the loaded configuration's project only, so
