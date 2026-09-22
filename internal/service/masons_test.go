@@ -188,6 +188,58 @@ func started(unit, reason string) transitionMove {
 // settle lets the service's loop run several more passes.
 func settle() { time.Sleep(1500 * time.Millisecond) }
 
+// awaitEventTurns waits until the workstream's chief of staff has received
+// event turns that together carry every wanted body.
+func (f *shedFixture) awaitEventTurns(t *testing.T, stream config.WorkstreamID, want ...string) {
+	t.Helper()
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		th, err := f.repository().ChiefOfStaffThread(stream)
+		must(t, err)
+		found := 0
+		for _, w := range want {
+			for _, q := range th.Turns {
+				if strings.HasPrefix(q.Request.TurnID, "events_") && !q.CompletedAt.IsZero() && q.Status() == "idle" && strings.Contains(q.Request.Prompt, w) {
+					found++
+					break
+				}
+			}
+		}
+		if found == len(want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the chief of staff of %s never received event turns with %q: %v turns", stream, want, len(th.Turns))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// awaitAcknowledgedNotices waits until every notice event of the workstream is
+// acknowledged, which the delivery pass does once the chief-of-staff turn
+// carrying them has completed successfully.
+func (f *shedFixture) awaitAcknowledgedNotices(t *testing.T, stream config.WorkstreamID) {
+	t.Helper()
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		outbox, err := f.repository().Outbox(stream)
+		must(t, err)
+		pending := 0
+		for _, e := range outbox {
+			if e.Event.Kind == trace.NoticeKind && !e.Acknowledged {
+				pending++
+			}
+		}
+		if pending == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d notices of %s were never acknowledged: %+v", pending, stream, outbox)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // A building workstream's first ready unit moves to implementing, recorded
 // in events.jsonl with the mason controller as its actor, and its mason's
 // first turn runs once, on a view of the unit's own workspace created from
@@ -207,7 +259,16 @@ func TestMasonStartsOneReadyUnitPerWorkstream(t *testing.T) {
 	if got, want := masonTransitions(t, f, stream), []transitionMove{started("resume", f.startedReason(t, stream, "resume"))}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
+	startNotice := "Unit resume is implementing: its mason works on it in its unit workspace on " + unitBranch(stream, "resume") + "."
+	if body := f.notice(t, stream, masonTransitionID("resume")); body != startNotice {
+		t.Fatalf("the start notice %q, want %q", body, startNotice)
+	}
 	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
+
+	// The chief of staff receives the start as an event turn, and the events
+	// are acknowledged once its turn has completed successfully.
+	f.awaitEventTurns(t, stream, startNotice)
+	f.awaitAcknowledgedNotices(t, stream)
 
 	th, err := f.repository().Thread(stream, masonAgent("resume"))
 	must(t, err)

@@ -327,7 +327,8 @@ func (m *masons) start(ctx context.Context, b building, unit string) (bool, erro
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: masonTransitionID(unit), Revision: 1, Project: m.repository.Project(), Workstream: b.stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: subject + "-" + UnitReady}
 	tr := trace.Transition{Header: h, Subject: subject, From: UnitReady, To: UnitImplementing,
 		Reason: fmt.Sprintf("unit %s is the next ready unit of the plan of seal %d; its mason works in the unit's workspace on %s, created from %s at %s", unit, mason.Seal, w.Branch, featureBranch(b.stream), base)}
-	if _, err := m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr}); errors.Is(err, trace.ErrConflict) {
+	if _, err := m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr,
+		Events: []trace.Event{trace.Notice(masonTransitionID(unit), "unit", fmt.Sprintf("Unit %s is implementing: its mason works on it in its unit workspace on %s.", unit, w.Branch))}}); errors.Is(err, trace.ErrConflict) {
 		return false, nil
 	} else if err != nil {
 		return false, err

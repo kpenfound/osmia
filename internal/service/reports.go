@@ -300,7 +300,9 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 	h.Schema, h.ID, h.Revision = "osmia.trace.transition", reviewingTransitionID(unit, k), 1
 	tr := trace.Transition{Header: h, Subject: subject, From: UnitImplementing, To: UnitReviewing,
 		Reason: fmt.Sprintf("the mason of unit %s reported done on turn %s; its candidate is %s on %s, from %s at %s, and its report is %s revision %d", unit, turn.Request.TurnID, candidate, w.Branch, featureBranch(b.stream), base, doc.Path, k)}
-	if _, err := m.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr}); errors.Is(err, trace.ErrConflict) {
+	tx := trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr,
+		Events: []trace.Event{trace.Notice(reviewingTransitionID(unit, k), "unit", fmt.Sprintf("Unit %s is reviewing: its mason reported done on turn %s; its report is %s revision %d.", unit, turn.Request.TurnID, doc.Path, k))}}
+	if _, err := m.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); errors.Is(err, trace.ErrConflict) {
 		return false, false, nil
 	} else if err != nil {
 		return false, false, err
