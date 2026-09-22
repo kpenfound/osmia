@@ -72,9 +72,10 @@ func Enforce(opts Options, e Enforcement) Options {
 		units := newUnitWorkspaces(cfg)
 		reports := &masonReports{}
 		turns := &isolation.Turns{
-			Workspaces: threadWorkspaces{units: units},
-			Views:      isolation.Views{Directory: views},
-			Grants:     map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant},
+			Workspaces:         threadWorkspaces{units: units},
+			Views:              isolation.Views{Directory: views},
+			PreserveMasonViews: true,
+			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant},
 			Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 				role, ok := cfg.Roles[scope.Role]
 				if !ok || scope.Project != project {

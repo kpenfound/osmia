@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -103,6 +104,9 @@ func (m *masons) Pass(ctx context.Context) error {
 			if state.Value != UnitImplementing && state.Value != UnitWaiting {
 				continue
 			}
+			if err := m.recoverInterrupted(ctx, stream, u.ID); err != nil {
+				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
+			}
 			value, err := m.follow(ctx, stream, u.ID, state)
 			if err != nil {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
@@ -121,7 +125,13 @@ func (m *masons) Pass(ctx context.Context) error {
 			busy = true
 			queued := false
 			if !blocked {
-				if queued, err = m.resume(ctx, stream, u.ID); err != nil {
+				if queued, err = m.recoverTurn(ctx, stream, u.ID); err != nil {
+					return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
+				}
+				if !queued {
+					queued, err = m.resume(ctx, stream, u.ID)
+				}
+				if err != nil {
 					return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 				}
 			}
@@ -152,9 +162,111 @@ func (m *masons) Pass(ctx context.Context) error {
 	return nil
 }
 
+// recoverInterrupted copies a stopped turn's surviving view into its existing
+// workspace before releasing the thread claim. Repeating the copy is safe if
+// the service stops during recovery. The claim is released only after the
+// copy, so another turn cannot overwrite work that has not been recovered.
+func (m *masons) recoverInterrupted(ctx context.Context, stream config.WorkstreamID, unit string) error {
+	th, err := m.repository.Thread(stream, masonAgent(unit))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil || th.Status != "interrupted" || th.Active == "" {
+		return err
+	}
+	var pending *trace.QueuedTurn
+	for i := range th.Turns {
+		if th.Turns[i].Request.TurnID == th.Active {
+			pending = &th.Turns[i]
+			break
+		}
+	}
+	if pending == nil {
+		return fmt.Errorf("interrupted mason thread has no active turn")
+	}
+	dir := filepath.Join(m.cfg.Root.String(), "views", string(m.repository.Project()), string(stream), masonAgent(unit), pending.Request.TurnID)
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	ready, err := os.ReadFile(filepath.Join(dir, "ready"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	views := slices.DeleteFunc(entries, func(entry os.DirEntry) bool { return entry.Name() == "ready" })
+	if len(views) > 1 {
+		return fmt.Errorf("mason turn %s has multiple surviving views", pending.Request.TurnID)
+	}
+	if len(views) == 1 {
+		if !views[0].IsDir() || !strings.HasPrefix(views[0].Name(), "turn-") {
+			return fmt.Errorf("mason turn %s has an unexpected view entry", pending.Request.TurnID)
+		}
+		view := filepath.Join(dir, views[0].Name())
+		if string(ready) != views[0].Name() {
+			// The view was not fully copied before the service stopped; no
+			// mason could have run against it yet.
+			if len(ready) != 0 {
+				return fmt.Errorf("mason turn %s has a mismatched ready view", pending.Request.TurnID)
+			}
+			if err := os.RemoveAll(view); err != nil {
+				return err
+			}
+			return m.repository.AbandonTurn(ctx, stream, masonAgent(unit), pending.Request.TurnID, m.s.now())
+		}
+		w, _, found, err := newUnitWorkspaces(m.cfg).find(ctx, stream, unit)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("unit %s of workstream %s has no workspace", unit, stream)
+		}
+		if err := mirror(view, w.Path); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(view); err != nil {
+			return err
+		}
+	}
+	if err := os.Remove(filepath.Join(dir, "ready")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return m.repository.AbandonTurn(ctx, stream, masonAgent(unit), pending.Request.TurnID, m.s.now())
+}
+
+// recoverTurn queues one continuation for an interrupted mason turn unless
+// that turn asked a question. The answer turn then supplies the continuation.
+func (m *masons) recoverTurn(ctx context.Context, stream config.WorkstreamID, unit string) (bool, error) {
+	th, err := m.repository.Thread(stream, masonAgent(unit))
+	if errors.Is(err, os.ErrNotExist) || err == nil && len(th.Turns) == 0 {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	last := th.Turns[len(th.Turns)-1]
+	if last.Status() != "interrupted" {
+		return false, nil
+	}
+	asked, err := m.repository.Questions(stream)
+	if err != nil {
+		return false, err
+	}
+	if askedBy(asked, th.Identity.ThreadID, last.Request.TurnID) != "" {
+		return false, nil
+	}
+	req := last.Request
+	req.ID = "request_" + masonAgent(unit) + "-recover-" + fmt.Sprint(last.Sequence)
+	req.TurnID = masonAgent(unit) + "-recover-" + fmt.Sprint(last.Sequence)
+	req.At = m.s.now()
+	req.Cause = last.Response.ID
+	req.Prompt = last.Request.Prompt + "\n\nThe service stopped during your last turn. Your workspace includes the files left by that turn. Continue from those files, check the unit's criteria and proofs, and report done when they hold."
+	_, err = m.repository.EnqueueTurn(ctx, req)
+	return err == nil, err
+}
+
 // follow moves a unit between implementing and waiting as its mason's thread
-// says, and returns the unit's state. An implementing unit whose mason's
-// latest turn asked a question moves to waiting; a waiting
+// says, and returns the unit's state. An implementing unit with a question
+// whose waiting transition has not been recorded moves to waiting; a waiting
 // unit whose mason's latest turn delivers the answer to one of its questions
 // moves back to implementing. The workspace is left as it is either way. A
 // unit whose state moved since it was read is left to the next pass.
@@ -175,7 +287,19 @@ func (m *masons) follow(ctx context.Context, stream config.WorkstreamID, unit st
 	var to, id, cause, reason string
 	switch state.Value {
 	case UnitImplementing:
-		q := askedBy(asked, th.Identity.ThreadID, last.Request.TurnID)
+		transitions, err := trace.Read[trace.Transition](m.repository, stream)
+		if err != nil {
+			return "", err
+		}
+		q := ""
+		for _, turn := range th.Turns {
+			candidate := askedBy(asked, th.Identity.ThreadID, turn.Request.TurnID)
+			id := fmt.Sprintf("%s-%s-%s", subject, UnitWaiting, candidate)
+			if candidate != "" && !slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
+				q = candidate
+				break
+			}
+		}
 		if q == "" {
 			return state.Value, nil
 		}
