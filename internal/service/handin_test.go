@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -17,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/issues"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -269,6 +271,39 @@ func TestHandInRetryReturnsTheSameWorkstream(t *testing.T) {
 	if !f.unchanged(t, head) || len(f.streams(t)) != 3 {
 		t.Fatal("refused retry wrote to the trace")
 	}
+}
+
+// The workstream a hand-in creates takes a priority and a workstream pause on
+// the running service, without a restart. A workstream the trace does not hold
+// is still refused.
+func TestHandInMakesItsWorkstreamKnownToRuntime(t *testing.T) {
+	t.Parallel()
+	f := newHandInFixture(t)
+	ctx := context.Background()
+	text := "design"
+	out := f.handIn(t, HandInRequest{Key: "known", Stdin: &text})
+	target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: out.Workstream}
+	mutation(t, f.c, "PUT", "priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{out.Workstream}})
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "operator"})
+	rt, err := f.c.Runtime(ctx)
+	must(t, err)
+	if len(rt.Diagnostics) != 0 {
+		t.Fatalf("diagnostics %+v", rt.Diagnostics)
+	}
+	if len(rt.Effective.Priorities) != 1 || rt.Effective.Priorities[0].Project != f.project ||
+		!reflect.DeepEqual(rt.Effective.Priorities[0].Workstreams, []config.WorkstreamID{out.Workstream}) {
+		t.Fatalf("effective priorities %+v", rt.Effective.Priorities)
+	}
+	if len(rt.Effective.Pauses) != 1 || rt.Effective.Pauses[0].Target != target || rt.Effective.Pauses[0].Mode != "soft" {
+		t.Fatalf("effective pauses %+v", rt.Effective.Pauses)
+	}
+	// A retried hand-in on the workstream still succeeds.
+	if again := f.handIn(t, HandInRequest{Key: "known", Stdin: &text}); again != out {
+		t.Fatalf("retry %+v, first %+v", again, out)
+	}
+	unknown := config.WorkstreamID("w_00000000000000000000000000000000")
+	assertCode(t, f.c.Do(ctx, "PUT", Prefix+"/runtime/priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{unknown}}, nil), Validation)
+	assertCode(t, f.c.Do(ctx, "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: unknown}, Mode: "soft", Source: "operator"}, nil), Validation)
 }
 
 func TestHandInFinishesAnInterruptedHandIn(t *testing.T) {
