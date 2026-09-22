@@ -8,7 +8,7 @@ returns configured results/errors, records calls, honours pre-cancellation and
 fails when exhausted. It does not emulate an enforcing sandbox or durable store.
 
 The direct dependency is pinned to
-`github.com/kpenfound/busybees/core v0.4.2`.
+`github.com/kpenfound/busybees/core v0.4.4`.
 Only public core packages may be imported inside adapters. No sibling checkout
 or local replacement is needed. The public `vcs.Workspace` compile-time fixture
 keeps the dependency checked by Go without executing a session or repository.
@@ -22,12 +22,12 @@ Capabilities describe this pinned version, based on its public API and README.
 
 | Osmia port | Core package / primitive | Boundary and upstream gaps |
 |---|---|---|
-| `Turns` | `agent.Runner`, `Request`, `Result`, backend implementations | Runs a prepared turn and returns backend identity, final response, outcome, cost knowledge and failure detail. Resume is backend-dependent: the pinned Codex path ignores `ResumeID`. Uniform resumable backends are an upstream gap. Osmia owns log replay, turn queues and profile selection. |
-| `Sandboxes` | `agent.Grants`, `agent.Enforcer` (`NewHostNone`, `NewHostClaude`, `NewContainer`), `Session.Policy`; `vcs.Workspace` | Core prepares a session for the grants only where the platform can enforce them, reports the policy it enforces, and admits a request against its complete grants (environment allowlist, tools, mounts, VCS) before starting anything; VCS executables are denied when VCS is not granted. The contract separates required isolation from verified isolation; flags or prompts are not verification. Unsupported requirements must fail before launch. |
+| `Turns` | `agent.Runner`, `Request`, `Result`, backend descriptors (`Backends`) and implementations | Runs a prepared turn and returns backend identity, final response, outcome, cost knowledge and failure detail; `Result.Agent` names the backend that answered. Resume is backend-dependent: the pinned Codex path ignores `ResumeID`. Uniform resumable backends are an upstream gap. Osmia owns log replay, turn queues and profile selection. |
+| `Sandboxes` | `agent.Grants`, `agent.Enforcer` (`NewHostNone`, `NewHostClaude`, `NewContainer`, and `RunRestricted` over `SandboxSbx` with `SandboxBoundary`), `Session.Policy`; `vcs.Workspace` | Core prepares a session for the grants only where the platform can enforce them, reports the policy it enforces, and admits a request against its complete grants (environment allowlist, tools, mounts, VCS, and a Dagger engine in `SandboxSbx` only) before starting anything; VCS executables are denied when VCS is not granted. The pinned version additionally offers the Docker Sandbox `SandboxSbx`, restricted sessions (`RunRestricted`) and Dagger engine grants (`Profile.Dagger`, `Grants.DaggerEngine`); Osmia adopts none of them. Osmia's `NewEnforcer` builds enforcers only for `none`, `claude` and `container` and fails closed on `sbx`. The contract separates required isolation from verified isolation; flags or prompts are not verification. Unsupported requirements must fail before launch. |
 | `MCPHosts` | `mcphost.Registry`, role policies, transports | Hosts supplied role-scoped tools with explicit capabilities. Osmia supplies handlers, fixed routes and outcome validation. No workflow handlers are inherited from busybees. |
 | `Workspaces` | `vcs.Provider`, `Workspace`, `Directory` | Caller owns acquisition and lifetime across turns. Core exposes the provider interface but **no reusable concrete git-worktree provider** in the public module; that implementation is an upstream gap. The lease port neither commits nor rebases nor delivers. |
-| `Reviews` | `review.Runner`, `Bundle`, `ReadArtifact`, findings | Accepts supplied context and diff; retains partial artifacts, findings and session accounting. Core does not bind approval to spec/plan/candidate revisions: Osmia carries that identity and owns approval checks. Interactive review threads belong to Osmia. |
-| `Retries` | `ops.ClassifyFailure`, `RetryPolicy.Decide`, `SelectModel` | Classification and bounded retry advice only; no sleeping or dispatch. **Upstream gap:** model fallback selection does not resolve named profiles across agent binaries. Osmia resolves its profile graph and supplies the selected profile. |
+| `Reviews` | `review.Runner`, `Bundle`, `ReadArtifact`, findings | Accepts supplied context and diff; retains partial artifacts, findings and session accounting. A run whose agent fell back may disclose `Provider` and `Model` naming the agent that answered. Core does not bind approval to spec/plan/candidate revisions: Osmia carries that identity and owns approval checks. Interactive review threads belong to Osmia. |
+| `Retries` | `ops.ClassifyFailure`, `RetryPolicy.Decide`, `SelectProfile` | Classification and bounded retry advice only; no sleeping or dispatch. `SelectProfile` walks a profile's `Fallback` chain across agents. **Upstream gap:** it walks a profile graph handed to it; resolution of Osmia's named profiles across agent binaries remains Osmia's own, and Osmia supplies the selected profile. |
 | `Ledger` | `ops.Ledger`, `Spend` | Accounting storage and totals only. Core append is not an idempotent transaction with workflow state. **Upstream gaps:** strict reads (core ignores a malformed final line) and explicit cost knowledge. A temporary strict reader fails closed; cost knowledge is encoded in opaque work tags. Attempt reconciliation and durable trace integration belong to Osmia. |
 | `Budgets` | `ops.EvaluateWindow` | Numeric threshold/window primitives; pauses, scope selection and degradation responses belong to Osmia. `BudgetRequest` receives already-selected spend. The adapter retains no episode state; the caller supplies the previous threshold state. |
 | `Capacity` | `ops.SharedPool` | All-or-none slot claims. Core's queued-member FIFO order is not Osmia's stage/workstream scheduling policy. The adapter serializes multi-pool claims and rolls back on refusal. Members leave immediately, retaining no FIFO reservation; caller ordering remains authoritative. |
@@ -168,9 +168,10 @@ one-based attempt counts, limits and delay to `RetryPolicy.Decide`. Any nonempty
 reported outcome takes precedence over infrastructure flags. Clean exits without
 an outcome are behavioural; transport errors, signals and provider limits are
 infrastructure. Cancellation and unsupported capabilities do not receive retry
-advice. A supplied fallback profile is returned only with an eligible retry;
-resolving that profile and choosing when to offer it belong to the caller. The
-adapter neither waits nor starts work.
+advice. A supplied fallback profile is returned only with an eligible retry.
+Core's `ops.SelectProfile` walks a profile's `Fallback` chain across agents, but
+resolving Osmia's named profiles and choosing when to offer a fallback belong to
+the caller. The adapter neither waits nor starts work.
 
 `NewLedger` accepts a directory and clock. Share one adapter per file; external
 writers are unsupported. Core appends accounting entries, using the complete
