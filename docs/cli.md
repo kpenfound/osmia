@@ -58,10 +58,11 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   context mode (`file`, a normal mode; see [context](context.md)), then each
   workstream with its state, open question count and context mode, and the
   chief of staff's goal and attention (`Attention: none` when nothing needs
-  you), or `no status yet`. Reading the charter records any edit you made to
+  you), or `no status yet`. Open owner gates appear under the workstream even
+  before a status is written. Reading the charter records any edit you made to
   it; see [charter](charter.md).
 - `status <workstream-id>` shows one workstream of the active project: the same
-  facts, then `Units:` with one line per unit of the sealed plan and its state
+  facts and owner gates, then `Units:` with one line per unit of the sealed plan and its state
   once the workstream is building, then the full status (goal, attention, note, one line per active
   agent, and when it was written), or `Status: none yet` before the chief of
   staff writes one. A workstream the project does not hold fails with

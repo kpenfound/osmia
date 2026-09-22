@@ -41,7 +41,11 @@ func TestCheckAcceptsPlainStatus(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := valid()
 			edit(&c)
-			if err := Check(c, []string{"first", "", "test", "chief_thread"}); err != nil {
+			gates := []trace.OwnerGate{{Kind: "ratification", Reference: "workstream"}}
+			if name == "no attention" {
+				gates = nil
+			}
+			if err := Check(c, []string{"first", "", "test", "chief_thread"}, gates); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -99,11 +103,43 @@ func TestCheckRejects(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := valid()
 			tc.edit(&c)
-			err := Check(c, known)
+			err := Check(c, known, []trace.OwnerGate{{Kind: "ratification", Reference: "workstream"}})
 			if err == nil || !strings.Contains(err.Error(), tc.reason) {
 				t.Fatalf("got %v, want %q", err, tc.reason)
 			}
 		})
+	}
+}
+
+func TestCheckAttentionFollowsOwnerGates(t *testing.T) {
+	for _, gate := range []trace.OwnerGate{
+		{Kind: "escalation", Reference: "17"},
+		{Kind: "ratification", Reference: "w_0123456789abcdef0123456789abcdef"},
+		{Kind: "contested", Reference: "upload-index"},
+	} {
+		t.Run(gate.Kind, func(t *testing.T) {
+			c := valid()
+			c.Attention = ""
+			if err := Check(c, nil, []trace.OwnerGate{gate}); err == nil || err.Error() != "attention is required while the owner holds "+gate.Kind+" "+gate.Reference {
+				t.Fatalf("empty attention: %v", err)
+			}
+			c.Attention = "Decide whether the plan is ready."
+			if err := Check(c, nil, []trace.OwnerGate{gate}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	c := valid()
+	if err := Check(c, nil, nil); err == nil || err.Error() != "attention must be empty: nothing waits on the owner" {
+		t.Fatalf("invented attention: %v", err)
+	}
+	c.Attention = " "
+	if err := Check(c, nil, nil); err == nil || err.Error() != "attention must be empty: nothing waits on the owner" {
+		t.Fatalf("blank attention: %v", err)
+	}
+	c.Attention = ""
+	if err := Check(c, nil, nil); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -194,7 +230,7 @@ func TestToolStoresReplacesAndRejects(t *testing.T) {
 			t.Errorf("accepted %s", input)
 		}
 	}
-	if out := call(`{"goal":"Ship uploads.","attention":"Approve the plan.","note":"The plan is ready.","agents":["The architect is idle."]}`); out != `{"stored":true,"revision":1}` {
+	if out := call(`{"goal":"Ship uploads.","note":"The plan is ready.","agents":["The architect is idle."]}`); out != `{"stored":true,"revision":1}` {
 		t.Fatalf("store: %s", out)
 	}
 	if out := call(`{"goal":"Ship uploads.","note":"The plan was approved.","agents":[]}`); out != `{"stored":true,"revision":2}` {
@@ -210,5 +246,50 @@ func TestToolStoresReplacesAndRejects(t *testing.T) {
 	if len(list) != 1 || list[0].Status == nil || list[0].Status.Revision != 2 || list[0].Status.Attention != "" ||
 		list[0].Status.Goal != want.Goal || list[0].Status.Note != want.Note || len(list[0].Status.Agents) != 0 || !list[0].Status.At.Equal(clock()) {
 		t.Fatalf("stored: %+v", list)
+	}
+}
+
+func TestToolAttentionFollowsEscalatedInboxEntry(t *testing.T) {
+	ctx := context.Background()
+	repo, chiefScope, _, p := chief(t)
+	stream := config.WorkstreamID(chiefScope.Workstream)
+	at := time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC)
+	owner := trace.Actor{Kind: "owner", ID: "local"}
+	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, ID: "mason", Revision: 1, Project: p.ID, Workstream: stream, At: at, Actor: owner, Cause: "workstream-create"}
+	must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: "mason", ThreadID: "mason_thread"}))
+	h.Schema, h.ID, h.Cause = "osmia.trace.turn-request", "request_ask", "work"
+	h.Unit = "upload"
+	_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: "mason", ThreadID: "mason_thread", TurnID: "ask", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Build"})
+	must(t, err)
+	_, err = repo.ClaimTurn(ctx, stream, "mason", "ask-token", "/owned/mason", at)
+	must(t, err)
+	asker := coreadapter.Scope{Project: string(p.ID), Workstream: string(stream), Thread: "mason_thread", Turn: "ask", Role: "mason", Unit: "upload"}
+	_, err = repo.Ask(ctx, "mason", asker, "May uploads change?", at)
+	must(t, err)
+	_, err = repo.EscalateQuestions(ctx, "chief", chiefScope, trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "May uploads change?", Blocked: "The upload unit.", Recommendation: "Keep it."}, at)
+	must(t, err)
+	tool, err := Tool(repo, "chief", chiefScope, func() time.Time { return at })
+	must(t, err)
+	call := func(attention string) string {
+		t.Helper()
+		input, err := json.Marshal(trace.StatusContent{Goal: "Ship uploads.", Attention: attention, Note: "The upload decision is pending.", Agents: []string{}})
+		must(t, err)
+		out, err := tool.Handle(ctx, input)
+		must(t, err)
+		return string(out)
+	}
+	if got := call(""); got != `{"stored":false,"reason":"attention is required while the owner holds escalation 1"}` {
+		t.Fatalf("empty: %s", got)
+	}
+	if got := call("Decide whether uploads may change."); got != `{"stored":true,"revision":1}` {
+		t.Fatalf("gate open: %s", got)
+	}
+	_, err = repo.Rule(ctx, 1, "Keep the current upload.", owner, at)
+	must(t, err)
+	if got := call(""); got != `{"stored":true,"revision":2}` {
+		t.Fatalf("gate ruled: %s", got)
+	}
+	if got := call("Decide again."); got != `{"stored":false,"reason":"attention must be empty: nothing waits on the owner"}` {
+		t.Fatalf("invented: %s", got)
 	}
 }

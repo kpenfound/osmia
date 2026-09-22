@@ -46,7 +46,7 @@ var slashWords = []string{"and/or", "either/or", "i/o", "input/output", "read/wr
 // Known identifiers are rejected where they appear as a whole token, but only
 // those shaped like identifiers (containing a digit or underscore, or at least
 // 16 characters), so ordinary words used as test IDs do not reject prose.
-func Check(c trace.StatusContent, known []string) error {
+func Check(c trace.StatusContent, known []string, gates []trace.OwnerGate) error {
 	if strings.TrimSpace(c.Goal) == "" {
 		return errors.New("goal is required: one sentence on what the workstream is working toward")
 	}
@@ -64,6 +64,12 @@ func Check(c trace.StatusContent, known []string) error {
 	}
 	if err := line("attention", c.Attention, maxAttention); err != nil {
 		return err
+	}
+	if strings.TrimSpace(c.Attention) == "" && len(gates) > 0 {
+		return fmt.Errorf("attention is required while the owner holds %s %s", gates[0].Kind, gates[0].Reference)
+	}
+	if c.Attention != "" && len(gates) == 0 {
+		return errors.New("attention must be empty: nothing waits on the owner")
 	}
 	if len(c.Note) > maxNote {
 		return fmt.Errorf("note must be at most %d characters", maxNote)
@@ -195,7 +201,7 @@ func Tool(repository *trace.Repository, agent string, scope coreadapter.Scope, n
 		return coreadapter.Tool{}, fmt.Errorf("%s is granted to the chief of staff only", ToolName)
 	}
 	tool := coreadapter.Tool{Name: ToolName, Effect: coreadapter.ToolMemory,
-		Description: "Replace this workstream's status for the owner. goal: one sentence on what is being worked toward. attention: one concrete action the owner must take now, or empty. note: a few sentences on what changed and where things stand. agents: one line per active agent. Write in words: no commit hashes, branch names, file paths, session IDs, Osmia IDs or model names.",
+		Description: "Replace this workstream's status for the owner. goal: one sentence on what is being worked toward. attention: a concrete action while an owner gate is open, otherwise empty. note: a few sentences on what changed and where things stand. agents: one line per active agent. Write in words: no commit hashes, branch names, file paths, session IDs, Osmia IDs or model names.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"goal":{"type":"string"},"attention":{"type":"string"},"note":{"type":"string"},"agents":{"type":"array","items":{"type":"string"}}},"required":["goal","note","agents"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var content trace.StatusContent

@@ -131,8 +131,8 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 		defer mu.Unlock()
 		for _, args := range []map[string]any{
 			{"goal": "Finish the importer on " + chiefThread + ".", "note": "Started.", "agents": []string{}},
-			{"goal": "Ship resumable uploads.", "attention": "Approve the upload plan.", "note": "The plan is drafted.", "agents": []string{"The architect is drafting the plan."}},
-			{"goal": "Ship resumable uploads.", "note": "The plan was approved. Work is starting.", "agents": []string{"The architect is idle."}},
+			{"goal": "Ship resumable uploads.", "note": "The plan is drafted.", "agents": []string{"The architect is drafting the plan."}},
+			{"goal": "Ship resumable uploads.", "note": "The plan is ready for review. Work is starting.", "agents": []string{"The architect is idle."}},
 		} {
 			out, err := callTool(ctx, tools, status.ToolName, args)
 			if err != nil {
@@ -147,7 +147,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	list, err := c.Statuses(ctx)
 	must(t, err)
 	empty := func(w config.WorkstreamID) WorkstreamStatus {
-		return WorkstreamStatus{Workstream: w, Project: project, Units: []UnitStatus{}, ContextMode: "file"}
+		return WorkstreamStatus{Workstream: w, Project: project, Units: []UnitStatus{}, Gates: []trace.OwnerGate{}, ContextMode: "file"}
 	}
 	if want := []WorkstreamStatus{empty(stream), empty(quiet)}; !sameStatuses(list.Workstreams, want) || len(list.Diagnostics) != 0 {
 		t.Fatalf("before the chief of staff wrote: %+v", list)
@@ -176,7 +176,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 		t.Helper()
 		st := got.Status
 		if got.Workstream != stream || got.Project != project || got.State != nil || got.OpenQuestions != 0 || got.ContextMode != "file" || st == nil ||
-			st.Goal != "Ship resumable uploads." || st.Attention != "" || st.Note != "The plan was approved. Work is starting." ||
+			st.Goal != "Ship resumable uploads." || st.Attention != "" || st.Note != "The plan is ready for review. Work is starting." ||
 			!slices.Equal(st.Agents, []string{"The architect is idle."}) || st.Revision != 2 || st.UpdatedAt.IsZero() {
 			t.Fatalf("stored status: %+v %+v", got, st)
 		}
@@ -198,7 +198,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	}
 	raw := map[string]json.RawMessage{}
 	must(t, c.Do(ctx, "GET", Prefix+"/status/"+string(quiet), nil, &raw))
-	if string(raw["status"]) != "null" || string(raw["state"]) != "null" || string(raw["units"]) != "[]" || string(raw["open_questions"]) != "0" || string(raw["context_mode"]) != `"file"` {
+	if string(raw["status"]) != "null" || string(raw["state"]) != "null" || string(raw["units"]) != "[]" || string(raw["gates"]) != "[]" || string(raw["open_questions"]) != "0" || string(raw["context_mode"]) != `"file"` {
 		t.Fatalf("no-status JSON: %v", raw)
 	}
 	engine.mu.Lock()
@@ -292,7 +292,7 @@ func TestStatusViewCarriesTraceFacts(t *testing.T) {
 	stored := &trace.Status{Header: trace.Header{Revision: 4, At: at}, StatusContent: trace.StatusContent{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}}}
 	state := "building"
 	got := statusView(project, bundle.ModeFile, trace.WorkstreamStatus{Workstream: stream, State: state, OpenQuestions: 2, Status: stored})
-	want := WorkstreamStatus{Workstream: stream, Project: project, State: &state, Units: []UnitStatus{}, OpenQuestions: 2, ContextMode: "file",
+	want := WorkstreamStatus{Workstream: stream, Project: project, State: &state, Units: []UnitStatus{}, OpenQuestions: 2, Gates: []trace.OwnerGate{}, ContextMode: "file",
 		Status: &StatusView{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}, Revision: 4, UpdatedAt: at}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)

@@ -237,7 +237,7 @@ func TestM2HandInToSketchedPlan(t *testing.T) {
 		must(t, err)
 		st := got.Status
 		if got.Workstream != stream || got.Project != f.project || got.State == nil || *got.State != SketchedState || st == nil ||
-			st.Goal != "Ship resumable uploads." || st.Attention != "Review the drafted spec and plan." || st.Revision != 1 {
+			st.Goal != "Ship resumable uploads." || st.Attention != "" || st.Revision != 1 {
 			t.Fatalf("status of %s: %+v %+v", stream, got, st)
 		}
 		if chief.written[string(stream)] != `{"stored":true,"revision":1}` {

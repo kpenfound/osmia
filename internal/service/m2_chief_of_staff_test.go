@@ -59,7 +59,7 @@ const (
 // identifier in any field.
 var chiefDemoStatus = StatusView{
 	Goal:      "Ship resumable uploads.",
-	Attention: "Nothing needs you yet.",
+	Attention: "",
 	Note:      "Two masons and a reviewer are at work on the upload unit.",
 	Agents:    []string{"The first mason is building the upload unit.", "The second mason is building the index unit.", "The reviewer is reviewing the upload unit."},
 }

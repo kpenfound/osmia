@@ -32,7 +32,7 @@ func chiefThread(t *testing.T, r *Repository, turn string) coreadapter.Scope {
 	return coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Thread: "chief_thread", Turn: turn, Role: StatusRole}
 }
 
-func accept(StatusContent, []string) error { return nil }
+func accept(StatusContent, []string, []OwnerGate) error { return nil }
 
 func statusOf(t *testing.T, r *Repository) WorkstreamStatus {
 	t.Helper()
@@ -52,7 +52,7 @@ func TestSetStatusStoresWholeRevisions(t *testing.T) {
 	scope := chiefThread(t, r, "turn1")
 	first := StatusContent{Goal: "Ship the importer.", Attention: "Approve the plan.", Note: "The draft is ready.", Agents: []string{"The architect is drafting."}}
 	var known []string
-	revision, err := r.SetStatus(ctx, "chief", scope, first, at.Add(time.Minute), func(_ StatusContent, k []string) error { known = k; return nil })
+	revision, err := r.SetStatus(ctx, "chief", scope, first, at.Add(time.Minute), func(_ StatusContent, k []string, _ []OwnerGate) error { known = k; return nil })
 	if err != nil || revision != 1 {
 		t.Fatalf("first: %d %v", revision, err)
 	}
@@ -96,12 +96,96 @@ func TestSetStatusStoresWholeRevisions(t *testing.T) {
 	}
 }
 
+func TestSetStatusFollowsEscalationGate(t *testing.T) {
+	ctx := context.Background()
+	r, _, _ := create(t)
+	chief := chiefThread(t, r, "statusgate")
+	asker := askerThread(t, r, "mason_gate", "mason", "askgate")
+	if _, err := r.Ask(ctx, "mason_gate", asker, "May the upload change?", at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.EscalateQuestions(ctx, "chief", chief, EscalationRequest{Questions: []string{"1"}, Rephrasing: "May the upload change?", Blocked: "The upload unit.", Recommendation: "No."}, at); err != nil {
+		t.Fatal(err)
+	}
+	want := []OwnerGate{{Kind: "escalation", Reference: "1"}}
+	if got := statusOf(t, r).Gates; !reflect.DeepEqual(got, want) {
+		t.Fatalf("gates: %+v", got)
+	}
+	content := StatusContent{Goal: "Ship uploads.", Note: "A decision is needed.", Agents: []string{}}
+	check := func(c StatusContent, _ []string, gates []OwnerGate) error {
+		if !reflect.DeepEqual(gates, want) {
+			t.Fatalf("check gates: %+v", gates)
+		}
+		if c.Attention == "" {
+			return errors.New("attention is required while the owner holds escalation 1")
+		}
+		return nil
+	}
+	if _, err := r.SetStatus(ctx, "chief", chief, content, at, check); refusalStatus(err) != "attention is required while the owner holds escalation 1" {
+		t.Fatalf("refusal: %v", err)
+	}
+	content.Attention = "Decide whether the upload may change."
+	if _, err := r.SetStatus(ctx, "chief", chief, content, at, check); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Rule(ctx, 1, "Keep the current upload.", Actor{Kind: "owner", ID: "local"}, at); err != nil {
+		t.Fatal(err)
+	}
+	if got := statusOf(t, r).Gates; len(got) != 0 {
+		t.Fatalf("ruled gates: %+v", got)
+	}
+	content.Attention = ""
+	if _, err := r.SetStatus(ctx, "chief", chief, content, at, func(_ StatusContent, _ []string, gates []OwnerGate) error {
+		if len(gates) != 0 {
+			t.Fatalf("ruled check gates: %+v", gates)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func refusalStatus(err error) string {
+	var rejected *StatusRejected
+	if errors.As(err, &rejected) {
+		return rejected.Reason
+	}
+	return ""
+}
+
+func TestOwnerGatesForRatificationAndContestedUnit(t *testing.T) {
+	view := &workflowView{states: map[string]WorkflowState{FeatureSubject: {Value: "in-shed"}, UnitSubject("upload-index"): {Value: "contested"}}}
+	packet := Document{Header: Header{Workstream: streamID, Cause: "ratification-packet"}, Path: "shed/round-1/packet.json"}
+	want := []OwnerGate{{Kind: "contested", Reference: "upload-index"}, {Kind: "ratification", Reference: string(streamID)}}
+	if got := ownerGates([]Record{packet}, streamID, view); !reflect.DeepEqual(got, want) {
+		t.Fatalf("pending gates: %+v", got)
+	}
+	ratified := Document{Header: Header{Workstream: streamID, Cause: "owner-shed"}, Path: "shed/round-1/ratification.json"}
+	if got := ownerGates([]Record{packet, ratified}, streamID, view); !reflect.DeepEqual(got, want[:1]) {
+		t.Fatalf("ratified gates: %+v", got)
+	}
+	if got := ownerGates([]Record{packet, ratified, packet}, streamID, view); !reflect.DeepEqual(got, want) {
+		t.Fatalf("new packet gates: %+v", got)
+	}
+	view.states[UnitSubject("upload-index")] = WorkflowState{Value: "merged"}
+	if got := ownerGates([]Record{packet, ratified}, streamID, view); len(got) != 0 {
+		t.Fatalf("closed gates: %+v", got)
+	}
+	longUnit := strings.Repeat("long-unit-", 8)
+	subject := UnitSubject(longUnit)
+	view.states[subject] = WorkflowState{Value: "contested"}
+	transition := Transition{Header: Header{Workstream: streamID, Unit: longUnit}, Subject: subject, To: "contested"}
+	if got := ownerGates([]Record{packet, ratified, transition}, streamID, view); !reflect.DeepEqual(got, []OwnerGate{{Kind: "contested", Reference: longUnit}}) {
+		t.Fatalf("long unit gate: %+v", got)
+	}
+}
+
 func TestSetStatusRefusals(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
 	scope := chiefThread(t, r, "turn1")
 	valid := StatusContent{Goal: "Ship it.", Note: "Going well.", Agents: []string{}}
-	_, err := r.SetStatus(ctx, "chief", scope, valid, at, func(StatusContent, []string) error { return errors.New("goal names a commit") })
+	_, err := r.SetStatus(ctx, "chief", scope, valid, at, func(StatusContent, []string, []OwnerGate) error { return errors.New("goal names a commit") })
 	var rejected *StatusRejected
 	if !errors.As(err, &rejected) || rejected.Reason != "goal names a commit" {
 		t.Fatalf("check rejection: %v", err)
