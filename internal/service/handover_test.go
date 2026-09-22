@@ -53,7 +53,7 @@ func (h *handoverChief) turn(ctx context.Context, req agent.Request, _ *agent.Tu
 	h.mu.Unlock()
 	if strings.Contains(req.Prompt, "Workstream state changed from handed to sketched") {
 		out, err := callTool(ctx, tools, status.ToolName, map[string]any{
-			"goal": "Ship resumable uploads.", "attention": "Review the drafted spec and plan.",
+			"goal": "Ship resumable uploads.",
 			"note": "The architect's plan passed validation.", "agents": []string{"The architect is idle."}})
 		if err != nil {
 			return nil, err
