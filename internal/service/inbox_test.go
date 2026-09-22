@@ -198,6 +198,18 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	if single.Workstream != quiet || single.Batch != "escalation_1" || single.Question != "May the index unit add a dependency?" || single.Options == nil || len(single.Options) != 0 || len(single.Asked) != 1 || single.Asked[0].AskedBy != "agent_other" {
 		t.Fatalf("single entry: %+v", single)
 	}
+	if got, err := c.Status(ctx, stream); err != nil || !reflect.DeepEqual(got.Gates, []trace.OwnerGate{{Kind: "escalation", Reference: strconv.Itoa(batch.Number)}}) {
+		t.Fatalf("status gates: %+v %v", got.Gates, err)
+	}
+	if list, err := c.Statuses(ctx); err != nil || len(list.Workstreams) != 2 {
+		t.Fatalf("status list: %+v %v", list, err)
+	} else {
+		for _, ws := range list.Workstreams {
+			if len(ws.Gates) != 1 || ws.Gates[0].Kind != "escalation" {
+				t.Fatalf("list gates: %+v", ws)
+			}
+		}
+	}
 
 	traceDir, err := f.cfg.Root.ProjectTrace(project)
 	must(t, err)
@@ -214,6 +226,9 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	}
 	answered, err := c.Answer(ctx, batch.Number, "Both are part of the contract.")
 	must(t, err)
+	if got, err := c.Status(ctx, stream); err != nil || len(got.Gates) != 0 {
+		t.Fatalf("ruled status gates: %+v %v", got.Gates, err)
+	}
 	if !reflect.DeepEqual(answered, AnswerResponse{Number: batch.Number, Workstream: stream, Batch: "escalation_1", Questions: []string{"1", "2"}, Ruling: "Both are part of the contract.", At: f.clock.Now()}) {
 		t.Fatalf("answer: %+v", answered)
 	}

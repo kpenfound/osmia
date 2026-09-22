@@ -9,6 +9,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/shed"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 const Prefix = "/v1"
@@ -279,14 +280,16 @@ type StatusResponse struct {
 
 // WorkstreamStatus is the chief of staff's status for one workstream, next to
 // the facts the service owns. State is null until a feature state is
-// recorded; Units is empty until the units' states are recorded; Status is
-// null until the chief of staff writes one.
+// recorded; Units is empty until the units' states are recorded; Gates is
+// empty while no owner decision waits; Status is null until the chief of staff
+// writes one.
 type WorkstreamStatus struct {
 	Workstream    config.WorkstreamID `json:"workstream"`
 	Project       config.ProjectID    `json:"project"`
 	State         *string             `json:"state"`
 	Units         []UnitStatus        `json:"units"`
 	OpenQuestions int                 `json:"open_questions"`
+	Gates         []trace.OwnerGate   `json:"gates"`
 	ContextMode   bundle.Mode         `json:"context_mode"`
 	Status        *StatusView         `json:"status"`
 }

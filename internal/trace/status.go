@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -33,8 +34,8 @@ func UnitSubject(unit string) string {
 	return "unit_" + hex.EncodeToString(sum[:16])
 }
 
-// StatusContent is what the chief of staff writes. Attention may be empty;
-// Agents holds one line per active agent and may be empty.
+// StatusContent is what the chief of staff writes. Attention names an open
+// owner gate, or is empty when there are none. Agents may be empty.
 type StatusContent struct {
 	Goal      string   `json:"goal"`
 	Attention string   `json:"attention"`
@@ -62,8 +63,15 @@ func (e *StatusRejected) Error() string { return "status rejected: " + e.Reason 
 
 // StatusCheck decides whether content may be stored. Known holds identifiers
 // the trace records for the workstream: project, workstream, agent, thread,
-// turn and backend session IDs, and the turn profile's model.
-type StatusCheck func(content StatusContent, known []string) error
+// turn and backend session IDs, and the turn profile's model. Gates are the
+// decisions currently waiting on the owner.
+type StatusCheck func(content StatusContent, known []string, gates []OwnerGate) error
+
+// OwnerGate identifies a decision currently waiting on the owner.
+type OwnerGate struct {
+	Kind      string `json:"kind"`
+	Reference string `json:"reference"`
+}
 
 // SetStatus stores content as the next status revision of the scope's
 // workstream. The scope must name this session's active, uncaptured turn of a
@@ -86,7 +94,7 @@ func (r *Repository) SetStatus(ctx context.Context, agent string, scope coreadap
 		return 0, err
 	}
 	stream := config.WorkstreamID(scope.Workstream)
-	log, _, err := r.loadWorkflow(stream)
+	log, view, err := r.loadWorkflow(stream)
 	if err != nil {
 		return 0, err
 	}
@@ -100,12 +108,12 @@ func (r *Repository) SetStatus(ctx context.Context, agent string, scope coreadap
 			}
 		}
 	}
-	if err := check(content, known); err != nil {
-		return 0, &StatusRejected{Reason: err.Error()}
-	}
 	records, _, err := r.scan()
 	if err != nil {
 		return 0, err
+	}
+	if err := check(content, known, ownerGates(records, stream, view)); err != nil {
+		return 0, &StatusRejected{Reason: err.Error()}
 	}
 	revision := 1
 	if latest := latestStatus(records, stream); latest != nil {
@@ -134,12 +142,14 @@ func latestStatus(records []Record, stream config.WorkstreamID) *Status {
 // owns. Status is nil until the chief of staff first writes one. State is the
 // FeatureSubject workflow state, empty until one is recorded, and Subjects
 // the state of every workflow subject that has one, read with it.
-// OpenQuestions counts questions without a ruling.
+// OpenQuestions counts questions without a ruling. Gates lists open owner
+// decisions.
 type WorkstreamStatus struct {
 	Workstream    config.WorkstreamID
 	State         string
 	Subjects      map[string]WorkflowState
 	OpenQuestions int
+	Gates         []OwnerGate
 	Status        *Status
 }
 
@@ -176,7 +186,56 @@ func (r *Repository) Statuses() ([]WorkstreamStatus, error) {
 				open++
 			}
 		}
-		out = append(out, WorkstreamStatus{Workstream: stream, State: view.states[FeatureSubject].Value, Subjects: view.states, OpenQuestions: open, Status: latestStatus(records, stream)})
+		out = append(out, WorkstreamStatus{Workstream: stream, State: view.states[FeatureSubject].Value, Subjects: view.states, OpenQuestions: open, Gates: ownerGates(records, stream, view), Status: latestStatus(records, stream)})
 	}
 	return out, nil
+}
+
+func ownerGates(records []Record, stream config.WorkstreamID, view *workflowView) []OwnerGate {
+	gates := []OwnerGate{}
+	states := view.states
+	if states[FeatureSubject].Value != "abandoned" {
+		for _, entry := range escalations(questions(records, view, stream)) {
+			if entry.State == QuestionEscalated {
+				gates = append(gates, OwnerGate{Kind: "escalation", Reference: fmt.Sprint(entry.Number)})
+			}
+		}
+	}
+	if states[FeatureSubject].Value == "in-shed" {
+		pending := false
+		for _, rec := range records {
+			if d, ok := rec.(Document); ok && d.Workstream == stream {
+				if d.Cause == "ratification-packet" {
+					pending = true
+				}
+				if strings.HasSuffix(d.Path, "/ratification.json") {
+					pending = false
+				}
+			}
+		}
+		if pending {
+			gates = append(gates, OwnerGate{Kind: "ratification", Reference: string(stream)})
+		}
+	}
+	for subject, state := range states {
+		if state.Value == "contested" && (strings.HasPrefix(subject, "unit-") || strings.HasPrefix(subject, "unit_")) {
+			reference := strings.TrimPrefix(subject, "unit-")
+			if strings.HasPrefix(subject, "unit_") {
+				reference = subject
+				for _, rec := range records {
+					if transition, ok := rec.(Transition); ok && transition.Workstream == stream && transition.Subject == subject && transition.Unit != "" {
+						reference = transition.Unit
+					}
+				}
+			}
+			gates = append(gates, OwnerGate{Kind: "contested", Reference: reference})
+		}
+	}
+	slices.SortFunc(gates, func(a, b OwnerGate) int {
+		if a.Kind != b.Kind {
+			return strings.Compare(a.Kind, b.Kind)
+		}
+		return strings.Compare(a.Reference, b.Reference)
+	})
+	return gates
 }
