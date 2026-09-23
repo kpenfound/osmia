@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -45,6 +46,7 @@ type UnitReviewResult struct {
 	Identity UnitReviewIdentity `json:"identity"`
 	Turn     string             `json:"turn"`
 	Verdict  UnitVerdict        `json:"verdict"`
+	Bounces  int                `json:"bounces"`
 }
 
 type reviewerReports struct {
@@ -135,6 +137,12 @@ func reviewTurnID(unit string, version uint64) string {
 	return fmt.Sprintf("%s-review-%d", reviewerAgent(unit), version)
 }
 
+func answerQuestionID(turn string) string {
+	id := strings.TrimPrefix(turn, "answer_")
+	id, _, _ = strings.Cut(id, "-recover-")
+	return id
+}
+
 func (r *reviewers) Pass(ctx context.Context) error {
 	streams, err := r.repository.Workstreams()
 	if err != nil {
@@ -156,6 +164,12 @@ func (r *reviewers) Pass(ctx context.Context) error {
 		for _, u := range b.plan.Units {
 			unit := u.ID
 			st := b.states[trace.UnitSubject(unit)]
+			if st.Value == UnitContested {
+				if err := r.resumeContested(ctx, stream, unit, st); err != nil {
+					return err
+				}
+				continue
+			}
 			if st.Value == UnitImplementing {
 				if result, ok, err := r.storedResult(stream, unit, st); err != nil {
 					return err
@@ -166,7 +180,38 @@ func (r *reviewers) Pass(ctx context.Context) error {
 				}
 				continue
 			}
-			if st.Value != UnitReviewing {
+			if st.Value != UnitReviewing && st.Value != UnitWaiting {
+				continue
+			}
+			if st.Value == UnitWaiting {
+				transitions, err := trace.Read[trace.Transition](r.repository, stream)
+				if err != nil {
+					return err
+				}
+				reviewerWaiting := false
+				for i := len(transitions) - 1; i >= 0; i-- {
+					if transitions[i].Subject == trace.UnitSubject(unit) && transitions[i].To == UnitWaiting {
+						reviewerWaiting = transitions[i].Actor == reviewerActor
+						break
+					}
+				}
+				if !reviewerWaiting {
+					continue
+				}
+				value, err := r.followQuestion(ctx, stream, unit, st)
+				if err != nil {
+					return err
+				}
+				if value != UnitReviewing {
+					continue
+				}
+				st, err = r.repository.Workflow(stream, trace.UnitSubject(unit))
+				if err != nil {
+					return err
+				}
+			} else if value, err := r.followQuestion(ctx, stream, unit, st); err != nil {
+				return err
+			} else if value != UnitReviewing {
 				continue
 			}
 			if err := r.one(ctx, stream, unit, st, paused); err != nil {
@@ -175,6 +220,61 @@ func (r *reviewers) Pass(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (r *reviewers) followQuestion(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) (string, error) {
+	th, err := r.repository.Thread(stream, reviewerAgent(unit))
+	if errors.Is(err, os.ErrNotExist) || err == nil && len(th.Turns) == 0 {
+		return state.Value, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	asked, err := r.repository.Questions(stream)
+	if err != nil {
+		return "", err
+	}
+	var q string
+	var to, cause, reason string
+	if state.Value == UnitReviewing {
+		transitions, err := trace.Read[trace.Transition](r.repository, stream)
+		if err != nil {
+			return "", err
+		}
+		for _, turn := range th.Turns {
+			candidate := askedBy(asked, th.Identity.ThreadID, turn.Request.TurnID)
+			id := fmt.Sprintf("%s-reviewer-%s-%s", trace.UnitSubject(unit), UnitWaiting, candidate)
+			if candidate != "" && !slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
+				q = candidate
+				break
+			}
+		}
+		if q == "" {
+			return state.Value, nil
+		}
+		to, cause = UnitWaiting, trace.QuestionSubject(q)+"_"+trace.QuestionOpen
+		reason = fmt.Sprintf("unit %s is waiting: its reviewer asked question %s; the exact candidate is kept until the answer arrives", unit, q)
+	} else if state.Value == UnitWaiting {
+		last := th.Turns[len(th.Turns)-1]
+		i := slices.IndexFunc(asked, func(q trace.QuestionState) bool {
+			return q.Asked.Thread == th.Identity.ThreadID && strings.HasPrefix(last.Request.TurnID, "answer_") && q.Asked.ID == answerQuestionID(last.Request.TurnID)
+		})
+		if i < 0 {
+			return state.Value, nil
+		}
+		q = asked[i].Asked.ID
+		to, cause = UnitReviewing, trace.QuestionSubject(q)+"_"+trace.QuestionAnswered
+		reason = fmt.Sprintf("unit %s resumes reviewing: the answer to question %s is the reviewer's next turn over the same candidate", unit, q)
+	} else {
+		return state.Value, nil
+	}
+	id := fmt.Sprintf("%s-reviewer-%s-%s", trace.UnitSubject(unit), to, q)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: cause}
+	_, err = r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: state.Value, To: to, Reason: reason}})
+	if errors.Is(err, trace.ErrConflict) {
+		return state.Value, nil
+	}
+	return to, err
 }
 
 func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, paused bool) error {
@@ -191,6 +291,40 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	turnID := reviewTurnID(unit, state.Version)
 	if err == nil && len(th.Turns) != 0 {
 		last := th.Turns[len(th.Turns)-1]
+		if strings.HasPrefix(last.Request.TurnID, "answer_") {
+			if th.Status == "interrupted" && th.Active == last.Request.TurnID && last.Response == nil {
+				if err := r.repository.AbandonTurn(ctx, stream, agent, last.Request.TurnID, r.s.now()); err != nil {
+					return err
+				}
+				th, err = r.repository.Thread(stream, agent)
+				if err != nil {
+					return err
+				}
+				last = th.Turns[len(th.Turns)-1]
+			}
+			if last.Status() == "interrupted" && !paused {
+				return r.recover(ctx, last)
+			}
+			if last.CompletedAt.IsZero() {
+				return nil
+			}
+			transitions, err := trace.Read[trace.Transition](r.repository, stream)
+			if err != nil {
+				return err
+			}
+			latest := trace.Transition{}
+			for _, t := range transitions {
+				if t.Subject == trace.UnitSubject(unit) {
+					latest = t
+				}
+			}
+			currentAnswer := latest.From == UnitWaiting && latest.To == UnitReviewing && latest.Cause == trace.QuestionSubject(answerQuestionID(last.Request.TurnID))+"_"+trace.QuestionAnswered
+			if currentAnswer && last.Status() == "idle" && last.Response.Result.Outcome != nil && last.Response.Result.Outcome.Status == verdictOutcome {
+				return r.finishReview(ctx, stream, unit, state, last)
+			}
+			// An answer supplies context but never grants approval on its own.
+			// The next review turn still requires a verdict for this candidate.
+		}
 		if last.Request.TurnID == turnID || strings.HasPrefix(last.Request.TurnID, turnID+"-recover-") {
 			if th.Status == "interrupted" && th.Active == last.Request.TurnID && last.Response == nil {
 				if err := r.repository.AbandonTurn(ctx, stream, agent, last.Request.TurnID, r.s.now()); err != nil {
@@ -230,12 +364,47 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	}
 	content, _ := json.MarshalIndent(identity, "", "  ")
 	prompt := fmt.Sprintf("Review this exact candidate against the sealed spec, plan and mason report. Record criterion-linked evidence with verdict. Material findings must say what the mason should change. The candidate identity is:\n%s\n\nExact diff:\n%s", content, req.Diff)
+	guidance, err := r.reviewGuidance(stream, unit, identity.Candidate.Revision)
+	if err != nil {
+		return err
+	}
+	prompt += guidance
 	for _, item := range req.Context {
 		prompt += "\n\n" + item.Source + ":\n" + item.Content
 	}
-	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: "You are the unit reviewer. Read only the supplied candidate evidence. Call verdict with your decision; you cannot edit the candidate.", Prompt: prompt}
+	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: "You are the unit reviewer. Read only the supplied candidate evidence. Call ask if a decision is needed and end the turn; review resumes when the answer arrives. Otherwise call verdict with your decision. You cannot edit the candidate.", Prompt: prompt}
 	_, err = r.repository.EnqueueTurn(ctx, request)
 	return err
+}
+
+func (r *reviewers) reviewGuidance(stream config.WorkstreamID, unit, candidate string) (string, error) {
+	asked, err := r.repository.Questions(stream)
+	if err != nil {
+		return "", err
+	}
+	var guidance string
+	for _, q := range asked {
+		if q.Asked.Thread == reviewerAgent(unit) && q.State == trace.QuestionAnswered && q.Ruling != nil {
+			guidance += "\n\n" + questions.Prompt(q.Asked, *q.Ruling)
+		}
+	}
+	docs, err := trace.Read[trace.Document](r.repository, stream)
+	if err != nil {
+		return "", err
+	}
+	var latest ContestedRuling
+	for _, d := range docs {
+		if strings.HasPrefix(d.Path, "units/"+trace.UnitSubject(unit)+"/ruling-") {
+			var ruling ContestedRuling
+			if json.Unmarshal([]byte(d.Content), &ruling) == nil && ruling.Bounces > latest.Bounces {
+				latest = ruling
+			}
+		}
+	}
+	if latest.Decision == "review" && latest.Candidate == candidate {
+		guidance += fmt.Sprintf("\n\nThe owner ruled on contested candidate %s: review it again. Owner note: %s", latest.Candidate, latest.Note)
+	}
+	return guidance, nil
 }
 
 func (r *reviewers) ensureThread(ctx context.Context, stream config.WorkstreamID, unit string) error {
@@ -275,7 +444,22 @@ func (r *reviewers) storedResult(stream config.WorkstreamID, unit string, state 
 		return UnitReviewResult{}, false, nil
 	}
 	if state.Value == UnitReviewing && result.Turn != reviewTurnID(unit, state.Version) && !strings.HasPrefix(result.Turn, reviewTurnID(unit, state.Version)+"-recover-") {
-		return UnitReviewResult{}, false, nil
+		if !strings.HasPrefix(result.Turn, "answer_") {
+			return UnitReviewResult{}, false, nil
+		}
+		transitions, err := trace.Read[trace.Transition](r.repository, stream)
+		if err != nil {
+			return UnitReviewResult{}, false, err
+		}
+		latest := trace.Transition{}
+		for _, t := range transitions {
+			if t.Subject == trace.UnitSubject(unit) {
+				latest = t
+			}
+		}
+		if latest.From != UnitWaiting || latest.To != UnitReviewing || latest.Cause != trace.QuestionSubject(answerQuestionID(result.Turn))+"_"+trace.QuestionAnswered {
+			return UnitReviewResult{}, false, nil
+		}
 	}
 	return result, true, nil
 }
@@ -305,7 +489,14 @@ func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID
 	for _, d := range docs {
 		if d.ID == reviewDocument(unit) {
 			latest = d
+			var prior UnitReviewResult
+			if json.Unmarshal([]byte(d.Content), &prior) == nil && prior.Verdict.Decision == "material_findings" && prior.Bounces > result.Bounces {
+				result.Bounces = prior.Bounces
+			}
 		}
+	}
+	if verdict.Decision == "material_findings" {
+		result.Bounces++
 	}
 	content, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
@@ -366,9 +557,15 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 	to := UnitApproved
 	if result.Verdict.Decision == "material_findings" {
 		to = UnitImplementing
+		if result.Bounces >= r.cfg.Shed.MaxBounces {
+			to = UnitContested
+		}
 	}
 	id := fmt.Sprintf("%s-%s-%d", trace.UnitSubject(unit), to, state.Version)
 	reason := fmt.Sprintf("reviewer verdict %s on %s: candidate %s from %s, spec %s, plan %s; review %s", result.Verdict.Decision, result.Turn, result.Identity.Candidate.Revision, result.Identity.Candidate.BaseRevision, result.Identity.Candidate.SpecRevision, result.Identity.Candidate.PlanRevision, reviewDocument(unit))
+	if to == UnitContested {
+		reason += fmt.Sprintf("; %d material send-backs reached shed.max_bounces; the owner must rule review or revise before the unit moves", result.Bounces)
+	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit)}
 	_, err = r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitReviewing, To: to, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s review %s: %s.", unit, result.Verdict.Decision, reason))}})
 	if errors.Is(err, trace.ErrConflict) {
@@ -398,6 +595,13 @@ func (r *reviewers) enqueueFindings(ctx context.Context, stream config.Workstrea
 	}
 	findings, _ := json.MarshalIndent(result.Verdict.Findings, "", "  ")
 	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: result.Turn, Depth: 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(r.cfg.Project), Prompt: fmt.Sprintf("The reviewer returned candidate %s for revision. Address these criterion-linked findings in your unit workspace, run the planned proofs, then call done with a new criterion report:\n%s", result.Identity.Candidate.Revision, findings)}
+	ruling, found, err := latestContestedRuling(r.repository, stream, unit, result.Bounces)
+	if err != nil {
+		return err
+	}
+	if found && ruling.Decision == "revise" && ruling.Candidate == result.Identity.Candidate.Revision {
+		request.Prompt += "\n\nThe owner ruled that this candidate needs revision: " + ruling.Note
+	}
 	_, err = r.repository.EnqueueTurn(ctx, request)
 	return err
 }

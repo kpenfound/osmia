@@ -104,6 +104,23 @@ func (m *masons) Pass(ctx context.Context) error {
 			if state.Value != UnitImplementing && state.Value != UnitWaiting {
 				continue
 			}
+			if state.Value == UnitWaiting {
+				transitions, err := trace.Read[trace.Transition](m.repository, stream)
+				if err != nil {
+					return err
+				}
+				masonWaiting := false
+				for i := len(transitions) - 1; i >= 0; i-- {
+					if transitions[i].Subject == trace.UnitSubject(u.ID) && transitions[i].To == UnitWaiting {
+						masonWaiting = transitions[i].Actor == masonActor
+						break
+					}
+				}
+				if !masonWaiting {
+					busy = true
+					continue
+				}
+			}
 			if err := m.recoverInterrupted(ctx, stream, u.ID); err != nil {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 			}

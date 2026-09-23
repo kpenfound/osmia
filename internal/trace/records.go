@@ -265,9 +265,16 @@ func documentPath(p string, stream bool) error {
 }
 
 // unitPath reports whether parts name a unit record of a workstream,
-// units/<unit>/report.json or review.json, where the unit is a key.
+// units/<unit>/report.json, review.json or ruling-<n>.json, where the unit is a key.
 func unitPath(parts []string) bool {
-	return len(parts) == 3 && parts[0] == "units" && key(parts[1]) && (parts[2] == "report.json" || parts[2] == "review.json")
+	if len(parts) != 3 || parts[0] != "units" || !key(parts[1]) {
+		return false
+	}
+	if parts[2] == "report.json" || parts[2] == "review.json" {
+		return true
+	}
+	n := strings.TrimSuffix(strings.TrimPrefix(parts[2], "ruling-"), ".json")
+	return strings.HasPrefix(parts[2], "ruling-") && strings.HasSuffix(parts[2], ".json") && shedRound.MatchString("round-"+n)
 }
 
 var shedRound = regexp.MustCompile(`^round-[1-9][0-9]{0,8}$`)

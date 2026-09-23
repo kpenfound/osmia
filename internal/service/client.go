@@ -243,3 +243,10 @@ func (c *Client) Answer(ctx context.Context, number int, text string) (AnswerRes
 	err := c.Do(ctx, "POST", Prefix+"/inbox/"+strconv.Itoa(number), AnswerRequest{Text: text}, &v)
 	return v, err
 }
+
+// RuleContested records the owner's direction for a contested unit.
+func (c *Client) RuleContested(ctx context.Context, stream config.WorkstreamID, unit, decision, note string) (ContestedRulingResponse, error) {
+	var v ContestedRulingResponse
+	err := c.Do(ctx, "POST", Prefix+"/contested/"+string(stream)+"/"+unit, ContestedRulingRequest{Decision: decision, Note: note}, &v)
+	return v, err
+}

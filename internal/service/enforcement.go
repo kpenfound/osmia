@@ -43,7 +43,7 @@ var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName
 // its view of its unit's workspace, ask the chief of staff and report its
 // unit done.
 var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, doneTool}, WriteFiles: true, Execute: true}
-var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", verdictTool}}
+var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, verdictTool}}
 
 // Enforce returns opts with Librarian, Architect, Committee and Threads
 // running every role turn through e. Thread turns are granted to the chief of
@@ -103,7 +103,8 @@ func Enforce(opts Options, e Enforcement) Options {
 					return append(ask, reports.tool(r, scope)), err
 				}
 				if scope.Role == reviewerRole {
-					return []coreadapter.Tool{verdicts.tool(scope)}, nil
+					ask, err := questions.Tools(r, reviewerAgent(scope.Unit), scope, now)
+					return append(ask, verdicts.tool(scope)), err
 				}
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil

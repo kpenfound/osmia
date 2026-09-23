@@ -54,6 +54,7 @@ set through `Options` by embedders.
 | GET | `/conversation/<workstream-id>` | `ConversationResponse`: the workstream's conversation with its chief of staff |
 | GET | `/inbox` | `InboxResponse`: the escalations of the active project that wait for the owner's ruling |
 | POST | `/inbox/<number>` | `AnswerRequest`: text; records the owner's ruling and returns `AnswerResponse` |
+| POST | `/contested/<workstream-id>/<unit-id>` | `ContestedRulingRequest`: decision (`review` or `revise`) and note; records the owner's direction and returns `ContestedRulingResponse` |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
 | POST | `/projects/extract` | `ProjectExtractRequest`: project; returns `ExtractionResponse` |
@@ -1343,8 +1344,8 @@ the same reviewer. The scheduler admits reviewer turns within
 `capacity.reviewers` and offers review turns before mason turns when both are
 queued. Pauses hold new review turns. The review prompt includes the recorded
 identity, exact diff, sealed spec and plan, criterion report, resolved
-footprint and local context. The reviewer has a read-only, isolated turn and
-the `verdict` tool.
+footprint and local context. The reviewer has a read-only, isolated turn with
+`ask` and `verdict` tools.
 
 `verdict` requires `satisfactory` or `material_findings`, evidence for every
 unit criterion, and, for material findings, at least one finding naming a
@@ -1352,11 +1353,21 @@ criterion, severity, evidence and action. The completed turn's verdict is
 stored in `units/<id>/review.json` with the candidate commit, base commit,
 spec and plan revisions, diff digest and reviewer turn. Only a clean turn
 with a recorded verdict moves the unit. A satisfactory verdict moves it to
-`approved`; material findings move it to `implementing` and are included in
-the mason's next turn. The mason's next report makes a new candidate and
-the reviewer sees a new exact request. An interrupted turn is continued on
-the same thread. A result recorded before a stop is applied after restart
-without another reviewer turn.
+`approved`; material findings increment the durable bounce count and return
+it to `implementing` with findings for the mason. At `shed.max_bounces`, the
+unit enters `contested` and raises an owner gate instead. The owner uses
+`osmia contested <workstream> <unit> <review|revise> <note>` to record a
+direction for that candidate. `review` resumes review and still needs a new
+reviewer verdict; `revise` passes the findings to the mason. A ruling is
+recorded before the transition so restart reconciles it once. The mason's
+next report makes a new candidate and the reviewer sees a new exact request.
+
+A reviewer question moves the unit to `waiting` and reaches the chief of
+staff through the ordinary question event. The answer returns on the same
+reviewer thread and resumes `reviewing` with the candidate intact. An answer
+alone cannot approve the unit. An interrupted turn is continued on the same
+thread. A result recorded before a stop is applied after restart without
+another reviewer turn.
 
 ### Unit workspaces
 
