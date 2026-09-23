@@ -237,6 +237,23 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if target, ok := strings.CutPrefix(r.URL.Path, Prefix+"/contested/"); ok && r.Method == http.MethodPost {
+		stream, unit, found := strings.Cut(target, "/")
+		if !found || unit == "" {
+			failWith(w, &APIError{Validation, "a contested ruling requires a workstream and unit"})
+			return
+		}
+		var v ContestedRulingRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		if out, api := s.ruleContested(r.Context(), stream, unit, v); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
 	if rest, ok := strings.CutPrefix(r.URL.Path, Prefix+"/shed/"); ok && r.Method == http.MethodPost {
 		action, id, _ := strings.Cut(rest, "/")
 		var (

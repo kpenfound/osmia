@@ -40,6 +40,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   conversation <workstream-id> [--json]
   inbox [--json]
   answer <inbox-number> <ruling> [--json]
+  contested <workstream> <unit> <review|revise> <note> [--json]
   pause <all|project-id|workstream-id> [--hard] [--reason TEXT] [--json]
   resume <all|project-id|workstream-id> [--json]
   priority set <workstream-id>... | priority clear [--json]
@@ -160,6 +161,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 0
 	case "answer":
 		valid = len(a) == 2
+	case "contested":
+		valid = len(a) == 4
 	case "pause", "resume":
 		valid = len(a) == 1
 	case "handin":
@@ -436,6 +439,21 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Ruling recorded on inbox entry %d (%s, questions %s)\nThe chief of staff relays it to the askers.\n", result.Number, result.Workstream, strings.Join(result.Questions, ", "))
+		return 0
+	}
+	if cmd == "contested" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		result, err := c.RuleContested(ctx, id, a[1], a[2], a[3])
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Ruling recorded for contested unit %s of %s: %s\n", result.Unit, result.Workstream, result.Ruling.Decision)
 		return 0
 	}
 	if cmd == "status" && len(a) == 1 {

@@ -101,6 +101,10 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   configured it fails with `no_project` (exit 4). An entry that already has a
   ruling, or belongs to an abandoned workstream, fails with `conflict`
   (exit 5) and records nothing.
+- `contested <workstream-id> <unit> <review|revise> <note>` records your
+  direction for a contested unit shown by `status`. Quote the required note.
+  `review` requests another reviewer verdict on the same candidate; `revise`
+  returns the findings and your note to the mason. Neither approves a unit.
 - `abandon <workstream-id> <reason>` abandons a workstream of the active
   project that is neither delivered nor abandoned. The reason is one argument;
   quote it. The service records the move to `abandoned` with you as actor and

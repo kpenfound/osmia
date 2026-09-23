@@ -52,8 +52,9 @@ type Options struct {
 	// and queues each started unit's first mason turn for the scheduler. It
 	// parks a unit in waiting when its mason asks, and resumes it once the
 	// answer is queued as the mason's next turn. The reviewer controller
-	// dispatches exact-candidate reviews through durable reviewer threads and
-	// applies completed verdicts before the mason controller starts more work.
+	// dispatches exact-candidate reviews through durable reviewer threads,
+	// parks reviewer questions, and applies completed verdicts and owner
+	// rulings before the mason controller starts more work.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error)
 	// Librarian supplies the execution boundary of the librarian's
