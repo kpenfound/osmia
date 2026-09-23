@@ -443,3 +443,41 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 		t.Fatalf("resolved conflicts %v %v", paths, err)
 	}
 }
+
+// A unit whose mason reported done while a landing left its workspace behind
+// is neither finished nor blocked: it waits for its rebase, then goes to
+// review with a candidate on the new tip.
+func TestUnitDoneBehindItsFeatureBranchFinishesAfterItsRebase(t *testing.T) {
+	t.Parallel()
+	f, stream, repository := newRebaseFixture(t, "done-behind")
+	defer repository.Close()
+	ctx := context.Background()
+	m := newMasonController(f.s, repository)
+	lands := &foreman{masons: m}
+	completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
+	landed := moveFeature(t, f, stream, map[string]string{"LANDED.md": "landed\n"})
+
+	must(t, m.Pass(ctx))
+	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != UnitImplementing {
+		t.Fatalf("a unit behind its feature branch is %+v %v", state, err)
+	}
+	if blocked, err := repository.Workflow(stream, blockedSubject("dedupe")); err != nil || blocked.Value != "" {
+		t.Fatalf("a unit behind its feature branch was blocked: %+v %v", blocked, err)
+	}
+
+	must(t, lands.Pass(ctx))
+	ops := rebaseOperations(t, repository, stream, "dedupe")
+	if len(ops) != 1 {
+		t.Fatalf("dedupe's rebases %+v", ops)
+	}
+	if result, err := (rebaser{lands}).Apply(ctx, ops[0].Operation); err != nil || result.Outcome != "succeeded" {
+		t.Fatalf("the rebase %+v %v", result, err)
+	}
+	must(t, m.Pass(ctx))
+	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != UnitReviewing {
+		t.Fatalf("the rebased unit is %+v %v", state, err)
+	}
+	if _, report := latestReport(t, repository, stream, "dedupe"); report.Base != landed {
+		t.Fatalf("the report %+v is not on %s", report, landed)
+	}
+}
