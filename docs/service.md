@@ -1333,8 +1333,30 @@ context scoped to the unit's entities. Missing report fields, commits, seals,
 or resolved entities stop preparation with a recorded block reason. The
 prepared identity in `units/<id>/review.json` records the subject, candidate, base, spec
 and plan revisions, the diff digest, report revision and seal number. Repeated
-preparation of the same evidence leaves that revision unchanged. Reviewer
-dispatch and verdict handling use this preparation in a later stage.
+preparation of the same evidence leaves that revision unchanged.
+
+### Reviewing a unit
+
+The reviewer controller offers each `reviewing` unit to its durable reviewer
+thread. The thread ID belongs to the unit, so a revised candidate returns to
+the same reviewer. The scheduler admits reviewer turns within
+`capacity.reviewers` and offers review turns before mason turns when both are
+queued. Pauses hold new review turns. The review prompt includes the recorded
+identity, exact diff, sealed spec and plan, criterion report, resolved
+footprint and local context. The reviewer has a read-only, isolated turn and
+the `verdict` tool.
+
+`verdict` requires `satisfactory` or `material_findings`, evidence for every
+unit criterion, and, for material findings, at least one finding naming a
+criterion, severity, evidence and action. The completed turn's verdict is
+stored in `units/<id>/review.json` with the candidate commit, base commit,
+spec and plan revisions, diff digest and reviewer turn. Only a clean turn
+with a recorded verdict moves the unit. A satisfactory verdict moves it to
+`approved`; material findings move it to `implementing` and are included in
+the mason's next turn. The mason's next report makes a new candidate and
+the reviewer sees a new exact request. An interrupted turn is continued on
+the same thread. A result recorded before a stop is applied after restart
+without another reviewer turn.
 
 ### Unit workspaces
 
@@ -1650,9 +1672,10 @@ either pause mode. The gate reads the runtime store on every pass, so after a
 pause is cleared the loop's next periodic pass runs the held turns with no new
 message or operation.
 
-The scheduler also dispatches within the configured `[capacity]`. Mason and
-reviewer turns share `capacity.masons` and `capacity.reviewers` across
-workstreams. Committee turns are not dispatched by the scheduler: a
+The scheduler also dispatches within the configured `[capacity]`. Mason
+turns use `capacity.masons`, reviewer turns use `capacity.reviewers`, and both
+limits apply across workstreams. A queued reviewer turn is offered before a
+queued mason turn when they compete for a workstream slot. Committee turns are not dispatched by the scheduler: a
 [shed round](#a-members-turn) runs every member of its workstream's committee
 at once, outside `capacity.per_workstream`, so two workstreams in the shed run
 two committees at the same time. Every other role runs one turn at a time per
