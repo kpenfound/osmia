@@ -321,16 +321,19 @@ func list(entries []string) string {
 	return strings.Join(entries, ", ")
 }
 
-// UnitStatus is the recorded state and latest card of one unit of the sealed plan.
+// UnitStatus is the recorded state, latest card and landing of one unit of
+// the sealed plan.
 type UnitStatus struct {
-	Unit  string            `json:"unit"`
-	State string            `json:"state"`
-	Card  *coreadapter.Card `json:"card,omitempty"`
+	Unit    string            `json:"unit"`
+	State   string            `json:"state"`
+	Card    *coreadapter.Card `json:"card,omitempty"`
+	Landing *UnitLanding      `json:"landing,omitempty"`
 }
 
-// unitStates returns states and latest cards, taken from the given workflow states and reports, of
-// the units of the workstream's sealed plan, in plan order: none before a
-// seal is recorded or before the build recorded them.
+// unitStates returns states, latest cards and landings, taken from the given
+// workflow states, reports and landing documents, of the units of the
+// workstream's sealed plan, in plan order: none before a seal is recorded or
+// before the build recorded them.
 func unitStates(repository *trace.Repository, stream config.WorkstreamID, states map[string]trace.WorkflowState) ([]UnitStatus, error) {
 	latest, _, found, err := seal.Latest(repository, stream)
 	if err != nil || !found {
@@ -349,7 +352,16 @@ func unitStates(repository *trace.Repository, stream config.WorkstreamID, states
 		return nil, err
 	}
 	cards := map[string]*coreadapter.Card{}
+	landings := map[string]*UnitLanding{}
 	for _, document := range documents {
+		if document.Unit != "" && document.ID == landingDocument(document.Unit) {
+			var landing UnitLanding
+			if err := json.Unmarshal([]byte(document.Content), &landing); err != nil {
+				return nil, fmt.Errorf("unit %s landing: %w", document.Unit, err)
+			}
+			landings[document.Unit] = &landing
+			continue
+		}
 		if document.Unit == "" || document.ID != reportDocument(document.Unit) {
 			continue
 		}
@@ -364,7 +376,7 @@ func unitStates(repository *trace.Repository, stream config.WorkstreamID, states
 	var out []UnitStatus
 	for _, u := range p.Units {
 		if state := states[trace.UnitSubject(u.ID)].Value; state != "" {
-			out = append(out, UnitStatus{Unit: u.ID, State: state, Card: cards[u.ID]})
+			out = append(out, UnitStatus{Unit: u.ID, State: state, Card: cards[u.ID], Landing: landings[u.ID]})
 		}
 	}
 	return out, nil
