@@ -3,12 +3,14 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kpenfound/busybees/core/vcs"
 )
@@ -444,5 +446,82 @@ func TestSnapshotRefusesAWorktreeThatDoesNotDescendFromItsBase(t *testing.T) {
 	}
 	if _, err := f.provider.Snapshot(ctx, Worktree{}, base); err == nil || !strings.Contains(err.Error(), "no workspace to snapshot") {
 		t.Fatalf("a snapshot of no workspace: %v", err)
+	}
+}
+
+// A squash of a candidate that took two snapshots is one commit of its tree
+// on the base, made the same way twice. Advance moves the feature worktree's
+// branch, index and files to it once, and refuses a worktree at any other
+// commit.
+func TestSquashAndAdvanceLandOneCommit(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base := git(t, "-C", f.scratch, "rev-parse", "HEAD")
+	git(t, "-C", f.clone, "branch", "osmia/w1", base)
+	feature, err := f.provider.Acquire(ctx, vcs.Request{Name: "feature-w1", Branch: "osmia/w1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired, err := f.provider.Acquire(ctx, vcs.Request{Name: "w1/u1", Ref: "osmia/w1", Branch: "osmia-unit/w1/u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := acquired.(Worktree)
+	for _, name := range []string{"first.go", "second.go"} {
+		if err := os.WriteFile(filepath.Join(unit.Path, name), []byte(name+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.provider.Snapshot(ctx, unit, base); err != nil {
+			t.Fatal(err)
+		}
+	}
+	candidate := git(t, "-C", f.clone, "rev-parse", "osmia-unit/w1/u1")
+	at := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	message := "Uploads resume\n\nOsmia-Operation: op-1"
+	commit, err := f.provider.Squash(ctx, base, candidate, message, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := f.provider.Squash(ctx, base, candidate, message, at)
+	if err != nil || again != commit {
+		t.Fatalf("a second squash made %s, %v; want %s", again, err, commit)
+	}
+	got, err := f.provider.Commit(ctx, commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := git(t, "-C", f.clone, "rev-parse", candidate+"^{tree}"); got.Tree != want || !slices.Equal(got.Parents, []string{base}) || got.Message != message {
+		t.Fatalf("the squash %+v, want tree %s on %s with %q", got, want, base, message)
+	}
+	if who := git(t, "-C", f.clone, "log", "-1", "--format=%an <%ae> %cn <%ce> %at", commit); who != "Osmia <osmia@localhost> Osmia <osmia@localhost> "+fmt.Sprint(at.Unix()) {
+		t.Fatalf("the squash's identity and date: %s", who)
+	}
+	if tip, _, err := f.provider.Branch(ctx, "osmia/w1"); err != nil || tip != base {
+		t.Fatalf("a squash moved the feature branch to %s, %v", tip, err)
+	}
+	w := feature.(Worktree)
+	if err := f.provider.Advance(ctx, w, candidate, commit); err == nil || !strings.Contains(err.Error(), "is at "+base+", not "+candidate) {
+		t.Fatalf("an advance from another commit: %v", err)
+	}
+	for range 2 {
+		if err := f.provider.Advance(ctx, w, base, commit); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if tip, _, err := f.provider.Branch(ctx, "osmia/w1"); err != nil || tip != commit {
+		t.Fatalf("the feature branch is at %s, %v; want %s", tip, err, commit)
+	}
+	if count := git(t, "-C", f.clone, "rev-list", "--count", base+"..osmia/w1"); count != "1" {
+		t.Fatalf("%s commits landed", count)
+	}
+	if status := git(t, "-C", w.Path, "status", "--porcelain"); status != "" {
+		t.Fatalf("the feature worktree after the advance:\n%s", status)
+	}
+	if data, err := os.ReadFile(filepath.Join(w.Path, "second.go")); err != nil || string(data) != "second.go\n" {
+		t.Fatalf("the feature worktree's files: %q %v", data, err)
+	}
+	if _, err := f.provider.Squash(ctx, candidate, base, message, at); err == nil || !strings.Contains(err.Error(), "does not descend from") {
+		t.Fatalf("a squash of a candidate not on its base: %v", err)
 	}
 }

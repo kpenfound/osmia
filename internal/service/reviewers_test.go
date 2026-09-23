@@ -255,7 +255,7 @@ func TestReviewerSendBackResubmitAndApprove(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if state.Value == UnitApproved {
+		if state.Value == UnitMerged {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -560,7 +560,7 @@ func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 				}
 				close(release)
 			}
-			f.awaitUnit(t, stream, "resume", UnitApproved)
+			f.awaitUnit(t, stream, "resume", UnitMerged)
 			r := &reviewers{masons: newMasonController(f.s, f.repository())}
 			result, ok, err := r.storedResult(stream, "resume", trace.WorkflowState{Value: UnitApproved})
 			must(t, err)

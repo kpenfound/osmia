@@ -114,6 +114,12 @@ func (m *masons) unitReviewEvidence(ctx context.Context, stream config.Workstrea
 	if state.Value != UnitReviewing {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("unit %s is %s, not reviewing", unit, state.Value)
 	}
+	return m.candidateEvidence(ctx, stream, unit)
+}
+
+// candidateEvidence assembles the review request and identity of the unit's
+// recorded report, whatever the unit's state.
+func (m *masons) candidateEvidence(ctx context.Context, stream config.WorkstreamID, unit string) (coreadapter.ReviewRequest, UnitReviewIdentity, error) {
 	docs, err := trace.Read[trace.Document](m.repository, stream)
 	if err != nil {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
