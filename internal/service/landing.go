@@ -94,7 +94,7 @@ var _ coreadapter.Reconciler = (*foreman)(nil)
 
 // Pass runs one landing and rebase sequence at a time per project. While a
 // landing of the project has no result, it does nothing. Otherwise it keeps
-// the unfinished units of the building workstreams that are not paused on
+// the unfinished units of the building and assembled workstreams that are not paused on
 // their feature branches, rebasing each unit whose workspace a landing left
 // behind and routing rebase conflicts to masons. Once every such unit is
 // current and every rebase has its result, it asks to land the first approved
@@ -429,15 +429,15 @@ func (f *foreman) requestedAt(stream config.WorkstreamID, operation string) (tim
 }
 
 // current returns why the approval can no longer land, or "" when the
-// workstream is building, the unit is approved by this review revision and
+// workstream is building or assembled, the unit is approved by this review revision and
 // every reviewed input is current.
 func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in landInput, result UnitReviewResult) (string, error) {
 	feature, err := f.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return "", err
 	}
-	if feature.Value != BuildingState {
-		return fmt.Sprintf("the workstream is %s, not building", featureState(feature.Value)), nil
+	if feature.Value != BuildingState && feature.Value != AssembledState {
+		return fmt.Sprintf("the workstream is %s, not building or assembled", featureState(feature.Value)), nil
 	}
 	state, err := f.repository.Workflow(stream, trace.UnitSubject(in.Unit))
 	if err != nil {
@@ -535,11 +535,11 @@ func (f *foreman) record(ctx context.Context, stream config.WorkstreamID, in lan
 		return coreadapter.OperationResult{}, err
 	}
 	if !found {
-		return coreadapter.OperationResult{}, fmt.Errorf("workstream %s is not building", stream)
+		return coreadapter.OperationResult{}, fmt.Errorf("workstream %s is not building or assembled", stream)
 	}
 	unit, ok := b.plan.Unit(in.Unit)
 	if !ok {
-		return coreadapter.OperationResult{}, fmt.Errorf("the sealed plan of workstream %s has no unit %s", stream, in.Unit)
+		return coreadapter.OperationResult{}, fmt.Errorf("the sealed plan and follow-ups of workstream %s have no unit %s", stream, in.Unit)
 	}
 	landed, err := featureWorkspaces(f.cfg).Commit(ctx, commit)
 	if err != nil {

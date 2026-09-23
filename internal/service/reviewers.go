@@ -734,8 +734,8 @@ func (r *reviewers) checkReviewFootprint(ctx context.Context, stream config.Work
 	if !found {
 		return "missing seal", nil
 	}
-	i := slices.IndexFunc(s.Footprints, func(f seal.Footprint) bool { return f.Unit == unit })
-	if i < 0 {
+	footprint, err := reviewFootprint(r.repository, stream, s, unit)
+	if err != nil || len(footprint.Entities) == 0 {
 		return "missing sealed footprint", nil
 	}
 	paths, err := newUnitWorkspaces(r.cfg).git.ChangedPaths(ctx, result.Identity.Candidate.BaseRevision, result.Identity.Candidate.Revision)
@@ -746,7 +746,7 @@ func (r *reviewers) checkReviewFootprint(ctx context.Context, stream config.Work
 	if err != nil {
 		return "", err
 	}
-	return footprintReason(mapping, s.Footprints[i], paths, result.Verdict.ExtraPaths), nil
+	return footprintReason(mapping, footprint, paths, result.Verdict.ExtraPaths), nil
 }
 
 func footprintReason(mapping kb.Map, footprint seal.Footprint, paths []string, explanations []PathExplanation) string {

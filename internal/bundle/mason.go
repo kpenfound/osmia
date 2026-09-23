@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -28,6 +29,7 @@ type Mason struct {
 	Criteria   []UnitCriterion     `json:"criteria"`
 	DependsOn  []string            `json:"depends_on"`
 	Footprint  []string            `json:"footprint"`
+	Followup   *followup.Unit      `json:"followup,omitempty"`
 	// Context holds the charter and the knowledge-base context of the
 	// unit's footprint.
 	Context Bundle `json:"context"`
@@ -59,7 +61,7 @@ var ErrStaleSpec = errors.New("spec does not match its seal")
 // seal. It first reads spec.md, recording any owner edit, and refuses the
 // bundle when the spec's hash differs from the sealed one, so a unit is never
 // built against a spec the owner did not ratify. The unit is read from the
-// sealed plan revision.
+// sealed plan revision or a final-review follow-up.
 func (f Files) Mason(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, unit string) (Mason, error) {
 	if f.Repository == nil {
 		return Mason{}, errors.New("file context provider has no trace")
@@ -92,8 +94,16 @@ func (f Files) Mason(ctx context.Context, project config.ProjectID, stream confi
 		return Mason{}, fmt.Errorf("%s revision %d: %w", plan.PlanPath, planDoc.Revision, err)
 	}
 	u, ok := p.Unit(unit)
+	var added *followup.Unit
 	if !ok {
-		return Mason{}, fmt.Errorf("unit %q is not in %s revision %d", unit, plan.PlanPath, planDoc.Revision)
+		item, found, err := followup.Find(repo, stream, unit)
+		if err != nil {
+			return Mason{}, err
+		}
+		if !found {
+			return Mason{}, fmt.Errorf("unit %q is not in %s revision %d", unit, plan.PlanPath, planDoc.Revision)
+		}
+		u, added = item.Unit, &item
 	}
 	parsed := plan.ParseSpec(spec.Content)
 	m := Mason{
@@ -106,6 +116,7 @@ func (f Files) Mason(ctx context.Context, project config.ProjectID, stream confi
 		Criteria:   []UnitCriterion{},
 		DependsOn:  append([]string{}, u.DependsOn...),
 		Footprint:  append([]string{}, u.Footprint...),
+		Followup:   added,
 	}
 	for _, a := range u.Addresses {
 		n, _ := plan.ParseCitation(a.Criterion)
@@ -156,6 +167,10 @@ func (m Mason) Render() string {
 	line("seal: %d", m.Seal)
 	line("spec: %s (record %s revision %d, %s)", m.Spec.Source, m.Spec.Record, m.Spec.Revision, m.Spec.Hash)
 	line("plan: %s (record %s revision %d)", m.Plan.Source, m.Plan.Record, m.Plan.Revision)
+	if m.Followup != nil {
+		line("follow-up: final/report.json revision %d, review %d, %s", m.Followup.Report, m.Followup.Review, m.Followup.Criterion)
+		line("gap: %s", m.Followup.Gap)
+	}
 	line("")
 	line("## Criteria")
 	if len(m.Criteria) == 0 {

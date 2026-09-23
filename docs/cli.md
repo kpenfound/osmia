@@ -62,7 +62,7 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   before a status is written. Reading the charter records any edit you made to
   it; see [charter](charter.md).
 - `status <workstream-id>` shows one workstream of the active project: the same
-  facts and owner gates, then `Units:` with one line per unit of the sealed plan and its state
+  facts and owner gates, then `Units:` with one line per unit of the sealed plan or final-review follow-up and its state
   and the latest available card (headline, happened and any owner action) beneath it
   once the workstream is building, and for a landed unit its commit on the
   feature branch, the reviewed candidate and base with the approval that

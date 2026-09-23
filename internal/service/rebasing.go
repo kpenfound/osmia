@@ -71,7 +71,7 @@ func resolveTurnID(unit string, k int) string {
 	return fmt.Sprintf("%s-rebase-%d", masonAgent(unit), k)
 }
 
-// refresh keeps the unfinished units of a building workstream on the tip of
+// refresh keeps the unfinished units of a building or assembled workstream on the tip of
 // its feature branch. A unit whose rebases left conflicts is routed to its
 // mason first. A unit whose workspace does not descend from the tip is
 // rebased once no mason turn of it is claimed or dispatched: its rebase is

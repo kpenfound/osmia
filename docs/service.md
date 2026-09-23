@@ -1172,7 +1172,7 @@ while the build ran; the workstream is <state>`).
 With `Options.Threads` set, the mason controller runs in every reconciliation
 pass, after answer delivery and before the scheduler. It first
 [parks and resumes](#a-masons-question) units on their masons' questions.
-It then starts units of `building` workstreams, at most one `implementing` or
+It then starts units of `building` or `assembled` workstreams, at most one `implementing` or
 `waiting` unit per workstream, while fewer than `capacity.masons` units are
 `implementing` in workstreams no pause covers. A
 workstream a runtime pause covers (a `factory` pause, a `project` pause on the
@@ -1393,9 +1393,9 @@ The landing controller runs in every reconciliation pass after the building
 controller. It runs one landing and rebase sequence at a time per project:
 while a landing operation of the project has no result, it asks for nothing.
 Otherwise it first [rebases](#rebasing-units-in-flight) the units a landing
-left behind. While a unit of a building workstream that is not paused is
+left behind. While a unit of a building or assembled workstream that is not paused is
 behind its feature branch, or a rebase has no result, it asks for no landing.
-Otherwise it takes the building workstreams that are not paused, in priority
+Otherwise it takes the building and assembled workstreams that are not paused, in priority
 order, and their units in dependency order, and asks to land the first
 `approved` unit
 whose latest `units/<id>/review.json` revision `<k>` is a satisfactory
@@ -1408,7 +1408,7 @@ transition `landing-<id>-<k>` (actor `service`/`foreman`, cause
 The operation first checks the feature branch. A tip whose only parent is the
 approved base and whose message carries this operation's `Osmia-Operation`
 trailer is an interrupted landing: the commit is recorded and not made again.
-Otherwise the approval must still be current: the workstream `building`, the
+Otherwise the approval must still be current: the workstream `building` or `assembled`, the
 unit `approved` by review revision `<k>`, and the recorded report, seal,
 candidate diff, unit branch tip, feature branch tip and latest spec and plan
 revisions those the approval names. The service then commits the
@@ -1574,12 +1574,13 @@ its sealed plan is `merged`, and not before: the transition `assembled`
 (actor `service`/`foreman`, cause the last unit's move to merged, reason
 `every unit of the sealed plan has merged onto <branch>: <ids>; the feature
 branch is rebased onto upstream and read against the sealed spec and the
-charter next`) tells the chief of staff. Nothing on the workstream's units
-moves after that.
+charter next`) tells the chief of staff. Final-review gaps add follow-up units
+without moving the feature back from `assembled`.
 
 ### Asking for a final review
 
-For an `assembled` workstream that is not paused, the controller asks for
+For an `assembled` workstream whose units, including follow-ups, have all
+merged and that is not paused, the controller asks for
 final review `<k>` when none has a result pending and no review was asked for,
 and no reviewed report records, the current inputs: the feature branch tip,
 the latest seal, its spec and plan revisions and the latest charter revision.
@@ -1641,14 +1642,24 @@ another status, the turn was interrupted too often, the workstream was
 abandoned, or an input changed. A review whose outcome is recorded completes
 on inspection.
 
+Each reported gap also records a follow-up unit in `final/followups.json` in
+that commit. Its record names the criterion, gap, review and report revision.
+The unit inherits its criterion's proof and the combined footprints of the
+sealed plan units addressing that criterion. It enters `ready` and uses the
+ordinary mason, exact-candidate reviewer and foreman landing path while the
+feature stays `assembled`. The sealed spec and plan remain unchanged; any
+change to their intent or footprint requires an owner-approved amendment.
+
 ### A current report
 
 A final report authorises a later owner approval or delivery only while it is
-current. A failed report never does. A reviewed report stops being current
+current, shows every criterion, and every follow-up unit has landed. A failed
+report never does. A reviewed report stops being current
 when the feature branch moves from the reviewed commit, or the latest seal,
 its spec hash, the latest spec or plan revision, or the latest charter
 revision differs from the one it read; the reason names the first input that
-changed. The controller then asks for a new final review. The report, and
+changed. The controller asks for a new whole-branch review after follow-up
+units land. The report, and
 whether it is current, reads the same after a restart.
 
 ## Abandoning
@@ -1697,7 +1708,7 @@ order, except the librarian's, which carries no feature (see
 | --- | --- |
 | `workstream`, `project` | The workstream and its project |
 | `state` | The feature workflow state, or `null` before one is recorded |
-| `units` | One `{"unit", "state"}` per unit of the sealed plan, in plan order, once the [build](#building) recorded their states; `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
+| `units` | One `{"unit", "state"}` per unit of the sealed plan and each final-review follow-up, in order, once their states are recorded; `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
 | `open_questions` | Questions in the workstream without a ruling |
 | `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, or `contested` with the unit ID; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |

@@ -16,8 +16,10 @@ import (
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -216,8 +218,8 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 		if got, err := callTool(ctx, tools, FinalReportTool, map[string]any{"criteria": []any{map[string]any{"criterion": "spec#1", "evidence": "x", "gap": "y"}, map[string]any{"criterion": "spec#2", "gap": "y"}}}); err != nil || !strings.Contains(got, "not both") {
 			problems = append(problems, fmt.Errorf("a criterion with evidence and a gap was not refused: %s %v", got, err))
 		}
-		got, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Resume is shown; dedupe is not.", "criteria": []any{
-			map[string]any{"criterion": "spec#2", "gap": "Nothing tests that acknowledged chunks are skipped."},
+		got, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Both criteria are shown.", "criteria": []any{
+			map[string]any{"criterion": "spec#2", "evidence": "internal/trace/dedupe.go skips acknowledged chunks."},
 			map[string]any{"criterion": "spec#1", "evidence": "internal/trace/resume.go resumes from the last chunk."}}})
 		if err != nil || !strings.Contains(got, `"recorded":true`) {
 			problems = append(problems, fmt.Errorf("the report was not recorded: %s %v", got, err))
@@ -260,9 +262,9 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 
 	want := FinalReport{Review: 1, Operation: op.ID, Outcome: finalReviewed, Branch: featureBranch(stream), Before: head, Commit: tip,
 		Upstream: &seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, Seal: 1, SpecHash: seal.SpecHash(validSpec), Spec: 1, Plan: 1, Charter: charter.Revision,
-		Reader: committeeAgent(1), Turn: turn, Summary: "Resume is shown; dedupe is not.", Criteria: []FinalCriterion{
+		Reader: committeeAgent(1), Turn: turn, Summary: "Both criteria are shown.", Criteria: []FinalCriterion{
 			{Criterion: "spec#1", Text: "An interrupted upload resumes from the last acknowledged chunk.", Evidence: "internal/trace/resume.go resumes from the last chunk."},
-			{Criterion: "spec#2", Text: "Acknowledged chunks are never sent again.", Gap: "Nothing tests that acknowledged chunks are skipped."}}}
+			{Criterion: "spec#2", Text: "Acknowledged chunks are never sent again.", Evidence: "internal/trace/dedupe.go skips acknowledged chunks."}}}
 	report, found, err := latestFinalReport(repository, stream)
 	if err != nil || !found || !reflect.DeepEqual(report, want) {
 		t.Fatalf("final report %+v, %v, %v; want %+v", report, found, err, want)
@@ -278,11 +280,11 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 		t.Fatalf("final rebase documents %+v", rebases)
 	}
 	reviewed := transitionByID(t, repository, stream, "final-review-1-reviewed")
-	wantReason := fmt.Sprintf("final review 1 read %s at %s against seal 1 (spec revision 1, plan revision 1, charter revision %d): 1 of 2 criteria shown; gaps: spec#2; report final/report.json revision 1", featureBranch(stream), tip, charter.Revision)
+	wantReason := fmt.Sprintf("final review 1 read %s at %s against seal 1 (spec revision 1, plan revision 1, charter revision %d): 2 of 2 criteria shown; gaps: none; report final/report.json revision 1", featureBranch(stream), tip, charter.Revision)
 	if reviewed.Subject != finalReviewSubject || reviewed.From != "requested-1" || reviewed.To != "reviewed-1" || reviewed.Cause != op.ID || reviewed.Reason != wantReason || result.Evidence != wantReason {
 		t.Fatalf("the reviewed transition %+v, result %+v", reviewed, result)
 	}
-	if body := noticeOf(t, repository, stream, reviewed.ID); body != "The final review of the assembled branch is recorded: 1 of 2 criteria are shown; not shown: spec#2." {
+	if body := noticeOf(t, repository, stream, reviewed.ID); body != "The final review of the assembled branch is recorded: 2 of 2 criteria are shown; not shown: none." {
 		t.Fatalf("the notice %q", body)
 	}
 	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != "" {
@@ -355,6 +357,113 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 	must(t, repository.RecordDocuments(ctx, []trace.Document{amended}))
 	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != "final review 1 is stale: it read spec revision 1, and 2 is current; a new final review is required" {
 		t.Fatalf("a changed spec: %q %v", reason, err)
+	}
+}
+
+func TestFinalReviewGapBecomesAnAssembledFollowupAndRequiresRereview(t *testing.T) {
+	t.Parallel()
+	f, stream, repository, a := newFinalFixture(t, "gaps")
+	ctx := context.Background()
+	_, op := assembleBoth(t, f, repository, a, stream,
+		map[string]string{"internal/trace/resume.go": "package trace\n"},
+		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
+	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"criteria": []any{
+			map[string]any{"criterion": "spec#1", "evidence": "resume.go"},
+			map[string]any{"criterion": "spec#2", "gap": "The branch has no proof that acknowledged chunks are skipped."},
+		}})
+		return err
+	})
+	_, err := a.Apply(ctx, op)
+	must(t, err)
+	added, err := followup.Read(repository, stream)
+	must(t, err)
+	if len(added) != 1 || added[0].Review != 1 || added[0].Report != 1 || added[0].Criterion != "spec#2" || added[0].Gap == "" {
+		t.Fatalf("follow-up trace %+v", added)
+	}
+	id := added[0].Unit.ID
+	if len(added[0].Unit.Addresses) != 1 || added[0].Unit.Addresses[0].Criterion != "spec#2" || len(added[0].Unit.Footprint) == 0 {
+		t.Fatalf("follow-up is not actionable: %+v", added[0])
+	}
+	if plans := streamDocuments(t, repository, stream, plan.PlanDocument); len(plans) != 1 || plans[0].Content != validPlan {
+		t.Fatalf("follow-up changed the ratified plan: %+v", plans)
+	}
+	if docs := streamDocuments(t, repository, stream, followup.DocumentID); len(docs) != 1 || docs[0].Path != followup.Path || docs[0].Cause != "final-review-1-reviewed" {
+		t.Fatalf("follow-up documents %+v", docs)
+	}
+	if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AssembledState {
+		t.Fatalf("feature after gap %+v: %v", feature, err)
+	}
+	b, found, err := (&masons{s: f.s, cfg: f.s.cfg, repository: repository}).read(stream)
+	must(t, err)
+	if !found || b.states[trace.UnitSubject(id)].Value != UnitReady || !slices.ContainsFunc(b.plan.Units, func(u plan.Unit) bool { return u.ID == id }) {
+		t.Fatalf("follow-up is not scheduled: %+v", b)
+	}
+	m := &masons{s: f.s, cfg: f.s.cfg, repository: repository}
+	masonBundle, err := m.bundle(ctx, stream, id)
+	must(t, err)
+	if masonBundle.Followup == nil || masonBundle.Followup.Gap != added[0].Gap || !strings.Contains(masonBundle.Render(), added[0].Gap) {
+		t.Fatalf("mason cannot see the gap: %+v", masonBundle.Followup)
+	}
+	sealed, _, _, err := seal.Latest(repository, stream)
+	must(t, err)
+	footprint, err := reviewFootprint(repository, stream, sealed, id)
+	must(t, err)
+	if len(footprint.Entities) == 0 || len(footprint.Paths) == 0 {
+		t.Fatalf("reviewer lacks the follow-up footprint: %+v", footprint)
+	}
+	started, err := m.start(ctx, b, id)
+	must(t, err)
+	if !started {
+		t.Fatal("the normal mason controller did not start the follow-up")
+	}
+	if state, err := repository.Workflow(stream, trace.UnitSubject(id)); err != nil || state.Value != UnitImplementing {
+		t.Fatalf("follow-up did not enter implementing: %+v %v", state, err)
+	}
+	if _, reason, err := a.finalGate(ctx, stream); err != nil || !strings.Contains(reason, "unresolved gap for spec#2") {
+		t.Fatalf("gap passed delivery gate: %q %v", reason, err)
+	}
+	must(t, a.Pass(ctx))
+	if ops := finalOperations(t, repository, stream); len(ops) != 1 {
+		t.Fatalf("review asked before landing: %+v", ops)
+	}
+	mergeDirectly(t, f, repository, stream, id, map[string]string{"internal/trace/proof_test.go": "package trace\n"})
+	if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AssembledState {
+		t.Fatalf("landing moved the feature: %+v %v", feature, err)
+	}
+	if _, reason, err := a.finalGate(ctx, stream); err != nil || !strings.Contains(reason, "stale") {
+		t.Fatalf("old review after landing: %q %v", reason, err)
+	}
+	repository.Close()
+	f.start(t)
+	awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return finalOperations(t, f.repository(), stream) })
+	f.stop(t)
+	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	defer repository.Close()
+	a = &finalReviewer{s: f.s, repository: repository}
+	must(t, a.Pass(ctx))
+	if ops := finalOperations(t, repository, stream); len(ops) != 2 {
+		t.Fatalf("new review not asked: %+v", ops)
+	}
+	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.SpecPath), []byte(strings.Replace(validSpec, "never sent again", "sometimes resent", 1)), 0600))
+	if _, err := (&masons{s: f.s, cfg: f.s.cfg, repository: repository}).bundle(ctx, stream, id); !errors.Is(err, bundle.ErrStaleSpec) {
+		t.Fatalf("follow-up accepted unratified spec change: %v", err)
+	}
+}
+
+func TestFinalReviewBehaviorAndEvidenceGapsStayExplicit(t *testing.T) {
+	t.Parallel()
+	_, stream, _, a := newFinalFixture(t, "both-gaps")
+	added, err := a.followups(stream, FinalReport{Review: 1, Spec: 1, Plan: 1, Criteria: []FinalCriterion{
+		{Criterion: "spec#1", Gap: "Resume ignores the checkpoint."},
+		{Criterion: "spec#2", Gap: "No test shows acknowledged chunks are skipped."},
+	}}, 1)
+	must(t, err)
+	if len(added) != 2 || added[0].Criterion != "spec#1" || added[0].Gap != "Resume ignores the checkpoint." ||
+		added[1].Criterion != "spec#2" || added[1].Gap != "No test shows acknowledged chunks are skipped." ||
+		added[0].Unit.ID == added[1].Unit.ID || len(added[0].Unit.Footprint) == 0 || len(added[1].Unit.Footprint) == 0 {
+		t.Fatalf("gaps were collapsed or lost: %+v", added)
 	}
 }
 

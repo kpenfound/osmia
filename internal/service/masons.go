@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -42,7 +43,7 @@ func masonTransitionID(unit string) string {
 // masons is the mason controller. Its pass parks and resumes units on their
 // masons' questions, and moves each implementing unit whose mason reported
 // done to reviewing, with the unit's workspace snapshotted as its candidate.
-// It then starts ready units: in each building workstream with no
+// It then starts ready units: in each building or assembled workstream with no
 // implementing or waiting unit, while fewer units than
 // capacity.masons are implementing, it moves the first ready unit in the
 // plan's dependency order to implementing, and queues its mason's first turn
@@ -352,11 +353,11 @@ func (m *masons) follow(ctx context.Context, stream config.WorkstreamID, unit st
 	return to, nil
 }
 
-// read returns the workstream's unit states and sealed plan when it is
-// building, and when it last started a unit.
+// read returns the workstream's unit states and effective plan while it is
+// building or assembled, and when it last started a unit.
 func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
 	feature, err := m.repository.Workflow(stream, trace.FeatureSubject)
-	if err != nil || feature.Value != BuildingState {
+	if err != nil || (feature.Value != BuildingState && feature.Value != AssembledState) {
 		return building{}, false, err
 	}
 	latest, _, found, err := seal.Latest(m.repository, stream)
@@ -370,6 +371,15 @@ func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
 	p, err := plan.Parse([]byte(graph.Content))
 	if err != nil {
 		return building{}, false, err
+	}
+	if feature.Value == AssembledState {
+		added, err := followup.Read(m.repository, stream)
+		if err != nil {
+			return building{}, false, err
+		}
+		for _, u := range added {
+			p.Units = append(p.Units, u.Unit)
+		}
 	}
 	states, err := m.repository.WorkflowStates(stream)
 	if err != nil {
