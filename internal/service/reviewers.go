@@ -472,12 +472,46 @@ func (r *reviewers) storedResult(stream config.WorkstreamID, unit string, state 
 	return result, true, nil
 }
 
+// turnIdentity follows answer turns back to the exact evidence that prompted
+// the question. Current workspace contents cannot replace that identity.
+func (r *reviewers) turnIdentity(stream config.WorkstreamID, unit string, turn trace.QueuedTurn) (UnitReviewIdentity, error) {
+	if !strings.HasPrefix(turn.Request.TurnID, "answer_") {
+		return reviewIdentityInPrompt(turn.Request.Prompt)
+	}
+	thread, err := r.repository.Thread(stream, reviewerAgent(unit))
+	if err != nil {
+		return UnitReviewIdentity{}, err
+	}
+	asked, err := r.repository.Questions(stream)
+	if err != nil {
+		return UnitReviewIdentity{}, err
+	}
+	for range thread.Turns {
+		question := answerQuestionID(turn.Request.TurnID)
+		i := slices.IndexFunc(asked, func(q trace.QuestionState) bool {
+			return q.Asked.ID == question && q.Asked.Thread == thread.Identity.ThreadID
+		})
+		if i < 0 {
+			break
+		}
+		j := slices.IndexFunc(thread.Turns, func(t trace.QueuedTurn) bool { return t.Request.TurnID == asked[i].Asked.Turn })
+		if j < 0 {
+			break
+		}
+		turn = thread.Turns[j]
+		if !strings.HasPrefix(turn.Request.TurnID, "answer_") {
+			return reviewIdentityInPrompt(turn.Request.Prompt)
+		}
+	}
+	return UnitReviewIdentity{}, errors.New("review answer has no original candidate identity")
+}
+
 func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, turn trace.QueuedTurn) error {
 	var verdict UnitVerdict
 	if err := json.Unmarshal([]byte(turn.Response.Result.Outcome.Report), &verdict); err != nil {
 		return err
 	}
-	identity, err := reviewIdentityInPrompt(turn.Request.Prompt)
+	identity, err := r.turnIdentity(stream, unit, turn)
 	if err != nil {
 		return err
 	}

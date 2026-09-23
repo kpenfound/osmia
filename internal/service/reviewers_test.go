@@ -378,61 +378,110 @@ func TestInterruptedReviewQueuesOneContinuation(t *testing.T) {
 
 func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 	t.Parallel()
-	p := &faults{}
-	f, masons, chief := newAskingMasonFixture(t, 1, independentPlan, p)
-	defer f.stop(t)
-	masons.play[masonTurnID("resume")] = reportDone("Built")
-	f.engine.mu.Lock()
-	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
-			if err := asks(p, "1")(ctx, req, turn, tools); err != nil {
-				return nil, err
+	for _, answerVerdict := range []bool{true, false} {
+		t.Run(fmt.Sprintf("answer-verdict-%t", answerVerdict), func(t *testing.T) {
+			p := &faults{}
+			f, masons, chief := newAskingMasonFixture(t, 1, independentPlan, p)
+			defer f.stop(t)
+			masons.play[masonTurnID("resume")] = reportDone("Built")
+			var reviews atomic.Int32
+			started, release := make(chan struct{}), make(chan struct{})
+			defer func() {
+				select {
+				case <-release:
+				default:
+					close(release)
+				}
+			}()
+			f.engine.mu.Lock()
+			f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+				if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
+					if reviews.Add(1) > 1 {
+						close(started)
+						select {
+						case <-release:
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+						if !strings.Contains(req.Prompt, relayedRuling) {
+							return nil, fmt.Errorf("missing ruling in fresh review")
+						}
+						body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": reviewEvidence(), "findings": []ReviewFinding{}})
+						if err != nil || !strings.Contains(body, `"recorded":true`) {
+							return nil, fmt.Errorf("verdict %s: %v", body, err)
+						}
+						return &agent.Result{ClaudeID: "reviewed", ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
+					}
+					if err := asks(p, "1")(ctx, req, turn, tools); err != nil {
+						return nil, err
+					}
+					return &agent.Result{ClaudeID: "asked", ResultText: "Asked", SessionDir: req.SessionDir, NumTurns: 1}, nil
+				}
+				return chief.turn(ctx, req, turn, tools)
 			}
-			return &agent.Result{ClaudeID: "asked", ResultText: "Asked", SessionDir: req.SessionDir, NumTurns: 1}, nil
-		}
-		return chief.turn(ctx, req, turn, tools)
+			f.engine.mu.Unlock()
+			f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
+				if !strings.Contains(req.Prompt, relayedRuling) {
+					return fmt.Errorf("missing ruling: %s", req.Prompt)
+				}
+				if !answerVerdict {
+					return nil
+				}
+				body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": reviewEvidence(), "findings": []ReviewFinding{}})
+				if err != nil || !strings.Contains(body, `"recorded":true`) {
+					return fmt.Errorf("verdict %s: %v", body, err)
+				}
+				return nil
+			})
+			stream, _ := f.builtAs(t, "review-question")
+			f.awaitUnit(t, stream, "resume", UnitWaiting)
+			docs, err := trace.Read[trace.Document](f.repository(), stream)
+			must(t, err)
+			var before UnitReviewIdentity
+			for _, d := range docs {
+				if d.ID == reviewDocument("resume") {
+					_ = json.Unmarshal([]byte(d.Content), &before)
+				}
+			}
+			if before.Candidate.Revision == "" {
+				t.Fatal("review identity was not recorded")
+			}
+			f.stop(t)
+			f.start(t)
+			f.awaitUnit(t, stream, "resume", UnitWaiting)
+			f.rule(t, "1")
+			if !answerVerdict {
+				select {
+				case <-started:
+				case <-time.After(demoTimeout):
+					t.Fatal("no fresh review after answer")
+				}
+				state, err := f.repository().Workflow(stream, trace.UnitSubject("resume"))
+				must(t, err)
+				if state.Value != UnitReviewing {
+					t.Fatalf("answer alone moved unit to %s", state.Value)
+				}
+				close(release)
+			}
+			f.awaitUnit(t, stream, "resume", UnitApproved)
+			r := &reviewers{masons: newMasonController(f.s, f.repository())}
+			result, ok, err := r.storedResult(stream, "resume", trace.WorkflowState{Value: UnitApproved})
+			must(t, err)
+			if !ok || result.Identity.Candidate.Revision != before.Candidate.Revision || (answerVerdict && result.Turn != questions.TurnID("1")) {
+				t.Fatalf("review after answer: %+v", result)
+			}
+			th := f.thread(t, stream, reviewerAgent("resume"))
+			wantTurns := 2
+			if !answerVerdict {
+				wantTurns++
+			}
+			if len(th.Turns) != wantTurns || th.Turns[0].Status() != questions.Waiting {
+				t.Fatalf("reviewer turns: %+v", th.Turns)
+			}
+			p.check(t)
+			masons.check(t)
+		})
 	}
-	f.engine.mu.Unlock()
-	f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		if !strings.Contains(req.Prompt, relayedRuling) {
-			return fmt.Errorf("missing ruling: %s", req.Prompt)
-		}
-		body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": reviewEvidence(), "findings": []ReviewFinding{}})
-		if err != nil || !strings.Contains(body, `"recorded":true`) {
-			return fmt.Errorf("verdict %s: %v", body, err)
-		}
-		return nil
-	})
-	stream, _ := f.builtAs(t, "review-question")
-	f.awaitUnit(t, stream, "resume", UnitWaiting)
-	docs, err := trace.Read[trace.Document](f.repository(), stream)
-	must(t, err)
-	var before UnitReviewIdentity
-	for _, d := range docs {
-		if d.ID == reviewDocument("resume") {
-			_ = json.Unmarshal([]byte(d.Content), &before)
-		}
-	}
-	if before.Candidate.Revision == "" {
-		t.Fatal("review identity was not recorded")
-	}
-	f.stop(t)
-	f.start(t)
-	f.awaitUnit(t, stream, "resume", UnitWaiting)
-	f.rule(t, "1")
-	f.awaitUnit(t, stream, "resume", UnitApproved)
-	r := &reviewers{masons: newMasonController(f.s, f.repository())}
-	result, ok, err := r.storedResult(stream, "resume", trace.WorkflowState{Value: UnitApproved})
-	must(t, err)
-	if !ok || result.Identity.Candidate.Revision != before.Candidate.Revision || result.Turn != questions.TurnID("1") {
-		t.Fatalf("review after answer: %+v", result)
-	}
-	th := f.thread(t, stream, reviewerAgent("resume"))
-	if len(th.Turns) != 2 || th.Turns[0].Status() != questions.Waiting {
-		t.Fatalf("reviewer turns: %+v", th.Turns)
-	}
-	p.check(t)
-	masons.check(t)
 }
 
 func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
