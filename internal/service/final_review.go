@@ -1074,6 +1074,17 @@ func (a *finalReviewer) followups(stream config.WorkstreamID, report FinalReport
 	if err != nil {
 		return nil, err
 	}
+	known := map[string]bool{}
+	for _, u := range p.Units {
+		known[u.ID] = true
+	}
+	previous, err := followup.Read(a.repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range previous {
+		known[u.Unit.ID] = true
+	}
 	var out []followup.Unit
 	for _, c := range report.Criteria {
 		if c.Gap == "" {
@@ -1098,7 +1109,12 @@ func (a *finalReviewer) followups(stream config.WorkstreamID, report FinalReport
 		if len(footprint) == 0 {
 			return nil, fmt.Errorf("%s has no sealed footprint for %s; an owner-approved plan amendment is required", c.Criterion, c.Gap)
 		}
-		id := fmt.Sprintf("final-%d-%s", report.Review, strings.ReplaceAll(c.Criterion, "#", "-"))
+		base := fmt.Sprintf("final-%d-%s", report.Review, strings.ReplaceAll(c.Criterion, "#", "-"))
+		id := base
+		for n := 2; known[id]; n++ {
+			id = fmt.Sprintf("%s-%d", base, n)
+		}
+		known[id] = true
 		out = append(out, followup.Unit{Review: report.Review, Report: revision, Criterion: c.Criterion, Gap: c.Gap, Unit: plan.Unit{ID: id, Title: "Address final review gap", Addresses: []plan.Address{{Criterion: c.Criterion, Proof: proof}}, DependsOn: []string{}, Footprint: footprint}})
 	}
 	return out, nil
