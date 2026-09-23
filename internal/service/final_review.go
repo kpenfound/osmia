@@ -188,25 +188,25 @@ func (a *finalReviewer) assemble(ctx context.Context, stream config.WorkstreamID
 	if err != nil || !found {
 		return err
 	}
-	if merged, _ := allMerged(b); !merged {
+	if !allMerged(b) {
 		return nil
 	}
 	transitions, err := trace.Read[trace.Transition](a.repository, stream)
 	if err != nil {
 		return err
 	}
-	cause := ""
 	var ids []string
+	subjects := map[string]bool{}
 	for _, u := range b.plan.Units {
 		ids = append(ids, u.ID)
+		subjects[trace.UnitSubject(u.ID)] = true
 	}
+	// The last unit's move to merged caused the assembly.
+	cause := BuildingState
 	for _, t := range transitions {
-		if t.To == UnitMerged && strings.HasPrefix(t.Subject, "unit") {
+		if t.To == UnitMerged && subjects[t.Subject] {
 			cause = t.ID
 		}
-	}
-	if cause == "" {
-		cause = BuildingState
 	}
 	reason := fmt.Sprintf("every unit of the sealed plan has merged onto %s: %s; the feature branch is rebased onto upstream and read against the sealed spec and the charter next", featureBranch(stream), strings.Join(ids, ", "))
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: AssembledState, Revision: 1, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: foremanActor, Cause: cause}
@@ -217,16 +217,19 @@ func (a *finalReviewer) assemble(ctx context.Context, stream config.WorkstreamID
 	return err
 }
 
-// allMerged reports whether every unit of the building workstream's plan
-// has merged, and names the first that has not.
-func allMerged(b building) (bool, string) {
+// allMerged reports whether the building workstream's plan has units and
+// every one of them has merged.
+func allMerged(b building) bool {
 	for _, u := range b.plan.Units {
 		if b.states[trace.UnitSubject(u.ID)].Value != UnitMerged {
-			return false, u.ID
+			return false
 		}
 	}
-	return len(b.plan.Units) > 0, ""
+	return len(b.plan.Units) > 0
 }
+
+// errNoFeatureBranch is a workstream whose feature branch the clone lacks.
+var errNoFeatureBranch = errors.New("the clone has no feature branch")
 
 // governing returns the inputs a final review of the workstream would read
 // now: the feature branch tip and the latest seal with its spec and plan
@@ -244,7 +247,7 @@ func (a *finalReviewer) governing(ctx context.Context, stream config.WorkstreamI
 		return finalReviewInput{}, seal.Seal{}, err
 	}
 	if !exists {
-		return finalReviewInput{}, seal.Seal{}, fmt.Errorf("the clone has no feature branch %s", featureBranch(stream))
+		return finalReviewInput{}, seal.Seal{}, fmt.Errorf("%w %s", errNoFeatureBranch, featureBranch(stream))
 	}
 	charter, err := a.repository.Charter(ctx, a.s.now())
 	if err != nil {
@@ -296,6 +299,9 @@ func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID)
 		asked = append(asked, in)
 	}
 	now, _, err := a.governing(ctx, stream)
+	if errors.Is(err, errNoFeatureBranch) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -466,6 +472,9 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 		return fail(fmt.Sprintf("the workstream is %s, not assembled", featureState(feature.Value)))
 	}
 	now, _, err := a.governing(ctx, stream)
+	if errors.Is(err, errNoFeatureBranch) {
+		return fail(err.Error())
+	}
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -1049,6 +1058,9 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 		return report, fmt.Sprintf("final review %d failed: %s", report.Review, report.Failure), nil
 	}
 	now, latest, err := a.governing(ctx, stream)
+	if errors.Is(err, errNoFeatureBranch) {
+		return report, err.Error(), nil
+	}
 	if err != nil {
 		return report, "", err
 	}

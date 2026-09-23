@@ -401,9 +401,25 @@ func TestFinalReviewThatCannotRebaseFailsAndAuthorisesNothing(t *testing.T) {
 	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != "final review 1 failed: "+report.Failure {
 		t.Fatalf("a failed review authorises: %q %v", reason, err)
 	}
+
+	// Once a restarted service completed the operation from its record, the
+	// failed review is not asked for again with nothing changed.
+	repository.Close()
+	f.start(t)
+	if ops := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return finalOperations(t, f.repository(), stream) }); len(ops) != 1 || !reflect.DeepEqual(ops[0].Result, &result) {
+		t.Fatalf("final review operations after a restart %+v", ops)
+	}
+	f.stop(t)
+	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	defer repository.Close()
+	a = &finalReviewer{s: f.s, repository: repository}
 	must(t, a.Pass(ctx))
 	if ops := finalOperations(t, repository, stream); len(ops) != 1 {
 		t.Fatalf("the failed review was asked for again with nothing changed: %+v", ops)
+	}
+	if after, _, err := latestFinalReport(repository, stream); err != nil || !reflect.DeepEqual(after, report) {
+		t.Fatalf("the failed report after a restart %+v: %v", after, err)
 	}
 }
 
