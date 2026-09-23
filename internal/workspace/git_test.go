@@ -57,6 +57,22 @@ func newFixture(t *testing.T) fixture {
 	return f
 }
 
+func TestChangedPathsUsesRecordedCommits(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base := git(t, "-C", f.clone, "rev-parse", "HEAD")
+	first := f.advance(t, "first.txt")
+	second := f.advance(t, "second.txt")
+	if _, err := f.provider.Fetch(ctx, "upstream", "main"); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := f.provider.ChangedPaths(ctx, base, first)
+	if err != nil || !slices.Equal(paths, []string{"first.txt"}) {
+		t.Fatalf("paths %v: %v; later commit %s", paths, err, second)
+	}
+}
+
 // advance commits on upstream main and returns the new commit.
 func (f fixture) advance(t *testing.T, name string) string {
 	t.Helper()

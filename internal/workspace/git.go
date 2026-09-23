@@ -130,6 +130,22 @@ func (g *Git) Diff(ctx context.Context, base, candidate string) (string, error) 
 	return g.runInRaw(ctx, g.Clone, nil, "diff", "--no-ext-diff", "--binary", "--no-renames", base, candidate, "--")
 }
 
+// ChangedPaths lists the paths changed between the same recorded commits used
+// for Diff, including both sides of a rename as separate changes.
+func (g *Git) ChangedPaths(ctx context.Context, base, candidate string) ([]string, error) {
+	if _, err := g.Diff(ctx, base, candidate); err != nil {
+		return nil, err
+	}
+	out, err := g.runInRaw(ctx, g.Clone, nil, "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", base, candidate, "--")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return []string{}, nil
+	}
+	return strings.Split(strings.TrimSuffix(out, "\x00"), "\x00"), nil
+}
+
 // identity is the author and committer of the commits the service makes.
 var identity = []string{"GIT_AUTHOR_NAME=Osmia", "GIT_AUTHOR_EMAIL=osmia@localhost", "GIT_COMMITTER_NAME=Osmia", "GIT_COMMITTER_EMAIL=osmia@localhost"}
 

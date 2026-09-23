@@ -156,6 +156,12 @@ func match(pattern, name []string) bool {
 	return ok && err == nil && match(pattern[1:], name[1:])
 }
 
+// MatchPathPattern reports whether a clean repository path lies under an
+// entity path pattern, using the same matching rules as ResolvePaths.
+func MatchPathPattern(pattern, name string) bool {
+	return cleanPath(name) && match(strings.Split(pattern, "/"), strings.Split(name, "/"))
+}
+
 func literalPrefix(pattern string) int {
 	if i := strings.IndexAny(pattern, "*?[\\"); i >= 0 {
 		return i
