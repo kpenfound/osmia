@@ -279,9 +279,9 @@ func unitPath(parts []string) bool {
 }
 
 // finalPath reports whether parts name a final review record of a
-// workstream, final/rebase.json, final/report.json or final/followups.json.
+// workstream, including its review, follow-ups and delivery decision.
 func finalPath(parts []string) bool {
-	return len(parts) == 2 && parts[0] == "final" && (parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json")
+	return len(parts) == 2 && parts[0] == "final" && (parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "delivery.json")
 }
 
 var shedRound = regexp.MustCompile(`^round-[1-9][0-9]{0,8}$`)

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -36,6 +37,8 @@ const usage = `Usage: osmia <command> [--root PATH]
   shed more <workstream-id> <rounds> [--json]
   shed redraft <workstream-id> <note> [--json]
   ratify <workstream-id> [--json]
+  delivery <workstream-id> [--json]
+  approve <workstream-id> [description-file] [--json]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
   inbox [--json]
@@ -155,6 +158,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 2
 	case "ratify":
 		valid = len(a) == 1
+	case "delivery":
+		valid = len(a) == 1
+	case "approve":
+		valid = len(a) == 1 || len(a) == 2
 	case "conversation":
 		valid = len(a) == 1
 	case "inbox":
@@ -205,7 +212,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "ratify" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "ratify" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "status" && len(a) == 1)
 	}
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
@@ -387,6 +394,53 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Workstream %s ratified: spec.md revision %d and plan.json revision %d\n%s\n", result.Workstream, result.Spec, result.Plan, result.Detail)
+		return 0
+	}
+	if cmd == "delivery" || cmd == "approve" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		presentation, err := c.Delivery(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		if cmd == "delivery" {
+			if o.json {
+				return output(stdout, stderr, presentation)
+			}
+			fmt.Fprintf(stdout, "Final review %d of %s at %s:\n", presentation.Report.Review, id, presentation.Report.Commit)
+			for _, criterion := range presentation.Report.Criteria {
+				if criterion.Gap != "" {
+					fmt.Fprintf(stdout, "Unshown %s: %s — %s\n", criterion.Criterion, criterion.Text, criterion.Gap)
+				} else {
+					fmt.Fprintf(stdout, "Shown %s: %s — %s\n", criterion.Criterion, criterion.Text, criterion.Evidence)
+				}
+			}
+			fmt.Fprintf(stdout, "\nDraft pull request description:\n%s", presentation.Draft)
+			if presentation.Approval != nil {
+				fmt.Fprintf(stdout, "\nApproved description:\n%s", presentation.Approval.Description)
+			}
+			return 0
+		}
+		decision := service.DeliveryDecision{Review: presentation.Report.Review, ReviewRevision: presentation.ReviewRevision, Commit: presentation.Report.Commit, DraftHash: presentation.DraftHash}
+		if len(a) == 2 {
+			content, err := os.ReadFile(a[1])
+			if err != nil {
+				fmt.Fprintln(stderr, "cannot read description file")
+				return 2
+			}
+			value := string(content)
+			decision.Description = &value
+		}
+		approved, err := c.ApproveDelivery(ctx, id, decision)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, approved)
+		}
+		fmt.Fprintf(stdout, "Approved final review %d at %s with description %s\n", approved.Review, approved.Commit, approved.DescriptionHash)
 		return 0
 	}
 	if cmd == "send" || cmd == "conversation" {
