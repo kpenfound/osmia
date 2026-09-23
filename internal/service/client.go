@@ -195,6 +195,20 @@ func (c *Client) Ratify(ctx context.Context, id config.WorkstreamID, spec, plan 
 	return v, err
 }
 
+// Delivery reads the current final report and draft description.
+func (c *Client) Delivery(ctx context.Context, id config.WorkstreamID) (DeliveryPresentation, error) {
+	var v DeliveryPresentation
+	err := c.Do(ctx, "GET", Prefix+"/delivery/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
+}
+
+// ApproveDelivery records the owner's exact description for a reviewed commit.
+func (c *Client) ApproveDelivery(ctx context.Context, id config.WorkstreamID, decision DeliveryDecision) (DeliveryApproval, error) {
+	var v DeliveryApproval
+	err := c.Do(ctx, "POST", Prefix+"/delivery/"+url.PathEscape(string(id)), decision, &v)
+	return v, err
+}
+
 func (c *Client) shed(ctx context.Context, action string, id config.WorkstreamID, input any) (ShedResponse, error) {
 	var v ShedResponse
 	err := c.Do(ctx, "POST", Prefix+"/shed/"+action+"/"+url.PathEscape(string(id)), input, &v)

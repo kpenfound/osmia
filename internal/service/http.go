@@ -324,6 +324,29 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/delivery/"); ok {
+		switch r.Method {
+		case http.MethodGet:
+			if out, api := s.deliveryPresentation(r.Context(), id); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+		case http.MethodPost:
+			var v DeliveryDecision
+			if !decode(w, r, &v) {
+				return
+			}
+			if out, api := s.approveDelivery(r.Context(), id, v); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+		default:
+			fail(w, Unsupported)
+		}
+		return
+	}
 	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/abandon/"); ok && r.Method == http.MethodPost {
 		var v AbandonRequest
 		if !decode(w, r, &v) {

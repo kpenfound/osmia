@@ -55,6 +55,8 @@ set through `Options` by embedders.
 | GET | `/inbox` | `InboxResponse`: the escalations of the active project that wait for the owner's ruling |
 | POST | `/inbox/<number>` | `AnswerRequest`: text; records the owner's ruling and returns `AnswerResponse` |
 | POST | `/contested/<workstream-id>/<unit-id>` | `ContestedRulingRequest`: decision (`review` or `revise`) and note; records the owner's direction and returns `ContestedRulingResponse` |
+| GET | `/delivery/<workstream-id>` | Current final report, trace-based draft description and any matching approval |
+| POST | `/delivery/<workstream-id>` | Final review number and report revision, commit, draft hash and optional edited description; records the owner's approval |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
 | POST | `/projects/extract` | `ProjectExtractRequest`: project; returns `ExtractionResponse` |
@@ -1661,6 +1663,28 @@ revision differs from the one it read; the reason names the first input that
 changed. The controller asks for a new whole-branch review after follow-up
 units land. The report, and
 whether it is current, reads the same after a restart.
+
+### Owner delivery approval
+
+`osmia delivery <workstream-id>` presents the current final report with
+unshown criteria first, retaining each criterion's evidence or gap, followed
+by a pull request description drafted from the final report and landed-unit
+records. The JSON form includes the reviewed commit, governing revisions,
+draft text and its SHA-256 hash. A report with gaps can be read but cannot be
+approved.
+
+`osmia approve <workstream-id>` accepts the draft. To edit it, use
+`osmia approve <workstream-id> <description-file>`. The service requires the
+review number, report revision, commit and draft hash that were presented, then records the
+exact chosen description and its hash in `final/delivery.json`. The record
+also pins the final report revision, branch commit, seal, spec hash, spec,
+plan and charter revisions. Its owner workflow transition and document are
+one trace commit. Repeating the same decision returns the recorded ruling.
+Restarting preserves an edited description; a newly drafted description does
+not replace it. Publication must check the current final report and the
+description it proposes to send against this approval. A changed branch or
+governing revision requires a new review and approval; a changed description
+requires a new approval.
 
 ## Abandoning
 
