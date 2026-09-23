@@ -1472,7 +1472,8 @@ carries conflict markers, `<<<<<<< <new tip>` above the feature branch's
 lines and `>>>>>>> <snapshot>` below the unit's, and a path one side deleted
 and the other changed keeps the changed side; either is a conflicted path.
 The unit branch, its index and its files then move to the rebased commit. No
-agent takes part.
+agent takes part. The merge runs `git merge-tree --write-tree`, which needs
+Git 2.38 or later.
 
 One trace commit then records `units/<id>/rebase.json` (the unit, rebase
 number, operation, the unit's state, branch, base, new tip, snapshot, rebased
