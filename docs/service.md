@@ -1611,7 +1611,7 @@ order, except the librarian's, which carries no feature (see
 | --- | --- |
 | `workstream`, `project` | The workstream and its project |
 | `state` | The feature workflow state, or `null` before one is recorded |
-| `units` | One `{"unit", "state"}` per unit of the sealed plan, in plan order, once the [build](#building) recorded their states; `card` holds that unit's latest completed turn card when present; empty before |
+| `units` | One `{"unit", "state"}` per unit of the sealed plan, in plan order, once the [build](#building) recorded their states; `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
 | `open_questions` | Questions in the workstream without a ruling |
 | `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, or `contested` with the unit ID; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
@@ -1622,8 +1622,8 @@ refuses a non-empty one when no gate is open. The chief of staff writes the
 wording. A refusal is an ordinary `{"stored":false,"reason":"…"}` result;
 an open-gate reason names its kind and reference. `osmia status` prints the
 gates under each workstream status.
-`osmia status <workstream>` prints each available unit card beneath its unit,
-apart from the chief of staff's status.
+`osmia status <workstream>` prints each available unit card and landing
+beneath its unit, apart from the chief of staff's status.
 
 Without an active project or its trace, the list is empty. If the trace
 cannot be read, the list is empty and carries a `workstreams` diagnostic with

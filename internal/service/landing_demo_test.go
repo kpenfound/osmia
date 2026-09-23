@@ -237,7 +237,7 @@ func TestM3LandingDemonstration(t *testing.T) {
 	}
 	f.start(t)
 
-	for unit := range landingUnits {
+	for _, unit := range []string{"resume", "audit", "dedupe"} {
 		f.awaitMerged(t, stream, unit)
 	}
 	masons.check(t)
@@ -252,9 +252,11 @@ func TestM3LandingDemonstration(t *testing.T) {
 	// The restart recorded the interrupted landing: one commit, found by its
 	// operation trailer, with its provenance.
 	resume := decoded["resume"]
+	interrupted := ops[0].Operation.ID
 	ops = landOperations(t, f.repository(), stream)
-	if resume.Commit != moved[0] || resume.Operation != ops[0].Operation.ID || resume.Candidate != first.Candidate || resume.Base != base || !slices.Equal(resume.Criteria, []string{"spec#1"}) {
-		t.Fatalf("resume's landing %+v, want commit %s of operation %s", resume, moved[0], ops[0].Operation.ID)
+	ops = slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.ID != interrupted })
+	if len(ops) != 1 || resume.Commit != moved[0] || resume.Operation != interrupted || resume.Candidate != first.Candidate || resume.Base != base || !slices.Equal(resume.Criteria, []string{"spec#1"}) {
+		t.Fatalf("resume's landing %+v, want commit %s of operation %s", resume, moved[0], interrupted)
 	}
 	if ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
 		t.Fatalf("the first landing's result %+v", ops[0].Result)
