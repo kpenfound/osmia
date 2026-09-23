@@ -69,6 +69,7 @@ func (r *refresher) Pass(ctx context.Context) error {
 		return err
 	}
 	known := map[string]bool{}
+	knownUnit := map[string]bool{}
 	for _, op := range ops {
 		if op.Operation.Action == RefreshAction {
 			var in refreshInput
@@ -79,6 +80,7 @@ func (r *refresher) Pass(ctx context.Context) error {
 				return errors.New("recorded refresh has no landing commit")
 			}
 			known[in.Commit] = true
+			knownUnit[string(in.Workstream)+"/"+in.Unit] = true
 			if op.Result == nil {
 				return nil
 			}
@@ -93,6 +95,27 @@ func (r *refresher) Pass(ctx context.Context) error {
 	}
 	for _, workstream := range streams {
 		if workstream == stream {
+			continue
+		}
+		landings, err := r.repository.Operations(workstream)
+		if err != nil {
+			return err
+		}
+		unrefreshed := false
+		for _, landing := range landings {
+			if landing.Operation.Action != LandAction || landing.Result == nil || landing.Result.Outcome != "succeeded" {
+				continue
+			}
+			var in landInput
+			if err := json.Unmarshal(landing.Operation.Input, &in); err != nil {
+				return err
+			}
+			if !knownUnit[string(workstream)+"/"+in.Unit] {
+				unrefreshed = true
+				break
+			}
+		}
+		if !unrefreshed {
 			continue
 		}
 		docs, err := trace.Read[trace.Document](r.repository, workstream)
