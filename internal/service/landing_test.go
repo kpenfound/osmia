@@ -320,12 +320,11 @@ func newApprovedFixture(t *testing.T, key string) (*shedFixture, config.Workstre
 }
 
 // Landing is serial per project: while one landing has no result no other is
-// asked for. Two units approved on the same base both ask to land, one after
-// the other; the second finds the feature branch moved by the first and is
-// refused as stale, with a notice, leaving the unit approved and the branch
-// with the first unit's commit alone. The refused approval is not asked to
-// land again.
-func TestLandingIsSerialAndRefusesAnApprovalWhoseBaseMoved(t *testing.T) {
+// asked for. Two units approved on the same base both wait to land; once the
+// first lands, the second's workspace is rebased onto the landed commit, its
+// report names the rebased candidate on the new base, and its approval no
+// longer holds: it returns to review, with a notice, and is not asked to land.
+func TestLandingIsSerialAndARebasedApprovalReturnsToReview(t *testing.T) {
 	t.Parallel()
 	f, stream, repository := newApprovedFixture(t, "serial")
 	lands := &foreman{masons: newMasonController(f.s, repository)}
@@ -342,50 +341,61 @@ func TestLandingIsSerialAndRefusesAnApprovalWhoseBaseMoved(t *testing.T) {
 	if first.Unit != "resume" {
 		t.Fatalf("the first landing is of %s, not the first unit of the plan", first.Unit)
 	}
+	_, approved := approvedReview(t, repository, stream, "dedupe")
 	must(t, repository.Close())
 	f.start(t)
 	defer f.stop(t)
 
 	f.awaitMerged(t, stream, "resume")
+	f.awaitUnit(t, stream, "dedupe", UnitReviewing)
 	deadline := time.Now().Add(demoTimeout)
+	var rebases []trace.OperationRecord
 	for {
-		ops = landOperations(t, f.repository(), stream)
-		if len(ops) == 2 && ops[0].Result != nil && ops[1].Result != nil {
+		rebases = rebaseOperations(t, f.repository(), stream, "dedupe")
+		if len(rebases) == 1 && rebases[0].Result != nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("landing operations %+v", ops)
+			t.Fatalf("dedupe's rebases %+v", rebases)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	settle()
-	if got := landOperations(t, f.repository(), stream); len(got) != 2 {
-		t.Fatalf("the refused approval was asked to land again: %+v", got)
+	if got := landOperations(t, f.repository(), stream); len(got) != 1 {
+		t.Fatalf("a landing was asked for after the first: %+v", got)
 	}
-	dedupe, result := approvedReview(t, f.repository(), stream, "dedupe")
-	transition, _ := landIDs("dedupe", dedupe.Revision)
-	reason := "unit dedupe did not land: stale approval: stale base revision; review the current candidate again"
-	var refused trace.OperationRecord
-	for _, o := range ops {
-		if in, err := decodeLand(o.Operation); err == nil && in.Unit == "dedupe" {
-			refused = o
-		}
-	}
-	if refused.Result == nil || refused.Result.Outcome != "failed" || refused.Result.Evidence != reason {
-		t.Fatalf("the stale landing's result %+v", refused.Result)
-	}
-	if body := f.notice(t, stream, transition+"-refused"); body != "Unit dedupe did not land: stale approval: stale base revision; review the current candidate again. Nothing was committed to the feature branch; the unit lands once an approval of its current candidate, base, spec and plan is recorded." {
-		t.Fatalf("refusal notice %q", body)
-	}
-	if state, err := f.repository().Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != UnitApproved {
-		t.Fatalf("the refused unit is %+v: %v", state, err)
-	}
-	if state, err := f.repository().Workflow(stream, landingSubject("dedupe")); err != nil || state.Value != fmt.Sprintf("refused-%d", dedupe.Revision) {
-		t.Fatalf("the refused landing is %+v: %v", state, err)
-	}
+	_, result := approvedReview(t, f.repository(), stream, "resume")
 	commits := f.landedCommits(t, stream, result.Identity.Candidate.BaseRevision)
-	if len(commits) != 1 || !strings.Contains(demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "log", "-1", "--format=%B", commits[0]), "Osmia-Unit: resume\n") {
+	if len(commits) != 1 {
 		t.Fatalf("the feature branch holds %v", commits)
+	}
+	landed := commits[0]
+	recorded := unitRebases(t, f.repository(), stream, "dedupe")
+	if len(recorded) != 1 {
+		t.Fatalf("rebase records %+v", recorded)
+	}
+	rebase := recorded[0]
+	if rebase.State != UnitApproved || rebase.Onto != landed || rebase.Snapshot != approved.Identity.Candidate.Revision || rebase.Base != approved.Identity.Candidate.BaseRevision || len(rebase.Conflicts) != 0 {
+		t.Fatalf("rebase.json %+v", rebase)
+	}
+	if parent := strings.TrimSpace(demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "log", "-1", "--format=%P", unitBranch(stream, "dedupe"))); parent != landed || rebase.Commit != strings.TrimSpace(demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "rev-parse", unitBranch(stream, "dedupe"))) {
+		t.Fatalf("the unit branch is on %s, rebase.json names %s", parent, rebase.Commit)
+	}
+	doc, report := latestReport(t, f.repository(), stream, "dedupe")
+	if report.Base != landed || report.Candidate != rebase.Commit || doc.Revision != rebase.Report || doc.Cause != rebases[0].Operation.ID || doc.Actor != foremanActor {
+		t.Fatalf("the rebased report %+v %+v", doc.Header, report)
+	}
+	id := trace.UnitSubject("dedupe") + "-reviewing-rebase-1"
+	i := slices.IndexFunc(allTransitions(t, f.trace, stream), func(tr trace.Transition) bool { return tr.ID == id })
+	if i < 0 {
+		t.Fatal("the return to review is not recorded")
+	}
+	back := allTransitions(t, f.trace, stream)[i]
+	if back.From != UnitApproved || back.To != UnitReviewing || back.Cause != rebases[0].Operation.ID || !strings.HasPrefix(back.Reason, "the approval no longer holds: ") {
+		t.Fatalf("the return to review %+v", back)
+	}
+	if body := f.notice(t, stream, id); body != fmt.Sprintf("Unit dedupe returns to review: its approved candidate was rebased onto %s.", landed) {
+		t.Fatalf("notice %q", body)
 	}
 }
 
