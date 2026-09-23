@@ -68,8 +68,8 @@ const (
 
 var shedActor = trace.Actor{Kind: "service", ID: "shed"}
 
-// Committee supplies the execution boundary of the committee's shed turns:
-// the core execution engine and the role-scoped MCP host. The service owns
+// Committee supplies the execution boundary of the committee's shed turns
+// and final reviews: the core execution engine and the role-scoped MCP host. The service owns
 // each member's view, tools, prompt and record.
 type Committee struct {
 	Engine coreadapter.Engine

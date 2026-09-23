@@ -68,8 +68,9 @@ type Options struct {
 	// requested redrafts wait.
 	Architect *Architect
 	// Committee supplies the execution boundary of the committee's shed
-	// turns. Without it no round is requested, a round already requested
-	// stays pending, and sketched workstreams and replied rounds wait; only a
+	// turns and final reviews. Without it no round or final review is
+	// requested, one already requested stays pending, and sketched
+	// workstreams, replied rounds and assembled workstreams wait; only a
 	// workstream whose debate the owner skipped at hand-in enters the shed,
 	// without a committee. The architect's replies and the
 	// debate's conclusion need no committee runner.
