@@ -12,8 +12,10 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/scheduler"
+	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -36,9 +38,15 @@ type ReviewFinding struct {
 }
 
 type UnitVerdict struct {
-	Decision string           `json:"decision"`
-	Evidence []ReviewEvidence `json:"evidence"`
-	Findings []ReviewFinding  `json:"findings"`
+	Decision   string            `json:"decision"`
+	Evidence   []ReviewEvidence  `json:"evidence"`
+	Findings   []ReviewFinding   `json:"findings"`
+	ExtraPaths []PathExplanation `json:"extra_paths,omitempty"`
+}
+
+type PathExplanation struct {
+	Path        string `json:"path"`
+	Explanation string `json:"explanation"`
 }
 
 type UnitReviewResult struct {
@@ -55,7 +63,7 @@ type reviewerReports struct {
 func (r *reviewerReports) tool(scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: verdictTool, Effect: coreadapter.ToolMemory,
 		Description: "Record a verdict for the exact candidate in this turn. Cite each unit criterion with evidence. Material findings need an action the mason can take. End your turn after acceptance.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"decision":{"type":"string"},"evidence":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"evidence":{"type":"string"}},"required":["criterion","evidence"],"additionalProperties":false}},"findings":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"severity":{"type":"string"},"evidence":{"type":"string"},"action":{"type":"string"}},"required":["criterion","severity","evidence","action"],"additionalProperties":false}}},"required":["decision","evidence","findings"],"additionalProperties":false}`)}
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"decision":{"type":"string"},"evidence":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"evidence":{"type":"string"}},"required":["criterion","evidence"],"additionalProperties":false}},"findings":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"severity":{"type":"string"},"evidence":{"type":"string"},"action":{"type":"string"}},"required":["criterion","severity","evidence","action"],"additionalProperties":false}},"extra_paths":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"explanation":{"type":"string"}},"required":["path","explanation"],"additionalProperties":false}}},"required":["decision","evidence","findings"],"additionalProperties":false}`)}
 	tool.Handle = func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var verdict UnitVerdict
 		if err := json.Unmarshal(raw, &verdict); err != nil {
@@ -229,7 +237,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 		return err
 	}
 	content, _ := json.MarshalIndent(identity, "", "  ")
-	prompt := fmt.Sprintf("Review this exact candidate against the sealed spec, plan and mason report. Record criterion-linked evidence with verdict. Material findings must say what the mason should change. The candidate identity is:\n%s\n\nExact diff:\n%s", content, req.Diff)
+	prompt := fmt.Sprintf("Review this exact candidate against the sealed spec, plan and mason report. Record criterion-linked evidence with verdict. Explain each changed path outside the sealed footprint in extra_paths. Unresolved or ambiguous path mappings require a plan amendment before approval. Material findings must say what the mason should change. The candidate identity is:\n%s\n\nExact diff:\n%s", content, req.Diff)
 	for _, item := range req.Context {
 		prompt += "\n\n" + item.Source + ":\n" + item.Content
 	}
@@ -285,7 +293,7 @@ func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID
 	if err := json.Unmarshal([]byte(turn.Response.Result.Outcome.Report), &verdict); err != nil {
 		return err
 	}
-	_, identity, err := r.prepareUnitReview(ctx, stream, unit)
+	identity, err := reviewIdentityInPrompt(turn.Request.Prompt)
 	if err != nil {
 		return err
 	}
@@ -363,6 +371,50 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 	if reason := validateVerdict(planned, result.Verdict); reason != "" {
 		return errors.New(reason)
 	}
+	_, current, err := r.unitReviewEvidence(ctx, stream, unit)
+	if err != nil {
+		return r.refreshReview(ctx, stream, unit, state, "stale review inputs: "+err.Error())
+	}
+	if reason := staleReview(result.Identity, current); reason != "" {
+		return r.refreshReview(ctx, stream, unit, state, reason)
+	}
+	candidate, exists, err := newUnitWorkspaces(r.cfg).git.Branch(ctx, unitBranch(stream, unit))
+	if err != nil {
+		return err
+	}
+	if !exists || candidate != result.Identity.Candidate.Revision {
+		return r.refreshReview(ctx, stream, unit, state, "stale candidate revision; review the current candidate again")
+	}
+	base, exists, err := newUnitWorkspaces(r.cfg).git.Branch(ctx, featureBranch(stream))
+	if err != nil {
+		return err
+	}
+	if !exists || base != result.Identity.Candidate.BaseRevision {
+		return r.refreshReview(ctx, stream, unit, state, "stale base revision; review the current candidate again")
+	}
+	docs, err := trace.Read[trace.Document](r.repository, stream)
+	if err != nil {
+		return err
+	}
+	latest := map[string]int{}
+	for _, d := range docs {
+		if d.Revision > latest[d.ID] {
+			latest[d.ID] = d.Revision
+		}
+	}
+	if fmt.Sprint(latest[plan.SpecDocument]) != result.Identity.Candidate.SpecRevision {
+		return r.refreshReview(ctx, stream, unit, state, "stale spec revision; review the current spec again")
+	}
+	if fmt.Sprint(latest[plan.PlanDocument]) != result.Identity.Candidate.PlanRevision {
+		return r.refreshReview(ctx, stream, unit, state, "stale plan revision; review the current plan again")
+	}
+	if result.Verdict.Decision == "satisfactory" {
+		if reason, err := r.checkReviewFootprint(ctx, stream, unit, result); err != nil {
+			return err
+		} else if reason != "" {
+			return r.refreshReview(ctx, stream, unit, state, reason)
+		}
+	}
 	to := UnitApproved
 	if result.Verdict.Decision == "material_findings" {
 		to = UnitImplementing
@@ -381,6 +433,103 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 		return r.enqueueFindings(ctx, stream, unit, result)
 	}
 	return nil
+}
+
+func reviewIdentityInPrompt(prompt string) (UnitReviewIdentity, error) {
+	const start, end = "The candidate identity is:\n", "\n\nExact diff:\n"
+	_, body, ok := strings.Cut(prompt, start)
+	if !ok {
+		return UnitReviewIdentity{}, errors.New("review turn lacks candidate identity")
+	}
+	body, _, ok = strings.Cut(body, end)
+	if !ok {
+		return UnitReviewIdentity{}, errors.New("review turn lacks exact diff")
+	}
+	var identity UnitReviewIdentity
+	err := json.Unmarshal([]byte(body), &identity)
+	return identity, err
+}
+
+func staleReview(reviewed, current UnitReviewIdentity) string {
+	for _, field := range []struct{ name, old, now string }{
+		{"candidate", reviewed.Candidate.Revision, current.Candidate.Revision},
+		{"base", reviewed.Candidate.BaseRevision, current.Candidate.BaseRevision},
+		{"spec", reviewed.Candidate.SpecRevision, current.Candidate.SpecRevision},
+		{"plan", reviewed.Candidate.PlanRevision, current.Candidate.PlanRevision},
+		{"diff", reviewed.DiffSHA256, current.DiffSHA256},
+		{"mason report", reviewed.Report, current.Report},
+	} {
+		if field.old != field.now {
+			return "stale " + field.name + " revision; review the current candidate again"
+		}
+	}
+	if reviewed.Seal != current.Seal {
+		return "stale seal; review the current candidate again"
+	}
+	return ""
+}
+
+func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, reason string) error {
+	id := fmt.Sprintf("%s-review-refresh-%d", trace.UnitSubject(unit), state.Version)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit)}
+	_, err := r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitReviewing, To: UnitReviewing, Reason: reason}, Events: []trace.Event{trace.Notice(id, "chief", "Unit "+unit+" stays reviewing: "+reason)}})
+	if errors.Is(err, trace.ErrConflict) {
+		return nil
+	}
+	return err
+}
+
+func (r *reviewers) checkReviewFootprint(ctx context.Context, stream config.WorkstreamID, unit string, result UnitReviewResult) (string, error) {
+	s, _, found, err := seal.Latest(r.repository, stream)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "missing seal", nil
+	}
+	i := slices.IndexFunc(s.Footprints, func(f seal.Footprint) bool { return f.Unit == unit })
+	if i < 0 {
+		return "missing sealed footprint", nil
+	}
+	paths, err := newUnitWorkspaces(r.cfg).git.ChangedPaths(ctx, result.Identity.Candidate.BaseRevision, result.Identity.Candidate.Revision)
+	if err != nil {
+		return "", err
+	}
+	mapping, err := kb.Load(r.repository)
+	if err != nil {
+		return "", err
+	}
+	return footprintReason(mapping, s.Footprints[i], paths, result.Verdict.ExtraPaths), nil
+}
+
+func footprintReason(mapping kb.Map, footprint seal.Footprint, paths []string, explanations []PathExplanation) string {
+	resolved := mapping.ResolvePaths(paths)
+	if len(resolved.Unresolved) != 0 {
+		return "unresolved changed paths " + strings.Join(resolved.Unresolved, ", ") + "; request an owner approved plan amendment"
+	}
+	extras := map[string]bool{}
+	for _, match := range resolved.Matches {
+		if len(match.Entities) != 1 {
+			return "ambiguous mapping for " + match.Path + "; request an owner approved plan amendment"
+		}
+		inSealedPath := slices.ContainsFunc(footprint.Paths, func(pattern string) bool { return kb.MatchPathPattern(pattern, match.Path) })
+		if !slices.Contains(footprint.Entities, match.Entities[0]) || !inSealedPath {
+			extras[match.Path] = true
+		}
+	}
+	explained := map[string]bool{}
+	for _, extra := range explanations {
+		if !extras[extra.Path] || explained[extra.Path] || strings.TrimSpace(extra.Explanation) == "" {
+			return "invalid explanation for changed path " + extra.Path
+		}
+		explained[extra.Path] = true
+	}
+	for _, path := range paths {
+		if extras[path] && !explained[path] {
+			return "unexplained changed path " + path + "; request an owner approved plan amendment when the footprint must change"
+		}
+	}
+	return ""
 }
 
 func (r *reviewers) enqueueFindings(ctx context.Context, stream config.WorkstreamID, unit string, result UnitReviewResult) error {
