@@ -321,13 +321,14 @@ func list(entries []string) string {
 	return strings.Join(entries, ", ")
 }
 
-// UnitStatus is the recorded state of one unit of the sealed plan.
+// UnitStatus is the recorded state and latest card of one unit of the sealed plan.
 type UnitStatus struct {
-	Unit  string `json:"unit"`
-	State string `json:"state"`
+	Unit  string            `json:"unit"`
+	State string            `json:"state"`
+	Card  *coreadapter.Card `json:"card,omitempty"`
 }
 
-// unitStates returns the states, taken from the given workflow states, of
+// unitStates returns states and latest cards, taken from the given workflow states and reports, of
 // the units of the workstream's sealed plan, in plan order: none before a
 // seal is recorded or before the build recorded them.
 func unitStates(repository *trace.Repository, stream config.WorkstreamID, states map[string]trace.WorkflowState) ([]UnitStatus, error) {
@@ -343,10 +344,27 @@ func unitStates(repository *trace.Repository, stream config.WorkstreamID, states
 	if err != nil {
 		return nil, err
 	}
+	documents, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	cards := map[string]*coreadapter.Card{}
+	for _, document := range documents {
+		if document.Unit == "" || document.ID != reportDocument(document.Unit) {
+			continue
+		}
+		var report UnitReport
+		if err := json.Unmarshal([]byte(document.Content), &report); err != nil {
+			return nil, fmt.Errorf("unit %s report: %w", document.Unit, err)
+		}
+		if report.Card != nil {
+			cards[document.Unit] = report.Card
+		}
+	}
 	var out []UnitStatus
 	for _, u := range p.Units {
 		if state := states[trace.UnitSubject(u.ID)].Value; state != "" {
-			out = append(out, UnitStatus{Unit: u.ID, State: state})
+			out = append(out, UnitStatus{Unit: u.ID, State: state, Card: cards[u.ID]})
 		}
 	}
 	return out, nil

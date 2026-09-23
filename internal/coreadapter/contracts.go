@@ -178,7 +178,19 @@ type PreparedTurn struct {
 	Resume                                          *BackendSession
 	AllowedOutcomes                                 []string
 }
-type Outcome struct{ Status, Report string }
+
+// Card is the concise owner-facing account of a completed turn.
+type Card struct {
+	Headline string `json:"headline"`
+	Happened string `json:"happened"`
+	NeedsYou string `json:"needs_you"`
+}
+
+type Outcome struct {
+	Status string `json:"Status"`
+	Report string `json:"Report"`
+	Card   *Card  `json:"Card,omitempty"`
+}
 type Usage struct {
 	CostUSD   float64
 	CostKnown bool

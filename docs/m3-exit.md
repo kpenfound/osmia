@@ -32,12 +32,13 @@ escalates it. The owner answers through the inbox; the chief relays the
 ruling; the answer arrives on the mason's existing thread. The controller
 records a move back to `implementing`.
 
-On that answer turn, the fake mason calls `done` with an outcome and a report
-for `spec#1`: what it did, evidence and the planned proof's location. The
+On that answer turn, the fake mason calls `done` with an outcome, an
+owner-facing card and a report for `spec#1`: what it did, evidence and the
+planned proof's location. The
 service snapshots the unit workspace as a candidate commit and records
 `units/resume/report.json` revision 1 in the trace. The unit moves to
 `reviewing`. The test checks the candidate's branch and parent commit, the
-report and transition causes, and delivery and acknowledgement of the chief
+report and card, transition causes, and delivery and acknowledgement of the chief
 of staff's start, question and finish notices. `dedupe` remains `planned`,
 has no workspace or report, and receives no mason turn. Its dependency can
 become ready only after landing, which is outside this demonstration.

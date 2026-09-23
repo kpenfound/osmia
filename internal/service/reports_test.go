@@ -25,6 +25,7 @@ import (
 // resumeReport is a complete report on the one criterion unit resume of
 // independentPlan and validPlan addresses.
 var resumeReport = CriterionReport{Criterion: "spec#1", Done: "resume from the last chunk", Evidence: "TestResume passes", Proof: "internal/trace/built_test.go TestResume"}
+var exampleCard = coreadapter.Card{Headline: "Uploads resume", Happened: "The storage client resumes uploads from the last chunk.", NeedsYou: "Review the candidate."}
 
 // newMasonController returns the mason controller of the service's
 // configuration over repository.
@@ -39,6 +40,11 @@ func criterionArgs(c CriterionReport) map[string]any {
 // done calls the done tool and returns whether the service accepted the
 // report, and its reason when it did not.
 func done(ctx context.Context, tools *mcp.ClientSession, args map[string]any) (bool, string, error) {
+	for key, value := range map[string]string{"headline": exampleCard.Headline, "happened": exampleCard.Happened, "needs_you": exampleCard.NeedsYou} {
+		if _, ok := args[key]; !ok {
+			args[key] = value
+		}
+	}
 	text, err := callTool(ctx, tools, doneTool, args)
 	if err != nil {
 		return false, err.Error(), nil
@@ -63,6 +69,22 @@ func reportDone(outcome string) func(context.Context, agent.Request, *mcp.Client
 			return fmt.Errorf("done refused: %q %v", reason, err)
 		}
 		return nil
+	}
+}
+
+func TestFinishNoticeWithOptionalOwnerAction(t *testing.T) {
+	base := "Unit parser is reviewing: its mason reported done on turn first; its report is units/parser/report.json revision 2."
+	for _, tc := range []struct {
+		card *coreadapter.Card
+		want string
+	}{
+		{nil, base},
+		{&coreadapter.Card{Headline: "Parser is ready"}, base + " Headline: Parser is ready"},
+		{&coreadapter.Card{Headline: "Parser is ready", NeedsYou: "Review the candidate."}, base + " Headline: Parser is ready; Needs you: Review the candidate."},
+	} {
+		if got := finishNotice("parser", "first", "units/parser/report.json", 2, tc.card); got != tc.want {
+			t.Fatalf("notice %q, want %q", got, tc.want)
+		}
 	}
 }
 
@@ -142,6 +164,24 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		{map[string]any{"outcome": "Built", "criteria": []any{criterionArgs(blank)}}, "criterion spec#1 has no evidence"},
 	}
 	masons.play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+		missing, err := callTool(ctx, tools, doneTool, map[string]any{"outcome": "approved", "criteria": complete})
+		if err != nil || !strings.Contains(missing, `"recorded":false`) || !strings.Contains(missing, `headline is required`) {
+			return fmt.Errorf("missing card: %q %v", missing, err)
+		}
+		for _, bad := range []struct{ field, value, reason string }{
+			{"headline", " ", "headline is required"},
+			{"happened", " ", "happened is required"},
+			{"headline", strings.Repeat("x", 65), "headline must be at most 64 characters"},
+			{"happened", "One\nTwo", "happened must be a single line"},
+			{"happened", "Completed " + masonTurnID("resume"), "happened contains an Osmia or backend identifier"},
+			{"needs_you", "See parser.go", "needs_you contains a file name"},
+		} {
+			args := map[string]any{"outcome": "approved", "criteria": complete, bad.field: bad.value}
+			recorded, reason, err := done(ctx, tools, args)
+			if err != nil || recorded || !strings.Contains(reason, bad.reason) {
+				return fmt.Errorf("bad %s: recorded %t reason %q err %v", bad.field, recorded, reason, err)
+			}
+		}
 		for _, r := range refused {
 			recorded, reason, err := done(ctx, tools, r.args)
 			if err != nil || recorded || reason != r.reason {
@@ -160,7 +200,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 				return fmt.Errorf("done %v is no tool error: %s", args, text)
 			}
 		}
-		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "approved", "criteria": complete}); err != nil || !recorded {
+		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "approved", "criteria": complete, "headline": " Uploads   resume ", "happened": " The storage client resumes uploads from the last chunk. ", "needs_you": " Review the candidate. "}); err != nil || !recorded {
 			return fmt.Errorf("complete report: reason %q (%v)", reason, err)
 		}
 		const again = "this turn already reported its unit done; end the turn"
@@ -197,7 +237,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	}
 	settle()
 	masons.check(t)
-	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitReviewing}, {Unit: "dedupe", State: UnitImplementing}})
+	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitReviewing, Card: &exampleCard}, {Unit: "dedupe", State: UnitImplementing}})
 
 	th, err := f.repository().Thread(stream, masonAgent("resume"))
 	must(t, err)
@@ -207,7 +247,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	turn := th.Turns[0]
 	wantReport := MasonReport{Outcome: "approved", Criteria: []CriterionReport{resumeReport}}
 	var reported MasonReport
-	if outcome := turn.Response.Result.Outcome; turn.Status() != "idle" || outcome == nil || outcome.Status != masonDone || json.Unmarshal([]byte(outcome.Report), &reported) != nil || !reflect.DeepEqual(reported, wantReport) {
+	if outcome := turn.Response.Result.Outcome; turn.Status() != "idle" || outcome == nil || outcome.Status != masonDone || outcome.Card == nil || *outcome.Card != exampleCard || json.Unmarshal([]byte(outcome.Report), &reported) != nil || !reflect.DeepEqual(reported, wantReport) {
 		t.Fatalf("the mason's turn ended %s with %+v", turn.Status(), turn.Response.Result.Outcome)
 	}
 
@@ -222,9 +262,19 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	var report UnitReport
 	must(t, json.Unmarshal([]byte(doc.Content), &report))
 	f.checkCandidate(t, stream, report)
-	want := UnitReport{Unit: "resume", Turn: masonTurnID("resume"), Seal: 1, Outcome: "approved", Criteria: []CriterionReport{resumeReport}, Branch: unitBranch(stream, "resume"), Base: report.Base, Candidate: report.Candidate}
+	want := UnitReport{Unit: "resume", Turn: masonTurnID("resume"), Seal: 1, Outcome: "approved", Criteria: []CriterionReport{resumeReport}, Card: &exampleCard, Branch: unitBranch(stream, "resume"), Base: report.Base, Candidate: report.Candidate}
 	if !reflect.DeepEqual(report, want) {
 		t.Fatalf("report %+v, want %+v", report, want)
+	}
+	status, err := f.c.Status(context.Background(), stream)
+	must(t, err)
+	if len(status.Units) != 2 || status.Units[0].Card == nil || *status.Units[0].Card != exampleCard || status.Units[1].Card != nil {
+		t.Fatalf("unit cards in status: %+v", status.Units)
+	}
+	var api WorkstreamStatus
+	must(t, f.c.Do(context.Background(), "GET", Prefix+"/status/"+string(stream), nil, &api))
+	if !reflect.DeepEqual(api.Units, status.Units) {
+		t.Fatalf("unit cards through API: %+v", api.Units)
 	}
 	if data, err := os.ReadFile(filepath.Join(f.trace, "workstreams", string(stream), "units", "resume", "report.json")); err != nil || string(data) != doc.Content {
 		t.Fatalf("report file %q %v", data, err)
@@ -239,7 +289,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	// The finish and the next start carry one notice each for the chief of
 	// staff, delivered as event turns and acknowledged once they have
 	// completed successfully.
-	reviewNotice := fmt.Sprintf("Unit resume is reviewing: its mason reported done on turn %s; its report is units/resume/report.json revision 1.", masonTurnID("resume"))
+	reviewNotice := fmt.Sprintf("Unit resume is reviewing: its mason reported done on turn %s; its report is units/resume/report.json revision 1. Headline: Uploads resume; Needs you: Review the candidate.", masonTurnID("resume"))
 	if body := f.notice(t, stream, reviewingTransitionID("resume", 1)); body != reviewNotice {
 		t.Fatalf("the reviewing notice %q, want %q", body, reviewNotice)
 	}

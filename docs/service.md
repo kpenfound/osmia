@@ -1273,6 +1273,15 @@ did), `evidence` (why the criterion holds) and `proof` (where the proof
 lives). No argument names a state, and the outcome is text: whatever it
 says, an accepted report sends the unit to `reviewing`, never further.
 
+`done` also takes an owner-facing card: `headline` (required, at most 64
+characters), `happened` (required, at most 140 characters, naming concrete
+work and observable results) and `needs_you` (at most 140 characters, empty
+unless the owner has a specific action). The service collapses whitespace,
+removes control and zero-width characters, and refuses line breaks and
+identifiers using the same rules as `set_status`. A missing or invalid card
+field produces an ordinary `{"recorded":false,"reason":"…"}` result naming
+that field. No field is silently truncated.
+
 A report the service refuses is an ordinary tool result,
 `{"recorded":false,"reason":"<reason>"}`, so the mason reads why, fixes the
 report and calls `done` again in the same turn. The unit does not move and
@@ -1283,11 +1292,12 @@ report on <criteria> alone`, `criterion <criterion> is reported twice`,
 <criteria>: report on every criterion of unit <id>`, `unit <id> is <state>,
 not implementing`, `this turn already reported its unit done; end the turn`
 once one report was accepted. Input the tool's schema refuses, such as an
-argument the tool does not take, a missing field or a value of the wrong type,
+argument the tool does not take, a missing report field or a value of the wrong type,
 comes back as a tool error before the report is checked; the unit does not
 move and the turn goes on.
 A turn whose report was accepted ends with the outcome `done`, whose report is
-the mason's report as JSON. A turn that ends without an accepted report, or
+the mason's report as JSON and whose card is the normalised owner-facing card.
+A turn that ends without an accepted report, or
 fails after one, leaves its unit `implementing`.
 
 On its next pass the mason controller finishes each `implementing` unit whose
@@ -1301,8 +1311,9 @@ is <commit> on <unit-branch>, from <feature-branch> at <base>, and its report is
 units/<id>/report.json revision <k>`. The transition carries one
 [notice](#event-delivery) for the chief of staff, `Unit <id> is reviewing: its
 mason reported done on turn <turn>; its report is units/<id>/report.json
-revision <k>.` The document holds `unit`, `turn`,
-`seal`, `outcome`, `criteria`, `branch`, `base` (the feature branch commit the
+revision <k>. Headline: <headline>` followed by `; Needs you: <needs_you>`
+when the latter is set. The document holds `unit`, `turn`,
+`seal`, `outcome`, `criteria`, `card`, `branch`, `base` (the feature branch commit the
 workspace descends from) and `candidate`. A unit in `reviewing` takes no mason
 slot, so its workstream can start its next `ready` unit.
 
@@ -1400,7 +1411,7 @@ order, except the librarian's, which carries no feature (see
 | --- | --- |
 | `workstream`, `project` | The workstream and its project |
 | `state` | The feature workflow state, or `null` before one is recorded |
-| `units` | One `{"unit", "state"}` per unit of the sealed plan, in plan order, once the [build](#building) recorded their states; empty before |
+| `units` | One `{"unit", "state"}` per unit of the sealed plan, in plan order, once the [build](#building) recorded their states; `card` holds that unit's latest completed turn card when present; empty before |
 | `open_questions` | Questions in the workstream without a ruling |
 | `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, or `contested` with the unit ID; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
@@ -1411,6 +1422,8 @@ refuses a non-empty one when no gate is open. The chief of staff writes the
 wording. A refusal is an ordinary `{"stored":false,"reason":"…"}` result;
 an open-gate reason names its kind and reference. `osmia status` prints the
 gates under each workstream status.
+`osmia status <workstream>` prints each available unit card beneath its unit,
+apart from the chief of staff's status.
 
 Without an active project or its trace, the list is empty. If the trace
 cannot be read, the list is empty and carries a `workstreams` diagnostic with

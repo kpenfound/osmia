@@ -51,7 +51,7 @@ func TestCompletedMasonTurnFinishesAfterRestart(t *testing.T) {
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.clock.Now()
 	response := trace.TurnResponse{Header: h, AgentID: masonAgent("resume"), ThreadID: masonAgent("resume"), TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision,
-		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: "completed-mason"}, SessionDirectory: directory, StartedAt: q.Claim.At, Outcome: &coreadapter.Outcome{Status: masonDone, Report: string(content)}}}
+		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: "completed-mason"}, SessionDirectory: directory, StartedAt: q.Claim.At, Outcome: &coreadapter.Outcome{Status: masonDone, Report: string(content), Card: &exampleCard}}}
 	must(t, repo.CaptureTurn(ctx, q.Claim.Token, response))
 	must(t, repo.CompleteTurn(ctx, stream, masonAgent("resume"), q.Request.TurnID, q.Claim.Token, f.clock.Now()))
 	must(t, repo.Close())

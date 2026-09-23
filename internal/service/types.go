@@ -280,7 +280,8 @@ type StatusResponse struct {
 
 // WorkstreamStatus is the chief of staff's status for one workstream, next to
 // the facts the service owns. State is null until a feature state is
-// recorded; Units is empty until the units' states are recorded; Gates is
+// recorded; Units is empty until the units' states are recorded, and each
+// unit carries its latest reported card when present; Gates is
 // empty while no owner decision waits; Status is null until the chief of staff
 // writes one.
 type WorkstreamStatus struct {

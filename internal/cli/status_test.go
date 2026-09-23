@@ -213,3 +213,17 @@ func TestStatusPrintsOwnerGates(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusPrintsLatestUnitCard(t *testing.T) {
+	st := service.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Units: []service.UnitStatus{
+		{Unit: "parser", State: "reviewing", Card: &coreadapter.Card{Headline: "Parser is ready", Happened: "The parser accepts resumed chunks.", NeedsYou: "Review the candidate."}},
+		{Unit: "validator", State: "ready"},
+	}}
+	var out strings.Builder
+	showStatus(&out, st)
+	for _, want := range []string{"parser reviewing\n    Headline: Parser is ready\n    Happened: The parser accepts resumed chunks.\n    Needs you: Review the candidate.\n", "validator ready\n", "Status: none yet"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("status lacks %q: %s", want, out.String())
+		}
+	}
+}

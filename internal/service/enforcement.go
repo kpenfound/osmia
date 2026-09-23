@@ -49,7 +49,7 @@ var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_wri
 // staff and the mason only; a turn of any other role fails with a recorded
 // reason. A mason turn works on a view of its unit's workspace, copied back
 // into the workspace after the turn, and a mason turn whose done the service
-// accepted ends with the outcome done and the mason's report. Each role's
+// accepted ends with the outcome done, the mason's report and its card. Each role's
 // sandbox comes from its configuration, and a sandbox the platform cannot
 // enforce fails the turn with core's reason. Thread turns take their role's sandbox and the root from the
 // configuration the service has loaded, and record UTC times.
