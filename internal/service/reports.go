@@ -14,6 +14,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/status"
@@ -96,7 +97,7 @@ func turnKey(scope coreadapter.Scope) string {
 // fixes it and calls done again; its unit does not move.
 func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	done := coreadapter.Tool{Name: doneTool, Effect: coreadapter.ToolMemory,
-		Description: "Report your unit's work done, once every criterion of the unit holds and the proof the plan names for it is in place and passing. Give the outcome, one entry per criterion, and any new project knowledge in learnings. Include an owner-facing headline (64 characters), what happened (140 characters), and needs_you (140 characters, empty unless the owner has an action). Write a single line per card field, in words without IDs, paths or model names. The service records the report, takes your workspace as the unit's candidate and sends it to review; end your turn as soon as this returns.",
+		Description: "Report your unit's work done, once every criterion of the unit holds and its recorded proof is in place and passing. Give the outcome, one entry per criterion, and any new project knowledge in learnings. Include an owner-facing headline (64 characters), what happened (140 characters), and needs_you (140 characters, empty unless the owner has an action). Write a single line per card field, in words without IDs, paths or model names. The service records the report, takes your workspace as the unit's candidate and sends it to review; end your turn as soon as this returns.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"criteria":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"done":{"type":"string"},"evidence":{"type":"string"},"proof":{"type":"string"}},"required":["criterion","done","evidence","proof"],"additionalProperties":false}},"learnings":{"type":"array","items":{"type":"string"}},"headline":{"type":"string"},"happened":{"type":"string"},"needs_you":{"type":"string"}},"required":["outcome","criteria"],"additionalProperties":false}`)}
 	done.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
@@ -168,7 +169,7 @@ func refuseReport(format string, args ...any) (json.RawMessage, error) {
 	}{false, fmt.Sprintf(format, args...)})
 }
 
-// sealedUnit returns the unit of the latest sealed plan scope names.
+// sealedUnit returns the unit of the latest sealed plan or follow-up scope names.
 func sealedUnit(repository *trace.Repository, scope coreadapter.Scope) (plan.Unit, error) {
 	stream := config.WorkstreamID(scope.Workstream)
 	latest, _, found, err := seal.Latest(repository, stream)
@@ -188,7 +189,14 @@ func sealedUnit(repository *trace.Repository, scope coreadapter.Scope) (plan.Uni
 	}
 	unit, ok := p.Unit(scope.Unit)
 	if !ok {
-		return plan.Unit{}, fmt.Errorf("the sealed plan of workstream %s has no unit %s", stream, scope.Unit)
+		added, found, err := followup.Find(repository, stream, scope.Unit)
+		if err != nil {
+			return plan.Unit{}, err
+		}
+		if !found {
+			return plan.Unit{}, fmt.Errorf("the sealed plan and follow-ups of workstream %s have no unit %s", stream, scope.Unit)
+		}
+		return added.Unit, nil
 	}
 	return unit, nil
 }

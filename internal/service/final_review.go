@@ -16,6 +16,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/scheduler"
@@ -140,8 +141,9 @@ func finalTurnID(k int, member string, attempt int) string {
 
 // finalReviewer is the assembly controller. Its pass moves a building
 // workstream whose every planned unit has merged to assembled, and asks for
-// a final review of an assembled workstream whose latest review does not read
-// its current branch and governing documents; its reconciler runs each final
+// a final review of an assembled workstream once all its units have merged
+// and its latest review does not read its current branch and governing
+// documents; its reconciler runs each final
 // review operation.
 type finalReviewer struct {
 	s          *Service
@@ -278,6 +280,13 @@ func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID)
 	}
 	state, _ := a.s.store.Effective()
 	if scheduler.Paused(state.Pauses, a.repository.Project(), stream) {
+		return nil
+	}
+	b, found, err := (&masons{s: a.s, cfg: a.s.current(), repository: a.repository}).read(stream)
+	if err != nil || !found {
+		return err
+	}
+	if !allMerged(b) {
 		return nil
 	}
 	ops, err := a.repository.Operations(stream)
@@ -1013,7 +1022,36 @@ func (a *finalReviewer) record(ctx context.Context, stream config.WorkstreamID, 
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: finalReviewSubject, From: state.Value, To: fmt.Sprintf("%s-%d", report.Outcome, report.Review), Reason: reason},
 		Events:     []trace.Event{trace.Notice(id, "chief", body)}}
-	if _, err := a.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
+	documents := []trace.Document{doc}
+	txs := []trace.Transaction{tx}
+	if report.Outcome == finalReviewed {
+		added, err := a.followups(stream, report, revision)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if len(added) != 0 {
+			content, err := json.MarshalIndent(added, "", "  ")
+			if err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			rev, err := nextRevision(a.repository, stream, followup.DocumentID)
+			if err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			documents = append(documents, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: followup.DocumentID, Revision: rev, Project: a.repository.Project(), Workstream: stream, At: at, Actor: finalReviewActor, Cause: id}, Path: followup.Path, Content: string(content) + "\n"})
+			for _, u := range added {
+				subject := trace.UnitSubject(u.Unit.ID)
+				planned := subject + "-" + UnitPlanned
+				ready := subject + "-" + UnitReady
+				makeHeader := func(key, cause string) trace.Header {
+					return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: key, Revision: 1, Project: a.repository.Project(), Workstream: stream, Unit: u.Unit.ID, At: at, Actor: finalReviewActor, Cause: cause}
+				}
+				txs = append(txs, trace.Transaction{Transition: trace.Transition{Header: makeHeader(planned, id), Subject: subject, To: UnitPlanned, Reason: fmt.Sprintf("final review %d found %s missing: %s; report %s revision %d", report.Review, u.Criterion, u.Gap, finalReportPath, revision)}})
+				txs = append(txs, trace.Transaction{ExpectedVersion: 1, Transition: trace.Transition{Header: makeHeader(ready, planned), Subject: subject, From: UnitPlanned, To: UnitReady, Reason: fmt.Sprintf("follow-up %s is ready to address %s from final review %d", u.Unit.ID, u.Criterion, report.Review)}})
+			}
+		}
+	}
+	if _, err := a.repository.RecordDocumentsWith(ctx, documents, txs...); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			if recorded, outcomeErr := a.outcome(stream, report.Review); outcomeErr == nil && recorded != nil {
 				return *recorded, nil
@@ -1022,6 +1060,64 @@ func (a *finalReviewer) record(ctx context.Context, stream config.WorkstreamID, 
 		return coreadapter.OperationResult{}, err
 	}
 	return outcome, nil
+}
+
+// followups turns each unshown criterion into a unit scoped to the sealed
+// footprint already assigned to that criterion. New intent or footprint must
+// go through the owner amendment flow before unit work can use it.
+func (a *finalReviewer) followups(stream config.WorkstreamID, report FinalReport, revision int) ([]followup.Unit, error) {
+	_, graph, err := a.documents(stream, report)
+	if err != nil {
+		return nil, err
+	}
+	p, err := plan.Parse([]byte(graph.Content))
+	if err != nil {
+		return nil, err
+	}
+	known := map[string]bool{}
+	for _, u := range p.Units {
+		known[u.ID] = true
+	}
+	previous, err := followup.Read(a.repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range previous {
+		known[u.Unit.ID] = true
+	}
+	var out []followup.Unit
+	for _, c := range report.Criteria {
+		if c.Gap == "" {
+			continue
+		}
+		var footprint []string
+		var proof plan.Proof
+		for _, original := range p.Units {
+			for _, address := range original.Addresses {
+				if address.Criterion == c.Criterion {
+					if proof.Kind == "" {
+						proof = address.Proof
+					}
+					for _, name := range original.Footprint {
+						if !slices.Contains(footprint, name) {
+							footprint = append(footprint, name)
+						}
+					}
+				}
+			}
+		}
+		if len(footprint) == 0 {
+			return nil, fmt.Errorf("%s has no sealed footprint for %s; an owner-approved plan amendment is required", c.Criterion, c.Gap)
+		}
+		base := fmt.Sprintf("final-%d-%s", report.Review, strings.ReplaceAll(c.Criterion, "#", "-"))
+		id := base
+		for n := 2; known[id]; n++ {
+			id = fmt.Sprintf("%s-%d", base, n)
+		}
+		known[id] = true
+		out = append(out, followup.Unit{Review: report.Review, Report: revision, Criterion: c.Criterion, Gap: c.Gap, Unit: plan.Unit{ID: id, Title: "Address final review gap", Addresses: []plan.Address{{Criterion: c.Criterion, Proof: proof}}, DependsOn: []string{}, Footprint: footprint}})
+	}
+	return out, nil
 }
 
 // latestFinalReport returns the workstream's latest final report, and
@@ -1048,7 +1144,8 @@ func latestFinalReport(repository *trace.Repository, stream config.WorkstreamID)
 // authorise approval or delivery: none is recorded, the latest failed, or it
 // no longer reads the workstream's feature branch tip, latest seal and its
 // spec hash, latest spec and plan revisions and latest charter revision. The
-// reason is empty when the report can.
+// A report with gaps or unfinished follow-ups also cannot authorise delivery.
+// The reason is empty when the report can.
 func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamID) (FinalReport, string, error) {
 	report, found, err := latestFinalReport(a.repository, stream)
 	if err != nil || !found {
@@ -1087,6 +1184,18 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 		if field.reviewed != field.current {
 			return report, fmt.Sprintf("final review %d is stale: it read %s %v, and %v is current; a new final review is required", report.Review, field.name, field.reviewed, field.current), nil
 		}
+	}
+	for _, c := range report.Criteria {
+		if c.Gap != "" {
+			return report, fmt.Sprintf("final review %d has an unresolved gap for %s; follow-up units must land and a new final review is required", report.Review, c.Criterion), nil
+		}
+	}
+	b, found, err := (&masons{s: a.s, cfg: a.s.current(), repository: a.repository}).read(stream)
+	if err != nil {
+		return report, "", err
+	}
+	if !found || !allMerged(b) {
+		return report, "final-review follow-up units have not all landed", nil
 	}
 	return report, "", nil
 }

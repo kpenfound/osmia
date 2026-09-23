@@ -12,6 +12,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -322,7 +323,7 @@ func list(entries []string) string {
 }
 
 // UnitStatus is the recorded state, latest card and landing of one unit of
-// the sealed plan.
+// the sealed plan or a final-review follow-up.
 type UnitStatus struct {
 	Unit    string            `json:"unit"`
 	State   string            `json:"state"`
@@ -332,8 +333,8 @@ type UnitStatus struct {
 
 // unitStates returns states, latest cards and landings, taken from the given
 // workflow states, reports and landing documents, of the units of the
-// workstream's sealed plan, in plan order: none before a seal is recorded or
-// before the build recorded them.
+// workstream's sealed plan and final-review follow-ups, in order: none before
+// their unit states are recorded.
 func unitStates(repository *trace.Repository, stream config.WorkstreamID, states map[string]trace.WorkflowState) ([]UnitStatus, error) {
 	latest, _, found, err := seal.Latest(repository, stream)
 	if err != nil || !found {
@@ -346,6 +347,13 @@ func unitStates(repository *trace.Repository, stream config.WorkstreamID, states
 	p, err := plan.Parse([]byte(graph.Content))
 	if err != nil {
 		return nil, err
+	}
+	added, err := followup.Read(repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range added {
+		p.Units = append(p.Units, u.Unit)
 	}
 	documents, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {

@@ -47,7 +47,8 @@ type Options struct {
 	// clearing it lets them run. Outbox events are delivered to each
 	// workstream's chief of staff as queued turns, one per event window, and
 	// each recorded answer to a question is queued on its asker's thread.
-	// The mason controller starts the ready units of building workstreams,
+	// The mason controller starts ready units of building workstreams and
+	// final-review follow-ups of assembled workstreams,
 	// one implementing or waiting unit per workstream within capacity.masons,
 	// and queues each started unit's first mason turn for the scheduler. It
 	// parks a unit in waiting when its mason asks, and resumes it once the
