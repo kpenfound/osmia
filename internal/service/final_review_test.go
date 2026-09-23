@@ -443,8 +443,24 @@ func TestFinalReviewGapBecomesAnAssembledFollowupAndRequiresRereview(t *testing.
 	defer repository.Close()
 	a = &finalReviewer{s: f.s, repository: repository}
 	must(t, a.Pass(ctx))
-	if ops := finalOperations(t, repository, stream); len(ops) != 2 {
+	ops := finalOperations(t, repository, stream)
+	if len(ops) != 2 {
 		t.Fatalf("new review not asked: %+v", ops)
+	}
+	f.finalTurn(2, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"criteria": []any{
+			map[string]any{"criterion": "spec#1", "evidence": "resume.go"},
+			map[string]any{"criterion": "spec#2", "evidence": "proof_test.go shows acknowledged chunks are skipped"},
+		}})
+		return err
+	})
+	result, err := a.Apply(ctx, ops[1].Operation)
+	must(t, err)
+	if result.Outcome != "succeeded" {
+		t.Fatalf("rerun failed: %+v", result)
+	}
+	if report, reason, err := a.finalGate(ctx, stream); err != nil || reason != "" || report.Review != 2 {
+		t.Fatalf("rerun did not clear gap: review %+v, reason %q: %v", report, reason, err)
 	}
 	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.SpecPath), []byte(strings.Replace(validSpec, "never sent again", "sometimes resent", 1)), 0600))
 	if _, err := (&masons{s: f.s, cfg: f.s.cfg, repository: repository}).bundle(ctx, stream, id); !errors.Is(err, bundle.ErrStaleSpec) {
