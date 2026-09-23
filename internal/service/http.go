@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -169,6 +170,12 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == Prefix+"/projects" && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {
+		if r.Method == http.MethodPost {
+			if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(addProjectTimeout)); err != nil {
+				fail(w, Internal)
+				return
+			}
+		}
 		var (
 			result ProjectResponse
 			api    *APIError

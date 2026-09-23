@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,22 +18,32 @@ import (
 )
 
 type Client struct {
-	http      *http.Client
-	transport *http.Transport
+	http              *http.Client
+	transport         *http.Transport
+	defaultTimeout    time.Duration
+	addProjectTimeout time.Duration
 }
+
+const defaultClientTimeout = 15 * time.Second
+const addProjectTimeout = 60 * time.Second
 
 // NewClient never reads state files and never dials TCP or follows redirects.
 func NewClient(socket string) *Client {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
-	return &Client{http: &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, transport: transport}
+	return &Client{http: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, transport: transport, defaultTimeout: defaultClientTimeout, addProjectTimeout: addProjectTimeout}
 }
 func (c *Client) Close() { c.transport.CloseIdleConnections() }
 
-// Do exchanges shared API types. Transport failures use the unavailable code;
-// callers can still inspect context cancellation via their context.
+// Do exchanges shared API types with the default response budget. Transport
+// failures use the unavailable code; callers can still inspect context
+// cancellation via their context.
 func (c *Client) Do(ctx context.Context, method, path string, input, output any) error {
+	return c.do(ctx, method, path, input, output, c.defaultTimeout)
+}
+
+func (c *Client) do(ctx context.Context, method, path string, input, output any, timeout time.Duration) error {
 	if !strings.HasPrefix(path, Prefix+"/") {
 		return fmt.Errorf("expected a versioned API path")
 	}
@@ -42,29 +53,56 @@ func (c *Client) Do(ctx context.Context, method, path string, input, output any)
 			return err
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, method, "http://osmia"+path, &body)
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(callCtx, method, "http://osmia"+path, &body)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return &APIError{Unavailable, "cannot reach Osmia Unix socket"}
+		return transportError(ctx, err, timeout)
 	}
 	defer resp.Body.Close()
 	d := json.NewDecoder(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var out ErrorResponse
-		if err := d.Decode(&out); err != nil || out.Error.Code == "" {
+		if err := d.Decode(&out); err != nil {
+			if isTimeout(ctx, err) {
+				return transportError(ctx, err, timeout)
+			}
+			return &APIError{Internal, "invalid API error response"}
+		}
+		if out.Error.Code == "" {
 			return &APIError{Internal, "invalid API error response"}
 		}
 		return &out.Error
 	}
 	if output == nil {
 		_, err = io.Copy(io.Discard, resp.Body)
-		return err
+	} else {
+		err = d.Decode(output)
 	}
-	return d.Decode(output)
+	if err != nil {
+		return transportError(ctx, err, timeout)
+	}
+	return nil
+}
+
+func transportError(ctx context.Context, err error, timeout time.Duration) error {
+	if isTimeout(ctx, err) {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return &APIError{Unavailable, "no response before caller's context deadline"}
+		}
+		return &APIError{Unavailable, fmt.Sprintf("no response within %s", timeout)}
+	}
+	return &APIError{Unavailable, "cannot reach Osmia Unix socket"}
+}
+
+func isTimeout(ctx context.Context, err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout() || errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded)
 }
 func (c *Client) Health(ctx context.Context) (HealthResponse, error) {
 	var v HealthResponse
@@ -83,7 +121,7 @@ func (c *Client) Runtime(ctx context.Context) (RuntimeResponse, error) {
 }
 func (c *Client) AddProject(ctx context.Context, req ProjectAddRequest) (ProjectResponse, error) {
 	var v ProjectResponse
-	err := c.Do(ctx, "POST", Prefix+"/projects", req, &v)
+	err := c.do(ctx, "POST", Prefix+"/projects", req, &v, c.addProjectTimeout)
 	return v, err
 }
 func (c *Client) RemoveProject(ctx context.Context, id config.ProjectID) (ProjectResponse, error) {

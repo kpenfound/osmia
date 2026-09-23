@@ -30,9 +30,12 @@ type Options struct {
 	Build  Identity
 	// Workstreams supplies known identities when no trace exists. An existing
 	// trace supplies its validated workstream manifests.
-	Workstreams     []config.WorkstreamID
-	ShutdownTimeout time.Duration
-	Reconciliation  reconcile.Options
+	Workstreams       []config.WorkstreamID
+	ShutdownTimeout   time.Duration
+	ReadHeaderTimeout time.Duration
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	Reconciliation    reconcile.Options
 	// Threads binds the runner-boundary reconciler to the trace this service
 	// owns and the configuration it has loaded. It is called each time a
 	// project's trace opens, at startup and when a project is added, and
@@ -197,6 +200,16 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if opts.ShutdownTimeout <= 0 {
 		opts.ShutdownTimeout = 5 * time.Second
 	}
+	if opts.ReadHeaderTimeout <= 0 {
+		opts.ReadHeaderTimeout = 5 * time.Second
+	}
+	if opts.ReadTimeout <= 0 {
+		opts.ReadTimeout = 10 * time.Second
+	}
+	if opts.WriteTimeout <= 0 {
+		opts.WriteTimeout = 10 * time.Second
+	}
+	s.options = opts
 	s.lifetime, s.cancel = context.WithCancel(ctx)
 	s.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.requests.Add(1)
@@ -206,7 +219,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			return
 		}
 		s.handle(w, r)
-	}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second,
+	}), ReadHeaderTimeout: opts.ReadHeaderTimeout, ReadTimeout: opts.ReadTimeout, WriteTimeout: opts.WriteTimeout,
 		BaseContext: func(net.Listener) context.Context { return s.lifetime }}
 	s.ready.Store(true)
 	s.launch(active)
