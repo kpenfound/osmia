@@ -281,6 +281,7 @@ type runnerAdapter struct {
 	refresh *refresher
 	draft   *drafter
 	rounds  *debate
+	finals  *finalReviewer
 }
 
 func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
@@ -298,6 +299,9 @@ func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (c
 	}
 	if op.Action == ReplyAction || op.Action == RedraftAction {
 		return replier{a.rounds}.Inspect(ctx, op)
+	}
+	if op.Action == FinalReviewAction {
+		return a.finals.Inspect(ctx, op)
 	}
 	if a.turns == nil {
 		return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "No reconciliation adapter configured"}, nil
@@ -319,6 +323,9 @@ func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (cor
 	}
 	if op.Action == ReplyAction || op.Action == RedraftAction {
 		return replier{a.rounds}.Apply(ctx, op)
+	}
+	if op.Action == FinalReviewAction {
+		return a.finals.Apply(ctx, op)
 	}
 	if a.turns == nil {
 		return coreadapter.OperationResult{}, errors.New("no runner adapter is configured")

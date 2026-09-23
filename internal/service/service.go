@@ -453,11 +453,11 @@ func (s *Service) stop(active *activeProject) error {
 // trace must open cleanly before the service can report readiness. The runner
 // boundary is served by the bound thread reconciler for turns and by the
 // service's own reconcilers for knowledge-base extraction and refresh, architect drafts,
-// committee rounds and the architect's replies to them, and the repository
+// committee rounds and the architect's replies to them, and final reviews, and the repository
 // boundary by the service's sealer for sealings, its builder for builds and
 // its foreman for landings and rebases; the architect controller, then the shed
 // controller, then the sealing controller, then the building controller, then
-// the refresh and landing controllers run at the start of every pass, and the pass reconciles operations in stagePriority order. With
+// the refresh, landing and assembly controllers run at the start of every pass, and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
 // chief of staff, recorded answers are queued on their askers' threads, the
 // mason controller parks, resumes and starts units, and the scheduler runs, whose gate holds turns that a runtime pause covers and mason turns of units behind their feature branch;
@@ -493,8 +493,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	build := &builder{s: s, repository: repository}
 	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository}}
 	refresh := &refresher{extractor: &extractor{s: s, repository: repository}}
-	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, rounds: rounds}
-	hooks := []func(context.Context) error{draft.Pass, rounds.Pass, seals.Pass, build.Pass, refresh.Pass, land.Pass}
+	finals := &finalReviewer{s: s, repository: repository}
+	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, rounds: rounds, finals: finals}
+	hooks := []func(context.Context) error{draft.Pass, rounds.Pass, seals.Pass, build.Pass, refresh.Pass, land.Pass, finals.Pass}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, options.Schedule)
 	}

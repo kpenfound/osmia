@@ -258,7 +258,7 @@ func documentPath(p string, stream bool) error {
 	if !stream && (p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && (p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || shedPath(parts) || unitPath(parts)) {
+	if stream && (p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || shedPath(parts) || unitPath(parts) || finalPath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)
@@ -276,6 +276,12 @@ func unitPath(parts []string) bool {
 	}
 	n := strings.TrimSuffix(strings.TrimPrefix(parts[2], "ruling-"), ".json")
 	return strings.HasPrefix(parts[2], "ruling-") && strings.HasSuffix(parts[2], ".json") && shedRound.MatchString("round-"+n)
+}
+
+// finalPath reports whether parts name a final review record of a
+// workstream, final/rebase.json or final/report.json.
+func finalPath(parts []string) bool {
+	return len(parts) == 2 && parts[0] == "final" && (parts[1] == "rebase.json" || parts[1] == "report.json")
 }
 
 var shedRound = regexp.MustCompile(`^round-[1-9][0-9]{0,8}$`)

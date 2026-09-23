@@ -690,3 +690,147 @@ func TestRebaseReportsConflictsAndMarkersFindsThem(t *testing.T) {
 		t.Fatalf("markers after resolving %v: %v", marked, err)
 	}
 }
+
+// replayLeftovers fails the test when Replay left its temporary worktree.
+func (f fixture) replayLeftovers(t *testing.T) {
+	t.Helper()
+	if list := git(t, "-C", f.clone, "worktree", "list", "--porcelain"); strings.Contains(list, replayName) {
+		t.Fatalf("the replay worktree is still listed:\n%s", list)
+	}
+	if _, err := os.Lstat(filepath.Join(f.provider.Directory, replayName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the replay worktree's directory: %v", err)
+	}
+}
+
+// A replay applies each commit of the branch onto the new upstream commit in
+// order, keeping each message and author, even where a later commit changes
+// what an earlier one added. It is made the same way every time, moves no
+// branch and leaves no worktree behind; a head already on upstream is
+// returned as it is.
+func TestReplayAppliesEachCommitOntoUpstream(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base, feature, _ := rebaseFixture(t, f)
+	first := f.commitFiles(t, feature, base, map[string]string{"a.go": "a\n"})
+	second := f.commitFiles(t, feature, first, map[string]string{"a.go": "a2\n", "b.go": "b\n"})
+	upstream := f.advance(t, "upstream.txt")
+	if _, err := f.provider.Fetch(ctx, "upstream", "main"); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	commit, conflicts, err := f.provider.Replay(ctx, second, upstream, at)
+	if err != nil || len(conflicts) != 0 {
+		t.Fatalf("replay %s %v: %v", commit, conflicts, err)
+	}
+	f.replayLeftovers(t)
+	again, _, err := f.provider.Replay(ctx, second, upstream, at)
+	if err != nil || again != commit {
+		t.Fatalf("a second replay made %s, %v; want %s", again, err, commit)
+	}
+	if replayed := git(t, "-C", f.clone, "rev-list", "--reverse", upstream+".."+commit); len(strings.Fields(replayed)) != 2 {
+		t.Fatalf("the replay holds %q on upstream", replayed)
+	}
+	if parent := git(t, "-C", f.clone, "rev-parse", commit+"~2"); parent != upstream {
+		t.Fatalf("the replay starts from %s, not upstream %s", parent, upstream)
+	}
+	for i, original := range []string{second, first} {
+		replayed := fmt.Sprintf("%s~%d", commit, i)
+		for _, format := range []string{"%B", "%an <%ae> %at"} {
+			if got, want := git(t, "-C", f.clone, "log", "-1", "--format="+format, replayed), git(t, "-C", f.clone, "log", "-1", "--format="+format, original); got != want {
+				t.Fatalf("replayed %s %s is %q, original %q", replayed, format, got, want)
+			}
+		}
+		if committed := git(t, "-C", f.clone, "log", "-1", "--format=%cn <%ce> %ct", replayed); committed != "Osmia <osmia@localhost> "+fmt.Sprint(at.Unix()) {
+			t.Fatalf("replayed %s committed by %s", replayed, committed)
+		}
+	}
+	if a := git(t, "-C", f.clone, "show", commit+":a.go"); a != "a2" {
+		t.Fatalf("a.go holds %q", a)
+	}
+	if files := git(t, "-C", f.clone, "ls-tree", "-r", "--name-only", commit); files != "README\na.go\nb.go\nupstream.txt" {
+		t.Fatalf("the replayed tree holds %q", files)
+	}
+	if tip, _, err := f.provider.Branch(ctx, "osmia/w1"); err != nil || tip != second {
+		t.Fatalf("a replay moved the feature branch to %s, %v", tip, err)
+	}
+	if same, conflicts, err := f.provider.Replay(ctx, commit, upstream, at.Add(time.Hour)); err != nil || same != commit || len(conflicts) != 0 {
+		t.Fatalf("a head on upstream replayed to %s %v: %v", same, conflicts, err)
+	}
+}
+
+// A replay whose commit conflicts with upstream returns the conflicted paths
+// and no commit, moves nothing and leaves no worktree or replay state behind,
+// so the next replay starts clean.
+func TestReplayReportsConflictsAndLeavesNothing(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base, feature, _ := rebaseFixture(t, f)
+	head := f.commitFiles(t, feature, base, map[string]string{"README": "feature\n", "clean.go": "clean\n"})
+	if err := os.WriteFile(filepath.Join(f.scratch, "README"), []byte("upstream\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, "-C", f.scratch, "commit", "--quiet", "-am", "upstream README")
+	git(t, "-C", f.scratch, "push", "--quiet", "origin", "main")
+	upstream, err := f.provider.Fetch(ctx, "upstream", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit, conflicts, err := f.provider.Replay(ctx, head, upstream, time.Now())
+	if err != nil || commit != "" || !slices.Equal(conflicts, []string{"README"}) {
+		t.Fatalf("replay %q %v: %v", commit, conflicts, err)
+	}
+	f.replayLeftovers(t)
+	if tip, _, err := f.provider.Branch(ctx, "osmia/w1"); err != nil || tip != head {
+		t.Fatalf("a conflicted replay moved the feature branch to %s, %v", tip, err)
+	}
+	if _, conflicts, err := f.provider.Replay(ctx, head, upstream, time.Now()); err != nil || !slices.Equal(conflicts, []string{"README"}) {
+		t.Fatalf("a second replay %v: %v", conflicts, err)
+	}
+}
+
+// Export writes a commit's tracked regular files, with their executable
+// bits, and leaves out symbolic links and the repository's metadata.
+func TestExportWritesTheCommitsTrackedFiles(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base, feature, _ := rebaseFixture(t, f)
+	if err := os.MkdirAll(filepath.Join(feature.Path, "cmd"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(feature.Path, "cmd", "run.sh"), []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("README", filepath.Join(feature.Path, "link")); err != nil {
+		t.Fatal(err)
+	}
+	commit := f.commitFiles(t, feature, base, map[string]string{"main.go": "package main\n"})
+	if err := os.WriteFile(filepath.Join(feature.Path, "main.go"), []byte("uncommitted\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "branch")
+	if err := f.provider.Export(ctx, commit, dir); err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	if err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err == nil && !entry.IsDir() {
+			rel, _ := filepath.Rel(dir, path)
+			files = append(files, filepath.ToSlash(rel))
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(files, []string{"README", "cmd/run.sh", "main.go"}) {
+		t.Fatalf("exported %v", files)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "main.go")); err != nil || string(data) != "package main\n" {
+		t.Fatalf("main.go holds %q, %v", data, err)
+	}
+	if info, err := os.Stat(filepath.Join(dir, "cmd", "run.sh")); err != nil || info.Mode().Perm()&0100 == 0 {
+		t.Fatalf("run.sh lost its executable bit: %v %v", info, err)
+	}
+}
