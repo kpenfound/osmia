@@ -537,12 +537,8 @@ func (f *foreman) record(ctx context.Context, stream config.WorkstreamID, in lan
 	landingState := b.states[landingSubject(in.Unit)]
 	txs = append(txs, trace.Transaction{ExpectedVersion: landingState.Version,
 		Transition: trace.Transition{Header: f.header(transition+"-landed", stream, in.Unit, operation, at), Subject: landingSubject(in.Unit), From: landingState.Value, To: fmt.Sprintf("landed-%d", in.Review), Reason: reason}})
-	mergedUnit := func(id string) bool { return id == in.Unit || b.states[trace.UnitSubject(id)].Value == UnitMerged }
-	for _, u := range b.plan.Units {
+	for _, u := range newlyReady(b.plan, b.states, in.Unit) {
 		state := b.states[trace.UnitSubject(u.ID)]
-		if state.Value != UnitPlanned || !slices.Contains(u.DependsOn, in.Unit) || slices.ContainsFunc(u.DependsOn, func(d string) bool { return !mergedUnit(d) }) {
-			continue
-		}
 		txs = append(txs, trace.Transaction{ExpectedVersion: state.Version,
 			Transition: trace.Transition{Header: f.header(trace.UnitSubject(u.ID)+"-"+UnitReady, stream, u.ID, operation, at), Subject: trace.UnitSubject(u.ID), From: UnitPlanned, To: UnitReady,
 				Reason: fmt.Sprintf("unit %s is ready: every unit it depends on has merged: %s", u.ID, strings.Join(u.DependsOn, ", "))}})
@@ -559,6 +555,20 @@ func (f *foreman) record(ctx context.Context, stream config.WorkstreamID, in lan
 		return coreadapter.OperationResult{}, err
 	}
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
+}
+
+// newlyReady returns the planned units of the plan, in plan order, that
+// depend on the unit that merges and whose every other dependency has
+// merged.
+func newlyReady(p plan.Plan, states map[string]trace.WorkflowState, merging string) []plan.Unit {
+	merged := func(id string) bool { return id == merging || states[trace.UnitSubject(id)].Value == UnitMerged }
+	var out []plan.Unit
+	for _, u := range p.Units {
+		if states[trace.UnitSubject(u.ID)].Value == UnitPlanned && slices.Contains(u.DependsOn, merging) && !slices.ContainsFunc(u.DependsOn, func(d string) bool { return !merged(d) }) {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // refuse records why the landing was refused, tells the chief of staff, and

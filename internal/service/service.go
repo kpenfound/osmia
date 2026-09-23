@@ -443,9 +443,10 @@ func (s *Service) stop(active *activeProject) error {
 // boundary is served by the bound thread reconciler for turns and by the
 // service's own reconcilers for knowledge-base extraction, architect drafts,
 // committee rounds and the architect's replies to them, and the repository
-// boundary by the service's sealer for sealings and its builder for builds;
-// the architect controller, then the shed controller, then the sealing
-// controller, then the building controller run at the start of every pass, and the pass reconciles operations in stagePriority order. With
+// boundary by the service's sealer for sealings, its builder for builds and
+// its foreman for landings; the architect controller, then the shed
+// controller, then the sealing controller, then the building controller, then
+// the landing controller run at the start of every pass, and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
 // chief of staff, recorded answers are queued on their askers' threads, the
 // mason controller parks, resumes and starts units, and the scheduler runs, whose gate holds turns that a runtime pause covers;

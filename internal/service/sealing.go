@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -293,10 +292,7 @@ func (z *sealer) outcome(stream config.WorkstreamID, k int, operation string) (*
 }
 
 // git returns the workspace provider of the project's clone.
-func (z *sealer) git() *workspace.Git {
-	cfg := z.s.current()
-	return &workspace.Git{Clone: cfg.Project.Clone, Directory: filepath.Join(cfg.Root.String(), branchesDirectory, string(cfg.Project.ID))}
-}
+func (z *sealer) git() *workspace.Git { return featureWorkspaces(z.s.current()) }
 
 // Inspect reads the recorded transitions and the clone. A recorded outcome
 // completes the operation; otherwise it is absent, with what the clone holds

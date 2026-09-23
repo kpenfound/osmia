@@ -82,7 +82,9 @@ shape as a reply, `shed/round-<n>/packet.json`, the
 [report and candidate](service.md#finishing-units), where `<unit>` is the unit
 ID, `units/<unit>/review.json`, the prepared review's candidate, base, spec
 and plan revisions and diff digest followed by the reviewer's exact verdict,
-criterion evidence, findings and bounce count, `units/<unit-subject>/ruling-<n>.json`,
+criterion evidence, findings and bounce count, `units/<unit>/landing.json`,
+the [landing](service.md#landing-a-unit) of the unit's approval as one feature
+branch commit, `units/<unit-subject>/ruling-<n>.json`,
 the owner's direction after bounce `n`, and the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
 round: `shed/round-<n>/owner.json`, the owner's objections, a record of the
 same shape as a member's; `shed/round-<n>/rulings.json`, what the owner ruled
