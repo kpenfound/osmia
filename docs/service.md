@@ -1566,6 +1566,91 @@ that does not descend from the feature branch is refused before anything is
 committed: `workspace <path> is at <commit>, which does not descend from
 <branch>`.
 
+## Assembly and final review
+
+The assembly controller runs in every reconciliation pass after the landing
+controller. A `building` workstream moves to `assembled` once every unit of
+its sealed plan is `merged`, and not before: the transition `assembled`
+(actor `service`/`foreman`, cause the last unit's move to merged, reason
+`every unit of the sealed plan has merged onto <branch>: <ids>; the feature
+branch is rebased onto upstream and read against the sealed spec and the
+charter next`) tells the chief of staff. Nothing on the workstream's units
+moves after that.
+
+### Asking for a final review
+
+For an `assembled` workstream that is not paused, the controller asks for
+final review `<k>` when none has a result pending and no review was asked for,
+and no reviewed report records, the current inputs: the feature branch tip,
+the latest seal, its spec and plan revisions and the latest charter revision.
+A service without a committee runner asks for none. It publishes the
+operation `final-review` (input `review`, `commit`, `seal`, `spec`, `plan`
+and `charter`) on the runner boundary with the transition `final-review-<k>`
+(actor `service`/`final-review`, cause `assembled`), which moves the workflow
+subject `final-review` to `requested-<k>`. A review that failed is asked for
+again only once one of its inputs changes.
+
+### Running a final review
+
+The operation first checks its inputs. The workstream must still be
+`assembled` and read the seal, spec, plan and charter revisions the review
+was asked for, and, before the rebase, its feature branch must still be at
+`commit`; otherwise the review fails with the reason.
+
+The foreman then rebases the feature branch one last time: it fetches the
+project's configured `base_branch` from the remote whose URL names its
+`upstream`, and replays each commit the branch holds on top of the fetched
+commit, in a temporary worktree, keeping each commit's message and author and
+committing as `Osmia <osmia@localhost>` at the time the review was asked for.
+A commit whose change upstream already holds is dropped, and a branch already
+on upstream stays as it is. `final/rebase.json` records the review, the
+operation, the branch, the upstream remote, branch and commit, the commit the
+branch was at and the rebased commit; only then do the branch and its
+workspace move to the rebased commit, so a review a stop interrupted moves
+the branch to the recorded commit, whatever upstream did since. A replay that
+conflicts moves nothing and fails the review with the conflicted paths. Fetch
+and Git errors leave the operation pending for another attempt.
+
+The workstream's first committee member, its thread created when debate was
+skipped, then reads the rebased commit in a turn the service runs itself,
+like a [shed round](#a-members-turn)'s. Its read-only view holds `branch/`,
+the rebased commit's tracked files, `branch.diff`, the branch's change to the
+upstream commit, the sealed `spec.md` and `plan.json`, the charter revision
+the review reads as `charter.md`, and each unit's latest `report.json` and
+`landing.json` under `units/<id>/`. The member holds `file_read` and
+`final_report`, nothing that writes, runs or fetches. `final_report` takes an
+optional `summary` and `criteria`, one entry per criterion of the sealed
+spec, cited as `spec#<n>`, with either `evidence`, what in the branch shows
+the criterion holds, or a `gap`, what does not. A call that leaves out a
+criterion, repeats one, cites one the spec does not hold, or gives an entry
+both or neither is refused with the reason; a later accepted call replaces an
+earlier one. A turn a stop interrupted is abandoned and started again, up to
+the committee's attempt bound.
+
+One trace commit then records the next revision of `final/report.json` with
+the transition `final-review-<k>-reviewed` or `final-review-<k>-failed`, which
+moves `final-review` to `reviewed-<k>` or `failed-<k>`, and a notice for the
+chief of staff. The report holds the review number and operation, the
+outcome, the branch, the commit it was asked for and the reviewed commit, the
+upstream remote, branch and commit, the seal, spec hash, spec, plan and
+charter revisions, the reader and its turn, the summary and, for every sealed
+criterion in spec order, its text with the evidence or the gap. A failed
+report holds the failure instead of criteria, and the conflicted paths when
+the replay conflicted: the member's turn ended without a report or with
+another status, the turn was interrupted too often, the workstream was
+abandoned, or an input changed. A review whose outcome is recorded completes
+on inspection.
+
+### A current report
+
+A final report authorises a later owner approval or delivery only while it is
+current. A failed report never does. A reviewed report stops being current
+when the feature branch moves from the reviewed commit, or the latest seal,
+its spec hash, the latest spec or plan revision, or the latest charter
+revision differs from the one it read; the reason names the first input that
+changed. The controller then asks for a new final review. The report, and
+whether it is current, reads the same after a restart.
+
 ## Abandoning
 
 `POST /v1/abandon/<workstream-id>` abandons a workstream of the active project

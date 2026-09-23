@@ -338,6 +338,107 @@ func (g *Git) Advance(ctx context.Context, w Worktree, from, to string) error {
 	return err
 }
 
+// replayName names the temporary worktree Replay runs in, under Directory.
+// A leading dot keeps it apart from every workspace name.
+const replayName = ".replay"
+
+// Replay returns the commit that holds each commit head has and onto does
+// not, applied on top of onto in order, each keeping its message and author
+// and committed by Osmia at the given time, with the paths that conflicted,
+// sorted, when that cannot be done. A commit whose change onto already holds
+// is dropped, and a head that already descends from onto is returned as it
+// is. The replay runs in a temporary detached worktree under Directory, which
+// it removes, so no branch moves; the same arguments make the same commit.
+func (g *Git) Replay(ctx context.Context, head, onto string, at time.Time) (string, []string, error) {
+	descends, err := g.Ancestor(ctx, onto, head)
+	if err != nil || descends {
+		return head, nil, err
+	}
+	dir := g.path(replayName)
+	if err := g.dropReplay(ctx, dir); err != nil {
+		return "", nil, err
+	}
+	defer g.dropReplay(context.WithoutCancel(ctx), dir)
+	if err := os.MkdirAll(g.Directory, 0700); err != nil {
+		return "", nil, err
+	}
+	if _, err := g.run(ctx, "worktree", "add", "--quiet", "--detach", dir, head); err != nil {
+		return "", nil, err
+	}
+	date := fmt.Sprintf("@%d +0000", at.Unix())
+	env := append(slices.Clone(identity), "GIT_COMMITTER_DATE="+date, "GIT_EDITOR=true", "GIT_SEQUENCE_EDITOR=true")
+	settings := []string{"rebase.autoStash=false", "rebase.autoSquash=false", "rebase.updateRefs=false", "rebase.rebaseMerges=false", "commit.gpgSign=false"}
+	env = append(env, fmt.Sprintf("GIT_CONFIG_COUNT=%d", len(settings)))
+	for i, setting := range settings {
+		key, value, _ := strings.Cut(setting, "=")
+		env = append(env, fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", i, key), fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", i, value))
+	}
+	if _, err := g.runIn(ctx, dir, env, "rebase", "--quiet", "--no-autostash", onto); err != nil {
+		out, diffErr := g.runInRaw(ctx, dir, nil, "diff", "--name-only", "--diff-filter=U", "-z")
+		var conflicts []string
+		for _, path := range strings.Split(out, "\x00") {
+			if path != "" && !slices.Contains(conflicts, path) {
+				conflicts = append(conflicts, path)
+			}
+		}
+		if diffErr != nil || len(conflicts) == 0 {
+			return "", nil, errors.Join(err, diffErr)
+		}
+		slices.Sort(conflicts)
+		return "", conflicts, nil
+	}
+	commit, err := g.runIn(ctx, dir, nil, "rev-parse", "--verify", "HEAD^{commit}")
+	return commit, nil, err
+}
+
+// dropReplay removes Replay's temporary worktree at dir, and what a stop left
+// of it.
+func (g *Git) dropReplay(ctx context.Context, dir string) error {
+	entries, err := g.list(ctx)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if g.own(entry, replayName) {
+			if err := g.forget(ctx, entry); err != nil {
+				return err
+			}
+		}
+	}
+	return os.RemoveAll(dir)
+}
+
+// Export writes the tracked regular files of a commit's tree, with their
+// executable bits, into the directory dir, which must not hold them yet.
+// Symbolic links and submodules are left out.
+func (g *Git) Export(ctx context.Context, commit, dir string) error {
+	index, err := os.CreateTemp("", "osmia-export-*.index")
+	if err != nil {
+		return err
+	}
+	name := index.Name()
+	defer os.Remove(name)
+	if err := errors.Join(index.Close(), os.Remove(name)); err != nil {
+		return err
+	}
+	env := []string{"GIT_INDEX_FILE=" + name}
+	if _, err := g.runEnv(ctx, env, "read-tree", commit+"^{tree}"); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	if _, err := g.runEnv(ctx, append(env, "GIT_WORK_TREE="+dir), "checkout-index", "--all", "--force"); err != nil {
+		return err
+	}
+	return filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || entry.Type().IsRegular() {
+			return err
+		}
+		return os.Remove(path)
+	})
+}
+
 // Commit is what a commit records.
 type Commit struct {
 	Tree    string

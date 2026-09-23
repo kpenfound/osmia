@@ -87,7 +87,10 @@ the [landing](service.md#landing-a-unit) of the unit's approval as one feature
 branch commit, `units/<unit>/rebase.json`, the
 [rebase](service.md#rebasing-units-in-flight) of the unit's workspace onto a
 moved feature branch, `units/<unit-subject>/ruling-<n>.json`,
-the owner's direction after bounce `n`, and the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
+the owner's direction after bounce `n`, `final/rebase.json`, the
+[final rebase](service.md#running-a-final-review) of an assembled
+workstream's feature branch onto upstream, `final/report.json`, its
+criterion-by-criterion final report, and the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
 round: `shed/round-<n>/owner.json`, the owner's objections, a record of the
 same shape as a member's; `shed/round-<n>/rulings.json`, what the owner ruled
 and overruled about the objections that stand; `shed/round-<n>/more.json`, the
