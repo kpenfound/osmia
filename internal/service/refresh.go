@@ -48,6 +48,18 @@ type refresher struct{ *extractor }
 
 func refreshKey(commit string) string { return "refresh-" + commit[:16] }
 
+func refreshResult(docs []trace.Document) coreadapter.OperationResult {
+	result := extractionResult(docs)
+	count := 0
+	for _, d := range docs {
+		if _, ok := kb.Subsystem(d.Path); ok {
+			count++
+		}
+	}
+	result.Evidence = fmt.Sprintf("recorded %d subsystem revisions and the source ledger", count)
+	return result
+}
+
 func refreshPending(repo *trace.Repository) (bool, error) {
 	streams, err := repo.Workstreams()
 	if err != nil {
@@ -239,7 +251,7 @@ func (r *refresher) Inspect(ctx context.Context, op coreadapter.Operation) (core
 		return coreadapter.Observation{}, err
 	}
 	if len(docs) > 0 {
-		result := extractionResult(docs)
+		result := refreshResult(docs)
 		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "knowledge base recorded", Result: &result}, nil
 	}
 	t, err := r.repository.Thread(librarianWorkstream(r.repository.Project()), librarianAgent)
@@ -268,7 +280,7 @@ func (r *refresher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		return coreadapter.OperationResult{}, err
 	}
 	if len(docs) > 0 {
-		return extractionResult(docs), nil
+		return refreshResult(docs), nil
 	}
 	stream := librarianWorkstream(r.repository.Project())
 	for {
@@ -498,5 +510,5 @@ func (r *refresher) recordRefresh(ctx context.Context, operation string, in refr
 	if err := r.repository.RecordDocuments(ctx, records); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	return extractionResult(records), nil
+	return refreshResult(records), nil
 }
