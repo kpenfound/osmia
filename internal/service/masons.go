@@ -160,14 +160,14 @@ func (m *masons) Pass(ctx context.Context) error {
 			idle = append(idle, b)
 		}
 	}
+	pending, err := refreshPending(m.repository)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return nil
+	}
 	for _, b := range startOrder(idle, state.Priorities, m.cfg.Project.ID) {
-		pending, err := refreshPending(m.repository)
-		if err != nil {
-			return err
-		}
-		if pending {
-			return nil
-		}
 		if implementing >= m.cfg.Capacity.Masons {
 			return nil
 		}

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -48,6 +49,13 @@ type refresher struct{ *extractor }
 func refreshKey(commit string) string { return "refresh-" + commit[:16] }
 
 func refreshPending(repo *trace.Repository) (bool, error) {
+	streams, err := repo.Workstreams()
+	if err != nil {
+		return false, err
+	}
+	if !slices.Contains(streams, librarianWorkstream(repo.Project())) {
+		return false, nil
+	}
 	ops, err := repo.Operations(librarianWorkstream(repo.Project()))
 	if err != nil {
 		return false, err
@@ -64,6 +72,13 @@ func refreshPending(repo *trace.Repository) (bool, error) {
 // document is immutable and the request ID is derived from its landed commit.
 func (r *refresher) Pass(ctx context.Context) error {
 	stream := librarianWorkstream(r.repository.Project())
+	streams, err := r.repository.Workstreams()
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(streams, stream) {
+		return nil
+	}
 	ops, err := r.repository.Operations(stream)
 	if err != nil {
 		return err
@@ -88,10 +103,6 @@ func (r *refresher) Pass(ctx context.Context) error {
 		if op.Operation.Action == ExtractAction && op.Result == nil {
 			return nil
 		}
-	}
-	streams, err := r.repository.Workstreams()
-	if err != nil {
-		return err
 	}
 	for _, workstream := range streams {
 		if workstream == stream {
