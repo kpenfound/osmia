@@ -60,6 +60,10 @@ them through debate, the owner's overrule, a skipped debate and an abandon to
 sealed, ratified plans with feature branches, across a restart in the middle
 of a sealing.
 
+The [M3 sequential implementation demonstration](docs/m3-exit.md) takes a
+ratified two-unit plan through a mason's question and answer to a recorded
+report and candidate commit for the first unit.
+
 The [charter reference](docs/charter.md) documents the charter template, the
 numbered-rule format and how owner edits are recorded.
 
