@@ -75,6 +75,9 @@ func (r *refresher) Pass(ctx context.Context) error {
 			if err := json.Unmarshal(op.Operation.Input, &in); err != nil {
 				return err
 			}
+			if len(in.Commit) < 16 {
+				return errors.New("recorded refresh has no landing commit")
+			}
 			known[in.Commit] = true
 			if op.Result == nil {
 				return nil
@@ -183,7 +186,7 @@ func (r *refresher) decode(op coreadapter.Operation) (refreshInput, error) {
 	if err := json.Unmarshal(op.Input, &in); err != nil {
 		return in, err
 	}
-	if in.Workstream == "" || in.Unit == "" || in.Landing < 1 || in.Report < 1 || len(in.Commit) < 16 || refreshKey(in.Commit) == "" {
+	if in.Workstream == "" || in.Unit == "" || in.Landing < 1 || in.Report < 1 || len(in.Commit) < 16 {
 		return in, errors.New("incomplete refresh operation")
 	}
 	return in, nil
