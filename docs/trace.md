@@ -8,6 +8,27 @@ repository with an exclusive directory creation and preserves an existing
 paths. `Repository` is a trace handle; it does not implement a target workspace
 or provide delivery operations.
 
+The local API review demonstration is `TestM3ExactReviewDemonstration` in
+`internal/service/review_demo_test.go`. Run it inside Dagger with:
+
+```sh
+dagger core container from --address golang:1.26-bookworm \
+  with-directory --path /src --source . --exclude .git,.bees \
+  with-workdir --path /src \
+  with-exec --args=go,test,-count=1,-run,TestM3ExactReviewDemonstration,-v,./internal/service \
+  combined-output
+```
+
+It builds candidates in a local Git fixture using fake mason and reviewer turns.
+The first review records a criterion-linked finding and sends the unit back.
+The mason revises the candidate, then the reviewer asks an owner question. A
+restart preserves that question and candidate. The owner answer lets review
+continue, but an unexplained changed path still prevents approval. A further
+review explains the path and approves the current candidate. Inspect
+`units/resume/report.json` and `units/resume/review.json` revisions,
+`agents/reviewer-resume/log.jsonl`, `questions/1/`, and `events.jsonl` to follow
+the requests, results, ruling, footprint refusal and exact approval.
+
 `CreateWorkstream` reserves a supplied `config.WorkstreamID`. Project and
 workstream manifests retain their identity and creation provenance. `Workstreams`
 returns identities validated against those manifests, including terminal streams.
