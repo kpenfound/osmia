@@ -105,6 +105,31 @@ func (g *Git) MergeBase(ctx context.Context, a, b string) (string, error) {
 	return g.run(ctx, "merge-base", a, b)
 }
 
+// Diff reads two recorded commits directly, independently of moving branches.
+func (g *Git) Diff(ctx context.Context, base, candidate string) (string, error) {
+	for _, revision := range []string{base, candidate} {
+		if len(revision) != 40 {
+			return "", fmt.Errorf("invalid recorded commit %q", revision)
+		}
+		for _, ch := range revision {
+			if ch < '0' || ch > '9' && ch < 'a' || ch > 'f' {
+				return "", fmt.Errorf("invalid recorded commit %q", revision)
+			}
+		}
+		if _, err := g.run(ctx, "cat-file", "-e", revision+"^{commit}"); err != nil {
+			return "", fmt.Errorf("recorded commit %s is unavailable: %w", revision, err)
+		}
+	}
+	ancestor, err := g.Ancestor(ctx, base, candidate)
+	if err != nil {
+		return "", err
+	}
+	if !ancestor {
+		return "", fmt.Errorf("recorded candidate %s does not descend from base %s", candidate, base)
+	}
+	return g.runInRaw(ctx, g.Clone, nil, "diff", "--no-ext-diff", "--binary", "--no-renames", base, candidate, "--")
+}
+
 // identity is the author and committer of the commits the service makes.
 var identity = []string{"GIT_AUTHOR_NAME=Osmia", "GIT_AUTHOR_EMAIL=osmia@localhost", "GIT_COMMITTER_NAME=Osmia", "GIT_COMMITTER_EMAIL=osmia@localhost"}
 
@@ -336,6 +361,11 @@ func (g *Git) runEnv(ctx context.Context, extra []string, args ...string) (strin
 
 // runIn runs Git the way run does, in dir rather than the clone.
 func (g *Git) runIn(ctx context.Context, dir string, extra []string, args ...string) (string, error) {
+	out, err := g.runInRaw(ctx, dir, extra, args...)
+	return strings.TrimSpace(out), err
+}
+
+func (g *Git) runInRaw(ctx context.Context, dir string, extra []string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "gc.auto=0"}, args...)...)
 	cmd.Env = []string{"GIT_TERMINAL_PROMPT=0", "LC_ALL=C"}
 	for _, name := range []string{"PATH", "HOME", "SSH_AUTH_SOCK", "GIT_SSH_COMMAND", "GIT_SSH", "XDG_CONFIG_HOME", "TMPDIR"} {
@@ -352,7 +382,7 @@ func (g *Git) runIn(ctx context.Context, dir string, extra []string, args ...str
 		}
 		return "", &Error{Args: args, Err: err, Stderr: strings.TrimSpace(stderr.String())}
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return stdout.String(), nil
 }
 
 // Error is a Git command that failed, with what it said.
