@@ -59,7 +59,8 @@ shape as a reply, `shed/round-<n>/packet.json`, the
 [ratification packet](service.md#the-packet) the chief of staff presents,
 `units/<unit>/report.json`, a unit's
 [report and candidate](service.md#finishing-units), where `<unit>` is the unit
-ID, and the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
+ID, `units/<unit>/review.json`, the prepared review's candidate, base, spec
+and plan revisions and diff digest, and the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
 round: `shed/round-<n>/owner.json`, the owner's objections, a record of the
 same shape as a member's; `shed/round-<n>/rulings.json`, what the owner ruled
 and overruled about the objections that stand; `shed/round-<n>/more.json`, the

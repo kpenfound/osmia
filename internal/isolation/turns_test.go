@@ -337,6 +337,26 @@ func TestScopedToolsFollowGrantForEachTurn(t *testing.T) {
 	}
 }
 
+func TestReviewerGrantIsReadOnly(t *testing.T) {
+	grant, err := roleGrant("reviewer", a.Capabilities{Tools: []string{"file_read", "file_write", "shell", "git"}, WriteFiles: true, Execute: true, Network: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grant.WriteFiles || grant.Execute || grant.Network {
+		t.Fatalf("reviewer capabilities %+v", grant)
+	}
+	// Effect filtering in Turns removes these tools even when a repository
+	// configuration grants their names.
+	r, _, h, _, input := fixture(t, "reviewer", "container")
+	r.Grants["reviewer"] = a.Capabilities{Tools: []string{"file_read", "file_write", "shell", "git"}, WriteFiles: true, Execute: true, Network: true}
+	if _, err := r.Run(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.requests) != 1 || len(h.requests[0].Tools) != 1 || h.requests[0].Tools[0].Name != "file_read" {
+		t.Fatalf("reviewer tools %+v", h.requests)
+	}
+}
+
 func TestStatusToolOnlyReachesChiefOfStaff(t *testing.T) {
 	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason", "librarian"} {
 		t.Run(role, func(t *testing.T) {

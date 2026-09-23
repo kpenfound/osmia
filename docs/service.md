@@ -1312,6 +1312,19 @@ past the commit its workspace is at, stays `implementing` and is [blocked](#star
 made: <error>`: it takes no mason slot, its workstream starts no other unit,
 and the next pass tries again.
 
+### Preparing a unit review
+
+The service prepares a reviewing unit from its recorded report and seal. It
+reads the diff between the report's base and candidate commits directly, even
+if either branch has moved. The request carries the sealed spec and plan, the
+mason's criterion report, the resolved seal footprint, and charter and local
+context scoped to the unit's entities. Missing report fields, commits, seals,
+or resolved entities stop preparation with a recorded block reason. The
+prepared identity in `units/<id>/review.json` records the subject, candidate, base, spec
+and plan revisions, the diff digest, report revision and seal number. Repeated
+preparation of the same evidence leaves that revision unchanged. Reviewer
+dispatch and verdict handling use this preparation in a later stage.
+
 ### Unit workspaces
 
 The service gives each unit of a workstream a workspace of its own: a Git
