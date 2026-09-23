@@ -271,18 +271,22 @@ func (s *Service) extractProject(ctx context.Context, req ProjectExtractRequest)
 	return ExtractionResponse{Project: projectView(cfg.Root, cfg.Project), Extraction: ExtractionState{Extraction: n, State: "pending", At: at}}, nil
 }
 
-// runnerAdapter routes runner-boundary operations: extraction passes to the
-// service's extractor, architect drafts to its drafter, committee rounds and
+// runnerAdapter routes runner-boundary operations: extraction and refresh
+// passes to the librarian, architect drafts to its drafter, committee rounds and
 // the architect's replies to its debate, everything else to the bound thread
 // reconciler.
 type runnerAdapter struct {
 	turns   coreadapter.Reconciler
 	extract *extractor
+	refresh *refresher
 	draft   *drafter
 	rounds  *debate
 }
 
 func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
+	if op.Action == RefreshAction {
+		return a.refresh.Inspect(ctx, op)
+	}
 	if op.Action == ExtractAction {
 		return a.extract.Inspect(ctx, op)
 	}
@@ -301,6 +305,9 @@ func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (c
 	return a.turns.Inspect(ctx, op)
 }
 func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
+	if op.Action == RefreshAction {
+		return a.refresh.Apply(ctx, op)
+	}
 	if op.Action == ExtractAction {
 		return a.extract.Apply(ctx, op)
 	}
@@ -618,7 +625,16 @@ func (e *extractor) selectView(ctx context.Context, scope coreadapter.Scope) (is
 	if err := e.stage(ctx, cfg.Project.Clone, workspace); err != nil {
 		return isolation.Selection{}, err
 	}
-	return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: []string{"repo", "kb", "seed", kb.OutputDirectory}, Execution: settings}, nil
+	if strings.HasPrefix(scope.Turn, "refresh-") {
+		if err := stageRefreshSource(ctx, e.repository, cfg.Project.Clone, scope.Turn, workspace); err != nil {
+			return isolation.Selection{}, err
+		}
+	}
+	paths := []string{"repo", "kb", "seed", kb.OutputDirectory}
+	if strings.HasPrefix(scope.Turn, "refresh-") {
+		paths = append(paths, "source")
+	}
+	return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: settings}, nil
 }
 
 // stage builds the workspace: the clone's tracked files under repo/, the

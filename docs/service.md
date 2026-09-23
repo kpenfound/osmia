@@ -1385,6 +1385,10 @@ another reviewer turn.
 
 ### Landing a unit
 
+The librarian's [refresh pass](knowledge-base.md#refresh-after-landing) follows
+each recorded landing. A ready unit waits while that refresh is pending, so
+its next file-based bundle can include the new local knowledge.
+
 The landing controller runs in every reconciliation pass after the building
 controller. It runs one landing and rebase sequence at a time per project:
 while a landing operation of the project has no result, it asks for nothing.
@@ -1762,17 +1766,17 @@ service keeps running and the other roles' turns still run.
 `Options.Threads` binds a runner-boundary reconciler to the trace the service
 opened and the configuration it loaded, each time a project's trace opens: at startup and when a project is
 added. It replaces any runner adapter in `Options.Reconciliation` for every
-runner operation except the librarian's `kb-extract`, the architect's
-`architect-draft` and the shed's `shed-round` and `shed-reply` actions, which
+runner operation except the librarian's `kb-extract` and `kb-refresh`, the
+architect's `architect-draft` and the shed's `shed-round` and `shed-reply` actions, which
 the service reconciles itself. The [thread dispatcher](trace.md#turn-dispatch) is the
 intended binding; it receives the service-owned repository handle, which callers
 must not close. The [M1 demonstration](m1-demonstration.md) uses this path with
 fake engines.
 
 `Options.Librarian` supplies the execution engine and MCP host factory the
-librarian's extraction turns run in. Without it every extraction fails with a
-recorded reason, so a service without an execution engine still registers
-projects and reports the failure in status.
+librarian's extraction and refresh turns run in. Without it these operations
+fail with a recorded reason, so a service without an execution engine still
+registers projects and reports extraction failure in status.
 
 With `Options.Threads` set, the service also starts ready units (see
 [starting units](#starting-units)), runs queued workstream turns on its own,

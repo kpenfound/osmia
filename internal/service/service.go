@@ -58,8 +58,8 @@ type Options struct {
 	// Callers must not close the repository.
 	Threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error)
 	// Librarian supplies the execution boundary of the librarian's
-	// knowledge-base extraction turns. Without it every extraction fails with
-	// a recorded reason and the project stays usable.
+	// knowledge-base extraction and refresh turns. Without it those operations
+	// fail with a recorded reason and the project stays usable.
 	Librarian *Librarian
 	// Architect supplies the execution boundary of the architect's drafting
 	// turns, of its replies to shed rounds and of the redrafts the owner asks
@@ -452,12 +452,12 @@ func (s *Service) stop(active *activeProject) error {
 // openReconciliation leaves trace creation to project registration; an existing
 // trace must open cleanly before the service can report readiness. The runner
 // boundary is served by the bound thread reconciler for turns and by the
-// service's own reconcilers for knowledge-base extraction, architect drafts,
+// service's own reconcilers for knowledge-base extraction and refresh, architect drafts,
 // committee rounds and the architect's replies to them, and the repository
 // boundary by the service's sealer for sealings, its builder for builds and
 // its foreman for landings and rebases; the architect controller, then the shed
 // controller, then the sealing controller, then the building controller, then
-// the landing controller run at the start of every pass, and the pass reconciles operations in stagePriority order. With
+// the refresh and landing controllers run at the start of every pass, and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
 // chief of staff, recorded answers are queued on their askers' threads, the
 // mason controller parks, resumes and starts units, and the scheduler runs, whose gate holds turns that a runtime pause covers and mason turns of units behind their feature branch;
@@ -492,8 +492,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	seals := &sealer{s: s, repository: repository}
 	build := &builder{s: s, repository: repository}
 	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository}}
-	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: &extractor{s: s, repository: repository}, draft: draft, rounds: rounds}
-	hooks := []func(context.Context) error{draft.Pass, rounds.Pass, seals.Pass, build.Pass, land.Pass}
+	refresh := &refresher{extractor: &extractor{s: s, repository: repository}}
+	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, rounds: rounds}
+	hooks := []func(context.Context) error{draft.Pass, rounds.Pass, seals.Pass, build.Pass, refresh.Pass, land.Pass}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, options.Schedule)
 	}

@@ -289,7 +289,7 @@ func publicationPath(name string) error {
 		}
 	case len(parts) == 2 && parts[0] == "notes" && strings.HasSuffix(parts[1], ".md") && key(strings.TrimSuffix(parts[1], ".md")):
 		return nil
-	case name == "documents.jsonl" || name == EntitiesPath:
+	case name == "documents.jsonl" || name == EntitiesPath || name == "kb/sources.json":
 		return nil
 	case len(parts) == 2 && parts[0] == "kb" && strings.HasSuffix(parts[1], ".md") && key(strings.TrimSuffix(parts[1], ".md")):
 		return nil

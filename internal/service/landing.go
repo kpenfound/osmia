@@ -101,6 +101,13 @@ var _ coreadapter.Reconciler = (*foreman)(nil)
 // unit, in the workstreams' priority order and each plan's dependency order,
 // whose approval no landing was asked for.
 func (f *foreman) Pass(ctx context.Context) error {
+	pending, err := refreshPending(f.repository)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return nil
+	}
 	streams, err := f.repository.Workstreams()
 	if err != nil {
 		return err

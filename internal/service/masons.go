@@ -160,6 +160,13 @@ func (m *masons) Pass(ctx context.Context) error {
 			idle = append(idle, b)
 		}
 	}
+	pending, err := refreshPending(m.repository)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return nil
+	}
 	for _, b := range startOrder(idle, state.Priorities, m.cfg.Project.ID) {
 		if implementing >= m.cfg.Capacity.Masons {
 			return nil
@@ -597,7 +604,7 @@ func masonSystemPrompt(p config.Project) string {
 func masonPrompt(m bundle.Mason) string {
 	return fmt.Sprintf(`Build unit %s of this workstream.
 
-Your view holds the project's files as the feature branch had them when the unit started, with the work done on the unit since. Make each of the unit's criteria below hold, and put in place and pass the proof the plan names for it. Stay within the unit's footprint. The spec below is the one the owner ratified; build against it. When every criterion of the unit holds and its proof is in place and passing, call done with the outcome of your work and a report on every criterion of the unit: what you did, the evidence that it holds and where its proof lives. Add a short headline, what happened in concrete terms, and needs_you only when the owner has a specific action. Then end your turn.
+Your view holds the project's files as the feature branch had them when the unit started, with the work done on the unit since. Make each of the unit's criteria below hold, and put in place and pass the proof the plan names for it. Stay within the unit's footprint. The spec below is the one the owner ratified; build against it. When every criterion of the unit holds and its proof is in place and passing, call done with the outcome of your work and a report on every criterion of the unit: what you did, the evidence that it holds and where its proof lives. Include any new project facts you learned in learnings; leave that list empty when there are none. Add a short headline, what happened in concrete terms, and needs_you only when the owner has a specific action. Then end your turn.
 
 %s`, m.Unit, m.Render())
 }
