@@ -297,12 +297,14 @@ func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID
 	if err != nil {
 		return err
 	}
-	planned, err := sealedUnit(r.repository, coreadapter.Scope{Workstream: string(stream), Unit: unit})
-	if err != nil {
-		return err
-	}
-	if reason := validateVerdict(planned, verdict); reason != "" {
-		return r.recordReviewPreparationError(ctx, stream, unit, turn.Response.ID, "unit "+unit+" stays reviewing: "+reason)
+	if _, current, err := r.unitReviewEvidence(ctx, stream, unit); err == nil && staleReview(identity, current) == "" {
+		planned, err := sealedUnit(r.repository, coreadapter.Scope{Workstream: string(stream), Unit: unit})
+		if err != nil {
+			return err
+		}
+		if reason := validateVerdict(planned, verdict); reason != "" {
+			return r.recordReviewPreparationError(ctx, stream, unit, turn.Response.ID, "unit "+unit+" stays reviewing: "+reason)
+		}
 	}
 	result := UnitReviewResult{Identity: identity, Turn: turn.Request.TurnID, Verdict: verdict}
 	docs, err := trace.Read[trace.Document](r.repository, stream)
@@ -364,13 +366,6 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 	if result.Identity.Subject != string(stream)+"/"+unit || result.Identity.Candidate.Revision == "" || result.Identity.Candidate.BaseRevision == "" || result.Identity.Candidate.SpecRevision == "" || result.Identity.Candidate.PlanRevision == "" || result.Identity.DiffSHA256 == "" {
 		return errors.New("review result has incomplete candidate identity")
 	}
-	planned, err := sealedUnit(r.repository, coreadapter.Scope{Workstream: string(stream), Unit: unit})
-	if err != nil {
-		return err
-	}
-	if reason := validateVerdict(planned, result.Verdict); reason != "" {
-		return errors.New(reason)
-	}
 	_, current, err := r.unitReviewEvidence(ctx, stream, unit)
 	if err != nil {
 		return r.refreshReview(ctx, stream, unit, state, "stale review inputs: "+err.Error())
@@ -407,6 +402,13 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 	}
 	if fmt.Sprint(latest[plan.PlanDocument]) != result.Identity.Candidate.PlanRevision {
 		return r.refreshReview(ctx, stream, unit, state, "stale plan revision; review the current plan again")
+	}
+	planned, err := sealedUnit(r.repository, coreadapter.Scope{Workstream: string(stream), Unit: unit})
+	if err != nil {
+		return err
+	}
+	if reason := validateVerdict(planned, result.Verdict); reason != "" {
+		return errors.New(reason)
 	}
 	if result.Verdict.Decision == "satisfactory" {
 		if reason, err := r.checkReviewFootprint(ctx, stream, unit, result); err != nil {

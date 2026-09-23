@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -58,6 +59,86 @@ func TestReviewFootprintDecisions(t *testing.T) {
 	if got := footprintReason(mapping, footprint, []string{"internal/other.go"}, nil); !strings.Contains(got, "unexplained changed path") {
 		t.Fatalf("changed entity map broadened the sealed footprint: %s", got)
 	}
+}
+
+func TestReviewFootprintUsesRecordedCommits(t *testing.T) {
+	t.Parallel()
+	f, masons := newMasonFixture(t, 1, independentPlan)
+	stopped := false
+	defer func() {
+		if !stopped {
+			f.stop(t)
+		}
+	}()
+	masons.play[masonTurnID("resume")] = reportDone("Built")
+	stream, _ := f.builtAs(t, "footprint")
+	f.awaitUnit(t, stream, "resume", UnitReviewing)
+	f.stop(t)
+	stopped = true
+	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	r := &reviewers{masons: newMasonController(f.s, repo)}
+	_, identity, err := r.unitReviewEvidence(context.Background(), stream, "resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(candidate string, explanations []PathExplanation, want string) {
+		t.Helper()
+		result := UnitReviewResult{Identity: identity, Verdict: UnitVerdict{ExtraPaths: explanations}}
+		result.Identity.Candidate.Revision = candidate
+		got, err := r.checkReviewFootprint(context.Background(), stream, "resume", result)
+		if err != nil || (want == "" && got != "") || (want != "" && !strings.Contains(got, want)) {
+			t.Fatalf("footprint reason %q, want %q: %v", got, want, err)
+		}
+	}
+	check(identity.Candidate.Revision, nil, "")
+
+	worktree := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", f.clone}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("worktree", "add", "--detach", worktree, identity.Candidate.Revision)
+	t.Cleanup(func() { git("worktree", "remove", "--force", worktree) })
+	commit := func(path string) string {
+		t.Helper()
+		full := filepath.Join(worktree, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("scope evidence\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		git("-C", worktree, "add", path)
+		git("-C", worktree, "commit", "-m", path)
+		return git("-C", worktree, "rev-parse", "HEAD")
+	}
+	mapNow, err := kb.Load(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapNow.Entities = append(mapNow.Entities, kb.Entity{ID: "docs", Name: "Docs", Paths: []string{"docs"}})
+	if err := kb.Store(context.Background(), repo, mapNow, f.clock.Now(), reviewerActor, "test"); err != nil {
+		t.Fatal(err)
+	}
+	extra := commit("docs/guide.md")
+	// The later commit is visible on the unit branch, but the first check still
+	// uses the candidate recorded in the review result.
+	git("update-ref", "refs/heads/"+unitBranch(stream, "resume"), extra)
+	check(identity.Candidate.Revision, nil, "")
+	check(extra, nil, "unexplained changed path docs/guide.md")
+	check(extra, []PathExplanation{{Path: "docs/guide.md", Explanation: "Explains the planned proof"}}, "")
+	unmapped := commit("other/file.go")
+	check(unmapped, []PathExplanation{{Path: "docs/guide.md", Explanation: "Explains the planned proof"}}, "unresolved changed paths other/file.go")
 }
 
 func TestStaleReviewIdentifiesEachRevision(t *testing.T) {
@@ -302,21 +383,37 @@ func TestStaleCandidateReturnsUnitToReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity.Candidate.Revision = identity.Candidate.BaseRevision
-	result := UnitReviewResult{Identity: identity, Turn: reviewTurnID("resume", state.Version), Verdict: UnitVerdict{Decision: "satisfactory", Evidence: reviewEvidence()}}
-	if err := r.applyReview(context.Background(), stream, "resume", state, result); err != nil {
-		t.Fatal(err)
-	}
-	current, err := repo.Workflow(stream, trace.UnitSubject("resume"))
-	if err != nil || current.Value != UnitReviewing || current.Version != state.Version+1 {
-		t.Fatalf("stale state %+v: %v", current, err)
-	}
-	transitions, err := trace.Read[trace.Transition](repo, stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(transitions[len(transitions)-1].Reason, "stale candidate") {
-		t.Fatalf("reason: %s", transitions[len(transitions)-1].Reason)
+	for _, tc := range []struct {
+		name   string
+		change func(*UnitReviewIdentity)
+	}{
+		{"candidate", func(i *UnitReviewIdentity) { i.Candidate.Revision = i.Candidate.BaseRevision }},
+		{"base", func(i *UnitReviewIdentity) { i.Candidate.BaseRevision = i.Candidate.Revision }},
+		{"spec", func(i *UnitReviewIdentity) { i.Candidate.SpecRevision = "0" }},
+		{"plan", func(i *UnitReviewIdentity) { i.Candidate.PlanRevision = "0" }},
+	} {
+		reviewed := identity
+		tc.change(&reviewed)
+		verdict := UnitVerdict{Decision: "satisfactory", Evidence: reviewEvidence()}
+		if tc.name == "plan" {
+			verdict.Evidence[0].Criterion = "spec#99"
+		}
+		result := UnitReviewResult{Identity: reviewed, Turn: reviewTurnID("resume", state.Version), Verdict: verdict}
+		if err := r.applyReview(context.Background(), stream, "resume", state, result); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		current, err := repo.Workflow(stream, trace.UnitSubject("resume"))
+		if err != nil || current.Value != UnitReviewing || current.Version != state.Version+1 {
+			t.Fatalf("%s: stale state %+v: %v", tc.name, current, err)
+		}
+		transitions, err := trace.Read[trace.Transition](repo, stream)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(transitions[len(transitions)-1].Reason, "stale "+tc.name) {
+			t.Fatalf("%s: reason: %s", tc.name, transitions[len(transitions)-1].Reason)
+		}
+		state = current
 	}
 }
 
