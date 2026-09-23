@@ -95,7 +95,7 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 				result.IsError = true
 				result.ErrorSubtype = "invalid_outcome"
 			} else {
-				result.Outcome = &Outcome{raw.Outcome.Status, raw.Outcome.Note}
+				result.Outcome = &Outcome{Status: raw.Outcome.Status, Report: raw.Outcome.Note}
 			}
 		}
 	} else if runErr == nil {

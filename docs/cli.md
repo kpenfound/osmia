@@ -63,6 +63,7 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   it; see [charter](charter.md).
 - `status <workstream-id>` shows one workstream of the active project: the same
   facts and owner gates, then `Units:` with one line per unit of the sealed plan and its state
+  and the latest available card (headline, happened and any owner action) beneath it
   once the workstream is building, then the full status (goal, attention, note, one line per active
   agent, and when it was written), or `Status: none yet` before the chief of
   staff writes one. A workstream the project does not hold fails with

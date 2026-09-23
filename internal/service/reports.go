@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -47,7 +48,7 @@ type CriterionReport struct {
 }
 
 // UnitReport is the document units/<unit>/report.json: the mason's report
-// on a unit, the turn it came from, the seal the unit was built against,
+// on a unit, the turn and owner-facing card it came from, the seal the unit was built against,
 // and the candidate the service made of the unit's workspace, a commit on
 // Branch that descends from the feature branch at Base.
 type UnitReport struct {
@@ -56,6 +57,7 @@ type UnitReport struct {
 	Seal      int               `json:"seal"`
 	Outcome   string            `json:"outcome"`
 	Criteria  []CriterionReport `json:"criteria"`
+	Card      *coreadapter.Card `json:"card,omitempty"`
 	Branch    string            `json:"branch"`
 	Base      string            `json:"base"`
 	Candidate string            `json:"candidate"`
@@ -74,7 +76,12 @@ func reviewingTransitionID(unit string, k int) string {
 // until the turn ends and reports it as its outcome.
 type masonReports struct {
 	mu       sync.Mutex
-	accepted map[string]MasonReport
+	accepted map[string]reportedDone
+}
+
+type reportedDone struct {
+	Report MasonReport
+	Card   coreadapter.Card
 }
 
 func turnKey(scope coreadapter.Scope) string {
@@ -87,13 +94,16 @@ func turnKey(scope coreadapter.Scope) string {
 // fixes it and calls done again; its unit does not move.
 func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	done := coreadapter.Tool{Name: doneTool, Effect: coreadapter.ToolMemory,
-		Description: "Report your unit's work done, once every criterion of the unit holds and the proof the plan names for it is in place and passing. Give the outcome of your work and, for every criterion of the unit, what you did, the evidence that it holds and where the proof lives. The service records the report, takes your workspace as the unit's candidate and sends it to review; end your turn as soon as this returns.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"criteria":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"done":{"type":"string"},"evidence":{"type":"string"},"proof":{"type":"string"}},"required":["criterion","done","evidence","proof"],"additionalProperties":false}}},"required":["outcome","criteria"],"additionalProperties":false}`)}
+		Description: "Report your unit's work done, once every criterion of the unit holds and the proof the plan names for it is in place and passing. Give the outcome and one entry per criterion. Include an owner-facing headline (64 characters), what happened (140 characters), and needs_you (140 characters, empty unless the owner has an action). Write a single line per card field, in words without IDs, paths or model names. The service records the report, takes your workspace as the unit's candidate and sends it to review; end your turn as soon as this returns.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"criteria":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"done":{"type":"string"},"evidence":{"type":"string"},"proof":{"type":"string"}},"required":["criterion","done","evidence","proof"],"additionalProperties":false}},"headline":{"type":"string"},"happened":{"type":"string"},"needs_you":{"type":"string"}},"required":["outcome","criteria"],"additionalProperties":false}`)}
 	done.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-		var report MasonReport
+		var input struct {
+			MasonReport
+			coreadapter.Card
+		}
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
-		if err := d.Decode(&report); err != nil {
+		if err := d.Decode(&input); err != nil {
 			return nil, fmt.Errorf("tool input: %w", err)
 		}
 		if err := d.Decode(new(any)); err != io.EOF {
@@ -110,7 +120,23 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 		if err != nil {
 			return nil, err
 		}
-		if reason := checkReport(unit, report); reason != "" {
+		known := []string{scope.Project, scope.Workstream, scope.Unit, scope.Thread, scope.Turn}
+		thread, err := repository.Thread(config.WorkstreamID(scope.Workstream), masonAgent(scope.Unit))
+		if err != nil {
+			return nil, err
+		}
+		known = append(known, thread.Identity.ID, thread.Identity.ThreadID, thread.Identity.Session.ID)
+		for _, turn := range thread.Turns {
+			known = append(known, turn.Request.TurnID, turn.Request.Profile.Model)
+			if turn.Response != nil {
+				known = append(known, turn.Response.Result.Session.ID)
+			}
+		}
+		card, err := status.CheckCard(input.Card, known)
+		if err != nil {
+			return refuseReport("%s", err)
+		}
+		if reason := checkReport(unit, input.MasonReport); reason != "" {
 			return refuseReport("%s", reason)
 		}
 		r.mu.Lock()
@@ -120,9 +146,9 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 			return refuseReport("this turn already reported its unit done; end the turn")
 		}
 		if r.accepted == nil {
-			r.accepted = map[string]MasonReport{}
+			r.accepted = map[string]reportedDone{}
 		}
-		r.accepted[key] = report
+		r.accepted[key] = reportedDone{input.MasonReport, card}
 		return json.Marshal(struct {
 			Recorded bool   `json:"recorded"`
 			Next     string `json:"next"`
@@ -217,11 +243,11 @@ func (t *reportingTurns) Run(ctx context.Context, prepared coreadapter.PreparedT
 	report, ok := t.reports.accepted[key]
 	delete(t.reports.accepted, key)
 	if ok {
-		data, encodeErr := json.Marshal(report)
+		data, encodeErr := json.Marshal(report.Report)
 		if encodeErr != nil {
 			return result, errors.Join(err, encodeErr)
 		}
-		result.Outcome = &coreadapter.Outcome{Status: masonDone, Report: string(data)}
+		result.Outcome = &coreadapter.Outcome{Status: masonDone, Report: string(data), Card: &report.Card}
 	}
 	return result, err
 }
@@ -289,7 +315,8 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 			k = d.Revision + 1
 		}
 	}
-	content, err := json.MarshalIndent(UnitReport{Unit: unit, Turn: turn.Request.TurnID, Seal: latest.Seal, Outcome: report.Outcome, Criteria: report.Criteria, Branch: w.Branch, Base: base, Candidate: candidate}, "", "  ")
+	card := turn.Response.Result.Outcome.Card
+	content, err := json.MarshalIndent(UnitReport{Unit: unit, Turn: turn.Request.TurnID, Seal: latest.Seal, Outcome: report.Outcome, Criteria: report.Criteria, Card: card, Branch: w.Branch, Base: base, Candidate: candidate}, "", "  ")
 	if err != nil {
 		return false, false, err
 	}
@@ -301,11 +328,22 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 	tr := trace.Transition{Header: h, Subject: subject, From: UnitImplementing, To: UnitReviewing,
 		Reason: fmt.Sprintf("the mason of unit %s reported done on turn %s; its candidate is %s on %s, from %s at %s, and its report is %s revision %d", unit, turn.Request.TurnID, candidate, w.Branch, featureBranch(b.stream), base, doc.Path, k)}
 	tx := trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr,
-		Events: []trace.Event{trace.Notice(reviewingTransitionID(unit, k), "unit", fmt.Sprintf("Unit %s is reviewing: its mason reported done on turn %s; its report is %s revision %d.", unit, turn.Request.TurnID, doc.Path, k))}}
+		Events: []trace.Event{trace.Notice(reviewingTransitionID(unit, k), "unit", finishNotice(unit, turn.Request.TurnID, doc.Path, k, card))}}
 	if _, err := m.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); errors.Is(err, trace.ErrConflict) {
 		return false, false, nil
 	} else if err != nil {
 		return false, false, err
 	}
 	return true, false, nil
+}
+
+func finishNotice(unit, turn, path string, revision int, card *coreadapter.Card) string {
+	message := fmt.Sprintf("Unit %s is reviewing: its mason reported done on turn %s; its report is %s revision %d.", unit, turn, path, revision)
+	if card != nil {
+		message += " Headline: " + card.Headline
+	}
+	if card != nil && card.NeedsYou != "" {
+		message += "; Needs you: " + card.NeedsYou
+	}
+	return message
 }

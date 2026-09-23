@@ -284,7 +284,7 @@ func TestMasonStartsOneReadyUnitPerWorkstream(t *testing.T) {
 		t.Fatalf("mason turns run %d times", len(runs))
 	}
 	run := runs[0]
-	for _, want := range []string{"Build unit resume of this workstream.", "# Unit resume\n", "title: Resume from the last chunk\n", "seal: 1\n", "- spec#1: ", "  proof: new-test TestResume\n", "## Spec\n", "call done with the outcome of your work and a report on every criterion of the unit", "Then end your turn."} {
+	for _, want := range []string{"Build unit resume of this workstream.", "# Unit resume\n", "title: Resume from the last chunk\n", "seal: 1\n", "- spec#1: ", "  proof: new-test TestResume\n", "## Spec\n", "call done with the outcome of your work and a report on every criterion of the unit", "Add a short headline, what happened in concrete terms, and needs_you only when the owner has a specific action.", "Then end your turn."} {
 		if !strings.Contains(run.Prompt, want) {
 			t.Fatalf("mason prompt lacks %q:\n%s", want, run.Prompt)
 		}

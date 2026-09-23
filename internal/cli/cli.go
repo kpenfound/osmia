@@ -680,6 +680,12 @@ func showStatus(w io.Writer, st service.WorkstreamStatus) {
 		fmt.Fprintln(w, "Units:")
 		for _, u := range st.Units {
 			fmt.Fprintf(w, "  %s %s\n", u.Unit, u.State)
+			if u.Card != nil {
+				fmt.Fprintf(w, "    Headline: %s\n    Happened: %s\n", u.Card.Headline, u.Card.Happened)
+				if u.Card.NeedsYou != "" {
+					fmt.Fprintf(w, "    Needs you: %s\n", u.Card.NeedsYou)
+				}
+			}
 		}
 	}
 	if st.Status == nil {

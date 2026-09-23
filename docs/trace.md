@@ -41,7 +41,7 @@ does not infer authority, readiness or workflow transitions from them.
 | `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer, scope, citations and affected references; a ruling holds a returned answer, an owner response or both, and a scope only with a returned answer; see [questions](#questions) |
 | `Agent` | `agents/<id>/identity.jsonl` | Stable role/thread identity and backend session at that revision |
 | `TurnRequest` | `agents/<agent-id>/log.jsonl` | Thread/turn identity, accepted profile, system prompt, request and caller-supplied context |
-| `TurnResponse` | `agents/<agent-id>/log.jsonl` | Exact request revision, thread/turn identity, adapter result and any execution failure |
+| `TurnResponse` | `agents/<agent-id>/log.jsonl` | Exact request revision, thread/turn identity, adapter result (including the accepted `done` report and card) and any execution failure |
 | `Cost` | `ledger.jsonl` | Adapter ledger entry with attempt, full scope, time and explicit cost knowledge |
 | `Status` | `status.jsonl` | The chief of staff's goal, attention, note and agent lines; see [workstream status](#workstream-status) |
 
@@ -77,6 +77,14 @@ across backend-session revisions. An agent may have no backend session before
 its first turn. Failed execution may have no session identity when it includes
 an explicit failure. Unknown cost is stored as zero with `CostKnown: false`;
 it is distinguishable from a known zero-cost result.
+
+An accepted `done` records its report and owner-facing card on the turn's
+`Outcome`. The card has `headline` (required, at most 64 characters),
+`happened` (required, at most 140 characters) and `needs_you` (at most 140
+characters, empty unless an owner action exists). Whitespace is collapsed,
+control and zero-width characters are removed, and line breaks or identifiers
+are refused. The same card is copied beside the report in the unit's
+`units/<unit>/report.json` document.
 
 `Append(ctx, record)` accepts concrete record values other than `Status`,
 which only `SetStatus` writes. Revisions must begin at one
