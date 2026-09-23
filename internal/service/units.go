@@ -86,6 +86,22 @@ func (u unitWorkspaces) find(ctx context.Context, stream config.WorkstreamID, un
 	return w, base, true, nil
 }
 
+// behind reports whether the unit has a workspace that does not descend from
+// the tip of its workstream's feature branch, as after a landing moved the
+// branch, until the workspace is rebased onto it.
+func (u unitWorkspaces) behind(ctx context.Context, stream config.WorkstreamID, unit string) (bool, error) {
+	w, found, err := u.git.Workspace(ctx, unitName(stream, unit))
+	if err != nil || !found {
+		return false, err
+	}
+	tip, exists, err := u.git.Branch(ctx, featureBranch(stream))
+	if err != nil || !exists {
+		return false, err
+	}
+	descends, err := u.git.Ancestor(ctx, tip, w.Branch)
+	return !descends, err
+}
+
 // snapshot commits what the unit's workspace holds as its candidate, a
 // commit that descends from the feature branch, and returns it with the
 // workspace and the feature branch commit the workspace descends from.

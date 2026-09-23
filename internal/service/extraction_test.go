@@ -820,7 +820,7 @@ func TestSchedulerLeavesLibrarianTurnsToTheExtractor(t *testing.T) {
 		t.Fatalf("first extraction: %+v", x)
 	}
 	must(t, s.active.repository.CreateWorkstream(ctx, stream, f.clock.Now(), ownerActor))
-	gate := s.admit(id, s.active.repository)
+	gate := s.admit(s.current(), s.active.repository)
 	if admitted, err := gate(ctx, scheduler.Candidate{Workstream: librarianWorkstream(id)}); err != nil || admitted {
 		t.Fatalf("librarian workstream admitted: %t %v", admitted, err)
 	}

@@ -1239,7 +1239,7 @@ func TestSchedulerLeavesArchitectTurnsToTheDrafter(t *testing.T) {
 	ctx := context.Background()
 	const created = config.WorkstreamID("w_00000000000000000000000000000001")
 	must(t, f.repository().CreateWorkstream(ctx, created, f.clock.Now(), ownerActor))
-	gate := f.s.admit(f.project, f.repository())
+	gate := f.s.admit(f.s.current(), f.repository())
 	architect := scheduler.Candidate{Workstream: created, Thread: trace.Thread{Identity: trace.Agent{Role: architectRole}}}
 	if admitted, err := gate(ctx, architect); err != nil || admitted {
 		t.Fatalf("architect turn admitted: %t %v", admitted, err)
