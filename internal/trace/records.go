@@ -265,12 +265,13 @@ func documentPath(p string, stream bool) error {
 }
 
 // unitPath reports whether parts name a unit record of a workstream,
-// units/<unit>/report.json, review.json or ruling-<n>.json, where the unit is a key.
+// units/<unit>/report.json, review.json, landing.json or ruling-<n>.json, where
+// the unit is a key.
 func unitPath(parts []string) bool {
 	if len(parts) != 3 || parts[0] != "units" || !key(parts[1]) {
 		return false
 	}
-	if parts[2] == "report.json" || parts[2] == "review.json" {
+	if parts[2] == "report.json" || parts[2] == "review.json" || parts[2] == "landing.json" {
 		return true
 	}
 	n := strings.TrimSuffix(strings.TrimPrefix(parts[2], "ruling-"), ".json")

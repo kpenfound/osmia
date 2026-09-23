@@ -1145,7 +1145,7 @@ its cause:
   `planned` to `ready`, with the reason `unit <id> is ready: it depends on no
   unit`. A unit becomes `ready` once every unit it depends on has merged; no
   unit has merged when the build runs, so a unit with dependencies stays
-  `planned`.
+  `planned` until [landing](#landing-a-unit) merges the last of them.
 - `building` moves the feature state, with the reason `seal <k> is recorded;
   the states of the <n> units of its plan are recorded: ready <ids>; planned
   <id> (waiting for <ids>), ...` (`none` for an empty list). The operation's
@@ -1375,6 +1375,57 @@ reviewer thread and resumes `reviewing` with the candidate intact. An answer
 alone cannot approve the unit. An interrupted turn is continued on the same
 thread. A result recorded before a stop is applied after restart without
 another reviewer turn.
+
+### Landing a unit
+
+The landing controller runs in every reconciliation pass after the building
+controller. It lands one unit at a time per project: while a landing
+operation of the project has no result, it asks for no other. Otherwise it
+takes the building workstreams that are not paused, in priority order, and
+their units in dependency order, and asks to land the first `approved` unit
+whose latest `units/<id>/review.json` revision `<k>` is a satisfactory
+verdict no landing was asked for. It publishes the operation `land` (input
+`unit`, `review`, `candidate` and `base`) on the repository boundary with the
+transition `landing-<id>-<k>` (actor `service`/`foreman`, cause
+`unit-<id>-review-<k>`), which moves the workflow subject `landing-<id>` to
+`requested-<k>`.
+
+The operation first checks the feature branch. A tip whose only parent is the
+approved base and whose message carries this operation's `Osmia-Operation`
+trailer is an interrupted landing: the commit is recorded and not made again.
+Otherwise the approval must still be current: the workstream `building`, the
+unit `approved` by review revision `<k>`, and the recorded report, seal,
+candidate diff, unit branch tip, feature branch tip and latest spec and plan
+revisions those the approval names. The service then commits the
+candidate's tree once on the approved base, by `Osmia <osmia@localhost>` and
+stamped with the time the landing was asked for, and fast-forwards the
+feature branch and its workspace to it. No agent takes part. The message's
+subject is the text of the criteria the unit addresses, from the sealed spec;
+its body lists each criterion, and its trailers name the workstream
+(`Osmia-Workstream`), unit (`Osmia-Unit`), candidate (`Osmia-Candidate`),
+base (`Osmia-Base`), approval (`Osmia-Approval`, `units/<id>/review.json
+revision <k>`) and operation (`Osmia-Operation`).
+
+One trace commit then records `units/<id>/landing.json`, which holds the
+unit, operation, approval, reviewer turn, candidate, base, spec and plan
+revisions, seal, criteria, branch, landed commit and its message; the
+transition `unit-<id>-merged` from `approved` to `merged` (cause the
+operation ID, reason `unit <id> landed as <commit> on <branch>: <approval>
+approved candidate <candidate> from <base>, spec <s>, plan <p>, seal <n>;
+criteria <criteria>`) with the chief of staff's notice `Unit <id> merged: it
+landed as <commit> on <branch>.`; `landing-<id>` moving to `landed-<k>`; and,
+for every `planned` unit that depends on it and whose other dependencies have
+all merged, `unit-<dep>-ready` with the reason `unit <dep> is ready: every
+unit it depends on has merged: <ids>`. The mason controller then starts the
+ready unit from the landed commit.
+
+A stale approval is refused: nothing is committed, the unit stays `approved`,
+`landing-<id>-<k>-refused` moves `landing-<id>` to `refused-<k>` with the
+reason `unit <id> did not land: <why>` as the operation's result, and the
+chief of staff is told that the unit lands once an approval of its current
+candidate, base, spec and plan is recorded. The same approval is not asked
+to land again. A landing whose outcome is recorded completes on inspection
+without touching the branch.
 
 ### Unit workspaces
 

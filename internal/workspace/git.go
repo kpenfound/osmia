@@ -11,7 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/kpenfound/busybees/core/vcs"
 )
@@ -193,6 +195,63 @@ func (g *Git) Snapshot(ctx context.Context, w Worktree, base string) (string, er
 		return "", err
 	}
 	return commit, nil
+}
+
+// Squash returns one commit holding the tree of candidate whose only parent is
+// base, with message, authored and committed by Osmia at the given time.
+// Candidate must descend from base. The same arguments make the same commit,
+// and no branch moves.
+func (g *Git) Squash(ctx context.Context, base, candidate, message string, at time.Time) (string, error) {
+	descends, err := g.Ancestor(ctx, base, candidate)
+	if err != nil {
+		return "", err
+	}
+	if !descends {
+		return "", fmt.Errorf("candidate %s does not descend from %s", candidate, base)
+	}
+	tree, err := g.run(ctx, "rev-parse", "--verify", candidate+"^{tree}")
+	if err != nil {
+		return "", err
+	}
+	date := fmt.Sprintf("@%d +0000", at.Unix())
+	env := append(slices.Clone(identity), "GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE="+date)
+	return g.runEnv(ctx, env, "commit-tree", "--no-gpg-sign", "-p", base, "-m", message, tree)
+}
+
+// Advance fast-forwards the worktree's branch, with its index and files, from
+// commit from to commit to, which must descend from it. A worktree already at
+// to is left as it is; one at any other commit is refused.
+func (g *Git) Advance(ctx context.Context, w Worktree, from, to string) error {
+	head, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return err
+	}
+	if head == to {
+		return nil
+	}
+	if head != from {
+		return fmt.Errorf("workspace %s is at %s, not %s", w.Path, head, from)
+	}
+	_, err = g.runIn(ctx, w.Path, identity, "merge", "--ff-only", "--quiet", to)
+	return err
+}
+
+// Commit is what a commit records.
+type Commit struct {
+	Tree    string
+	Parents []string
+	Message string
+}
+
+// Commit reads the tree, parents and message of a commit.
+func (g *Git) Commit(ctx context.Context, revision string) (Commit, error) {
+	out, err := g.runInRaw(ctx, g.Clone, nil, "show", "-s", "--format=%T%n%P%n%B", revision+"^{commit}", "--")
+	if err != nil {
+		return Commit{}, err
+	}
+	tree, rest, _ := strings.Cut(out, "\n")
+	parents, message, _ := strings.Cut(rest, "\n")
+	return Commit{Tree: tree, Parents: strings.Fields(parents), Message: strings.TrimRight(message, "\n")}, nil
 }
 
 // listed is one entry of the clone's worktree list.

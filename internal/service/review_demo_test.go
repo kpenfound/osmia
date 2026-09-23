@@ -124,7 +124,7 @@ func TestM3ExactReviewDemonstration(t *testing.T) {
 	f.start(t)
 	f.awaitUnit(t, stream, "resume", UnitWaiting)
 	f.rule(t, "1")
-	f.awaitUnit(t, stream, "resume", UnitApproved)
+	f.awaitUnit(t, stream, "resume", UnitMerged)
 	if reviews.Load() != 3 {
 		t.Fatalf("review turns: %d", reviews.Load())
 	}

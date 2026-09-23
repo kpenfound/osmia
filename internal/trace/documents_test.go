@@ -543,13 +543,18 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 	if _, err := Get[Document](r, streamID, "unit-parser-report", 1); err != nil {
 		t.Fatal(err)
 	}
-	// Only units/<unit>/report.json is a unit document.
+	// A unit's landing is a unit document; other paths under units/ are not.
 	for _, path := range []string{"units/parser/other.json", "units/parser", "units/../report.json", "units/a/b/report.json"} {
 		d := unitReport("{}\n", 2)
 		d.ID, d.Path = "unit-other", path
 		if err := r.RecordDocuments(ctx, []Document{d}); err == nil {
 			t.Fatalf("path %s accepted", path)
 		}
+	}
+	landing := unitReport("{\"commit\":\"c\"}\n", 1)
+	landing.ID, landing.Path = "unit-parser-landing", "units/parser/landing.json"
+	if err := r.RecordDocuments(ctx, []Document{landing}); err != nil {
+		t.Fatal(err)
 	}
 }
 

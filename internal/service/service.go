@@ -443,9 +443,10 @@ func (s *Service) stop(active *activeProject) error {
 // boundary is served by the bound thread reconciler for turns and by the
 // service's own reconcilers for knowledge-base extraction, architect drafts,
 // committee rounds and the architect's replies to them, and the repository
-// boundary by the service's sealer for sealings and its builder for builds;
-// the architect controller, then the shed controller, then the sealing
-// controller, then the building controller run at the start of every pass, and the pass reconciles operations in stagePriority order. With
+// boundary by the service's sealer for sealings, its builder for builds and
+// its foreman for landings; the architect controller, then the shed
+// controller, then the sealing controller, then the building controller, then
+// the landing controller run at the start of every pass, and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
 // chief of staff, recorded answers are queued on their askers' threads, the
 // mason controller parks, resumes and starts units, and the scheduler runs, whose gate holds turns that a runtime pause covers;
@@ -479,8 +480,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	rounds := &debate{s: s, repository: repository}
 	seals := &sealer{s: s, repository: repository}
 	build := &builder{s: s, repository: repository}
+	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository}}
 	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: &extractor{s: s, repository: repository}, draft: draft, rounds: rounds}
-	hooks := []func(context.Context) error{draft.Pass, rounds.Pass, seals.Pass, build.Pass}
+	hooks := []func(context.Context) error{draft.Pass, rounds.Pass, seals.Pass, build.Pass, land.Pass}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, options.Schedule)
 	}
@@ -517,7 +519,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		return nil
 	}
 	adapters[coreadapter.RunnerBoundary] = runner
-	adapters[coreadapter.RepositoryBoundary] = repositoryAdapter{other: adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build}
+	adapters[coreadapter.RepositoryBoundary] = repositoryAdapter{other: adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land}
 	options.Adapters = adapters
 	if options.Priority == nil {
 		options.Priority = stagePriority

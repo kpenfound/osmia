@@ -591,42 +591,10 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 	if result.Identity.Subject != string(stream)+"/"+unit || result.Identity.Candidate.Revision == "" || result.Identity.Candidate.BaseRevision == "" || result.Identity.Candidate.SpecRevision == "" || result.Identity.Candidate.PlanRevision == "" || result.Identity.DiffSHA256 == "" {
 		return errors.New("review result has incomplete candidate identity")
 	}
-	_, current, err := r.unitReviewEvidence(ctx, stream, unit)
-	if err != nil {
-		return r.refreshReview(ctx, stream, unit, state, "stale review inputs: "+err.Error())
-	}
-	if reason := staleReview(result.Identity, current); reason != "" {
+	if reason, err := r.staleInputs(ctx, stream, unit, result.Identity); err != nil {
+		return err
+	} else if reason != "" {
 		return r.refreshReview(ctx, stream, unit, state, reason)
-	}
-	candidate, exists, err := newUnitWorkspaces(r.cfg).git.Branch(ctx, unitBranch(stream, unit))
-	if err != nil {
-		return err
-	}
-	if !exists || candidate != result.Identity.Candidate.Revision {
-		return r.refreshReview(ctx, stream, unit, state, "stale candidate revision; review the current candidate again")
-	}
-	base, exists, err := newUnitWorkspaces(r.cfg).git.Branch(ctx, featureBranch(stream))
-	if err != nil {
-		return err
-	}
-	if !exists || base != result.Identity.Candidate.BaseRevision {
-		return r.refreshReview(ctx, stream, unit, state, "stale base revision; review the current candidate again")
-	}
-	docs, err := trace.Read[trace.Document](r.repository, stream)
-	if err != nil {
-		return err
-	}
-	latest := map[string]int{}
-	for _, d := range docs {
-		if d.Revision > latest[d.ID] {
-			latest[d.ID] = d.Revision
-		}
-	}
-	if fmt.Sprint(latest[plan.SpecDocument]) != result.Identity.Candidate.SpecRevision {
-		return r.refreshReview(ctx, stream, unit, state, "stale spec revision; review the current spec again")
-	}
-	if fmt.Sprint(latest[plan.PlanDocument]) != result.Identity.Candidate.PlanRevision {
-		return r.refreshReview(ctx, stream, unit, state, "stale plan revision; review the current plan again")
 	}
 	planned, err := sealedUnit(r.repository, coreadapter.Scope{Workstream: string(stream), Unit: unit})
 	if err != nil {
@@ -700,6 +668,52 @@ func staleReview(reviewed, current UnitReviewIdentity) string {
 		return "stale seal; review the current candidate again"
 	}
 	return ""
+}
+
+// staleInputs returns why a reviewed identity no longer names the unit's
+// current report, seal, candidate, base, spec and plan: the recorded report
+// and seal, the tips of the unit branch and the feature branch, and the latest
+// spec and plan revisions. It returns "" when every input is current.
+func (m *masons) staleInputs(ctx context.Context, stream config.WorkstreamID, unit string, reviewed UnitReviewIdentity) (string, error) {
+	_, current, err := m.candidateEvidence(ctx, stream, unit)
+	if err != nil {
+		return "stale review inputs: " + err.Error(), nil
+	}
+	if reason := staleReview(reviewed, current); reason != "" {
+		return reason, nil
+	}
+	git := newUnitWorkspaces(m.cfg).git
+	candidate, exists, err := git.Branch(ctx, unitBranch(stream, unit))
+	if err != nil {
+		return "", err
+	}
+	if !exists || candidate != reviewed.Candidate.Revision {
+		return "stale candidate revision; review the current candidate again", nil
+	}
+	base, exists, err := git.Branch(ctx, featureBranch(stream))
+	if err != nil {
+		return "", err
+	}
+	if !exists || base != reviewed.Candidate.BaseRevision {
+		return "stale base revision; review the current candidate again", nil
+	}
+	docs, err := trace.Read[trace.Document](m.repository, stream)
+	if err != nil {
+		return "", err
+	}
+	latest := map[string]int{}
+	for _, d := range docs {
+		if d.Revision > latest[d.ID] {
+			latest[d.ID] = d.Revision
+		}
+	}
+	if fmt.Sprint(latest[plan.SpecDocument]) != reviewed.Candidate.SpecRevision {
+		return "stale spec revision; review the current spec again", nil
+	}
+	if fmt.Sprint(latest[plan.PlanDocument]) != reviewed.Candidate.PlanRevision {
+		return "stale plan revision; review the current plan again", nil
+	}
+	return "", nil
 }
 
 func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, reason string) error {
