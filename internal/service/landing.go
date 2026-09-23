@@ -97,7 +97,7 @@ var _ coreadapter.Reconciler = (*foreman)(nil)
 // the unfinished units of the building workstreams that are not paused on
 // their feature branches, rebasing each unit whose workspace a landing left
 // behind and routing rebase conflicts to masons. Once every such unit is
-// current and no rebase has no result, it asks to land the first approved
+// current and every rebase has its result, it asks to land the first approved
 // unit, in the workstreams' priority order and each plan's dependency order,
 // whose approval no landing was asked for.
 func (f *foreman) Pass(ctx context.Context) error {
