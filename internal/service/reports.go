@@ -121,15 +121,17 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 			return nil, err
 		}
 		known := []string{scope.Project, scope.Workstream, scope.Unit, scope.Thread, scope.Turn}
-		thread, err := repository.Thread(config.WorkstreamID(scope.Workstream), masonAgent(scope.Unit))
+		threads, err := repository.Threads(config.WorkstreamID(scope.Workstream))
 		if err != nil {
 			return nil, err
 		}
-		known = append(known, thread.Identity.ID, thread.Identity.ThreadID, thread.Identity.Session.ID)
-		for _, turn := range thread.Turns {
-			known = append(known, turn.Request.TurnID, turn.Request.Profile.Model)
-			if turn.Response != nil {
-				known = append(known, turn.Response.Result.Session.ID)
+		for _, thread := range threads {
+			known = append(known, thread.Identity.ID, thread.Identity.ThreadID, thread.Identity.Session.ID)
+			for _, turn := range thread.Turns {
+				known = append(known, turn.Request.TurnID, turn.Request.Profile.Model)
+				if turn.Response != nil {
+					known = append(known, turn.Response.Result.Session.ID)
+				}
 			}
 		}
 		card, err := status.CheckCard(input.Card, known)

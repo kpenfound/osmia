@@ -173,6 +173,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 			{"happened", " ", "happened is required"},
 			{"headline", strings.Repeat("x", 65), "headline must be at most 64 characters"},
 			{"happened", "One\nTwo", "happened must be a single line"},
+			{"happened", "Completed " + masonTurnID("resume"), "happened contains an Osmia or backend identifier"},
 			{"needs_you", "See parser.go", "needs_you contains a file name"},
 		} {
 			args := map[string]any{"outcome": "approved", "criteria": complete, bad.field: bad.value}
