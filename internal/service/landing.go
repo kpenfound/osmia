@@ -94,6 +94,13 @@ var _ coreadapter.Reconciler = (*foreman)(nil)
 // for. Nothing is asked for while a landing of the project has no result, so
 // landings run one at a time. A paused workstream asks for none.
 func (f *foreman) Pass(ctx context.Context) error {
+	pending, err := refreshPending(f.repository)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return nil
+	}
 	streams, err := f.repository.Workstreams()
 	if err != nil {
 		return err

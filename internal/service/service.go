@@ -481,8 +481,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	seals := &sealer{s: s, repository: repository}
 	build := &builder{s: s, repository: repository}
 	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository}}
-	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: &extractor{s: s, repository: repository}, draft: draft, rounds: rounds}
-	hooks := []func(context.Context) error{draft.Pass, rounds.Pass, seals.Pass, build.Pass, land.Pass}
+	refresh := &refresher{extractor: &extractor{s: s, repository: repository}}
+	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, rounds: rounds}
+	hooks := []func(context.Context) error{draft.Pass, rounds.Pass, seals.Pass, build.Pass, refresh.Pass, land.Pass}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, options.Schedule)
 	}

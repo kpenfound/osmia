@@ -31,11 +31,12 @@ const (
 	reportPath = "units/%s/report.json"
 )
 
-// MasonReport is what a mason reports with done: the outcome of its work
-// and one entry for every criterion its unit addresses.
+// MasonReport is what a mason reports with done: its outcome, one entry for
+// every criterion it addresses, and any reusable project learnings.
 type MasonReport struct {
-	Outcome  string            `json:"outcome"`
-	Criteria []CriterionReport `json:"criteria"`
+	Outcome   string            `json:"outcome"`
+	Criteria  []CriterionReport `json:"criteria"`
+	Learnings []string          `json:"learnings,omitempty"`
 }
 
 // CriterionReport is a mason's report on one criterion of its unit: what it
@@ -57,6 +58,7 @@ type UnitReport struct {
 	Seal      int               `json:"seal"`
 	Outcome   string            `json:"outcome"`
 	Criteria  []CriterionReport `json:"criteria"`
+	Learnings []string          `json:"learnings,omitempty"`
 	Card      *coreadapter.Card `json:"card,omitempty"`
 	Branch    string            `json:"branch"`
 	Base      string            `json:"base"`
@@ -94,8 +96,8 @@ func turnKey(scope coreadapter.Scope) string {
 // fixes it and calls done again; its unit does not move.
 func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	done := coreadapter.Tool{Name: doneTool, Effect: coreadapter.ToolMemory,
-		Description: "Report your unit's work done, once every criterion of the unit holds and the proof the plan names for it is in place and passing. Give the outcome and one entry per criterion. Include an owner-facing headline (64 characters), what happened (140 characters), and needs_you (140 characters, empty unless the owner has an action). Write a single line per card field, in words without IDs, paths or model names. The service records the report, takes your workspace as the unit's candidate and sends it to review; end your turn as soon as this returns.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"criteria":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"done":{"type":"string"},"evidence":{"type":"string"},"proof":{"type":"string"}},"required":["criterion","done","evidence","proof"],"additionalProperties":false}},"headline":{"type":"string"},"happened":{"type":"string"},"needs_you":{"type":"string"}},"required":["outcome","criteria"],"additionalProperties":false}`)}
+		Description: "Report your unit's work done, once every criterion of the unit holds and the proof the plan names for it is in place and passing. Give the outcome, one entry per criterion, and any new project knowledge in learnings. Include an owner-facing headline (64 characters), what happened (140 characters), and needs_you (140 characters, empty unless the owner has an action). Write a single line per card field, in words without IDs, paths or model names. The service records the report, takes your workspace as the unit's candidate and sends it to review; end your turn as soon as this returns.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"criteria":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"done":{"type":"string"},"evidence":{"type":"string"},"proof":{"type":"string"}},"required":["criterion","done","evidence","proof"],"additionalProperties":false}},"learnings":{"type":"array","items":{"type":"string"}},"headline":{"type":"string"},"happened":{"type":"string"},"needs_you":{"type":"string"}},"required":["outcome","criteria"],"additionalProperties":false}`)}
 	done.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
 			MasonReport
@@ -198,6 +200,11 @@ func sealedUnit(repository *trace.Repository, scope coreadapter.Scope) (plan.Uni
 func checkReport(unit plan.Unit, report MasonReport) string {
 	if strings.TrimSpace(report.Outcome) == "" {
 		return "outcome is required: say what the unit's work now does"
+	}
+	for i, learning := range report.Learnings {
+		if strings.TrimSpace(learning) == "" {
+			return fmt.Sprintf("learning %d is empty", i+1)
+		}
 	}
 	var criteria []string
 	for _, a := range unit.Addresses {
@@ -318,7 +325,7 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 		}
 	}
 	card := turn.Response.Result.Outcome.Card
-	content, err := json.MarshalIndent(UnitReport{Unit: unit, Turn: turn.Request.TurnID, Seal: latest.Seal, Outcome: report.Outcome, Criteria: report.Criteria, Card: card, Branch: w.Branch, Base: base, Candidate: candidate}, "", "  ")
+	content, err := json.MarshalIndent(UnitReport{Unit: unit, Turn: turn.Request.TurnID, Seal: latest.Seal, Outcome: report.Outcome, Criteria: report.Criteria, Learnings: report.Learnings, Card: card, Branch: w.Branch, Base: base, Candidate: candidate}, "", "  ")
 	if err != nil {
 		return false, false, err
 	}

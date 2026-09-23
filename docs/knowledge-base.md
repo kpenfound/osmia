@@ -236,3 +236,27 @@ operation pending for the reconciliation loop to retry.
 when it failed or is waiting to retry. A new extraction is refused while the
 latest is pending or running. Each re-run is a new turn of the same librarian
 thread, so it continues the thread's owned log.
+
+## Refresh after landing
+
+A mason's `done` report may include `learnings`, an array of project facts it
+found while building its unit. The report is recorded with the unit candidate.
+After a successful landing records `units/<unit>/landing.json` and moves the
+unit to `merged`, the service requests one `kb-refresh` operation for that
+landing. A pending or refused landing supplies no refresh. The request names
+the exact unit, mason report revision, landing revision and commit.
+
+The librarian receives the current knowledge base, the files of the exact
+landed commit under `repo/`, and the report and landing under `source/`. It
+writes a complete `output/kb/` using the same schema and validation as an
+extraction pass. The service records changed prose and entity-map revisions
+atomically. `kb/sources.json` links each accepted prose revision to its
+workstream, unit, report, landing, commit and refresh operation. A refresh
+that changes no prose still records its source ledger revision as a durable
+completion marker. A failed turn or invalid output leaves the previous KB
+untouched.
+
+The operation and librarian turn IDs derive from the landing commit. A retry
+finds the already recorded revisions and does not add them again. The next
+unit waits while a refresh is pending; its file-based bundle then reads the
+newest local prose without Hearsay.
