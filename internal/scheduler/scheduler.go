@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -102,6 +103,7 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 		}
 	}
 	used := usage{roles: map[string]int{}, streams: map[config.WorkstreamID]int{}, local: map[localKey]int{}}
+	var candidates []Candidate
 	for _, stream := range streams {
 		for _, t := range threads[stream] {
 			if inFlight(t, stream, dispatched) {
@@ -115,25 +117,43 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 			if !ok || dispatched[turnKey{stream, t.Identity.ID, q.Request.TurnID}] {
 				continue
 			}
-			role := t.Identity.Role
-			if !s.fits(used, stream, role) {
+			candidates = append(candidates, Candidate{Workstream: stream, Thread: t, Turn: q})
+		}
+	}
+	// A freed slot is offered to review before implementation. Preserve trace
+	// order within each stage for stable admission across passes.
+	slices.SortStableFunc(candidates, func(a, b Candidate) int {
+		stage := func(role string) int {
+			switch role {
+			case "reviewer":
+				return 0
+			case "mason":
+				return 1
+			default:
+				return 2
+			}
+		}
+		return stage(a.Thread.Identity.Role) - stage(b.Thread.Identity.Role)
+	})
+	for _, c := range candidates {
+		stream, t := c.Workstream, c.Thread
+		role := t.Identity.Role
+		if !s.fits(used, stream, role) {
+			continue
+		}
+		if s.options.Admit != nil {
+			admitted, err := s.options.Admit(ctx, c)
+			if err != nil {
+				return err
+			}
+			if !admitted {
 				continue
 			}
-			c := Candidate{Workstream: stream, Thread: t, Turn: q}
-			if s.options.Admit != nil {
-				admitted, err := s.options.Admit(ctx, c)
-				if err != nil {
-					return err
-				}
-				if !admitted {
-					continue
-				}
-			}
-			if err := s.dispatch(ctx, c); err != nil {
-				return fmt.Errorf("workstream %s: %w", stream, err)
-			}
-			used.add(stream, role)
 		}
+		if err := s.dispatch(ctx, c); err != nil {
+			return fmt.Errorf("workstream %s: %w", stream, err)
+		}
+		used.add(stream, role)
 	}
 	return nil
 }

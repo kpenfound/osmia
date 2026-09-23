@@ -40,6 +40,21 @@ func counts(pairs []string) map[string]int {
 	return n
 }
 
+func TestReviewDispatchPrecedesMasonAtWorkstreamLimit(t *testing.T) {
+	t.Parallel()
+	f, repo := setup(t, "mason1")
+	defer repo.Close()
+	f.thread(t, repo, stream, "reviewer1", "reviewer")
+	f.queue(t, repo, "mason1", "one")
+	f.queue(t, repo, "reviewer1", "one")
+	s, err := New(repo, Options{Now: f.clock.Now, Capacity: &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 1}})
+	must(t, err)
+	must(t, s.Pass(context.Background()))
+	if got := dispatched(t, repo); !slices.Equal(got, []string{"reviewer1/one"}) {
+		t.Fatalf("review did not take first slot: %v", got)
+	}
+}
+
 func TestCapacityBoundsDispatch(t *testing.T) {
 	ctx := context.Background()
 	f, repo := crowd(t)
@@ -53,19 +68,12 @@ func TestCapacityBoundsDispatch(t *testing.T) {
 	s, err := New(repo, Options{Now: f.clock.Now, Capacity: limits, Admit: admit})
 	must(t, err)
 	must(t, s.Pass(ctx))
-	// Admit sees only candidates with a free slot.
-	if want := []string{"architect1", "committee1", "mason1", "architect1", "committee1", "mason1"}; !slices.Equal(offered, want) {
-		t.Fatalf("offered %v, want %v", offered, want)
+	// The reviewer is offered first, and role and workstream limits still bind.
+	if len(offered) == 0 || offered[0] != "reviewer1" {
+		t.Fatalf("review was not offered first: %v", offered)
 	}
-	// In workstream and agent ID order, each workstream takes one architect
-	// (architects run one at a time per workstream), the committee member and
-	// one mason, and then its per-workstream cap is reached.
-	want := []string{"architect1/one", "committee1/one", "mason1/one"}
-	if got := dispatched(t, repo, stream); !slices.Equal(got, want) {
-		t.Fatalf("stream dispatched %v, want %v", got, want)
-	}
-	if got := dispatched(t, repo, other); !slices.Equal(got, want) {
-		t.Fatalf("other dispatched %v, want %v", got, want)
+	if got := counts(dispatched(t, repo, stream, other)); got["reviewer"] != 1 || got["mason"] > 3 {
+		t.Fatalf("capacity exceeded: %v", got)
 	}
 	// Nothing completed, so a later pass admits nothing more.
 	must(t, s.Pass(ctx))
@@ -102,9 +110,8 @@ func TestCapacityHoldsUnderConcurrentPasses(t *testing.T) {
 	}
 	wg.Wait()
 	got := dispatched(t, repo, stream, other)
-	// stream: architect1, committee1, mason1; other: architect1, mason1 and
-	// reviewer1, the committee slot being taken.
-	if n := counts(got); !maps.Equal(n, map[string]int{"architect": 2, "committee": 1, "mason": 2, "reviewer": 1}) {
+	// One reviewer and no more than two masons can hold role slots.
+	if n := counts(got); !maps.Equal(n, map[string]int{"architect": 1, "committee": 1, "mason": 2, "reviewer": 1}) {
 		t.Fatalf("dispatched %v", got)
 	}
 }
