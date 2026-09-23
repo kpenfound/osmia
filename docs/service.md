@@ -1349,10 +1349,17 @@ footprint and local context. The reviewer has a read-only, isolated turn with
 
 `verdict` requires `satisfactory` or `material_findings`, evidence for every
 unit criterion, and, for material findings, at least one finding naming a
-criterion, severity, evidence and action. The completed turn's verdict is
+criterion, severity, evidence and action. For a satisfactory verdict, the
+reviewer explains each changed path outside the sealed footprint in
+`extra_paths`. Unresolved or ambiguous path mappings, or an unexplained extra
+path, keep the unit in `reviewing` for another review and an owner approved
+plan amendment when the footprint needs to change. The completed turn's verdict is
 stored in `units/<id>/review.json` with the candidate commit, base commit,
 spec and plan revisions, diff digest and reviewer turn. Only a clean turn
-with a recorded verdict moves the unit. A satisfactory verdict moves it to
+with a recorded verdict moves the unit. Before approval, the service compares
+the reviewed identity with the current report, seal, documents and workspace
+branches; stale inputs return the unit to `reviewing` with a reason.
+A satisfactory verdict moves it to
 `approved`; material findings increment the durable bounce count and return
 it to `implementing` with findings for the mason. At `shed.max_bounces`, the
 unit enters `contested` and raises an owner gate instead. The owner uses

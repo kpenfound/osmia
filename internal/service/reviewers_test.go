@@ -14,13 +14,73 @@ import (
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func reviewEvidence() []ReviewEvidence {
 	return []ReviewEvidence{{Criterion: "spec#1", Evidence: "The planned proof passes on the candidate diff"}}
+}
+
+func TestReviewFootprintDecisions(t *testing.T) {
+	t.Parallel()
+	mapping := kb.Map{Version: kb.Version, Entities: []kb.Entity{
+		{ID: "planned", Paths: []string{"internal/trace"}},
+		{ID: "extra", Paths: []string{"docs"}},
+	}}
+	footprint := seal.Footprint{Unit: "resume", Entities: []string{"planned"}, Paths: []string{"internal/trace"}}
+	for _, tc := range []struct {
+		name         string
+		paths        []string
+		explanations []PathExplanation
+		want         string
+	}{
+		{"in footprint", []string{"internal/trace/built.go"}, nil, ""},
+		{"unexplained extra", []string{"docs/guide.md"}, nil, "unexplained changed path docs/guide.md"},
+		{"explained extra", []string{"docs/guide.md"}, []PathExplanation{{Path: "docs/guide.md", Explanation: "Documents the criterion"}}, ""},
+		{"unresolved mapping", []string{"other/file.go"}, nil, "unresolved changed paths other/file.go"},
+		{"invalid explanation", []string{"docs/guide.md"}, []PathExplanation{{Path: "docs/guide.md"}}, "invalid explanation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := footprintReason(mapping, footprint, tc.paths, tc.explanations)
+			if !strings.HasPrefix(got, tc.want) {
+				t.Fatalf("reason %q, want prefix %q", got, tc.want)
+			}
+		})
+	}
+	mapping.Entities = append(mapping.Entities, kb.Entity{ID: "other", Paths: []string{"docs"}})
+	if got := footprintReason(mapping, footprint, []string{"docs/guide.md"}, nil); !strings.Contains(got, "ambiguous mapping") {
+		t.Fatal(got)
+	}
+	mapping.Entities[0].Paths = []string{"internal"}
+	if got := footprintReason(mapping, footprint, []string{"internal/other.go"}, nil); !strings.Contains(got, "unexplained changed path") {
+		t.Fatalf("changed entity map broadened the sealed footprint: %s", got)
+	}
+}
+
+func TestStaleReviewIdentifiesEachRevision(t *testing.T) {
+	t.Parallel()
+	current := UnitReviewIdentity{Candidate: coreadapter.Candidate{Revision: "candidate", BaseRevision: "base", SpecRevision: "1", PlanRevision: "2"}, DiffSHA256: "diff", Report: "report", Seal: 1}
+	for _, tc := range []struct {
+		name   string
+		change func(*UnitReviewIdentity)
+	}{
+		{"candidate", func(i *UnitReviewIdentity) { i.Candidate.Revision = "old" }},
+		{"base", func(i *UnitReviewIdentity) { i.Candidate.BaseRevision = "old" }},
+		{"spec", func(i *UnitReviewIdentity) { i.Candidate.SpecRevision = "old" }},
+		{"plan", func(i *UnitReviewIdentity) { i.Candidate.PlanRevision = "old" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reviewed := current
+			tc.change(&reviewed)
+			if got := staleReview(reviewed, current); !strings.Contains(got, tc.name) {
+				t.Fatal(got)
+			}
+		})
+	}
 }
 
 func TestReviewerVerdictToolAndOutcome(t *testing.T) {
@@ -212,6 +272,52 @@ func TestReviewResultReconcilesAfterRestart(t *testing.T) {
 	approved, err := repo.Workflow(stream, trace.UnitSubject("resume"))
 	if err != nil || approved.Value != UnitApproved {
 		t.Fatalf("recovered %+v %v", approved, err)
+	}
+}
+
+func TestStaleCandidateReturnsUnitToReview(t *testing.T) {
+	t.Parallel()
+	f, masons := newMasonFixture(t, 1, independentPlan)
+	stopped := false
+	defer func() {
+		if !stopped {
+			f.stop(t)
+		}
+	}()
+	masons.play[masonTurnID("resume")] = reportDone("Built")
+	stream, _ := f.builtAs(t, "stale-review")
+	f.awaitUnit(t, stream, "resume", UnitReviewing)
+	f.stop(t)
+	stopped = true
+	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	r := &reviewers{masons: newMasonController(f.s, repo)}
+	state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, identity, err := r.prepareUnitReview(context.Background(), stream, "resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity.Candidate.Revision = identity.Candidate.BaseRevision
+	result := UnitReviewResult{Identity: identity, Turn: reviewTurnID("resume", state.Version), Verdict: UnitVerdict{Decision: "satisfactory", Evidence: reviewEvidence()}}
+	if err := r.applyReview(context.Background(), stream, "resume", state, result); err != nil {
+		t.Fatal(err)
+	}
+	current, err := repo.Workflow(stream, trace.UnitSubject("resume"))
+	if err != nil || current.Value != UnitReviewing || current.Version != state.Version+1 {
+		t.Fatalf("stale state %+v: %v", current, err)
+	}
+	transitions, err := trace.Read[trace.Transition](repo, stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(transitions[len(transitions)-1].Reason, "stale candidate") {
+		t.Fatalf("reason: %s", transitions[len(transitions)-1].Reason)
 	}
 }
 
