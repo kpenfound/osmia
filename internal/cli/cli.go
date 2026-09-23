@@ -704,6 +704,9 @@ func showStatus(w io.Writer, st service.WorkstreamStatus) {
 					fmt.Fprintf(w, "    Needs you: %s\n", u.Card.NeedsYou)
 				}
 			}
+			if l := u.Landing; l != nil {
+				fmt.Fprintf(w, "    Landed: %s on %s\n    Candidate: %s from %s, approved by %s\n    Criteria: %s\n", l.Commit, l.Branch, l.Candidate, l.Base, l.Approval, strings.Join(l.Criteria, ", "))
+			}
 		}
 	}
 	if st.Status == nil {

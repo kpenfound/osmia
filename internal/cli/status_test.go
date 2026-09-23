@@ -227,3 +227,16 @@ func TestStatusPrintsLatestUnitCard(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusPrintsUnitLanding(t *testing.T) {
+	st := service.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Units: []service.UnitStatus{
+		{Unit: "parser", State: "merged", Landing: &service.UnitLanding{Unit: "parser", Approval: "units/parser/review.json revision 2", Candidate: "c0ffee", Base: "ba5e", Criteria: []string{"spec#1", "spec#3"}, Branch: "osmia/feature", Commit: "1a4d3d"}},
+		{Unit: "validator", State: "ready"},
+	}}
+	var out strings.Builder
+	showStatus(&out, st)
+	want := "Units:\n  parser merged\n    Landed: 1a4d3d on osmia/feature\n    Candidate: c0ffee from ba5e, approved by units/parser/review.json revision 2\n    Criteria: spec#1, spec#3\n  validator ready\n"
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("status lacks the landing:\n%s", out.String())
+	}
+}

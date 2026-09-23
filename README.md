@@ -62,7 +62,11 @@ of a sealing.
 
 The [M3 sequential implementation demonstration](docs/m3-exit.md) takes a
 ratified two-unit plan through a mason's question and answer to a recorded
-report and candidate commit for the first unit.
+report and candidate commit for the first unit. Its
+[landing demonstration](docs/m3-exit.md#landing-and-recovery-demonstration)
+lands three reviewed units in dependency order, rebasing an approved unit in
+flight back to review, refreshing the knowledge base from a landed learning
+and recovering an interrupted landing across a restart.
 
 The [charter reference](docs/charter.md) documents the charter template, the
 numbered-rule format and how owner edits are recorded.

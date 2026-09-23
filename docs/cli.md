@@ -64,7 +64,9 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
 - `status <workstream-id>` shows one workstream of the active project: the same
   facts and owner gates, then `Units:` with one line per unit of the sealed plan and its state
   and the latest available card (headline, happened and any owner action) beneath it
-  once the workstream is building, then the full status (goal, attention, note, one line per active
+  once the workstream is building, and for a landed unit its commit on the
+  feature branch, the reviewed candidate and base with the approval that
+  landed it, and the criteria it meets, then the full status (goal, attention, note, one line per active
   agent, and when it was written), or `Status: none yet` before the chief of
   staff writes one. A workstream the project does not hold fails with
   `not_found` (exit 4); with no project configured it fails with `no_project`

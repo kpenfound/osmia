@@ -41,8 +41,60 @@ service snapshots the unit workspace as a candidate commit and records
 report and card, transition causes, and delivery and acknowledgement of the chief
 of staff's start, question and finish notices. `dedupe` remains `planned`,
 has no workspace or report, and receives no mason turn. Its dependency can
-become ready only after landing, which is outside this demonstration.
+become ready only after landing, which the
+[landing demonstration](#landing-and-recovery-demonstration) shows.
 
 The trace files to inspect are `events.jsonl` for unit transitions,
 `questions/1/` for the question and answer, the mason's thread record for
 both turns, and `units/resume/report.json` for the report and candidate.
+
+## Landing and recovery demonstration
+
+`TestM3LandingDemonstration` in `internal/service/landing_demo_test.go` lands
+the units of one workstream on its feature branch. Fake masons, reviewer and
+librarian run through the same local API, temporary Osmia root and local Git
+clone as above. The test starts no model, container, remote push or pull
+request. Run it with `dagger check`, or alone inside Dagger:
+
+```sh
+dagger core container from --address golang:1.26-bookworm \
+  with-directory --path /src --source . --exclude .git,.bees \
+  with-workdir --path /src \
+  with-exec --args=go,test,-count=1,-run,TestM3LandingDemonstration,-v,./internal/service \
+  combined-output
+```
+
+The plan has three units: `resume` and `audit` are independent, and `dedupe`
+depends on `resume`. `resume`'s mason reports a learning with its criterion.
+When `resume` moves to review, `audit`'s workspace is created from the same
+feature branch commit, so it is in flight when `resume` lands.
+
+The first landing is interrupted twice. After its commit is made, the
+landing fails and waits to retry. Meanwhile the reviewer approves `audit` on
+the base `resume` has not yet moved. The service then stops after moving the
+feature branch but before recording the landing. On restart, the landing
+finds its commit on the branch by its `Osmia-Operation` trailer and records it
+without a second commit. The landing operation keeps its retry history, and
+`units/resume/landing.json` names the reviewed candidate, base, approval,
+criteria and commit. The same landing moves `resume` to `merged` and then
+`dedupe` to `ready`; its mason starts only after that.
+
+The librarian then folds `resume`'s learning into `kb/internal.md`.
+`kb/sources.json` links the new prose revision to `resume`'s landing
+revision, commit and the refresh operation. `dedupe`'s mason bundle includes
+the refreshed prose; `resume`'s did not.
+
+`audit`'s approved workspace does not descend from the landed commit, so the
+service rebases it. `units/audit/rebase.json` records the approved snapshot,
+its old base and the rebased commit. The approval no longer holds, and
+`audit` returns to review. The reviewer reviews the rebased candidate on the
+new base, and only that approval lands. `dedupe` lands after `resume`; the
+feature branch ends with one commit per unit, each on the one before.
+
+`osmia status <workstream>` and `GET /v1/status/<workstream-id>` show each
+merged unit's landing: its commit, the reviewed candidate and base, the
+approval and the criteria. In the trace, follow `events.jsonl` for the unit,
+landing and rebase transitions and their causes, `units/<unit>/landing.json`,
+`units/<unit>/review.json` and `units/audit/rebase.json`, the landing
+operations' history, and the librarian workstream's `kb-refresh` operations
+with `kb/sources.json`.
