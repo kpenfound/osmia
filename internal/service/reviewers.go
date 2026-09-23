@@ -1,0 +1,403 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"slices"
+	"strings"
+	"sync"
+
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/scheduler"
+	"github.com/kpenfound/osmia/internal/trace"
+)
+
+const verdictTool = "verdict"
+const verdictOutcome = "verdict"
+const reviewerRole = "reviewer"
+
+var reviewerActor = trace.Actor{Kind: "service", ID: reviewerRole}
+
+type ReviewEvidence struct {
+	Criterion string `json:"criterion"`
+	Evidence  string `json:"evidence"`
+}
+
+type ReviewFinding struct {
+	Criterion string `json:"criterion"`
+	Severity  string `json:"severity"`
+	Evidence  string `json:"evidence"`
+	Action    string `json:"action"`
+}
+
+type UnitVerdict struct {
+	Decision string           `json:"decision"`
+	Evidence []ReviewEvidence `json:"evidence"`
+	Findings []ReviewFinding  `json:"findings"`
+}
+
+type UnitReviewResult struct {
+	Identity UnitReviewIdentity `json:"identity"`
+	Turn     string             `json:"turn"`
+	Verdict  UnitVerdict        `json:"verdict"`
+}
+
+type reviewerReports struct {
+	mu       sync.Mutex
+	accepted map[string]UnitVerdict
+}
+
+func (r *reviewerReports) tool(scope coreadapter.Scope) coreadapter.Tool {
+	tool := coreadapter.Tool{Name: verdictTool, Effect: coreadapter.ToolMemory,
+		Description: "Record a verdict for the exact candidate in this turn. Cite each unit criterion with evidence. Material findings need an action the mason can take. End your turn after acceptance.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"decision":{"type":"string"},"evidence":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"evidence":{"type":"string"}},"required":["criterion","evidence"],"additionalProperties":false}},"findings":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"severity":{"type":"string"},"evidence":{"type":"string"},"action":{"type":"string"}},"required":["criterion","severity","evidence","action"],"additionalProperties":false}}},"required":["decision","evidence","findings"],"additionalProperties":false}`)}
+	tool.Handle = func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		var verdict UnitVerdict
+		if err := json.Unmarshal(raw, &verdict); err != nil {
+			return nil, err
+		}
+		if verdict.Decision != "satisfactory" && verdict.Decision != "material_findings" {
+			return refuseReport("decision must be satisfactory or material_findings")
+		}
+		if len(verdict.Evidence) == 0 {
+			return refuseReport("criterion-linked evidence is required")
+		}
+		for _, e := range verdict.Evidence {
+			if strings.TrimSpace(e.Criterion) == "" || strings.TrimSpace(e.Evidence) == "" {
+				return refuseReport("each criterion needs evidence")
+			}
+		}
+		if verdict.Decision == "material_findings" && len(verdict.Findings) == 0 {
+			return refuseReport("material findings are required")
+		}
+		if verdict.Decision == "satisfactory" && len(verdict.Findings) != 0 {
+			return refuseReport("satisfactory verdict cannot carry material findings")
+		}
+		for _, f := range verdict.Findings {
+			if strings.TrimSpace(f.Criterion) == "" || strings.TrimSpace(f.Severity) == "" || strings.TrimSpace(f.Evidence) == "" || strings.TrimSpace(f.Action) == "" {
+				return refuseReport("each finding needs criterion, severity, evidence and action")
+			}
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.accepted == nil {
+			r.accepted = map[string]UnitVerdict{}
+		}
+		key := turnKey(scope)
+		if _, exists := r.accepted[key]; exists {
+			return refuseReport("this turn already recorded a verdict; end the turn")
+		}
+		r.accepted[key] = verdict
+		return json.Marshal(map[string]any{"recorded": true, "next": "End your turn now."})
+	}
+	return tool
+}
+
+type verdictTurns struct {
+	coreadapter.Turns
+	reports *reviewerReports
+}
+
+func (t *verdictTurns) Run(ctx context.Context, prepared coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	result, err := t.Turns.Run(ctx, prepared)
+	t.reports.mu.Lock()
+	verdict, ok := t.reports.accepted[turnKey(prepared.Scope)]
+	delete(t.reports.accepted, turnKey(prepared.Scope))
+	t.reports.mu.Unlock()
+	if ok {
+		data, encodeErr := json.Marshal(verdict)
+		if encodeErr != nil {
+			return result, errors.Join(err, encodeErr)
+		}
+		result.Outcome = &coreadapter.Outcome{Status: verdictOutcome, Report: string(data)}
+	}
+	return result, err
+}
+
+func (t *verdictTurns) CheckResume(ctx context.Context, previous, next coreadapter.Profile, session coreadapter.BackendSession) error {
+	if checker, ok := t.Turns.(coreadapter.ResumeChecker); ok {
+		return checker.CheckResume(ctx, previous, next, session)
+	}
+	return coreadapter.ErrResumeUnavailable
+}
+
+type reviewers struct{ *masons }
+
+func reviewerAgent(unit string) string {
+	return reviewerRole + strings.TrimPrefix(trace.UnitSubject(unit), "unit")
+}
+func reviewTurnID(unit string, version uint64) string {
+	return fmt.Sprintf("%s-review-%d", reviewerAgent(unit), version)
+}
+
+func (r *reviewers) Pass(ctx context.Context) error {
+	streams, err := r.repository.Workstreams()
+	if err != nil {
+		return err
+	}
+	state, _ := r.s.store.Effective()
+	for _, stream := range streams {
+		if stream == librarianWorkstream(r.repository.Project()) {
+			continue
+		}
+		b, found, err := r.read(stream)
+		if err != nil {
+			return err
+		}
+		if !found {
+			continue
+		}
+		paused := scheduler.Paused(state.Pauses, r.cfg.Project.ID, stream)
+		for _, u := range b.plan.Units {
+			unit := u.ID
+			st := b.states[trace.UnitSubject(unit)]
+			if st.Value == UnitImplementing {
+				if result, ok, err := r.storedResult(stream, unit, st); err != nil {
+					return err
+				} else if ok && result.Verdict.Decision == "material_findings" {
+					if err := r.enqueueFindings(ctx, stream, unit, result); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			if st.Value != UnitReviewing {
+				continue
+			}
+			if err := r.one(ctx, stream, unit, st, paused); err != nil {
+				return fmt.Errorf("workstream %s unit %s review: %w", stream, unit, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, paused bool) error {
+	agent := reviewerAgent(unit)
+	if result, ok, err := r.storedResult(stream, unit, state); err != nil {
+		return err
+	} else if ok {
+		return r.applyReview(ctx, stream, unit, state, result)
+	}
+	th, err := r.repository.Thread(stream, agent)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	turnID := reviewTurnID(unit, state.Version)
+	if err == nil && len(th.Turns) != 0 {
+		last := th.Turns[len(th.Turns)-1]
+		if last.Request.TurnID == turnID || strings.HasPrefix(last.Request.TurnID, turnID+"-recover-") {
+			if th.Status == "interrupted" && th.Active == last.Request.TurnID && last.Response == nil {
+				if err := r.repository.AbandonTurn(ctx, stream, agent, last.Request.TurnID, r.s.now()); err != nil {
+					return err
+				}
+				th, err = r.repository.Thread(stream, agent)
+				if err != nil {
+					return err
+				}
+				last = th.Turns[len(th.Turns)-1]
+			}
+			if last.Status() == "interrupted" && !paused {
+				return r.recover(ctx, last)
+			}
+			if last.CompletedAt.IsZero() {
+				return nil
+			}
+			if last.Status() != "idle" || last.Response.Result.Outcome == nil || last.Response.Result.Outcome.Status != verdictOutcome {
+				return nil
+			}
+			return r.finishReview(ctx, stream, unit, state, last)
+		}
+	}
+	if paused {
+		return nil
+	}
+	req, identity, err := r.prepareUnitReview(ctx, stream, unit)
+	if err != nil {
+		return nil
+	} // preparation records the block for the chief
+	if err := r.ensureThread(ctx, stream, unit); err != nil {
+		return err
+	}
+	profile, _, err := r.s.roleExecution(r.cfg, reviewerRole)
+	if err != nil {
+		return err
+	}
+	content, _ := json.MarshalIndent(identity, "", "  ")
+	prompt := fmt.Sprintf("Review this exact candidate against the sealed spec, plan and mason report. Record criterion-linked evidence with verdict. Material findings must say what the mason should change. The candidate identity is:\n%s\n\nExact diff:\n%s", content, req.Diff)
+	for _, item := range req.Context {
+		prompt += "\n\n" + item.Source + ":\n" + item.Content
+	}
+	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: "You are the unit reviewer. Read only the supplied candidate evidence. Call verdict with your decision; you cannot edit the candidate.", Prompt: prompt}
+	_, err = r.repository.EnqueueTurn(ctx, request)
+	return err
+}
+
+func (r *reviewers) ensureThread(ctx context.Context, stream config.WorkstreamID, unit string) error {
+	agent := reviewerAgent(unit)
+	if _, err := r.repository.Thread(stream, agent); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return r.repository.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: agent, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit)}, Role: reviewerRole, ThreadID: agent})
+}
+
+func (r *reviewers) recover(ctx context.Context, last trace.QueuedTurn) error {
+	req := last.Request
+	req.ID = "request_" + req.TurnID + "-recover-" + fmt.Sprint(last.Sequence)
+	req.TurnID += "-recover-" + fmt.Sprint(last.Sequence)
+	req.Cause = last.Response.ID
+	req.At = r.s.now()
+	req.Prompt += "\n\nThe previous turn was interrupted. Review the same exact candidate and record a verdict."
+	_, err := r.repository.EnqueueTurn(ctx, req)
+	return err
+}
+
+func (r *reviewers) storedResult(stream config.WorkstreamID, unit string, state trace.WorkflowState) (UnitReviewResult, bool, error) {
+	docs, err := trace.Read[trace.Document](r.repository, stream)
+	if err != nil {
+		return UnitReviewResult{}, false, err
+	}
+	var latest trace.Document
+	for _, d := range docs {
+		if d.ID == reviewDocument(unit) {
+			latest = d
+		}
+	}
+	var result UnitReviewResult
+	if latest.Revision == 0 || json.Unmarshal([]byte(latest.Content), &result) != nil || result.Turn == "" {
+		return UnitReviewResult{}, false, nil
+	}
+	if state.Value == UnitReviewing && result.Turn != reviewTurnID(unit, state.Version) && !strings.HasPrefix(result.Turn, reviewTurnID(unit, state.Version)+"-recover-") {
+		return UnitReviewResult{}, false, nil
+	}
+	return result, true, nil
+}
+
+func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, turn trace.QueuedTurn) error {
+	var verdict UnitVerdict
+	if err := json.Unmarshal([]byte(turn.Response.Result.Outcome.Report), &verdict); err != nil {
+		return err
+	}
+	_, identity, err := r.prepareUnitReview(ctx, stream, unit)
+	if err != nil {
+		return err
+	}
+	planned, err := sealedUnit(r.repository, coreadapter.Scope{Workstream: string(stream), Unit: unit})
+	if err != nil {
+		return err
+	}
+	if reason := validateVerdict(planned, verdict); reason != "" {
+		return r.recordReviewPreparationError(ctx, stream, unit, turn.Response.ID, "unit "+unit+" stays reviewing: "+reason)
+	}
+	result := UnitReviewResult{Identity: identity, Turn: turn.Request.TurnID, Verdict: verdict}
+	docs, err := trace.Read[trace.Document](r.repository, stream)
+	if err != nil {
+		return err
+	}
+	var latest trace.Document
+	for _, d := range docs {
+		if d.ID == reviewDocument(unit) {
+			latest = d
+		}
+	}
+	content, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	h := latest.Header
+	h.Revision++
+	h.At = r.s.now()
+	h.Actor = reviewerActor
+	h.Cause = turn.Response.ID
+	if err := r.repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: latest.Path, Content: string(content) + "\n"}}); err != nil {
+		return err
+	}
+	return r.applyReview(ctx, stream, unit, state, result)
+}
+
+func validateVerdict(unit plan.Unit, v UnitVerdict) string {
+	if v.Decision != "satisfactory" && v.Decision != "material_findings" {
+		return "invalid review decision"
+	}
+	want := map[string]bool{}
+	for _, a := range unit.Addresses {
+		want[a.Criterion] = true
+	}
+	seen := map[string]bool{}
+	for _, e := range v.Evidence {
+		if !want[e.Criterion] || seen[e.Criterion] || strings.TrimSpace(e.Evidence) == "" {
+			return "review evidence must cite each unit criterion once"
+		}
+		seen[e.Criterion] = true
+	}
+	if len(seen) != len(want) {
+		return "review evidence must cite each unit criterion once"
+	}
+	if v.Decision == "satisfactory" && len(v.Findings) > 0 || v.Decision == "material_findings" && len(v.Findings) == 0 {
+		return "review findings do not match the decision"
+	}
+	for _, f := range v.Findings {
+		if !want[f.Criterion] || strings.TrimSpace(f.Severity) == "" || strings.TrimSpace(f.Evidence) == "" || strings.TrimSpace(f.Action) == "" {
+			return "review finding needs an addressed criterion, severity, evidence and action"
+		}
+	}
+	return ""
+}
+
+func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, result UnitReviewResult) error {
+	// The durable result retains every governing revision and the diff digest.
+	if result.Identity.Subject != string(stream)+"/"+unit || result.Identity.Candidate.Revision == "" || result.Identity.Candidate.BaseRevision == "" || result.Identity.Candidate.SpecRevision == "" || result.Identity.Candidate.PlanRevision == "" || result.Identity.DiffSHA256 == "" {
+		return errors.New("review result has incomplete candidate identity")
+	}
+	planned, err := sealedUnit(r.repository, coreadapter.Scope{Workstream: string(stream), Unit: unit})
+	if err != nil {
+		return err
+	}
+	if reason := validateVerdict(planned, result.Verdict); reason != "" {
+		return errors.New(reason)
+	}
+	to := UnitApproved
+	if result.Verdict.Decision == "material_findings" {
+		to = UnitImplementing
+	}
+	id := fmt.Sprintf("%s-%s-%d", trace.UnitSubject(unit), to, state.Version)
+	reason := fmt.Sprintf("reviewer verdict %s on %s: candidate %s from %s, spec %s, plan %s; review %s", result.Verdict.Decision, result.Turn, result.Identity.Candidate.Revision, result.Identity.Candidate.BaseRevision, result.Identity.Candidate.SpecRevision, result.Identity.Candidate.PlanRevision, reviewDocument(unit))
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit)}
+	_, err = r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitReviewing, To: to, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s review %s: %s.", unit, result.Verdict.Decision, reason))}})
+	if errors.Is(err, trace.ErrConflict) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if to == UnitImplementing {
+		return r.enqueueFindings(ctx, stream, unit, result)
+	}
+	return nil
+}
+
+func (r *reviewers) enqueueFindings(ctx context.Context, stream config.WorkstreamID, unit string, result UnitReviewResult) error {
+	th, err := r.repository.Thread(stream, masonAgent(unit))
+	if err != nil {
+		return err
+	}
+	turn := fmt.Sprintf("%s-revise-%s", masonAgent(unit), strings.TrimPrefix(result.Turn, reviewerAgent(unit)+"-review-"))
+	if slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == turn }) {
+		return nil
+	}
+	profile, _, err := r.s.roleExecution(r.cfg, masonRole)
+	if err != nil {
+		return err
+	}
+	findings, _ := json.MarshalIndent(result.Verdict.Findings, "", "  ")
+	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: result.Turn, Depth: 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(r.cfg.Project), Prompt: fmt.Sprintf("The reviewer returned candidate %s for revision. Address these criterion-linked findings in your unit workspace, run the planned proofs, then call done with a new criterion report:\n%s", result.Identity.Candidate.Revision, findings)}
+	_, err = r.repository.EnqueueTurn(ctx, request)
+	return err
+}

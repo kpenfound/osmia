@@ -60,7 +60,8 @@ shape as a reply, `shed/round-<n>/packet.json`, the
 `units/<unit>/report.json`, a unit's
 [report and candidate](service.md#finishing-units), where `<unit>` is the unit
 ID, `units/<unit>/review.json`, the prepared review's candidate, base, spec
-and plan revisions and diff digest, and the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
+and plan revisions and diff digest followed by the reviewer's exact verdict,
+criterion evidence and findings, and the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
 round: `shed/round-<n>/owner.json`, the owner's objections, a record of the
 same shape as a member's; `shed/round-<n>/rulings.json`, what the owner ruled
 and overruled about the objections that stand; `shed/round-<n>/more.json`, the

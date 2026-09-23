@@ -498,6 +498,35 @@ func TestReplyToolOnlyReachesTheArchitect(t *testing.T) {
 
 type verifyOnlyEngine struct{ a.Engine }
 
+func TestVerdictToolOnlyReachesReviewer(t *testing.T) {
+	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason", "librarian"} {
+		t.Run(role, func(t *testing.T) {
+			r, _, h, _, input := fixture(t, role, "container")
+			r.Grants[role] = a.Capabilities{Tools: []string{"file_read", "verdict"}}
+			r.Scoped = func(_ context.Context, scope a.Scope) ([]a.Tool, error) {
+				if scope.Role != "reviewer" {
+					return nil, nil
+				}
+				return []a.Tool{{Name: "verdict", Effect: a.ToolMemory, Handle: func(context.Context, json.RawMessage) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }}}, nil
+			}
+			if _, err := r.Run(context.Background(), input); err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"file_read"}
+			if role == "reviewer" {
+				want = append(want, "verdict")
+			}
+			var names []string
+			for _, tool := range h.requests[0].Tools {
+				names = append(names, tool.Name)
+			}
+			if !reflect.DeepEqual(names, want) {
+				t.Fatalf("tools %v; want %v", names, want)
+			}
+		})
+	}
+}
+
 func TestServiceTurnsForwardResumeChecksToEngine(t *testing.T) {
 	r, p, _, engine, _ := fixture(t, "mason", "container")
 	previous := a.Profile{Name: "a", Backend: "claude", Model: "model"}

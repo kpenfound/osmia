@@ -54,7 +54,8 @@ fetch permission. Some tools belong to one role: `set_status`, `answer`,
 other role's grant, so only `chief_of_staff` can see them, and `ask` is removed
 from the `chief_of_staff` grant, so every other role can hold it and the chief
 of staff cannot. `object` and `concede` are removed from every grant but the
-`committee`'s, and `reply` from every grant but the `architect`'s. The selector's
+`committee`'s, `reply` from every grant but the `architect`'s, and `verdict`
+from every grant but the `reviewer`'s. The selector's
 optional `Narrow` request intersects the grant. Neither prompts nor profiles
 grant tools. The full workflow role-tool catalogue is outside this M1
 implementation.

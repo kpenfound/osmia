@@ -23,9 +23,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// masonRoles runs the chief of staff and the mason in a container, the only
+// masonRoles runs the chief of staff, mason and reviewer in containers, the
 // sandbox the fake engine's boundary check accepts.
-const masonRoles = chiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
+const masonRoles = chiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
 
 // masonWrote is the file every fake mason writes into its view.
 const masonWrote = "internal/trace/built.go"

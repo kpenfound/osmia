@@ -51,7 +51,9 @@ type Options struct {
 	// one implementing or waiting unit per workstream within capacity.masons,
 	// and queues each started unit's first mason turn for the scheduler. It
 	// parks a unit in waiting when its mason asks, and resumes it once the
-	// answer is queued as the mason's next turn.
+	// answer is queued as the mason's next turn. The reviewer controller
+	// dispatches exact-candidate reviews through durable reviewer threads and
+	// applies completed verdicts before the mason controller starts more work.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error)
 	// Librarian supplies the execution boundary of the librarian's
@@ -502,7 +504,8 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 			return nil, nil, err
 		}
 		units := &masons{s: s, cfg: cfg, repository: repository}
-		hooks = append(hooks, deliver.Pass, s.answers(cfg, repository).Pass, units.Pass, dispatch.Pass)
+		reviews := &reviewers{masons: units}
+		hooks = append(hooks, deliver.Pass, s.answers(cfg, repository).Pass, reviews.Pass, units.Pass, dispatch.Pass)
 	}
 	options.Schedule = func(ctx context.Context) error {
 		for _, hook := range hooks {

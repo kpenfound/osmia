@@ -43,10 +43,11 @@ var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName
 // its view of its unit's workspace, ask the chief of staff and report its
 // unit done.
 var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, doneTool}, WriteFiles: true, Execute: true}
+var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", verdictTool}}
 
 // Enforce returns opts with Librarian, Architect, Committee and Threads
 // running every role turn through e. Thread turns are granted to the chief of
-// staff and the mason only; a turn of any other role fails with a recorded
+// staff, mason and reviewer; a turn of any other role fails with a recorded
 // reason. A mason turn works on a view of its unit's workspace, copied back
 // into the workspace after the turn, and a mason turn whose done the service
 // accepted ends with the outcome done, the mason's report and its card. Each role's
@@ -71,11 +72,12 @@ func Enforce(opts Options, e Enforcement) Options {
 		project := string(r.Project())
 		units := newUnitWorkspaces(cfg)
 		reports := &masonReports{}
+		verdicts := &reviewerReports{}
 		turns := &isolation.Turns{
 			Workspaces:         threadWorkspaces{units: units},
 			Views:              isolation.Views{Directory: views},
 			PreserveMasonViews: true,
-			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant},
+			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant},
 			Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 				role, ok := cfg.Roles[scope.Role]
 				if !ok || scope.Project != project {
@@ -100,6 +102,9 @@ func Enforce(opts Options, e Enforcement) Options {
 					ask, err := questions.Tools(r, masonAgent(scope.Unit), scope, now)
 					return append(ask, reports.tool(r, scope)), err
 				}
+				if scope.Role == reviewerRole {
+					return []coreadapter.Tool{verdicts.tool(scope)}, nil
+				}
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil
 				}
@@ -119,7 +124,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				return units.capture(ctx, scope, view, result)
 			},
 		}
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: &questions.Turns{Turns: &reportingTurns{Turns: turns, reports: reports}, Repository: r}, Now: now},
+		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: &questions.Turns{Turns: &verdictTurns{Turns: &reportingTurns{Turns: turns, reports: reports}, reports: verdicts}, Repository: r}, Now: now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				directory := filepath.Join(root, "threads", project, string(in.Workstream), in.Agent, in.Turn)
 				return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
