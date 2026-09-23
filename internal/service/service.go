@@ -351,11 +351,15 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 // workstream and of every architect and committee thread, which the service's
 // own reconcilers run in their staged views, and of abandoned workstreams, and
 // holds the project's other queued turns that a runtime pause in force covers.
+// It also holds every mason turn of a unit whose workspace is behind its
+// feature branch, so the workspace has no writer when the foreman rebases it.
 // The store is read on every pass, so a cleared pause lets held turns run on
 // the loop's next periodic pass.
-func (s *Service) admit(project config.ProjectID, repository *trace.Repository) func(context.Context, scheduler.Candidate) (bool, error) {
+func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(context.Context, scheduler.Candidate) (bool, error) {
+	project := cfg.Project.ID
 	librarian := librarianWorkstream(project)
-	return func(_ context.Context, c scheduler.Candidate) (bool, error) {
+	units := newUnitWorkspaces(cfg)
+	return func(ctx context.Context, c scheduler.Candidate) (bool, error) {
 		if c.Workstream == librarian || c.Thread.Identity.Role == architectRole || c.Thread.Identity.Role == committeeRole {
 			return false, nil
 		}
@@ -363,7 +367,14 @@ func (s *Service) admit(project config.ProjectID, repository *trace.Repository) 
 			return false, err
 		}
 		st, _ := s.store.Effective()
-		return !scheduler.Held(st.Pauses, project, c), nil
+		if scheduler.Held(st.Pauses, project, c) {
+			return false, nil
+		}
+		if c.Thread.Identity.Role == masonRole && c.Turn.Request.Unit != "" {
+			behind, err := units.behind(ctx, c.Workstream, c.Turn.Request.Unit)
+			return !behind, err
+		}
+		return true, nil
 	}
 }
 
@@ -444,12 +455,12 @@ func (s *Service) stop(active *activeProject) error {
 // service's own reconcilers for knowledge-base extraction, architect drafts,
 // committee rounds and the architect's replies to them, and the repository
 // boundary by the service's sealer for sealings, its builder for builds and
-// its foreman for landings; the architect controller, then the shed
+// its foreman for landings and rebases; the architect controller, then the shed
 // controller, then the sealing controller, then the building controller, then
 // the landing controller run at the start of every pass, and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
 // chief of staff, recorded answers are queued on their askers' threads, the
-// mason controller parks, resumes and starts units, and the scheduler runs, whose gate holds turns that a runtime pause covers;
+// mason controller parks, resumes and starts units, and the scheduler runs, whose gate holds turns that a runtime pause covers and mason turns of units behind their feature branch;
 // without it, the configured Schedule hook runs instead.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, error) {
 	options, threads := s.options.Reconciliation, s.options.Threads
@@ -495,7 +506,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		runner.turns = abandonable{Reconciler: bound, s: s, repository: repository}
 		limits := cfg.Capacity
 		limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
-		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg.Project.ID, repository), Capacity: &limits})
+		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg, repository), Capacity: &limits})
 		if err != nil {
 			repository.Close()
 			return nil, nil, err

@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -84,15 +85,21 @@ func featureWorkspaces(cfg *config.Config) *workspace.Git {
 }
 
 // foreman is the landing controller. Its pass asks to land one approved unit
-// at a time per project, and its reconciler runs each landing operation.
+// at a time per project and to rebase the unit workspaces a landing left
+// behind; its reconciler runs each landing operation, and rebaser each
+// rebase operation.
 type foreman struct{ *masons }
 
 var _ coreadapter.Reconciler = (*foreman)(nil)
 
-// Pass asks to land the first approved unit, in the workstreams' priority
-// order and each plan's dependency order, whose approval no landing was asked
-// for. Nothing is asked for while a landing of the project has no result, so
-// landings run one at a time. A paused workstream asks for none.
+// Pass runs one landing and rebase sequence at a time per project. While a
+// landing of the project has no result, it does nothing. Otherwise it keeps
+// the unfinished units of the building workstreams that are not paused on
+// their feature branches, rebasing each unit whose workspace a landing left
+// behind and routing rebase conflicts to masons. Once every such unit is
+// current and every rebase has its result, it asks to land the first approved
+// unit, in the workstreams' priority order and each plan's dependency order,
+// whose approval no landing was asked for.
 func (f *foreman) Pass(ctx context.Context) error {
 	streams, err := f.repository.Workstreams()
 	if err != nil {
@@ -101,6 +108,9 @@ func (f *foreman) Pass(ctx context.Context) error {
 	state, _ := f.s.store.Effective()
 	librarian := librarianWorkstream(f.repository.Project())
 	requested := map[config.WorkstreamID][]landInput{}
+	rebasing := map[config.WorkstreamID]map[string]bool{}
+	rebased := map[config.WorkstreamID]map[string][]string{}
+	dispatched := map[config.WorkstreamID]map[string]bool{}
 	var candidates []building
 	for _, stream := range streams {
 		if stream == librarian {
@@ -113,18 +123,33 @@ func (f *foreman) Pass(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		rebasing[stream], rebased[stream], dispatched[stream] = map[string]bool{}, map[string][]string{}, map[string]bool{}
 		for _, o := range ops {
-			if o.Operation.Action != LandAction {
-				continue
+			switch o.Operation.Action {
+			case LandAction:
+				if o.Result == nil {
+					return nil
+				}
+				in, err := decodeLand(o.Operation)
+				if err != nil {
+					return err
+				}
+				requested[stream] = append(requested[stream], in)
+			case RebaseAction:
+				in, err := decodeRebase(o.Operation)
+				if err != nil {
+					return err
+				}
+				if o.Result == nil {
+					rebasing[stream][in.Unit] = true
+				} else {
+					rebased[stream][in.Unit] = append(rebased[stream][in.Unit], in.Onto)
+				}
+			default:
+				if in, err := thread.DecodeTurn(o.Operation); err == nil {
+					dispatched[stream][in.Agent+"/"+in.Turn] = true
+				}
 			}
-			if o.Result == nil {
-				return nil
-			}
-			in, err := decodeLand(o.Operation)
-			if err != nil {
-				return err
-			}
-			requested[stream] = append(requested[stream], in)
 		}
 		b, found, err := f.read(stream)
 		if err != nil {
@@ -133,6 +158,17 @@ func (f *foreman) Pass(ctx context.Context) error {
 		if found && !scheduler.Paused(state.Pauses, f.cfg.Project.ID, stream) {
 			candidates = append(candidates, b)
 		}
+	}
+	settled := true
+	for _, b := range candidates {
+		current, err := f.refresh(ctx, b, rebasing[b.stream], dispatched[b.stream], rebased[b.stream])
+		if err != nil {
+			return fmt.Errorf("workstream %s rebase: %w", b.stream, err)
+		}
+		settled = settled && current
+	}
+	if !settled {
+		return nil
 	}
 	for _, b := range startOrder(candidates, state.Priorities, f.cfg.Project.ID) {
 		for _, u := range dependencyOrder(b.plan) {
@@ -371,8 +407,8 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	return f.record(ctx, stream, in, op.ID, review, result, commit)
 }
 
-// requestedAt returns when the landing operation was asked for, the time its
-// commit is stamped with.
+// requestedAt returns when the operation was asked for, the time the commit
+// it makes is stamped with.
 func (f *foreman) requestedAt(stream config.WorkstreamID, operation string) (time.Time, error) {
 	ops, err := f.repository.Operations(stream)
 	if err != nil {
@@ -380,7 +416,7 @@ func (f *foreman) requestedAt(stream config.WorkstreamID, operation string) (tim
 	}
 	i := slices.IndexFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.ID == operation })
 	if i < 0 {
-		return time.Time{}, fmt.Errorf("land operation %s is not recorded", operation)
+		return time.Time{}, fmt.Errorf("operation %s is not recorded", operation)
 	}
 	return ops[i].Transition.At, nil
 }

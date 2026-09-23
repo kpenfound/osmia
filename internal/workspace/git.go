@@ -218,6 +218,108 @@ func (g *Git) Squash(ctx context.Context, base, candidate, message string, at ti
 	return g.runEnv(ctx, env, "commit-tree", "--no-gpg-sign", "-p", base, "-m", message, tree)
 }
 
+// Rebase returns one commit whose only parent is onto and whose tree is the
+// three-way merge of onto and head from their merge base, with message,
+// authored and committed by Osmia at the given time, and the paths the merge
+// left conflicted, sorted. A conflicted path holds the merge's conflict
+// markers, or the side that kept it when the other deleted it. The same
+// arguments make the same commit, and no branch moves.
+func (g *Git) Rebase(ctx context.Context, onto, head, message string, at time.Time) (string, []string, error) {
+	out, err := g.runInRaw(ctx, g.Clone, nil, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", onto, head)
+	if err != nil && !exitCode(err, 1) {
+		return "", nil, err
+	}
+	fields := strings.Split(out, "\x00")
+	tree := fields[0]
+	if tree == "" {
+		return "", nil, fmt.Errorf("git merge-tree of %s and %s wrote no tree", onto, head)
+	}
+	var conflicts []string
+	for _, path := range fields[1:] {
+		if path != "" && !slices.Contains(conflicts, path) {
+			conflicts = append(conflicts, path)
+		}
+	}
+	if err != nil && len(conflicts) == 0 {
+		return "", nil, err
+	}
+	slices.Sort(conflicts)
+	date := fmt.Sprintf("@%d +0000", at.Unix())
+	env := append(slices.Clone(identity), "GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE="+date)
+	commit, err := g.runEnv(ctx, env, "commit-tree", "--no-gpg-sign", "-p", onto, "-m", message, tree)
+	if err != nil {
+		return "", nil, err
+	}
+	return commit, conflicts, nil
+}
+
+// Move points the worktree's branch at commit to, from commit from, and makes
+// its index and files those of to. A worktree already at to has its index
+// and files made those of to again, which completes a move interrupted
+// between the two; one at any other commit is refused. Files the repository
+// ignores stay unless to tracks them.
+func (g *Git) Move(ctx context.Context, w Worktree, from, to string) error {
+	head, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return err
+	}
+	if head != to {
+		if head != from {
+			return fmt.Errorf("workspace %s is at %s, not %s", w.Path, head, from)
+		}
+		if _, err := g.runIn(ctx, w.Path, identity, "update-ref", "-m", "osmia: rebase", "HEAD", to, from); err != nil {
+			return err
+		}
+	}
+	_, err = g.runIn(ctx, w.Path, identity, "reset", "--hard", "--quiet", to)
+	return err
+}
+
+// Markers returns the paths, of those given, whose file in commit still
+// holds a conflict marker line: one that starts with seven < or seven >
+// followed by a space or the line's end. A path commit does not hold as a
+// file has none.
+func (g *Git) Markers(ctx context.Context, commit string, paths []string) ([]string, error) {
+	out, err := g.runInRaw(ctx, g.Clone, nil, "ls-tree", "-r", "-z", commit+"^{tree}")
+	if err != nil {
+		return nil, err
+	}
+	blobs := map[string]string{}
+	for _, entry := range strings.Split(out, "\x00") {
+		info, path, ok := strings.Cut(entry, "\t")
+		if fields := strings.Fields(info); ok && len(fields) == 3 && fields[1] == "blob" {
+			blobs[path] = fields[2]
+		}
+	}
+	var marked []string
+	for _, path := range paths {
+		blob, ok := blobs[path]
+		if !ok {
+			continue
+		}
+		content, err := g.runInRaw(ctx, g.Clone, nil, "cat-file", "blob", blob)
+		if err != nil {
+			return nil, err
+		}
+		if conflicted(content) {
+			marked = append(marked, path)
+		}
+	}
+	return marked, nil
+}
+
+// conflicted reports whether a file holds a conflict marker line.
+func conflicted(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		for _, marker := range []string{"<<<<<<<", ">>>>>>>"} {
+			if rest, ok := strings.CutPrefix(strings.TrimSuffix(line, "\r"), marker); ok && (rest == "" || rest[0] == ' ') {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Advance fast-forwards the worktree's branch, with its index and files, from
 // commit from to commit to, which must descend from it. A worktree already at
 // to is left as it is; one at any other commit is refused.
@@ -434,7 +536,8 @@ func (g *Git) runEnv(ctx context.Context, extra []string, args ...string) (strin
 	return g.runIn(ctx, g.Clone, extra, args...)
 }
 
-// runIn runs Git the way run does, in dir rather than the clone.
+// runIn runs Git the way run does, in dir rather than the clone. A command
+// that fails returns what it wrote to standard output with its error.
 func (g *Git) runIn(ctx context.Context, dir string, extra []string, args ...string) (string, error) {
 	out, err := g.runInRaw(ctx, dir, extra, args...)
 	return strings.TrimSpace(out), err
@@ -455,7 +558,7 @@ func (g *Git) runInRaw(ctx context.Context, dir string, extra []string, args ...
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return "", fmt.Errorf("git %s: %w", args[0], ctxErr)
 		}
-		return "", &Error{Args: args, Err: err, Stderr: strings.TrimSpace(stderr.String())}
+		return stdout.String(), &Error{Args: args, Err: err, Stderr: strings.TrimSpace(stderr.String())}
 	}
 	return stdout.String(), nil
 }

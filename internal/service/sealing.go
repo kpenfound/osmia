@@ -529,8 +529,8 @@ func units(n int) string {
 }
 
 // repositoryAdapter routes repository-boundary operations: sealings to the
-// service's sealer, builds to its builder, landings to its foreman,
-// everything else to the configured reconciler.
+// service's sealer, builds to its builder, landings and rebases to its
+// foreman, everything else to the configured reconciler.
 type repositoryAdapter struct {
 	other  coreadapter.Reconciler
 	seals  *sealer
@@ -546,6 +546,8 @@ func (a repositoryAdapter) Inspect(ctx context.Context, op coreadapter.Operation
 		return a.builds.Inspect(ctx, op)
 	case LandAction:
 		return a.lands.Inspect(ctx, op)
+	case RebaseAction:
+		return rebaser{a.lands}.Inspect(ctx, op)
 	}
 	if a.other == nil {
 		return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "No reconciliation adapter configured"}, nil
@@ -560,6 +562,8 @@ func (a repositoryAdapter) Apply(ctx context.Context, op coreadapter.Operation) 
 		return a.builds.Apply(ctx, op)
 	case LandAction:
 		return a.lands.Apply(ctx, op)
+	case RebaseAction:
+		return rebaser{a.lands}.Apply(ctx, op)
 	}
 	if a.other == nil {
 		return coreadapter.OperationResult{}, errors.New("no repository adapter is configured")

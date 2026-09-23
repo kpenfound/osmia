@@ -497,7 +497,7 @@ func TestCommitteeSizeIsCapacityCommittee(t *testing.T) {
 	}
 	th, err := f.repository().Thread(stream, committeeAgent(1))
 	must(t, err)
-	admitted, err := f.s.admit(f.project, f.repository())(context.Background(), scheduler.Candidate{Workstream: stream, Thread: th})
+	admitted, err := f.s.admit(f.s.current(), f.repository())(context.Background(), scheduler.Candidate{Workstream: stream, Thread: th})
 	if err != nil || admitted {
 		t.Fatalf("the scheduler admits committee turns: %v %v", admitted, err)
 	}

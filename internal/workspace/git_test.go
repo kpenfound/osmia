@@ -525,3 +525,168 @@ func TestSquashAndAdvanceLandOneCommit(t *testing.T) {
 		t.Fatalf("a squash of a candidate not on its base: %v", err)
 	}
 }
+
+// rebaseFixture is a feature branch osmia/w1 on base with a worktree, and a
+// unit worktree created from it; each is a Worktree of the fixture's provider.
+func rebaseFixture(t *testing.T, f fixture) (base string, feature, unit Worktree) {
+	t.Helper()
+	ctx := context.Background()
+	base = git(t, "-C", f.scratch, "rev-parse", "HEAD")
+	git(t, "-C", f.clone, "branch", "osmia/w1", base)
+	acquired, err := f.provider.Acquire(ctx, vcs.Request{Name: "feature-w1", Branch: "osmia/w1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feature = acquired.(Worktree)
+	acquired, err = f.provider.Acquire(ctx, vcs.Request{Name: "w1/u1", Ref: "osmia/w1", Branch: "osmia-unit/w1/u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base, feature, acquired.(Worktree)
+}
+
+// commitFiles writes files into the worktree and snapshots it on base.
+func (f fixture) commitFiles(t *testing.T, w Worktree, base string, files map[string]string) string {
+	t.Helper()
+	for name, content := range files {
+		path := filepath.Join(w.Path, name)
+		if content == "" {
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commit, err := f.provider.Snapshot(context.Background(), w, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return commit
+}
+
+// A rebase merges the change a unit's snapshot holds since its base onto the
+// new feature branch tip as one commit on that tip, made the same way every
+// time, and moves nothing; Move then puts the unit's branch, index and files
+// on it, and completes a move interrupted after the branch moved.
+func TestRebaseMergesTheUnitsChangeOntoTheNewTip(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base, feature, unit := rebaseFixture(t, f)
+	landed := f.commitFiles(t, feature, base, map[string]string{"landed.go": "landed\n"})
+	snapshot := f.commitFiles(t, unit, base, map[string]string{"unit.go": "unit\n"})
+	if err := os.WriteFile(filepath.Join(unit.Path, "build.log"), []byte("ignored\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.clone, ".git", "info", "exclude"), []byte("build.log\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	message := "Rebase unit u1\n\nOsmia-Operation: op-1"
+	commit, conflicts, err := f.provider.Rebase(ctx, landed, snapshot, message, at)
+	if err != nil || len(conflicts) != 0 {
+		t.Fatalf("rebase %s %v: %v", commit, conflicts, err)
+	}
+	again, _, err := f.provider.Rebase(ctx, landed, snapshot, message, at)
+	if err != nil || again != commit {
+		t.Fatalf("a second rebase made %s, %v; want %s", again, err, commit)
+	}
+	got, err := f.provider.Commit(ctx, commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got.Parents, []string{landed}) || got.Message != message {
+		t.Fatalf("the rebased commit %+v", got)
+	}
+	if files := git(t, "-C", f.clone, "ls-tree", "-r", "--name-only", commit); files != "README\nlanded.go\nunit.go" {
+		t.Fatalf("the rebased tree holds %q", files)
+	}
+	if who := git(t, "-C", f.clone, "log", "-1", "--format=%an <%ae> %at", commit); who != "Osmia <osmia@localhost> "+fmt.Sprint(at.Unix()) {
+		t.Fatalf("the rebase's identity and date: %s", who)
+	}
+	if tip, _, err := f.provider.Branch(ctx, "osmia-unit/w1/u1"); err != nil || tip != snapshot {
+		t.Fatalf("a rebase moved the unit branch to %s, %v", tip, err)
+	}
+
+	if err := f.provider.Move(ctx, unit, landed, commit); err == nil || !strings.Contains(err.Error(), "is at "+snapshot+", not "+landed) {
+		t.Fatalf("a move from another commit: %v", err)
+	}
+	if err := f.provider.Move(ctx, unit, snapshot, commit); err != nil {
+		t.Fatal(err)
+	}
+	check := func() {
+		t.Helper()
+		if head := git(t, "-C", unit.Path, "rev-parse", "HEAD"); head != commit {
+			t.Fatalf("the unit worktree is at %s, not %s", head, commit)
+		}
+		if tip, _, err := f.provider.Branch(ctx, "osmia-unit/w1/u1"); err != nil || tip != commit {
+			t.Fatalf("the unit branch is at %s, %v", tip, err)
+		}
+		if status := git(t, "-C", unit.Path, "status", "--porcelain"); status != "" {
+			t.Fatalf("the unit worktree after the move:\n%s", status)
+		}
+		for name, want := range map[string]string{"landed.go": "landed\n", "unit.go": "unit\n", "build.log": "ignored\n"} {
+			if data, err := os.ReadFile(filepath.Join(unit.Path, name)); err != nil || string(data) != want {
+				t.Fatalf("%s holds %q, %v", name, data, err)
+			}
+		}
+	}
+	check()
+	if err := f.provider.Move(ctx, unit, snapshot, commit); err != nil {
+		t.Fatal(err)
+	}
+	check()
+	// Interrupted after the branch moved and before the files did.
+	git(t, "-C", unit.Path, "reset", "--hard", "--quiet", snapshot)
+	git(t, "-C", unit.Path, "update-ref", "HEAD", commit)
+	if err := f.provider.Move(ctx, unit, snapshot, commit); err != nil {
+		t.Fatal(err)
+	}
+	check()
+}
+
+// A rebase whose sides both changed a file, or one changed what the other
+// deleted, still makes its commit, with the conflicted paths: a changed file
+// carries conflict markers, and a deleted one is kept as the side that
+// changed it. Markers finds the conflicted files still carrying markers.
+func TestRebaseReportsConflictsAndMarkersFindsThem(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base, feature, unit := rebaseFixture(t, f)
+	base = f.commitFiles(t, feature, base, map[string]string{"gone.txt": "one\n"})
+	git(t, "-C", unit.Path, "reset", "--hard", "--quiet", base)
+	landed := f.commitFiles(t, feature, base, map[string]string{"README": "feature\n", "gone.txt": ""})
+	snapshot := f.commitFiles(t, unit, base, map[string]string{"README": "unit\n", "gone.txt": "two\n", "clean.go": "clean\n"})
+	commit, conflicts, err := f.provider.Rebase(ctx, landed, snapshot, "Rebase unit u1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(conflicts, []string{"README", "gone.txt"}) {
+		t.Fatalf("conflicts %v", conflicts)
+	}
+	if parents := git(t, "-C", f.clone, "log", "-1", "--format=%P", commit); parents != landed {
+		t.Fatalf("the conflicted commit's parents %s", parents)
+	}
+	readme := git(t, "-C", f.clone, "show", commit+":README")
+	if !strings.HasPrefix(readme, "<<<<<<< "+landed+"\nfeature\n=======\nunit\n>>>>>>> "+snapshot) {
+		t.Fatalf("the conflicted README:\n%s", readme)
+	}
+	if kept := git(t, "-C", f.clone, "show", commit+":gone.txt"); kept != "two" {
+		t.Fatalf("the changed file the feature deleted holds %q", kept)
+	}
+	marked, err := f.provider.Markers(ctx, commit, []string{"README", "gone.txt", "missing.txt"})
+	if err != nil || !slices.Equal(marked, []string{"README"}) {
+		t.Fatalf("markers %v: %v", marked, err)
+	}
+	if err := f.provider.Move(ctx, unit, snapshot, commit); err != nil {
+		t.Fatal(err)
+	}
+	resolved := f.commitFiles(t, unit, landed, map[string]string{"README": "feature and unit\n<<<<<<<< not a marker\n"})
+	if marked, err := f.provider.Markers(ctx, resolved, conflicts); err != nil || len(marked) != 0 {
+		t.Fatalf("markers after resolving %v: %v", marked, err)
+	}
+}

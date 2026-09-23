@@ -289,19 +289,36 @@ func (m *masons) reported(stream config.WorkstreamID, unit string) (MasonReport,
 // with the candidate as the next revision of units/<unit>/report.json and the
 // move in one commit. It reports whether the unit moved. A unit whose
 // candidate cannot be made stays implementing, and finish records why it is
-// blocked. A unit whose state moved since it was read is left to the next
-// pass.
+// blocked. A unit whose workspace is behind its feature branch waits for the
+// foreman to rebase it. A candidate whose files a rebase left conflicted
+// still carry conflict markers stays implementing, and its mason gets a turn
+// that names them. A unit whose state moved since it was read is left to the
+// next pass.
 func (m *masons) finish(ctx context.Context, b building, unit string) (moved, blocked bool, err error) {
 	report, turn, found, err := m.reported(b.stream, unit)
 	if err != nil || !found {
 		return false, false, err
 	}
-	w, base, candidate, err := newUnitWorkspaces(m.cfg).snapshot(ctx, b.stream, unit)
+	units := newUnitWorkspaces(m.cfg)
+	if behind, err := units.behind(ctx, b.stream, unit); err != nil || behind {
+		return false, false, err
+	}
+	w, base, candidate, err := units.snapshot(ctx, b.stream, unit)
 	if err != nil {
 		if ctx.Err() != nil {
 			return false, false, err
 		}
 		return false, true, m.block(ctx, b.stream, unit, turn.Response.ID, fmt.Sprintf("unit %s stays implementing: its mason reported done, and its candidate cannot be made: %v", unit, err))
+	}
+	conflicted, _, err := m.conflicts(b.stream, unit)
+	if err != nil {
+		return false, false, err
+	}
+	if marked, err := units.git.Markers(ctx, candidate, conflicted); err != nil || len(marked) != 0 {
+		if err != nil {
+			return false, false, err
+		}
+		return false, false, m.remind(ctx, b.stream, unit, turn, marked)
 	}
 	latest, _, _, err := seal.Latest(m.repository, b.stream)
 	if err != nil {

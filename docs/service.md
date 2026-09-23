@@ -1318,11 +1318,18 @@ when the latter is set. The document holds `unit`, `turn`,
 workspace descends from) and `candidate`. A unit in `reviewing` takes no mason
 slot, so its workstream can start its next `ready` unit.
 
-A unit whose candidate cannot be made, as when the feature branch moved on
-past the commit its workspace is at, stays `implementing` and is [blocked](#starting-units) with the reason `unit
-<id> stays implementing: its mason reported done, and its candidate cannot be
-made: <error>`: it takes no mason slot, its workstream starts no other unit,
-and the next pass tries again.
+A unit whose workspace does not descend from the tip of the feature branch,
+as after another unit landed, is not finished until the foreman has
+[rebased](#rebasing-units-in-flight) the workspace; the snapshot then holds
+the mason's work on the new tip. A unit whose rebases left conflicts is not
+finished while a conflicted file of its candidate still carries a conflict
+marker line, one starting with `<<<<<<<` or `>>>>>>>`: it stays
+`implementing`, and its mason gets the turn `mason-<id>-markers-<n>`, after
+its done turn `n`, naming those files. A unit whose candidate cannot be made
+for any other reason stays `implementing` and is [blocked](#starting-units)
+with the reason `unit <id> stays implementing: its mason reported done, and
+its candidate cannot be made: <error>`: it takes no mason slot, its
+workstream starts no other unit, and the next pass tries again.
 
 ### Preparing a unit review
 
@@ -1379,10 +1386,14 @@ another reviewer turn.
 ### Landing a unit
 
 The landing controller runs in every reconciliation pass after the building
-controller. It lands one unit at a time per project: while a landing
-operation of the project has no result, it asks for no other. Otherwise it
-takes the building workstreams that are not paused, in priority order, and
-their units in dependency order, and asks to land the first `approved` unit
+controller. It runs one landing and rebase sequence at a time per project:
+while a landing operation of the project has no result, it asks for nothing.
+Otherwise it first [rebases](#rebasing-units-in-flight) the units a landing
+left behind. While a unit of a building workstream that is not paused is
+behind its feature branch, or a rebase has no result, it asks for no landing.
+Otherwise it takes the building workstreams that are not paused, in priority
+order, and their units in dependency order, and asks to land the first
+`approved` unit
 whose latest `units/<id>/review.json` revision `<k>` is a satisfactory
 verdict no landing was asked for. It publishes the operation `land` (input
 `unit`, `review`, `candidate` and `base`) on the repository boundary with the
@@ -1426,6 +1437,87 @@ chief of staff is told that the unit lands once an approval of its current
 candidate, base, spec and plan is recorded. The same approval is not asked
 to land again. A landing whose outcome is recorded completes on inspection
 without touching the branch.
+
+### Rebasing units in flight
+
+A landing moves the feature branch, and the workspace of every other
+unfinished unit of the workstream is then behind it: its branch does not
+descend from the new tip. The landing controller rebases each such unit, in
+any state but `planned` and `merged`, once no writer holds its workspace. A
+mason turn of the unit that is claimed, including one a stop interrupted
+whose view the mason controller has not copied back yet, or that a turn
+operation names and that has not completed, holds the workspace, and the
+unit waits. The scheduler's [gate](#running-turns) dispatches no new mason
+turn of a unit that is behind, so a unit's writer finishes, or is stopped and
+recovered into its workspace, and none starts before the rebase.
+
+The controller publishes the operation `rebase` (input `unit`, `rebase` `<k>`
+and `onto`, the feature branch tip) on the repository boundary with the
+transition `rebase-<id>-<k>` (actor `service`/`foreman`, cause the landing
+operation that made the tip), which moves the workflow subject `rebase-<id>`
+to `requested-<k>`. A unit already rebased onto that tip is not asked again.
+
+The operation first checks the unit branch. A tip whose only parent is the
+new feature branch tip and whose message carries this operation's
+`Osmia-Operation` trailer is an interrupted rebase: its snapshot is read from
+the `Osmia-Snapshot` trailer, and nothing is snapshotted or committed again.
+Otherwise the feature branch must still be at `onto` and the workspace must
+not descend from it. The service snapshots the workspace, untracked files
+included, then merges the change the snapshot holds since the feature branch
+commit it descends from onto the new tip, and commits the merged tree once
+with the new tip as its only parent, by `Osmia <osmia@localhost>` and stamped
+with the time the rebase was asked for. Its trailers name the workstream,
+unit, snapshot, base, new tip and operation. A path both sides changed
+carries conflict markers, `<<<<<<< <new tip>` above the feature branch's
+lines and `>>>>>>> <snapshot>` below the unit's, and a path one side deleted
+and the other changed keeps the changed side; either is a conflicted path.
+The unit branch, its index and its files then move to the rebased commit. No
+agent takes part. The merge runs `git merge-tree --write-tree`, which needs
+Git 2.38 or later.
+
+One trace commit then records `units/<id>/rebase.json` (the unit, rebase
+number, operation, the unit's state, branch, base, new tip, snapshot, rebased
+commit, conflicted paths and the report revision current after the rebase)
+and the rebase's outcome: `rebase-<id>-<k>-rebased` moving `rebase-<id>` to
+`rebased-<k>`, or `rebase-<id>-<k>-conflicted` moving it to `conflicted-<k>`
+with a notice for the chief of staff, `Unit <id> conflicts with feature
+branch <branch> at <tip> in <paths>. Its mason resolves the conflict markers
+against the sealed spec; the unit is reviewed again before it lands.` A
+refused rebase, of a unit with no workspace, one already current or one whose
+feature branch moved on again, moves `rebase-<id>` to `refused-<k>` and
+changes nothing.
+
+A clean rebase of the candidate the unit's latest report names records the
+next revision of `units/<id>/report.json` (actor `service`/`foreman`, cause
+the operation) with the rebased commit as `candidate` and the new tip as
+`base`. The candidate and its base changed, so no approval carries over: an
+`approved` unit returns to `reviewing` through
+`unit-<id>-reviewing-rebase-<k>` (reason `the approval no longer holds:
+unit <id>'s candidate <snapshot> from <base> was rebased onto <tip> as
+candidate <commit>, recorded in units/<id>/report.json revision <r>; the
+rebased candidate is reviewed before it lands`), with the notice `Unit <id>
+returns to review: its approved candidate was rebased onto <tip>.`, and a
+`reviewing` unit's review starts again on the same transition. The reviewer
+then [prepares](#preparing-a-unit-review) the rebased candidate as a new
+review. An `implementing` or `waiting` unit keeps its state and its mason
+works on the rebased files.
+
+Conflicts go to the unit's mason and never to its reviewer. They are
+unresolved while no report revision was recorded after the rebase that left
+them. The landing controller moves a `reviewing` or `approved` unit with
+unresolved conflicts to `implementing` through
+`unit-<id>-implementing-rebase-<k>`, with a notice, and queues its mason the
+turn `mason-<id>-rebase-<k>`, whose prompt lists the conflicted files,
+explains the markers and carries the unit's bundle with the sealed spec to
+resolve them against. A `waiting` or `contested` unit keeps its state until
+its answer or the owner's ruling moves it on; the same rules then apply. The
+mason reports `done` as usual, and the mason controller
+[finishes](#finishing-units) the unit only once no conflicted file of its
+candidate still carries a marker, so a candidate the reviewer receives never
+does.
+
+A rebase whose outcome is recorded completes on inspection without touching
+the workspace.
 
 ### Unit workspaces
 
@@ -1739,7 +1831,9 @@ chief of staff stays reachable while everything is paused. A held turn gets no
 operation and stays queued; a turn already in flight is not interrupted, in
 either pause mode. The gate reads the runtime store on every pass, so after a
 pause is cleared the loop's next periodic pass runs the held turns with no new
-message or operation.
+message or operation. The gate also holds every mason turn of a unit whose
+workspace does not descend from the tip of its workstream's feature branch,
+until the foreman [rebases](#rebasing-units-in-flight) the workspace onto it.
 
 The scheduler also dispatches within the configured `[capacity]`. Mason
 turns use `capacity.masons`, reviewer turns use `capacity.reviewers`, and both
