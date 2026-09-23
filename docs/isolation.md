@@ -9,7 +9,8 @@ in the owned turn response and survive reopening the trace repository.
 The service supplies a workspace provider, a view directory under the Osmia root,
 role grants, a scope selector, an MCP host factory and an execution engine. These
 are Go dependencies, not repository or profile configuration. The service runs
-the librarian's [knowledge-base extraction](knowledge-base.md#extraction), the
+the librarian's [knowledge-base extraction](knowledge-base.md#extraction) and
+[refresh](knowledge-base.md#refresh-after-landing), the
 architect's drafting and [replies to the shed](service.md#the-architects-reply),
 the committee's [shed rounds](service.md#the-shed-debate)
 and chief-of-staff thread turns through it; see

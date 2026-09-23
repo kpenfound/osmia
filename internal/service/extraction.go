@@ -271,8 +271,8 @@ func (s *Service) extractProject(ctx context.Context, req ProjectExtractRequest)
 	return ExtractionResponse{Project: projectView(cfg.Root, cfg.Project), Extraction: ExtractionState{Extraction: n, State: "pending", At: at}}, nil
 }
 
-// runnerAdapter routes runner-boundary operations: extraction passes to the
-// service's extractor, architect drafts to its drafter, committee rounds and
+// runnerAdapter routes runner-boundary operations: extraction and refresh
+// passes to the librarian, architect drafts to its drafter, committee rounds and
 // the architect's replies to its debate, everything else to the bound thread
 // reconciler.
 type runnerAdapter struct {
