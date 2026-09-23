@@ -101,7 +101,7 @@ func TestM3ExactReviewDemonstration(t *testing.T) {
 	must(t, err)
 	mapping.Entities = append(mapping.Entities, kb.Entity{ID: "proof-docs", Name: "Proof documents", Paths: []string{"docs"}})
 	must(t, kb.Store(context.Background(), f.repository(), mapping, f.clock.Now(), reviewerActor, "review-context"))
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(demoTimeout)
 	for {
 		state, err := f.repository().Workflow(stream, trace.UnitSubject("resume"))
 		must(t, err)
