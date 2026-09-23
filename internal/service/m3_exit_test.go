@@ -83,12 +83,12 @@ func TestM3SequentialImplementation(t *testing.T) {
 	f.awaitUnit(t, stream, "resume", UnitReviewing)
 	p.check(t)
 	fake.check(t)
-	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitReviewing}, {Unit: "dedupe", State: UnitPlanned}})
+	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitReviewing, Card: &exampleCard}, {Unit: "dedupe", State: UnitPlanned}})
 	if got := f.question(t, stream, "1").State; got != trace.QuestionAnswered {
 		t.Fatalf("question state %s", got)
 	}
 	thread := f.thread(t, stream, masonAgent("resume"))
-	if len(thread.Turns) != 2 || thread.Turns[1].Status() != "idle" || thread.Turns[1].Response.Result.Outcome == nil || thread.Turns[1].Response.Result.Outcome.Status != masonDone {
+	if len(thread.Turns) != 2 || thread.Turns[1].Status() != "idle" || thread.Turns[1].Response.Result.Outcome == nil || thread.Turns[1].Response.Result.Outcome.Status != masonDone || thread.Turns[1].Response.Result.Outcome.Card == nil || *thread.Turns[1].Response.Result.Outcome.Card != exampleCard {
 		t.Fatalf("mason thread %+v", thread.Turns)
 	}
 	docs := f.reports(t, stream, "resume")
@@ -100,7 +100,7 @@ func TestM3SequentialImplementation(t *testing.T) {
 		must(t, json.Unmarshal([]byte(docs[0].Content), &report))
 	}
 	f.checkCandidate(t, stream, report)
-	wantReport := UnitReport{Unit: "resume", Turn: questions.TurnID("1"), Seal: 1, Outcome: "Uploads resume at the last acknowledged chunk", Criteria: []CriterionReport{resumeReport}, Branch: unitBranch(stream, "resume"), Base: report.Base, Candidate: report.Candidate}
+	wantReport := UnitReport{Unit: "resume", Turn: questions.TurnID("1"), Seal: 1, Outcome: "Uploads resume at the last acknowledged chunk", Criteria: []CriterionReport{resumeReport}, Card: &exampleCard, Branch: unitBranch(stream, "resume"), Base: report.Base, Candidate: report.Candidate}
 	if !reflect.DeepEqual(report, wantReport) {
 		t.Fatalf("report %+v, want %+v", report, wantReport)
 	}
@@ -108,7 +108,7 @@ func TestM3SequentialImplementation(t *testing.T) {
 	if len(transitions) != 4 || !reflect.DeepEqual(transitions[:3], []transitionMove{started("resume", f.startedReason(t, stream, "resume")), parked("resume", "1"), resumed("resume", "1")}) || transitions[3].ID != reviewingTransitionID("resume", 1) || transitions[3].From != UnitImplementing || transitions[3].To != UnitReviewing || transitions[3].Cause != thread.Turns[1].Response.ID {
 		t.Fatalf("mason transitions %+v", transitions)
 	}
-	finishNotice := "Unit resume is reviewing: its mason reported done on turn " + questions.TurnID("1") + "; its report is units/resume/report.json revision 1."
+	finishNotice := "Unit resume is reviewing: its mason reported done on turn " + questions.TurnID("1") + "; its report is units/resume/report.json revision 1. Headline: Uploads resume; Needs you: Review the candidate."
 	f.awaitEventTurns(t, stream, finishNotice)
 	f.awaitAcknowledgedNotices(t, stream)
 	if got := f.reports(t, stream, "dedupe"); len(got) != 0 {
