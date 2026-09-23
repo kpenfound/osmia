@@ -1432,7 +1432,8 @@ landed as <commit> on <branch>.`; `landing-<id>` moving to `landed-<k>`; and,
 for every `planned` unit that depends on it and whose other dependencies have
 all merged, `unit-<dep>-ready` with the reason `unit <dep> is ready: every
 unit it depends on has merged: <ids>`. The mason controller then starts the
-ready unit from the landed commit.
+ready unit from the landed commit. [Workstream status](#workstream-status)
+shows each unit's latest landing.
 
 A stale approval is refused: nothing is committed, the unit stays `approved`,
 `landing-<id>-<k>-refused` moves `landing-<id>` to `refused-<k>` with the
