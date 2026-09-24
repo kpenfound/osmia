@@ -1178,20 +1178,35 @@ while the build ran; the workstream is <state>`).
 With `Options.Threads` set, the mason controller runs in every reconciliation
 pass, after answer delivery and before the scheduler. It first
 [parks and resumes](#a-masons-question) units on their masons' questions.
-It then starts units of `building` or `assembled` workstreams, at most one `implementing` or
-`waiting` unit per workstream, while fewer than `capacity.masons` units are
-`implementing` in workstreams no pause covers. A
+It then starts `ready` units of `building` or `assembled` workstreams while
+fewer than `capacity.masons` units are `implementing` in workstreams no pause
+covers. A workstream starts no unit while `capacity.per_workstream` of its
+units are `implementing`, whether or not a turn of theirs is queued or
+running. A `waiting` unit counts toward neither limit. A
 workstream a runtime pause covers (a `factory` pause, a `project` pause on the
 active project or a `workstream` pause on it) starts no unit, and its
-`implementing` unit takes no mason slot, so the slot goes to a workstream that
-is not paused.
+`implementing` units take no mason slot, so the slots go to workstreams that
+are not paused. Before it starts anything, a pass reads every `implementing`
+unit from the trace, so after a restart the units in flight hold their slots
+and none is started twice.
 
-A free slot goes first to the workstream earliest in the project's priority
+Each free slot goes first to the workstream earliest in the project's priority
 order (`PUT /v1/runtime/priority`), then to those it does not name; among
 equals, to the workstream that started a unit least recently, one that never
-did first (a unit resuming from `waiting` is not a start), then in workstream ID order. In that workstream the controller takes
-the first `ready` unit in the plan's dependency order: every unit follows the
-units it depends on, and otherwise keeps its place in the plan.
+did first (a unit resuming from `waiting` is not a start), then in workstream
+ID order. The order is taken again after every start, so equals take turns
+within one pass. A workstream is passed over when it has no unit to start. In
+a workstream the controller takes the first `ready` unit in the plan's
+dependency order (every unit follows the units it depends on, and otherwise
+keeps its place in the plan) that is entangled with none of the workstream's
+`implementing` or `waiting` units. Two units are entangled when one depends
+on the other, when their footprints resolved through the entity map
+(`kb/entities.json`) intersect, or when either footprint does not resolve to
+exactly one entity per name. An entangled unit stays `ready` and keeps its
+place, and a later `ready` unit that is disjoint from every unit in flight
+starts ahead of it. Units in `reviewing`, `approved` or `contested` do not
+hold back an entangled unit: the foreman
+[rebases](#rebasing-units-in-flight) the units in flight after each landing.
 
 Starting a unit assembles its mason bundle from the sealed spec and plan, opens
 the unit's workspace, then records the transition `unit-<id>-implementing`
@@ -1239,12 +1254,11 @@ the transition `unit-<id>-waiting-<q>` from `implementing` to `waiting` (actor
 `service`/`mason`, cause `question_<q>_open`) with the reason `unit <id> is
 waiting: its mason asked question <q>; the unit's workspace is kept and it
 takes no mason slot until the answer arrives`. The unit's workspace stays as the turn
-left it. A `waiting` unit takes no mason slot, so a free slot goes to another
-workstream, and its own workstream starts no other unit. This narrows design
-§5.2, where other units of the workstream continue while one waits: with one
-unit at a time per workstream, a sibling started meanwhile would leave the
-workstream two `implementing` units once the answer arrives. Nothing times the
-question out.
+left it. A `waiting` unit takes no mason slot and does not count toward
+`capacity.per_workstream`, so a free slot goes to another unit, of its own
+workstream when one is disjoint from every unit in flight there. The waiting
+unit still holds back the units entangled with it. Nothing times the question
+out.
 
 The chief of staff answers the question or escalates it to the owner, whose
 ruling it relays. The answer is then queued as the mason's next turn on its
@@ -1253,10 +1267,10 @@ same workspace. In the same pass, before the scheduler dispatches that turn,
 the mason controller records `unit-<id>-implementing-<q>` from `waiting` back
 to `implementing` (cause `question_<q>_answered`) with the reason `unit <id>
 resumes implementing: the answer to question <q> is its mason's next turn`. A
-unit resumes whatever the free slots, so more than `capacity.masons` units can
-be `implementing` for a while; the scheduler still runs at most
-`capacity.masons` mason turns at once, and no unit starts until fewer units
-are `implementing`. A mason that asks again in its answer turn parks the unit
+unit resumes whatever the free slots, so more than `capacity.masons` units, or
+more than `capacity.per_workstream` units of one workstream, can be
+`implementing` for a while; the scheduler still runs at most `capacity.masons`
+mason turns at once, and no unit starts until fewer units are `implementing`. A mason that asks again in its answer turn parks the unit
 again, on the transition named after its new question.
 
 Parking and resuming are derived from the unit's state, the mason's thread

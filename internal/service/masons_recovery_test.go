@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -163,4 +165,56 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	if string(data) != "package trace\n// recovered\n" {
 		t.Fatalf("partial view replaced the workspace: %q", data)
 	}
+}
+
+// A unit started just before a stop, its mason's first turn queued and not
+// yet run, is recovered from the trace before anything starts: it takes a
+// mason slot, the one slot left goes to one more unit, and its turn runs
+// once. Later restarts start and run nothing more.
+func TestRestartCountsImplementingUnitsBeforeStarting(t *testing.T) {
+	t.Parallel()
+	f, masons := newParallelMasonFixture(t, 2, 3, disjointPlan)
+	defer func() { f.stop(t) }()
+	factory := runtime.Target{Scope: "factory"}
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+	stream, _ := f.builtAs(t, "start-recovery")
+	f.stop(t)
+	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	m := newMasonController(f.s, repo)
+	b, found, err := m.read(stream)
+	must(t, err)
+	if !found {
+		t.Fatal("building workstream missing")
+	}
+	started, err := m.start(context.Background(), b, "resume")
+	must(t, errors.Join(err, repo.Close()))
+	if !started {
+		t.Fatal("resume did not start")
+	}
+
+	want := []string{trace.UnitSubject("resume"), trace.UnitSubject("upload")}
+	for restart := range 2 {
+		f.start(t)
+		if restart == 0 {
+			mutation(t, f.c, "DELETE", "pause", factory)
+		}
+		f.awaitMasonRan(t, stream, "resume")
+		f.awaitMasonRan(t, stream, "upload")
+		settle()
+		masons.check(t)
+		if got := starts(t, f, stream); !slices.Equal(got, want) {
+			t.Fatalf("after restart %d, started %v, want %v", restart+1, got, want)
+		}
+		var ran []string
+		for _, req := range masons.requests(stream) {
+			ran = append(ran, req.Name)
+		}
+		if slices.Sort(ran); !slices.Equal(ran, []string{masonTurnID("resume"), masonTurnID("upload")}) {
+			t.Fatalf("after restart %d, mason turns ran %v", restart+1, ran)
+		}
+		f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "upload", State: UnitImplementing}, {Unit: "audit", State: UnitReady}})
+		f.stop(t)
+	}
+	f.start(t)
 }

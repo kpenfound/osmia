@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/followup"
+	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -43,12 +44,11 @@ func masonTransitionID(unit string) string {
 // masons is the mason controller. Its pass parks and resumes units on their
 // masons' questions, and moves each implementing unit whose mason reported
 // done to reviewing, with the unit's workspace snapshotted as its candidate.
-// It then starts ready units: in each building or assembled workstream with no
-// implementing or waiting unit, while fewer units than
-// capacity.masons are implementing, it moves the first ready unit in the
-// plan's dependency order to implementing, and queues its mason's first turn
-// with the unit's bundle in the unit's own workspace. The scheduler then runs
-// that turn.
+// It then starts ready units of building and assembled workstreams: while
+// fewer units than capacity.masons are implementing, it moves a ready unit
+// entangled with none of its workstream's implementing or waiting units to
+// implementing, and queues its mason's first turn with the unit's bundle in
+// the unit's own workspace. The scheduler then runs that turn.
 type masons struct {
 	s          *Service
 	cfg        *config.Config
@@ -62,19 +62,27 @@ type building struct {
 	plan   plan.Plan
 	// started is when the workstream last started a unit, zero when never.
 	started time.Time
+	// inFlight names the workstream's implementing and waiting units.
+	inFlight []string
+	// implementing counts the workstream's implementing units, whether or not
+	// a turn of theirs is queued or running.
+	implementing int
 }
 
 // Pass follows the implementing and waiting units' questions and moves the
 // units whose mason reported done to reviewing, which frees their mason
-// slots, then starts the ready units capacity allows, the highest-priority
-// workstream first and, among equals, the one that started a unit least
-// recently. A waiting unit takes no mason slot, and its workstream starts no
-// other unit. A paused workstream starts none, and its implementing unit
-// takes no mason slot. A unit that cannot start, or an implementing unit
-// whose first turn cannot be queued or whose candidate cannot be made, is
-// blocked: the reason is recorded, the unit
-// takes no mason slot and its workstream starts nothing else, and the other
-// workstreams go on.
+// slots, then starts the ready units capacity allows. Each start goes to the
+// highest-priority workstream with a unit it can start and, among equals, the
+// one that started a unit least recently; in that workstream, to the first
+// ready unit in the plan's dependency order that is entangled with none of its
+// implementing or waiting units. A workstream starts no unit while
+// capacity.per_workstream of its units are implementing. A waiting unit takes
+// no mason slot and does not count toward that cap. A paused workstream
+// starts none, and its implementing units take no mason slot. A unit that
+// cannot start, or an implementing unit whose first turn cannot be queued or
+// whose candidate cannot be made, is blocked: the reason is recorded, the
+// unit takes no mason slot and its workstream starts nothing else, and the
+// other workstreams go on.
 func (m *masons) Pass(ctx context.Context) error {
 	streams, err := m.repository.Workstreams()
 	if err != nil {
@@ -84,7 +92,7 @@ func (m *masons) Pass(ctx context.Context) error {
 	state, _ := m.s.store.Effective()
 	paused := func(stream config.WorkstreamID) bool { return scheduler.Paused(state.Pauses, m.cfg.Project.ID, stream) }
 	implementing := 0
-	var idle []building
+	var candidates []building
 	for _, stream := range streams {
 		if stream == librarian {
 			continue
@@ -99,7 +107,7 @@ func (m *masons) Pass(ctx context.Context) error {
 		if !found {
 			continue
 		}
-		busy := false
+		blocked := false
 		for _, u := range b.plan.Units {
 			state := b.states[trace.UnitSubject(u.ID)]
 			if state.Value != UnitImplementing && state.Value != UnitWaiting {
@@ -118,7 +126,7 @@ func (m *masons) Pass(ctx context.Context) error {
 					}
 				}
 				if !masonWaiting {
-					busy = true
+					b.inFlight = append(b.inFlight, u.ID)
 					continue
 				}
 			}
@@ -130,19 +138,20 @@ func (m *masons) Pass(ctx context.Context) error {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 			}
 			if value != UnitImplementing {
-				busy = true
+				b.inFlight = append(b.inFlight, u.ID)
 				continue
 			}
-			moved, blocked, err := m.finish(ctx, b, u.ID)
+			moved, stuck, err := m.finish(ctx, b, u.ID)
 			if err != nil {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 			}
 			if moved {
 				continue
 			}
-			busy = true
+			b.inFlight = append(b.inFlight, u.ID)
+			b.implementing++
 			queued := false
-			if !blocked {
+			if !stuck {
 				if queued, err = m.recoverTurn(ctx, stream, u.ID); err != nil {
 					return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 				}
@@ -153,12 +162,14 @@ func (m *masons) Pass(ctx context.Context) error {
 					return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 				}
 			}
-			if queued && !paused(stream) {
+			if !queued {
+				blocked = true
+			} else if !paused(stream) {
 				implementing++
 			}
 		}
-		if !busy && !paused(stream) {
-			idle = append(idle, b)
+		if !blocked && !paused(stream) {
+			candidates = append(candidates, b)
 		}
 	}
 	pending, err := refreshPending(m.repository)
@@ -168,23 +179,51 @@ func (m *masons) Pass(ctx context.Context) error {
 	if pending {
 		return nil
 	}
-	for _, b := range startOrder(idle, state.Priorities, m.cfg.Project.ID) {
-		if implementing >= m.cfg.Capacity.Masons {
-			return nil
+	var entities kb.Map
+	if len(candidates) > 0 {
+		if entities, err = kb.Load(m.repository); err != nil {
+			return err
 		}
-		unit, ok := nextReady(b)
-		if !ok {
-			continue
+	}
+	// Each start re-sorts the workstreams, so equals take turns.
+	for implementing < m.cfg.Capacity.Masons {
+		i, unit, err := m.nextStart(startOrder(candidates, state.Priorities, m.cfg.Project.ID), entities)
+		if err != nil || i < 0 {
+			return err
 		}
+		b := candidates[i]
 		started, err := m.start(ctx, b, unit)
 		if err != nil {
 			return fmt.Errorf("workstream %s unit %s: %w", b.stream, unit, err)
 		}
-		if started {
-			implementing++
+		if !started {
+			candidates = slices.Delete(candidates, i, i+1)
+			continue
 		}
+		implementing++
+		b.states[trace.UnitSubject(unit)] = trace.WorkflowState{Value: UnitImplementing}
+		b.inFlight, b.implementing, b.started = append(b.inFlight, unit), b.implementing+1, m.s.now()
+		candidates[i] = b
 	}
 	return nil
+}
+
+// nextStart returns the index of the first workstream, in the given order,
+// with a unit it can start, and that unit, or -1 when none has one.
+func (m *masons) nextStart(streams []building, entities kb.Map) (int, string, error) {
+	for i, b := range streams {
+		if b.implementing >= m.cfg.Project.Capacity.PerWorkstream {
+			continue
+		}
+		unit, ok, err := nextReady(b, entities)
+		if err != nil {
+			return -1, "", fmt.Errorf("workstream %s: %w", b.stream, err)
+		}
+		if ok {
+			return i, unit, nil
+		}
+	}
+	return -1, "", nil
 }
 
 // recoverInterrupted copies a stopped turn's surviving view into its existing
@@ -423,14 +462,22 @@ func startOrder(streams []building, priorities []runtime.Priority, project confi
 }
 
 // nextReady returns the first ready unit of the workstream in its plan's
-// dependency order.
-func nextReady(b building) (string, bool) {
+// dependency order that is entangled with none of the workstream's units in
+// flight, its footprint resolved through entities.
+func nextReady(b building, entities kb.Map) (string, bool, error) {
 	for _, u := range dependencyOrder(b.plan) {
-		if b.states[trace.UnitSubject(u.ID)].Value == UnitReady {
-			return u.ID, true
+		if b.states[trace.UnitSubject(u.ID)].Value != UnitReady {
+			continue
+		}
+		decision, err := plan.DecideStart(b.plan, entities, u.ID, b.inFlight)
+		if err != nil {
+			return "", false, err
+		}
+		if decision.CanStart {
+			return u.ID, true, nil
 		}
 	}
-	return "", false
+	return "", false, nil
 }
 
 // dependencyOrder returns the plan's units so that every unit follows the
