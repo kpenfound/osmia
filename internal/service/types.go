@@ -241,10 +241,17 @@ type ProjectResponse struct {
 	NextStep string      `json:"next_step"`
 }
 type RuntimeResponse struct {
-	Effective runtime.State `json:"effective"`
+	Effective runtime.State               `json:"effective"`
+	Profiles  map[string]EffectiveProfile `json:"profiles"`
 	// Projects lists each active project's context mode.
 	Projects    []ProjectRuntime `json:"projects"`
 	Diagnostics []Diagnostic     `json:"diagnostics"`
+}
+
+// EffectiveProfile identifies the profile selected for a role's next turn.
+type EffectiveProfile struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
 }
 
 // ProjectRuntime reports where a project's turn context comes from. "file"
@@ -270,12 +277,13 @@ type MutationResponse struct {
 	Applied bool `json:"applied"`
 }
 
-// StatusResponse lists every workstream of the active project. It is empty
-// without an active project or its trace, and when the trace cannot be read,
-// which a diagnostic reports.
+// StatusResponse lists every workstream of the active project and every role's
+// effective profile. Workstreams is empty without an active project or trace,
+// or when the trace cannot be read, which a diagnostic reports.
 type StatusResponse struct {
-	Workstreams []WorkstreamStatus `json:"workstreams"`
-	Diagnostics []Diagnostic       `json:"diagnostics"`
+	Workstreams []WorkstreamStatus          `json:"workstreams"`
+	Profiles    map[string]EffectiveProfile `json:"profiles"`
+	Diagnostics []Diagnostic                `json:"diagnostics"`
 }
 
 // WorkstreamStatus is the chief of staff's status for one workstream, next to

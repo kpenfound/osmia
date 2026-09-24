@@ -84,6 +84,9 @@ func TestCommandsAndRestart(t *testing.T) {
 		t.Fatal(status)
 	}
 	text := successful(t, root, "status")
+	if !strings.Contains(text, "mason: default source=configuration") {
+		t.Fatal("missing configured profile source", text)
+	}
 	if !strings.Contains(text, "ready=true") {
 		t.Fatal("missing health")
 	}
@@ -113,8 +116,11 @@ func TestCommandsAndRestart(t *testing.T) {
 	must(t, err)
 	var rt service.RuntimeResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "profiles", "--json")), &rt))
-	if len(rt.Effective.Pauses) != 3 || len(rt.Effective.Priorities) != 1 || rt.Effective.Profiles["mason"] != "other" {
+	if len(rt.Effective.Pauses) != 3 || len(rt.Effective.Priorities) != 1 || rt.Effective.Profiles["mason"] != "other" || rt.Profiles["mason"] != (service.EffectiveProfile{Name: "other", Source: "owner_override"}) {
 		t.Fatalf("%+v", rt)
+	}
+	if out := successful(t, root, "profiles"); !strings.Contains(out, "mason: other source=owner_override") {
+		t.Fatalf("profiles text: %s", out)
 	}
 	for _, args := range [][]string{{"resume", "all"}, {"resume", project}, {"resume", stream}, {"priority", "clear"}, {"profiles", "clear", "mason"}} {
 		if !strings.Contains(successful(t, root, args...), "applied=true") {
@@ -124,7 +130,7 @@ func TestCommandsAndRestart(t *testing.T) {
 	// Unmarshal into a fresh value because omitted JSON fields retain old values.
 	rt = service.RuntimeResponse{}
 	must(t, json.Unmarshal([]byte(successful(t, root, "profiles", "--json")), &rt))
-	if len(rt.Effective.Pauses) != 0 || len(rt.Effective.Priorities) != 0 || rt.Effective.Profiles["mason"] != "default" {
+	if len(rt.Effective.Pauses) != 0 || len(rt.Effective.Priorities) != 0 || rt.Effective.Profiles["mason"] != "default" || rt.Profiles["mason"] != (service.EffectiveProfile{Name: "default", Source: "configuration"}) {
 		t.Fatalf("%+v", rt)
 	}
 	code, out, diag := invoke(t, root, "profiles", "set", "mason", "missing")

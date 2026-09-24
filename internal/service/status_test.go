@@ -21,6 +21,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -272,7 +273,10 @@ func TestStatusReportsUnreadableTrace(t *testing.T) {
 	must(t, repo.CreateWorkstream(ctx, stream, demoStart, owner))
 	// A running controller stops the service on a damaged trace, so the
 	// handlers are called on a service value without one.
-	s := &Service{cfg: cfg, active: &activeProject{repository: repo}}
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: []config.WorkstreamID{stream}})
+	must(t, err)
+	t.Cleanup(func() { store.Close() })
+	s := &Service{cfg: cfg, active: &activeProject{repository: repo}, store: store}
 	directory, err := cfg.Root.ProjectTrace(project)
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(directory, "workstreams", string(stream), "status.jsonl"), []byte("{not json}\n"), 0600))

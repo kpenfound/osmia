@@ -47,8 +47,8 @@ set through `Options` by embedders.
 | --- | --- | --- |
 | GET | `/health` | Readiness, service name, API version, supplied build version and commit |
 | GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics |
-| GET | `/runtime` | Effective runtime state, each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
-| GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, and diagnostics |
+| GET | `/runtime` | Effective runtime state, each role's next-turn profile (`name` and `source`: `configuration` or `owner_override`), each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
+| GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, each role's effective profile and source, and diagnostics |
 | GET | `/status/<workstream-id>` | `WorkstreamStatus` for one workstream of the active project |
 | GET | `/trace/<workstream-id>` | `TraceSummary`: sealed revisions, criteria, unit walks, delivery and explicit gaps |
 | GET | `/trace/<workstream-id>/unit/<unit-id>` | `UnitTrace`: document revisions, reports, reviews, rulings, landings, turns, costs, history and gaps |

@@ -472,6 +472,11 @@ func (m *masons) recoverTurn(ctx context.Context, stream config.WorkstreamID, un
 		return false, nil
 	}
 	req := last.Request
+	profile, _, err := m.s.roleExecution(m.cfg, masonRole)
+	if err != nil {
+		return false, err
+	}
+	req.Profile = profile
 	req.ID = "request_" + masonAgent(unit) + "-recover-" + fmt.Sprint(last.Sequence)
 	req.TurnID = masonAgent(unit) + "-recover-" + fmt.Sprint(last.Sequence)
 	req.At = m.s.now()

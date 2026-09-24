@@ -143,6 +143,14 @@ func TestRoundTrip(t *testing.T) {
 	if len(before.Effective.Pauses) != 1 || len(before.Effective.Priorities) != 1 || before.Effective.Profiles["mason"] != "other" {
 		t.Fatal(before)
 	}
+	if len(before.Profiles) != len(s.cfg.Roles) || before.Profiles["mason"] != (EffectiveProfile{"other", "owner_override"}) || before.Profiles["reviewer"] != (EffectiveProfile{"default", "configuration"}) {
+		t.Fatalf("effective role profiles: %+v", before.Profiles)
+	}
+	status, err := c.Statuses(ctx)
+	must(t, err)
+	if !reflect.DeepEqual(status.Profiles, before.Profiles) {
+		t.Fatalf("status role profiles: %+v", status.Profiles)
+	}
 	must(t, s.Close())
 	if _, err := os.Lstat(s.Socket()); !os.IsNotExist(err) {
 		t.Fatal("socket retained", err)
@@ -160,6 +168,9 @@ func TestRoundTrip(t *testing.T) {
 	must(t, err)
 	if len(after.Effective.Pauses) != 0 || len(after.Effective.Priorities) != 0 || after.Effective.Profiles["mason"] != "default" {
 		t.Fatal(after)
+	}
+	if after.Profiles["mason"] != (EffectiveProfile{"default", "configuration"}) {
+		t.Fatalf("cleared role profile: %+v", after.Profiles)
 	}
 	must(t, s2.Close())
 	_, c3 := start(t, opts)
