@@ -1217,7 +1217,8 @@ workstream keeps its state:
 
 ## Building
 
-A sealed workstream is built unit by unit. The building controller runs in
+A sealed workstream is built in units, and units that are not entangled
+[build at the same time](#starting-units). The building controller runs in
 every reconciliation pass after the sealing controller. For every `ratified`
 workstream whose latest `seal.json` revision no build was asked for, it
 publishes the operation `build` (input `seal`, the sealing's number) on the
