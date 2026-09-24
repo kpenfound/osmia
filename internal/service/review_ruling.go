@@ -11,14 +11,14 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// ContestedRuling records the owner's direction for a contested candidate.
-// Review requires another reviewer verdict; revise returns the findings to
-// the mason. Neither direction approves the candidate.
+// ContestedRuling records the owner's direction for a contested unit.
 type ContestedRuling struct {
 	Decision  string `json:"decision"`
 	Note      string `json:"note"`
 	Bounces   int    `json:"bounces"`
 	Candidate string `json:"candidate"`
+	Contest   string `json:"contest,omitempty"`
+	ResetTurn uint64 `json:"reset_turn,omitempty"`
 }
 
 type ContestedRulingRequest struct {
@@ -34,6 +34,46 @@ type ContestedRulingResponse struct {
 
 func contestedRulingPath(unit string, bounces int) string {
 	return fmt.Sprintf("units/%s/ruling-%d.json", trace.UnitSubject(unit), bounces)
+}
+
+func masonRulingPath(unit string, sequence uint64) string {
+	return fmt.Sprintf("units/%s/mason-ruling-%d.json", trace.UnitSubject(unit), sequence)
+}
+
+func masonContest(repo *trace.Repository, stream config.WorkstreamID, unit string) (trace.Transition, bool, error) {
+	transitions, err := trace.Read[trace.Transition](repo, stream)
+	if err != nil {
+		return trace.Transition{}, false, err
+	}
+	for i := len(transitions) - 1; i >= 0; i-- {
+		t := transitions[i]
+		if t.Subject == trace.UnitSubject(unit) && t.To == UnitContested {
+			return t, t.From == UnitImplementing && t.Actor == masonActor, nil
+		}
+	}
+	return trace.Transition{}, false, nil
+}
+
+func latestMasonRuling(repo *trace.Repository, stream config.WorkstreamID, unit string) (ContestedRuling, bool, error) {
+	docs, err := trace.Read[trace.Document](repo, stream)
+	if err != nil {
+		return ContestedRuling{}, false, err
+	}
+	var latest ContestedRuling
+	found := false
+	for _, d := range docs {
+		if d.Unit != unit || !strings.HasPrefix(d.Path, "units/"+trace.UnitSubject(unit)+"/mason-ruling-") {
+			continue
+		}
+		var ruling ContestedRuling
+		if err := json.Unmarshal([]byte(d.Content), &ruling); err != nil {
+			return ContestedRuling{}, false, err
+		}
+		if !found || ruling.ResetTurn > latest.ResetTurn {
+			latest, found = ruling, true
+		}
+	}
+	return latest, found, nil
 }
 
 func latestContestedRuling(repo *trace.Repository, stream config.WorkstreamID, unit string, bounces int) (ContestedRuling, bool, error) {
@@ -80,6 +120,37 @@ func (s *Service) ruleContested(ctx context.Context, rawStream, unit string, req
 	}
 	if state.Value != UnitContested {
 		return ContestedRulingResponse{}, &APIError{Conflict, "unit is not contested"}
+	}
+	contest, mason, err := masonContest(repo, stream, unit)
+	if err != nil {
+		return ContestedRulingResponse{}, &APIError{Internal, "cannot read contested transition"}
+	}
+	if mason {
+		if req.Decision == "review" {
+			return ContestedRulingResponse{}, &APIError{Validation, "no candidate under review; use revise"}
+		}
+		th, err := repo.Thread(stream, masonAgent(unit))
+		if err != nil || len(th.Turns) == 0 {
+			return ContestedRulingResponse{}, &APIError{Internal, "contested mason thread is missing"}
+		}
+		last := th.Turns[len(th.Turns)-1]
+		if last.Response == nil || last.Response.ID != contest.Cause {
+			return ContestedRulingResponse{}, &APIError{Internal, "contested mason turn does not match transition"}
+		}
+		ruling := ContestedRuling{Decision: "revise", Note: strings.TrimSpace(req.Note), Contest: contest.ID, ResetTurn: last.Sequence}
+		data, _ := json.MarshalIndent(ruling, "", "  ")
+		id := fmt.Sprintf("%s-mason-ruling-%d", trace.UnitSubject(unit), last.Sequence)
+		doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.now(), Actor: ownerActor, Cause: contest.ID}, Path: masonRulingPath(unit, last.Sequence), Content: string(data) + "\n"}
+		reason := fmt.Sprintf("owner ruled revise on mason contest %s; clean-turn attempts reset to zero: %s", contest.ID, ruling.Note)
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id + "-implementing", Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.now(), Actor: ownerActor, Cause: id}
+		tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitContested, To: UnitImplementing, Reason: reason}, Events: []trace.Event{trace.Notice(h.ID, "unit", reason)}}
+		if _, err := repo.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
+			if errors.Is(err, trace.ErrConflict) {
+				return ContestedRulingResponse{}, &APIError{Conflict, "unit already has a ruling"}
+			}
+			return ContestedRulingResponse{}, &APIError{Internal, "cannot record contested ruling"}
+		}
+		return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: ruling}, nil
 	}
 	r := &reviewers{masons: &masons{s: s, cfg: s.current(), repository: repo}}
 	result, ok, err := r.storedResult(stream, unit, state)

@@ -49,7 +49,8 @@ const (
 	UnitMerged = "merged"
 	// UnitWaiting is a unit whose role asked a question.
 	UnitWaiting = "waiting"
-	// UnitContested is a unit whose bounces passed the threshold.
+	// UnitContested is a unit awaiting an owner ruling after review bounces
+	// or a mason clean-turn contest.
 	UnitContested = "contested"
 )
 
@@ -327,6 +328,7 @@ func list(entries []string) string {
 type UnitStatus struct {
 	Unit    string            `json:"unit"`
 	State   string            `json:"state"`
+	Reason  string            `json:"reason,omitempty"`
 	Card    *coreadapter.Card `json:"card,omitempty"`
 	Landing *UnitLanding      `json:"landing,omitempty"`
 }

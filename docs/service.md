@@ -1198,7 +1198,13 @@ that names `ask`; for `claims_done` it names `done`. An `unclear` response gets
 a turn naming both tools. `gave_up` contests the unit immediately. When the
 number of clean turns without an outcome reaches `max_clean_turns`, the unit
 becomes `contested` with a bound-exhaustion reason instead of receiving another
-turn. These decisions are read from owned responses after a restart.
+turn. These decisions are read from owned responses after a restart. Status and
+the contested owner gate show whether the mason gave up or exhausted the bound.
+The owner may rule `revise` with a non-empty note. The ruling and move back to
+`implementing` are recorded together, resetting the clean-turn attempt count;
+the existing mason thread resumes in its workspace with the note. A `review`
+ruling is refused because there is no candidate under review. The mason's
+later `done` report still enters the normal reviewer and landing path.
 
 With `Options.Threads` set, the mason controller runs in every reconciliation
 pass, after answer delivery and before the scheduler. It first
@@ -1418,7 +1424,7 @@ it to `implementing` with findings for the mason. At `shed.max_bounces`, the
 unit enters `contested` and raises an owner gate instead. The owner uses
 `osmia contested <workstream> <unit> <review|revise> <note>` to record a
 direction for that candidate. `review` resumes review and still needs a new
-reviewer verdict; `revise` passes the findings to the mason. A ruling is
+reviewer verdict; `revise` passes the findings to the mason. A ruling on a review contest is
 recorded before the transition so restart reconciles it once. The mason's
 next report makes a new candidate and the reviewer sees a new exact request.
 
@@ -1828,9 +1834,9 @@ order, except the librarian's, which carries no feature (see
 | --- | --- |
 | `workstream`, `project` | The workstream and its project |
 | `state` | The feature workflow state, or `null` before one is recorded |
-| `units` | One `{"unit", "state"}` per unit of the sealed plan and each final-review follow-up, in order, once their states are recorded; `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
+| `units` | One `{"unit", "state"}` per unit of the sealed plan and each final-review follow-up, in order, once their states are recorded; `reason` gives a mason contest's classification or bound exhaustion, `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
 | `open_questions` | Questions in the workstream without a ruling |
-| `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, or `contested` with the unit ID; empty when none wait |
+| `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, or `contested` with the unit ID; a mason contest also has `reason`; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
 | `status` | `null` until the chief of staff writes one; otherwise `goal`, `attention` (empty when nothing needs the owner), `note`, `agents`, `revision` and `updated_at` |
 

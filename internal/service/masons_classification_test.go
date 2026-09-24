@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,106 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+func TestMasonContestedRuling(t *testing.T) {
+	for _, tc := range []struct {
+		name, response, reason string
+	}{
+		{"gave_up", "I cannot complete this work.", "gave_up"},
+		{"bound", "Work is ongoing.", "bound exhausted"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f, fake := newMasonFixture(t, 1, validPlan)
+			defer f.stop(t)
+			fake.response = map[string]string{masonTurnID("resume"): tc.response}
+			ownerTurn := masonAgent("resume") + "-owner-revise-"
+			f.engine.mu.Lock()
+			if tc.name == "bound" {
+				for i := 1; i < f.s.cfg.Mason.MaxCleanTurns; i++ {
+					delete(fake.play, fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), i))
+				}
+			}
+			f.engine.turns[ownerTurn+"1"] = fake.turn
+			f.engine.turns[ownerTurn+"2"] = fake.turn
+			f.engine.turns[ownerTurn+"3"] = fake.turn
+			f.engine.mu.Unlock()
+			stream, _ := f.builtAs(t, tc.name+"-ruling")
+			f.awaitUnit(t, stream, "resume", UnitContested)
+			status, err := f.c.Status(context.Background(), stream)
+			if err != nil || len(status.Gates) != 1 || !strings.Contains(status.Gates[0].Reason, tc.reason) {
+				t.Fatalf("mason contest gate: %+v %v", status.Gates, err)
+			}
+			if len(status.Units) == 0 || !strings.Contains(status.Units[0].Reason, tc.reason) {
+				t.Fatalf("mason contest status: %+v", status.Units)
+			}
+			if _, err := f.c.RuleContested(context.Background(), stream, "resume", "review", "Try a reviewer"); err == nil || !strings.Contains(err.Error(), "no candidate under review; use revise") {
+				t.Fatalf("review refusal: %v", err)
+			}
+			th := f.thread(t, stream, masonAgent("resume"))
+			reset := th.Turns[len(th.Turns)-1].Sequence
+			turnID := fmt.Sprintf("%s%d", ownerTurn, reset)
+			if tc.name == "bound" {
+				continuation := fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), reset+1)
+				fake.play[continuation] = reportDone("Owner revision")
+				f.engine.mu.Lock()
+				f.engine.turns[continuation] = fake.turn
+				f.engine.mu.Unlock()
+			} else {
+				fake.play[turnID] = reportDone("Owner revision")
+			}
+			ruling, err := f.c.RuleContested(context.Background(), stream, "resume", "revise", "Use the existing workspace")
+			if err != nil || ruling.Ruling.ResetTurn != reset || ruling.Ruling.Decision != "revise" {
+				t.Fatalf("mason ruling: %+v %v", ruling, err)
+			}
+			if _, err := f.c.RuleContested(context.Background(), stream, "resume", "revise", "Again"); err == nil {
+				t.Fatal("accepted duplicate mason ruling")
+			}
+			f.stop(t)
+			f.start(t)
+			deadline := time.Now().Add(demoTimeout)
+			for {
+				th = f.thread(t, stream, masonAgent("resume"))
+				if len(th.Turns) > int(reset) && th.Turns[reset].Request.TurnID == turnID {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("owner turn not queued: %+v", th.Turns)
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			if !strings.Contains(th.Turns[reset].Request.Prompt, "Use the existing workspace") || th.Turns[reset].Request.ThreadID != th.Identity.ThreadID {
+				t.Fatalf("owner turn: %+v", th.Turns[reset])
+			}
+			f.awaitUnit(t, stream, "resume", UnitReviewing)
+			th = f.thread(t, stream, masonAgent("resume"))
+			wantTurns := int(reset) + 1
+			if tc.name == "bound" {
+				wantTurns++
+			}
+			if len(th.Turns) != wantTurns {
+				t.Fatalf("duplicate mason turn: %+v", th.Turns)
+			}
+			transitions, err := trace.Read[trace.Transition](f.repository(), stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rulings := 0
+			for _, transition := range transitions {
+				if transition.Cause == fmt.Sprintf("%s-mason-ruling-%d", trace.UnitSubject("resume"), reset) {
+					rulings++
+					if transition.From != UnitContested || transition.To != UnitImplementing {
+						t.Fatalf("ruling transition: %+v", transition)
+					}
+				}
+			}
+			if rulings != 1 {
+				t.Fatalf("ruling transitions: %d", rulings)
+			}
+			fake.check(t)
+		})
+	}
+}
 
 func TestMasonCleanTurnPolicy(t *testing.T) {
 	for _, tc := range []struct {

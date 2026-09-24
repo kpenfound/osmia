@@ -71,6 +71,7 @@ type StatusCheck func(content StatusContent, known []string, gates []OwnerGate) 
 type OwnerGate struct {
 	Kind      string `json:"kind"`
 	Reference string `json:"reference"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // SetStatus stores content as the next status revision of the scope's
@@ -229,7 +230,16 @@ func ownerGates(records []Record, stream config.WorkstreamID, view *workflowView
 					}
 				}
 			}
-			gates = append(gates, OwnerGate{Kind: "contested", Reference: reference})
+			gate := OwnerGate{Kind: "contested", Reference: reference}
+			for _, rec := range records {
+				if transition, ok := rec.(Transition); ok && transition.Workstream == stream && transition.Subject == subject && transition.To == "contested" {
+					gate.Reason = ""
+					if transition.From == "implementing" && transition.Actor.Kind == "service" && transition.Actor.ID == "mason" {
+						gate.Reason = transition.Reason
+					}
+				}
+			}
+			gates = append(gates, gate)
 		}
 	}
 	slices.SortFunc(gates, func(a, b OwnerGate) int {

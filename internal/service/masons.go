@@ -146,6 +146,16 @@ func (m *masons) Pass(ctx context.Context) error {
 				b.inFlight = append(b.inFlight, u.ID)
 				continue
 			}
+			if queued, err := m.resumeMasonRuling(ctx, stream, u.ID); err != nil {
+				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
+			} else if queued {
+				b.inFlight = append(b.inFlight, u.ID)
+				b.implementing++
+				if !paused(stream) {
+					implementing++
+				}
+				continue
+			}
 			moved, stuck, err := m.finish(ctx, b, u.ID)
 			if err != nil {
 				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
@@ -236,9 +246,18 @@ func (m *masons) classify(ctx context.Context, stream config.WorkstreamID, unit 
 		return false, false, nil
 	}
 	c := last.Response.Classification
+	var reset uint64
+	if ruling, found, err := latestMasonRuling(m.repository, stream, unit); err != nil {
+		return false, false, err
+	} else if found {
+		reset = ruling.ResetTurn
+	}
+	if last.Sequence <= reset {
+		return false, false, nil
+	}
 	attempts := 0
 	for _, turn := range th.Turns {
-		if !turn.CompletedAt.IsZero() && turn.Response != nil && turn.Response.Classification != nil {
+		if turn.Sequence > reset && !turn.CompletedAt.IsZero() && turn.Response != nil && turn.Response.Classification != nil {
 			attempts++
 		}
 	}
@@ -293,6 +312,34 @@ func (m *masons) classify(ctx context.Context, stream config.WorkstreamID, unit 
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: last.Response.ID, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: last.Request.SystemPrompt, Prompt: prompt}
 	_, err = m.repository.EnqueueTurn(ctx, req)
 	return err == nil, false, err
+}
+
+// resumeMasonRuling queues the owner's direction on the existing mason
+// thread. The ruling's turn sequence gives a durable clean-turn reset.
+func (m *masons) resumeMasonRuling(ctx context.Context, stream config.WorkstreamID, unit string) (bool, error) {
+	ruling, found, err := latestMasonRuling(m.repository, stream, unit)
+	if err != nil || !found {
+		return false, err
+	}
+	th, err := m.repository.Thread(stream, masonAgent(unit))
+	if err != nil {
+		return false, err
+	}
+	if len(th.Turns) == 0 {
+		return false, fmt.Errorf("ruled mason thread for unit %s is empty", unit)
+	}
+	last := th.Turns[len(th.Turns)-1]
+	if last.Sequence > ruling.ResetTurn {
+		return false, nil
+	}
+	profile, _, err := m.s.roleExecution(m.cfg, masonRole)
+	if err != nil {
+		return false, err
+	}
+	turnID := fmt.Sprintf("%s-owner-revise-%d", masonAgent(unit), ruling.ResetTurn)
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: ownerActor, Cause: ruling.Contest, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: last.Request.SystemPrompt, Prompt: "The owner ruled that you should revise this unit in your existing workspace. Owner note: " + ruling.Note + "\nCheck the criteria and planned proofs, then call done with a criterion report or ask if you need a decision."}
+	_, err = m.repository.EnqueueTurn(ctx, req)
+	return err == nil, err
 }
 
 // nextStart returns the index of the first workstream, in the given order,
