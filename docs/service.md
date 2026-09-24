@@ -481,7 +481,8 @@ moves to `applied`.
 
 For `applied`, `rejected` and `unapplied`, the controller queues turn
 `amendment_<n>_ruling` on the requester's thread: the mason's thread, or the
-unit's reviewer thread for a reviewer's request. The turn carries the decision
+unit's reviewer thread for a reviewer's request; a drift mason's request gets
+none. The turn carries the decision
 and its outcome, with the request and the owner's note quoted in the shared
 envelope. The unit the request parked then moves from `waiting` back to the
 stage its waiting transition preserved, `implementing` or `reviewing`, through
@@ -1836,12 +1837,14 @@ already on the fetched commit stays as it is.
 
 A replay that conflicts changes neither the branch nor the seal: one trace
 commit records `drift/rebase.json` with outcome `conflicted`, the upstream
-remote, branch and commit, the branch commit and the conflicted paths, and
+remote, branch and commit, the upstream commit the seal's base named before
+(`from`), the branch commit and the conflicted paths, and
 `drift-<k>-conflicted` moves `drift` to `conflicted-<k>` with the reason
 `feature branch <branch> does not rebase cleanly onto <remote>/<branch> at
 <commit>: <paths> conflicted; the branch stays at <commit> and the seal is
 unchanged until a mason's resolution of the conflicts against the sealed spec
-is approved by a reviewer`. The operation then stays pending, holding the
+is approved by a reviewer`, and raises an
+[upstream moved event](#upstream-moved-events). The operation then stays pending, holding the
 project's lander, until the resolution is approved: no landing, unit rebase or
 other drift rebase of the project is asked for meanwhile.
 
@@ -1858,8 +1861,8 @@ workstream's drift mason (thread `drift-mason`, role `mason`) gets one turn,
 carries the sealed spec, with the instruction to resolve every conflict
 against it and remove every marker. The turn works on a
 [private view](isolation.md) of the resolution workspace, as a unit's mason
-does on its unit's workspace, holds `file_read`, `file_write` and `done`
-alone, and has its view copied back. Its `done` takes the resolution's
+does on its unit's workspace, holds `file_read`, `file_write`, `amend` and
+`done` alone, and has its view copied back. Its `done` takes the resolution's
 `outcome`. A turn that ends with a marker left in a conflicted path gets one
 `drift-mason-markers-<n>` turn that names the marked paths. Once none is
 left, the foreman stages the workspace's files and goes on with the replay to
@@ -1916,6 +1919,43 @@ skipped drift rebase moves `drift` to `skipped-<k>` with the reason `drift
 rebase <k> changed nothing: <why>`, as does one whose branch moved to a
 commit other than the one it replayed or the rebased one. Fetch and Git
 errors leave the operation pending for another attempt.
+
+### Upstream moved events
+
+A drift rebase tells the workstream's chief of staff when it does something
+visible, with an outbox event of kind `upstream-moved`
+[delivered](#event-delivery) like a notice. Each is committed in the same
+transaction as the state change it reports, and its body names the
+workstream, the drift rebase, the upstream commits the seal's base moves from
+and to, and the outcome:
+
+| Outcome | Raised by |
+| --- | --- |
+| The feature branch conflicts with upstream | `drift-<k>-conflicted` |
+| A unit carried onto the rebased feature branch conflicts | the unit rebase's `conflicted` transition |
+| An approved unit's carried candidate returns to review | the unit's move from `approved` to `reviewing` |
+| The workstream's completed final report, on the old base, no longer authorises delivery | the drift outcome that moves the seal (`carrying` or `rebased`) |
+| A drift mason or unit reviewer files an amendment | `amendment_<n>_filed` |
+
+A drift rebase with none of these, including a clean one and one whose
+resolved conflicts are approved without further consequence, raises no
+event. Event IDs derive from the transition and the drift number, so a retry
+or a restart raises none twice, and a delivered event is not delivered again.
+The [workstream status](#workstream-status) lists, under `drift.moved`, the bodies of
+the latest drift rebase's events.
+
+When upstream's change alters what a sealed criterion means, the drift mason
+resolving the feature branch's conflicts, or the unit reviewer reading a
+candidate a drift rebase carried back to review, calls `amend` as usual.
+The request records the drift rebase and its upstream commits as `upstream`,
+its filing notice cites the upstream commit, and it then takes the normal
+[amendment](#architect-drafting) path to the owner; the owner's presentation
+names the drift rebase and its upstream commits. A reviewer's request parks
+its unit in `waiting`. The drift mason has no unit: its request parks
+nothing, the resolution goes on against the sealed spec as it stands, and
+its thread gets no ruling turn. A second request from the same agent and
+thread about the same drift rebase, such as one from a turn that recovers an
+interrupted one, returns the request already filed.
 
 ### Unit workspaces
 
@@ -2177,7 +2217,7 @@ order, except the librarian's, which carries no feature (see
 | `state` | The feature workflow state, or `null` before one is recorded |
 | `units` | One `{"unit", "state"}` per unit of the sealed plan and each follow-up of a final review or an amendment, in order, once their states are recorded; `reason` gives a mason contest's classification or bound exhaustion, `deferral` holds the [decision](#why-a-ready-unit-waits) that keeps a `ready` unit waiting, with its `message` as `reason`, `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
 | `advisories` | The workstream's active [overlap advisories](#overlapping-workstreams): `workstream`, the other workstream; `seal` and `other_seal`, the seals compared; `subsystems`, `entities` and `paths`, what they share; and `message`, the advisory as the chief of staff received it; empty when none is active |
-| `drift` | The workstream's latest [drift rebase](#drift-rebases): `drift`, its number; `outcome`, `requested` once it is asked for, `conflicted` while its conflicts are resolved and `carrying` while unfinished units follow the branch, then `rebased` or `skipped`; `at` and `reason`, the time and reason of the transition that recorded that outcome; `null` before the first |
+| `drift` | The workstream's latest [drift rebase](#drift-rebases): `drift`, its number; `outcome`, `requested` once it is asked for, `conflicted` while its conflicts are resolved and `carrying` while unfinished units follow the branch, then `rebased` or `skipped`; `at` and `reason`, the time and reason of the transition that recorded that outcome; `moved`, the bodies of its [upstream moved events](#upstream-moved-events), oldest first, and empty when it raised none; `null` before the first |
 | `open_questions` | Questions in the workstream without a ruling |
 | `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, `contested` with the unit ID, or a `charter` proposal with its question number; a mason contest also has `reason`; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |

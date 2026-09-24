@@ -93,6 +93,9 @@ type Amendment struct {
 	Seal         int      `json:"seal"`
 	SealRevision int      `json:"seal_revision"`
 	SpecHash     string   `json:"spec_hash"`
+	// Upstream is the drift rebase whose upstream change prompted the
+	// request, when one did.
+	Upstream *UpstreamMove `json:"upstream,omitempty"`
 }
 
 func (Amendment) traceRecord() {}

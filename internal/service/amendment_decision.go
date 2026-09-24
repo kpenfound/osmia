@@ -616,8 +616,13 @@ func (a amendmentDebate) rule(ctx context.Context, stream config.WorkstreamID, r
 // unless the thread holds it already. The turn carries the system prompt of
 // the turn that asked for the amendment, or asked the question the chief of
 // staff routed as one, and the profile the requester's role is bound to now.
-// A requester the trace holds no thread for is sent nothing.
+// A requester the trace holds no thread for is sent nothing, and neither is
+// a drift mason: its thread takes turns for a drift rebase's conflicts
+// alone.
 func (a amendmentDebate) deliverRuling(ctx context.Context, stream config.WorkstreamID, req trace.Amendment, d AmendmentDecision, cause, outcome string) error {
+	if req.Requester.ID == driftMasonAgent {
+		return nil
+	}
 	th, err := a.repository.Thread(stream, req.Requester.ID)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
@@ -111,14 +112,15 @@ func (r resolutions) Acquire(ctx context.Context, req coreadapter.WorkspaceReque
 
 // selection selects the whole of the resolution workspace, but its VCS
 // metadata, as the drift mason turn's view, run with execution. The turn
-// may read and write files and call done, and nothing else.
+// may read and write files, file an amendment and call done, and nothing
+// else.
 func (r resolutions) selection(ctx context.Context, scope coreadapter.Scope, execution coreadapter.ExecutionSettings) (isolation.Selection, error) {
 	w, err := r.find(ctx, config.WorkstreamID(scope.Workstream))
 	if err != nil {
 		return isolation.Selection{}, err
 	}
 	paths, err := viewPaths(w.Path)
-	return isolation.Selection{Paths: paths, Execution: execution, Narrow: &coreadapter.Capabilities{Tools: []string{"file_read", "file_write", doneTool}, WriteFiles: true, Execute: true}}, err
+	return isolation.Selection{Paths: paths, Execution: execution, Narrow: &coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AmendTool, doneTool}, WriteFiles: true, Execute: true}}, err
 }
 
 // capture copies a drift mason turn's view back into its resolution
@@ -134,7 +136,13 @@ func (r resolutions) capture(ctx context.Context, scope coreadapter.Scope, view 
 // records returns the recorded revisions of drift/rebase.json for drift
 // rebase k, in order.
 func (d drifter) records(stream config.WorkstreamID, k int) ([]DriftRebase, error) {
-	docs, err := trace.Read[trace.Document](d.repository, stream)
+	return driftRebases(d.repository, stream, k)
+}
+
+// driftRebases returns the recorded revisions of drift/rebase.json for
+// drift rebase k of the workstream, in order.
+func driftRebases(repository *trace.Repository, stream config.WorkstreamID, k int) ([]DriftRebase, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +160,80 @@ func (d drifter) records(stream config.WorkstreamID, k int) ([]DriftRebase, erro
 		}
 	}
 	return out, nil
+}
+
+// latestDriftRecord returns the latest record of the workstream's latest
+// drift rebase, and whether one is.
+func latestDriftRecord(repository *trace.Repository, stream config.WorkstreamID) (DriftRebase, bool, error) {
+	state, err := repository.Workflow(stream, driftSubject)
+	if err != nil {
+		return DriftRebase{}, false, err
+	}
+	k, err := driftNumber(state.Value)
+	if err != nil || k == 0 {
+		return DriftRebase{}, false, err
+	}
+	records, err := driftRebases(repository, stream, k)
+	if err != nil || len(records) == 0 {
+		return DriftRebase{}, false, err
+	}
+	return records[len(records)-1], true, nil
+}
+
+// resolvingMove returns the drift rebase whose conflicts the workstream's
+// drift mason resolves, and whether one is being resolved.
+func resolvingMove(repository *trace.Repository, stream config.WorkstreamID) (trace.UpstreamMove, bool, error) {
+	r, found, err := latestDriftRecord(repository, stream)
+	if err != nil || !found || !resolving(r.Outcome) {
+		return trace.UpstreamMove{}, false, err
+	}
+	return r.move(), true, nil
+}
+
+// carriedOnto returns the workstream's latest drift rebase when it moved
+// the feature branch to onto, and whether it did: a unit rebased onto onto
+// is carried by that drift rebase.
+func carriedOnto(repository *trace.Repository, stream config.WorkstreamID, onto string) (trace.UpstreamMove, bool, error) {
+	r, found, err := latestDriftRecord(repository, stream)
+	if err != nil || !found || (r.Outcome != driftCarrying && r.Outcome != driftRebased) || r.Commit != onto {
+		return trace.UpstreamMove{}, false, err
+	}
+	return r.move(), true, nil
+}
+
+// unitDrift returns the drift rebase whose carry produced the candidate the
+// unit's latest report names, and whether one did: the unit's latest
+// rebase, clean and onto the feature branch a drift rebase moved, made that
+// candidate.
+func unitDrift(repository *trace.Repository, stream config.WorkstreamID, unit string) (trace.UpstreamMove, bool, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return trace.UpstreamMove{}, false, err
+	}
+	var report, rebase trace.Document
+	for _, d := range docs {
+		switch d.ID {
+		case reportDocument(unit):
+			report = d
+		case rebaseDocument(unit):
+			rebase = d
+		}
+	}
+	if report.Revision == 0 || rebase.Revision == 0 {
+		return trace.UpstreamMove{}, false, nil
+	}
+	var reported UnitReport
+	var rebased UnitRebase
+	if err := json.Unmarshal([]byte(report.Content), &reported); err != nil {
+		return trace.UpstreamMove{}, false, err
+	}
+	if err := json.Unmarshal([]byte(rebase.Content), &rebased); err != nil {
+		return trace.UpstreamMove{}, false, err
+	}
+	if len(rebased.Conflicts) != 0 || rebased.Commit != reported.Candidate {
+		return trace.UpstreamMove{}, false, nil
+	}
+	return carriedOnto(repository, stream, rebased.Onto)
 }
 
 // conflicted returns every path a stop of drift rebase k left conflicted,
@@ -175,7 +257,7 @@ func (d drifter) conflicted(stream config.WorkstreamID, k int) ([]string, error)
 
 // conflict records that the replay of drift rebase k conflicted: the next
 // revision of drift/rebase.json and the drift subject's move to
-// conflicted-<k>, in one commit. The branch and the seal stay; the
+// conflicted-<k>, with an upstream moved event, in one commit. The branch and the seal stay; the
 // resolution starts from this record.
 func (d drifter) conflict(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase) error {
 	doc, err := d.document(stream, rebase)
@@ -188,8 +270,11 @@ func (d drifter) conflict(ctx context.Context, stream config.WorkstreamID, rebas
 	}
 	transition, _ := driftIDs(rebase.Drift)
 	reason := fmt.Sprintf("feature branch %s does not rebase cleanly onto %s/%s at %s: %s conflicted; the branch stays at %s and the seal is unchanged until a mason's resolution of the conflicts against the sealed spec is approved by a reviewer", rebase.Branch, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, strings.Join(rebase.Conflicts, ", "), rebase.Before)
+	id := transition + "-" + driftConflicted
+	visible := fmt.Sprintf("feature branch %s conflicts with upstream in %s; a mason resolves the conflicts against the sealed spec, and the branch and the seal stay until a reviewer approves the resolution", rebase.Branch, strings.Join(rebase.Conflicts, ", "))
 	tx := trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: d.header(transition+"-"+driftConflicted, stream, "", rebase.Operation, d.s.now()), Subject: driftSubject, From: state.Value, To: fmt.Sprintf("%s-%d", driftConflicted, rebase.Drift), Reason: reason}}
+		Transition: trace.Transition{Header: d.header(id, stream, "", rebase.Operation, d.s.now()), Subject: driftSubject, From: state.Value, To: fmt.Sprintf("%s-%d", driftConflicted, rebase.Drift), Reason: reason},
+		Events:     []trace.Event{trace.UpstreamMoved(id, stream, rebase.move(), visible)}}
 	if _, err := d.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return err
 	}
@@ -520,7 +605,13 @@ func (d drifter) ensureThread(ctx context.Context, stream config.WorkstreamID, a
 }
 
 func driftMasonSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are a mason of the %s project (%s). You resolve the conflicts the service's rebase of a feature branch onto upstream left, in a workspace of its own whose files are your view. You hold no version control tool: the service records your work and goes on with the rebase. Resolve against the sealed spec, change nothing the conflicts do not need, and call done when no conflict marker is left.", p.Name, p.Upstream)
+	return fmt.Sprintf("You are a mason of the %s project (%s). You resolve the conflicts the service's rebase of a feature branch onto upstream left, in a workspace of its own whose files are your view. You hold no version control tool: the service records your work and goes on with the rebase. Resolve against the sealed spec, change nothing the conflicts do not need, and call done when no conflict marker is left. When upstream's change alters what a sealed criterion means, call %s: the owner decides the spec, never your resolution.", p.Name, p.Upstream, questions.AmendTool)
+}
+
+// driftAmendGuidance tells a drift mason how to raise an upstream change to
+// what a sealed criterion means.
+func driftAmendGuidance(rebase DriftRebase) string {
+	return fmt.Sprintf("If upstream's change alters what a sealed criterion means, do not settle that in the resolution: call %s with the spec#<n> criteria it changes, the change the spec needs and why. The request cites upstream commit %s and goes to the owner; resolve the conflicts against the sealed spec as it stands all the same.", questions.AmendTool, rebase.Upstream.Commit)
 }
 
 // sealedSpec returns the workstream's sealed spec rendered for a prompt.
@@ -566,7 +657,9 @@ The service is rebasing the workstream's feature branch %s from %s onto %s/%s at
 
 A conflicted file carries conflict markers: the lines between "<<<<<<<" and "=======" are the branch as rebased onto upstream so far, and those between "=======" and ">>>>>>>" are the commit being replayed. Resolve every conflict against the sealed spec below, so that what upstream now holds and what the feature branch built both stand, and remove every marker. Change nothing the conflicts do not need. Then call done with the outcome of your resolution and end your turn. The service goes on with the rebase once no conflicted file carries a marker, and a reviewer reads the resolved branch against the sealed spec before the feature branch moves.
 
-%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, rebase.Stop, subject, strings.Join(rebase.Conflicts, "\n- "), spec), nil
+%s
+
+%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, rebase.Stop, subject, strings.Join(rebase.Conflicts, "\n- "), driftAmendGuidance(rebase), spec), nil
 }
 
 func (d drifter) fixPrompt(stream config.WorkstreamID, rebase DriftRebase) (string, error) {
@@ -585,7 +678,9 @@ func (d drifter) fixPrompt(stream config.WorkstreamID, rebase DriftRebase) (stri
 
 Your view holds the resolved branch, candidate %s. Address every finding against the sealed spec below, keep what upstream holds and what the feature branch built, and leave no conflict marker. Then call done with the outcome of your changes and end your turn. The reviewer reads the resolution again before the feature branch moves.
 
-%s`, rebase.Branch, strings.Join(findings, "\n"), rebase.Candidate, spec), nil
+%s
+
+%s`, rebase.Branch, strings.Join(findings, "\n"), rebase.Candidate, driftAmendGuidance(rebase), spec), nil
 }
 
 func (d drifter) reviewPrompt(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase) (string, error) {

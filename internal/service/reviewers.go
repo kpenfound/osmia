@@ -377,6 +377,11 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 		return err
 	}
 	prompt += guidance
+	if move, drifted, err := unitDrift(r.repository, stream, unit); err != nil {
+		return err
+	} else if drifted {
+		prompt += fmt.Sprintf("\n\nThis candidate was rebased onto the feature branch after drift rebase %d moved its upstream base from %s to %s. If upstream's change alters what a sealed criterion means, call %s with the criteria it changes rather than judging the candidate against a meaning the spec no longer has; the request cites upstream commit %s.", move.Drift, move.From, move.To, questions.AmendTool, move.To)
+	}
 	for _, item := range req.Context {
 		prompt += "\n\n" + item.Source + ":\n" + item.Content
 	}

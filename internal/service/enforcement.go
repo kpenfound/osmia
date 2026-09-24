@@ -52,8 +52,10 @@ var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questi
 // into the workspace after the turn, and a mason turn whose done the service
 // accepted ends with the outcome done, the mason's report and its card. A
 // drift mason turn works the same way on its workstream's drift resolution
-// workspace, with file tools and done alone, and a drift reviewer turn holds
-// file_read and verdict alone. Each role's
+// workspace, with file tools, amend and done alone, and a drift reviewer
+// turn holds file_read and verdict alone. An amendment a drift mason files,
+// or a unit reviewer files while it reads a candidate a drift rebase
+// carried, cites that drift rebase's upstream commit. Each role's
 // sandbox comes from its configuration, and a sandbox the platform cannot
 // enforce fails the turn with core's reason. Thread turns take their role's sandbox and the root from the
 // configuration the service has loaded, and record UTC times.
@@ -124,7 +126,8 @@ func Enforce(opts Options, e Enforcement) Options {
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				if scope.Role == masonRole && scope.Thread == driftMasonAgent {
-					return []coreadapter.Tool{reports.driftTool(scope)}, nil
+					amend, err := driftMasonTools(r, scope, now)
+					return append([]coreadapter.Tool{reports.driftTool(scope)}, amend...), err
 				}
 				if scope.Role == reviewerRole && scope.Thread == driftReviewerAgent {
 					return []coreadapter.Tool{verdicts.tool(scope)}, nil
@@ -134,7 +137,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					return append(ask, reports.tool(r, scope)), err
 				}
 				if scope.Role == reviewerRole {
-					ask, err := questions.Tools(r, reviewerAgent(scope.Unit), scope, now)
+					ask, err := reviewerQuestionTools(r, scope, now)
 					return append(ask, verdicts.tool(scope)), err
 				}
 				if scope.Role != trace.ChiefOfStaff {
@@ -198,4 +201,29 @@ func (w threadWorkspaces) Acquire(ctx context.Context, req coreadapter.Workspace
 		return w.units.Acquire(ctx, req)
 	}
 	return stagedWorkspaces{}.Acquire(ctx, req)
+}
+
+// driftMasonTools returns the question tools of a drift mason turn: amend,
+// citing the drift rebase whose conflicts it resolves, or none while no
+// resolution is in progress.
+func driftMasonTools(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
+	move, found, err := resolvingMove(r, config.WorkstreamID(scope.Workstream))
+	if err != nil || !found {
+		return nil, err
+	}
+	return questions.DriftTools(r, driftMasonAgent, scope, now, move)
+}
+
+// reviewerQuestionTools returns the question tools of a unit reviewer turn:
+// its amend cites the drift rebase that carried the candidate back to
+// review, when one did.
+func reviewerQuestionTools(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
+	move, drifted, err := unitDrift(r, config.WorkstreamID(scope.Workstream), scope.Unit)
+	if err != nil {
+		return nil, err
+	}
+	if drifted {
+		return questions.DriftTools(r, reviewerAgent(scope.Unit), scope, now, move)
+	}
+	return questions.Tools(r, reviewerAgent(scope.Unit), scope, now)
 }

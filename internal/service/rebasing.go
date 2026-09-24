@@ -520,8 +520,10 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 // next report revision, naming the rebased candidate and the new base; an
 // approved unit returns to reviewing, and a reviewing unit's review starts
 // again. A conflicted rebase tells the chief of staff; the next pass routes
-// the conflicts to the unit's mason. A rebase already recorded returns its
-// result and records nothing more.
+// the conflicts to the unit's mason. When a drift rebase moved the feature
+// branch the unit is rebased onto, an approval sent back to review and a
+// conflict each also raise an upstream moved event. A rebase already
+// recorded returns its result and records nothing more.
 func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in rebaseInput, operation string, rebase UnitRebase) (coreadapter.OperationResult, error) {
 	subject := trace.UnitSubject(in.Unit)
 	state, err := r.repository.Workflow(stream, subject)
@@ -540,6 +542,10 @@ func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in reba
 		case rebaseDocument(in.Unit):
 			previous = d
 		}
+	}
+	move, drifted, err := carriedOnto(r.repository, stream, in.Onto)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
 	}
 	at := r.s.now()
 	rebase.State, rebase.Report = state.Value, report.Revision
@@ -568,6 +574,9 @@ func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in reba
 			if state.Value == UnitApproved {
 				reason = "the approval no longer holds: " + reason
 				events = append(events, trace.Notice(id, "unit", fmt.Sprintf("Unit %s returns to review: its approved candidate was rebased onto %s.", in.Unit, rebase.Onto)))
+				if drifted {
+					events = append(events, trace.UpstreamMoved(id, stream, move, fmt.Sprintf("unit %s's approval no longer holds: its candidate was rebased onto the feature branch at %s and returns to review", in.Unit, rebase.Onto)))
+				}
 			}
 			txs = append(txs, trace.Transaction{ExpectedVersion: state.Version,
 				Transition: trace.Transition{Header: r.header(id, stream, in.Unit, operation, at), Subject: subject, From: state.Value, To: UnitReviewing, Reason: reason}, Events: events})
@@ -586,6 +595,9 @@ func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in reba
 		outcome, to = "-conflicted", fmt.Sprintf("conflicted-%d", in.Rebase)
 		reason += "; conflicted: " + strings.Join(rebase.Conflicts, ", ")
 		events = append(events, trace.Notice(transition+outcome, "chief", fmt.Sprintf("Unit %s conflicts with feature branch %s at %s in %s. Its mason resolves the conflict markers against the sealed spec; the unit is reviewed again before it lands.", in.Unit, featureBranch(stream), rebase.Onto, strings.Join(rebase.Conflicts, ", "))))
+		if drifted {
+			events = append(events, trace.UpstreamMoved(transition+outcome, stream, move, fmt.Sprintf("unit %s conflicts with the feature branch at %s in %s; its mason resolves the conflicts against the sealed spec, and the unit is reviewed again before it lands", in.Unit, rebase.Onto, strings.Join(rebase.Conflicts, ", "))))
+		}
 	}
 	rebaseState, err := r.repository.Workflow(stream, rebaseSubject(in.Unit))
 	if err != nil {

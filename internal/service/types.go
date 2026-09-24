@@ -336,11 +336,15 @@ type WorkstreamStatus struct {
 
 // DriftStatus is a workstream's latest drift rebase: its number, its
 // outcome (requested while it has none), and when and why that was recorded.
+// Moved holds, oldest first, the upstream moved events it raised for the
+// chief of staff, one for each visible outcome; it is empty for a drift
+// rebase with none.
 type DriftStatus struct {
 	Drift   int       `json:"drift"`
 	Outcome string    `json:"outcome"`
 	At      time.Time `json:"at"`
 	Reason  string    `json:"reason"`
+	Moved   []string  `json:"moved"`
 }
 
 // StatusView is one status revision as the chief of staff wrote it.

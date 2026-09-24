@@ -320,7 +320,7 @@ func TestRebaseProjectThroughTheAPI(t *testing.T) {
 	rebased := transitionByID(t, f.repository(), stream, "drift-2-rebased")
 	st, err = f.c.Status(ctx, stream)
 	must(t, err)
-	if want := (&DriftStatus{Drift: 2, Outcome: "rebased", At: rebased.At, Reason: rebased.Reason}); !reflect.DeepEqual(st.Drift, want) {
+	if want := (&DriftStatus{Drift: 2, Outcome: "rebased", At: rebased.At, Reason: rebased.Reason, Moved: []string{}}); !reflect.DeepEqual(st.Drift, want) {
 		t.Fatalf("status drift %+v, want %+v", st.Drift, want)
 	}
 	list, err := f.c.Statuses(ctx)
