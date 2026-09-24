@@ -40,8 +40,8 @@ func CoreEnforcement() Enforcement {
 var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName}, questions.ChiefTools...)}
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
-// its view of its unit's workspace, ask the chief of staff and report its
-// unit done.
+// its view of its unit's workspace, ask the chief of staff, file an amendment
+// and report its unit done.
 var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, doneTool}, WriteFiles: true, Execute: true}
 var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, questions.AmendTool, verdictTool}}
 
