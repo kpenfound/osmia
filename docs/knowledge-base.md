@@ -136,6 +136,10 @@ literal prefix (the text before its first `*`, `?`, `[` or `\`), and an entity
 scores its most specific matching pattern. Every entity with the top score is
 returned.
 
+`PatternsOverlap(a, b)` reports whether two valid patterns can cover the same
+path, including a file below a matched directory or a path admitted by both
+globs. The plan's start decision uses it after resolving unit footprints.
+
 Both calls return an explicit `Unresolved` list, in input order, and never drop
 an input. It holds:
 
