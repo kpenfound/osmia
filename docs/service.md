@@ -1924,11 +1924,12 @@ sketched, and every queued chief-of-staff turn. All four use one `Enforcement`:
 | `Engine` | `coreadapter.CoreEngine`: each role's enforcer for its configured `sandbox` and `image` |
 | `Hosts` | `coreadapter.MCPHost` serving host turns with `CoreTransport` and container turns with `ContainerTransport` |
 
-`Options.Threads` binds the thread dispatcher to isolated turns that grant only
-the chief of staff, with `set_status`, `answer`, `escalate`, `relay_ruling`,
-`route_amendment` and `propose_charter`, and the mason, which may write and
-execute in its view and holds `file_read`, `file_write`, `ask` and
-[`done`](#finishing-units). A thread turn of any other role
+`Options.Threads` binds the thread dispatcher to isolated turns that grant
+the chief of staff `set_status`, `answer`, `escalate`, `relay_ruling`,
+`route_amendment` and `propose_charter`; the mason may write and execute in its
+view and holds `file_read`, `file_write`, `ask`, `amend` and
+[`done`](#finishing-units). The reviewer holds `file_read`, `ask`, `amend` and
+`verdict`. A thread turn of any other role
 fails with the recorded reason `role has no service grant`. A mason turn works
 on a view of its [unit's workspace](#unit-workspaces), which is copied back into
 the workspace after the turn. The chief of staff's workspace is an empty
