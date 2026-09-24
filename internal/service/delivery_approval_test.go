@@ -11,9 +11,43 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
+
+func TestDeliveryRejectsFinalReportOnPreviousUpstreamBase(t *testing.T) {
+	t.Parallel()
+	f, stream, repository, report := deliveryFixture(t)
+	defer repository.Close()
+	ctx := context.Background()
+	reviewer := &finalReviewer{s: f.s, repository: repository}
+	must(t, reviewer.request(ctx, stream))
+	if ops := finalOperations(t, repository, stream); len(ops) != 0 {
+		t.Fatalf("fresh report prompted another final read: %+v", ops)
+	}
+	latest, doc, found, err := seal.Latest(repository, stream)
+	must(t, err)
+	if !found {
+		t.Fatal("no seal")
+	}
+	latest.Base.Commit = strings.Repeat("a", 40)
+	content, err := seal.Encode(latest)
+	must(t, err)
+	doc.Revision++
+	doc.Content = string(content)
+	must(t, repository.RecordDocuments(ctx, []trace.Document{doc}))
+	if _, reason, err := reviewer.finalGate(ctx, stream); err != nil || !strings.Contains(reason, "upstream base changed") {
+		t.Fatalf("final gate accepted the old upstream base: %q %v", reason, err)
+	}
+	must(t, reviewer.request(ctx, stream))
+	if ops := finalOperations(t, repository, stream); len(ops) != 1 {
+		t.Fatalf("stale report did not prompt a fresh final read: %+v", ops)
+	}
+	if _, api := f.s.approveDelivery(ctx, string(stream), DeliveryDecision{Review: report.Review, Commit: report.Commit}); api == nil || api.Code != Conflict {
+		t.Fatalf("delivery accepted the old upstream base: %v", api)
+	}
+}
 
 func deliveryFixture(t *testing.T) (*shedFixture, config.WorkstreamID, *trace.Repository, FinalReport) {
 	t.Helper()

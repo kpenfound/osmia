@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -37,6 +38,7 @@ const (
 	// rebased commit exists and before the branch moves, then rebased or
 	// conflicted.
 	driftReplayed   = "replayed"
+	driftCarrying   = "carrying"
 	driftRebased    = "rebased"
 	driftConflicted = "conflicted"
 	driftSkipped    = "skipped"
@@ -238,6 +240,26 @@ func (d drifter) replayed(stream config.WorkstreamID, k int) (DriftRebase, bool,
 	return DriftRebase{}, false, nil
 }
 
+func (d drifter) carrying(stream config.WorkstreamID, k int) (DriftRebase, bool, error) {
+	docs, err := trace.Read[trace.Document](d.repository, stream)
+	if err != nil {
+		return DriftRebase{}, false, err
+	}
+	for _, doc := range slices.Backward(docs) {
+		if doc.ID != driftDocument {
+			continue
+		}
+		var r DriftRebase
+		if err := json.Unmarshal([]byte(doc.Content), &r); err != nil {
+			return DriftRebase{}, false, err
+		}
+		if r.Drift == k && r.Outcome == driftCarrying {
+			return r, true, nil
+		}
+	}
+	return DriftRebase{}, false, nil
+}
+
 // Inspect reads the recorded transitions and documents. A recorded outcome
 // completes the operation; otherwise it is absent, with the recorded replay
 // or the feature branch's tip as evidence, and Apply reconciles the branch
@@ -302,6 +324,11 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 			return coreadapter.OperationResult{}, err
 		}
 		return *result, nil
+	}
+	if carrying, found, err := d.carrying(stream, in.Drift); err != nil {
+		return coreadapter.OperationResult{}, err
+	} else if found {
+		return d.finishCarry(ctx, stream, carrying)
 	}
 	rebase, replayed, err := d.replayed(stream, in.Drift)
 	if err != nil {
@@ -400,7 +427,93 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if rebase.Commit == rebase.Before {
 		reason = fmt.Sprintf("feature branch %s at %s already descends from %s; %s", branch, rebase.Before, onto, resealed)
 	}
+	b, found, err := d.read(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	needsCarry := false
+	if found {
+		units := newUnitWorkspaces(d.cfg)
+		for _, unit := range b.plan.Units {
+			state := b.states[trace.UnitSubject(unit.ID)].Value
+			if state == "" || state == UnitPlanned || state == UnitMerged {
+				continue
+			}
+			behind, err := units.behind(ctx, stream, unit.ID)
+			if err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			needsCarry = needsCarry || behind
+		}
+	}
+	if needsCarry {
+		rebase.Outcome = driftCarrying
+		if _, err := d.record(ctx, stream, rebase, moved, driftCarrying, reason); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		return d.finishCarry(ctx, stream, rebase)
+	}
 	return d.record(ctx, stream, rebase, moved, driftRebased, reason)
+}
+
+// finishCarry uses the unit rebase path while the drift operation holds the
+// project lander. Each requested rebase and conflict turn is durable, so a
+// retry only asks for work that has not already been recorded.
+func (d drifter) finishCarry(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase) (coreadapter.OperationResult, error) {
+	b, found, err := d.read(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if !found {
+		return coreadapter.OperationResult{}, fmt.Errorf("workstream %s disappeared during drift", stream)
+	}
+	ops, err := d.repository.Operations(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	rebasing, rebased, dispatched := map[string]bool{}, map[string][]string{}, map[string]bool{}
+	for _, o := range ops {
+		switch o.Operation.Action {
+		case RebaseAction:
+			in, err := decodeRebase(o.Operation)
+			if err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			if o.Result == nil {
+				rebasing[in.Unit] = true
+			} else if o.Result.Outcome == "succeeded" {
+				rebased[in.Unit] = append(rebased[in.Unit], in.Onto)
+			}
+		default:
+			if in, err := thread.DecodeTurn(o.Operation); err == nil {
+				dispatched[in.Agent+"/"+in.Turn] = true
+			}
+		}
+	}
+	current, err := d.refresh(ctx, b, rebasing, dispatched, rebased)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if !current {
+		return coreadapter.OperationResult{}, fmt.Errorf("drift rebase %d awaits unit carryover", rebase.Drift)
+	}
+	units := newUnitWorkspaces(d.cfg)
+	for _, unit := range b.plan.Units {
+		state := b.states[trace.UnitSubject(unit.ID)].Value
+		if state == "" || state == UnitPlanned || state == UnitMerged {
+			continue
+		}
+		behind, err := units.behind(ctx, stream, unit.ID)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if behind {
+			return coreadapter.OperationResult{}, fmt.Errorf("drift rebase %d awaits unit %s's workspace at %s", rebase.Drift, unit.ID, rebase.Commit)
+		}
+	}
+	rebase.Outcome = driftRebased
+	reason := fmt.Sprintf("feature branch %s and every unfinished unit are current at %s, or a conflict turn is queued", rebase.Branch, rebase.Commit)
+	return d.record(ctx, stream, rebase, nil, driftRebased, reason)
 }
 
 // eligible returns why the workstream takes no drift rebase now, or "" when

@@ -314,12 +314,19 @@ func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID)
 	if err != nil {
 		return err
 	}
-	if slices.ContainsFunc(asked, func(in finalReviewInput) bool { return in.reads(now) }) {
+	report, found, err := latestFinalReport(a.repository, stream)
+	if err != nil {
+		return err
+	}
+	baseStale, err := finalReportBaseStale(a.repository, stream)
+	if err != nil {
+		return err
+	}
+	baseCurrent := found && !baseStale
+	if (!found || baseCurrent) && slices.ContainsFunc(asked, func(in finalReviewInput) bool { return in.reads(now) }) {
 		return nil
 	}
-	if report, found, err := latestFinalReport(a.repository, stream); err != nil {
-		return err
-	} else if found && report.Outcome == finalReviewed && report.input().reads(now) {
+	if baseCurrent && report.Outcome == finalReviewed && report.input().reads(now) {
 		return nil
 	}
 	subject, err := a.repository.Workflow(stream, finalReviewSubject)
@@ -1140,6 +1147,40 @@ func latestFinalReport(repository *trace.Repository, stream config.WorkstreamID)
 	return FinalReport{}, false, nil
 }
 
+// finalReportBaseStale reports whether the recorded seal's upstream base
+// moved after the latest final report was written.
+func finalReportBaseStale(repository *trace.Repository, stream config.WorkstreamID) (bool, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return false, err
+	}
+	reportAt := -1
+	for i, doc := range docs {
+		if doc.ID == finalReportDocument {
+			reportAt = i
+		}
+	}
+	if reportAt < 0 {
+		return false, nil
+	}
+	var before, after seal.Base
+	for i, doc := range docs {
+		if doc.ID != seal.DocumentID {
+			continue
+		}
+		recorded, err := seal.Parse([]byte(doc.Content))
+		if err != nil {
+			return false, err
+		}
+		if i < reportAt {
+			before = recorded.Base
+		} else {
+			after = recorded.Base
+		}
+	}
+	return after != (seal.Base{}) && after != before, nil
+}
+
 // finalGate returns the workstream's latest final report and why it cannot
 // authorise approval or delivery: none is recorded, the latest failed, or it
 // no longer reads the workstream's feature branch tip, latest seal and its
@@ -1184,6 +1225,11 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 		if field.reviewed != field.current {
 			return report, fmt.Sprintf("final review %d is stale: it read %s %v, and %v is current; a new final review is required", report.Review, field.name, field.reviewed, field.current), nil
 		}
+	}
+	if stale, err := finalReportBaseStale(a.repository, stream); err != nil {
+		return report, "", err
+	} else if stale {
+		return report, fmt.Sprintf("final review %d is stale: its upstream base changed; a new final review is required", report.Review), nil
 	}
 	for _, c := range report.Criteria {
 		if c.Gap != "" {
