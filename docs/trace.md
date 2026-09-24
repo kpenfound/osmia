@@ -703,7 +703,7 @@ shows those still `escalated`.
 | Call | Records | Transition |
 | --- | --- | --- |
 | `Rule(ctx, number, text, owner, at)` | For every question of inbox entry `number`, revision 1 of `Ruling` `n`: `question_id`, the question's latest revision, `decision` `ruling` and `owner_response`, the text as given. The actor is `owner`, the cause `question_<n>_escalated` and the depth one more than the escalation's. | `question_<n>_ruled` for each, `escalated` to `ruled`. The first carries one `notice` event for the chief of staff: `The owner ruled on inbox entry <number>, <batch> (questions <n>, …): <text>`. |
-| `RelayRuling(ctx, agent, scope, n, text, reach, at)` | For every question in the batch of question `n`, revision 2 of its ruling: the owner's revision with `returned_answer`, the text the askers receive, and `scope`, `local` or `notify`. The actor is the calling agent, the cause its turn request's ID and the depth one more than the request's. | `question_<n>_answered` for each, `ruled` to `answered`. |
+| `RelayRuling(ctx, agent, scope, n, text, reach, at)` | For every question in the batch of question `n`, revision 2 of its ruling: the owner's revision with `returned_answer`, the chief of staff's relay delivered beside the owner's response, and `scope`, `local` or `notify`. The actor is the calling agent, the cause its turn request's ID and the depth one more than the request's. | `question_<n>_answered` for each, `ruled` to `answered`. |
 
 Each is one commit, so the ruling and its event, and the relay of a whole
 batch, appear together or not at all. `Rule` needs no turn scope: it is the
@@ -763,15 +763,22 @@ ends with the outcome `waiting` and the report `Asked question <n>`, whatever
 the agent reported, so its thread parks. A turn that asked nothing keeps its
 result. It forwards resume checks to the wrapped runner.
 
-`questions.Deliverer.Pass` queues each answered question's
-`returned_answer` on the thread that asked, as turn `answer_<n>`
+`questions.Deliverer.Pass` queues each answered question's answer on the
+thread that asked, as turn `answer_<n>`
 (`questions.TurnID`) with request ID `request_answer_<n>`, actor
 `service`/`questions` and cause `question_<n>_answered`. The prompt is
 `questions.Prompt`: the question number, the question as asked, the answer and
-the citations. For the owner's ruling it opens `The owner ruled on your
-question <n>. The chief of staff relays the ruling.` instead of `Answer to
-your question <n>.`, and the answer is the relayed text. A ruled question is
-not delivered until the relay moves it to `answered`. The turn carries the asking turn's unit and system prompt and
+the citations. A chief-of-staff `answer` is one `answer` section. For an
+owner ruling, the prompt has an `owner_response` section containing the
+owner's words copied by Osmia and a `returned_answer` section containing the
+chief of staff's relay. Both are attributed. The service renders the question,
+answer and citations with named delimiters and prefixes every content line
+with `| `, so text resembling a delimiter or attribution line remains data.
+The header records the original byte count; backslashes and carriage returns
+are escaped in content. Unknown or repeated section names are rejected before
+rendering. The same envelope renders project-wide `notify` bundle notices.
+A ruled question is not delivered until the relay moves it to `answered`.
+The turn carries the asking turn's unit and system prompt and
 the profile `Profile(role)` returns at delivery. The tools only record; this
 pass is the one path that delivers. A question whose thread already holds its
 answer turn is skipped, so a repeated pass or a restart between the record and

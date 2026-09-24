@@ -3,6 +3,8 @@ package bundle
 import (
 	"fmt"
 	"strings"
+
+	"github.com/kpenfound/osmia/internal/envelope"
 )
 
 // Render returns the bundle as the text a turn request carries. The output
@@ -105,7 +107,11 @@ func (b Bundle) Render() string {
 	}
 	for _, n := range b.Notices {
 		line("- %s (record %s revision %d, workstream %s)", n.Source, n.Record, n.Revision, n.Workstream)
-		line("  notice: %s", indent(n.Text))
+		section, err := envelope.Render(envelope.Section{Name: "owner_response", Text: n.OwnerResponse}, envelope.Section{Name: "returned_answer", Text: n.ReturnedAnswer})
+		if err != nil {
+			panic(err)
+		}
+		w.WriteString(section)
 	}
 	return w.String()
 }

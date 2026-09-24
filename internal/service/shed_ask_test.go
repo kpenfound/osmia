@@ -309,7 +309,7 @@ func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 	})
 	other := f.member(1, 2, 1, silent)
 	answering := f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		for _, want := range []string{"The owner ruled on your question 1. The chief of staff relays the ruling.", "You asked:\n" + askedQuestion, "Answer:\n" + relayedRuling} {
+		for _, want := range []string{"The owner ruled on your question 1. The chief of staff relays the ruling.", "| " + askedQuestion, "<<< osmia:owner_response", "| " + relayedRuling} {
 			if !strings.Contains(req.Prompt, want) {
 				p.report("answer prompt lacks %q:\n%s", want, req.Prompt)
 			}
@@ -505,7 +505,7 @@ func TestInterruptedAnswerTurnIsRetriedWithTheAnswer(t *testing.T) {
 		return ctx.Err()
 	})
 	retried := f.member(1, 1, 2, func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
-		for _, want := range []string{"Round 1 of the shed", "The answers to the questions you asked in this round:", "Answer to your question 1.", "You asked:\n" + askedQuestion, "Answer:\n" + askedAnswer} {
+		for _, want := range []string{"Round 1 of the shed", "The answers to the questions you asked in this round:", "Answer to your question 1.", "| " + askedQuestion, "<<< osmia:answer", "| " + askedAnswer} {
 			if !strings.Contains(req.Prompt, want) {
 				p.report("retried attempt's prompt lacks %q:\n%s", want, req.Prompt)
 			}

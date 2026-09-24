@@ -16,6 +16,8 @@ import (
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/envelope"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -69,7 +71,11 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	f.engine.turns["answer_1"], f.engine.turns["answer_2"] = resumed, resumed
 
 	relayed := make(chan struct{})
-	notice := "- workstreams/" + string(stream) + "/questions/1/rulings.jsonl (record 1 revision 2, workstream " + string(stream) + ")\n  notice: State and the log format are part of the contract.\n"
+	section, sectionErr := envelope.Render(envelope.Section{Name: "owner_response", Text: "Both are part of the contract."}, envelope.Section{Name: "returned_answer", Text: "State and the log format are part of the contract."})
+	if sectionErr != nil {
+		t.Fatal(sectionErr)
+	}
+	notice := "- workstreams/" + string(stream) + "/questions/1/rulings.jsonl (record 1 revision 2, workstream " + string(stream) + ")\n" + section
 	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		f.mu.Lock()
 		switch {
@@ -84,7 +90,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 				return questionResult(req, "session-chief", "Already relayed"), nil
 			default:
 			}
-			if strings.Contains(req.SystemPrompt, "  notice: ") {
+			if strings.Contains(req.SystemPrompt, "<<< osmia:owner_response") {
 				f.problem("a notice before any notify ruling:\n%s", req.SystemPrompt)
 			}
 			for _, args := range []map[string]any{
@@ -355,7 +361,11 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	defer f.mu.Unlock()
 	slices.Sort(f.results["resumed"])
 	ruled := func(id, question, answer string) string {
-		return "The owner ruled on your question " + id + ". The chief of staff relays the ruling.\n\nYou asked:\n" + question + "\n\nAnswer:\n" + answer + "\n"
+		ownerWords := "Both are part of the contract."
+		if answer == "Add no dependency." {
+			ownerWords = "No new dependencies."
+		}
+		return questions.Prompt(trace.Question{Header: trace.Header{ID: id}, Question: question}, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: ownerWords, ReturnedAnswer: answer})
 	}
 	wantResumed := []string{ruled("1", wantBatch.Asked[0].Question, "State and the log format are part of the contract."), ruled("1", "May I add a dependency?", "Add no dependency."),
 		ruled("2", wantBatch.Asked[1].Question, "State and the log format are part of the contract.")}

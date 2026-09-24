@@ -19,6 +19,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/envelope"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/questions"
@@ -500,14 +501,18 @@ func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	defer mu.Unlock()
 	// Each asker resumed its own backend session with the answer.
 	for turn, w := range map[string]struct{ session, prompt string }{
-		"answer_1": {"session-build", "Answer to your question 1.\n\nYou asked:\nWhere does state live?\n\nAnswer:\n" + chiefDemoAnswer + "\n\nCitations:\n- charter#1\n"},
-		"answer_2": {"session-review", "The owner ruled on your question 2. The chief of staff relays the ruling.\n\nYou asked:\n" + chiefDemoQuestion + "\n\nAnswer:\n" + chiefDemoRelayed + "\n"},
+		"answer_1": {"session-build", questions.Prompt(trace.Question{Header: trace.Header{ID: "1"}, Question: "Where does state live?"}, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: chiefDemoAnswer, Citations: []string{"charter#1"}})},
+		"answer_2": {"session-review", questions.Prompt(trace.Question{Header: trace.Header{ID: "2"}, Question: chiefDemoQuestion}, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: chiefDemoRuling, ReturnedAnswer: chiefDemoRelayed})},
 	} {
 		if req := prompts[turn]; req.ResumeID != w.session || !strings.Contains(req.Prompt, w.prompt) {
 			t.Fatalf("%s resumed %q with:\n%s", turn, req.ResumeID, req.Prompt)
 		}
 	}
-	notice := "## Notices\n- workstreams/" + string(stream) + "/questions/2/rulings.jsonl (record 2 revision 2, workstream " + string(stream) + ")\n  notice: " + chiefDemoRelayed + "\n"
+	section, err := envelope.Render(envelope.Section{Name: "owner_response", Text: chiefDemoRuling}, envelope.Section{Name: "returned_answer", Text: chiefDemoRelayed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	notice := "## Notices\n- workstreams/" + string(stream) + "/questions/2/rulings.jsonl (record 2 revision 2, workstream " + string(stream) + ")\n" + section
 	if first := prompts[sent[0].Turn].SystemPrompt; !strings.HasSuffix(first, "## Notices\nNo project-wide notices.\n") {
 		t.Fatalf("a notice before the ruling:\n%s", first)
 	}

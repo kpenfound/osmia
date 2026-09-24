@@ -64,7 +64,7 @@ func TestArchitectQuestionParksTheDraftUntilTheAnswerArrives(t *testing.T) {
 		return errors.Join(delivers(p, plan.SpecPath, validSpec)(ctx, req, verified, tools), asks(p, "1")(ctx, req, verified, tools))
 	})
 	answering := f.answer("1", func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
-		for _, want := range []string{"The owner ruled on your question 1. The chief of staff relays the ruling.", "You asked:\n" + askedQuestion, "Answer:\n" + relayedRuling} {
+		for _, want := range []string{"The owner ruled on your question 1. The chief of staff relays the ruling.", "| " + askedQuestion, "<<< osmia:owner_response", "| " + relayedRuling} {
 			if !strings.Contains(req.Prompt, want) {
 				p.report("answer prompt lacks %q:\n%s", want, req.Prompt)
 			}
@@ -179,7 +179,7 @@ func TestArchitectAskingTurnThatFailsParksAndAnInterruptedAnswerIsRepeated(t *te
 		return ctx.Err()
 	})
 	f.script(draftTurnID(1, 2), map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
-		for _, want := range []string{"The answers to the questions you asked in this draft:\n\nAnswer to your question 1.", "Answer:\n" + askedAnswer} {
+		for _, want := range []string{"The answers to the questions you asked in this draft:\n\nAnswer to your question 1.", "<<< osmia:answer", "| " + askedAnswer} {
 			if !strings.Contains(req.Prompt, want) {
 				p.report("the next attempt's prompt lacks %q:\n%s", want, req.Prompt)
 			}
@@ -545,7 +545,7 @@ func TestInterruptedReplyAnswerIsRepeatedToTheNextAttempt(t *testing.T) {
 		return ctx.Err()
 	})
 	f.script(replyTurnID(1, 2), nil, func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
-		for _, want := range []string{"The answers to the questions you asked in this reply:\n\nAnswer to your question 1.", "Answer:\n" + askedAnswer} {
+		for _, want := range []string{"The answers to the questions you asked in this reply:\n\nAnswer to your question 1.", "<<< osmia:answer", "| " + askedAnswer} {
 			if !strings.Contains(req.Prompt, want) {
 				p.report("the next attempt's prompt lacks %q:\n%s", want, req.Prompt)
 			}

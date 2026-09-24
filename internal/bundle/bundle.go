@@ -110,12 +110,13 @@ type Decision struct {
 // whatever workstream recorded it and whatever the bundle's scope. A ruling
 // relayed to a batch of questions is one notice.
 type Notice struct {
-	Source     string              `json:"source"`
-	Workstream config.WorkstreamID `json:"workstream"`
-	Record     string              `json:"record"`
-	Revision   int                 `json:"revision"`
-	At         time.Time           `json:"at"`
-	Text       string              `json:"text"`
+	Source         string              `json:"source"`
+	Workstream     config.WorkstreamID `json:"workstream"`
+	Record         string              `json:"record"`
+	Revision       int                 `json:"revision"`
+	At             time.Time           `json:"at"`
+	OwnerResponse  string              `json:"owner_response"`
+	ReturnedAnswer string              `json:"returned_answer"`
 }
 
 // Files is the provider that reads only the project's local files and trace.
@@ -177,10 +178,10 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 		// One relay gives every ruling of its batch the same text at the same
 		// time; it is one notice, sourced from the first of them.
 		same := func(n Notice) bool {
-			return n.Workstream == d.Workstream && n.At.Equal(d.At) && n.Text == d.ReturnedAnswer
+			return n.Workstream == d.Workstream && n.At.Equal(d.At) && n.OwnerResponse == d.OwnerResponse && n.ReturnedAnswer == d.ReturnedAnswer
 		}
 		if d.Scope == trace.ScopeNotify && !slices.ContainsFunc(b.Notices, same) {
-			b.Notices = append(b.Notices, Notice{Source: d.Source, Workstream: d.Workstream, Record: d.Record, Revision: d.Revision, At: d.At, Text: d.ReturnedAnswer})
+			b.Notices = append(b.Notices, Notice{Source: d.Source, Workstream: d.Workstream, Record: d.Record, Revision: d.Revision, At: d.At, OwnerResponse: d.OwnerResponse, ReturnedAnswer: d.ReturnedAnswer})
 		}
 	}
 	return b, nil

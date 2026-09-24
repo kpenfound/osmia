@@ -473,7 +473,7 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	d.mu.Lock()
 	answered := d.prompts[exitTitle(exitCapped)+"/"+questions.TurnID("1")]
 	d.mu.Unlock()
-	if !strings.Contains(answered, "You asked:\n"+exitQuestion+"\n\nAnswer:\n"+exitRelayed) {
+	if !strings.Contains(answered, "| "+exitQuestion) || !strings.Contains(answered, "<<< osmia:owner_response") || !strings.Contains(answered, "| "+exitRelayed) {
 		t.Fatalf("the member heard:\n%s", answered)
 	}
 	if inbox, err := f.c.Inbox(ctx); err != nil || len(inbox.Entries) != 0 {

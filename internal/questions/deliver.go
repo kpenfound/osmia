@@ -10,6 +10,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/envelope"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -21,21 +22,25 @@ var Actor = trace.Actor{Kind: "service", ID: "questions"}
 // once.
 func TurnID(id string) string { return "answer_" + id }
 
-// Prompt is the text of the turn that delivers ruling's returned answer. It
-// says when the answer is the owner's ruling, relayed by the chief of staff.
+// Prompt is the text of the turn that delivers a validated ruling.
 func Prompt(q trace.Question, ruling trace.Ruling) string {
 	var b strings.Builder
 	opening := "Answer to your question %s."
 	if ruling.Decision == trace.DecisionRuling {
 		opening = "The owner ruled on your question %s. The chief of staff relays the ruling."
 	}
-	fmt.Fprintf(&b, opening+"\n\nYou asked:\n%s\n\nAnswer:\n%s\n", q.ID, strings.TrimSpace(q.Question), strings.TrimSpace(ruling.ReturnedAnswer))
-	if len(ruling.Citations) > 0 {
-		b.WriteString("\nCitations:\n")
-		for _, c := range ruling.Citations {
-			fmt.Fprintf(&b, "- %s\n", c)
-		}
+	fmt.Fprintf(&b, opening+"\n\n", q.ID)
+	sections := []envelope.Section{{Name: "question", Text: q.Question}}
+	if ruling.Decision == trace.DecisionRuling {
+		sections = append(sections, envelope.Section{Name: "owner_response", Text: ruling.OwnerResponse}, envelope.Section{Name: "returned_answer", Text: ruling.ReturnedAnswer})
+	} else {
+		sections = append(sections, envelope.Section{Name: "answer", Text: ruling.ReturnedAnswer})
 	}
+	if len(ruling.Citations) > 0 {
+		sections = append(sections, envelope.Section{Name: "citations", Text: strings.Join(ruling.Citations, "\n")})
+	}
+	part, _ := envelope.Render(sections...)
+	b.WriteString(part)
 	return b.String()
 }
 
