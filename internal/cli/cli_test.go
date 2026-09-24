@@ -84,6 +84,9 @@ func TestCommandsAndRestart(t *testing.T) {
 		t.Fatal(status)
 	}
 	text := successful(t, root, "status")
+	if !strings.Contains(text, "mason: default source=configuration") {
+		t.Fatal("missing configured profile source", text)
+	}
 	if !strings.Contains(text, "ready=true") {
 		t.Fatal("missing health")
 	}

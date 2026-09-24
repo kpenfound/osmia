@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -123,6 +124,11 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	_, err = repo.ClaimTurn(ctx, stream, masonAgent("resume"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), masonAgent("resume"), masonTurnID("resume")), f.clock.Now())
 	must(t, err)
 	must(t, repo.Close())
+	store, _, err := runtime.Open(runtime.Inputs{Config: f.s.cfg, Workstreams: []config.WorkstreamID{stream}})
+	must(t, err)
+	must(t, store.SetProfile(masonRole, "other"))
+	f.s.store = store
+	defer store.Close()
 	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	defer repo.Close()
@@ -133,6 +139,9 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	must(t, err)
 	if len(th.Turns) != 2 || th.Turns[0].Status() != "interrupted" || th.Turns[1].Request.TurnID != masonAgent("resume")+"-recover-1" || !strings.Contains(th.Turns[1].Request.Prompt, "The service stopped during your last turn") {
 		t.Fatalf("recovered mason thread: %+v", th)
+	}
+	if th.Turns[0].Request.Profile.Name != "default" || th.Turns[1].Request.Profile.Name != "other" || th.Turns[1].Request.Profile.Backend != "codex" {
+		t.Fatalf("recovery profiles: %+v", th.Turns)
 	}
 	data, err := os.ReadFile(filepath.Join(w.Path, masonWrote))
 	must(t, err)

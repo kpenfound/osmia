@@ -835,8 +835,9 @@ func showRuntime(w io.Writer, rt service.RuntimeResponse) {
 		fmt.Fprintf(w, "  %s: %v\n", p.Project, p.Workstreams)
 	}
 	fmt.Fprintln(w, "Profiles:")
-	for _, r := range slices.Sorted(maps.Keys(rt.Effective.Profiles)) {
-		fmt.Fprintf(w, "  %s: %s\n", r, rt.Effective.Profiles[r])
+	for _, r := range slices.Sorted(maps.Keys(rt.Profiles)) {
+		p := rt.Profiles[r]
+		fmt.Fprintf(w, "  %s: %s source=%s\n", r, p.Name, p.Source)
 	}
 	diagnostics(w, rt.Diagnostics)
 }

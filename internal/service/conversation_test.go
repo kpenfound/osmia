@@ -39,7 +39,7 @@ func (c *chiefTurns) Run(ctx context.Context, p coreadapter.PreparedTurn) (corea
 			return coreadapter.SessionResult{}, ctx.Err()
 		}
 	}
-	session := coreadapter.BackendSession{Backend: "claude", ID: "session"}
+	session := coreadapter.BackendSession{Backend: p.Profile.Backend, ID: "session"}
 	switch p.Prompt {
 	case "fail":
 		return coreadapter.SessionResult{Session: session, FinalResponse: "partial", IsError: true}, nil
@@ -48,7 +48,11 @@ func (c *chiefTurns) Run(ctx context.Context, p coreadapter.PreparedTurn) (corea
 	case "silent":
 		return coreadapter.SessionResult{Session: session}, nil
 	}
-	return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "claude", ID: "session"}, FinalResponse: "Answer to " + p.Prompt}, nil
+	return coreadapter.SessionResult{Session: session, FinalResponse: "Answer to " + p.Prompt}, nil
+}
+
+func (c *chiefTurns) CheckResume(context.Context, coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+	return nil
 }
 
 func (c *chiefTurns) Calls() []coreadapter.PreparedTurn {
@@ -289,6 +293,63 @@ func TestConversationUsesProfileOverride(t *testing.T) {
 	must(t, err)
 	if len(th.Turns) != 1 || th.Turns[0].Request.TurnID != sent.Turn || th.Turns[0].Request.Profile.Name != "other" || th.Turns[0].Request.Profile.Backend != "codex" {
 		t.Fatalf("accepted profile: %+v", th.Turns)
+	}
+}
+
+func TestConversationProfileChangesResumeOrReplay(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	opts, cfg := conversationFixture(t, "cp-")
+	file := filepath.Join(opts.Config.Root, "config.toml")
+	data, err := os.ReadFile(file)
+	must(t, err)
+	must(t, os.WriteFile(file, append(data, []byte("\n[profiles.same]\nagent = \"claude\"\nmodel = \"same\"\n")...), 0600))
+	turns := &chiefTurns{hold: make(chan struct{}), entered: make(chan struct{})}
+	runChief(&opts, cfg, turns)
+	s, c := start(t, opts)
+	_, err = c.Send(ctx, stream, "first")
+	must(t, err)
+	select {
+	case <-turns.entered:
+	case <-time.After(demoTimeout):
+		t.Fatal("first turn did not start")
+	}
+	mutation(t, c, "PUT", "profile", ProfileRequest{trace.ChiefOfStaff, "same"})
+	if calls := turns.Calls(); len(calls) != 1 || calls[0].Profile.Name != "default" {
+		t.Fatalf("in-flight profile changed: %+v", calls)
+	}
+	close(turns.hold)
+	awaitConversation(t, c, func(l ConversationResponse) bool { return len(l.Entries) == 2 })
+	for i, step := range []struct{ profile, prompt string }{{"same", "second"}, {"other", "third"}, {"", "fourth"}} {
+		if i == 2 {
+			mutation(t, c, "DELETE", "profile", ClearProfileRequest{trace.ChiefOfStaff})
+		} else if i > 0 {
+			mutation(t, c, "PUT", "profile", ProfileRequest{trace.ChiefOfStaff, step.profile})
+		}
+		_, err := c.Send(ctx, stream, step.prompt)
+		must(t, err)
+		awaitConversation(t, c, func(l ConversationResponse) bool { return len(l.Entries) == (i+2)*2 })
+	}
+	calls := turns.Calls()
+	if len(calls) != 4 {
+		t.Fatalf("turn calls: %d", len(calls))
+	}
+	for i, want := range []struct{ name, path string }{{"default", "replay"}, {"same", "resume"}, {"other", "replay"}, {"default", "replay"}} {
+		path := "replay"
+		if calls[i].Resume != nil {
+			path = "resume"
+		}
+		if calls[i].Profile.Name != want.name || path != want.path {
+			t.Fatalf("turn %d: profile %q path %s", i, calls[i].Profile.Name, path)
+		}
+		if want.path == "replay" && i > 0 && !strings.Contains(calls[i].History, "Answer to first") {
+			t.Fatalf("turn %d omitted owned log: %q", i, calls[i].History)
+		}
+	}
+	th, err := s.active.repository.ChiefOfStaffThread(stream)
+	must(t, err)
+	if len(th.Turns) != 4 || th.Turns[0].Request.Profile.Name != "default" || th.Turns[3].Request.Profile.Name != "default" {
+		t.Fatalf("recorded profiles: %+v", th.Turns)
 	}
 }
 

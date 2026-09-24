@@ -103,8 +103,18 @@ func (s *Service) configuration() ConfigResponse {
 }
 func (s *Service) runtimeView() RuntimeResponse {
 	state, ds := s.store.Effective()
-	out := RuntimeResponse{Effective: state, Projects: []ProjectRuntime{}, Diagnostics: []Diagnostic{}}
-	if cfg := s.current(); cfg.HasProject() {
+	stored, _ := s.store.Snapshot()
+	profiles := make(map[string]EffectiveProfile)
+	cfg := s.current()
+	for role, binding := range cfg.Roles {
+		name, source := binding.Profile, "configuration"
+		if override := stored.Profiles[role]; override != "" && state.Profiles[role] == override {
+			name, source = override, "owner_override"
+		}
+		profiles[role] = EffectiveProfile{Name: name, Source: source}
+	}
+	out := RuntimeResponse{Effective: state, Profiles: profiles, Projects: []ProjectRuntime{}, Diagnostics: []Diagnostic{}}
+	if cfg.HasProject() {
 		out.Projects = append(out.Projects, ProjectRuntime{cfg.Project.ID, s.Context().Mode(cfg.Project.ID)})
 	} else {
 		out.Diagnostics = append(out.Diagnostics, noProject("project"))

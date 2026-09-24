@@ -241,10 +241,17 @@ type ProjectResponse struct {
 	NextStep string      `json:"next_step"`
 }
 type RuntimeResponse struct {
-	Effective runtime.State `json:"effective"`
+	Effective runtime.State               `json:"effective"`
+	Profiles  map[string]EffectiveProfile `json:"profiles"`
 	// Projects lists each active project's context mode.
 	Projects    []ProjectRuntime `json:"projects"`
 	Diagnostics []Diagnostic     `json:"diagnostics"`
+}
+
+// EffectiveProfile identifies the profile selected for a role's next turn.
+type EffectiveProfile struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
 }
 
 // ProjectRuntime reports where a project's turn context comes from. "file"
