@@ -50,6 +50,10 @@ set through `Options` by embedders.
 | GET | `/runtime` | Effective runtime state, each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
 | GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, and diagnostics |
 | GET | `/status/<workstream-id>` | `WorkstreamStatus` for one workstream of the active project |
+| GET | `/trace/<workstream-id>` | `TraceSummary`: sealed revisions, criteria, unit walks, delivery and explicit gaps |
+| GET | `/trace/<workstream-id>/unit/<unit-id>` | `UnitTrace`: document revisions, reports, reviews, rulings, landings, turns, costs, history and gaps |
+| GET | `/trace/<workstream-id>/criterion/<spec#n>` | `CriterionTrace`: sealed criterion, assigned unit evidence, rulings, final account, delivery and gaps |
+| GET | `/trace/<workstream-id>/commit/<sha>` | `CommitTrace`: records naming the full commit ID, linked landings and their reviewed evidence, delivery and gaps |
 | POST | `/conversation/<workstream-id>` | `SendRequest`: text; returns the accepted `ConversationEntry` |
 | GET | `/conversation/<workstream-id>` | `ConversationResponse`: the workstream's conversation with its chief of staff |
 | GET | `/inbox` | `InboxResponse`: the escalations of the active project that wait for the owner's ruling |

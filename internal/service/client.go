@@ -229,6 +229,30 @@ func (c *Client) Status(ctx context.Context, id config.WorkstreamID) (Workstream
 	return v, err
 }
 
+func (c *Client) Trace(ctx context.Context, id config.WorkstreamID) (TraceSummary, error) {
+	var v TraceSummary
+	err := c.Do(ctx, "GET", Prefix+"/trace/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
+}
+
+func (c *Client) TraceUnit(ctx context.Context, id config.WorkstreamID, unit string) (UnitTrace, error) {
+	var v UnitTrace
+	err := c.Do(ctx, "GET", Prefix+"/trace/"+url.PathEscape(string(id))+"/unit/"+url.PathEscape(unit), nil, &v)
+	return v, err
+}
+
+func (c *Client) TraceCriterion(ctx context.Context, id config.WorkstreamID, criterion string) (CriterionTrace, error) {
+	var v CriterionTrace
+	err := c.Do(ctx, "GET", Prefix+"/trace/"+url.PathEscape(string(id))+"/criterion/"+url.PathEscape(criterion), nil, &v)
+	return v, err
+}
+
+func (c *Client) TraceCommit(ctx context.Context, id config.WorkstreamID, commit string) (CommitTrace, error) {
+	var v CommitTrace
+	err := c.Do(ctx, "GET", Prefix+"/trace/"+url.PathEscape(string(id))+"/commit/"+url.PathEscape(commit), nil, &v)
+	return v, err
+}
+
 // Send sends an owner message to a workstream's chief of staff. It returns
 // once the message is durable.
 func (c *Client) Send(ctx context.Context, id config.WorkstreamID, text string) (ConversationEntry, error) {
