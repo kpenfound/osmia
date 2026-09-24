@@ -129,3 +129,19 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 	_ = r.wake.Notify(context.Background())
 	return a, nil
 }
+
+// OwnerTurn returns the request of the scope's active, uncaptured
+// chief-of-staff turn and reports whether that turn answers a message from
+// the owner.
+func (r *Repository) OwnerTurn(agent string, scope coreadapter.Scope) (TurnRequest, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if scope.Role != ChiefOfStaff {
+		return TurnRequest{}, false, fmt.Errorf("only a chief-of-staff turn answers the owner")
+	}
+	_, q, err := r.turnScope(agent, scope, true)
+	if err != nil {
+		return TurnRequest{}, false, err
+	}
+	return q.Request, q.Request.Actor.Kind == "owner", nil
+}
