@@ -50,6 +50,9 @@ type Bundle struct {
 	Entities  Entities         `json:"entities"`
 	Decisions []Decision       `json:"decisions"`
 	Notices   []Notice         `json:"notices"`
+	// CharterNotices are the charter rules the owner ratified from rulings,
+	// in the order they were recorded in the charter.
+	CharterNotices []CharterNotice `json:"charter_notices"`
 }
 
 // Charter is the recorded charter revision and its citable rules.
@@ -119,6 +122,26 @@ type Notice struct {
 	ReturnedAnswer string              `json:"returned_answer"`
 }
 
+// CharterNotice is a rule the owner ratified from a ruling and the service
+// recorded in the charter. Like a notify ruling it applies to the whole
+// project, so every bundle on the project carries it. Source, Record and
+// Revision name the proposal's charter.json revision that records the rule's
+// number and the charter revision that holds it; Ruling and RulingRevision
+// name the ruling it came from and OwnerResponse the owner's words in it.
+type CharterNotice struct {
+	Source         string              `json:"source"`
+	Workstream     config.WorkstreamID `json:"workstream"`
+	Record         string              `json:"record"`
+	Revision       int                 `json:"revision"`
+	At             time.Time           `json:"at"`
+	Number         int                 `json:"number"`
+	Rule           string              `json:"rule"`
+	Charter        int                 `json:"charter"`
+	Ruling         string              `json:"ruling"`
+	RulingRevision int                 `json:"ruling_revision"`
+	OwnerResponse  string              `json:"owner_response"`
+}
+
 // Files is the provider that reads only the project's local files and trace.
 // It keeps nothing between calls, so edits to the charter or the knowledge
 // base apply to the next assembly.
@@ -137,7 +160,8 @@ func (Files) Mode(config.ProjectID) Mode { return ModeFile }
 // Assemble reads the charter through the trace, which first records any
 // unrecorded owner edit, then the knowledge base, the entity map and the
 // rulings, in that order. The notices are the project's rulings with scope
-// notify, ordered as the decisions are.
+// notify, ordered as the decisions are, and the charter rules ratified from
+// rulings, ordered by when the charter recorded them.
 func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Scope) (Bundle, error) {
 	if f.Repository == nil {
 		return Bundle{}, errors.New("file context provider has no trace")
@@ -146,7 +170,7 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 	if err != nil {
 		return Bundle{}, err
 	}
-	b := Bundle{Project: project, Mode: ModeFile, Scope: scope, Knowledge: []Prose{}, Missing: []MissingProse{}, Decisions: []Decision{}, Notices: []Notice{}}
+	b := Bundle{Project: project, Mode: ModeFile, Scope: scope, Knowledge: []Prose{}, Missing: []MissingProse{}, Decisions: []Decision{}, Notices: []Notice{}, CharterNotices: []CharterNotice{}}
 	doc, err := repo.Charter(ctx, f.now().UTC())
 	if err != nil {
 		return Bundle{}, fmt.Errorf("charter: %w", err)
@@ -184,6 +208,18 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 			b.Notices = append(b.Notices, Notice{Source: d.Source, Workstream: d.Workstream, Record: d.Record, Revision: d.Revision, At: d.At, OwnerResponse: d.OwnerResponse, ReturnedAnswer: d.ReturnedAnswer})
 		}
 	}
+	proposals, err := repo.CharterProposals()
+	if err != nil {
+		return Bundle{}, fmt.Errorf("charter notices: %w", err)
+	}
+	for _, p := range proposals {
+		if p.State.Value != trace.CharterChartered {
+			continue
+		}
+		b.CharterNotices = append(b.CharterNotices, CharterNotice{Source: "workstreams/" + string(p.Workstream) + "/" + p.Latest.Path, Workstream: p.Workstream, Record: p.Latest.ID, Revision: p.Latest.Revision, At: p.Latest.At,
+			Number: p.Proposal.Number, Rule: p.Proposal.Rule, Charter: p.Proposal.Charter, Ruling: p.Proposal.Ruling, RulingRevision: p.Proposal.RulingRevision, OwnerResponse: p.Proposal.OwnerResponse})
+	}
+	slices.SortStableFunc(b.CharterNotices, func(x, y CharterNotice) int { return x.At.Compare(y.At) })
 	return b, nil
 }
 

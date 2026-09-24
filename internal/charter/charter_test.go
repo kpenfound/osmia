@@ -87,3 +87,40 @@ func TestCommentLinesAndFencesEndRules(t *testing.T) {
 		t.Fatalf("%+v", c)
 	}
 }
+
+// A ratified rule takes the next number and goes under the standing rulings
+// heading, which is added once; its source is a comment, not rule text.
+func TestAppendRule(t *testing.T) {
+	if n := Parse("").Next(); n != 1 {
+		t.Fatalf("empty charter next %d", n)
+	}
+	if n := Parse("1. One.\n5. Five.\n3. Three.\n").Next(); n != 6 {
+		t.Fatalf("next %d", n)
+	}
+	content := "# Charter\n\n## Testing\n\n1. Every change has a test.\n2. Run the suite\n   before review."
+	first := AppendRule(content, 3, "Uploads resume.", "ratified from q1")
+	if want := content + "\n\n## Standing rulings\n\n3. Uploads resume. <!-- ratified from q1 -->\n"; first != want {
+		t.Fatalf("first append:\n%q\nwant\n%q", first, want)
+	}
+	second := AppendRule(first, 4, "Logs stay JSON.", "ratified from q2")
+	if want := first + "\n4. Logs stay JSON. <!-- ratified from q2 -->\n"; second != want {
+		t.Fatalf("second append:\n%q\nwant\n%q", second, want)
+	}
+	c := Parse(second)
+	want := []Rule{
+		{1, "Every change has a test.", "Testing"},
+		{2, "Run the suite before review.", "Testing"},
+		{3, "Uploads resume.", StandingRulings},
+		{4, "Logs stay JSON.", StandingRulings},
+	}
+	if !reflect.DeepEqual(c.Rules, want) || len(c.Diagnostics) != 0 {
+		t.Fatalf("%+v", c)
+	}
+	// A heading in a comment or a fence is not the charter's last heading.
+	for _, hidden := range []string{"<!--\n## Standing rulings\n-->\n", "```\n## Standing rulings\n```\n"} {
+		got := AppendRule("## Testing\n"+hidden, 1, "Rule.", "src")
+		if !strings.HasSuffix(got, hidden+"\n## Standing rulings\n\n1. Rule. <!-- src -->\n") {
+			t.Fatalf("after %q:\n%q", hidden, got)
+		}
+	}
+}

@@ -479,7 +479,7 @@ func (s *Service) stop(active *activeProject) error {
 // boundary by the service's sealer for sealings, its builder for builds and
 // its foreman for landings and rebases and its publisher for publications;
 // the architect controller, then the shed controller, then the sealing
-// controller, then the building controller, then the overlap, refresh, landing,
+// controller, then the building controller, then the overlap, charter, refresh, landing,
 // assembly and publication controllers run at the start of every pass, and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
 // chief of staff, recorded answers are queued on their askers' threads, the
@@ -515,6 +515,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	seals := &sealer{s: s, repository: repository}
 	build := &builder{s: s, repository: repository}
 	overlap := &overlaps{s: s, repository: repository}
+	rules := charterer{s: s, repository: repository}
 	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository}}
 	refresh := &refresher{extractor: &extractor{s: s, repository: repository}}
 	finals := &finalReviewer{s: s, repository: repository}
@@ -526,7 +527,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		name string
 		pass func(context.Context) error
 	}
-	hooks := []scheduleHook{{"draft", draft.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"refresh", refresh.Pass}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
+	hooks := []scheduleHook{{"draft", draft.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})
 	}

@@ -19,6 +19,7 @@ var attribution = map[string]string{
 	"owner_response":  "owner (copied by Osmia)",
 	"returned_answer": "chief of staff relay",
 	"citations":       "chief of staff",
+	"charter_rule":    "chief of staff proposal, ratified by the owner",
 }
 
 // Render validates structural names and renders content with a data prefix on

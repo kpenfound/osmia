@@ -1,4 +1,6 @@
-// Package followup reads final-review work that supplements a sealed plan.
+// Package followup reads work that supplements a sealed plan: gaps a final
+// review found, and criteria an approved amendment changed after the units
+// addressing them merged.
 package followup
 
 import (
@@ -14,11 +16,13 @@ import (
 const DocumentID = "final-followups"
 const Path = "final/followups.json"
 
-// Unit retains the report and criterion that caused a follow-up. The sealed
-// spec and plan remain separate, immutable inputs to its ordinary unit work.
+// Unit retains the final report, or the amendment, and the criterion that
+// caused a follow-up. The sealed spec and plan remain separate, immutable
+// inputs to its ordinary unit work.
 type Unit struct {
 	Review    int       `json:"review"`
 	Report    int       `json:"report"`
+	Amendment string    `json:"amendment,omitempty"`
 	Criterion string    `json:"criterion"`
 	Gap       string    `json:"gap"`
 	Unit      plan.Unit `json:"unit"`

@@ -93,7 +93,7 @@ type foreman struct{ *masons }
 var _ coreadapter.Reconciler = (*foreman)(nil)
 
 // Pass runs one landing and rebase sequence at a time per project. While a
-// landing of the project has no result, it does nothing. Otherwise it keeps
+// landing or drift rebase of the project has no result, it does nothing. Otherwise it keeps
 // the unfinished units of the building and assembled workstreams that are not paused on
 // their feature branches, rebasing each unit whose workspace a landing left
 // behind and routing rebase conflicts to masons. Once every such unit is
@@ -133,6 +133,10 @@ func (f *foreman) Pass(ctx context.Context) error {
 		rebasing[stream], rebased[stream], dispatched[stream] = map[string]bool{}, map[string][]string{}, map[string]bool{}
 		for _, o := range ops {
 			switch o.Operation.Action {
+			case DriftAction:
+				if o.Result == nil {
+					return nil
+				}
 			case LandAction:
 				if o.Result == nil {
 					return nil

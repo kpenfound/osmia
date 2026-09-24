@@ -529,8 +529,8 @@ func units(n int) string {
 }
 
 // repositoryAdapter routes repository-boundary operations: sealings to the
-// service's sealer, builds to its builder, landings and rebases to its
-// foreman, publications to its publisher, everything else to the configured
+// service's sealer, builds to its builder, landings, rebases and drift
+// rebases to its foreman, publications to its publisher, everything else to the configured
 // reconciler.
 type repositoryAdapter struct {
 	other     coreadapter.Reconciler
@@ -550,6 +550,8 @@ func (a repositoryAdapter) Inspect(ctx context.Context, op coreadapter.Operation
 		return a.lands.Inspect(ctx, op)
 	case RebaseAction:
 		return rebaser{a.lands}.Inspect(ctx, op)
+	case DriftAction:
+		return drifter{a.lands}.Inspect(ctx, op)
 	case PublishAction:
 		return a.publishes.Inspect(ctx, op)
 	}
@@ -568,6 +570,8 @@ func (a repositoryAdapter) Apply(ctx context.Context, op coreadapter.Operation) 
 		return a.lands.Apply(ctx, op)
 	case RebaseAction:
 		return rebaser{a.lands}.Apply(ctx, op)
+	case DriftAction:
+		return drifter{a.lands}.Apply(ctx, op)
 	case PublishAction:
 		return a.publishes.Apply(ctx, op)
 	}

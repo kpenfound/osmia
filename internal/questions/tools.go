@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -26,9 +27,6 @@ const (
 	ProposeCharterTool = "propose_charter"
 )
 
-// Reserved is the reason propose_charter returns.
-const Reserved = "reserved until standing rulings (M4)"
-
 // Guidance tells the chief of staff what to do with a question. It belongs
 // in the system prompt of every turn that may carry one.
 const Guidance = "When a service event says a question is open, choose exactly once for it. " +
@@ -37,7 +35,9 @@ const Guidance = "When a service event says a question is open, choose exactly o
 	"Call route_amendment when the honest answer changes the sealed spec or plan. " +
 	"Escalate several open questions that need the same decision as one batch. Never answer for the owner because time is passing; a question waits as long as it needs. " +
 	"When a service event says the owner ruled on an inbox entry, call relay_ruling exactly once for it, naming one of its questions: rephrase the ruling for the askers without changing what it decides, " +
-	"and choose scope local when it matters only to them, or notify when it applies across the project."
+	"and choose scope local when it matters only to them, or notify when it applies across the project. " +
+	"When the owner's ruling is a standing rule for the project rather than a decision about this feature, also call propose_charter once for it with the rule as the charter should state it; " +
+	"the owner ratifies or declines the proposal, so make it the attention of your status until they do."
 
 // ChiefTools names the chief of staff's question tools.
 var ChiefTools = []string{AnswerTool, EscalateTool, RelayRulingTool, RouteAmendmentTool, ProposeCharterTool}
@@ -238,17 +238,31 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 			Next      string   `json:"next"`
 		}{true, relayed, input.Scope, "The ruling is delivered to each asker as its next turn."})
 	}
-	tools := []coreadapter.Tool{answer, escalate, relay, amendmentTool(repository, agent, scope, now, true)}
-	for _, reserved := range []struct{ name, description string }{
-		{ProposeCharterTool, "Propose a charter amendment for an answer that is a standing rule. " + Reserved + "."},
-	} {
-		tools = append(tools, coreadapter.Tool{Name: reserved.name, Effect: coreadapter.ToolMemory, Description: reserved.description,
-			InputSchema: json.RawMessage(`{"type":"object"}`),
-			Handle: func(context.Context, json.RawMessage) (json.RawMessage, error) {
-				return encode(refusal{Reason: Reserved})
-			}})
+	propose := coreadapter.Tool{Name: ProposeCharterTool, Effect: coreadapter.ToolMemory,
+		Description: "Propose the owner's ruling on a question as a standing charter rule, when it applies to the project beyond this feature. question: the number of a question the owner ruled on; one proposal per ruling. rule: the rule as the charter should state it, one line. " +
+			"The owner ratifies or declines it. A ratified rule is appended to the charter as its next number, recording the ruling, and becomes a notice in every bundle on the project.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"question":{"type":"string"},"rule":{"type":"string"}},"required":["question","rule"],"additionalProperties":false}`)}
+	propose.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		var input struct {
+			Question string `json:"question"`
+			Rule     string `json:"rule"`
+		}
+		if err := decodeInput(raw, &input); err != nil {
+			return nil, err
+		}
+		next := func(content string) int { return charter.Parse(content).Next() }
+		proposal, err := repository.ProposeCharter(ctx, agent, scope, input.Question, input.Rule, next, now())
+		if err != nil {
+			return refuse(err)
+		}
+		return encode(struct {
+			Recorded bool   `json:"recorded"`
+			Question string `json:"question"`
+			Number   int    `json:"number"`
+			Next     string `json:"next"`
+		}{true, proposal.Question, proposal.Number, "The owner ratifies or declines the proposal; make it the attention of your status until they do."})
 	}
-	return tools
+	return []coreadapter.Tool{answer, escalate, relay, amendmentTool(repository, agent, scope, now, true), propose}
 }
 
 // refuse turns a refusal into the tool's result and passes other errors on.

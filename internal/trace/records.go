@@ -299,7 +299,7 @@ func documentPath(p string, stream bool) error {
 	if !stream && (p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && (p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts)) {
+	if stream && (p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || charterProposalPath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)
@@ -314,7 +314,7 @@ func amendmentRoundPath(parts []string) bool {
 		return false
 	}
 	if len(parts) == 3 {
-		return parts[2] == "packet.json" || parts[2] == "decision.json"
+		return parts[2] == "packet.json" || parts[2] == "decision.json" || parts[2] == "application.json"
 	}
 	return len(parts) == 4 && shedRound.MatchString(parts[2]) && strings.HasSuffix(parts[3], ".json") && key(strings.TrimSuffix(parts[3], ".json"))
 }
@@ -343,6 +343,12 @@ func unitPath(parts []string) bool {
 // publication.
 func finalPath(parts []string) bool {
 	return len(parts) == 2 && parts[0] == "final" && (parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "delivery.json" || parts[1] == "publication.json")
+}
+
+// driftPath reports whether parts name the drift rebase record of a
+// workstream.
+func driftPath(parts []string) bool {
+	return len(parts) == 2 && parts[0] == "drift" && parts[1] == "rebase.json"
 }
 
 var shedRound = regexp.MustCompile(`^round-[1-9][0-9]{0,8}$`)

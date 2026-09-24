@@ -515,7 +515,14 @@ func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID
 	if err != nil {
 		return err
 	}
-	if _, current, err := r.unitReviewEvidence(ctx, stream, unit); err == nil && staleReview(identity, current) == "" {
+	_, current, evidenceErr := r.unitReviewEvidence(ctx, stream, unit)
+	reviewed := identity
+	if evidenceErr == nil {
+		if reviewed, err = r.carried(stream, unit, identity, current); err != nil {
+			return err
+		}
+	}
+	if evidenceErr == nil && staleReview(reviewed, current) == "" {
 		planned, err := sealedUnit(r.repository, coreadapter.Scope{Workstream: string(stream), Unit: unit})
 		if err != nil {
 			return err
@@ -673,11 +680,16 @@ func staleReview(reviewed, current UnitReviewIdentity) string {
 // staleInputs returns why a reviewed identity no longer names the unit's
 // current report, seal, candidate, base, spec and plan: the recorded report
 // and seal, the tips of the unit branch and the feature branch, and the latest
-// spec and plan revisions. It returns "" when every input is current.
+// spec and plan revisions. A seal, spec and plan that approved amendments
+// replaced without reworking, notifying or removing the unit are current. It
+// returns "" when every input is current.
 func (m *masons) staleInputs(ctx context.Context, stream config.WorkstreamID, unit string, reviewed UnitReviewIdentity) (string, error) {
 	_, current, err := m.candidateEvidence(ctx, stream, unit)
 	if err != nil {
 		return "stale review inputs: " + err.Error(), nil
+	}
+	if reviewed, err = m.carried(stream, unit, reviewed, current); err != nil {
+		return "", err
 	}
 	if reason := staleReview(reviewed, current); reason != "" {
 		return reason, nil

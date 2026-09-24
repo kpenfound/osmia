@@ -446,7 +446,8 @@ A decision requires a `building` or `assembled` workstream and an amendment in
 state `presented`; a packet revision other than the latest is refused with
 `conflict`. Approval and overrule are also refused once `seal.json` has a later
 revision than the one the request was filed against: another amendment moved
-the sealed documents, so the request is rejected and filed again. Every
+the sealed documents, or a [drift rebase](#drift-rebases) moved the seal's
+base, so the request is rejected and filed again. Every
 decision is one revision of `amendments/<n>/decision.json`, committed with its
 transition `amendment-<n>-decided-<k>` and a notice for the chief of staff. It
 records the decision, the note, the debate round, the packet revision, the
@@ -463,14 +464,19 @@ The amendment controller then applies the decision on the next pass:
   number and its hash; a plan-only change keeps the seal number and spec hash
   and records the new plan's footprints. The base commit, feature branch and
   feature state stay as they are, and no code is edited. The documents, the
-  seal and transition `amendment-<n>-resealed` are one commit, so a restart
-  between the decision and the reseal completes it once. An approval that can
-  no longer apply, because the sealed documents moved or the plan's footprints
+  seal, the first revision of `amendments/<n>/application.json` and
+  transition `amendment-<n>-resealed` are one commit, so a restart between
+  the decision and the reseal completes it once. An approval that can no
+  longer apply, because the sealed documents moved or the plan's footprints
   no longer resolve, moves to `unapplied` with the reason and leaves the
   sealed documents in force.
 - **Rejected**: nothing is versioned and the sealed documents stay in force.
 
-For `resealed`, `rejected` and `unapplied`, the controller queues turn
+A resealed amendment is then applied to the workstream's units, as described
+in [applying an approved amendment](#applying-an-approved-amendment), and
+moves to `applied`.
+
+For `applied`, `rejected` and `unapplied`, the controller queues turn
 `amendment_<n>_ruling` on the requester's thread: the mason's thread, or the
 unit's reviewer thread for a reviewer's request. The turn carries the decision
 and its outcome, with the request and the owner's note quoted in the shared
@@ -478,8 +484,51 @@ envelope. The unit the request parked then moves from `waiting` back to the
 stage its waiting transition preserved, `implementing` or `reviewing`, through
 transition `<unit-subject>_resumed_amendment_<n>`, and the amendment moves to
 `ruled`. Each step finds what an earlier pass did, so a restart between them
-completes the rest once. Units, approvals and final reports the approved
-amendment affects are not reconsidered here.
+completes the rest once.
+
+### Applying an approved amendment
+
+The application record `amendments/<n>/application.json` classifies the
+affected set the architect's draft recorded against the sealed and approved
+plans:
+
+| Class | Units | Effect |
+| --- | --- | --- |
+| rework | address a changed criterion in either plan | `implementing`, `reviewing` and `approved` units move to `implementing` through `<unit-subject>_reworked_amendment_<n>`; a merged unit is never reopened, and each changed criterion it addresses becomes a follow-up unit |
+| notify | their plan entry changed while their criteria keep their meaning | an `implementing` unit stays `implementing` and a `reviewing` or `approved` unit moves to `reviewing`, through `<unit-subject>_notified_amendment_<n>` |
+| added | new to the plan | enter `planned`, then `ready` when every unit they depend on has merged |
+| removed | no longer in the plan | nothing moves them |
+
+`planned` and `ready` units need no move: their first bundle is assembled from
+the amended documents. `waiting` and `contested` units are held, and move as
+their class says once they leave that state. Every move to `implementing`
+queues mason turn `mason-<unit>-amendment-<n>`, which carries the unit's
+amended bundle. The mason bundle and the reviewer's evidence of every reworked
+or notified unit carry an amendment notice from then on: the revisions the
+amendment sealed, the changed criteria, the unit's affected proofs, and the
+request and the owner's note in the shared envelope.
+
+A follow-up unit for a changed criterion of a merged unit is recorded in
+`final/followups.json` as `amendment-<n>-spec-<k>`, scoped to the footprints
+of the plan's units that address the criterion, and enters `ready`. The
+workstream assembles, or its final review runs again, only once follow-ups
+have merged too.
+
+From the reseal on, a unit's report and review stay current across the
+amendment only when it does not rework the unit, and its review only when it
+neither reworks, notifies nor removes the unit. An approval of an unaffected
+unit therefore still lands; an approval of an affected unit is refused at
+landing and the unit is moved as above. A final report that read the replaced
+seal, spec and plan no longer authorises delivery: the application names its
+review invalidated with a notice for the chief of staff, and final review runs
+again against the amended documents once every unit has merged.
+
+The moves, the added units, the follow-ups, the second revision of
+`application.json`, which lists the held units, follow-ups and invalidated
+final review, and transition `amendment-<n>-applied` are one commit. A unit
+that moved since the controller read it leaves that commit to the next pass.
+The mason turns and the held units' moves are completed on later passes, each
+found by its ID, so a restart part way completes the application once.
 
 `GET /v1/amendment/<workstream-id>/<n>` and `osmia amendment <workstream-id> <n>`
 show the amendment's state, round, latest packet with its revision and latest
@@ -1167,7 +1216,9 @@ Each attempt, in order:
 the spec revision's content), `base` (`remote`, `branch`, `commit`), `branch`,
 `workspace` and `footprints`, one per unit in plan order with `unit`,
 `entities` and `paths`. Every sealing that completes records the next revision
-of the file; the seal in force is the latest.
+of the file; the seal in force is the latest. A
+[drift rebase](#drift-rebases) records the next revision with a new `base`
+and the same seal number.
 
 A fetch that fails, a remote the clone lacks, and a branch or worktree that
 cannot be created are infrastructure: the attempt returns the error, the
@@ -1592,7 +1643,8 @@ its next file-based bundle can include the new local knowledge.
 
 The landing controller runs in every reconciliation pass after the building
 controller. It runs one landing and rebase sequence at a time per project:
-while a landing operation of the project has no result, it asks for nothing.
+while a landing or [drift rebase](#drift-rebases) operation of the project
+has no result, it asks for nothing.
 Otherwise it first [rebases](#rebasing-units-in-flight) the units a landing
 left behind. While a unit of a building or assembled workstream that is not paused is
 behind its feature branch, or a rebase has no result, it asks for no landing.
@@ -1724,6 +1776,60 @@ does.
 
 A rebase whose outcome is recorded completes on inspection without touching
 the workspace.
+
+### Drift rebases
+
+A drift rebase brings a workstream's feature branch current with upstream
+before final review, and moves the seal's upstream base with it. Drift
+rebases share the project's one lander with landings. Asking for them takes
+every `building` or `assembled` workstream of the project that is not paused
+and has no final review in flight, and asks nothing while a landing or drift
+rebase of the project has no result. Each gets the operation `drift` (input
+`drift` `<k>`, the workstream's next drift number) on the repository boundary
+with the transition `drift-<k>` (actor `service`/`foreman`, cause the seal
+revision in force), which moves the workflow subject `drift` to
+`requested-<k>`. While a drift rebase has no result, the landing controller
+asks for no landing and no unit rebase.
+
+The operation checks the workstream again: one that is no longer `building`
+or `assembled`, is paused, or has no feature branch is skipped. The foreman
+then fetches the project's configured `base_branch` from the remote whose URL
+names its `upstream` and replays the feature branch onto the fetched commit,
+as a [final review](#running-a-final-review) does, committing as
+`Osmia <osmia@localhost>` at the time the drift rebase was asked for. A branch
+already on the fetched commit stays as it is.
+
+A replay that conflicts changes neither the branch nor the seal: one trace
+commit records `drift/rebase.json` with outcome `conflicted`, the upstream
+remote, branch and commit, the branch commit and the conflicted paths, and
+`drift-<k>-conflicted` moves `drift` to `conflicted-<k>` with the reason
+`feature branch <branch> does not rebase cleanly onto <remote>/<branch> at
+<commit>: <paths> conflicted; the branch stays at <commit> and the seal is
+unchanged`.
+
+A clean replay is recorded in `drift/rebase.json` with outcome `replayed` and
+the rebased commit before anything moves. The feature branch and its
+workspace then move to the rebased commit. One trace commit then records the
+next revision of `drift/rebase.json` with outcome `rebased`, the seal and the
+`seal.json` revision in force afterwards; the next revision of `seal.json`
+(actor `service`/`foreman`, cause the operation), identical but for `base`,
+which names the fetched commit, unless the seal was already on it; and
+`drift-<k>-rebased`, which moves `drift` to `rebased-<k>` with the reason
+`feature branch <branch> is rebased from <before> onto <remote>/<branch> at
+<commit> as <rebased>; seal <n> moves from base <old> to <new> in seal.json
+revision <r>`. The seal number is unchanged. With the branch moved, the
+landing controller [rebases the units](#rebasing-units-in-flight) it left
+behind.
+
+A drift rebase that is interrupted resumes from what the trace records. A
+recorded replay is not replayed again: the branch moves to its commit, even
+when upstream moved since. A branch already at that commit is not moved
+again, and a recorded outcome completes the operation on inspection. So each
+drift rebase records one outcome and at most one `seal.json` revision. A
+skipped drift rebase moves `drift` to `skipped-<k>` with the reason `drift
+rebase <k> changed nothing: <why>`, as does one whose branch moved to a
+commit other than the one it replayed or the rebased one. Fetch and Git
+errors leave the operation pending for another attempt.
 
 ### Unit workspaces
 
@@ -1983,10 +2089,10 @@ order, except the librarian's, which carries no feature (see
 | --- | --- |
 | `workstream`, `project` | The workstream and its project |
 | `state` | The feature workflow state, or `null` before one is recorded |
-| `units` | One `{"unit", "state"}` per unit of the sealed plan and each final-review follow-up, in order, once their states are recorded; `reason` gives a mason contest's classification or bound exhaustion, `deferral` holds the [decision](#why-a-ready-unit-waits) that keeps a `ready` unit waiting, with its `message` as `reason`, `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
+| `units` | One `{"unit", "state"}` per unit of the sealed plan and each follow-up of a final review or an amendment, in order, once their states are recorded; `reason` gives a mason contest's classification or bound exhaustion, `deferral` holds the [decision](#why-a-ready-unit-waits) that keeps a `ready` unit waiting, with its `message` as `reason`, `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
 | `advisories` | The workstream's active [overlap advisories](#overlapping-workstreams): `workstream`, the other workstream; `seal` and `other_seal`, the seals compared; `subsystems`, `entities` and `paths`, what they share; and `message`, the advisory as the chief of staff received it; empty when none is active |
 | `open_questions` | Questions in the workstream without a ruling |
-| `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, or `contested` with the unit ID; a mason contest also has `reason`; empty when none wait |
+| `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, `contested` with the unit ID, or a `charter` proposal with its question number; a mason contest also has `reason`; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
 | `status` | `null` until the chief of staff writes one; otherwise `goal`, `attention` (empty when nothing needs the owner), `note`, `agents`, `revision` and `updated_at` |
 
@@ -2061,6 +2167,67 @@ reconciler, but only a service with `Options.Threads` delivers the event to
 the chief of staff and the relayed ruling to the askers, as described under
 [questions](#questions).
 
+## Charter proposals
+
+When the owner's ruling on a question is a standing rule rather than a
+decision about one feature, the chief of staff proposes it as a charter rule
+with `propose_charter`, naming the question and the rule as the charter should
+state it. The proposal waits for the owner as a `charter` gate on the
+workstream's status, which the chief of staff makes the attention of its
+status, and the owner ratifies or declines it with
+`POST /v1/charter/<workstream-id>/<question>`, `osmia charter`, or by telling
+the workstream's chief of staff, which records the decision with
+[`decide_charter`](#charter-decisions-at-the-owners-request). The records are
+described under [charter proposals](trace.md#charter-proposals) in the trace
+reference.
+
+`GET /v1/charter` returns a `CharterProposalsResponse`: `proposals`, oldest
+first, the active project's proposals still waiting for the owner, leaving
+out those of abandoned workstreams. `GET /v1/charter/<workstream-id>/<question>`
+returns one proposal in any state. Both describe a proposal as a
+`CharterProposalView`:
+
+| Field | Meaning |
+| --- | --- |
+| `workstream`, `question` | The workstream and the question whose ruling the proposal comes from |
+| `state` | `proposed`, `ratified` (the rule is being appended to the charter), `chartered` or `declined` |
+| `rule` | The rule as the chief of staff proposed it |
+| `number` | The number the rule would take when proposed; once `chartered`, the number it took |
+| `ruling`, `ruling_revision` | The trace record path and revision of the owner's ruling |
+| `owner_response` | The owner's words in that ruling |
+| `proposed_at` | When the chief of staff proposed it |
+| `decision`, `note` | The owner's decision, `ratify` or `decline`, and note, once decided |
+| `charter` | The `charter.md` revision that records the rule, once `chartered` |
+| `detail` | What a decision request did |
+
+`POST /v1/charter/<workstream-id>/<question>` takes a `CharterDecisionRequest`,
+`{"decision":"ratify|decline","note":"…"}`, and records the decision in one
+commit with the proposal's move to `ratified` or `declined`. A declined
+proposal changes neither the charter nor any bundle, and the chief of staff
+receives a notice of it. A ratified one is appended to the charter by the
+service's charter controller on its next pass: the rule takes the next number
+after the charter's highest rule, under a `## Standing rulings` heading, with
+the source ruling recorded in an HTML comment beside it. The charter is read
+through the trace first, so an owner edit is recorded as the owner's revision,
+and an edit saved during the write is detected and recorded rather than
+overwritten; the rule is then appended after it. Once the rule is in the
+charter the proposal is `chartered`, the chief of staff receives a notice,
+and every later [bundle](context.md) on the project, whatever its workstream,
+carries the rule as one notice. A restart at any point writes the rule and
+raises the notice once.
+
+| Case | Error |
+| --- | --- |
+| A decision other than `ratify` or `decline` | `validation`: `a charter decision is ratify or decline` |
+| The workstream is not in the active project | `validation` |
+| No proposal for the question | `not_found`: `workstream <id> has no charter proposal for question <n>` |
+| The workstream is abandoned | `conflict`: `workstream <id> is abandoned and its charter proposals take no decision` |
+| The proposal was decided the other way | `conflict`: `the charter proposal of question <n> is already decided: <decision>` |
+| The trace cannot be read or written | `internal` |
+
+Deciding a proposal the same way again returns it with a `detail` saying the
+decision is already recorded, and records nothing.
+
 ## Conversation
 
 `POST /v1/conversation/<workstream-id>` sends the owner's message to the
@@ -2078,7 +2245,9 @@ The accepted request fixes, at acceptance:
   override;
 - the prompt, which is the message text as sent;
 - the system prompt, which names the workstream, tells the chief of staff how
-  to [set the priority order](#priority-at-the-owners-request) and carries the
+  to [set the priority order](#priority-at-the-owners-request) and record the
+  owner's [amendment](#amendment-decisions-at-the-owners-request) and
+  [charter](#charter-decisions-at-the-owners-request) decisions, and carries the
   workstream's [context bundle](context.md), latest stored status and open
   inbox escalations rendered from the trace at acceptance.
 
@@ -2148,6 +2317,18 @@ and every decision the service refuses, record nothing and return
 `{"recorded":false,"reason":"…"}`. An accepted decision returns
 `{"recorded":true,"amendment":"<n>","state":"…","detail":"…"}`.
 
+### Charter decisions at the owner's request
+
+The chief of staff's `decide_charter` tool records the owner's decision on a
+[charter proposal](#charter-proposals) when the owner gives it in a message.
+Its input is `{"question":"<n>","decision":"ratify|decline","note":"…"}`, for
+a proposal of the turn's workstream. It records exactly what
+`POST /v1/charter/<workstream-id>/<n>` records, with the owner whose message
+the turn answers as the decision's actor and the turn's request as its cause.
+A turn that answers no message from the owner, and every decision the service
+refuses, record nothing and return `{"recorded":false,"reason":"…"}`. An
+accepted decision returns `{"recorded":true,"question":"<n>","state":"…","detail":"…"}`.
+
 ## Running turns
 
 `osmia serve` starts the service with `service.Enforce(opts,
@@ -2164,7 +2345,9 @@ sketched, and every queued chief-of-staff turn. All four use one `Enforcement`:
 
 `Options.Threads` binds the thread dispatcher to isolated turns that grant
 the chief of staff `set_status`, [`prioritise`](#priority-at-the-owners-request),
-[`decide_amendment`](#amendment-decisions-at-the-owners-request), `answer`, `escalate`, `relay_ruling`, `route_amendment` and `propose_charter`; the mason may write and execute in its
+[`decide_amendment`](#amendment-decisions-at-the-owners-request),
+[`decide_charter`](#charter-decisions-at-the-owners-request), `answer`, `escalate`, `relay_ruling`, `route_amendment` and
+[`propose_charter`](#charter-proposals); the mason may write and execute in its
 view and holds `file_read`, `file_write`, `ask`, `amend` and
 [`done`](#finishing-units). The reviewer holds `file_read`, `ask`, `amend` and
 `verdict`. A thread turn of any other role

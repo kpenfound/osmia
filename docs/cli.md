@@ -68,7 +68,7 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   before a status is written. Reading the charter records any edit you made to
   it; see [charter](charter.md).
 - `status <workstream-id>` shows one workstream of the active project: the same
-  facts and owner gates, then `Units:` with one line per unit of the sealed plan or final-review follow-up and its state
+  facts and owner gates, then `Units:` with one line per unit of the sealed plan or follow-up and its state
   and the latest available card (headline, happened and any owner action) beneath it
   once the workstream is building, and for a landed unit its commit on the
   feature branch, the reviewed candidate and base with the approval that
@@ -116,6 +116,23 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   configured it fails with `no_project` (exit 4). An entry that already has a
   ruling, or belongs to an abandoned workstream, fails with `conflict`
   (exit 5) and records nothing.
+- `charter` lists the charter rules the chief of staff proposed from your
+  rulings that wait for your decision, oldest first: the workstream and
+  question, the rule and the number it would take, the ruling it comes from
+  and your words in it. `charter <workstream-id> <question>` shows one
+  proposal in any state; once it is `chartered` it shows the number the rule
+  took and the charter revision that records it.
+  `charter <workstream-id> <question> <ratify|decline> [note]` decides it.
+  `ratify` has the service append the rule to your `charter.md` as its next
+  number, under a `## Standing rulings` heading and with the source ruling in a
+  comment, and every later bundle on the project carries it as a notice; an
+  edit you save to the charter meanwhile is recorded, not overwritten.
+  `decline` changes nothing but the proposal. The note is optional and is one
+  argument; quote it. Deciding again the same way prints the recorded
+  decision; deciding the other way fails with `conflict` (exit 5), as does a
+  proposal of an abandoned workstream. An unknown proposal fails with
+  `not_found` (exit 4). You can also tell the workstream's chief of staff your
+  decision with `send`. See [charter proposals](service.md#charter-proposals).
 - `contested <workstream-id> <unit> <review|revise> <note>` records your
   direction for a contested unit shown by `status`. Quote the required note.
   `review` requests another reviewer verdict on the same candidate; `revise`

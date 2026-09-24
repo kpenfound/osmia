@@ -50,7 +50,7 @@ executor; an engine that cannot verify a saved session selects replay.
 The service must explicitly grant a role its tool names and write/execute/network
 permissions. A missing role grant fails. The M1 workspace-write ceiling permits
 `mason` and `librarian`; other known roles are read-only and have no execute or
-fetch permission. Some tools belong to one role: `set_status`, `prioritise`, `decide_amendment`, `answer`,
+fetch permission. Some tools belong to one role: `set_status`, `prioritise`, `decide_amendment`, `decide_charter`, `answer`,
 `escalate`, `relay_ruling`, `route_amendment` and `propose_charter` are removed from every
 other role's grant, so only `chief_of_staff` can see them. `amend` is limited to
 `mason` and `reviewer`, and `ask` is removed

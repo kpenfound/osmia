@@ -476,3 +476,66 @@ func TestRenderedBundleTravelsInTurnRequest(t *testing.T) {
 		t.Fatalf("recorded request %#v %v", requests, err)
 	}
 }
+
+// A charter rule the owner ratified from a ruling is a notice in every bundle
+// on the project once the charter records it; a proposal still waiting, a
+// declined one and a ratified one the charter does not record yet are not.
+func TestBundleCharterNotices(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	for _, s := range []config.WorkstreamID{first, second} {
+		if err := f.repo.CreateWorkstream(ctx, s, timestamp, owner); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// record moves the proposal of question q through the states, one
+	// charter.json revision each.
+	record := func(q string, states ...string) {
+		t.Helper()
+		p := trace.CharterProposal{Question: q, Ruling: "workstreams/" + string(first) + "/questions/" + q + "/rulings.jsonl", RulingRevision: 2, OwnerResponse: "Keep uploads resumable.", Rule: "Uploads resume.", Number: 3}
+		from := ""
+		for i, to := range states {
+			switch to {
+			case trace.CharterRatified:
+				p.Decision = trace.CharterRatify
+			case trace.CharterDeclined:
+				p.Decision = trace.CharterDecline
+			case trace.CharterChartered:
+				p.Number, p.Charter = 4, 7
+			}
+			content, err := json.Marshal(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: trace.CharterProposalID(q), Revision: i + 1, Project: project, Workstream: first, At: timestamp.Add(time.Duration(i) * time.Minute), Actor: owner, Cause: "test"}
+			tx := h
+			tx.Schema, tx.ID, tx.Revision = "osmia.trace.transition", trace.CharterSubject(q)+"_"+to, 1
+			if _, err := f.repo.RecordDocumentsWith(ctx, []trace.Document{{Header: h, Path: trace.CharterProposalPath(q), Content: string(content)}},
+				trace.Transaction{ExpectedVersion: uint64(i), Transition: trace.Transition{Header: tx, Subject: trace.CharterSubject(q), From: from, To: to, Reason: "test"}}); err != nil {
+				t.Fatal(err)
+			}
+			from = to
+		}
+	}
+	record("1", trace.CharterProposed)
+	record("2", trace.CharterProposed, trace.CharterDeclined)
+	record("3", trace.CharterProposed, trace.CharterRatified)
+	if b := f.assemble(t, bundle.Scope{Workstream: second}); b.CharterNotices == nil || len(b.CharterNotices) != 0 || !strings.HasSuffix(b.Render(), "\n## Notices\nNo project-wide notices.\n") {
+		t.Fatalf("bundle without charter notices %#v:\n%s", b.CharterNotices, b.Render())
+	}
+	record("4", trace.CharterProposed, trace.CharterRatified, trace.CharterChartered)
+	source := "workstreams/" + string(first) + "/questions/4/"
+	want := []bundle.CharterNotice{{Source: source + "charter.json", Workstream: first, Record: "charter_4", Revision: 3, At: timestamp.Add(2 * time.Minute),
+		Number: 4, Rule: "Uploads resume.", Charter: 7, Ruling: source + "rulings.jsonl", RulingRevision: 2, OwnerResponse: "Keep uploads resumable."}}
+	for _, scope := range []bundle.Scope{{}, {Workstream: first}, {Workstream: second}, {Entities: []string{"internal"}}} {
+		b := f.assemble(t, scope)
+		if !reflect.DeepEqual(b.CharterNotices, want) {
+			t.Fatalf("charter notices of scope %+v: %#v", scope, b.CharterNotices)
+		}
+		if !strings.HasSuffix(b.Render(), "\n## Notices\n- "+source+"charter.json (record charter_4 revision 3, workstream "+string(first)+"): the owner ratified charter#4, recorded in charter.md revision 7, from "+source+"rulings.jsonl revision 2\n"+
+			"<<< osmia:owner_response | owner (copied by Osmia) | bytes=23 >>>\n| Keep uploads resumable.\n<<< /osmia:owner_response >>>\n"+
+			"<<< osmia:charter_rule | chief of staff proposal, ratified by the owner | bytes=15 >>>\n| Uploads resume.\n<<< /osmia:charter_rule >>>\n") {
+			t.Fatalf("render of scope %+v:\n%s", scope, b.Render())
+		}
+	}
+}
