@@ -121,7 +121,7 @@ func TestMasonModelClassifier(t *testing.T) {
 					count++
 				}
 			}
-			if !tc.failed && count != tc.attempts {
+			if count != tc.attempts {
 				t.Fatalf("classifier costs %d want %d", count, tc.attempts)
 			}
 		})
