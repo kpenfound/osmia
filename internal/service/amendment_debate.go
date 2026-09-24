@@ -594,7 +594,11 @@ func (a amendmentDebate) present(ctx context.Context, stream config.WorkstreamID
 	}
 	id := amendmentStep(req.ID, round, "presented")
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "amendment-" + req.ID + "-presented-packet", Revision: packetRevision, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: shedActor, Cause: id, Depth: 1}, Path: amendmentPacketPath(req.ID), Content: string(data) + "\n"}
-	body := fmt.Sprintf("Present amendment %s to the owner for a decision. Request: %s. Reason: %s. Proposed change: %s. Affected units and proofs: %s. Dissent: %s. Recommendation: %s. The round cap approves nothing. Packet: %s, revision %d, after round %d. The owner approves, rejects, asks for another round or overrules the objections that stand, with osmia amendment %s %s or through you.", req.ID, strings.Join(req.Citations, ", "), req.Reason, req.Change, affected, standing(dissent), recommendation, amendmentPacketPath(req.ID), packetRevision, round, stream, req.ID)
+	cited := strings.Join(req.Citations, ", ")
+	if m := req.Upstream; m != nil {
+		cited += fmt.Sprintf(", after drift rebase %d moved upstream from %s to %s", m.Drift, m.From, m.To)
+	}
+	body := fmt.Sprintf("Present amendment %s to the owner for a decision. Request: %s. Reason: %s. Proposed change: %s. Affected units and proofs: %s. Dissent: %s. Recommendation: %s. The round cap approves nothing. Packet: %s, revision %d, after round %d. The owner approves, rejects, asks for another round or overrules the objections that stand, with osmia amendment %s %s or through you.", req.ID, cited, req.Reason, req.Change, affected, standing(dissent), recommendation, amendmentPacketPath(req.ID), packetRevision, round, stream, req.ID)
 	for _, e := range dissent {
 		body += fmt.Sprintf("\n- %s (%s, blocking=%t): %s", e.ID, e.Kind, e.Blocking, e.Argument)
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
@@ -89,13 +90,21 @@ func completeDriftTurn(t *testing.T, f *shedFixture, repository *trace.Repositor
 	directory := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), agent, token)
 	q, err := repository.ClaimTurn(ctx, stream, agent, token, directory, f.clock.Now())
 	must(t, err)
+	completeClaimedTurn(t, f, repository, stream, agent, q, outcome)
+	return q
+}
+
+// completeClaimedTurn ends the claimed turn q of the workstream's agent as a
+// finished turn with outcome.
+func completeClaimedTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent string, q trace.QueuedTurn, outcome *coreadapter.Outcome) {
+	t.Helper()
+	ctx := context.Background()
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.clock.Now()
 	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: agent, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision,
-		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: token}, SessionDirectory: directory, StartedAt: q.Claim.At, Outcome: outcome}}
+		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: q.Claim.Token}, SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, Outcome: outcome}}
 	must(t, repository.CaptureTurn(ctx, q.Claim.Token, response))
 	must(t, repository.CompleteTurn(ctx, stream, agent, q.Request.TurnID, q.Claim.Token, f.clock.Now()))
-	return q
 }
 
 // resolvedDone is the outcome of a drift mason turn whose done the service
@@ -195,7 +204,7 @@ func TestDriftConflictIsResolvedByAMasonAndMovesTheBranchOnApproval(t *testing.T
 	if conflicted := transitionByID(t, repository, stream, "drift-1-conflicted"); conflicted.To != "conflicted-1" || !strings.Contains(conflicted.Reason, "CODEOWNERS conflicted") {
 		t.Fatalf("the conflict %+v", conflicted)
 	}
-	base := DriftRebase{Drift: 1, Operation: op.ID, Branch: featureBranch(stream), Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, Before: before, Conflicts: []string{"CODEOWNERS"}}
+	base := DriftRebase{Drift: 1, Operation: op.ID, Branch: featureBranch(stream), Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, From: seals(t, repository, stream)[0].Base.Commit, Before: before, Conflicts: []string{"CODEOWNERS"}}
 	stopped := base
 	stopped.Outcome, stopped.Round, stopped.Stop = driftConflicted, 1, before
 	opened := base
@@ -542,8 +551,8 @@ func TestLandingWaitsWhileADriftConflictIsOpen(t *testing.T) {
 }
 
 // A drift mason turn is lent its workstream's resolution workspace, sees all
-// of it but its VCS metadata, holds file tools and done alone, and has its
-// view copied back. Its done takes an outcome.
+// of it but its VCS metadata, holds file tools, amend and done alone, and has
+// its view copied back. Its done takes an outcome.
 func TestDriftMasonTurnWorksInTheResolutionWorkspace(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, _ := newFinalFixture(t, "drift-workspace")
@@ -568,7 +577,7 @@ func TestDriftMasonTurnWorksInTheResolutionWorkspace(t *testing.T) {
 	if slices.Contains(selection.Paths, ".git") || !slices.Contains(selection.Paths, "CODEOWNERS") {
 		t.Fatalf("the drift mason's view selects %v", selection.Paths)
 	}
-	if n := selection.Narrow; n == nil || !slices.Equal(n.Tools, []string{"file_read", "file_write", doneTool}) || !n.WriteFiles || !n.Execute {
+	if n := selection.Narrow; n == nil || !slices.Equal(n.Tools, []string{"file_read", "file_write", questions.AmendTool, doneTool}) || !n.WriteFiles || !n.Execute {
 		t.Fatalf("the drift mason's capabilities %+v", n)
 	}
 

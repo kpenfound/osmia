@@ -296,7 +296,7 @@ func TestProjectRebaseAndDriftStatus(t *testing.T) {
 	}
 	var one service.WorkstreamStatus
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", stream, "--json")), &one))
-	if want := (&service.DriftStatus{Drift: 1, Outcome: "skipped", At: written, Reason: reason}); !reflect.DeepEqual(one.Drift, want) {
+	if want := (&service.DriftStatus{Drift: 1, Outcome: "skipped", At: written, Reason: reason, Moved: []string{}}); !reflect.DeepEqual(one.Drift, want) {
 		t.Fatalf("status drift %+v, want %+v", one.Drift, want)
 	}
 

@@ -803,3 +803,157 @@ func TestProposeCharterFromAnOwnerRuling(t *testing.T) {
 		t.Fatalf("proposal %+v", p)
 	}
 }
+
+// unitlessTurn claims a turn of a new thread whose scope names no unit, as a
+// drift mason's does.
+func (f fixture) unitlessTurn(t *testing.T, agent, role, turn string) coreadapter.Scope {
+	t.Helper()
+	ctx := context.Background()
+	header := func(kind, id string) trace.Header {
+		return trace.Header{Schema: "osmia.trace." + kind, Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, At: start, Actor: trace.Actor{Kind: "service", ID: "controller"}, Cause: "test", Depth: 1}
+	}
+	if err := f.repo.CreateThread(ctx, trace.Agent{Header: header("agent", agent), Role: role, ThreadID: agent}); err != nil {
+		t.Fatal(err)
+	}
+	f.claim(t, agent, turn)
+	return coreadapter.Scope{Project: string(project), Workstream: string(stream), Thread: agent, Turn: turn, Role: role}
+}
+
+// claim queues turn on the agent's thread and claims it.
+func (f fixture) claim(t *testing.T, agent, turn string) {
+	t.Helper()
+	ctx := context.Background()
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: project, Workstream: stream, At: start, Actor: trace.Actor{Kind: "service", ID: "controller"}, Cause: "test", Depth: 1},
+		AgentID: agent, ThreadID: agent, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, SystemPrompt: "You resolve conflicts.", Prompt: "Resolve"}
+	if _, err := f.repo.EnqueueTurn(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repo.ClaimTurn(ctx, stream, agent, "token_"+turn, "/owned/"+turn, start); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// upstreamMoved returns the outbox's upstream moved events.
+func upstreamMoved(t *testing.T, f fixture) []trace.OutboxEntry {
+	t.Helper()
+	outbox, err := f.repo.Outbox(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []trace.OutboxEntry
+	for _, e := range outbox {
+		if e.Event.Kind == trace.UpstreamMovedKind {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// A turn that reads what a drift rebase did files amendments that cite its
+// upstream commit and raise an upstream moved event with the filing. A drift
+// mason, which has no unit, holds amend alone, parks nothing and keeps its
+// turn's result; a turn that recovers an interrupted one, after a restart,
+// gets the request already filed. A unit reviewer's request parks its unit
+// as any amendment does.
+func TestDriftAmendmentCitesUpstreamAndIsFiledOnce(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	if _, err := f.repo.SetFeatureState(ctx, trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "building", Revision: 1, Project: project, Workstream: stream, At: start, Actor: owner, Cause: "test"}, "building", "test"); err != nil {
+		t.Fatal(err)
+	}
+	unit := trace.UnitSubject("resume")
+	if _, err := f.repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "reviewing", Revision: 1, Project: project, Workstream: stream, Unit: "resume", At: start, Actor: owner, Cause: "test"}, Subject: unit, To: "reviewing", Reason: "test"}}); err != nil {
+		t.Fatal(err)
+	}
+	sealed := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "seal", Revision: 1, Project: project, Workstream: stream, At: start, Actor: owner, Cause: "test"}, Path: "seal.json", Content: `{"seal":1,"spec_hash":"sha256:test"}`}
+	if err := f.repo.RecordDocuments(ctx, []trace.Document{sealed}); err != nil {
+		t.Fatal(err)
+	}
+	move := trace.UpstreamMove{Drift: 2, From: "1111111111111111111111111111111111111111", To: "2222222222222222222222222222222222222222"}
+	driftTools := func(agent string, scope coreadapter.Scope) map[string]coreadapter.Tool {
+		t.Helper()
+		list, err := questions.DriftTools(f.repo, agent, scope, func() time.Time { return start }, move)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]coreadapter.Tool{}
+		for _, tool := range list {
+			out[tool.Name] = tool
+		}
+		return out
+	}
+
+	mason := f.unitlessTurn(t, "drift-mason", "mason", "resolve-1")
+	tools := driftTools("drift-mason", mason)
+	if len(tools) != 1 || !strings.Contains(tools[questions.AmendTool].Description, move.To) {
+		t.Fatalf("the drift mason's tools %v", tools)
+	}
+	input := `{"citations":["spec#1"],"change":"Resume from the upstream checkpoint","reason":"Upstream now checkpoints uploads itself"}`
+	if got := call(t, tools[questions.AmendTool], input); !strings.Contains(got, `"amendment":"1"`) || !strings.Contains(got, "Finish the resolution") {
+		t.Fatal(got)
+	}
+	requests, err := trace.Read[trace.Amendment](f.repo, stream)
+	if err != nil || len(requests) != 1 {
+		t.Fatalf("requests %+v: %v", requests, err)
+	}
+	if a := requests[0]; a.Upstream == nil || *a.Upstream != move || a.Unit != "" || a.Requester.ID != "drift-mason" || a.Role != "mason" {
+		t.Fatalf("the drift mason's request %+v", a)
+	}
+	if state, err := f.repo.Workflow(stream, unit); err != nil || state.Value != "reviewing" {
+		t.Fatalf("a drift mason's request moved unit resume to %+v: %v", state, err)
+	}
+	moved := upstreamMoved(t, f)
+	if len(moved) != 1 || moved[0].Event.ID != trace.EventID("amendment_1_filed", trace.UpstreamMovedKey(2)) {
+		t.Fatalf("upstream moved events %+v", moved)
+	}
+	for _, want := range []string{string(stream), "drift rebase 2", move.From, move.To, "amendment 1 was filed by the mason"} {
+		if !strings.Contains(moved[0].Event.Body, want) {
+			t.Fatalf("the upstream moved event lacks %q: %s", want, moved[0].Event.Body)
+		}
+	}
+	inner := &fakeTurns{result: coreadapter.SessionResult{Outcome: &coreadapter.Outcome{Status: "done", Report: "Resolved"}}}
+	if got, err := (&questions.Turns{Turns: inner, Repository: f.repo}).Run(ctx, coreadapter.PreparedTurn{Scope: mason}); err != nil || got.Outcome == nil || got.Outcome.Status != "done" {
+		t.Fatalf("the drift mason's turn ended %+v: %v", got.Outcome, err)
+	}
+
+	// A restart interrupts the turn; the turn that recovers it files nothing new.
+	if err := f.repo.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if f.repo, err = trace.Open(f.root, f.project); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.repo.Close() })
+	if err := f.repo.AbandonTurn(ctx, stream, "drift-mason", "resolve-1", start); err != nil {
+		t.Fatal(err)
+	}
+	f.claim(t, "drift-mason", "resolve-1-recover")
+	mason.Turn = "resolve-1-recover"
+	if got := call(t, driftTools("drift-mason", mason)[questions.AmendTool], input); !strings.Contains(got, `"amendment":"1"`) {
+		t.Fatal(got)
+	}
+	if requests, err := trace.Read[trace.Amendment](f.repo, stream); err != nil || len(requests) != 1 {
+		t.Fatalf("requests after recovery %+v: %v", requests, err)
+	}
+	if moved := upstreamMoved(t, f); len(moved) != 1 {
+		t.Fatalf("upstream moved events after recovery %+v", moved)
+	}
+
+	reviewer := f.turn(t, "reviewer1", "reviewer", "review1")
+	tools = driftTools("reviewer1", reviewer)
+	if _, ok := tools[questions.AskTool]; !ok || len(tools) != 2 {
+		t.Fatalf("the reviewer's tools %v", tools)
+	}
+	if got := call(t, tools[questions.AmendTool], input); !strings.Contains(got, `"amendment":"2"`) || !strings.Contains(got, "End your turn now") {
+		t.Fatal(got)
+	}
+	if state, err := f.repo.Workflow(stream, unit); err != nil || state.Value != "waiting" {
+		t.Fatalf("the reviewer's unit is %+v: %v", state, err)
+	}
+	if moved := upstreamMoved(t, f); len(moved) != 2 {
+		t.Fatalf("upstream moved events after the reviewer's request %+v", moved)
+	}
+	if _, err := questions.DriftTools(f.repo, "chief", f.turn(t, "chief", trace.ChiefOfStaff, "chief1"), time.Now, move); err == nil {
+		t.Fatal("the chief of staff got drift tools")
+	}
+}

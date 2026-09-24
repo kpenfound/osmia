@@ -916,6 +916,9 @@ func showStatus(w io.Writer, st service.WorkstreamStatus) {
 	}
 	if d := st.Drift; d != nil {
 		fmt.Fprintf(w, "Drift: %s\n  Reason: %s\n", drift(d), d.Reason)
+		for _, moved := range d.Moved {
+			fmt.Fprintf(w, "  Moved: %s\n", moved)
+		}
 	}
 	if len(st.Units) > 0 {
 		fmt.Fprintln(w, "Units:")

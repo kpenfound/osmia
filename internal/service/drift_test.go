@@ -176,8 +176,8 @@ func TestDriftRebaseMovesTheFeatureBranchAndTheSeal(t *testing.T) {
 	}
 	records := driftRecords(t, repository, stream)
 	want := []DriftRebase{
-		{Drift: 1, Operation: op.ID, Outcome: driftReplayed, Branch: featureBranch(stream), Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, Before: before, Commit: tip},
-		{Drift: 1, Operation: op.ID, Outcome: driftRebased, Branch: featureBranch(stream), Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, Before: before, Commit: tip, Seal: 1, SealRevision: 2},
+		{Drift: 1, Operation: op.ID, Outcome: driftReplayed, Branch: featureBranch(stream), Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, From: sealed[0].Base.Commit, Before: before, Commit: tip},
+		{Drift: 1, Operation: op.ID, Outcome: driftRebased, Branch: featureBranch(stream), Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, From: sealed[0].Base.Commit, Before: before, Commit: tip, Seal: 1, SealRevision: 2},
 	}
 	if !reflect.DeepEqual(records, want) {
 		t.Fatalf("drift/rebase.json %+v, want %+v", records, want)
@@ -191,6 +191,9 @@ func TestDriftRebaseMovesTheFeatureBranchAndTheSeal(t *testing.T) {
 	}
 	if again, err := d.Apply(ctx, op); err != nil || !reflect.DeepEqual(again, result) {
 		t.Fatalf("a recorded drift rebase applied again: %+v %v", again, err)
+	}
+	if moved := upstreamMovedEvents(t, repository, stream); len(moved) != 0 {
+		t.Fatalf("a clean drift rebase with nothing visible told the chief of staff %+v", moved)
 	}
 
 	// Nothing new upstream: the branch and the seal stay.
@@ -473,7 +476,8 @@ func TestDriftQueuesUnitConflictOnce(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(w.Path, "CONFLICT.md"), []byte("unit\n"), 0600))
 	_, err = units.git.Snapshot(ctx, w, base)
 	must(t, err)
-	advanceUpstream(t, f, map[string]string{"CONFLICT.md": "upstream\n"})
+	from := seals(t, repository, stream)[0].Base.Commit
+	upstream := advanceUpstream(t, f, map[string]string{"CONFLICT.md": "upstream\n"})
 	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
 	op := requestDrift(t, d, stream)
 	if _, err := d.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "awaits unit carryover") {
@@ -491,6 +495,12 @@ func TestDriftQueuesUnitConflictOnce(t *testing.T) {
 		t.Fatalf("drift result %+v", result)
 	}
 	check := func() {
+		moved := upstreamMovedEvents(t, repository, stream)
+		transition, _ := rebaseIDs("dedupe", 1)
+		if len(moved) != 1 || moved[0].TransitionID != transition+"-conflicted" {
+			t.Fatalf("upstream moved events of a unit conflict %+v", moved)
+		}
+		checkMoved(t, moved[0], stream, trace.UpstreamMove{Drift: 1, From: from, To: upstream}, "unit dedupe conflicts with the feature branch", "CONFLICT.md")
 		th, err := repository.Thread(stream, masonAgent("dedupe"))
 		must(t, err)
 		count := 0

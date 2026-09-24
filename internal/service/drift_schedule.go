@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -212,7 +213,8 @@ func (s *Service) rebaseProject(ctx context.Context, req ProjectRebaseRequest) (
 }
 
 // latestDrift returns the workstream's latest drift rebase as status reports
-// it, or nil before its first.
+// it, with what its upstream moved events told the chief of staff, or nil
+// before its first.
 func latestDrift(repository *trace.Repository, stream config.WorkstreamID, states map[string]trace.WorkflowState) (*DriftStatus, error) {
 	value := states[driftSubject].Value
 	if value == "" {
@@ -227,11 +229,22 @@ func latestDrift(repository *trace.Repository, stream config.WorkstreamID, state
 		return nil, err
 	}
 	outcome, _, _ := strings.Cut(value, "-")
-	out := &DriftStatus{Drift: k, Outcome: outcome}
+	out := &DriftStatus{Drift: k, Outcome: outcome, Moved: []string{}}
 	for _, t := range transitions {
 		if t.Subject == driftSubject && t.To == value && !t.At.Before(out.At) {
 			out.At, out.Reason = t.At, t.Reason
 		}
+	}
+	entries, err := repository.Outbox(stream)
+	if err != nil {
+		return nil, err
+	}
+	entries = slices.DeleteFunc(entries, func(e trace.OutboxEntry) bool {
+		return e.Event.Kind != trace.UpstreamMovedKind || e.Event.ID != trace.EventID(e.TransitionID, trace.UpstreamMovedKey(k))
+	})
+	slices.SortStableFunc(entries, func(a, b trace.OutboxEntry) int { return a.At.Compare(b.At) })
+	for _, e := range entries {
+		out.Moved = append(out.Moved, e.Event.Body)
 	}
 	return out, nil
 }

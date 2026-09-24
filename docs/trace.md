@@ -79,7 +79,7 @@ does not infer authority, readiness or workflow transitions from them.
 | `Document` | `documents.jsonl` and its document path | Path and complete content of each revision; a handed document also records its source |
 | `Transition` | `events.jsonl` | Subject, prior/resulting state and reason |
 | `Question` | `questions/<id>/question.jsonl` | Asking actor, its thread and turn, the question as asked, and once escalated the owner-facing text and the escalation; a routed question's workflow state links it to an amendment; see [questions](#questions) |
-| `Amendment` | `amendments/<id>/request.jsonl` | Requester and submitting turn, unit, citations, proposed change, reason and cited seal identity; see [tools and delivery](#tools-and-delivery) |
+| `Amendment` | `amendments/<id>/request.jsonl` | Requester and submitting turn, unit, citations, proposed change, reason, cited seal identity and, for a request a drift rebase prompted, `upstream`: its drift number and the upstream commits it moved the base from and to; see [tools and delivery](#tools-and-delivery) |
 | `Document` | `amendments/<id>/round-<n>/<member>.json`, `amendments/<id>/round-<n>/reply.json`, `amendments/<id>/packet.json`, `amendments/<id>/decision.json`, `amendments/<id>/application.json` | Pinned committee contributions and the architect answer of each debate round, the owner presentation packet (one revision per presentation), the owner's decisions (one revision per decision) and how an approved amendment applies to the units (one revision at the reseal, one once applied) |
 | `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer, scope, citations and affected references; a ruling holds a returned answer, an owner response or both, and a scope only with a returned answer; see [questions](#questions) |
 | `Document` | `questions/<question-id>/charter.json` | The chief of staff's proposal to make the owner's ruling on the question a charter rule, the owner's decision and, once ratified, the number and charter revision that record it; see [charter proposals](#charter-proposals) |
@@ -277,7 +277,13 @@ cause and causal depth. Its ID identifies the logical transaction in that
 workstream; revision must be one. `EventID(transactionID, eventKey)` derives a
 stable event ID. Event IDs are unique within a workstream, and ordinary notification events contain a
 kind and body for [chief-of-staff delivery](service.md#event-delivery).
-`Notice(transitionID, key, body)` builds one of kind `notice`, and
+`Notice(transitionID, key, body)` builds one of kind `notice`.
+`UpstreamMoved(transitionID, stream, move, outcome)` builds one of kind
+`upstream-moved`, keyed `upstream-moved-<k>` for drift rebase `k`, whose body
+names the workstream, the drift rebase, the upstream commits it moves the base
+from and to, and the visible outcome; see
+[upstream moved events](service.md#upstream-moved-events).
+
 `SetFeatureState(ctx, header, to, reason)` moves the workstream's `feature`
 subject from its current state and records a notice of the change in the same
 transaction; a retry with the same header, state and reason returns the
@@ -838,7 +844,7 @@ tool result, `{"recorded":false,"reason":"…"}`, so the agent reads why.
 | `answer` | `question`, `text`, `citations` | `{"recorded":true,"question":"<n>","next":"…"}` |
 | `escalate` | `questions`, `rephrasing`, `blocked`, `options`, `recommendation` | `{"recorded":true,"batch":"escalation_<n>","questions":[…]}` |
 | `relay_ruling` | `question`, `text`, `scope` (`local` or `notify`) | `{"recorded":true,"questions":[…],"scope":"…","next":"…"}`, naming every question of the batch |
-| `amend` | `citations` (`spec#<n>` and/or `plan#<unit>`), `change`, `reason` | `{"recorded":true,"amendment":"<n>","next":"…"}`; the requesting unit enters `waiting`. |
+| `amend` | `citations` (`spec#<n>` and/or `plan#<unit>`), `change`, `reason` | `{"recorded":true,"amendment":"<n>","next":"…"}`; the requesting unit enters `waiting`. A drift mason's request parks nothing. |
 | `route_amendment` | `question`, `citations`, `change`, `reason` | The same amendment result; the open question becomes `routed`. |
 | `propose_charter` | `question`, `rule` | `{"recorded":true,"question":"<n>","number":<rule number>,"next":"…"}`; see [charter proposals](#charter-proposals). |
 
@@ -849,7 +855,18 @@ question and preserves its original asker as requester; its actor is the chief
 of staff. Filing commits the request, its notice to the chief of staff and,
 when the requester has a unit, its waiting transition together. A routed
 question already waiting on that unit becomes an amendment wait. A retry from
-the same turn returns the same request. A request requires a building or
+the same turn returns the same request.
+
+`questions.DriftTools(repository, agent, scope, now, move)` returns the tools
+of a mason or reviewer turn that reads what a drift rebase did: the drift
+mason resolving the feature branch's conflicts with upstream, which holds
+`amend` alone, and a unit reviewer reading a candidate a drift rebase
+carried. Their `amend` records `move` as the request's `upstream`, and filing
+raises an [upstream moved event](service.md#upstream-moved-events) in the same
+commit as the request. A request citing a drift rebase that the same agent and
+thread already filed one for returns that one, so a turn that recovers an
+interrupted one files nothing twice. A drift mason has no unit, so its request
+parks nothing; the resolution goes on against the sealed spec as it stands. A request requires a building or
 assembled workstream and citations that resolve in its spec or plan. Waiting
 preserves the underlying implementation or review stage and its candidate.
 
@@ -900,7 +917,8 @@ read does.
 wrapped run it reads the workstream's questions and amendments. A turn that asked one
 ends with the outcome `waiting` and the report `Asked question <n>`, whatever
 the agent reported; a mason or reviewer turn that filed an amendment likewise
-ends `waiting` with `Filed amendment <n>`. A turn that did neither keeps its
+ends `waiting` with `Filed amendment <n>`, except a drift mason's, which parks
+nothing and keeps its result. A turn that did neither keeps its
 result. It forwards resume checks to the wrapped runner.
 
 `questions.Deliverer.Pass` queues each answered question's answer on the
