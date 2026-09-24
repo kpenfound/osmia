@@ -118,12 +118,17 @@ func (m *masons) Pass(ctx context.Context) error {
 				if err != nil {
 					return err
 				}
-				masonWaiting := false
+				masonWaiting, amendmentWaiting := false, false
 				for i := len(transitions) - 1; i >= 0; i-- {
 					if transitions[i].Subject == trace.UnitSubject(u.ID) && transitions[i].To == UnitWaiting {
+						amendmentWaiting = strings.HasPrefix(transitions[i].Cause, "amendment_")
 						masonWaiting = transitions[i].Actor == masonActor
 						break
 					}
+				}
+				if amendmentWaiting {
+					b.inFlight = append(b.inFlight, u.ID)
+					continue
 				}
 				if !masonWaiting {
 					b.inFlight = append(b.inFlight, u.ID)
@@ -642,7 +647,7 @@ func (m *masons) enqueue(ctx context.Context, stream config.WorkstreamID, unit s
 }
 
 func masonSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are a mason of the %s project (%s). You build one unit of a ratified plan in a workspace of its own, whose files are your view. You hold no version control tool: the service records your work. Build what the sealed spec says, for the criteria of your unit, and put in place the proofs the plan names for them. When your view and the spec do not settle something you must know, call %s: your unit waits for the answer, which arrives as your next turn, and your workspace is kept.", p.Name, p.Upstream, questions.AskTool)
+	return fmt.Sprintf("You are a mason of the %s project (%s). You build one unit of a ratified plan in a workspace of its own, whose files are your view. You hold no version control tool: the service records your work. Build what the sealed spec says, for the criteria of your unit, and put in place the proofs the plan names for them. When your view and the spec do not settle something you must know, call %s: your unit waits for the answer, which arrives as your next turn, and your workspace is kept. If the sealed spec or plan needs to change, call %s with citations, a proposed change and a reason, then end the turn.", p.Name, p.Upstream, questions.AskTool, questions.AmendTool)
 }
 
 func masonPrompt(m bundle.Mason) string {

@@ -79,6 +79,24 @@ type Question struct {
 	Escalation  *Escalation `json:"escalation,omitempty"`
 }
 
+// Amendment is a request against the sealed spec or plan.
+type Amendment struct {
+	Header
+	Requester    Actor    `json:"requester"`
+	Role         string   `json:"role"`
+	Thread       string   `json:"thread"`
+	Turn         string   `json:"turn"`
+	QuestionID   string   `json:"question_id,omitempty"`
+	Citations    []string `json:"citations"`
+	Change       string   `json:"change"`
+	Reason       string   `json:"reason"`
+	Seal         int      `json:"seal"`
+	SealRevision int      `json:"seal_revision"`
+	SpecHash     string   `json:"spec_hash"`
+}
+
+func (Amendment) traceRecord() {}
+
 // Escalation is the chief of staff's choice to send questions to the owner.
 // Batch identifies the escalation and Questions lists every question it
 // covers, so the revisions of one batch carry the same value. Inbox numbers
@@ -184,6 +202,8 @@ func kind(r Record) string {
 		return "transition"
 	case Question:
 		return "question"
+	case Amendment:
+		return "amendment"
 	case Ruling:
 		return "ruling"
 	case Agent:
@@ -230,6 +250,8 @@ func validate(r Record) error {
 		valid = key(v.Subject) && present(v.To) && present(v.Reason)
 	case Question:
 		valid = validActor(v.AskedBy) && present(v.Question) && (v.Thread == "" || key(v.Thread)) && (v.Turn == "" || key(v.Turn)) && (v.Escalation == nil || present(v.SentToOwner) && v.Escalation.valid(h.ID))
+	case Amendment:
+		valid = validActor(v.Requester) && (v.Role == "mason" || v.Role == "reviewer" || v.Role == ChiefOfStaff) && key(v.Thread) && key(v.Turn) && (v.QuestionID == "" || key(v.QuestionID)) && len(v.Citations) > 0 && present(v.Change) && present(v.Reason) && v.Seal > 0 && v.SealRevision > 0 && present(v.SpecHash) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Ruling:
 		valid = key(v.QuestionID) && v.QuestionRevision > 0 && present(v.Decision) && (present(v.ReturnedAnswer) || present(v.OwnerResponse)) && validRulingScope(v) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Agent:
@@ -318,6 +340,8 @@ func recordPath(r Record) string {
 		return prefix + "events.jsonl"
 	case Question:
 		return prefix + "questions/" + v.ID + "/question.jsonl"
+	case Amendment:
+		return prefix + "amendments/" + v.ID + "/request.jsonl"
 	case Ruling:
 		return prefix + "questions/" + v.QuestionID + "/rulings.jsonl"
 	case Agent:

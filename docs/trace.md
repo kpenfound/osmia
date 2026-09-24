@@ -78,7 +78,8 @@ does not infer authority, readiness or workflow transitions from them.
 | --- | --- | --- |
 | `Document` | `documents.jsonl` and its document path | Path and complete content of each revision; a handed document also records its source |
 | `Transition` | `events.jsonl` | Subject, prior/resulting state and reason |
-| `Question` | `questions/<id>/question.jsonl` | Asking actor, its thread and turn, the question as asked, and once escalated the owner-facing text and the escalation; see [questions](#questions) |
+| `Question` | `questions/<id>/question.jsonl` | Asking actor, its thread and turn, the question as asked, and once escalated the owner-facing text and the escalation; a routed question's workflow state links it to an amendment; see [questions](#questions) |
+| `Amendment` | `amendments/<id>/request.jsonl` | Requester and submitting turn, unit, citations, proposed change, reason and cited seal identity; see [tools and delivery](#tools-and-delivery) |
 | `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer, scope, citations and affected references; a ruling holds a returned answer, an owner response or both, and a scope only with a returned answer; see [questions](#questions) |
 | `Agent` | `agents/<id>/identity.jsonl` | Stable role/thread identity and backend session at that revision |
 | `TurnRequest` | `agents/<agent-id>/log.jsonl` | Thread/turn identity, accepted profile, system prompt, request and caller-supplied context |
@@ -652,7 +653,8 @@ A role's question, the chief of staff's one choice for it and the answer's
 way back are records under `workstreams/<id>/questions/<n>/`, where `n` counts
 the workstream's questions from 1. Each question also has a workflow subject,
 `trace.QuestionSubject(n)` (`question_<n>`), whose state is `open`, `answered`,
-`escalated` or, once the owner ruled on an escalation, `ruled`. The state
+`escalated`, `routed` to an amendment or, once the owner ruled on an escalation,
+`ruled`. The state
 leaves `open` once, so a question gets exactly one choice; an escalated
 question moves on to `ruled` and then `answered`. Every write below is one commit through the journaled publication
 boundary: the records, the transition in `events.jsonl` and any event appear
@@ -667,6 +669,7 @@ the agent, and writes nothing.
 | `Ask(ctx, agent, scope, text, at)` | Revision 1 of `Question` `n`: `asked_by` (the agent), `thread`, `turn` and the scope's unit, with `question` as asked. | `question_<n>_open`, from nothing to `open`, with one `notice` event for the chief of staff: `Question <n> is open, asked by the <role>: <question>`. |
 | `AnswerQuestion(ctx, agent, scope, n, text, citations, at)` | Revision 1 of `Ruling` `n`: `question_id`, the question's latest revision, `decision` `answer`, `returned_answer` and `citations`. | `question_<n>_answered`, `open` to `answered`. |
 | `EscalateQuestions(ctx, agent, scope, request, at)` | For every listed question, its next `Question` revision: `sent_to_owner` holds the rephrasing and `escalation` holds `batch`, the batch's `questions`, `blocked`, `options` and `recommendation`. The batch ID is `escalation_` and the first listed question. `inbox` is the escalation's inbox number: one more than the highest of the project's escalations, in any workstream, so it is unique in the project and never reused. | `question_<n>_escalated` for each, `open` to `escalated`. |
+| `FileAmendment` with a question | Revision 1 of `Amendment` under `amendments/<n>/request.jsonl`, naming the open question and its asker. | `question_<n>_routed`, `open` to `routed`, together with the amendment filing and any unit wait. |
 
 In every record the actor is the calling agent, the cause is its turn
 request's ID and the depth is one more than the request's.
@@ -725,8 +728,9 @@ the askers.
 
 `internal/questions` holds the tools. `questions.Tools(repository, agent,
 scope, now)` returns the memory tools of one claimed turn by role: `ask` for
-every role but the chief of staff, and `answer`, `escalate`, `relay_ruling`,
-`route_amendment` and `propose_charter` for the chief of staff. The
+every role but the chief of staff, `amend` for masons and reviewers, and
+`answer`, `escalate`, `relay_ruling`, `route_amendment` and `propose_charter`
+for the chief of staff. The
 [role grant](isolation.md#capabilities) enforces the same split whatever the
 service grants. Unknown input fields are rejected. A refusal is an ordinary
 tool result, `{"recorded":false,"reason":"…"}`, so the agent reads why.
@@ -737,7 +741,20 @@ tool result, `{"recorded":false,"reason":"…"}`, so the agent reads why.
 | `answer` | `question`, `text`, `citations` | `{"recorded":true,"question":"<n>","next":"…"}` |
 | `escalate` | `questions`, `rephrasing`, `blocked`, `options`, `recommendation` | `{"recorded":true,"batch":"escalation_<n>","questions":[…]}` |
 | `relay_ruling` | `question`, `text`, `scope` (`local` or `notify`) | `{"recorded":true,"questions":[…],"scope":"…","next":"…"}`, naming every question of the batch |
-| `route_amendment`, `propose_charter` | any object | Always `{"recorded":false,"reason":"reserved until amendments and standing rulings (M4)"}`; they read and write nothing. |
+| `amend` | `citations` (`spec#<n>` and/or `plan#<unit>`), `change`, `reason` | `{"recorded":true,"amendment":"<n>","next":"…"}`; the requesting unit enters `waiting`. |
+| `route_amendment` | `question`, `citations`, `change`, `reason` | The same amendment result; the open question becomes `routed`. |
+| `propose_charter` | any object | `{"recorded":false,"reason":"reserved until standing rulings (M4)"}`. |
+
+`amendments/<n>/request.jsonl` records the request with its submitting turn,
+requester, unit, cited criteria or plan units, proposed change, reason, and
+seal number, document revision and spec hash. A routed request also names the
+question and preserves its original asker as requester; its actor is the chief
+of staff. Filing commits the request, its notice to the chief of staff and,
+when the requester has a unit, its waiting transition together. A routed
+question already waiting on that unit becomes an amendment wait. A retry from
+the same turn returns the same request. A request requires a building or
+assembled workstream and citations that resolve in its spec or plan. Waiting
+preserves the underlying implementation or review stage and its candidate.
 
 Before `answer` records anything, `questions.Resolve` checks every citation
 against the trace, and the first one that names nothing refuses the answer
@@ -758,9 +775,10 @@ citation first records a pending owner edit of the charter, as every charter
 read does.
 
 `questions.Turns` wraps the turn runner the thread dispatcher uses. After the
-wrapped run it reads the workstream's questions, and a turn that asked one
+wrapped run it reads the workstream's questions and amendments. A turn that asked one
 ends with the outcome `waiting` and the report `Asked question <n>`, whatever
-the agent reported, so its thread parks. A turn that asked nothing keeps its
+the agent reported; a mason or reviewer turn that filed an amendment likewise
+ends `waiting` with `Filed amendment <n>`. A turn that did neither keeps its
 result. It forwards resume checks to the wrapped runner.
 
 `questions.Deliverer.Pass` queues each answered question's answer on the

@@ -380,7 +380,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	for _, item := range req.Context {
 		prompt += "\n\n" + item.Source + ":\n" + item.Content
 	}
-	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: "You are the unit reviewer. Read only the supplied candidate evidence. Call ask if a decision is needed and end the turn; review resumes when the answer arrives. Otherwise call verdict with your decision. You cannot edit the candidate.", Prompt: prompt}
+	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: "You are the unit reviewer. Read only the supplied candidate evidence. Call ask if a decision is needed and end the turn; review resumes when the answer arrives. Call amend with sealed spec or plan citations, proposed change and reason if those documents need to change, then end the turn. Otherwise call verdict with your decision. You cannot edit the candidate.", Prompt: prompt}
 	_, err = r.repository.EnqueueTurn(ctx, request)
 	return err
 }

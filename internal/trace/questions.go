@@ -21,6 +21,7 @@ const (
 	QuestionEscalated = "escalated"
 	QuestionRuled     = "ruled"
 	QuestionAnswered  = "answered"
+	QuestionRouted    = "routed"
 )
 
 // The Decision of a ruling: DecisionAnswer when the chief of staff answered
@@ -94,17 +95,30 @@ type QuestionState struct {
 
 // Questions returns every question of the workstream, oldest first.
 func (r *Repository) Questions(stream config.WorkstreamID) ([]QuestionState, error) {
+	questions, _, err := r.QuestionActions(stream)
+	return questions, err
+}
+
+// QuestionActions reads questions and filed amendment requests from one trace
+// snapshot, so a turn can determine its durable waiting outcome in one scan.
+func (r *Repository) QuestionActions(stream config.WorkstreamID) ([]QuestionState, []Amendment, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	_, v, err := r.loadWorkflow(stream)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	records, _, err := r.scan()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return questions(records, v, stream), nil
+	var amendments []Amendment
+	for _, record := range records {
+		if a, ok := record.(Amendment); ok && a.Workstream == stream {
+			amendments = append(amendments, a)
+		}
+	}
+	return questions(records, v, stream), amendments, nil
 }
 
 func questions(records []Record, v *workflowView, stream config.WorkstreamID) []QuestionState {
@@ -192,6 +206,11 @@ func (r *Repository) Ask(ctx context.Context, agent string, scope coreadapter.Sc
 			return Question{}, refused("this turn already asked question %s; end the turn, the answer arrives as your next turn", q.Asked.ID)
 		}
 	}
+	for _, record := range records {
+		if a, ok := record.(Amendment); ok && a.Workstream == stream && a.Actor.ID == agent && a.Thread == scope.Thread && a.Turn == scope.Turn {
+			return Question{}, refused("this turn already filed amendment %s; end the turn", a.ID)
+		}
+	}
 	n := len(existing) + 1
 	for ids[strconv.Itoa(n)] {
 		n++
@@ -232,6 +251,8 @@ func openQuestion(existing []QuestionState, id string) (QuestionState, error) {
 			return q, refused("question %s has the owner's ruling; relay it with relay_ruling", id)
 		case QuestionAnswered:
 			return q, refused("question %s is already answered", id)
+		case QuestionRouted:
+			return q, refused("question %s was routed to an amendment", id)
 		default:
 			return q, refused("question %s was not asked through ask and cannot be chosen for", id)
 		}
