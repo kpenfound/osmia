@@ -463,14 +463,19 @@ The amendment controller then applies the decision on the next pass:
   number and its hash; a plan-only change keeps the seal number and spec hash
   and records the new plan's footprints. The base commit, feature branch and
   feature state stay as they are, and no code is edited. The documents, the
-  seal and transition `amendment-<n>-resealed` are one commit, so a restart
-  between the decision and the reseal completes it once. An approval that can
-  no longer apply, because the sealed documents moved or the plan's footprints
+  seal, the first revision of `amendments/<n>/application.json` and
+  transition `amendment-<n>-resealed` are one commit, so a restart between
+  the decision and the reseal completes it once. An approval that can no
+  longer apply, because the sealed documents moved or the plan's footprints
   no longer resolve, moves to `unapplied` with the reason and leaves the
   sealed documents in force.
 - **Rejected**: nothing is versioned and the sealed documents stay in force.
 
-For `resealed`, `rejected` and `unapplied`, the controller queues turn
+A resealed amendment is then applied to the workstream's units, as described
+in [applying an approved amendment](#applying-an-approved-amendment), and
+moves to `applied`.
+
+For `applied`, `rejected` and `unapplied`, the controller queues turn
 `amendment_<n>_ruling` on the requester's thread: the mason's thread, or the
 unit's reviewer thread for a reviewer's request. The turn carries the decision
 and its outcome, with the request and the owner's note quoted in the shared
@@ -478,8 +483,51 @@ envelope. The unit the request parked then moves from `waiting` back to the
 stage its waiting transition preserved, `implementing` or `reviewing`, through
 transition `<unit-subject>_resumed_amendment_<n>`, and the amendment moves to
 `ruled`. Each step finds what an earlier pass did, so a restart between them
-completes the rest once. Units, approvals and final reports the approved
-amendment affects are not reconsidered here.
+completes the rest once.
+
+### Applying an approved amendment
+
+The application record `amendments/<n>/application.json` classifies the
+affected set the architect's draft recorded against the sealed and approved
+plans:
+
+| Class | Units | Effect |
+| --- | --- | --- |
+| rework | address a changed criterion in either plan | `implementing`, `reviewing` and `approved` units move to `implementing` through `<unit-subject>_reworked_amendment_<n>`; a merged unit is never reopened, and each changed criterion it addresses becomes a follow-up unit |
+| notify | their plan entry changed while their criteria keep their meaning | an `implementing` unit stays `implementing` and a `reviewing` or `approved` unit moves to `reviewing`, through `<unit-subject>_notified_amendment_<n>` |
+| added | new to the plan | enter `planned`, then `ready` when every unit they depend on has merged |
+| removed | no longer in the plan | nothing moves them |
+
+`planned` and `ready` units need no move: their first bundle is assembled from
+the amended documents. `waiting` and `contested` units are held, and move as
+their class says once they leave that state. Every move to `implementing`
+queues mason turn `mason-<unit>-amendment-<n>`, which carries the unit's
+amended bundle. The mason bundle and the reviewer's evidence of every reworked
+or notified unit carry an amendment notice from then on: the revisions the
+amendment sealed, the changed criteria, the unit's affected proofs, and the
+request and the owner's note in the shared envelope.
+
+A follow-up unit for a changed criterion of a merged unit is recorded in
+`final/followups.json` as `amendment-<n>-spec-<k>`, scoped to the footprints
+of the plan's units that address the criterion, and enters `ready`. The
+workstream assembles, or its final review runs again, only once follow-ups
+have merged too.
+
+From the reseal on, a unit's report and review stay current across the
+amendment only when it does not rework the unit, and its review only when it
+neither reworks, notifies nor removes the unit. An approval of an unaffected
+unit therefore still lands; an approval of an affected unit is refused at
+landing and the unit is moved as above. A final report that read the replaced
+seal, spec and plan no longer authorises delivery: the application names its
+review invalidated with a notice for the chief of staff, and final review runs
+again against the amended documents once every unit has merged.
+
+The moves, the added units, the follow-ups, the second revision of
+`application.json`, which lists the held units, follow-ups and invalidated
+final review, and transition `amendment-<n>-applied` are one commit. A unit
+that moved since the controller read it leaves that commit to the next pass.
+The mason turns and the held units' moves are completed on later passes, each
+found by its ID, so a restart part way completes the application once.
 
 `GET /v1/amendment/<workstream-id>/<n>` and `osmia amendment <workstream-id> <n>`
 show the amendment's state, round, latest packet with its revision and latest
@@ -1983,7 +2031,7 @@ order, except the librarian's, which carries no feature (see
 | --- | --- |
 | `workstream`, `project` | The workstream and its project |
 | `state` | The feature workflow state, or `null` before one is recorded |
-| `units` | One `{"unit", "state"}` per unit of the sealed plan and each final-review follow-up, in order, once their states are recorded; `reason` gives a mason contest's classification or bound exhaustion, `deferral` holds the [decision](#why-a-ready-unit-waits) that keeps a `ready` unit waiting, with its `message` as `reason`, `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
+| `units` | One `{"unit", "state"}` per unit of the sealed plan and each follow-up of a final review or an amendment, in order, once their states are recorded; `reason` gives a mason contest's classification or bound exhaustion, `deferral` holds the [decision](#why-a-ready-unit-waits) that keeps a `ready` unit waiting, with its `message` as `reason`, `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
 | `advisories` | The workstream's active [overlap advisories](#overlapping-workstreams): `workstream`, the other workstream; `seal` and `other_seal`, the seals compared; `subsystems`, `entities` and `paths`, what they share; and `message`, the advisory as the chief of staff received it; empty when none is active |
 | `open_questions` | Questions in the workstream without a ruling |
 | `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, or `contested` with the unit ID; a mason contest also has `reason`; empty when none wait |

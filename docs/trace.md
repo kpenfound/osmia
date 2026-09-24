@@ -80,7 +80,7 @@ does not infer authority, readiness or workflow transitions from them.
 | `Transition` | `events.jsonl` | Subject, prior/resulting state and reason |
 | `Question` | `questions/<id>/question.jsonl` | Asking actor, its thread and turn, the question as asked, and once escalated the owner-facing text and the escalation; a routed question's workflow state links it to an amendment; see [questions](#questions) |
 | `Amendment` | `amendments/<id>/request.jsonl` | Requester and submitting turn, unit, citations, proposed change, reason and cited seal identity; see [tools and delivery](#tools-and-delivery) |
-| `Document` | `amendments/<id>/round-<n>/<member>.json`, `amendments/<id>/round-<n>/reply.json`, `amendments/<id>/packet.json`, `amendments/<id>/decision.json` | Pinned committee contributions and the architect answer of each debate round, the owner presentation packet (one revision per presentation) and the owner's decisions (one revision per decision) |
+| `Document` | `amendments/<id>/round-<n>/<member>.json`, `amendments/<id>/round-<n>/reply.json`, `amendments/<id>/packet.json`, `amendments/<id>/decision.json`, `amendments/<id>/application.json` | Pinned committee contributions and the architect answer of each debate round, the owner presentation packet (one revision per presentation), the owner's decisions (one revision per decision) and how an approved amendment applies to the units (one revision at the reseal, one once applied) |
 | `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer, scope, citations and affected references; a ruling holds a returned answer, an owner response or both, and a scope only with a returned answer; see [questions](#questions) |
 | `Agent` | `agents/<id>/identity.jsonl` | Stable role/thread identity and backend session at that revision |
 | `TurnRequest` | `agents/<agent-id>/log.jsonl` | Thread/turn identity, accepted profile, system prompt, request and caller-supplied context |
@@ -819,7 +819,15 @@ the `seal.json` revision in force and any overruled objections. An approval
 records the proposed documents as the next revisions of `spec.md` and/or
 `plan.json` and the next revision of `seal.json` in one commit with the
 `resealed` transition; their actor is `service`/`amendments` and their cause
-the decision transition. See [amendment decisions](service.md#amendment-decisions).
+the decision transition. The same commit records revision 1 of
+`amendments/<n>/application.json`: the seal, `seal.json`, spec and plan
+revisions the amendment moved the workstream from and to, the request and the
+owner's note, the changed criteria and affected proofs, and the affected units
+classified as `rework`, `notify`, `added` and `removed`. Revision 2 adds
+`applied`, with the held units, follow-ups and invalidated final review, in one
+commit with the unit moves and the `applied` transition. See
+[amendment decisions](service.md#amendment-decisions) and
+[applying an approved amendment](service.md#applying-an-approved-amendment).
 
 Before `answer` records anything, `questions.Resolve` checks every citation
 against the trace, and the first one that names nothing refuses the answer
