@@ -148,9 +148,9 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	if body := f.notice(t, asking, "question_1_open"); body != opened {
 		t.Fatalf("the question notice %q, want %q", body, opened)
 	}
-	f.checkUnits(t, asking, []UnitStatus{{Unit: "resume", State: UnitWaiting}, {Unit: "dedupe", State: UnitReady}})
-	f.checkUnits(t, other, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
-	f.checkUnits(t, third, []UnitStatus{{Unit: "resume", State: UnitReady}, {Unit: "dedupe", State: UnitReady}})
+	f.checkUnits(t, asking, []UnitStatus{{Unit: "resume", State: UnitWaiting}, f.deferred(t, asking, "dedupe", overlapping("resume"))})
+	f.checkUnits(t, other, []UnitStatus{{Unit: "resume", State: UnitImplementing}, f.deferred(t, other, "dedupe", overlapping("resume"))})
+	f.checkUnits(t, third, []UnitStatus{f.deferred(t, third, "resume", slotless(1)), f.deferred(t, third, "dedupe", slotless(1))})
 	q := f.question(t, asking, "1")
 	if q.Asked.AskedBy.ID != masonAgent("resume") || q.Asked.Thread != masonAgent("resume") || q.Asked.Turn != masonTurnID("resume") || q.Asked.Unit != "resume" || q.Asked.Question != askedQuestion {
 		t.Fatalf("question %+v", q.Asked)
@@ -163,7 +163,7 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	f.stop(t)
 	f.start(t)
 	settle()
-	f.checkUnits(t, asking, []UnitStatus{{Unit: "resume", State: UnitWaiting}, {Unit: "dedupe", State: UnitReady}})
+	f.checkUnits(t, asking, []UnitStatus{{Unit: "resume", State: UnitWaiting}, f.deferred(t, asking, "dedupe", overlapping("resume"))})
 	if th := f.thread(t, asking, masonAgent("resume")); !th.Parked() || len(th.Turns) != 1 {
 		t.Fatalf("the mason's thread after a restart: %+v", th)
 	}
@@ -186,7 +186,7 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	if got := masonTransitions(t, f, asking); !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
-	f.checkUnits(t, asking, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
+	f.checkUnits(t, asking, []UnitStatus{{Unit: "resume", State: UnitImplementing}, f.deferred(t, asking, "dedupe", overlapping("resume"))})
 	mu.Lock()
 	defer mu.Unlock()
 	if len(answered) != 1 || !reflect.DeepEqual(during, []string{UnitImplementing}) {
@@ -206,8 +206,8 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 
 	// Two units are implementing with one mason slot: the third workstream
 	// waits until fewer than one are, here because pauses take theirs away.
-	f.checkUnits(t, other, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
-	f.checkUnits(t, third, []UnitStatus{{Unit: "resume", State: UnitReady}, {Unit: "dedupe", State: UnitReady}})
+	f.checkUnits(t, other, []UnitStatus{{Unit: "resume", State: UnitImplementing}, f.deferred(t, other, "dedupe", overlapping("resume"))})
+	f.checkUnits(t, third, []UnitStatus{f.deferred(t, third, "resume", slotless(1)), f.deferred(t, third, "dedupe", slotless(1))})
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: other}, Mode: "soft", Source: "operator"})
 	settle()
 	if got := masonTransitions(t, f, third); len(got) != 0 {
@@ -244,7 +244,7 @@ func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 	if got := masonTransitions(t, f, stream); !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
-	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
+	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, f.deferred(t, stream, "dedupe", overlapping("resume"))})
 	if runs := fakes.requests(stream); len(runs) != 1 {
 		t.Fatalf("mason turns %d", len(runs))
 	}

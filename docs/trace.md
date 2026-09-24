@@ -109,7 +109,9 @@ criterion evidence, findings and bounce count, `units/<unit>/landing.json`,
 the [landing](service.md#landing-a-unit) of the unit's approval as one feature
 branch commit, `units/<unit>/rebase.json`, the
 [rebase](service.md#rebasing-units-in-flight) of the unit's workspace onto a
-moved feature branch, `units/<unit-subject>/ruling-<n>.json`,
+moved feature branch, `units/<unit>/dispatch.json`, the mason controller's
+latest [decision](service.md#why-a-ready-unit-waits) to start or defer a
+ready unit, `units/<unit-subject>/ruling-<n>.json`,
 the owner's direction after bounce `n`, `units/<unit-subject>/mason-ruling-<n>.json`,
 the owner's `revise` direction after mason turn `n`, `final/rebase.json`, the
 [final rebase](service.md#running-a-final-review) of an assembled

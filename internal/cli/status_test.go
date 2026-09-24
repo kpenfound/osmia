@@ -12,6 +12,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -225,6 +226,20 @@ func TestStatusPrintsLatestUnitCard(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("status lacks %q: %s", want, out.String())
 		}
+	}
+}
+
+func TestStatusPrintsWhyAReadyUnitWaits(t *testing.T) {
+	waits := "Waits for units in flight it is entangled with: parser (their footprints overlap)."
+	st := service.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Units: []service.UnitStatus{
+		{Unit: "parser", State: "implementing"},
+		{Unit: "validator", State: "ready", Reason: waits, Deferral: &service.UnitDispatch{Unit: "validator", Version: 1, Decision: service.DispatchDeferred, Reason: service.DeferEntangled,
+			Blockers: []plan.StartBlocker{{Unit: "parser", Reason: plan.OverlapReason}}, Message: waits}},
+	}}
+	var out strings.Builder
+	showStatus(&out, st)
+	if want := "Units:\n  parser implementing\n  validator ready\n    Waiting: " + waits + "\nStatus: none yet"; !strings.Contains(out.String(), want) {
+		t.Fatalf("status lacks why the unit waits:\n%s", out.String())
 	}
 }
 

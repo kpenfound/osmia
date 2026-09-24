@@ -32,7 +32,7 @@ func TestCompletedMasonTurnFinishesAfterRestart(t *testing.T) {
 	if !found {
 		t.Fatal("building workstream missing")
 	}
-	started, err := m.start(ctx, b, "resume")
+	started, _, err := m.start(ctx, b, "resume")
 	must(t, err)
 	if !started {
 		t.Fatal("mason did not start")
@@ -97,7 +97,7 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	if !found {
 		t.Fatal("building workstream missing")
 	}
-	started, err := m.start(ctx, b, "resume")
+	started, _, err := m.start(ctx, b, "resume")
 	must(t, err)
 	if !started {
 		t.Fatal("mason did not start")
@@ -187,7 +187,7 @@ func TestRestartCountsImplementingUnitsBeforeStarting(t *testing.T) {
 	if !found {
 		t.Fatal("building workstream missing")
 	}
-	started, err := m.start(context.Background(), b, "resume")
+	started, _, err := m.start(context.Background(), b, "resume")
 	must(t, errors.Join(err, repo.Close()))
 	if !started {
 		t.Fatal("resume did not start")
@@ -213,7 +213,7 @@ func TestRestartCountsImplementingUnitsBeforeStarting(t *testing.T) {
 		if slices.Sort(ran); !slices.Equal(ran, []string{masonTurnID("resume"), masonTurnID("upload")}) {
 			t.Fatalf("after restart %d, mason turns ran %v", restart+1, ran)
 		}
-		f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "upload", State: UnitImplementing}, {Unit: "audit", State: UnitReady}})
+		f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "upload", State: UnitImplementing}, f.deferred(t, stream, "audit", slotless(2))})
 		f.stop(t)
 	}
 	f.start(t)

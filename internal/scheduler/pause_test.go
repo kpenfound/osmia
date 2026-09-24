@@ -45,6 +45,9 @@ func TestHeldCoversPausedScopes(t *testing.T) {
 			if got := Paused(tc.pauses, project, stream); got != tc.held {
 				t.Fatalf("workstream paused %v, want %v", got, tc.held)
 			}
+			if got, ok := Pausing(tc.pauses, project, stream); ok != tc.held || ok && got != tc.pauses[len(tc.pauses)-1] {
+				t.Fatalf("pausing %+v %v, want the covering pause %v", got, ok, tc.held)
+			}
 		})
 	}
 }

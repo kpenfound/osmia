@@ -797,7 +797,9 @@ func showStatus(w io.Writer, st service.WorkstreamStatus) {
 		fmt.Fprintln(w, "Units:")
 		for _, u := range st.Units {
 			fmt.Fprintf(w, "  %s %s\n", u.Unit, u.State)
-			if u.Reason != "" {
+			if u.Deferral != nil {
+				fmt.Fprintf(w, "    Waiting: %s\n", u.Deferral.Message)
+			} else if u.Reason != "" {
 				fmt.Fprintf(w, "    Reason: %s\n", u.Reason)
 			}
 			if u.Card != nil {

@@ -121,7 +121,11 @@ func TestMasonStartsStayWithinBothCaps(t *testing.T) {
 	for _, tc := range []struct {
 		name                  string
 		masons, perWorkstream int
-	}{{"capacity.masons", 2, 3}, {"capacity.per_workstream", 4, 2}} {
+		audit                 UnitDispatch
+	}{
+		{"capacity.masons", 2, 3, slotless(2)},
+		{"capacity.per_workstream", 4, 2, UnitDispatch{Reason: DeferWorkstreamCap, Limit: 2, Message: "Waits for a slot in its workstream: 2 of its units are implementing, the per-workstream cap."}},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			f, masons := newParallelMasonFixture(t, tc.masons, tc.perWorkstream, disjointPlan)
@@ -134,7 +138,7 @@ func TestMasonStartsStayWithinBothCaps(t *testing.T) {
 			if got, want := starts(t, f, stream), []string{trace.UnitSubject("resume"), trace.UnitSubject("upload")}; !slices.Equal(got, want) {
 				t.Fatalf("started %v, want %v", got, want)
 			}
-			f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "upload", State: UnitImplementing}, {Unit: "audit", State: UnitReady}})
+			f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "upload", State: UnitImplementing}, f.deferred(t, stream, "audit", tc.audit)})
 		})
 	}
 }
@@ -164,5 +168,5 @@ func TestWaitingUnitLeavesItsSlotToADisjointUnit(t *testing.T) {
 	if got, want := starts(t, f, stream), []string{trace.UnitSubject("resume"), trace.UnitSubject("upload"), trace.UnitSubject("audit")}; !slices.Equal(got, want) || parkedAt < 0 || audit < parkedAt {
 		t.Fatalf("mason transitions %+v", transitions)
 	}
-	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitWaiting}, {Unit: "upload", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}, {Unit: "audit", State: UnitImplementing}})
+	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitWaiting}, {Unit: "upload", State: UnitImplementing}, f.deferred(t, stream, "dedupe", overlapping("resume")), {Unit: "audit", State: UnitImplementing}})
 }

@@ -381,7 +381,7 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	if got := f.blocks(t, blocked, "resume"); len(got) != 1 || !strings.HasPrefix(got[0], prefix) || !strings.Contains(got[0], "index.lock") {
 		t.Fatalf("blocked %q", got)
 	}
-	f.checkUnits(t, blocked, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
+	f.checkUnits(t, blocked, []UnitStatus{{Unit: "resume", State: UnitImplementing}, f.deferred(t, blocked, "dedupe", UnitDispatch{Reason: DeferBlocked, Blocked: "resume", Message: "Waits while the mason controller is blocked on unit resume of this workstream."})})
 	if got := f.reports(t, blocked, "resume"); len(got) != 0 {
 		t.Fatalf("reports %+v", got)
 	}

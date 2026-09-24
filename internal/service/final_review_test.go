@@ -412,7 +412,7 @@ func TestFinalReviewGapBecomesAnAssembledFollowupAndRequiresRereview(t *testing.
 	if len(footprint.Entities) == 0 || len(footprint.Paths) == 0 {
 		t.Fatalf("reviewer lacks the follow-up footprint: %+v", footprint)
 	}
-	started, err := m.start(ctx, b, id)
+	started, _, err := m.start(ctx, b, id)
 	must(t, err)
 	if !started {
 		t.Fatal("the normal mason controller did not start the follow-up")
