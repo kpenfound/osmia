@@ -29,6 +29,26 @@ review explains the path and approves the current candidate. Inspect
 `agents/reviewer-resume/log.jsonl`, `questions/1/`, and `events.jsonl` to follow
 the requests, results, ruling, footprint refusal and exact approval.
 
+The bidirectional navigation demonstration is `TestM3TraceNavigationDemonstration`
+in `internal/service/trace_demo_test.go`. It uses a temporary local trace
+repository with fake agent records, a local API socket and the built `osmia`
+command. Run it inside Dagger with:
+
+```sh
+dagger core container from --address golang:1.26-bookworm \
+  with-directory --path /src --source . --exclude .git,.bees \
+  with-workdir --path /src \
+  with-exec --args=go,test,-count=1,-run,TestM3TraceNavigationDemonstration,-v,./internal/service \
+  combined-output
+```
+
+It queries an unfinished criterion, then follows a delivered criterion to its
+planned proof, reports, reviews, ruling, landing and publication. The reverse
+walk follows the landing commit to the reviewed candidate and base, unit,
+criterion and sealed document revisions. Unit history includes the fake turn
+and cost. Each API result is compared with `osmia trace --json` for the same
+selector, and the text output is checked for key links.
+
 `CreateWorkstream` reserves a supplied `config.WorkstreamID`. Project and
 workstream manifests retain their identity and creation provenance. `Workstreams`
 returns identities validated against those manifests, including terminal streams.
