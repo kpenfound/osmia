@@ -121,6 +121,9 @@ type Service struct {
 	ready      atomic.Bool
 	requests   sync.WaitGroup
 	boundary   func(string) error
+	// driftAsked is set once an owner's drift rebase request is recorded,
+	// so the next pass reads the drift schedule.
+	driftAsked atomic.Bool
 }
 
 // Start loads state and binds before returning. Wait joins shutdown and cleanup.

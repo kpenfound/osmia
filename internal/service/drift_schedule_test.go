@@ -36,6 +36,13 @@ func cadenceForeman(f *shedFixture, repository *trace.Repository, interval strin
 	return &foreman{masons: &masons{s: f.s, cfg: &cfg, repository: repository}}
 }
 
+// passDrifts runs the foreman's drift schedule as a pass that reads it does.
+func passDrifts(t *testing.T, fm *foreman) {
+	t.Helper()
+	fm.nextDrift = time.Time{}
+	must(t, fm.drifts(context.Background()))
+}
+
 // restartTrace closes repository and opens the project trace again, as a
 // service restart does.
 func restartTrace(t *testing.T, f *shedFixture, repository *trace.Repository) *trace.Repository {
@@ -108,17 +115,21 @@ func TestScheduledDriftRebasesFollowTheIntervalAcrossRestart(t *testing.T) {
 	sealed := sealedAt(t, repository, stream)
 	fm := cadenceForeman(f, repository, "1h")
 
-	setClock(f, sealed.Add(59*time.Minute))
+	setClock(f, sealed.Add(59*time.Minute+30*time.Second))
 	must(t, fm.drifts(ctx))
 	checkDrifts(t, repository, stream, 0, "before the interval elapsed")
+	// The schedule is read again a minute later, not at every pass.
 	setClock(f, sealed.Add(time.Hour))
+	must(t, fm.drifts(ctx))
+	checkDrifts(t, repository, stream, 0, "within a minute of the last read")
+	setClock(f, sealed.Add(time.Hour+30*time.Second))
 	must(t, fm.drifts(ctx))
 	ops := checkDrifts(t, repository, stream, 1, "once the interval elapsed since the sealing")
 	if reason := transitionByID(t, repository, stream, "drift-1").Reason; !strings.HasPrefix(reason, "upstream_rebase 1h0m0s has elapsed since the sealing at "+sealed.Format(time.RFC3339)+": drift rebase 1 fetches") {
 		t.Fatalf("scheduled drift rebase reason %q", reason)
 	}
 	setClock(f, sealed.Add(5*time.Hour))
-	must(t, fm.drifts(ctx))
+	passDrifts(t, fm)
 	checkDrifts(t, repository, stream, 1, "while the drift rebase runs")
 	settleOperation(t, f.s, repository, stream, ops[0].Operation, drifter{fm})
 	first := driftTransition(t, repository, stream)
@@ -129,17 +140,17 @@ func TestScheduledDriftRebasesFollowTheIntervalAcrossRestart(t *testing.T) {
 	repository = restartTrace(t, f, repository)
 	fm = cadenceForeman(f, repository, "1h")
 	setClock(f, first.At.Add(59*time.Minute))
-	must(t, fm.drifts(ctx))
+	passDrifts(t, fm)
 	checkDrifts(t, repository, stream, 1, "after a restart within the interval since drift rebase 1")
 	setClock(f, first.At.Add(time.Hour))
-	must(t, fm.drifts(ctx))
+	passDrifts(t, fm)
 	ops = checkDrifts(t, repository, stream, 2, "after a restart once the interval elapsed since drift rebase 1")
 	if reason := transitionByID(t, repository, stream, "drift-2").Reason; !strings.HasPrefix(reason, "upstream_rebase 1h0m0s has elapsed since the drift rebase 1 at "+first.At.Format(time.RFC3339)+":") {
 		t.Fatalf("second scheduled drift rebase reason %q", reason)
 	}
 	repository = restartTrace(t, f, repository)
 	fm = cadenceForeman(f, repository, "1h")
-	must(t, fm.drifts(ctx))
+	passDrifts(t, fm)
 	checkDrifts(t, repository, stream, 2, "after a restart while drift rebase 2 runs")
 	settleOperation(t, f.s, repository, stream, ops[1].Operation, drifter{fm})
 	second := driftTransition(t, repository, stream)
@@ -153,10 +164,10 @@ func TestScheduledDriftRebasesFollowTheIntervalAcrossRestart(t *testing.T) {
 	must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalRebaseDocument, Revision: revision, Project: repository.Project(), Workstream: stream, At: finalAt, Actor: foremanActor, Cause: "planted-final-review"},
 		Path: finalRebasePath, Content: string(content) + "\n"}}))
 	setClock(f, second.At.Add(time.Hour))
-	must(t, fm.drifts(ctx))
+	passDrifts(t, fm)
 	checkDrifts(t, repository, stream, 2, "within the interval since the final rebase")
 	setClock(f, finalAt.Add(time.Hour))
-	must(t, fm.drifts(ctx))
+	passDrifts(t, fm)
 	ops = checkDrifts(t, repository, stream, 3, "once the interval elapsed since the final rebase")
 	if reason := transitionByID(t, repository, stream, "drift-3").Reason; !strings.HasPrefix(reason, "upstream_rebase 1h0m0s has elapsed since the final rebase at "+finalAt.Format(time.RFC3339)+":") {
 		t.Fatalf("scheduled drift rebase after a final rebase reason %q", reason)
@@ -166,7 +177,7 @@ func TestScheduledDriftRebasesFollowTheIntervalAcrossRestart(t *testing.T) {
 	for _, disabled := range []string{"0", "0s"} {
 		fm = cadenceForeman(f, repository, disabled)
 		setClock(f, finalAt.Add(100*time.Hour))
-		must(t, fm.drifts(ctx))
+		passDrifts(t, fm)
 		checkDrifts(t, repository, stream, 3, "with upstream_rebase "+disabled)
 	}
 	if ops, err := repository.Operations(idleStream); err != nil || len(ops) != 0 {
@@ -184,7 +195,7 @@ func TestOwnerDriftRequestWaitsForTheLanderAcrossRestart(t *testing.T) {
 	sealed := sealedAt(t, repository, stream)
 	fm := cadenceForeman(f, repository, "0")
 	setClock(f, sealed.Add(100*time.Hour))
-	must(t, fm.drifts(ctx))
+	passDrifts(t, fm)
 	checkDrifts(t, repository, stream, 0, "with scheduled drift rebases disabled")
 
 	held := requestDrift(t, drifter{fm}, stream)
@@ -199,25 +210,32 @@ func TestOwnerDriftRequestWaitsForTheLanderAcrossRestart(t *testing.T) {
 	if len(requests) != 1 || requests[0].ID != "drift-request-2" || requests[0].To != "requested-2" || requests[0].Actor != ownerActor {
 		t.Fatalf("owner request transitions %+v", requests)
 	}
-	must(t, fm.drifts(ctx))
+	passDrifts(t, fm)
 	checkDrifts(t, repository, stream, 1, "while the lander is held")
 	settleOperation(t, f.s, repository, stream, held, drifter{fm})
 
 	repository = restartTrace(t, f, repository)
 	fm = cadenceForeman(f, repository, "0")
-	must(t, fm.drifts(ctx))
+	passDrifts(t, fm)
 	ops := checkDrifts(t, repository, stream, 2, "after a restart with the lander free")
 	if reason := transitionByID(t, repository, stream, "drift-2").Reason; !strings.HasPrefix(reason, "the owner asked for a drift rebase at "+requests[0].At.Format(time.RFC3339)+": drift rebase 2 fetches") {
 		t.Fatalf("requested drift rebase reason %q", reason)
 	}
-	must(t, fm.drifts(ctx))
+	passDrifts(t, fm)
 	checkDrifts(t, repository, stream, 2, "while the requested drift rebase runs")
 	settleOperation(t, f.s, repository, stream, ops[1].Operation, drifter{fm})
-	must(t, fm.drifts(ctx))
+	passDrifts(t, fm)
 	checkDrifts(t, repository, stream, 2, "once the request is answered")
+
+	// A recorded request is read at the next pass, not a minute later.
 	if k, err := fm.askDrift(ctx, stream, f.s.now()); err != nil || k != 3 {
 		t.Fatalf("a later request is answered by %d: %v", k, err)
 	}
+	must(t, fm.drifts(ctx))
+	checkDrifts(t, repository, stream, 2, "within a minute of the last read")
+	f.s.driftAsked.Store(true)
+	must(t, fm.drifts(ctx))
+	checkDrifts(t, repository, stream, 3, "at the pass after the owner asked")
 }
 
 // POST /v1/projects/rebase covers the building workstreams that are not

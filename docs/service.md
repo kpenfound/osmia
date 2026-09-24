@@ -1787,10 +1787,11 @@ before final review, and moves the seal's upstream base with it. Drift
 rebases share the project's one lander with landings. The foreman asks for
 them on the project's `upstream_rebase` cadence (see
 [configuration](configuration.md#project-configtoml)) and when the owner
-asks. At the start of every pass, before the landing controller, it considers
-every `building` or `assembled` workstream of the project that is not paused,
-has a seal and has no final review in flight, and asks nothing while a
-landing or drift rebase of the project has no result. A workstream is due
+asks. Before the landing controller, at most once a minute of service time
+and at the pass after an owner's request is recorded, it considers every
+`building` or `assembled` workstream of the project that is not paused, has a
+seal and has no final review in flight, and asks nothing while a landing or
+drift rebase of the project has no result. A workstream is due
 when the owner asked for a drift rebase it has not had yet, or when the
 `upstream_rebase` interval has elapsed since its latest drift rebase or
 [final rebase](#running-a-final-review), or, before either, since the sealing

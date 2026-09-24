@@ -106,11 +106,21 @@ func (f *foreman) driftDue(stream config.WorkstreamID, now time.Time) (string, e
 	return fmt.Sprintf("upstream_rebase %s has elapsed since the %s at %s", interval, h.What, h.Since.Format(time.RFC3339)), nil
 }
 
+// driftCheck is how often the foreman reads the drift schedule: the
+// shortest upstream_rebase interval.
+const driftCheck = time.Minute
+
 // drifts asks for the drift rebases that are due on the project's lander.
-// The trace holds everything it is measured from, so a restart neither
-// resets an elapsed interval nor asks for one twice.
+// It reads the schedule at most once per driftCheck, and at the next pass
+// after an owner's request. The trace holds everything the schedule is
+// measured from, so a restart neither resets an elapsed interval nor asks
+// for one twice.
 func (f *foreman) drifts(ctx context.Context) error {
 	now := f.s.now()
+	if !f.s.driftAsked.Swap(false) && now.Before(f.nextDrift) {
+		return nil
+	}
+	f.nextDrift = now.Add(driftCheck)
 	_, err := f.requestDrifts(ctx, func(stream config.WorkstreamID) (string, error) { return f.driftDue(stream, now) })
 	return err
 }
@@ -194,6 +204,9 @@ func (s *Service) rebaseProject(ctx context.Context, req ProjectRebaseRequest) (
 			return ProjectRebaseResponse{}, failed
 		}
 		out.Covered = append(out.Covered, DriftCoverage{Workstream: stream, Drift: k})
+	}
+	if len(out.Covered) > 0 {
+		s.driftAsked.Store(true)
 	}
 	return out, nil
 }
