@@ -59,9 +59,11 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 }
 
 func (s *Service) statusList() StatusResponse {
+	state, _ := s.store.Effective()
+	profiles := s.effectiveProfiles(state)
 	list, unreadable, api := s.statuses()
 	if api != nil {
-		return StatusResponse{Workstreams: []WorkstreamStatus{}, Diagnostics: []Diagnostic{{"workstreams", api.Code, api.Message}}}
+		return StatusResponse{Workstreams: []WorkstreamStatus{}, Profiles: profiles, Diagnostics: []Diagnostic{{"workstreams", api.Code, api.Message}}}
 	}
 	diagnostics := []Diagnostic{}
 	for _, w := range list {
@@ -69,7 +71,7 @@ func (s *Service) statusList() StatusResponse {
 			diagnostics = append(diagnostics, d)
 		}
 	}
-	return StatusResponse{Workstreams: list, Diagnostics: diagnostics}
+	return StatusResponse{Workstreams: list, Profiles: profiles, Diagnostics: diagnostics}
 }
 
 // workstreamStatus reports one workstream of the active project.

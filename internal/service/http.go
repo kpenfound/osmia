@@ -103,17 +103,8 @@ func (s *Service) configuration() ConfigResponse {
 }
 func (s *Service) runtimeView() RuntimeResponse {
 	state, ds := s.store.Effective()
-	stored, _ := s.store.Snapshot()
-	profiles := make(map[string]EffectiveProfile)
 	cfg := s.current()
-	for role, binding := range cfg.Roles {
-		name, source := binding.Profile, "configuration"
-		if override := stored.Profiles[role]; override != "" && state.Profiles[role] == override {
-			name, source = override, "owner_override"
-		}
-		profiles[role] = EffectiveProfile{Name: name, Source: source}
-	}
-	out := RuntimeResponse{Effective: state, Profiles: profiles, Projects: []ProjectRuntime{}, Diagnostics: []Diagnostic{}}
+	out := RuntimeResponse{Effective: state, Profiles: s.effectiveProfiles(state), Projects: []ProjectRuntime{}, Diagnostics: []Diagnostic{}}
 	if cfg.HasProject() {
 		out.Projects = append(out.Projects, ProjectRuntime{cfg.Project.ID, s.Context().Mode(cfg.Project.ID)})
 	} else {
@@ -134,6 +125,20 @@ func (s *Service) runtimeView() RuntimeResponse {
 		out.Diagnostics = append(out.Diagnostics, Diagnostic{"runtime", code, "disk runtime differs or is unreadable; acknowledged state retained"})
 	}
 	return out
+}
+
+func (s *Service) effectiveProfiles(state runtime.State) map[string]EffectiveProfile {
+	stored, _ := s.store.Snapshot()
+	profiles := make(map[string]EffectiveProfile)
+	cfg := s.current()
+	for role, binding := range cfg.Roles {
+		name, source := binding.Profile, "configuration"
+		if override := stored.Profiles[role]; override != "" && state.Profiles[role] == override {
+			name, source = override, "owner_override"
+		}
+		profiles[role] = EffectiveProfile{Name: name, Source: source}
+	}
+	return profiles
 }
 func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {

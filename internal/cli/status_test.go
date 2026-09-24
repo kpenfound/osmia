@@ -99,7 +99,7 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		Goal: "Ship resumable uploads.", Note: "The plan is drafted. Review is underway.",
 		Agents: []string{"The architect is preparing the packet.", "A reviewer is idle."}, Revision: 1, UpdatedAt: written}}
 	none := service.WorkstreamStatus{Workstream: quiet, Project: project, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, ContextMode: "file"}
-	if !all.Health.Ready || all.Configuration.Project == nil || !reflect.DeepEqual(all.Status, service.StatusResponse{Workstreams: []service.WorkstreamStatus{full, none}, Diagnostics: []service.Diagnostic{}}) {
+	if !all.Health.Ready || all.Configuration.Project == nil || !reflect.DeepEqual(all.Status, service.StatusResponse{Workstreams: []service.WorkstreamStatus{full, none}, Profiles: all.Runtime.Profiles, Diagnostics: []service.Diagnostic{}}) {
 		t.Fatalf("status --json: %+v", all.Status)
 	}
 

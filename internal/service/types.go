@@ -281,8 +281,9 @@ type MutationResponse struct {
 // without an active project or its trace, and when the trace cannot be read,
 // which a diagnostic reports.
 type StatusResponse struct {
-	Workstreams []WorkstreamStatus `json:"workstreams"`
-	Diagnostics []Diagnostic       `json:"diagnostics"`
+	Workstreams []WorkstreamStatus          `json:"workstreams"`
+	Profiles    map[string]EffectiveProfile `json:"profiles"`
+	Diagnostics []Diagnostic                `json:"diagnostics"`
 }
 
 // WorkstreamStatus is the chief of staff's status for one workstream, next to

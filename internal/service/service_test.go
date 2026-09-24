@@ -146,6 +146,11 @@ func TestRoundTrip(t *testing.T) {
 	if len(before.Profiles) != len(s.cfg.Roles) || before.Profiles["mason"] != (EffectiveProfile{"other", "owner_override"}) || before.Profiles["reviewer"] != (EffectiveProfile{"default", "configuration"}) {
 		t.Fatalf("effective role profiles: %+v", before.Profiles)
 	}
+	status, err := c.Statuses(ctx)
+	must(t, err)
+	if !reflect.DeepEqual(status.Profiles, before.Profiles) {
+		t.Fatalf("status role profiles: %+v", status.Profiles)
+	}
 	must(t, s.Close())
 	if _, err := os.Lstat(s.Socket()); !os.IsNotExist(err) {
 		t.Fatal("socket retained", err)
