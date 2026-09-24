@@ -479,7 +479,7 @@ func (s *Service) stop(active *activeProject) error {
 // boundary by the service's sealer for sealings, its builder for builds and
 // its foreman for landings and rebases and its publisher for publications;
 // the architect controller, then the shed controller, then the sealing
-// controller, then the building controller, then the refresh, landing,
+// controller, then the building controller, then the overlap, refresh, landing,
 // assembly and publication controllers run at the start of every pass, and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
 // chief of staff, recorded answers are queued on their askers' threads, the
@@ -514,6 +514,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	rounds := &debate{s: s, repository: repository}
 	seals := &sealer{s: s, repository: repository}
 	build := &builder{s: s, repository: repository}
+	overlap := &overlaps{s: s, repository: repository}
 	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository}}
 	refresh := &refresher{extractor: &extractor{s: s, repository: repository}}
 	finals := &finalReviewer{s: s, repository: repository}
@@ -521,7 +522,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	amend := &amendmentDrafter{drafter: draft}
 	amendRounds := amendmentDebate{rounds}
 	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals}
-	hooks := []func(context.Context) error{draft.Pass, amend.Pass, amendRounds.Pass, rounds.Pass, seals.Pass, build.Pass, refresh.Pass, land.Pass, finals.Pass, publish.Pass}
+	hooks := []func(context.Context) error{draft.Pass, amend.Pass, amendRounds.Pass, rounds.Pass, seals.Pass, build.Pass, overlap.Pass, refresh.Pass, land.Pass, finals.Pass, publish.Pass}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, options.Schedule)
 	}

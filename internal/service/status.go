@@ -10,14 +10,15 @@ import (
 
 // statuses reports every workstream of the active project, or none when no
 // project or trace is active. The librarian's workstream carries no feature
-// and is left out. A workstream whose unit states cannot be read is reported
-// with no units and its failure in unreadable, by workstream.
-func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]*APIError, *APIError) {
+// and is left out. A workstream whose unit states or overlap advisories cannot
+// be read is reported without them and its first such failure in unreadable,
+// by workstream.
+func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagnostic, *APIError) {
 	s.mu.Lock()
 	active, cfg := s.active, s.cfg
 	s.mu.Unlock()
 	out := []WorkstreamStatus{}
-	unreadable := map[config.WorkstreamID]*APIError{}
+	unreadable := map[config.WorkstreamID]Diagnostic{}
 	if !cfg.HasProject() || active == nil {
 		return out, unreadable, nil
 	}
@@ -34,9 +35,17 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]*APIEr
 		view := statusView(cfg.Project.ID, mode, w)
 		units, err := unitStates(active.repository, w.Workstream, w.Subjects)
 		if err != nil {
-			unreadable[w.Workstream] = &APIError{Internal, fmt.Sprintf("cannot read the unit states of workstream %s; check the trace repository", w.Workstream)}
+			unreadable[w.Workstream] = Diagnostic{"units", Internal, fmt.Sprintf("cannot read the unit states of workstream %s; check the trace repository", w.Workstream)}
 		}
 		view.Units = append(view.Units, units...)
+		advisories, err := overlapAdvisories(active.repository, w.Workstream, w.Subjects)
+		if err != nil {
+			if _, ok := unreadable[w.Workstream]; !ok {
+				unreadable[w.Workstream] = Diagnostic{"advisories", Internal, fmt.Sprintf("cannot read the overlap advisories of workstream %s; check the trace repository", w.Workstream)}
+			}
+		} else {
+			view.Advisories = advisories
+		}
 		for i := range view.Units {
 			for _, gate := range view.Gates {
 				if gate.Kind == UnitContested && gate.Reference == view.Units[i].Unit {
@@ -56,8 +65,8 @@ func (s *Service) statusList() StatusResponse {
 	}
 	diagnostics := []Diagnostic{}
 	for _, w := range list {
-		if api := unreadable[w.Workstream]; api != nil {
-			diagnostics = append(diagnostics, Diagnostic{"units", api.Code, api.Message})
+		if d, ok := unreadable[w.Workstream]; ok {
+			diagnostics = append(diagnostics, d)
 		}
 	}
 	return StatusResponse{Workstreams: list, Diagnostics: diagnostics}
@@ -76,8 +85,8 @@ func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 	if api != nil {
 		return WorkstreamStatus{}, api
 	}
-	if api := unreadable[id]; api != nil {
-		return WorkstreamStatus{}, api
+	if d, ok := unreadable[id]; ok {
+		return WorkstreamStatus{}, &APIError{d.Code, d.Message}
 	}
 	for _, w := range list {
 		if w.Workstream == id {
@@ -88,7 +97,7 @@ func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 }
 
 func statusView(project config.ProjectID, mode bundle.Mode, w trace.WorkstreamStatus) WorkstreamStatus {
-	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, Units: []UnitStatus{}, OpenQuestions: w.OpenQuestions, Gates: append([]trace.OwnerGate{}, w.Gates...), ContextMode: mode}
+	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, OpenQuestions: w.OpenQuestions, Gates: append([]trace.OwnerGate{}, w.Gates...), ContextMode: mode}
 	if w.State != "" {
 		state := w.State
 		out.State = &state
