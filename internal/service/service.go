@@ -522,9 +522,13 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	amend := &amendmentDrafter{drafter: draft}
 	amendRounds := amendmentDebate{rounds}
 	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals}
-	hooks := []func(context.Context) error{draft.Pass, amend.Pass, amendRounds.Pass, rounds.Pass, seals.Pass, build.Pass, overlap.Pass, refresh.Pass, land.Pass, finals.Pass, publish.Pass}
+	type scheduleHook struct {
+		name string
+		pass func(context.Context) error
+	}
+	hooks := []scheduleHook{{"draft", draft.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"refresh", refresh.Pass}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
 	if threads == nil && options.Schedule != nil {
-		hooks = append(hooks, options.Schedule)
+		hooks = append(hooks, scheduleHook{"configured", options.Schedule})
 	}
 	if threads != nil {
 		bound, err := threads(repository, cfg)
@@ -548,12 +552,12 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		}
 		units := &masons{s: s, cfg: cfg, repository: repository}
 		reviews := &reviewers{masons: units}
-		hooks = append(hooks, deliver.Pass, s.answers(cfg, repository).Pass, reviews.Pass, units.Pass, dispatch.Pass)
+		hooks = append(hooks, scheduleHook{"events", deliver.Pass}, scheduleHook{"answers", s.answers(cfg, repository).Pass}, scheduleHook{"reviews", reviews.Pass}, scheduleHook{"masons", units.Pass}, scheduleHook{"dispatch", dispatch.Pass})
 	}
 	options.Schedule = func(ctx context.Context) error {
 		for _, hook := range hooks {
-			if err := hook(ctx); err != nil {
-				return err
+			if err := hook.pass(ctx); err != nil {
+				return fmt.Errorf("%s pass: %w", hook.name, err)
 			}
 		}
 		return nil

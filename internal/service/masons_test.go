@@ -127,6 +127,9 @@ func newCappedMasonFixture(t *testing.T, capacity, drafted string) (*shedFixture
 func newConfiguredMasonFixture(t *testing.T, capacity, drafted, classifier string) (*shedFixture, *fakeMasons) {
 	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, masonRoles, func(opts *Options) {
+		// Leave time for status snapshots when instrumented tests run many
+		// service fixtures concurrently.
+		opts.WriteTimeout = time.Minute
 		opts.Threads = Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts}).Threads
 		if classifier != "" {
 			original := opts.Threads
@@ -179,6 +182,11 @@ func (f *shedFixture) awaitMasonRan(t *testing.T, stream config.WorkstreamID, un
 	t.Helper()
 	deadline := time.Now().Add(demoTimeout)
 	for {
+		select {
+		case <-f.s.done:
+			t.Fatalf("the mason of unit %s of %s could not run: service stopped: %v", unit, stream, f.s.Wait())
+		default:
+		}
 		th, err := f.repository().Thread(stream, masonAgent(unit))
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			t.Fatal(err)

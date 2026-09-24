@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http/httptrace"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -66,6 +68,44 @@ func starts(t *testing.T, f *shedFixture, stream config.WorkstreamID) []string {
 		}
 	}
 	return out
+}
+
+// Slow status reads in the mason fixtures keep their API and service available.
+func TestMasonFixtureSlowStatusKeepsServiceReachable(t *testing.T) {
+	t.Parallel()
+	f, _ := newParallelMasonFixture(t, 2, 3, disjointPlan)
+	defer f.stop(t)
+	entered := make(chan struct{}, 1)
+	ctx := httptrace.WithClientTrace(context.Background(), &httptrace.ClientTrace{
+		WroteRequest: func(httptrace.WroteRequestInfo) {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+		},
+	})
+	f.s.mu.Lock()
+	result := make(chan error, 1)
+	go func() {
+		_, err := f.c.Statuses(ctx)
+		result <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(demoTimeout):
+		f.s.mu.Unlock()
+		t.Fatal("status request never connected")
+	}
+	time.Sleep(16 * time.Second)
+	f.s.mu.Unlock()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("status request after a slow snapshot: %v", err)
+		}
+	case <-time.After(demoTimeout):
+		t.Fatal("status request never completed")
+	}
 }
 
 // Two ready units of one workstream whose footprints are disjoint implement
