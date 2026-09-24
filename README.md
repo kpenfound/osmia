@@ -68,6 +68,10 @@ lands three reviewed units in dependency order, rebasing an approved unit in
 flight back to review, refreshing the knowledge base from a landed learning
 and recovering an interrupted landing across a restart.
 
+The [M3 final review and delivery demonstration](docs/m3-exit.md#final-review-and-delivery-demonstration)
+routes a final-review gap through a follow-up unit, then exercises owner
+approval and resumable publication in both delivery styles with local fakes.
+
 The [charter reference](docs/charter.md) documents the charter template, the
 numbered-rule format and how owner edits are recorded.
 
