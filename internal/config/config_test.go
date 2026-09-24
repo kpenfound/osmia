@@ -65,6 +65,9 @@ func TestDefaults(t *testing.T) {
 	if c.EventWindow() != 5*time.Second {
 		t.Fatalf("event window default: %v", c.EventWindow())
 	}
+	if c.Project.UpstreamRebase != "6h" || c.Project.RebaseInterval() != 6*time.Hour {
+		t.Fatalf("upstream rebase default: %q %v", c.Project.UpstreamRebase, c.Project.RebaseInterval())
+	}
 	if c.Profiles["default"].Timeout != "45m" || c.Profiles["default"].Effort != "medium" || len(c.Roles) != 7 {
 		t.Fatalf("profile defaults: %+v", c)
 	}
@@ -235,7 +238,12 @@ func TestInvalid(t *testing.T) {
 		{"long socket", topConfig + "[listen]\nsocket = '" + strings.Repeat("a", 104) + ".sock'\n", "", "103 bytes"},
 		{"project version", "", strings.Replace(projectConfig, "version = 1", "version = 2", 1), "version:"},
 		{"project unknown", "", projectConfig + "oops = 1\n", "oops"},
-		{"project unsupported", "", projectConfig + "upstream_rebase = '6h'\n", "unsupported in M1"},
+		{"project unsupported", "", projectConfig + "hearsay_scope = 'dagger'\n", "unsupported in M1"},
+		{"malformed upstream rebase", "", projectConfig + "upstream_rebase = 'daily'\n", "upstream_rebase:"},
+		{"empty upstream rebase", "", projectConfig + "upstream_rebase = ''\n", "upstream_rebase:"},
+		{"negative upstream rebase", "", projectConfig + "upstream_rebase = '-6h'\n", "upstream_rebase:"},
+		{"short upstream rebase", "", projectConfig + "upstream_rebase = '59s'\n", "upstream_rebase:"},
+		{"integer upstream rebase", "", projectConfig + "upstream_rebase = 0\n", "upstream_rebase"},
 		{"repository url", "", strings.Replace(projectConfig, "upstream/repo", "https://host/upstream/repo", 1), "upstream:"},
 		{"same fork", "", strings.Replace(projectConfig, "owner/repo", "UPSTREAM/repo", 1), "fork:"},
 		{"missing clone", "", strings.Replace(projectConfig, `clone = "~/clone"`, "", 1), "clone:"},
@@ -258,6 +266,22 @@ func TestInvalid(t *testing.T) {
 			c, err := Load(fixture(t, top, project))
 			if c != nil || err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got config=%+v err=%v; want nil and %q", c, err, tc.want)
+			}
+		})
+	}
+}
+
+// upstream_rebase accepts a Go duration of at least a minute, and zero, which
+// disables scheduled drift rebases.
+func TestUpstreamRebase(t *testing.T) {
+	for value, want := range map[string]time.Duration{"1m": time.Minute, "90m": 90 * time.Minute, "24h": 24 * time.Hour, "0": 0, "0s": 0} {
+		t.Run(value, func(t *testing.T) {
+			c, err := Load(fixture(t, topConfig, projectConfig+"upstream_rebase = '"+value+"'\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Project.UpstreamRebase != value || c.Project.RebaseInterval() != want {
+				t.Fatalf("upstream_rebase %q loaded as %q, interval %v; want %v", value, c.Project.UpstreamRebase, c.Project.RebaseInterval(), want)
 			}
 		})
 	}

@@ -66,6 +66,7 @@ set through `Options` by embedders.
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
 | POST | `/projects/extract` | `ProjectExtractRequest`: project; returns `ExtractionResponse` |
+| POST | `/projects/rebase` | `ProjectRebaseRequest`: project; records the owner's [drift rebase](#drift-rebases) request and returns `ProjectRebaseResponse` |
 | POST | `/abandon/<workstream-id>` | `AbandonRequest`: reason; returns `AbandonResponse` |
 | POST | `/handin` | `HandInRequest`: project, key, one of path, url and stdin, optional skip_debate; returns `HandInResponse` |
 | PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason; the local API attributes it to the owner and records its set time |
@@ -1783,15 +1784,46 @@ the workspace.
 
 A drift rebase brings a workstream's feature branch current with upstream
 before final review, and moves the seal's upstream base with it. Drift
-rebases share the project's one lander with landings. Asking for them takes
-every `building` or `assembled` workstream of the project that is not paused
-and has no final review in flight, and asks nothing while a landing or drift
-rebase of the project has no result. Each gets the operation `drift` (input
-`drift` `<k>`, the workstream's next drift number) on the repository boundary
-with the transition `drift-<k>` (actor `service`/`foreman`, cause the seal
-revision in force), which moves the workflow subject `drift` to
-`requested-<k>`. While a drift rebase has no result, the landing controller
-asks for no landing and no unit rebase.
+rebases share the project's one lander with landings. The foreman asks for
+them on the project's `upstream_rebase` cadence (see
+[configuration](configuration.md#project-configtoml)) and when the owner
+asks. At the start of every pass, before the landing controller, it considers
+every `building` or `assembled` workstream of the project that is not paused,
+has a seal and has no final review in flight, and asks nothing while a
+landing or drift rebase of the project has no result. A workstream is due
+when the owner asked for a drift rebase it has not had yet, or when the
+`upstream_rebase` interval has elapsed since its latest drift rebase or
+[final rebase](#running-a-final-review), or, before either, since the sealing
+that created its feature branch. A zero `upstream_rebase` schedules nothing,
+and owner requests are still answered. The interval is measured from times
+the trace records, so a restart neither resets an elapsed interval nor asks
+for the same one twice, and a service stopped for several intervals asks for
+one drift rebase when it starts.
+
+Each due workstream gets the operation `drift` (input `drift` `<k>`, the
+workstream's next drift number) on the repository boundary with the
+transition `drift-<k>` (actor `service`/`foreman`, cause the seal revision in
+force), which moves the workflow subject `drift` to `requested-<k>`. Its
+reason begins with why it is due: `the owner asked for a drift rebase at
+<time>`, or `upstream_rebase <interval> has elapsed since the <drift rebase
+n|final rebase|sealing> at <time>`. While a drift rebase has no result, the
+landing controller asks for no landing and no unit rebase.
+
+`POST /v1/projects/rebase` with a `ProjectRebaseRequest` (`project`) records
+the owner's request for a drift rebase of every `building` or `assembled`
+workstream of the active project that is not paused, and returns once each
+request is durable. Each covered workstream gets the transition
+`drift-request-<k>` (actor `owner`/`local`), which moves the workflow subject
+`drift-request` to `requested-<k>`, where `k` is the next drift rebase the
+workstream has not been asked for; a request already waiting for that drift
+rebase is kept, so asking again before it runs records nothing more. The
+foreman answers the request with drift rebase `k` once the lander is free,
+whatever the cadence. The `ProjectRebaseResponse` names the `project`, the
+`covered` workstreams, each with the `drift` number that answers the
+request, and the `skipped` workstreams, each with the `reason` it was
+skipped: paused, or neither building nor assembled. A malformed project ID
+returns `validation`, an ID that is not the active project `not_found`, and a
+project without a trace or a trace that cannot be written `internal`.
 
 The operation checks the workstream again: one that is no longer `building`
 or `assembled`, is paused, or has no feature branch is skipped. The foreman
@@ -2144,6 +2176,7 @@ order, except the librarian's, which carries no feature (see
 | `state` | The feature workflow state, or `null` before one is recorded |
 | `units` | One `{"unit", "state"}` per unit of the sealed plan and each follow-up of a final review or an amendment, in order, once their states are recorded; `reason` gives a mason contest's classification or bound exhaustion, `deferral` holds the [decision](#why-a-ready-unit-waits) that keeps a `ready` unit waiting, with its `message` as `reason`, `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
 | `advisories` | The workstream's active [overlap advisories](#overlapping-workstreams): `workstream`, the other workstream; `seal` and `other_seal`, the seals compared; `subsystems`, `entities` and `paths`, what they share; and `message`, the advisory as the chief of staff received it; empty when none is active |
+| `drift` | The workstream's latest [drift rebase](#drift-rebases): `drift`, its number; `outcome`, `requested` once it is asked for, `conflicted` while its conflicts are resolved and `carrying` while unfinished units follow the branch, then `rebased` or `skipped`; `at` and `reason`, the time and reason of the transition that recorded that outcome; `null` before the first |
 | `open_questions` | Questions in the workstream without a ruling |
 | `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, `contested` with the unit ID, or a `charter` proposal with its question number; a mason contest also has `reason`; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
@@ -2167,7 +2200,10 @@ naming it (`cannot read the unit states of workstream <id>; check the trace
 repository`); one whose overlap advisories cannot be read is listed with no
 `advisories` and, unless it already has a `units` diagnostic, an
 `advisories` diagnostic (`cannot read the overlap advisories of workstream
-<id>; check the trace repository`); the other workstreams are listed as ever. For one workstream, a
+<id>; check the trace repository`), and one whose drift rebases cannot be
+read is listed with a null `drift` and, unless it already has a diagnostic, a
+`drift` diagnostic (`cannot read the drift rebases of workstream <id>; check
+the trace repository`); the other workstreams are listed as ever. For one workstream, a
 malformed ID returns `validation`, no configured project returns
 `no_project`, a workstream the active trace does not hold (or no trace at all)
 returns `not_found`, and an unreadable trace, or unit states of that

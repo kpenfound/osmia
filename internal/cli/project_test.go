@@ -195,6 +195,7 @@ func TestProjectUsage(t *testing.T) {
 		{"handin"}, {"handin", "not-an-id"}, {"handin", project}, {"handin", project, "a.md", "b.md"}, {"handin", "not-an-id", "a.md"},
 		{"handin", project, ""}, {"handin", project, "a.md", "--clone", "x"}, {"handin", project, "a.md", "--hard"},
 		{"project", "extract"}, {"project", "extract", "not-an-id"}, {"project", "extract", project, "--hard"},
+		{"project", "rebase"}, {"project", "rebase", "not-an-id"}, {"project", "rebase", project, "--hard"},
 	} {
 		code, out, diag := invoke(t, root, args...)
 		if code != 2 || out != "" || !strings.Contains(diag, "invalid arguments") {

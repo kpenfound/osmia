@@ -228,6 +228,7 @@ fork = "my-account/repository"      # required, distinct from upstream
 clone = "~/src/repository"          # required; may not yet exist
 base_branch = "main"
 landing = "commit-per-unit"
+upstream_rebase = "6h"              # default; "0" disables scheduled drift rebases
 classifier = "default"              # optional; omitted by default
 
 [capacity]
@@ -241,6 +242,14 @@ Git branch-name constraints. `landing` accepts `commit-per-unit` (default) or
 `squash`: it chooses whether an approved workstream is
 [published](service.md#publication) with each unit's commit or as one commit. Project `capacity.per_workstream` is a positive integer overriding the
 global default.
+
+`upstream_rebase` is a Go duration string: how long after a workstream's
+latest drift rebase or final rebase (or, before either, its sealing) the
+foreman schedules its next [drift rebase](service.md#drift-rebases) onto
+upstream. It defaults to `"6h"`. `"0"` (or `"0s"`) disables scheduled drift
+rebases; `osmia project rebase` still asks for them. A value that does not
+parse as a Go duration, a TOML number, a negative duration, or a nonzero
+duration shorter than `1m` is rejected.
 
 `classifier` names a top-level profile for clean mason turns with no accepted
 outcome. When omitted, code heuristics classify the response without a model
@@ -270,8 +279,8 @@ normal workflow. The request states the known spend as a lower bound and counts
 attempts whose cost is unknown. `per_day` is loaded for later budget policy.
 Missing values impose no cap. Unknown cost does not establish that a cap was reached.
 
-The full design's `listen.tailnet`, `listen.web`, `notify`, `hearsay`,
-project `upstream_rebase` and `hearsay_scope` settings are rejected as unsupported
+The full design's `listen.tailnet`, `listen.web`, `notify`, `hearsay` and
+project `hearsay_scope` settings are rejected as unsupported
 in M1, even if supplied empty. Daily budget actions, hard pauses that stop turns in flight,
 and live reload are M4 work, tailnet/web and notifications belong to M5, multi-project operation to M7, and
 Hearsay to M8. Unsupported keys do not silently enable later behavior.

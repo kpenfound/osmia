@@ -536,7 +536,7 @@ func TestLandingWaitsWhileADriftConflictIsOpen(t *testing.T) {
 	if state, err := repository.Workflow(stream, trace.UnitSubject(other)); err != nil || state.Value != UnitApproved {
 		t.Fatalf("unit %s is %+v %v", other, state, err)
 	}
-	if requested, err := d.requestDrifts(ctx); err != nil || len(requested) != 0 {
+	if requested, err := d.requestDrifts(ctx, testDrift); err != nil || len(requested) != 0 {
 		t.Fatalf("drift rebases asked for while a drift conflict is open: %v %v", requested, err)
 	}
 }
