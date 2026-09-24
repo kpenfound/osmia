@@ -47,17 +47,23 @@ type fixture struct {
 
 func setup(t *testing.T, agents ...string) (*fixture, *trace.Repository) {
 	t.Helper()
-	base := t.TempDir()
+	return setupIn(t, t.TempDir(), project, agents...)
+}
+
+// setupIn creates project id's trace under the Osmia root in base, with the
+// fixture's workstream and a mason thread for each agent.
+func setupIn(t *testing.T, base string, id config.ProjectID, agents ...string) (*fixture, *trace.Repository) {
+	t.Helper()
 	root, err := config.ResolveRoot(filepath.Join(base, "osmia"), "")
 	must(t, err)
-	f := &fixture{root: root, project: config.Project{ID: project, Clone: filepath.Join(base, "target")}, clock: &clock{now: start}}
+	f := &fixture{root: root, project: config.Project{ID: id, Clone: filepath.Join(base, "target_"+string(id))}, clock: &clock{now: start}}
 	must(t, os.Mkdir(f.project.Clone, 0700))
 	ctx := context.Background()
 	repo, err := trace.Create(ctx, root, f.project, f.clock.Now(), owner)
 	must(t, err)
 	must(t, repo.CreateWorkstream(ctx, stream, f.clock.Now(), owner))
 	for _, id := range agents {
-		h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: id, Project: project, Workstream: stream, At: f.clock.Now(), Actor: owner, Cause: "created"}
+		h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: id, Project: f.project.ID, Workstream: stream, At: f.clock.Now(), Actor: owner, Cause: "created"}
 		must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: "mason", ThreadID: "thread_" + id}))
 	}
 	return f, repo
@@ -87,7 +93,7 @@ func (f *fixture) queueOn(t *testing.T, repo *trace.Repository, ws config.Workst
 	t.Helper()
 	th, err := repo.Thread(ws, agent)
 	must(t, err)
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + agent + "_" + turn, Project: project, Workstream: ws, Unit: "unit", At: f.clock.Now(), Actor: owner, Cause: "message_" + turn, Depth: 2},
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + agent + "_" + turn, Project: f.project.ID, Workstream: ws, Unit: "unit", At: f.clock.Now(), Actor: owner, Cause: "message_" + turn, Depth: 2},
 		AgentID: agent, ThreadID: th.Identity.ThreadID, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Message " + turn}
 	_, err = repo.EnqueueTurn(context.Background(), req)
 	must(t, err)
@@ -97,7 +103,7 @@ func (f *fixture) queueOn(t *testing.T, repo *trace.Repository, ws config.Workst
 // thread creates an agent thread with the given role in ws.
 func (f *fixture) thread(t *testing.T, repo *trace.Repository, ws config.WorkstreamID, id, role string) {
 	t.Helper()
-	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: id, Project: project, Workstream: ws, At: f.clock.Now(), Actor: owner, Cause: "created"}
+	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: id, Project: f.project.ID, Workstream: ws, At: f.clock.Now(), Actor: owner, Cause: "created"}
 	must(t, repo.CreateThread(context.Background(), trace.Agent{Header: h, Role: role, ThreadID: "thread_" + id}))
 }
 

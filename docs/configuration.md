@@ -252,7 +252,7 @@ changes will still require a service restart when live reload arrives.
 
 The full design's `listen.tailnet`, `listen.web`, `budget`, `notify`, `hearsay`,
 project `upstream_rebase` and `hearsay_scope` settings are rejected as unsupported
-in M1, even if supplied empty. Budget, priority scheduling effects, hard pauses that stop turns in flight,
+in M1, even if supplied empty. Budget, hard pauses that stop turns in flight,
 and live reload belong to M4, tailnet/web and notifications to M5, multi-project operation to M7, and
 Hearsay to M8. Unsupported keys do not silently enable later behavior.
 

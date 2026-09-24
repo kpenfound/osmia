@@ -216,7 +216,7 @@ func TestChiefOfStaffTakesNoSlot(t *testing.T) {
 	f, repo := setup(t, "mason1", "mason2")
 	defer repo.Close()
 	limits := &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 1}
-	// The chief of staff sorts first; its turn leaves the only slot free.
+	// The chief of staff's turn leaves the only slot free.
 	f.queueOn(t, repo, stream, trace.ChiefOfStaff, "one")
 	f.queue(t, repo, "mason1", "one")
 	s, err := New(repo, Options{Now: f.clock.Now, Capacity: limits})

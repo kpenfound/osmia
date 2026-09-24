@@ -442,3 +442,68 @@ func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
 	}
 	must(t, s.Close())
 }
+
+func TestServiceOffersFreedSlotsInRuntimePriorityOrder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	home, err := os.MkdirTemp("", "sc-")
+	must(t, err)
+	t.Cleanup(func() { os.RemoveAll(home) })
+	opts := fixtureAt(t, home)
+	top := filepath.Join(opts.Config.Root, "config.toml")
+	body, err := os.ReadFile(top)
+	must(t, err)
+	must(t, os.WriteFile(top, []byte(strings.Replace(string(body), "[profiles.default]", "[capacity]\nmasons = 1\n[profiles.default]", 1)), 0600))
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	root := cfg.Root.String()
+
+	// The second workstream sorts after the first by ID but comes first in the
+	// project's priority order.
+	const second config.WorkstreamID = "w_fedcba9876543210fedcba9876543210"
+	clock := &demoClock{now: demoStart}
+	owner := trace.Actor{Kind: "owner", ID: "local"}
+	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
+	must(t, err)
+	for _, ws := range []config.WorkstreamID{stream, second} {
+		must(t, repo.CreateWorkstream(ctx, ws, clock.Now(), owner))
+		id := "mason_" + string(ws)
+		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: id, Project: project, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "mason", ThreadID: id}
+		must(t, repo.CreateThread(ctx, identity))
+		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + id, Project: project, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "message_" + id, Depth: 1},
+			AgentID: id, ThreadID: id, TurnID: string(ws), Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message"}
+		_, err = repo.EnqueueTurn(ctx, req)
+		must(t, err)
+	}
+	must(t, repo.Close())
+	priority, err := json.Marshal(runtime.State{Version: runtime.Version, Priorities: []runtime.Priority{{Project: project, Workstreams: []config.WorkstreamID{second}}}})
+	must(t, err)
+	must(t, os.WriteFile(filepath.Join(root, "runtime.json"), priority, 0600))
+
+	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Answer"}}
+	started := make(chan string, 2)
+	turns := &blockingTurns{fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply)}, hooks: map[string]func(context.Context){}}
+	for _, ws := range []config.WorkstreamID{stream, second} {
+		turns.hooks[string(ws)] = func(context.Context) { started <- string(ws) }
+	}
+	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
+		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
+			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
+				return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(root, "sessions", in.Agent, in.Turn)}, nil
+			}}, nil
+	}
+	s, _ := start(t, opts)
+	var order []string
+	for range 2 {
+		select {
+		case ws := <-started:
+			order = append(order, ws)
+		case <-time.After(demoTimeout):
+			t.Fatalf("turns started %v", order)
+		}
+	}
+	if want := []string{string(second), string(stream)}; !slices.Equal(order, want) {
+		t.Fatalf("turns started %v, want %v", order, want)
+	}
+	must(t, s.Close())
+}
