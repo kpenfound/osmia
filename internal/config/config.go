@@ -291,7 +291,7 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "sandbox", "image"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "events", "events.window"}, path)
+	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {

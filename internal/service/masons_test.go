@@ -155,7 +155,7 @@ func masonTransitions(t *testing.T, f *shedFixture, stream config.WorkstreamID) 
 	t.Helper()
 	var out []transitionMove
 	for _, tr := range allTransitions(t, f.trace, stream) {
-		if tr.Actor == masonActor && (strings.HasPrefix(tr.Subject, "unit-") || strings.HasPrefix(tr.Subject, "unit_")) {
+		if tr.Actor == masonActor && (strings.HasPrefix(tr.Subject, "unit-") || strings.HasPrefix(tr.Subject, "unit_") || strings.HasPrefix(tr.Subject, "blocked-mason")) {
 			out = append(out, transitionMove{tr.ID, tr.Subject, tr.From, tr.To, tr.Cause, tr.Reason})
 		}
 	}
