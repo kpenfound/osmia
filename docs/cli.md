@@ -304,7 +304,9 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   [service](service.md#priority-at-the-owners-request).
   `priority clear` removes that preference. Both, and `pause`/`resume` of a
   workstream, need an active project and say so otherwise.
-- `profiles` displays effective bindings and runtime diagnostics.
+- `profiles` displays every role's effective binding and its source
+  (`configuration` or `owner_override`), plus runtime diagnostics. `status`
+  shows the same profile information.
   `profiles set <role> <profile>` overrides a binding.
   `profiles clear <role>` restores its configured default.
 
