@@ -122,6 +122,15 @@ func TestCommandsAndRestart(t *testing.T) {
 	if out := successful(t, root, "profiles"); !strings.Contains(out, "mason: other source=owner_override") {
 		t.Fatalf("profiles text: %s", out)
 	}
+	for _, pause := range rt.Effective.Pauses {
+		if pause.Source != "owner" || pause.Reason == "" || pause.SetAt.IsZero() {
+			t.Fatalf("pause attribution: %+v", pause)
+		}
+	}
+	shown := successful(t, root, "status")
+	if !strings.Contains(shown, `source=owner reason="travel" set_at=`) {
+		t.Fatalf("status omits pause attribution: %s", shown)
+	}
 	for _, args := range [][]string{{"resume", "all"}, {"resume", project}, {"resume", stream}, {"priority", "clear"}, {"profiles", "clear", "mason"}} {
 		if !strings.Contains(successful(t, root, args...), "applied=true") {
 			t.Fatal(args)

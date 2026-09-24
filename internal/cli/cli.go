@@ -727,7 +727,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			if o.hard {
 				mode = "hard"
 			}
-			input = service.PauseRequest{Target: target, Mode: mode, Reason: o.reason, Source: "operator"}
+			input = service.PauseRequest{Target: target, Mode: mode, Reason: o.reason, Source: "owner"}
 		}
 	case "priority":
 		ids := []config.WorkstreamID{}
@@ -828,7 +828,7 @@ func diagnostics(w io.Writer, ds []service.Diagnostic) {
 func showRuntime(w io.Writer, rt service.RuntimeResponse) {
 	fmt.Fprintln(w, "Pauses (absent scopes are unpaused):")
 	for _, p := range rt.Effective.Pauses {
-		fmt.Fprintf(w, "  %s %s %s: %s source=%s reason=%q\n", p.Target.Scope, p.Target.Project, p.Target.Workstream, p.Mode, p.Source, p.Reason)
+		fmt.Fprintf(w, "  %s %s %s: %s source=%s reason=%q set_at=%s\n", p.Target.Scope, p.Target.Project, p.Target.Workstream, p.Mode, p.Source, p.Reason, p.SetAt.UTC().Format(time.RFC3339))
 	}
 	fmt.Fprintln(w, "Priority (absent projects have no preference):")
 	for _, p := range rt.Effective.Priorities {
