@@ -339,8 +339,8 @@ which workstream starts units and takes freed turn slots first.
 All client commands accept `--json`. Status returns an object with `health`,
 `configuration`, `runtime` and `status` API responses, where `status` lists
 every workstream except the librarian's with its full status (`null` before
-the first); `status <workstream-id>` returns that workstream's status
-response; profiles returns the runtime
+the first) and each role's effective profile and source;
+`status <workstream-id>` returns that workstream's status response; profiles returns the runtime
 response. `abandon` returns the API's abandon response: `project`,
 `workstream`, `state` and `reason`. `send` returns the accepted message entry and `conversation` the
 API's conversation response (see [conversation](service.md#conversation)).
