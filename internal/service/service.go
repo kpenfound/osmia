@@ -19,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/issues"
+	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
@@ -80,6 +81,10 @@ type Options struct {
 	// with the service's GITHUB_TOKEN environment variable, which no session
 	// receives.
 	Issues issues.Client
+	// PullRequests finds and opens the pull requests that deliver approved
+	// workstreams. It defaults to the GitHub REST API with the service's
+	// GITHUB_TOKEN environment variable, which no session receives.
+	PullRequests pulls.Client
 }
 
 // activeProject is the runtime state of the configured project: its open trace
@@ -145,6 +150,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	opts.Config.Root = root.String()
 	if opts.Issues == nil {
 		opts.Issues = issues.GitHub{Token: os.Getenv("GITHUB_TOKEN"), HTTP: &http.Client{Timeout: 30 * time.Second}}
+	}
+	if opts.PullRequests == nil {
+		opts.PullRequests = pulls.GitHub{Token: os.Getenv("GITHUB_TOKEN"), HTTP: &http.Client{Timeout: 30 * time.Second}}
 	}
 	cfg, err := config.Load(opts.Config)
 	if err != nil {
@@ -457,9 +465,10 @@ func (s *Service) stop(active *activeProject) error {
 // service's own reconcilers for knowledge-base extraction and refresh, architect drafts,
 // committee rounds and the architect's replies to them, and final reviews, and the repository
 // boundary by the service's sealer for sealings, its builder for builds and
-// its foreman for landings and rebases; the architect controller, then the shed
-// controller, then the sealing controller, then the building controller, then
-// the refresh, landing and assembly controllers run at the start of every pass, and the pass reconciles operations in stagePriority order. With
+// its foreman for landings and rebases and its publisher for publications;
+// the architect controller, then the shed controller, then the sealing
+// controller, then the building controller, then the refresh, landing,
+// assembly and publication controllers run at the start of every pass, and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
 // chief of staff, recorded answers are queued on their askers' threads, the
 // mason controller parks, resumes and starts units, and the scheduler runs, whose gate holds turns that a runtime pause covers and mason turns of units behind their feature branch;
@@ -496,8 +505,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository}}
 	refresh := &refresher{extractor: &extractor{s: s, repository: repository}}
 	finals := &finalReviewer{s: s, repository: repository}
+	publish := &publisher{s: s, repository: repository}
 	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, rounds: rounds, finals: finals}
-	hooks := []func(context.Context) error{draft.Pass, rounds.Pass, seals.Pass, build.Pass, refresh.Pass, land.Pass, finals.Pass}
+	hooks := []func(context.Context) error{draft.Pass, rounds.Pass, seals.Pass, build.Pass, refresh.Pass, land.Pass, finals.Pass, publish.Pass}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, options.Schedule)
 	}
@@ -534,7 +544,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		return nil
 	}
 	adapters[coreadapter.RunnerBoundary] = runner
-	adapters[coreadapter.RepositoryBoundary] = repositoryAdapter{other: adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land}
+	adapters[coreadapter.RepositoryBoundary] = repositoryAdapter{other: adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish}
 	options.Adapters = adapters
 	if options.Priority == nil {
 		options.Priority = stagePriority

@@ -19,7 +19,9 @@ const deliveryDocument = "final-delivery"
 const deliverySubject = "delivery-owner"
 
 // DeliveryPresentation is the final review and the description presented to
-// the owner. Criteria with a gap precede criteria with evidence.
+// the owner. Criteria with a gap precede criteria with evidence. A delivered
+// workstream presents the report, approval and publication it was delivered
+// with, and no draft.
 type DeliveryPresentation struct {
 	Project        config.ProjectID    `json:"project"`
 	Workstream     config.WorkstreamID `json:"workstream"`
@@ -28,6 +30,10 @@ type DeliveryPresentation struct {
 	Draft          string              `json:"draft"`
 	DraftHash      string              `json:"draft_hash"`
 	Approval       *DeliveryApproval   `json:"approval,omitempty"`
+	// Publication is the latest record of publishing an approval, and
+	// Delivered whether the workstream is delivered.
+	Publication *DeliveryPublication `json:"publication,omitempty"`
+	Delivered   bool                 `json:"delivered,omitempty"`
 }
 
 // DeliveryApproval preserves the exact text and reviewed identity the owner
@@ -137,6 +143,25 @@ func (s *Service) deliveryPresentation(ctx context.Context, raw string) (Deliver
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Internal, "cannot read feature state"}
 	}
+	published, err := publications(repository, stream)
+	if err != nil {
+		return DeliveryPresentation{}, &APIError{Internal, "cannot read publication records"}
+	}
+	var publication *DeliveryPublication
+	if len(published) > 0 {
+		publication = &published[len(published)-1]
+	}
+	if feature.Value == DeliveredState {
+		report, _, err := latestFinalReport(repository, stream)
+		if err != nil {
+			return DeliveryPresentation{}, &APIError{Internal, "cannot read final review"}
+		}
+		review, _, approval, err := deliveryDocuments(repository, stream)
+		if err != nil {
+			return DeliveryPresentation{}, &APIError{Internal, "cannot read delivery records"}
+		}
+		return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Approval: approval, Publication: publication, Delivered: true}, nil
+	}
 	if feature.Value != AssembledState {
 		return DeliveryPresentation{}, &APIError{Conflict, "the workstream is not assembled"}
 	}
@@ -172,13 +197,16 @@ func (s *Service) deliveryPresentation(ctx context.Context, raw string) (Deliver
 	if approval != nil && (approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter || approval.Seal != report.Seal) {
 		approval = nil
 	}
-	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Draft: draft, DraftHash: descriptionHash(draft), Approval: approval}, nil
+	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Draft: draft, DraftHash: descriptionHash(draft), Approval: approval, Publication: publication}, nil
 }
 
 func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryDecision) (DeliveryApproval, *APIError) {
 	presented, api := s.deliveryPresentation(ctx, raw)
 	if api != nil {
 		return DeliveryApproval{}, api
+	}
+	if presented.Delivered {
+		return DeliveryApproval{}, &APIError{Conflict, "the workstream is delivered"}
 	}
 	if req.Review != presented.Report.Review || req.ReviewRevision != presented.ReviewRevision || req.Commit != presented.Report.Commit || req.DraftHash != presented.DraftHash {
 		return DeliveryApproval{}, &APIError{Conflict, "the final report or draft description changed; read the current presentation"}
@@ -202,6 +230,17 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 	review, prior, existing, err := deliveryDocuments(repository, stream)
 	if err != nil {
 		return DeliveryApproval{}, &APIError{Internal, "cannot read delivery records"}
+	}
+	// Approving again after a refused publication records a new approval,
+	// which asks for another publication.
+	if existing != nil {
+		refused, err := publicationRefused(repository, stream, prior.Revision)
+		if err != nil {
+			return DeliveryApproval{}, &APIError{Internal, "cannot read publication records"}
+		}
+		if refused {
+			existing = nil
+		}
 	}
 	if existing != nil && req.Description == nil && existing.ReviewRevision == review.Revision && existing.Commit == req.Commit && existing.DraftHash == req.DraftHash {
 		return *existing, nil

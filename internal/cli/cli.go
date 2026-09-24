@@ -417,9 +417,18 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 					fmt.Fprintf(stdout, "Shown %s: %s — %s\n", criterion.Criterion, criterion.Text, criterion.Evidence)
 				}
 			}
-			fmt.Fprintf(stdout, "\nDraft pull request description:\n%s", presentation.Draft)
+			if !presentation.Delivered {
+				fmt.Fprintf(stdout, "\nDraft pull request description:\n%s", presentation.Draft)
+			}
 			if presentation.Approval != nil {
 				fmt.Fprintf(stdout, "\nApproved description:\n%s", presentation.Approval.Description)
+			}
+			if p := presentation.Publication; p != nil {
+				if p.Status == "opened" {
+					fmt.Fprintf(stdout, "\nPublished %s of %s at %s (%s) as pull request #%d: %s\n", p.Branch, p.Fork, p.Commit, p.Style, p.PullRequest, p.URL)
+				} else {
+					fmt.Fprintf(stdout, "\nPublishing %s of %s at %s (%s)\n", p.Branch, p.Fork, p.Commit, p.Style)
+				}
 			}
 			return 0
 		}

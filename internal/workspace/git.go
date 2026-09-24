@@ -83,6 +83,39 @@ func (g *Git) Fetch(ctx context.Context, remote, branch string) (string, error) 
 	return commit, nil
 }
 
+// RemoteBranch asks a remote which commit one of its branches points at, and
+// whether the branch exists. Nothing is fetched and no ref of the clone moves.
+func (g *Git) RemoteBranch(ctx context.Context, remote, branch string) (string, bool, error) {
+	env, err := g.sshEnvironment(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	out, err := g.runEnv(ctx, env, "ls-remote", "--heads", remote, "refs/heads/"+branch)
+	if err != nil {
+		return "", false, err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		commit, ref, ok := strings.Cut(line, "\t")
+		if ok && ref == "refs/heads/"+branch {
+			return commit, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// Push points a remote's branch at commit, only while the remote branch is at
+// expected, or absent when expected is empty; otherwise the remote refuses
+// and nothing moves. SSH runs in batch mode as it does for Fetch.
+func (g *Git) Push(ctx context.Context, remote, commit, branch, expected string) error {
+	env, err := g.sshEnvironment(ctx)
+	if err != nil {
+		return err
+	}
+	ref := "refs/heads/" + branch
+	_, err = g.runEnv(ctx, env, "push", "--quiet", "--no-verify", "--force-with-lease="+ref+":"+expected, remote, commit+":"+ref)
+	return err
+}
+
 // Branch returns the commit a local branch of the clone points at, and whether
 // the branch exists.
 func (g *Git) Branch(ctx context.Context, name string) (string, bool, error) {
