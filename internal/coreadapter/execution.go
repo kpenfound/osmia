@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 
 	"github.com/kpenfound/busybees/core/agent"
@@ -77,7 +78,16 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 	if err = r.Executor.Check(ctx, turn.Sandbox.Verified, turn.Execution); err != nil {
 		return result, err
 	}
-	raw, runErr := r.Executor.Run(ctx, req, turn.Execution)
+	runCtx := ctx
+	var monitor *costMonitor
+	if turn.Profile.CostLimitUSD > 0 {
+		var cancel context.CancelCauseFunc
+		runCtx, cancel = context.WithCancelCause(ctx)
+		defer cancel(nil)
+		monitor = &costMonitor{backend: turn.Profile.Backend, limit: turn.Profile.CostLimitUSD, cancel: cancel}
+		runCtx = context.WithValue(runCtx, costMonitorKey{}, monitor)
+	}
+	raw, runErr := r.Executor.Run(runCtx, req, turn.Execution)
 	if raw != nil {
 		result.Session.ID = raw.ClaudeID
 		result.SessionDirectory = raw.SessionDir
@@ -101,9 +111,24 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 	} else if runErr == nil {
 		runErr = errors.New("executor returned no result")
 	}
+	if monitor != nil {
+		spent, known, reached := monitor.snapshot()
+		if reached {
+			result.Usage.CostUSD, result.Usage.CostKnown = spent, known
+		}
+		if reached || result.Usage.CostKnown && result.Usage.CostUSD >= turn.Profile.CostLimitUSD {
+			if reached && errors.Is(runErr, context.Canceled) && errors.Is(context.Cause(runCtx), ErrSessionCostCap) {
+				runErr = nil
+			}
+			runErr = errors.Join(runErr, sessionCapError(turn.Profile.CostLimitUSD))
+			result.IsError = true
+			result.ErrorSubtype = "session_cost_cap"
+			result.Outcome = nil
+		}
+	}
 	if runErr != nil {
 		result.IsError = true
-		result.Cancelled = errors.Is(runErr, context.Canceled)
+		result.Cancelled = errors.Is(runErr, context.Canceled) && !errors.Is(runErr, ErrSessionCostCap)
 		result.TimedOut = result.TimedOut || errors.Is(runErr, context.DeadlineExceeded)
 		if result.ErrorSubtype == "" {
 			switch {
@@ -125,8 +150,8 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 	if !slices.Contains([]string{agent.AgentClaude, agent.AgentCodex, agent.AgentOpenCode}, p.Backend) {
 		return req, unsupported("backend", p.Backend)
 	}
-	if p.CostLimitUSD != 0 {
-		return req, unsupported("cost limit", "core has no per-session cost cap")
+	if p.CostLimitUSD < 0 || math.IsNaN(p.CostLimitUSD) || math.IsInf(p.CostLimitUSD, 0) {
+		return req, errors.New("invalid session cost limit")
 	}
 	if p.MaxTurns != 0 && p.Backend != agent.AgentClaude {
 		return req, unsupported("turn limit", "backend does not enforce max turns")

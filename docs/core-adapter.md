@@ -89,8 +89,13 @@ production), with grants built from the verified isolation, and refuses a
 session whose policy differs from them; see
 [enforced execution](isolation.md#enforced-execution). The fake engine
 tests validate request translation and grants, not actual isolation. Unresolved
-credential references, unsupported sandbox/backend modes, cost caps, and backend
+credential references, unsupported sandbox/backend modes, and backend
 turn limits or resume modes that core ignores also fail before execution.
+The local execution boundary monitors known stream costs for a per-session cap
+and records an infrastructure failure when the cap is reached. Claude reports
+cost at its final result; OpenCode reports it at each step; Codex does not
+report USD cost through the pinned core adapter. A final known result is also
+checked before an outcome is accepted.
 
 `WorkspaceAdapter.Select` is supplied by the service: it selects a core provider,
 validates its capabilities and translates source, name, revision and access

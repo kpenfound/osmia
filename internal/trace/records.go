@@ -163,6 +163,7 @@ type TurnResponse struct {
 	RequestRevision int                       `json:"request_revision"`
 	Result          coreadapter.SessionResult `json:"result"`
 	Failure         string                    `json:"failure,omitempty"`
+	FailureClass    coreadapter.FailureKind   `json:"failure_class,omitempty"`
 	Classification  *TurnClassification       `json:"classification,omitempty"`
 	ClassifierUsage []coreadapter.Usage       `json:"classifier_usage,omitempty"`
 }
@@ -265,6 +266,7 @@ func validate(r Record) error {
 	case TurnResponse:
 		valid = key(v.AgentID) && key(v.ThreadID) && key(v.TurnID) && key(v.RequestID) && v.RequestRevision > 0 && !v.Result.StartedAt.IsZero() && v.Result.Duration >= 0 && validUsage(v.Result.Usage) && (validSession(v.Result.Session) || (v.Result.Session == (coreadapter.BackendSession{}) && present(v.Failure)))
 		valid = valid && len(v.ClassifierUsage) <= 2
+		valid = valid && (v.FailureClass == "" || v.Failure != "" && (v.FailureClass == coreadapter.Infrastructure || v.FailureClass == coreadapter.Behavioural))
 		valid = valid && (len(v.ClassifierUsage) == 0 || v.Classification != nil)
 		for _, usage := range v.ClassifierUsage {
 			valid = valid && validUsage(usage)
