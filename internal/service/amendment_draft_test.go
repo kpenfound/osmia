@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -79,6 +80,11 @@ func TestArchitectAmendmentDrafts(t *testing.T) {
 			}
 			if operation == nil {
 				t.Fatal("amendment draft operation missing")
+			}
+			observation, err := a.Inspect(context.Background(), operation.Operation)
+			must(t, err)
+			if observation.State != coreadapter.EffectAbsent || observation.Evidence == "" {
+				t.Fatalf("absent amendment observation has no evidence: %+v", observation)
 			}
 			if tc.name == "plan-only" {
 				profile, _, err := f.s.roleExecution(f.s.current(), architectRole)
@@ -152,6 +158,102 @@ func TestArchitectAmendmentDrafts(t *testing.T) {
 				t.Fatalf("affected %+v", affected)
 			}
 		})
+	}
+}
+
+func TestAmendmentDraftReconcilesThroughRunningService(t *testing.T) {
+	t.Parallel()
+	f := newArchitectFixture(t)
+	t.Cleanup(func() { f.stop(t) })
+	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
+	f.script("amend-1-1", map[string]string{
+		plan.SpecPath: strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "An interrupted upload resumes from a durable checkpoint.", 1),
+	}, nil)
+	workstream := f.handIn(t, "amendment-reconcile", handedDesign)
+	f.await(t, workstream, sketched)
+
+	seedAmendment(t, f, f.repository(), workstream)
+	operations := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
+		t.Helper()
+		ops, err := f.repository().Operations(workstream)
+		must(t, err)
+		var drafts []trace.OperationRecord
+		for _, op := range ops {
+			if op.Operation.Action == AmendmentDraftAction {
+				drafts = append(drafts, op)
+			}
+		}
+		return drafts
+	})
+	if len(operations) != 1 || operations[0].Result == nil || operations[0].Result.Outcome != "succeeded" {
+		t.Fatalf("amendment draft operation did not succeed: %+v", operations)
+	}
+	for _, action := range operations[0].History {
+		if action.Kind == "observe" && (action.Observation == nil || action.Observation.Evidence == "") {
+			t.Fatalf("amendment observation has no evidence: %+v", action)
+		}
+	}
+	state, err := f.repository().Workflow(workstream, "amendment_1")
+	must(t, err)
+	if state.Value != "proposed" {
+		t.Fatalf("amendment state %q, want proposed", state.Value)
+	}
+	feature, err := f.repository().Workflow(workstream, trace.FeatureSubject)
+	must(t, err)
+	if feature.Value != BuildingState {
+		t.Fatalf("feature state %q, want %q", feature.Value, BuildingState)
+	}
+	adapter := &amendmentDrafter{drafter: &drafter{s: f.s, repository: f.repository()}}
+	observation, err := adapter.Inspect(context.Background(), operations[0].Operation)
+	must(t, err)
+	if observation.State != coreadapter.EffectCompleted || observation.Evidence == "" {
+		t.Fatalf("completed amendment observation has no evidence: %+v", observation)
+	}
+	health, err := f.c.Health(context.Background())
+	must(t, err)
+	if !health.Ready {
+		t.Fatalf("service is not ready after amendment reconciliation: %+v", health)
+	}
+}
+
+func TestAmendmentDraftInspectRunningTurnHasEvidence(t *testing.T) {
+	t.Parallel()
+	f := newArchitectFixture(t)
+	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
+	workstream := f.handIn(t, "amendment-inspect-running", handedDesign)
+	f.await(t, workstream, sketched)
+	f.stop(t)
+
+	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	defer repo.Close()
+	seedAmendment(t, f, repo, workstream)
+	adapter := &amendmentDrafter{drafter: &drafter{s: f.s, repository: repo}}
+	must(t, adapter.Pass(context.Background()))
+	operations, err := repo.Operations(workstream)
+	must(t, err)
+	var operation *trace.OperationRecord
+	for i := range operations {
+		if operations[i].Operation.Action == AmendmentDraftAction {
+			operation = &operations[i]
+			break
+		}
+	}
+	if operation == nil {
+		t.Fatal("amendment draft operation missing")
+	}
+	profile, _, err := f.s.roleExecution(f.s.current(), architectRole)
+	must(t, err)
+	turn := "amend-1-1"
+	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: f.project, Workstream: workstream, At: f.clock.Now(), Actor: draftingActor, Cause: operation.Operation.ID, Depth: 1}, AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: "Draft the amendment", Prompt: "Draft the amendment from request.json and draft/."}
+	_, err = repo.EnqueueTurn(context.Background(), request)
+	must(t, err)
+	_, err = repo.ClaimTurn(context.Background(), workstream, architectAgent, "running-amendment-turn", "fixture-session", f.clock.Now())
+	must(t, err)
+	observation, err := adapter.Inspect(context.Background(), operation.Operation)
+	must(t, err)
+	if observation.State != coreadapter.EffectUnknown || observation.Evidence == "" {
+		t.Fatalf("running amendment observation has no evidence: %+v", observation)
 	}
 }
 
