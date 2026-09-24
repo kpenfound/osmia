@@ -216,7 +216,7 @@ func TestAmendmentRoundResumesCompletedMember(t *testing.T) {
 	must(t, err)
 	replyCount, packetCount := 0, 0
 	for _, doc := range docs {
-		if doc.Path == amendmentReplyPath("1") {
+		if doc.Path == amendmentReplyPath("1", 1) {
 			replyCount++
 		}
 		if doc.Path == amendmentPacketPath("1") {

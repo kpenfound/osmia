@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -27,25 +28,52 @@ const (
 
 type amendmentDebate struct{ *debate }
 
+// amendmentOperation identifies the amendment and the debate round of an
+// amendment round or reply operation. A missing round is round 1.
 type amendmentOperation struct {
-	ID string `json:"id"`
+	ID    string `json:"id"`
+	Round int    `json:"round,omitempty"`
 }
 
-func amendmentRoundPath(id string, member string) string {
-	return "amendments/" + id + "/round-1/" + member + ".json"
+func (in amendmentOperation) round() int { return max(in.Round, 1) }
+
+func amendmentRoundPath(id string, round int, member string) string {
+	return fmt.Sprintf("amendments/%s/round-%d/%s.json", id, round, member)
 }
-func amendmentReplyPath(id string) string  { return "amendments/" + id + "/round-1/reply.json" }
+func amendmentReplyPath(id string, round int) string {
+	return fmt.Sprintf("amendments/%s/round-%d/reply.json", id, round)
+}
 func amendmentPacketPath(id string) string { return "amendments/" + id + "/packet.json" }
 
+// amendmentStep is the ID of the transition that moves an amendment to the
+// given state in the given debate round. Round 1 keeps the plain ID.
+func amendmentStep(id string, round int, to string) string {
+	if round > 1 {
+		return fmt.Sprintf("amendment-%s-%s-%d", id, to, round)
+	}
+	return "amendment-" + id + "-" + to
+}
+
+// amendmentReplyPrefix is the turn ID prefix of the architect's reply to one
+// debate round of an amendment.
+func amendmentReplyPrefix(id string, round int) string {
+	if round > 1 {
+		return fmt.Sprintf("amend-%s-round-%d-reply-", id, round)
+	}
+	return "amend-" + id + "-reply-"
+}
+
+// amendmentRecords returns the committee's records of every debate round of
+// an amendment, ordered by round and member.
 func amendmentRecords(repo *trace.Repository, stream config.WorkstreamID, id string) ([]shed.Record, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
 		return nil, err
 	}
-	prefix := "amendments/" + id + "/round-1/"
+	prefix := "amendments/" + id + "/round-"
 	latest := map[string]trace.Document{}
 	for _, doc := range docs {
-		if strings.HasPrefix(doc.Path, prefix) && doc.Path != amendmentReplyPath(id) {
+		if strings.HasPrefix(doc.Path, prefix) && !strings.HasSuffix(doc.Path, "/reply.json") {
 			if doc.Revision >= latest[doc.Path].Revision {
 				latest[doc.Path] = doc
 			}
@@ -57,13 +85,29 @@ func amendmentRecords(repo *trace.Repository, stream config.WorkstreamID, id str
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", doc.Path, err)
 		}
-		if amendmentRoundPath(id, r.Member) != doc.Path || r.Round != 1 {
+		if amendmentRoundPath(id, r.Round, r.Member) != doc.Path {
 			return nil, fmt.Errorf("%s: invalid amendment round record", doc.Path)
 		}
 		out = append(out, r)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Member < out[j].Member })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Round != out[j].Round {
+			return out[i].Round < out[j].Round
+		}
+		return out[i].Member < out[j].Member
+	})
 	return out, nil
+}
+
+// roundRecords returns the records of one debate round.
+func roundRecords(records []shed.Record, round int) []shed.Record {
+	var out []shed.Record
+	for _, r := range records {
+		if r.Round == round {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 func amendmentDissent(records []shed.Record) []shed.Entry { return shed.DissentRecord(records, nil) }
 func amendmentCommitteeSystemPrompt(project config.Project, in roundInput) string {
@@ -78,7 +122,10 @@ func amendmentCommitteePrompt(in roundInput, standing []shed.Dissent, answers []
 	if in.Amendment == "" {
 		return p
 	}
-	return fmt.Sprintf("This is the single bounded shed round for amendment %s to sealed documents. Read request.json and affected.json with the proposed spec.md and plan.json. Apply the normal charter veto, fit advice, size split and proof tests. The owner alone decides the amendment.\n\n%s", in.Amendment, p)
+	if in.Round > 1 {
+		return fmt.Sprintf("This is round %d of the shed debate for amendment %s to sealed documents, run because the owner asked for another round. Read request.json and affected.json with the proposed spec.md and plan.json. Apply the normal charter veto, fit advice, size split and proof tests, and concede what the architect's earlier answers settled. The owner alone decides the amendment.\n\n%s", in.Round, in.Amendment, p)
+	}
+	return fmt.Sprintf("This is the one automatic shed round for amendment %s to sealed documents. Read request.json and affected.json with the proposed spec.md and plan.json. Apply the normal charter veto, fit advice, size split and proof tests. The owner alone decides the amendment.\n\n%s", in.Amendment, p)
 }
 func (a amendmentDebate) Pass(ctx context.Context) error {
 	streams, err := a.repository.Workstreams()
@@ -98,71 +145,87 @@ func (a amendmentDebate) Pass(ctx context.Context) error {
 			return err
 		}
 		for _, req := range requests {
-			state, err := a.repository.Workflow(stream, amendmentSubject(req.ID))
-			if err != nil {
-				return err
-			}
-			switch state.Value {
-			case "proposed":
-				if a.s.options.Committee == nil {
-					continue
-				}
-				if err := a.ensureCommittee(ctx, stream, a.s.current().Capacity.Committee); err != nil {
-					return err
-				}
-				if err := a.start(ctx, stream, req.ID, state, "proposed", AmendmentRoundAction, "debating"); err != nil {
-					return err
-				}
-			case "heard":
-				if a.s.options.Architect != nil {
-					if err := a.drafter().ensureThread(ctx, stream); err != nil {
-						return err
-					}
-					if err := a.start(ctx, stream, req.ID, state, "heard", AmendmentReplyAction, "answering"); err != nil {
-						return err
-					}
-				}
-			case "answered":
-				if err := a.present(ctx, stream, req, state); err != nil {
-					return err
-				}
+			if err := a.one(ctx, stream, req); err != nil {
+				return fmt.Errorf("workstream %s amendment %s: %w", stream, req.ID, err)
 			}
 		}
 	}
 	return nil
 }
-func (a amendmentDebate) start(ctx context.Context, stream config.WorkstreamID, id string, state trace.WorkflowState, from, action, to string) error {
-	input, err := json.Marshal(amendmentOperation{id})
+
+// one moves one amendment on from the state it is in.
+func (a amendmentDebate) one(ctx context.Context, stream config.WorkstreamID, req trace.Amendment) error {
+	state, err := a.repository.Workflow(stream, amendmentSubject(req.ID))
 	if err != nil {
 		return err
 	}
-	transition := "amendment-" + id + "-" + to
+	round, err := amendmentRound(a.repository, stream, req.ID)
+	if err != nil {
+		return err
+	}
+	switch state.Value {
+	case "proposed":
+		if a.s.options.Committee == nil {
+			return nil
+		}
+		if err := a.ensureCommittee(ctx, stream, a.s.current().Capacity.Committee); err != nil {
+			return err
+		}
+		return a.start(ctx, stream, req.ID, round, state, "proposed", AmendmentRoundAction, "debating")
+	case "heard":
+		if a.s.options.Architect == nil {
+			return nil
+		}
+		if err := a.drafter().ensureThread(ctx, stream); err != nil {
+			return err
+		}
+		return a.start(ctx, stream, req.ID, round, state, "heard", AmendmentReplyAction, "answering")
+	case "answered":
+		return a.present(ctx, stream, req, round, state)
+	case amendmentApproved:
+		return a.reseal(ctx, stream, req, state)
+	case amendmentResealed, amendmentRejected, amendmentUnapplied:
+		return a.rule(ctx, stream, req, state)
+	}
+	return nil
+}
+
+func (a amendmentDebate) start(ctx context.Context, stream config.WorkstreamID, id string, round int, state trace.WorkflowState, from, action, to string) error {
+	in := amendmentOperation{ID: id}
+	if round > 1 {
+		in.Round = round
+	}
+	input, err := json.Marshal(in)
+	if err != nil {
+		return err
+	}
+	transition := amendmentStep(id, round, to)
 	event := trace.EventID(transition, "run")
 	op := coreadapter.Operation{ID: trace.OperationID(a.repository.Project(), stream, event), Boundary: coreadapter.RunnerBoundary, Action: action, Input: input}
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: a.header(transition, stream, "amendment_"+id+"_"+from, a.s.now()), Subject: amendmentSubject(id), From: from, To: to, Reason: "the amendment begins " + action}, Events: []trace.Event{{ID: event, Kind: action, Body: "Debate amendment " + id, Operation: &op}}}
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: a.header(transition, stream, "amendment_"+id+"_"+from, a.s.now()), Subject: amendmentSubject(id), From: from, To: to, Reason: fmt.Sprintf("round %d of the amendment begins %s", round, action)}, Events: []trace.Event{{ID: event, Kind: action, Body: "Debate amendment " + id, Operation: &op}}}
 	_, err = a.repository.Transact(ctx, tx)
 	return err
 }
-func (a amendmentDebate) locate(op coreadapter.Operation, action string) (config.WorkstreamID, string, error) {
+func (a amendmentDebate) locate(op coreadapter.Operation, action string) (config.WorkstreamID, string, int, error) {
 	var in amendmentOperation
-	if op.Action != action || op.Boundary != coreadapter.RunnerBoundary || json.Unmarshal(op.Input, &in) != nil || in.ID == "" {
-		return "", "", errors.New("invalid amendment operation")
+	if op.Action != action || op.Boundary != coreadapter.RunnerBoundary || json.Unmarshal(op.Input, &in) != nil || in.ID == "" || in.Round < 0 {
+		return "", "", 0, errors.New("invalid amendment operation")
 	}
 	streams, err := a.repository.Workstreams()
 	if err != nil {
-		return "", "", err
+		return "", "", 0, err
 	}
 	to := "debating"
 	if action == AmendmentReplyAction {
 		to = "answering"
 	}
 	for _, stream := range streams {
-		event := trace.EventID("amendment-"+in.ID+"-"+to, "run")
+		event := trace.EventID(amendmentStep(in.ID, in.round(), to), "run")
 		if trace.OperationID(a.repository.Project(), stream, event) == op.ID {
-			return stream, in.ID, nil
+			return stream, in.ID, in.round(), nil
 		}
 	}
-	return "", "", fmt.Errorf("amendment operation %s has no workstream", op.ID)
+	return "", "", 0, fmt.Errorf("amendment operation %s has no workstream", op.ID)
 }
 func (a amendmentDebate) outcome(stream config.WorkstreamID, id, operation string) (*coreadapter.OperationResult, error) {
 	transitions, err := trace.Read[trace.Transition](a.repository, stream)
@@ -177,7 +240,7 @@ func (a amendmentDebate) outcome(stream config.WorkstreamID, id, operation strin
 	return nil, nil
 }
 func (a amendmentDebate) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
-	stream, id, err := a.locate(op, op.Action)
+	stream, id, round, err := a.locate(op, op.Action)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -186,7 +249,7 @@ func (a amendmentDebate) Inspect(ctx context.Context, op coreadapter.Operation) 
 		return coreadapter.Observation{}, err
 	}
 	if result != nil {
-		return coreadapter.Observation{State: coreadapter.EffectCompleted, Result: result}, nil
+		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: fmt.Sprintf("round %d of amendment %s moved on: %s", round, id, result.Evidence), Result: result}, nil
 	}
 	if op.Action == AmendmentReplyAction {
 		thread, err := a.repository.Thread(stream, architectAgent)
@@ -194,7 +257,7 @@ func (a amendmentDebate) Inspect(ctx context.Context, op coreadapter.Operation) 
 			return coreadapter.Observation{}, err
 		}
 		for _, turn := range thread.Turns {
-			if strings.HasPrefix(turn.Request.TurnID, "amend-"+id+"-reply-") && turn.Claim != nil && turn.Response == nil && thread.Status != "interrupted" {
+			if strings.HasPrefix(turn.Request.TurnID, amendmentReplyPrefix(id, round)) && turn.Claim != nil && turn.Response == nil && thread.Status != "interrupted" {
 				return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "architect reply turn is running"}, nil
 			}
 		}
@@ -209,16 +272,16 @@ func (a amendmentDebate) Inspect(ctx context.Context, op coreadapter.Operation) 
 				return coreadapter.Observation{}, err
 			}
 			for _, turn := range thread.Turns {
-				if strings.HasPrefix(turn.Request.TurnID, "amend-"+id+"-round-1-") && turn.Claim != nil && turn.Response == nil && thread.Status != "interrupted" {
+				if strings.HasPrefix(turn.Request.TurnID, fmt.Sprintf("amend-%s-round-%d-", id, round)) && turn.Claim != nil && turn.Response == nil && thread.Status != "interrupted" {
 					return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "committee turn is running"}, nil
 				}
 			}
 		}
 	}
-	return coreadapter.Observation{State: coreadapter.EffectAbsent}, nil
+	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("round %d of amendment %s has not moved on and no turn of it is running", round, id)}, nil
 }
 func (a amendmentDebate) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
-	stream, id, err := a.locate(op, op.Action)
+	stream, id, round, err := a.locate(op, op.Action)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -229,21 +292,22 @@ func (a amendmentDebate) Apply(ctx context.Context, op coreadapter.Operation) (c
 		return *result, nil
 	}
 	if op.Action == AmendmentReplyAction {
-		return a.reply(ctx, op, stream, id)
+		return a.reply(ctx, op, stream, id, round)
 	}
-	return a.round(ctx, op, stream, id)
+	return a.round(ctx, op, stream, id, round)
 }
-func (a amendmentDebate) round(ctx context.Context, op coreadapter.Operation, stream config.WorkstreamID, id string) (coreadapter.OperationResult, error) {
+func (a amendmentDebate) round(ctx context.Context, op coreadapter.Operation, stream config.WorkstreamID, id string, n int) (coreadapter.OperationResult, error) {
 	members, err := a.committee(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	records, err := amendmentRecords(a.repository, stream, id)
+	all, err := amendmentRecords(a.repository, stream, id)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	records := roundRecords(all, n)
 	if len(records) == 0 {
-		in := roundInput{Round: 1, Spec: 1, Plan: 1, Amendment: id}
+		in := roundInput{Round: n, Spec: 1, Plan: 1, Amendment: id}
 		cfg := a.s.current()
 		records = make([]shed.Record, len(members))
 		failures := make([]error, len(members))
@@ -275,14 +339,14 @@ func (a amendmentDebate) round(ctx context.Context, op coreadapter.Operation, st
 			if err != nil {
 				return coreadapter.OperationResult{}, err
 			}
-			docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "amendment_" + id + "_round_1_" + r.Member, Revision: 1, Project: a.repository.Project(), Workstream: stream, At: at, Actor: trace.Actor{Kind: "agent", ID: r.Member}, Cause: op.ID, Depth: 1}, Path: amendmentRoundPath(id, r.Member), Content: string(data)})
+			docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: fmt.Sprintf("amendment_%s_round_%d_%s", id, n, r.Member), Revision: 1, Project: a.repository.Project(), Workstream: stream, At: at, Actor: trace.Actor{Kind: "agent", ID: r.Member}, Cause: op.ID, Depth: 1}, Path: amendmentRoundPath(id, n, r.Member), Content: string(data)})
 		}
 		if err := a.repository.RecordDocuments(ctx, docs); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 	}
 	if len(records) != len(members) {
-		return coreadapter.OperationResult{}, fmt.Errorf("amendment %s round has %d of %d member records", id, len(records), len(members))
+		return coreadapter.OperationResult{}, fmt.Errorf("amendment %s round %d has %d of %d member records", id, n, len(records), len(members))
 	}
 	state, err := a.repository.Workflow(stream, amendmentSubject(id))
 	if err != nil {
@@ -291,14 +355,14 @@ func (a amendmentDebate) round(ctx context.Context, op coreadapter.Operation, st
 	if state.Value != "debating" {
 		return coreadapter.OperationResult{}, trace.ErrConflict
 	}
-	reason := fmt.Sprintf("one amendment shed round heard %d committee members; %s", len(records), standing(amendmentDissent(records)))
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: a.header("amendment-"+id+"-heard", stream, op.ID, a.s.now()), Subject: amendmentSubject(id), From: "debating", To: "heard", Reason: reason}}
+	reason := fmt.Sprintf("amendment shed round %d heard %d committee members; %s", n, len(records), standing(amendmentDissent(append(slices.DeleteFunc(slices.Clone(all), func(r shed.Record) bool { return r.Round >= n }), records...))))
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: a.header(amendmentStep(id, n, "heard"), stream, op.ID, a.s.now()), Subject: amendmentSubject(id), From: "debating", To: "heard", Reason: reason}}
 	if _, err := a.repository.Transact(ctx, tx); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
 }
-func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, stream config.WorkstreamID, id string) (coreadapter.OperationResult, error) {
+func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, stream config.WorkstreamID, id string, n int) (coreadapter.OperationResult, error) {
 	if a.s.options.Architect == nil {
 		return coreadapter.OperationResult{}, errNoArchitect
 	}
@@ -311,7 +375,7 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	prefix := "amend-" + id + "-reply-"
+	prefix := amendmentReplyPrefix(id, n)
 	var queued *trace.QueuedTurn
 	attempts := 0
 	for i := range t.Turns {
@@ -353,7 +417,7 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 		for _, e := range open {
 			lines = append(lines, fmt.Sprintf("%s (%s on %s): %s", e.ID, e.Kind, e.Part, e.Argument))
 		}
-		prompt := fmt.Sprintf("Answer once for amendment %s, round 1. Read request.json, affected.json, spec.md, plan.json, charter.md and context.md. Use %s to answer each standing objection. This round is capped at one; do not redraft or decide for the owner. Dissent: %s", id, shed.ReplyTool, strings.Join(lines, "; "))
+		prompt := fmt.Sprintf("Answer once for amendment %s, round %d. Read request.json, affected.json, spec.md, plan.json, charter.md and context.md. Use %s to answer each standing objection. You answer this round once; do not redraft or decide for the owner. Dissent: %s", id, n, shed.ReplyTool, strings.Join(lines, "; "))
 		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: architectActor, Cause: op.ID, Depth: 1}, AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: architectSystemPrompt(a.s.current().Project), Prompt: prompt}
 		if _, err := a.repository.EnqueueTurn(ctx, req); err != nil {
 			return coreadapter.OperationResult{}, err
@@ -374,7 +438,7 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 	}
 	turn := queued.Request.TurnID
 	if queued.CompletedAt.IsZero() {
-		path := a.replyTurns(stream, id, open)
+		path := a.replyTurns(stream, id, n, open)
 		dispatcher := thread.Dispatcher{Runner: thread.Runner{Store: a.repository, Turns: &questions.Turns{Turns: path, Repository: a.repository}, Now: a.s.now}, Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 			dir := filepath.Join(a.drafter().turnDirectory(input.Workstream, input.Turn), "session")
 			return coreadapter.PreparedTurn{SessionDirectory: dir}, os.MkdirAll(dir, 0700)
@@ -397,7 +461,7 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 			}
 		}
 	}
-	reply := shed.Reply{Version: shed.Version, Round: 1, Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: turn}
+	reply := shed.Reply{Version: shed.Version, Round: n, Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: turn}
 	data, err := os.ReadFile(filepath.Join(a.drafter().turnDirectory(stream, turn), "output", "reply.json"))
 	if err == nil {
 		reply, err = shed.ParseReply(data)
@@ -414,18 +478,18 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "amendment_" + id + "_round_1_reply", Revision: 1, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: architectActor, Cause: op.ID, Depth: 1}, Path: amendmentReplyPath(id), Content: string(encoded)}
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: fmt.Sprintf("amendment_%s_round_%d_reply", id, n), Revision: 1, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: architectActor, Cause: op.ID, Depth: 1}, Path: amendmentReplyPath(id, n), Content: string(encoded)}
 	state, err := a.repository.Workflow(stream, amendmentSubject(id))
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: a.header("amendment-"+id+"-answered", stream, op.ID, a.s.now()), Subject: amendmentSubject(id), From: "answering", To: "answered", Reason: "the architect answered the amendment shed round once"}}
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: a.header(amendmentStep(id, n, "answered"), stream, op.ID, a.s.now()), Subject: amendmentSubject(id), From: "answering", To: "answered", Reason: fmt.Sprintf("the architect answered amendment shed round %d once", n)}}
 	if _, err := a.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: tx.Transition.Reason}, nil
 }
-func (a amendmentDebate) replyTurns(stream config.WorkstreamID, id string, open []shed.Entry) *isolation.Turns {
+func (a amendmentDebate) replyTurns(stream config.WorkstreamID, id string, n int, open []shed.Entry) *isolation.Turns {
 	cfg := a.s.current()
 	var engine coreadapter.Engine
 	var hosts coreadapter.MCPHosts
@@ -443,7 +507,7 @@ func (a amendmentDebate) replyTurns(stream config.WorkstreamID, id string, open 
 				return isolation.Selection{}, err
 			}
 			workspace := filepath.Join(a.drafter().turnDirectory(stream, scope.Turn), "workspace")
-			paths, err := a.stage(ctx, cfg.Project.Clone, stream, roundInput{Round: 1, Spec: 1, Plan: 1, Amendment: id}, workspace)
+			paths, err := a.stage(ctx, cfg.Project.Clone, stream, roundInput{Round: n, Spec: 1, Plan: 1, Amendment: id}, workspace)
 			if err != nil {
 				return isolation.Selection{}, err
 			}
@@ -457,7 +521,7 @@ func (a amendmentDebate) replyTurns(stream config.WorkstreamID, id string, open 
 				standing[i] = e.Dissent
 			}
 			file := filepath.Join(a.drafter().turnDirectory(stream, scope.Turn), "output", "reply.json")
-			return shed.ReplyTools(shed.ReplyTurn{Reply: shed.Reply{Version: shed.Version, Round: 1, Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: scope.Turn}, Standing: standing, Save: func(r shed.Reply) error {
+			return shed.ReplyTools(shed.ReplyTurn{Reply: shed.Reply{Version: shed.Version, Round: n, Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: scope.Turn}, Standing: standing, Save: func(r shed.Reply) error {
 				data, err := shed.EncodeReply(r)
 				if err != nil {
 					return err
@@ -472,12 +536,13 @@ func (a amendmentDebate) replyTurns(stream config.WorkstreamID, id string, open 
 			}})
 		}}
 }
-func (a amendmentDebate) present(ctx context.Context, stream config.WorkstreamID, req trace.Amendment, state trace.WorkflowState) error {
+func (a amendmentDebate) present(ctx context.Context, stream config.WorkstreamID, req trace.Amendment, round int, state trace.WorkflowState) error {
 	docs, err := trace.Read[trace.Document](a.repository, stream)
 	if err != nil {
 		return err
 	}
 	var spec, graph, affected, reply string
+	packetRevision := 1
 	for _, doc := range docs {
 		switch doc.Path {
 		case "amendments/" + req.ID + "/spec.md":
@@ -486,8 +551,10 @@ func (a amendmentDebate) present(ctx context.Context, stream config.WorkstreamID
 			graph = doc.Content
 		case "amendments/" + req.ID + "/affected.json":
 			affected = doc.Content
-		case amendmentReplyPath(req.ID):
+		case amendmentReplyPath(req.ID, round):
 			reply = doc.Content
+		case amendmentPacketPath(req.ID):
+			packetRevision = max(packetRevision, doc.Revision+1)
 		}
 	}
 	records, err := amendmentRecords(a.repository, stream, req.ID)
@@ -503,6 +570,7 @@ func (a amendmentDebate) present(ctx context.Context, stream config.WorkstreamID
 		}
 	}
 	packet := struct {
+		Round          int             `json:"round"`
 		Request        trace.Amendment `json:"request"`
 		Spec           string          `json:"spec"`
 		Plan           string          `json:"plan"`
@@ -510,18 +578,18 @@ func (a amendmentDebate) present(ctx context.Context, stream config.WorkstreamID
 		Dissent        []shed.Entry    `json:"dissent"`
 		Reply          json.RawMessage `json:"reply"`
 		Recommendation string          `json:"recommendation"`
-	}{req, spec, graph, json.RawMessage(affected), dissent, json.RawMessage(reply), recommendation}
+	}{round, req, spec, graph, json.RawMessage(affected), dissent, json.RawMessage(reply), recommendation}
 	data, err := json.MarshalIndent(packet, "", "  ")
 	if err != nil {
 		return err
 	}
-	id := "amendment-" + req.ID + "-presented"
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id + "-packet", Revision: 1, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: shedActor, Cause: id, Depth: 1}, Path: amendmentPacketPath(req.ID), Content: string(data) + "\n"}
-	body := fmt.Sprintf("Present amendment %s to the owner for a decision. Request: %s. Reason: %s. Proposed change: %s. Affected units and proofs: %s. Dissent: %s. Recommendation: %s. The round cap approves nothing. Packet: %s", req.ID, strings.Join(req.Citations, ", "), req.Reason, req.Change, affected, standing(dissent), recommendation, amendmentPacketPath(req.ID))
+	id := amendmentStep(req.ID, round, "presented")
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "amendment-" + req.ID + "-presented-packet", Revision: packetRevision, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: shedActor, Cause: id, Depth: 1}, Path: amendmentPacketPath(req.ID), Content: string(data) + "\n"}
+	body := fmt.Sprintf("Present amendment %s to the owner for a decision. Request: %s. Reason: %s. Proposed change: %s. Affected units and proofs: %s. Dissent: %s. Recommendation: %s. The round cap approves nothing. Packet: %s, revision %d, after round %d. The owner approves, rejects, asks for another round or overrules the objections that stand, with osmia amendment %s %s or through you.", req.ID, strings.Join(req.Citations, ", "), req.Reason, req.Change, affected, standing(dissent), recommendation, amendmentPacketPath(req.ID), packetRevision, round, stream, req.ID)
 	for _, e := range dissent {
 		body += fmt.Sprintf("\n- %s (%s, blocking=%t): %s", e.ID, e.Kind, e.Blocking, e.Argument)
 	}
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: a.header(id, stream, "amendment-"+req.ID+"-answered", a.s.now()), Subject: amendmentSubject(req.ID), From: "answered", To: "presented", Reason: "the chief of staff presents the amendment and dissent to the owner"}, Events: []trace.Event{trace.Notice(id, "amendment", body)}}
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: a.header(id, stream, amendmentStep(req.ID, round, "answered"), a.s.now()), Subject: amendmentSubject(req.ID), From: "answered", To: "presented", Reason: "the chief of staff presents the amendment and dissent to the owner"}, Events: []trace.Event{trace.Notice(id, "amendment", body)}}
 	_, err = a.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx)
 	return err
 }
