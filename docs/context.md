@@ -35,9 +35,11 @@ reload.
 | Entities | `kb/entities.json`, record `kb-entities` | Latest recorded map revision. Without a scope, every entity; with a scope, the entities `ResolveEntities` returns, including their parts, with their path patterns. Scope names that resolve to nothing are listed as unresolved. |
 | Decisions | `workstreams/<id>/questions/<q>/rulings.jsonl` | The latest revision of each ruling in the workstream, or in every workstream of the project without one, with its record ID, revision and question. An owner ruling shows what the owner said; one the chief of staff has not relayed shows `answer: waiting for the chief of staff to relay the ruling`. An empty set is valid. |
 | Notices | `workstreams/<id>/questions/<q>/rulings.jsonl` | Every owner ruling of the project that the chief of staff relayed with scope `notify`, from every workstream, whatever the bundle's workstream and entity scope: its source, record ID, revision, workstream, the owner's exact response and the chief of staff's relay. A ruling relayed to a batch of questions is one notice, sourced from the batch's first ruling in decision order. A ruling relayed with scope `local` is no notice. An empty set is valid. |
+| Charter notices | `workstreams/<id>/questions/<q>/charter.json` | Every [charter proposal](trace.md#charter-proposals) of the project that the owner ratified and the charter records (`chartered`), from every workstream, whatever the bundle's scope: its source, record ID, revision, workstream, the rule, the number it took, the `charter.md` revision that holds it, the ruling it came from and the owner's words in it. A proposal waiting, declined, or ratified but not yet in the charter is no notice. An empty set is valid. |
 
 Knowledge-base files are ordered by subsystem name, entities by ID, and decisions
-and notices by workstream, time and record ID. The same files and records always produce the
+and notices by workstream, time and record ID, and charter notices by when the
+charter recorded them. The same files and records always produce the
 same bundle.
 
 A symlinked or otherwise irregular `kb/<subsystem>.md` entry the bundle would
@@ -64,7 +66,11 @@ Each notice uses the same attributed envelope as an answer turn: an
 attributed to the chief of staff. Every content line is prefixed with `| `,
 and the header records the original byte count. Backslashes and carriage
 returns in content are escaped. Content that resembles a delimiter or an
-attribution line remains inside its section.
+attribution line remains inside its section. Charter notices follow the
+ruling notices under the same heading, each with the owner's words as
+`owner_response` and the ratified rule as a `charter_rule` section attributed
+to the chief of staff's proposal, ratified by the owner. `No project-wide
+notices.` stands for neither kind.
 
 ## Status
 

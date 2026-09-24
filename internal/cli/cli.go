@@ -20,6 +20,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 const usage = `Usage: osmia <command> [--root PATH]
@@ -45,6 +46,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   conversation <workstream-id> [--json]
   inbox [--json]
   answer <inbox-number> <ruling> [--json]
+  charter [<workstream-id> <question> [ratify|decline [note]]] [--json]
   contested <workstream> <unit> <review|revise> <note> [--json]
   pause <all|project-id|workstream-id> [--hard] [--reason TEXT] [--json]
   resume <all|project-id|workstream-id> [--json]
@@ -174,6 +176,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 0
 	case "answer":
 		valid = len(a) == 2
+	case "charter":
+		valid = len(a) == 0 || len(a) == 2 || (len(a) == 3 || len(a) == 4) && (a[2] == trace.CharterRatify || a[2] == trace.CharterDecline)
 	case "contested":
 		valid = len(a) == 4
 	case "pause", "resume":
@@ -218,7 +222,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "trace" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "trace" || cmd == "status" && len(a) == 1)
 	}
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
@@ -558,6 +562,41 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, list)
 		}
 		showInbox(stdout, list)
+		return 0
+	}
+	if cmd == "charter" {
+		if len(a) == 0 {
+			list, err := c.CharterProposals(ctx)
+			if err != nil {
+				return fail(err)
+			}
+			if o.json {
+				return output(stdout, stderr, list)
+			}
+			showCharterProposals(stdout, list)
+			return 0
+		}
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		var view service.CharterProposalView
+		if len(a) == 2 {
+			view, err = c.CharterProposal(ctx, id, a[1])
+		} else {
+			req := service.CharterDecisionRequest{Decision: a[2]}
+			if len(a) == 4 {
+				req.Note = a[3]
+			}
+			view, err = c.DecideCharter(ctx, id, a[1], req)
+		}
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, view)
+		}
+		showCharterProposal(stdout, view)
 		return 0
 	}
 	if cmd == "answer" {
@@ -921,6 +960,45 @@ func showInbox(w io.Writer, list service.InboxResponse) {
 		for _, q := range e.Asked {
 			block(fmt.Sprintf("Asked by %s as question %s", q.AskedBy, q.ID), q.Question)
 		}
+	}
+}
+
+func showCharterProposals(w io.Writer, list service.CharterProposalsResponse) {
+	if len(list.Proposals) == 0 {
+		fmt.Fprintln(w, "Charter: no proposed rules are waiting for you")
+		return
+	}
+	fmt.Fprintf(w, "Charter: %d proposed rules waiting; decide one with osmia charter <workstream-id> <question> ratify|decline\n", len(list.Proposals))
+	for _, p := range list.Proposals {
+		fmt.Fprintln(w)
+		showCharterProposal(w, p)
+	}
+}
+
+func showCharterProposal(w io.Writer, p service.CharterProposalView) {
+	fmt.Fprintf(w, "Question %s of %s, proposed %s: %s\n", p.Question, p.Workstream, p.ProposedAt.Format(time.RFC3339), p.State)
+	number := "would be"
+	if p.State == trace.CharterChartered {
+		number = "is"
+	}
+	fmt.Fprintf(w, "  Rule: charter#%d %s: %s\n", p.Number, number, p.Rule)
+	fmt.Fprintf(w, "  From: %s revision %d\n", p.Ruling, p.RulingRevision)
+	lines := strings.Split(strings.TrimRight(p.OwnerResponse, "\n"), "\n")
+	fmt.Fprintf(w, "  Your ruling: %s\n", lines[0])
+	for _, line := range lines[1:] {
+		fmt.Fprintf(w, "    %s\n", line)
+	}
+	if p.Decision != "" {
+		fmt.Fprintf(w, "  Decision: %s\n", p.Decision)
+	}
+	if p.Note != "" {
+		fmt.Fprintf(w, "  Note: %s\n", p.Note)
+	}
+	if p.Charter > 0 {
+		fmt.Fprintf(w, "  Recorded in charter.md revision %d\n", p.Charter)
+	}
+	if p.Detail != "" {
+		fmt.Fprintf(w, "%s\n", p.Detail)
 	}
 }
 

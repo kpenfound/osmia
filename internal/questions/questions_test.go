@@ -404,8 +404,7 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 	}
 
 	// An answer without a citation, or with one that names nothing, records
-	// nothing and says why. The reserved tools say so and record nothing.
-	reserved := `{"recorded":false,"reason":"reserved until standing rulings (M4)"}`
+	// nothing and says why.
 	before := f.head(t)
 	for _, c := range [][3]string{
 		{"answer", `{"question":"1","text":"In files.","citations":[]}`, `{"recorded":false,"reason":"an answer needs at least one citation; escalate a question the record does not settle"}`},
@@ -413,16 +412,15 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 		{"answer", `{"question":"1","text":"In files.","citations":["the code"]}`, `{"recorded":false,"reason":"citation \"the code\" does not resolve: it is not one of ` + questions.CitationForms + `"}`},
 		{"answer", `{"question":"1","text":"In files.","citations":["spec#9"]}`, `{"recorded":false,"reason":"citation \"spec#9\" does not resolve: the spec has no acceptance criterion numbered 9 exactly once"}`},
 		{"route_amendment", `{"question":"1","citations":["spec#1"],"change":"Amend criterion 1.","reason":"Needed"}`, `{"recorded":false,"reason":"this workstream has no seal"}`},
-		{"propose_charter", `{"question":"1","text":"Amend criterion 1."}`, reserved},
+		{"propose_charter", `{"question":"1","rule":"Every upload resumes."}`, `{"recorded":false,"reason":"question 1 has no ruling from the owner; only a ruling the owner gave can become a charter rule"}`},
 		{"route_amendment", `{"question":"1","citations":["spec#9"],"change":"Amend","reason":"Needed"}`, `{"recorded":false,"reason":"citation \"spec#9\" does not resolve: the spec has no acceptance criterion numbered 9 exactly once"}`},
-		{"propose_charter", `{}`, reserved},
 	} {
 		if got := call(t, chief[c[0]], c[1]); got != c[2] {
 			t.Fatalf("%s %s:\n%s\nwant\n%s", c[0], c[1], got, c[2])
 		}
 	}
 	if got := f.head(t); got != before {
-		t.Fatalf("a refused or reserved call committed: %s, was %s", got, before)
+		t.Fatalf("a refused call committed: %s, was %s", got, before)
 	}
 	// Checking a charter citation first records the owner's pending edit of
 	// the charter, and nothing else, even when the answer is then refused.
@@ -717,5 +715,91 @@ func TestRelayRulingDeliversToEachAsker(t *testing.T) {
 		if len(got) != 2 || got[1].Request.TurnID != "answer_"+id || got[1].Request.ThreadID != agent+"_thread" || got[1].Request.Prompt != want || got[1].Request.Cause != "question_"+id+"_answered" {
 			t.Fatalf("%s turns: %+v", agent, got)
 		}
+	}
+}
+
+// The chief of staff proposes the owner's ruling on a question as a charter
+// rule, numbered after the charter's highest rule. A question that does not
+// exist or has no ruling of the owner, rule text that cannot be one charter
+// rule and a second proposal for the same ruling are refused and record
+// nothing. The proposal is an owner gate and survives a restart.
+func TestProposeCharterFromAnOwnerRuling(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	mason := f.turn(t, "mason1", "mason", "build1")
+	if _, err := f.repo.Ask(ctx, "mason1", mason, "Must uploads resume?", start); err != nil {
+		t.Fatal(err)
+	}
+	reviewer := f.turn(t, "reviewer1", "reviewer", "review1")
+	if _, err := f.repo.Ask(ctx, "reviewer1", reviewer, "Is every change tested?", start); err != nil {
+		t.Fatal(err)
+	}
+	chief := tools(t, f, "chief", f.turn(t, "chief", trace.ChiefOfStaff, "chief1"), start)
+	if got := call(t, chief["answer"], `{"question":"2","text":"Yes.","citations":["charter#1"]}`); !strings.Contains(got, `"recorded":true`) {
+		t.Fatal(got)
+	}
+	if got := call(t, chief["escalate"], `{"questions":["1"],"rephrasing":"Must uploads resume?","blocked":"The resume unit.","options":[],"recommendation":"Yes."}`); !strings.Contains(got, `"recorded":true`) {
+		t.Fatal(got)
+	}
+	if _, err := f.repo.Rule(ctx, 1, "Uploads must always resume.", owner, start); err != nil {
+		t.Fatal(err)
+	}
+	before := f.head(t)
+	for _, c := range [][2]string{
+		{`{"question":"9","rule":"Uploads resume."}`, "there is no question 9 in this workstream"},
+		{`{"question":"2","rule":"Uploads resume."}`, "question 2 has no ruling from the owner; only a ruling the owner gave can become a charter rule"},
+		{`{"question":"1","rule":" "}`, "rule is required: the standing rule as the charter should state it"},
+		{`{"question":"1","rule":"Uploads\nresume."}`, "rule must be one line: a charter rule is one numbered item"},
+		{`{"question":"1","rule":"Uploads resume. <!-- always"}`, "rule must not contain an HTML comment marker"},
+	} {
+		if got, want := call(t, chief["propose_charter"], c[0]), `{"recorded":false,"reason":"`+c[1]+`"}`; got != want {
+			t.Fatalf("propose_charter %s:\n%s\nwant\n%s", c[0], got, want)
+		}
+	}
+	if got := f.head(t); got != before {
+		t.Fatalf("a refused proposal committed: %s, was %s", got, before)
+	}
+	// Rules 1 to 3 are in the owner's unrecorded edit of the charter, 3
+	// twice.
+	if got := call(t, chief["propose_charter"], `{"question":"1","rule":" Uploads resume. "}`); got != `{"recorded":true,"question":"1","number":4,"next":"The owner ratifies or declines the proposal; make it the attention of your status until they do."}` {
+		t.Fatalf("propose_charter: %s", got)
+	}
+	recorded := f.head(t)
+	if got := call(t, chief["propose_charter"], `{"question":"1","rule":"Uploads always resume."}`); got != `{"recorded":false,"reason":"the owner's ruling on question 1 already has a charter proposal, which is proposed"}` {
+		t.Fatalf("second proposal: %s", got)
+	}
+	if got := f.head(t); got != recorded {
+		t.Fatal("a second proposal committed")
+	}
+	statuses, err := f.repo.Statuses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range statuses {
+		want := []trace.OwnerGate{}
+		if s.Workstream == stream {
+			want = []trace.OwnerGate{{Kind: "charter", Reference: "1"}}
+		}
+		if !reflect.DeepEqual(s.Gates, want) {
+			t.Fatalf("gates of %s: %+v", s.Workstream, s.Gates)
+		}
+	}
+
+	if err := f.repo.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.repo, err = trace.Open(f.root, f.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.repo.Close() })
+	proposals, err := f.repo.CharterProposals()
+	if err != nil || len(proposals) != 1 {
+		t.Fatalf("proposals %+v: %v", proposals, err)
+	}
+	p := proposals[0]
+	want := trace.CharterProposal{Question: "1", Ruling: "workstreams/" + string(stream) + "/questions/1/rulings.jsonl", RulingRevision: 1, OwnerResponse: "Uploads must always resume.", Rule: "Uploads resume.", Number: 4}
+	if p.Workstream != stream || p.Proposal != want || p.State.Value != trace.CharterProposed || p.Proposed.Path != "questions/1/charter.json" || p.Proposed.Actor != (trace.Actor{Kind: "agent", ID: "chief"}) || p.Latest.Revision != 1 {
+		t.Fatalf("proposal %+v", p)
 	}
 }

@@ -249,7 +249,7 @@ func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		prompts[req.Name] = req
-		tools(ctx, req.Name, session, "answer", "decide_amendment", "escalate", "prioritise", "propose_charter", "relay_ruling", "route_amendment", "set_status")
+		tools(ctx, req.Name, session, "answer", "decide_amendment", "decide_charter", "escalate", "prioritise", "propose_charter", "relay_ruling", "route_amendment", "set_status")
 		switch {
 		case len(sent) > 0 && req.Name == sent[0].Turn:
 			// A status naming an agent by its ID is refused; one in words is

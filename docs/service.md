@@ -2034,7 +2034,7 @@ order, except the librarian's, which carries no feature (see
 | `units` | One `{"unit", "state"}` per unit of the sealed plan and each follow-up of a final review or an amendment, in order, once their states are recorded; `reason` gives a mason contest's classification or bound exhaustion, `deferral` holds the [decision](#why-a-ready-unit-waits) that keeps a `ready` unit waiting, with its `message` as `reason`, `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
 | `advisories` | The workstream's active [overlap advisories](#overlapping-workstreams): `workstream`, the other workstream; `seal` and `other_seal`, the seals compared; `subsystems`, `entities` and `paths`, what they share; and `message`, the advisory as the chief of staff received it; empty when none is active |
 | `open_questions` | Questions in the workstream without a ruling |
-| `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, or `contested` with the unit ID; a mason contest also has `reason`; empty when none wait |
+| `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, `contested` with the unit ID, or a `charter` proposal with its question number; a mason contest also has `reason`; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
 | `status` | `null` until the chief of staff writes one; otherwise `goal`, `attention` (empty when nothing needs the owner), `note`, `agents`, `revision` and `updated_at` |
 
@@ -2109,6 +2109,67 @@ reconciler, but only a service with `Options.Threads` delivers the event to
 the chief of staff and the relayed ruling to the askers, as described under
 [questions](#questions).
 
+## Charter proposals
+
+When the owner's ruling on a question is a standing rule rather than a
+decision about one feature, the chief of staff proposes it as a charter rule
+with `propose_charter`, naming the question and the rule as the charter should
+state it. The proposal waits for the owner as a `charter` gate on the
+workstream's status, which the chief of staff makes the attention of its
+status, and the owner ratifies or declines it with
+`POST /v1/charter/<workstream-id>/<question>`, `osmia charter`, or by telling
+the workstream's chief of staff, which records the decision with
+[`decide_charter`](#charter-decisions-at-the-owners-request). The records are
+described under [charter proposals](trace.md#charter-proposals) in the trace
+reference.
+
+`GET /v1/charter` returns a `CharterProposalsResponse`: `proposals`, oldest
+first, the active project's proposals still waiting for the owner, leaving
+out those of abandoned workstreams. `GET /v1/charter/<workstream-id>/<question>`
+returns one proposal in any state. Both describe a proposal as a
+`CharterProposalView`:
+
+| Field | Meaning |
+| --- | --- |
+| `workstream`, `question` | The workstream and the question whose ruling the proposal comes from |
+| `state` | `proposed`, `ratified` (the rule is being appended to the charter), `chartered` or `declined` |
+| `rule` | The rule as the chief of staff proposed it |
+| `number` | The number the rule would take when proposed; once `chartered`, the number it took |
+| `ruling`, `ruling_revision` | The trace record path and revision of the owner's ruling |
+| `owner_response` | The owner's words in that ruling |
+| `proposed_at` | When the chief of staff proposed it |
+| `decision`, `note` | The owner's decision, `ratify` or `decline`, and note, once decided |
+| `charter` | The `charter.md` revision that records the rule, once `chartered` |
+| `detail` | What a decision request did |
+
+`POST /v1/charter/<workstream-id>/<question>` takes a `CharterDecisionRequest`,
+`{"decision":"ratify|decline","note":"…"}`, and records the decision in one
+commit with the proposal's move to `ratified` or `declined`. A declined
+proposal changes neither the charter nor any bundle, and the chief of staff
+receives a notice of it. A ratified one is appended to the charter by the
+service's charter controller on its next pass: the rule takes the next number
+after the charter's highest rule, under a `## Standing rulings` heading, with
+the source ruling recorded in an HTML comment beside it. The charter is read
+through the trace first, so an owner edit is recorded as the owner's revision,
+and an edit saved during the write is detected and recorded rather than
+overwritten; the rule is then appended after it. Once the rule is in the
+charter the proposal is `chartered`, the chief of staff receives a notice,
+and every later [bundle](context.md) on the project, whatever its workstream,
+carries the rule as one notice. A restart at any point writes the rule and
+raises the notice once.
+
+| Case | Error |
+| --- | --- |
+| A decision other than `ratify` or `decline` | `validation`: `a charter decision is ratify or decline` |
+| The workstream is not in the active project | `validation` |
+| No proposal for the question | `not_found`: `workstream <id> has no charter proposal for question <n>` |
+| The workstream is abandoned | `conflict`: `workstream <id> is abandoned and its charter proposals take no decision` |
+| The proposal was decided the other way | `conflict`: `the charter proposal of question <n> is already decided: <decision>` |
+| The trace cannot be read or written | `internal` |
+
+Deciding a proposal the same way again returns it with a `detail` saying the
+decision is already recorded, and records nothing.
+
 ## Conversation
 
 `POST /v1/conversation/<workstream-id>` sends the owner's message to the
@@ -2126,7 +2187,9 @@ The accepted request fixes, at acceptance:
   override;
 - the prompt, which is the message text as sent;
 - the system prompt, which names the workstream, tells the chief of staff how
-  to [set the priority order](#priority-at-the-owners-request) and carries the
+  to [set the priority order](#priority-at-the-owners-request) and record the
+  owner's [amendment](#amendment-decisions-at-the-owners-request) and
+  [charter](#charter-decisions-at-the-owners-request) decisions, and carries the
   workstream's [context bundle](context.md), latest stored status and open
   inbox escalations rendered from the trace at acceptance.
 
@@ -2196,6 +2259,18 @@ and every decision the service refuses, record nothing and return
 `{"recorded":false,"reason":"…"}`. An accepted decision returns
 `{"recorded":true,"amendment":"<n>","state":"…","detail":"…"}`.
 
+### Charter decisions at the owner's request
+
+The chief of staff's `decide_charter` tool records the owner's decision on a
+[charter proposal](#charter-proposals) when the owner gives it in a message.
+Its input is `{"question":"<n>","decision":"ratify|decline","note":"…"}`, for
+a proposal of the turn's workstream. It records exactly what
+`POST /v1/charter/<workstream-id>/<n>` records, with the owner whose message
+the turn answers as the decision's actor and the turn's request as its cause.
+A turn that answers no message from the owner, and every decision the service
+refuses, record nothing and return `{"recorded":false,"reason":"…"}`. An
+accepted decision returns `{"recorded":true,"question":"<n>","state":"…","detail":"…"}`.
+
 ## Running turns
 
 `osmia serve` starts the service with `service.Enforce(opts,
@@ -2212,7 +2287,9 @@ sketched, and every queued chief-of-staff turn. All four use one `Enforcement`:
 
 `Options.Threads` binds the thread dispatcher to isolated turns that grant
 the chief of staff `set_status`, [`prioritise`](#priority-at-the-owners-request),
-[`decide_amendment`](#amendment-decisions-at-the-owners-request), `answer`, `escalate`, `relay_ruling`, `route_amendment` and `propose_charter`; the mason may write and execute in its
+[`decide_amendment`](#amendment-decisions-at-the-owners-request),
+[`decide_charter`](#charter-decisions-at-the-owners-request), `answer`, `escalate`, `relay_ruling`, `route_amendment` and
+[`propose_charter`](#charter-proposals); the mason may write and execute in its
 view and holds `file_read`, `file_write`, `ask`, `amend` and
 [`done`](#finishing-units). The reviewer holds `file_read`, `ask`, `amend` and
 `verdict`. A thread turn of any other role

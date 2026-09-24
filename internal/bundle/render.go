@@ -102,12 +102,20 @@ func (b Bundle) Render() string {
 
 	line("")
 	line("## Notices")
-	if len(b.Notices) == 0 {
+	if len(b.Notices) == 0 && len(b.CharterNotices) == 0 {
 		line("No project-wide notices.")
 	}
 	for _, n := range b.Notices {
 		line("- %s (record %s revision %d, workstream %s)", n.Source, n.Record, n.Revision, n.Workstream)
 		section, err := envelope.Render(envelope.Section{Name: "owner_response", Text: n.OwnerResponse}, envelope.Section{Name: "returned_answer", Text: n.ReturnedAnswer})
+		if err != nil {
+			panic(err)
+		}
+		w.WriteString(section)
+	}
+	for _, n := range b.CharterNotices {
+		line("- %s (record %s revision %d, workstream %s): the owner ratified charter#%d, recorded in charter.md revision %d, from %s revision %d", n.Source, n.Record, n.Revision, n.Workstream, n.Number, n.Charter, n.Ruling, n.RulingRevision)
+		section, err := envelope.Render(envelope.Section{Name: "owner_response", Text: n.OwnerResponse}, envelope.Section{Name: "charter_rule", Text: n.Rule})
 		if err != nil {
 			panic(err)
 		}

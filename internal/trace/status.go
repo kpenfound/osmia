@@ -219,6 +219,13 @@ func ownerGates(records []Record, stream config.WorkstreamID, view *workflowView
 			gates = append(gates, OwnerGate{Kind: "ratification", Reference: string(stream)})
 		}
 	}
+	if states[FeatureSubject].Value != "abandoned" {
+		for subject, state := range states {
+			if question, ok := strings.CutPrefix(subject, CharterSubject("")); ok && state.Value == CharterProposed {
+				gates = append(gates, OwnerGate{Kind: "charter", Reference: question})
+			}
+		}
+	}
 	for subject, state := range states {
 		if state.Value == "contested" && (strings.HasPrefix(subject, "unit-") || strings.HasPrefix(subject, "unit_")) {
 			reference := strings.TrimPrefix(subject, "unit-")
