@@ -441,20 +441,7 @@ func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
 // it does not name last, then by when each last started a unit, least
 // recently first, then by ID.
 func startOrder(streams []building, priorities []runtime.Priority, project config.ProjectID) []building {
-	rank := map[config.WorkstreamID]int{}
-	for _, p := range priorities {
-		if p.Project == project {
-			for i, stream := range p.Workstreams {
-				rank[stream] = i + 1
-			}
-		}
-	}
-	order := func(stream config.WorkstreamID) int {
-		if r, ok := rank[stream]; ok {
-			return r
-		}
-		return len(rank) + 1
-	}
+	order := scheduler.Rank(priorities, project)
 	slices.SortFunc(streams, func(a, b building) int {
 		return cmp.Or(cmp.Compare(order(a.stream), order(b.stream)), a.started.Compare(b.started), strings.Compare(string(a.stream), string(b.stream)))
 	})

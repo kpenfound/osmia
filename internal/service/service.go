@@ -388,6 +388,12 @@ func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(c
 	}
 }
 
+// priorities returns the runtime priority order in force.
+func (s *Service) priorities() []runtime.Priority {
+	st, _ := s.store.Effective()
+	return st.Priorities
+}
+
 // chiefProfile returns the chief of staff's effective profile for a new turn.
 func (s *Service) chiefProfile(cfg *config.Config) func() (coreadapter.Profile, error) {
 	return func() (coreadapter.Profile, error) {
@@ -520,7 +526,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		runner.turns = abandonable{Reconciler: bound, s: s, repository: repository}
 		limits := cfg.Capacity
 		limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
-		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg, repository), Capacity: &limits})
+		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg, repository), Capacity: &limits, Priorities: s.priorities})
 		if err != nil {
 			repository.Close()
 			return nil, nil, err

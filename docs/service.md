@@ -2033,8 +2033,7 @@ until the foreman [rebases](#rebasing-units-in-flight) the workspace onto it.
 
 The scheduler also dispatches within the configured `[capacity]`. Mason
 turns use `capacity.masons`, reviewer turns use `capacity.reviewers`, and both
-limits apply across workstreams. A queued reviewer turn is offered before a
-queued mason turn when they compete for a workstream slot. Committee turns are not dispatched by the scheduler: a
+limits apply across workstreams. Committee turns are not dispatched by the scheduler: a
 [shed round](#a-members-turn) runs every member of its workstream's committee
 at once, outside `capacity.per_workstream`, so two workstreams in the shed run
 two committees at the same time. Every other role runs one turn at a time per
@@ -2049,7 +2048,23 @@ is waiting or was cancelled. A claim a restart interrupted holds no slot,
 although its thread stays reserved. A parked thread holds no slot. The capacity
 check runs before the service's gate, so the gate sees only candidates with a
 free slot. A candidate without a free slot stays queued and is offered again on
-a later pass, in workstream and agent ID order.
+a later pass.
+
+Each pass offers queued turns to the free slots one at a time, finishing work
+before widening it: reviewer turns first, then mason, committee and architect
+turns, then every other role's. Within one of those stages the turn of the
+workstream first in the project's [runtime priority](runtime.md) order goes
+first; workstreams the order does not name follow those it names, in the same
+order the [mason controller](#starting-units) starts units. Among workstreams
+of equal priority, the one whose last turn of that stage was dispatched least
+recently goes first, so equal workstreams take a stage's slots in turn, within
+a pass and across passes. The last dispatch of each stage is read from the
+workstream's turn operations in the trace, so a restart continues the rotation
+rather than resetting it. A turn without a free slot, or one the gate holds,
+such as a paused workstream's, is not dispatched and leaves its workstream's
+place in the rotation unchanged. Candidates, capacity counts per workstream,
+priority lookups and the rotation are keyed by project and workstream, while
+the role kinds' slots are shared across projects.
 
 A turn whose outcome is `waiting` parks its thread (`trace.Thread.Parked`). A
 parked thread has no unfinished turn, so the scheduler offers it to no gate and
