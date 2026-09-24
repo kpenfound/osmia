@@ -177,7 +177,7 @@ func TestServeRunsRoleTurns(t *testing.T) {
 
 // chief checks the boundary serve gives a chief-of-staff thread turn: its
 // session directory under the thread's, empty workspaces of its own and
-// only its status and question tools.
+// only its status, priority and question tools.
 func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream string) {
 	t.Helper()
 	resolved, err := filepath.EvalSymlinks(root)
@@ -194,7 +194,7 @@ func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream stri
 	if work := turn.Request.Workspace.Directory(); filepath.Dir(work) != turn.Request.SessionDir {
 		t.Fatalf("working directory %s is not the session's own", work)
 	}
-	granted := append([]string{status.ToolName}, questions.ChiefTools...)
+	granted := append([]string{status.ToolName, "prioritise"}, questions.ChiefTools...)
 	var tools []string
 	for _, allowed := range turn.Request.Profile.AllowedTools {
 		server, tool, ok := strings.Cut(strings.TrimPrefix(allowed, "mcp__"), "__")
