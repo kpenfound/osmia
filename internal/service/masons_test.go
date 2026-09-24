@@ -297,7 +297,7 @@ func TestMasonStartsTheFirstOfTwoEntangledUnits(t *testing.T) {
 	if body := f.notice(t, stream, masonTransitionID("resume")); body != startNotice {
 		t.Fatalf("the start notice %q, want %q", body, startNotice)
 	}
-	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitReady}})
+	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, f.deferred(t, stream, "dedupe", overlapping("resume"))})
 
 	// The chief of staff receives the start as an event turn, and the events
 	// are acknowledged once its turn has completed successfully.
@@ -362,6 +362,8 @@ func TestMasonSlotsFollowPriorityAndPause(t *testing.T) {
 		if got := masonTransitions(t, f, stream); len(got) != 0 {
 			t.Fatalf("%s started a unit while the factory was paused: %+v", stream, got)
 		}
+		f.awaitDispatches(t, stream, "resume", 1)
+		f.checkUnits(t, stream, []UnitStatus{f.deferred(t, stream, "resume", factoryPaused), {Unit: "dedupe", State: UnitPlanned}})
 	}
 
 	// The priority order goes against the workstream ID order, which would
@@ -377,7 +379,7 @@ func TestMasonSlotsFollowPriorityAndPause(t *testing.T) {
 	if got := masonTransitions(t, f, lo); len(got) != 0 {
 		t.Fatalf("%s started a unit with no mason slot free: %+v", lo, got)
 	}
-	f.checkUnits(t, lo, []UnitStatus{{Unit: "resume", State: UnitReady}, {Unit: "dedupe", State: UnitPlanned}})
+	f.checkUnits(t, lo, []UnitStatus{f.deferred(t, lo, "resume", slotless(1)), {Unit: "dedupe", State: UnitPlanned}})
 
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: hi}, Mode: "soft", Source: "operator"})
 	f.awaitMasonRan(t, lo, "resume")
@@ -386,6 +388,10 @@ func TestMasonSlotsFollowPriorityAndPause(t *testing.T) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
 	f.checkUnits(t, hi, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
+	f.checkUnits(t, lo, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
+	if got, want := f.dispatches(t, lo, "resume"), []string{"deferred paused", "deferred capacity", "started"}; !slices.Equal(got, want) {
+		t.Fatalf("decisions on resume of %s: %q, want %q", lo, got, want)
+	}
 }
 
 // A unit moved to implementing whose mason turn was never queued, as after
@@ -485,7 +491,7 @@ func TestStaleSpecLeavesTheUnitReady(t *testing.T) {
 	if got, want := f.blocks(t, stream, "resume"), []string{staleReason("unit resume stays ready")}; !slices.Equal(got, want) {
 		t.Fatalf("blocked %q, want %q", got, want)
 	}
-	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitReady}, {Unit: "dedupe", State: UnitPlanned}})
+	f.checkUnits(t, stream, []UnitStatus{f.deferred(t, stream, "resume", blockedOnItself("resume")), {Unit: "dedupe", State: UnitPlanned}})
 	if _, err := os.Stat(filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(stream), "resume")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("the blocked unit has a workspace: %v", err)
 	}
@@ -533,7 +539,7 @@ func TestUnitWorkspaceFailureBlocksItsWorkstreamAlone(t *testing.T) {
 	if len(reasons) != 1 || !strings.HasPrefix(reasons[0], "unit resume stays ready: its workspace cannot be opened: ") {
 		t.Fatalf("blocked %q", reasons)
 	}
-	f.checkUnits(t, broken, []UnitStatus{{Unit: "resume", State: UnitReady}, {Unit: "dedupe", State: UnitPlanned}})
+	f.checkUnits(t, broken, []UnitStatus{f.deferred(t, broken, "resume", blockedOnItself("resume")), {Unit: "dedupe", State: UnitPlanned}})
 	f.checkUnits(t, other, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
 	if data, err := os.ReadFile(filepath.Join(squatter, "notes")); err != nil || string(data) != "mine\n" {
 		t.Fatalf("the directory in the workspace's place changed: %q %v", data, err)

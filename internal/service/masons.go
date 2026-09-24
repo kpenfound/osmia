@@ -82,7 +82,9 @@ type building struct {
 // cannot start, or an implementing unit whose first turn cannot be queued or
 // whose candidate cannot be made, is blocked: the reason is recorded, the
 // unit takes no mason slot and its workstream starts nothing else, and the
-// other workstreams go on.
+// other workstreams go on. Last, it records in units/<unit>/dispatch.json why
+// each ready unit it did not start waits, when that differs from the unit's
+// latest decision; a start records its own decision.
 func (m *masons) Pass(ctx context.Context) error {
 	streams, err := m.repository.Workstreams()
 	if err != nil {
@@ -92,7 +94,8 @@ func (m *masons) Pass(ctx context.Context) error {
 	state, _ := m.s.store.Effective()
 	paused := func(stream config.WorkstreamID) bool { return scheduler.Paused(state.Pauses, m.cfg.Project.ID, stream) }
 	implementing := 0
-	var candidates []building
+	var read, candidates []building
+	held := map[config.WorkstreamID]string{}
 	for _, stream := range streams {
 		if stream == librarian {
 			continue
@@ -107,7 +110,7 @@ func (m *masons) Pass(ctx context.Context) error {
 		if !found {
 			continue
 		}
-		blocked := false
+		blocked := ""
 		for _, u := range b.plan.Units {
 			state := b.states[trace.UnitSubject(u.ID)]
 			if state.Value != UnitImplementing && state.Value != UnitWaiting {
@@ -185,14 +188,20 @@ func (m *masons) Pass(ctx context.Context) error {
 				}
 			}
 			if !queued {
-				blocked = true
+				if blocked == "" {
+					blocked = u.ID
+				}
 			} else if !paused(stream) {
 				implementing++
 			}
 		}
-		if !blocked && !paused(stream) {
+		if blocked != "" {
+			held[stream] = blocked
+		} else if !paused(stream) {
 			candidates = append(candidates, b)
+			continue
 		}
+		read = append(read, b)
 	}
 	pending, err := refreshPending(m.repository)
 	if err != nil {
@@ -210,15 +219,24 @@ func (m *masons) Pass(ctx context.Context) error {
 	// Each start re-sorts the workstreams, so equals take turns.
 	for implementing < m.cfg.Capacity.Masons {
 		i, unit, err := m.nextStart(startOrder(candidates, state.Priorities, m.cfg.Project.ID), entities)
-		if err != nil || i < 0 {
+		if err != nil {
 			return err
 		}
+		if i < 0 {
+			break
+		}
 		b := candidates[i]
-		started, err := m.start(ctx, b, unit)
+		started, blocked, err := m.start(ctx, b, unit)
 		if err != nil {
 			return fmt.Errorf("workstream %s unit %s: %w", b.stream, unit, err)
 		}
 		if !started {
+			// A unit whose state moved since it was read is left to the
+			// next pass, with the rest of its workstream.
+			if blocked {
+				held[b.stream] = unit
+				read = append(read, b)
+			}
 			candidates = slices.Delete(candidates, i, i+1)
 			continue
 		}
@@ -227,7 +245,8 @@ func (m *masons) Pass(ctx context.Context) error {
 		b.inFlight, b.implementing, b.started = append(b.inFlight, unit), b.implementing+1, m.s.now()
 		candidates[i] = b
 	}
-	return nil
+	decisions := dispatchPass{cfg: m.cfg, pauses: state.Pauses, rank: scheduler.Rank(state.Priorities, m.cfg.Project.ID), entities: entities, candidates: candidates, held: held}
+	return m.recordDeferrals(ctx, decisions, append(read, candidates...))
 }
 
 // classify records one chief event per clean mason response, then either
@@ -629,37 +648,53 @@ func (m *masons) bundle(ctx context.Context, stream config.WorkstreamID, unit st
 }
 
 // start moves a ready unit to implementing and queues its mason's first
-// turn. The unit's bundle is assembled and its workspace opened first: a
-// unit whose spec no longer matches its seal, or whose workspace cannot be
-// opened, stays ready, and start records why it is blocked and reports false.
-// A unit whose state moved since it was read is left to the next pass.
-func (m *masons) start(ctx context.Context, b building, unit string) (bool, error) {
+// turn, recording the decision to start it in units/<unit>/dispatch.json in
+// the same commit as the move. The unit's bundle is assembled and its
+// workspace opened first: a unit whose spec no longer matches its seal, or
+// whose workspace cannot be opened, stays ready, and start records why it is
+// blocked and reports it blocked. A unit whose state moved since it was read
+// is left to the next pass.
+func (m *masons) start(ctx context.Context, b building, unit string) (started, blocked bool, err error) {
 	subject := trace.UnitSubject(unit)
 	stays := fmt.Sprintf("unit %s stays ready", unit)
 	mason, err := m.bundle(ctx, b.stream, unit)
 	if errors.Is(err, bundle.ErrStaleSpec) {
-		return false, m.block(ctx, b.stream, unit, subject+"-"+UnitReady, fmt.Sprintf("%s: its mason bundle cannot be assembled: %v", stays, err))
+		return false, true, m.block(ctx, b.stream, unit, subject+"-"+UnitReady, fmt.Sprintf("%s: its mason bundle cannot be assembled: %v", stays, err))
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	w, base, err := newUnitWorkspaces(m.cfg).open(ctx, b.stream, unit)
 	if err != nil && ctx.Err() == nil {
-		return false, m.block(ctx, b.stream, unit, subject+"-"+UnitReady, fmt.Sprintf("%s: its workspace cannot be opened: %v", stays, err))
+		return false, true, m.block(ctx, b.stream, unit, subject+"-"+UnitReady, fmt.Sprintf("%s: its workspace cannot be opened: %v", stays, err))
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
+	}
+	latest, err := latestDispatches(m.repository, b.stream)
+	if err != nil {
+		return false, false, err
+	}
+	decision, changed, err := m.dispatchRevision(b.stream, latest[unit], startedDispatch(unit, b.states[subject]))
+	if err != nil {
+		return false, false, err
 	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: masonTransitionID(unit), Revision: 1, Project: m.repository.Project(), Workstream: b.stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: subject + "-" + UnitReady}
 	tr := trace.Transition{Header: h, Subject: subject, From: UnitReady, To: UnitImplementing,
 		Reason: fmt.Sprintf("unit %s is the next ready unit of the plan of seal %d; its mason works in the unit's workspace on %s, created from %s at %s", unit, mason.Seal, w.Branch, featureBranch(b.stream), base)}
-	if _, err := m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr,
-		Events: []trace.Event{trace.Notice(masonTransitionID(unit), "unit", fmt.Sprintf("Unit %s is implementing: its mason works on it in its unit workspace on %s.", unit, w.Branch))}}); errors.Is(err, trace.ErrConflict) {
-		return false, nil
-	} else if err != nil {
-		return false, err
+	tx := trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr,
+		Events: []trace.Event{trace.Notice(masonTransitionID(unit), "unit", fmt.Sprintf("Unit %s is implementing: its mason works on it in its unit workspace on %s.", unit, w.Branch))}}
+	if changed {
+		_, err = m.repository.RecordDocumentsWith(ctx, []trace.Document{decision}, tx)
+	} else {
+		_, err = m.repository.Transact(ctx, tx)
 	}
-	return true, m.enqueue(ctx, b.stream, unit, mason, tr)
+	if errors.Is(err, trace.ErrConflict) {
+		return false, false, nil
+	} else if err != nil {
+		return false, false, err
+	}
+	return true, false, m.enqueue(ctx, b.stream, unit, mason, tr)
 }
 
 // resume queues the first turn of an implementing unit's mason when it is

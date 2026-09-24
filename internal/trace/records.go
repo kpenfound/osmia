@@ -310,13 +310,14 @@ func amendmentDraftPath(parts []string) bool {
 }
 
 // unitPath reports whether parts name a unit record of a workstream,
-// units/<unit>/report.json, review.json, landing.json, rebase.json or
-// ruling-<n>.json or mason-ruling-<n>.json, where the unit is a key.
+// units/<unit>/report.json, review.json, landing.json, rebase.json,
+// dispatch.json or ruling-<n>.json or mason-ruling-<n>.json, where the unit
+// is a key.
 func unitPath(parts []string) bool {
 	if len(parts) != 3 || parts[0] != "units" || !key(parts[1]) {
 		return false
 	}
-	if parts[2] == "report.json" || parts[2] == "review.json" || parts[2] == "landing.json" || parts[2] == "rebase.json" {
+	if parts[2] == "report.json" || parts[2] == "review.json" || parts[2] == "landing.json" || parts[2] == "rebase.json" || parts[2] == "dispatch.json" {
 		return true
 	}
 	n := strings.TrimSuffix(strings.TrimPrefix(parts[2], "ruling-"), ".json")

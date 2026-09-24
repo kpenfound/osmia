@@ -19,19 +19,26 @@ func Held(pauses []runtime.Pause, project config.ProjectID, c Candidate) bool {
 // Paused reports whether a pause in force covers the workstream of the
 // project: a factory pause, a pause on the project or one on the workstream.
 func Paused(pauses []runtime.Pause, project config.ProjectID, stream config.WorkstreamID) bool {
+	_, ok := Pausing(pauses, project, stream)
+	return ok
+}
+
+// Pausing returns the first pause in force that covers the workstream of the
+// project, and whether there is one.
+func Pausing(pauses []runtime.Pause, project config.ProjectID, stream config.WorkstreamID) (runtime.Pause, bool) {
 	for _, p := range pauses {
 		switch p.Target.Scope {
 		case "factory":
-			return true
+			return p, true
 		case "project":
 			if p.Target.Project == project {
-				return true
+				return p, true
 			}
 		case "workstream":
 			if p.Target.Project == project && p.Target.Workstream == stream {
-				return true
+				return p, true
 			}
 		}
 	}
-	return false
+	return runtime.Pause{}, false
 }

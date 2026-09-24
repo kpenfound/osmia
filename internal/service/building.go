@@ -324,19 +324,21 @@ func list(entries []string) string {
 }
 
 // UnitStatus is the recorded state, latest card and landing of one unit of
-// the sealed plan or a final-review follow-up.
+// the sealed plan or a final-review follow-up. A ready unit the mason
+// controller deferred carries the deferral, and its message as Reason.
 type UnitStatus struct {
-	Unit    string            `json:"unit"`
-	State   string            `json:"state"`
-	Reason  string            `json:"reason,omitempty"`
-	Card    *coreadapter.Card `json:"card,omitempty"`
-	Landing *UnitLanding      `json:"landing,omitempty"`
+	Unit     string            `json:"unit"`
+	State    string            `json:"state"`
+	Reason   string            `json:"reason,omitempty"`
+	Deferral *UnitDispatch     `json:"deferral,omitempty"`
+	Card     *coreadapter.Card `json:"card,omitempty"`
+	Landing  *UnitLanding      `json:"landing,omitempty"`
 }
 
-// unitStates returns states, latest cards and landings, taken from the given
-// workflow states, reports and landing documents, of the units of the
-// workstream's sealed plan and final-review follow-ups, in order: none before
-// their unit states are recorded.
+// unitStates returns states, latest cards, landings and deferrals, taken from
+// the given workflow states, reports, landing and dispatch documents, of the
+// units of the workstream's sealed plan and final-review follow-ups, in
+// order: none before their unit states are recorded.
 func unitStates(repository *trace.Repository, stream config.WorkstreamID, states map[string]trace.WorkflowState) ([]UnitStatus, error) {
 	latest, _, found, err := seal.Latest(repository, stream)
 	if err != nil || !found {
@@ -363,7 +365,12 @@ func unitStates(repository *trace.Repository, stream config.WorkstreamID, states
 	}
 	cards := map[string]*coreadapter.Card{}
 	landings := map[string]*UnitLanding{}
+	dispatches := map[string]trace.Document{}
 	for _, document := range documents {
+		if document.Unit != "" && document.ID == dispatchDocument(document.Unit) {
+			dispatches[document.Unit] = document
+			continue
+		}
 		if document.Unit != "" && document.ID == landingDocument(document.Unit) {
 			var landing UnitLanding
 			if err := json.Unmarshal([]byte(document.Content), &landing); err != nil {
@@ -385,9 +392,17 @@ func unitStates(repository *trace.Repository, stream config.WorkstreamID, states
 	}
 	var out []UnitStatus
 	for _, u := range p.Units {
-		if state := states[trace.UnitSubject(u.ID)].Value; state != "" {
-			out = append(out, UnitStatus{Unit: u.ID, State: state, Card: cards[u.ID], Landing: landings[u.ID]})
+		state := states[trace.UnitSubject(u.ID)]
+		if state.Value == "" {
+			continue
 		}
+		status := UnitStatus{Unit: u.ID, State: state.Value, Card: cards[u.ID], Landing: landings[u.ID]}
+		if status.Deferral, err = currentDeferral(dispatches[u.ID], state); err != nil {
+			return nil, err
+		} else if status.Deferral != nil {
+			status.Reason = status.Deferral.Message
+		}
+		out = append(out, status)
 	}
 	return out, nil
 }

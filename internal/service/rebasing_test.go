@@ -41,7 +41,7 @@ func newRebaseFixture(t *testing.T, key string) (*shedFixture, config.Workstream
 	if !found {
 		t.Fatal("the workstream is not building")
 	}
-	if started, err := m.start(context.Background(), b, "dedupe"); err != nil || !started {
+	if started, _, err := m.start(context.Background(), b, "dedupe"); err != nil || !started {
 		t.Fatalf("dedupe did not start: %v", err)
 	}
 	return f, stream, repository

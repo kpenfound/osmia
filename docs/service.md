@@ -1276,6 +1276,34 @@ mason bundle cannot be assembled: spec does not match its seal: ...` and
 `implementing` unit the same two with `unit <id> is implementing and its
 mason's first turn is not queued` in place of `unit <id> stays ready`.
 
+### Why a ready unit waits
+
+Every pass ends by deciding why each `ready` unit of a `building` or
+`assembled` workstream that it did not start waits, and records the decision
+in `units/<id>/dispatch.json` (actor `service`/`mason`, cause
+`unit-<id>-ready`) when it differs from the unit's latest revision there; a
+pass that finds the same decision records nothing. Starting a unit records
+the decision `started` in the same commit as its move to `implementing`. A
+pass that waits for a knowledge-base refresh starts nothing and records no
+decision.
+
+A decision is a JSON object: `unit`; `version`, the version of the unit's
+workflow state it was taken on; `decision`, `started` or `deferred`;
+`reason`, for a deferral; the fields that reason names; and `message`, the
+same in plain language. The first reason that holds is recorded:
+
+| `reason` | When | Fields |
+| --- | --- | --- |
+| `paused` | A runtime pause covers the workstream | `pause`: the pause in force |
+| `blocked` | The controller is [blocked](#building) on a unit of the workstream: the unit itself, or an `implementing` one | `blocked`: that unit |
+| `entangled` | The unit is entangled with `implementing` or `waiting` units of its workstream | `blockers`: `{"unit","reason"}` for each, `dependency`, `footprint-overlap` or `unresolved-footprint` |
+| `workstream-cap` | `capacity.per_workstream` of the workstream's units are `implementing` | `limit`: the cap |
+| `priority` | Every mason slot is taken, and workstreams earlier in the priority order have a unit to start first | `limit`: `capacity.masons`; `workstreams`: those workstreams |
+| `capacity` | Every mason slot is taken | `limit`: `capacity.masons` |
+
+[Status](#workstream-status) shows a unit's latest deferral while the unit
+is `ready` in the state it was decided on.
+
 ### A mason's question
 
 A mason holds `ask`. Its question is recorded and reaches the chief of staff
@@ -1834,7 +1862,7 @@ order, except the librarian's, which carries no feature (see
 | --- | --- |
 | `workstream`, `project` | The workstream and its project |
 | `state` | The feature workflow state, or `null` before one is recorded |
-| `units` | One `{"unit", "state"}` per unit of the sealed plan and each final-review follow-up, in order, once their states are recorded; `reason` gives a mason contest's classification or bound exhaustion, `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
+| `units` | One `{"unit", "state"}` per unit of the sealed plan and each final-review follow-up, in order, once their states are recorded; `reason` gives a mason contest's classification or bound exhaustion, `deferral` holds the [decision](#why-a-ready-unit-waits) that keeps a `ready` unit waiting, with its `message` as `reason`, `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
 | `open_questions` | Questions in the workstream without a ruling |
 | `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, or `contested` with the unit ID; a mason contest also has `reason`; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
@@ -1845,8 +1873,9 @@ refuses a non-empty one when no gate is open. The chief of staff writes the
 wording. A refusal is an ordinary `{"stored":false,"reason":"…"}` result;
 an open-gate reason names its kind and reference. `osmia status` prints the
 gates under each workstream status.
-`osmia status <workstream>` prints each available unit card and landing
-beneath its unit, apart from the chief of staff's status.
+`osmia status <workstream>` prints why each waiting `ready` unit waits, and
+each available unit card and landing, beneath its unit, apart from the chief
+of staff's status.
 
 Without an active project or its trace, the list is empty. If the trace
 cannot be read, the list is empty and carries a `workstreams` diagnostic with
