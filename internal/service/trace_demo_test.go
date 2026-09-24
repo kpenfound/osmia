@@ -34,7 +34,7 @@ func TestM3TraceNavigationDemonstration(t *testing.T) {
 	ctx := context.Background()
 
 	bin := filepath.Join(t.TempDir(), "osmia")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/osmia")
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/osmia")
 	build.Dir = filepath.Join("..", "..")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build osmia: %v\n%s", err, out)
