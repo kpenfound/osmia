@@ -599,6 +599,21 @@ func TestSealingFailsOnAFootprintTheMapDoesNotResolve(t *testing.T) {
 	f.stillInShed(t, stream)
 }
 
+// newSealingRestartFixture leaves time for Git-backed trace publication to
+// finish under a loaded full suite before a test API request times out.
+// architectFixture.start gives its client the same budget as the server.
+func newSealingRestartFixture(t *testing.T) *shedFixture {
+	t.Helper()
+	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) {
+		opts.WriteTimeout = time.Minute
+	})
+	if f.c.defaultTimeout < time.Minute || f.s.options.WriteTimeout < time.Minute {
+		f.stop(t)
+		t.Fatalf("sealing restart API budgets: client %s, server %s; want at least 1m each", f.c.defaultTimeout, f.s.options.WriteTimeout)
+	}
+	return f
+}
+
 // A service stop between the record of a ratification and the request of its
 // sealing leaves the sealing owed, and the next service's first pass asks for
 // it. A skipped debate on a workstream that never entered the shed is sealed
@@ -606,7 +621,7 @@ func TestSealingFailsOnAFootprintTheMapDoesNotResolve(t *testing.T) {
 // workstream fails once it runs, and makes no branch.
 func TestSealingIsAskedForAfterARestartAndSealsFromSketched(t *testing.T) {
 	t.Parallel()
-	f := newDebateFixture(t, 1, 1)
+	f := newSealingRestartFixture(t)
 	ctx := context.Background()
 	f.stop(t)
 	f.opts.Committee = nil
@@ -687,7 +702,7 @@ func TestSealingIsAskedForAfterARestartAndSealsFromSketched(t *testing.T) {
 // stale failure never makes a number get reused.
 func TestStaleSealingFailureLeavesTheSubjectToTheLaterOne(t *testing.T) {
 	t.Parallel()
-	f := newDebateFixture(t, 1, 1)
+	f := newSealingRestartFixture(t)
 	ctx := context.Background()
 	f.stop(t)
 	f.opts.Committee = nil
