@@ -50,7 +50,7 @@ func TestDeferralReasons(t *testing.T) {
 		return building{stream: id, states: states, plan: units, inFlight: inFlight, implementing: implementing}
 	}
 	cfg := &config.Config{Capacity: config.Capacity{Masons: 3}, Project: config.Project{ID: project, Capacity: config.ProjectCapacity{PerWorkstream: 2}}}
-	factory := runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "operator"}
+	factory := runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "owner"}
 	pass := func(pauses []runtime.Pause, priorities []runtime.Priority, held map[config.WorkstreamID]string, candidates ...building) dispatchPass {
 		return dispatchPass{cfg: cfg, pauses: pauses, rank: scheduler.Rank(priorities, project), entities: entities, candidates: candidates, held: held}
 	}
@@ -64,7 +64,7 @@ func TestDeferralReasons(t *testing.T) {
 		want UnitDispatch
 	}{
 		{"pause", pass([]runtime.Pause{factory}, nil, map[config.WorkstreamID]string{first: "resume"}), busy, "dedupe",
-			UnitDispatch{Reason: DeferPaused, Pause: &factory, Message: "Waits while a factory pause is in force, set by operator."}},
+			UnitDispatch{Reason: DeferPaused, Pause: &factory, Message: "Waits while a factory pause is in force, set by owner."}},
 		{"blocked on itself", pass(nil, nil, map[config.WorkstreamID]string{first: "dedupe"}), stream(first, 0), "dedupe",
 			UnitDispatch{Reason: DeferBlocked, Blocked: "dedupe", Message: "Cannot start: the mason controller is blocked on this unit and tries again on every pass."}},
 		{"blocked on another unit", pass(nil, nil, map[config.WorkstreamID]string{first: "resume"}), busy, "dedupe",
@@ -133,6 +133,15 @@ func TestCurrentDeferralFollowsTheUnitState(t *testing.T) {
 // mason controller defers it as d.
 func (f *shedFixture) deferred(t *testing.T, stream config.WorkstreamID, unit string, d UnitDispatch) UnitStatus {
 	t.Helper()
+	if d.Pause != nil {
+		state, _ := f.s.store.Effective()
+		for _, pause := range state.Pauses {
+			if pause.Target == d.Pause.Target {
+				d.Pause = &pause
+				break
+			}
+		}
+	}
 	states, err := f.repository().WorkflowStates(stream)
 	must(t, err)
 	d.Unit, d.Version, d.Decision = unit, states[trace.UnitSubject(unit)].Version, DispatchDeferred
@@ -153,7 +162,7 @@ func slotless(masons int) UnitDispatch {
 
 // factoryPaused is the deferral of a unit while the operator's soft factory
 // pause is in force.
-var factoryPaused = UnitDispatch{Reason: DeferPaused, Pause: &runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "operator"}, Message: "Waits while a factory pause is in force, set by operator."}
+var factoryPaused = UnitDispatch{Reason: DeferPaused, Pause: &runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "owner"}, Message: "Waits while a factory pause is in force, set by owner."}
 
 // blockedOnItself is the deferral of a unit the mason controller is blocked
 // on.
@@ -204,7 +213,7 @@ func TestReadyUnitDecisionsFollowPauseAndPriority(t *testing.T) {
 	f, masons := newParallelMasonFixture(t, 1, 3, disjointPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
 	a, _ := f.builtAs(t, "first")
 	b, _ := f.builtAs(t, "second")
 	// The priority order goes against the workstream ID order, which would
@@ -239,12 +248,12 @@ func TestReadyUnitDecisionsFollowPauseAndPriority(t *testing.T) {
 		t.Fatalf("decisions on resume of %s: %q, want %q", hi, got, want)
 	}
 
-	pause := runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: hi}, Mode: "soft", Source: "operator"}
+	pause := runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: hi}, Mode: "soft", Source: "owner"}
 	mutation(t, f.c, "PUT", "pause", PauseRequest(pause))
 	f.awaitMasonRan(t, lo, "resume")
 	settle()
 	masons.check(t)
-	paused := UnitDispatch{Reason: DeferPaused, Pause: &pause, Message: "Waits while a workstream pause is in force, set by operator."}
+	paused := UnitDispatch{Reason: DeferPaused, Pause: &pause, Message: "Waits while a workstream pause is in force, set by owner."}
 	f.checkUnits(t, hi, []UnitStatus{{Unit: "resume", State: UnitImplementing}, f.deferred(t, hi, "upload", paused), f.deferred(t, hi, "audit", paused)})
 	f.checkUnits(t, lo, []UnitStatus{{Unit: "resume", State: UnitImplementing}, f.deferred(t, lo, "upload", slotless(1)), f.deferred(t, lo, "audit", slotless(1))})
 	for stream, want := range map[config.WorkstreamID]map[string][]string{

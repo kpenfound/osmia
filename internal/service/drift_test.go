@@ -253,7 +253,7 @@ func TestPausedWorkstreamIsSkippedByDriftRebases(t *testing.T) {
 	sealed := streamDocuments(t, repository, stream, seal.DocumentID)
 	must(t, repository.Close())
 
-	state, err := json.Marshal(runtime.State{Version: runtime.Version, Pauses: []runtime.Pause{{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}, Mode: "soft", Source: "operator"}}})
+	state, err := json.Marshal(runtime.State{Version: runtime.Version, Pauses: []runtime.Pause{{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "test", SetAt: time.Now().UTC()}}})
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(f.s.cfg.Root.String(), "runtime.json"), state, 0600))
 	f.start(t)

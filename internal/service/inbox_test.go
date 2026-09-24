@@ -254,7 +254,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	}
 	// The turns of this workstream's askers are held from here on.
 	target := runtime.Target{Scope: "workstream", Project: project, Workstream: stream}
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "operator"})
+	mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
 	started := map[string]int{"build": 1, "review": 1, "build_other": 1, "events": 2}
 	if got := runs(); !reflect.DeepEqual(got, started) {
 		t.Fatalf("first lifetime runs: %v", got)

@@ -174,7 +174,7 @@ func TestPausedWorkstreamKeepsItsPlaceWithoutASlot(t *testing.T) {
 	defer repo.Close()
 	masons(t, f, repo, map[config.WorkstreamID][]string{stream: {"a1", "a2"}, other: {"b1", "b2", "b3"}})
 	var mu sync.Mutex
-	pauses := []runtime.Pause{{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Source: "operator"}}
+	pauses := []runtime.Pause{{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Source: "owner"}}
 	r := &running{}
 	c := f.controllerWith(t, repo, r.turns(), Options{Capacity: &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 5},
 		Admit: func(_ context.Context, c Candidate) (bool, error) {

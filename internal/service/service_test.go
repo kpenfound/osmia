@@ -135,7 +135,7 @@ func TestRoundTrip(t *testing.T) {
 	if info.Mode().Perm() != 0600 {
 		t.Fatal(info.Mode())
 	}
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "hard", Source: "operator"})
+	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "hard", Source: "owner"})
 	mutation(t, c, "PUT", "priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{stream}})
 	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
 	before, err := c.Runtime(ctx)
@@ -362,7 +362,7 @@ func TestConcurrentAcknowledgementsSurvive(t *testing.T) {
 		go func(id config.WorkstreamID) {
 			defer wg.Done()
 			var result MutationResponse
-			err := c.Do(context.Background(), "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: id}, Mode: "soft", Source: "operator"}, &result)
+			err := c.Do(context.Background(), "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: id}, Mode: "soft", Source: "owner"}, &result)
 			if err != nil {
 				errs <- err
 				return

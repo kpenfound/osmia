@@ -25,7 +25,7 @@ func TestM3SequentialImplementation(t *testing.T) {
 	f, fake, _ := newAskingMasonFixture(t, 1, validPlan, p)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
 	f.engine.mu.Lock()
 	f.engine.turns[masonTurnID("resume")] = fake.asking(p, "", "1")
 	f.engine.mu.Unlock()

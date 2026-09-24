@@ -68,7 +68,7 @@ set through `Options` by embedders.
 | POST | `/projects/extract` | `ProjectExtractRequest`: project; returns `ExtractionResponse` |
 | POST | `/abandon/<workstream-id>` | `AbandonRequest`: reason; returns `AbandonResponse` |
 | POST | `/handin` | `HandInRequest`: project, key, one of path, url and stdin, optional skip_debate; returns `HandInResponse` |
-| PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason, source |
+| PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason; the local API attributes it to the owner and records its set time |
 | DELETE | `/runtime/pause` | `ClearPauseRequest`: scope, project, workstream |
 | PUT | `/runtime/priority` | `PriorityRequest`: project, workstreams |
 | DELETE | `/runtime/priority` | `ClearPriorityRequest`: project |
@@ -2309,6 +2309,15 @@ in the trace of the workstream whose chief of staff set it, with the owner
 who asked as its actor. When the trace cannot record it, the runtime order is
 put back as it was and the tool call fails.
 
+### Pause and resume at the owner's request
+
+The chief of staff has `pause` and `resume` tools for factory, project, and
+workstream scopes. Both require a turn answering an owner message. A pause
+requires a reason, accepts `soft` or `hard` mode (default `soft`), and is stored
+with source `owner` and its set time. Resume clears the requested scope's pause,
+including one set by a budget or provider mechanism. A refused request returns
+`{"recorded":false,"reason":"…"}` and leaves runtime state untouched.
+
 ### Amendment decisions at the owner's request
 
 The chief of staff's `decide_amendment` tool records the owner's decision on a
@@ -2349,6 +2358,7 @@ sketched, and every queued chief-of-staff turn. All four use one `Enforcement`:
 
 `Options.Threads` binds the thread dispatcher to isolated turns that grant
 the chief of staff `set_status`, [`prioritise`](#priority-at-the-owners-request),
+[`pause` and `resume`](#pause-and-resume-at-the-owners-request),
 [`decide_amendment`](#amendment-decisions-at-the-owners-request),
 [`decide_charter`](#charter-decisions-at-the-owners-request), `answer`, `escalate`, `relay_ruling`, `route_amendment` and
 [`propose_charter`](#charter-proposals); the mason may write and execute in its

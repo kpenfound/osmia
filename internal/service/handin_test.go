@@ -284,7 +284,7 @@ func TestHandInMakesItsWorkstreamKnownToRuntime(t *testing.T) {
 	out := f.handIn(t, HandInRequest{Key: "known", Stdin: &text})
 	target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: out.Workstream}
 	mutation(t, f.c, "PUT", "priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{out.Workstream}})
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "operator"})
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
 	rt, err := f.c.Runtime(ctx)
 	must(t, err)
 	if len(rt.Diagnostics) != 0 {
@@ -303,7 +303,7 @@ func TestHandInMakesItsWorkstreamKnownToRuntime(t *testing.T) {
 	}
 	unknown := config.WorkstreamID("w_00000000000000000000000000000000")
 	assertCode(t, f.c.Do(ctx, "PUT", Prefix+"/runtime/priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{unknown}}, nil), Validation)
-	assertCode(t, f.c.Do(ctx, "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: unknown}, Mode: "soft", Source: "operator"}, nil), Validation)
+	assertCode(t, f.c.Do(ctx, "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: unknown}, Mode: "soft", Source: "owner"}, nil), Validation)
 }
 
 func TestHandInFinishesAnInterruptedHandIn(t *testing.T) {
