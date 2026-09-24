@@ -573,13 +573,19 @@ to an accepted project, role, thread and turn. The caller includes them in that
 turn's role-scoped MCP host, for example through `isolation.Turns.Scoped`.
 `notes_read` is a read tool and `notes_write` a memory tool. Every access
 verifies the same service's active, uncaptured turn; queued, completed and
-interrupted turns cannot use the handlers.
+interrupted turns cannot use the handlers. Read notes before writing and pass
+the returned `sha256` as `expected_sha256`. A stale precondition returns
+`written: false` and the current `sha256` without changing the notes. Re-read,
+merge the new notes with the intended changes, and retry with that hash.
 Input accepts no project, role or path selector, and unknown fields are rejected.
 
 Notes live at `projects/<project-id>/notes/<role>.md` beneath the Osmia root,
-shared by that role's workstreams in the project. Writes replace at most 65,536
-bytes through the trace's atomic publication/recovery boundary; an empty string
-clears the notes. Missing notes read as empty. Scope mismatches, path escapes,
+shared by that role's workstreams in the project. `sha256` is the lowercase
+hexadecimal SHA-256 of the file bytes; missing notes use the SHA-256 of the
+empty byte sequence, `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+Writes replace at most 65,536 bytes through the trace's atomic
+publication/recovery boundary; an empty string clears the notes. Missing notes
+read as empty. Scope mismatches, path escapes,
 symlink aliases and hardlink aliases are rejected. Notes remain private to the
 bound role tools and are not included in replay context.
 

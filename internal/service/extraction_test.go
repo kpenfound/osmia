@@ -330,7 +330,7 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 			if req.ResumeID != "" || strings.Contains(req.Prompt, "Knowledge base written") {
 				err = errors.Join(err, fmt.Errorf("first turn carries history: %q", req.ResumeID))
 			}
-			_, e := callTool(ctx, tools, "notes_write", map[string]any{"text": "librarian: trace tests are slow"})
+			_, e := callTool(ctx, tools, "notes_write", map[string]any{"text": "librarian: trace tests are slow", "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"})
 			return errors.Join(err, e)
 		})
 	s, c := start(t, f.opts)

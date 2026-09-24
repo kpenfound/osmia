@@ -262,7 +262,7 @@ func TestNotesIsolationAndReopen(t *testing.T) {
 			t.Fatalf("accepted %s", input)
 		}
 	}
-	if _, err := tools[1].Handle(ctx, json.RawMessage(`{"text":"private craft"}`)); err != nil {
+	if _, err := tools[1].Handle(ctx, json.RawMessage(`{"text":"private craft","expected_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}`)); err != nil {
 		t.Fatal(err)
 	}
 	data, err := tools[0].Handle(ctx, json.RawMessage(`{}`))
@@ -302,6 +302,19 @@ func TestNotesIsolationAndReopen(t *testing.T) {
 	if err != nil || !strings.Contains(string(data), "private craft") {
 		t.Fatalf("reopen: %s %v", data, err)
 	}
+	var currentNotes struct {
+		SHA256 string `json:"sha256"`
+	}
+	if err := json.Unmarshal(data, &currentNotes); err != nil {
+		t.Fatal(err)
+	}
+	writeInput, err := json.Marshal(map[string]string{"text": "later notes", "expected_sha256": currentNotes.SHA256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tools[1].Handle(ctx, writeInput); err != nil {
+		t.Fatal(err)
+	}
 	directory, _ := root.ProjectTrace(project)
 	if err := os.Rename(directory+"/notes/mason.md", directory+"/notes/reviewer.md"); err != nil {
 		t.Fatal(err)
@@ -312,7 +325,7 @@ func TestNotesIsolationAndReopen(t *testing.T) {
 	if _, err := tools[0].Handle(ctx, json.RawMessage(`{}`)); err == nil {
 		t.Fatal("symlink read accepted")
 	}
-	if _, err := tools[1].Handle(ctx, json.RawMessage(`{"text":"escape"}`)); err == nil {
+	if _, err := tools[1].Handle(ctx, json.RawMessage(`{"text":"escape","expected_sha256":"stale"}`)); err == nil {
 		t.Fatal("symlink write accepted")
 	}
 }

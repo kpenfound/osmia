@@ -408,10 +408,10 @@ func demonstrate(t *testing.T, mode string) {
 		if req.ResumeID != "" || !strings.HasSuffix(req.Prompt, first.Prompt) {
 			err = errors.Join(err, fmt.Errorf("first turn context: %q %q", req.ResumeID, req.Prompt))
 		}
-		if notes, e := callTool(ctx, tools, "notes_read", map[string]any{}); e != nil || notes != `{"text":""}` {
+		if notes, e := callTool(ctx, tools, "notes_read", map[string]any{}); e != nil || notes != `{"text":"","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}` {
 			err = errors.Join(err, fmt.Errorf("fresh notes %q %v", notes, e))
 		}
-		_, e1 := callTool(ctx, tools, "notes_write", map[string]any{"text": "first turn: owner prefers small commits"})
+		_, e1 := callTool(ctx, tools, "notes_write", map[string]any{"text": "first turn: owner prefers small commits", "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"})
 		_, e2 := callTool(ctx, tools, "file_write", map[string]any{"path": "src/app.txt", "content": "edited in turn one\n"})
 		if err = errors.Join(err, e1, e2); err != nil {
 			t.Error(err)
@@ -496,10 +496,16 @@ func demonstrate(t *testing.T, mode string) {
 			}
 		}
 		notes, e1 := callTool(ctx, tools, "notes_read", map[string]any{})
-		if e1 == nil && notes != `{"text":"first turn: owner prefers small commits"}` {
+		if e1 == nil && notes != `{"text":"first turn: owner prefers small commits","sha256":"6ed8b1311fa65fdd3ee9191dddacf7aa51404cca29d209a7f65f3d46754de087"}` {
 			e1 = fmt.Errorf("notes after restart: %s", notes)
 		}
-		_, e2 := callTool(ctx, tools, "notes_write", map[string]any{"text": "second turn: confirmed"})
+		var notesState struct {
+			SHA256 string `json:"sha256"`
+		}
+		if e := json.Unmarshal([]byte(notes), &notesState); e != nil {
+			e1 = errors.Join(e1, e)
+		}
+		_, e2 := callTool(ctx, tools, "notes_write", map[string]any{"text": "second turn: confirmed", "expected_sha256": notesState.SHA256})
 		// Views are fresh copies; the first turn's edit was never copied back.
 		content, e3 := callTool(ctx, tools, "file_read", map[string]any{"path": "src/app.txt"})
 		if e3 == nil && content != `"original\n"` {
