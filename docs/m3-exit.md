@@ -98,3 +98,40 @@ landing and rebase transitions and their causes, `units/<unit>/landing.json`,
 `units/<unit>/review.json` and `units/audit/rebase.json`, the landing
 operations' history, and the librarian workstream's `kb-refresh` operations
 with `kb/sources.json`.
+
+## Final review and delivery demonstration
+
+`TestM3DeliveryDemonstration` in `internal/service/delivery_demo_test.go` runs
+both `commit-per-unit` and `squash` delivery against a local bare fork and an
+in-memory pull request client. Fake masons and reviewers use the ordinary
+service turns; no model session, container, remote push or live pull request is
+started. Run the focused demonstration inside Dagger:
+
+```sh
+dagger core container from --address golang:1.26-bookworm \
+  with-directory --path /src --source . --exclude .git,.bees \
+  with-workdir --path /src \
+  with-exec --args=go,test,-count=1,-run,TestM3DeliveryDemonstration,-v,./internal/service \
+  combined-output
+```
+
+Two units build, receive exact-candidate review and land. Upstream advances
+after the seal, so final review reads the assembled branch rebased onto the
+new upstream tip. Its first criterion-level report gives evidence for one
+criterion and names a gap in the other. The service records a follow-up unit;
+that unit goes through mason, reviewer and landing before the second final
+review records evidence for both criteria.
+
+The delivery API presents the report and a description drafted from the
+trace. The owner edits that description and approves its reviewed commit.
+Changing the description or moving the branch makes the delivery gate refuse
+publication. After restoring the approved branch, the test interrupts
+publication after the pull request opens, reopens the trace as on restart and
+reconciles the existing branch and pull request. It checks one pull request,
+the approved tree and description, and the recorded review, approval and
+publication provenance for each delivery style.
+
+The relevant trace files are `final/report.json`, `final/followups.json`,
+`units/<follow-up>/report.json`, `units/<follow-up>/review.json`,
+`units/<follow-up>/landing.json`, `final/delivery.json` and
+`final/publication.json`.
