@@ -265,6 +265,36 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if target, ok := strings.CutPrefix(r.URL.Path, Prefix+"/amendment/"); ok {
+		stream, id, found := strings.Cut(target, "/")
+		if !found || id == "" || strings.Contains(id, "/") {
+			failWith(w, &APIError{Validation, "expected amendment/<workstream>/<amendment>"})
+			return
+		}
+		var (
+			out AmendmentResponse
+			api *APIError
+		)
+		switch r.Method {
+		case http.MethodGet:
+			out, api = s.amendmentView(stream, id)
+		case http.MethodPost:
+			var v AmendmentDecisionRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			out, api = s.decideAmendment(r.Context(), stream, id, v)
+		default:
+			fail(w, Unsupported)
+			return
+		}
+		if api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
 	if rest, ok := strings.CutPrefix(r.URL.Path, Prefix+"/shed/"); ok && r.Method == http.MethodPost {
 		action, id, _ := strings.Cut(rest, "/")
 		var (

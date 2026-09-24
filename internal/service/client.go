@@ -188,6 +188,22 @@ func (c *Client) Packet(ctx context.Context, id config.WorkstreamID) (PacketResp
 	return v, err
 }
 
+// Amendment reads one amendment of a workstream: its state, latest packet
+// and the owner's latest decision.
+func (c *Client) Amendment(ctx context.Context, id config.WorkstreamID, amendment string) (AmendmentResponse, error) {
+	var v AmendmentResponse
+	err := c.Do(ctx, "GET", Prefix+"/amendment/"+url.PathEscape(string(id))+"/"+url.PathEscape(amendment), nil, &v)
+	return v, err
+}
+
+// DecideAmendment records the owner's decision on a revision of an
+// amendment's packet.
+func (c *Client) DecideAmendment(ctx context.Context, id config.WorkstreamID, amendment string, req AmendmentDecisionRequest) (AmendmentResponse, error) {
+	var v AmendmentResponse
+	err := c.Do(ctx, "POST", Prefix+"/amendment/"+url.PathEscape(string(id))+"/"+url.PathEscape(amendment), req, &v)
+	return v, err
+}
+
 // Ratify ratifies the given revisions of a workstream's spec and plan.
 func (c *Client) Ratify(ctx context.Context, id config.WorkstreamID, spec, plan int) (RatifyResponse, error) {
 	var v RatifyResponse

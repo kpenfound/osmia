@@ -379,6 +379,7 @@ The Osmia server, role-scoped:
 | `verdict` | committee | A review verdict with findings and severities. |
 | `answer`, `escalate`, `route_amendment`, `propose_charter`, `set_status`, `notify` | chief of staff | The five outcomes of a question, the status, and a notice to in-flight bundles. |
 | `pause`, `resume`, `prioritise`, `capacity` | chief of staff | The factory-wide controls. |
+| `decide_amendment` | chief of staff | Record your decision on a presented amendment when you give it in a message. |
 
 The Hearsay server: `get_bundle`, `resolve`, `stance_history`, `get_l1`, `get_l0`, `search`, `assert`, filtered by the role's agent class and your principal.
 
@@ -451,6 +452,7 @@ osmia profiles [set <role> <profile>|clear <role>]
 osmia reload
 osmia trace <workstream> [unit|criterion|commit]
 osmia ratify <workstream>            after reading the packet
+osmia amendment <workstream> <n> [approve|reject|round|overrule]
 ```
 
 Every command is an API call. Nothing reads state files directly.

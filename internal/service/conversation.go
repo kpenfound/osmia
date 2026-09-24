@@ -93,7 +93,7 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 		ThreadID:     trace.ChiefOfStaff,
 		TurnID:       "message_" + id,
 		Profile:      profile,
-		SystemPrompt: fmt.Sprintf(chiefPrompt, stream) + "\n\n" + priorityGuidance + "\n\n" + context,
+		SystemPrompt: fmt.Sprintf(chiefPrompt, stream) + "\n\n" + priorityGuidance + "\n\n" + amendmentGuidance + "\n\n" + context,
 		Prompt:       req.Text,
 	})
 	if err != nil {

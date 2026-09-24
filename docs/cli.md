@@ -30,6 +30,8 @@ osmia shed skip w_0123456789abcdef0123456789abcdef
 osmia shed more w_0123456789abcdef0123456789abcdef 2
 osmia shed redraft w_0123456789abcdef0123456789abcdef "Split the resume unit by what it addresses."
 osmia ratify w_0123456789abcdef0123456789abcdef
+osmia amendment w_0123456789abcdef0123456789abcdef 1
+osmia amendment w_0123456789abcdef0123456789abcdef 1 approve "Checkpoints are what we meant."
 osmia pause all --reason "Away for the weekend"
 osmia resume all
 osmia profiles
@@ -184,6 +186,25 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   right what failed it. A workstream with no packet yet fails with `not_found`
   (exit 4). See [the ratification gate](service.md#the-ratification-gate) and
   [sealing](service.md#sealing).
+- `amendment <workstream-id> <n>` shows amendment `n` of a building or
+  assembled workstream: its state, the debate round it reached, the packet the
+  chief of staff presented with its revision, and your latest decision.
+  `amendment <workstream-id> <n> <approve|reject|round|overrule> [note]`
+  decides it. The command reads the packet first and decides exactly that
+  revision, so a packet presented again since is refused. `approve` versions
+  the proposed spec and/or plan and reseals; it is refused while a charter
+  veto, size split or proof objection stands. `overrule` approves over the
+  objections that stand and records them. `reject` leaves the sealed spec and
+  plan in force. `round` asks the committee for one more bounded debate round,
+  up to `shed.max_rounds` rounds in all, after which the chief of staff
+  presents the amendment again. The requester receives your ruling as its next
+  turn and the unit it parked resumes its stage. The note is optional and is
+  one argument; quote it. Deciding the same packet revision again the same way
+  prints the recorded decision; another decision on it, an amendment that is
+  not presented, and a refused approval fail with `conflict` (exit 5). An
+  unknown amendment fails with `not_found` (exit 4). You can also tell the
+  workstream's chief of staff your decision with `send`. See
+  [amendment decisions](service.md#amendment-decisions).
 - `delivery <workstream-id>` shows an assembled workstream's final report,
   unshown criteria first, and the drafted pull request description, then any
   approved description and the state of its publication. For a delivered

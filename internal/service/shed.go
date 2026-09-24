@@ -1056,7 +1056,8 @@ func (d *debate) earlier(stream config.WorkstreamID, n int) ([]shed.Record, erro
 
 func (d *debate) earlierRound(stream config.WorkstreamID, in roundInput) ([]shed.Record, error) {
 	if in.Amendment != "" {
-		return amendmentRecords(d.repository, stream, in.Amendment)
+		records, err := amendmentRecords(d.repository, stream, in.Amendment)
+		return slices.DeleteFunc(records, func(r shed.Record) bool { return r.Round >= in.Round }), err
 	}
 	return d.earlier(stream, in.Round)
 }

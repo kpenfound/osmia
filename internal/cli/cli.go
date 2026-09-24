@@ -37,6 +37,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   shed more <workstream-id> <rounds> [--json]
   shed redraft <workstream-id> <note> [--json]
   ratify <workstream-id> [--json]
+  amendment <workstream-id> <n> [approve|reject|round|overrule [note]] [--json]
   delivery <workstream-id> [--json]
   trace <workstream-id> [unit <id>|criterion <spec#n>|commit <sha>] [--json]
   approve <workstream-id> [description-file] [--json]
@@ -159,6 +160,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 2
 	case "ratify":
 		valid = len(a) == 1
+	case "amendment":
+		valid = len(a) == 2 || (len(a) == 3 || len(a) == 4) && slices.Contains([]string{service.AmendmentApprove, service.AmendmentReject, service.AmendmentRound, service.AmendmentOverrule}, a[2])
 	case "delivery":
 		valid = len(a) == 1
 	case "trace":
@@ -215,7 +218,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "ratify" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "trace" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "trace" || cmd == "status" && len(a) == 1)
 	}
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
@@ -397,6 +400,44 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Workstream %s ratified: spec.md revision %d and plan.json revision %d\n%s\n", result.Workstream, result.Spec, result.Plan, result.Detail)
+		return 0
+	}
+	if cmd == "amendment" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		// The decision is on the packet revision read here: a packet the
+		// chief of staff presented again since is the service's to refuse.
+		view, err := c.Amendment(ctx, id, a[1])
+		if err != nil {
+			return fail(err)
+		}
+		if len(a) == 2 {
+			if o.json {
+				return output(stdout, stderr, view)
+			}
+			fmt.Fprintf(stdout, "Amendment %s of %s: %s after round %d\n", view.Amendment, view.Workstream, view.State, view.Round)
+			if view.Revision > 0 {
+				fmt.Fprintf(stdout, "Packet revision %d:\n%s", view.Revision, view.Packet)
+			}
+			if d := view.Decision; d != nil {
+				fmt.Fprintf(stdout, "Decision: %s on packet revision %d\n", d.Decision, d.Packet)
+			}
+			return 0
+		}
+		req := service.AmendmentDecisionRequest{Decision: a[2], Packet: view.Revision}
+		if len(a) == 4 {
+			req.Note = a[3]
+		}
+		result, err := c.DecideAmendment(ctx, id, a[1], req)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Amendment %s of %s: %s\n%s\n", result.Amendment, result.Workstream, result.State, result.Detail)
 		return 0
 	}
 	if cmd == "delivery" || cmd == "approve" {
