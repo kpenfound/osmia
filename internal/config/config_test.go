@@ -80,6 +80,29 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
+func TestBudgetLimits(t *testing.T) {
+	c, err := Load(fixture(t, topConfig+"[budget]\nper_session = '5.00'\nper_unit = '40.00'\nper_day = '150.00'\n", projectConfig))
+	if err != nil || c.Budget.SessionLimitUSD() != 5 || c.Budget.PerUnit != "40.00" || c.Budget.PerDay != "150.00" {
+		t.Fatalf("budget: %+v %v", c, err)
+	}
+	p, _, err := c.Execution("mason", "default")
+	if err != nil || p.CostLimitUSD != 5 {
+		t.Fatalf("execution cap: %+v %v", p, err)
+	}
+	for _, field := range []string{"per_session", "per_unit", "per_day"} {
+		for _, value := range []string{"'0'", "'-1'", "'abc'", "'1e3'", "'NaN'", "''"} {
+			_, err := Load(fixture(t, topConfig+"[budget]\n"+field+" = "+value+"\n", projectConfig))
+			if err == nil || !strings.Contains(err.Error(), "budget."+field) {
+				t.Fatalf("%s %s: %v", field, value, err)
+			}
+		}
+	}
+	without, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil || without.Budget.SessionLimitUSD() != 0 {
+		t.Fatalf("absent budget: %+v %v", without, err)
+	}
+}
+
 func TestProjectClassifier(t *testing.T) {
 	for _, tc := range []struct{ setting, want string }{{"", ""}, {"classifier = 'default'\n", "default"}} {
 		c, err := Load(fixture(t, topConfig, projectConfig+tc.setting))
@@ -204,7 +227,6 @@ func TestInvalid(t *testing.T) {
 		{"unused image", topConfig + "[roles.mason]\nimage = 'image'\n", "", "roles.mason.image"},
 		{"fallback sandbox", topConfig + "fallback = 'other'\n[profiles.other]\nagent = 'codex'\nmodel = 'test'\n[roles.mason]\nsandbox = 'claude'\n", "", "entire fallback chain"},
 		{"tailnet", topConfig + "[listen]\ntailnet = ''\n", "", "unsupported in M1"},
-		{"budget", topConfig + "[budget]\nper_day = '150'\n", "", "unsupported in M1"},
 		{"hearsay", topConfig + "[hearsay]\n", "", "unsupported in M1"},
 		{"notify", topConfig + "[notify]\nwebhook = 'https://example.com'\n", "", "unsupported in M1"},
 		{"empty socket", topConfig + "[listen]\nsocket = ''\n", "", "listen.socket"},

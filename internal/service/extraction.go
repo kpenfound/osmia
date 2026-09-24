@@ -551,7 +551,7 @@ func (s *Service) roleExecution(cfg *config.Config, role string) (coreadapter.Pr
 		return coreadapter.Profile{}, coreadapter.ExecutionSettings{}, err
 	}
 	r := cfg.Roles[role]
-	return coreadapter.Profile{Name: name, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image}, nil
+	return coreadapter.Profile{Name: name, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: cfg.Budget.SessionLimitUSD()}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image}, nil
 }
 
 // enqueue accepts the librarian turn of one extraction attempt, fixing its
