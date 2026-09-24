@@ -29,6 +29,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH [--base-branch NAME] [--json]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
+  project rebase <project-id> [--json]
   handin <project-id> <path|issue-url|-> [--skip-debate] [--json]
   abandon <workstream-id> <reason> [--json]
   shed object <workstream-id> <argument> [--json]
@@ -193,7 +194,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "overrule" && (len(a) == 3 || len(a) == 4) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3 ||
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
-		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract")
+		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase")
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	if !valid || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && o.skipDebate || cmd == "serve" && (o.json || o.socket != "") {
@@ -241,6 +242,30 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Extraction %d of project %s (%s) started\nFollow it with osmia status\n", result.Extraction.Extraction, result.Project.ID, result.Project.Name)
+		return 0
+	}
+	if cmd == "project" && a[0] == "rebase" {
+		id, err := config.ParseProjectID(a[1])
+		if err != nil {
+			return invalid()
+		}
+		result, err := c.RebaseProject(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Drift rebase requested for project %s\n", result.Project)
+		if len(result.Covered) == 0 {
+			fmt.Fprintln(stdout, "Covered: none")
+		}
+		for _, c := range result.Covered {
+			fmt.Fprintf(stdout, "Covered: %s drift rebase %d\n", c.Workstream, c.Drift)
+		}
+		for _, s := range result.Skipped {
+			fmt.Fprintf(stdout, "Skipped: %s: %s\n", s.Workstream, s.Reason)
+		}
 		return 0
 	}
 	if cmd == "project" {
@@ -842,8 +867,8 @@ func showRuntime(w io.Writer, rt service.RuntimeResponse) {
 	diagnostics(w, rt.Diagnostics)
 }
 
-// showWorkstreams prints each workstream's gates, overlap advisories, goal and
-// attention.
+// showWorkstreams prints each workstream's gates, overlap advisories, latest
+// drift rebase, goal and attention.
 func showWorkstreams(w io.Writer, all service.StatusResponse) {
 	fmt.Fprintln(w, "Workstreams:")
 	if len(all.Workstreams) == 0 && len(all.Diagnostics) == 0 {
@@ -861,12 +886,20 @@ func showWorkstreams(w io.Writer, all service.StatusResponse) {
 		for _, a := range st.Advisories {
 			fmt.Fprintf(w, "    Overlap: %s\n", a.Message)
 		}
+		if d := st.Drift; d != nil {
+			fmt.Fprintf(w, "    Drift: %s\n", drift(d))
+		}
 		if st.Status == nil {
 			fmt.Fprintln(w, "    no status yet")
 			continue
 		}
 		fmt.Fprintf(w, "    Goal: %s\n    Attention: %s\n", st.Status.Goal, attention(st.Status.Attention))
 	}
+}
+
+// drift describes a workstream's latest drift rebase.
+func drift(d *service.DriftStatus) string {
+	return fmt.Sprintf("rebase %d %s at %s", d.Drift, d.Outcome, d.At.UTC().Format(time.RFC3339))
 }
 
 // showStatus prints one workstream's full status.
@@ -880,6 +913,9 @@ func showStatus(w io.Writer, st service.WorkstreamStatus) {
 	}
 	for _, a := range st.Advisories {
 		fmt.Fprintf(w, "Overlap: %s\n", a.Message)
+	}
+	if d := st.Drift; d != nil {
+		fmt.Fprintf(w, "Drift: %s\n  Reason: %s\n", drift(d), d.Reason)
 	}
 	if len(st.Units) > 0 {
 		fmt.Fprintln(w, "Units:")

@@ -87,8 +87,11 @@ func featureWorkspaces(cfg *config.Config) *workspace.Git {
 // foreman is the landing controller. Its pass asks to land one approved unit
 // at a time per project and to rebase the unit workspaces a landing left
 // behind; its reconciler runs each landing operation, and rebaser each
-// rebase operation.
-type foreman struct{ *masons }
+// rebase operation. nextDrift is when its drift schedule is next read.
+type foreman struct {
+	*masons
+	nextDrift time.Time
+}
 
 var _ coreadapter.Reconciler = (*foreman)(nil)
 

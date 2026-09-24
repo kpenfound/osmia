@@ -84,10 +84,11 @@ func driftIDs(k int) (transition, event string) {
 
 // requestDrifts asks for a drift rebase of every building or assembled
 // workstream of the project that is not paused and has no final review in
-// flight, and returns the workstreams it asked for. Drift rebases share the
-// project's lander with landings: while a landing or drift rebase of the
-// project has no result, it asks for nothing.
-func (f *foreman) requestDrifts(ctx context.Context) ([]config.WorkstreamID, error) {
+// flight, for which due returns why it takes one now and that has a seal,
+// and returns the workstreams it asked for. Drift rebases share the project's
+// lander with landings: while a landing or drift rebase of the project has
+// no result, it asks for nothing.
+func (f *foreman) requestDrifts(ctx context.Context, due func(config.WorkstreamID) (string, error)) ([]config.WorkstreamID, error) {
 	streams, err := f.repository.Workstreams()
 	if err != nil {
 		return nil, err
@@ -123,12 +124,24 @@ func (f *foreman) requestDrifts(ctx context.Context) ([]config.WorkstreamID, err
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if _, found, err := f.read(stream); err != nil {
+		if reason, err := (drifter{f}).building(stream); err != nil {
+			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
+		} else if reason != "" {
+			continue
+		}
+		why, err := due(stream)
+		if err != nil {
+			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
+		}
+		if why == "" {
+			continue
+		}
+		if _, _, found, err := seal.Latest(f.repository, stream); err != nil {
 			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
 		} else if !found {
 			continue
 		}
-		if err := f.requestDrift(ctx, stream); err != nil {
+		if err := f.requestDrift(ctx, stream, why); err != nil {
 			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
 		}
 		requested = append(requested, stream)
@@ -136,21 +149,32 @@ func (f *foreman) requestDrifts(ctx context.Context) ([]config.WorkstreamID, err
 	return requested, nil
 }
 
+// driftNumber returns the number of the drift rebase a value of the drift
+// or drift request subject names, or 0 for the empty value.
+func driftNumber(value string) (int, error) {
+	if value == "" {
+		return 0, nil
+	}
+	_, n, _ := strings.Cut(value, "-")
+	var k int
+	if _, err := fmt.Sscanf(n, "%d", &k); err != nil {
+		return 0, fmt.Errorf("drift state %q names no drift rebase", value)
+	}
+	return k, nil
+}
+
 // requestDrift publishes the workstream's next drift rebase as a durable
-// operation.
-func (f *foreman) requestDrift(ctx context.Context, stream config.WorkstreamID) error {
+// operation, with why it is asked for.
+func (f *foreman) requestDrift(ctx context.Context, stream config.WorkstreamID, why string) error {
 	state, err := f.repository.Workflow(stream, driftSubject)
 	if err != nil {
 		return err
 	}
-	k := 1
-	if state.Value != "" {
-		_, n, _ := strings.Cut(state.Value, "-")
-		if _, err := fmt.Sscanf(n, "%d", &k); err != nil {
-			return fmt.Errorf("subject %s is %q", driftSubject, state.Value)
-		}
-		k++
+	k, err := driftNumber(state.Value)
+	if err != nil {
+		return err
 	}
+	k++
 	_, doc, found, err := seal.Latest(f.repository, stream)
 	if err != nil {
 		return err
@@ -164,7 +188,7 @@ func (f *foreman) requestDrift(ctx context.Context, stream config.WorkstreamID) 
 		return err
 	}
 	op := coreadapter.Operation{ID: trace.OperationID(f.repository.Project(), stream, event), Boundary: coreadapter.RepositoryBoundary, Action: DriftAction, Input: input}
-	reason := fmt.Sprintf("drift rebase %d fetches %s of %s and rebases %s onto it; the seal's upstream base moves once the branch has", k, f.cfg.Project.BaseBranch, f.cfg.Project.Upstream, featureBranch(stream))
+	reason := fmt.Sprintf("%s: drift rebase %d fetches %s of %s and rebases %s onto it; the seal's upstream base moves once the branch has", why, k, f.cfg.Project.BaseBranch, f.cfg.Project.Upstream, featureBranch(stream))
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: f.header(transition, stream, "", fmt.Sprintf("%s-%d", seal.DocumentID, doc.Revision), f.s.now()), Subject: driftSubject, From: state.Value, To: fmt.Sprintf("requested-%d", k), Reason: reason},
 		Events:     []trace.Event{{ID: event, Kind: DriftAction, Body: fmt.Sprintf("Rebase %s onto upstream", featureBranch(stream)), Operation: &op}}}

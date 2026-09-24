@@ -15,6 +15,7 @@ osmia trace w_0123456789abcdef0123456789abcdef unit parser
 osmia trace w_0123456789abcdef0123456789abcdef commit 0123456789abcdef0123456789abcdef01234567
 osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
 osmia project extract p_0123456789abcdef0123456789abcdef
+osmia project rebase p_0123456789abcdef0123456789abcdef
 osmia project remove p_0123456789abcdef0123456789abcdef
 osmia handin p_0123456789abcdef0123456789abcdef design.md
 osmia handin p_0123456789abcdef0123456789abcdef small-fix.md --skip-debate
@@ -62,13 +63,14 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   `failed`, the time of its last activity and the reason when it failed or
   waits to retry), diagnostics, effective runtime controls and the project's
   context mode (`file`, a normal mode; see [context](context.md)), then each
-  workstream with its state, open question count and context mode, and the
+  workstream with its state, open question count and context mode, its latest
+  drift rebase (`Drift: rebase <n> <outcome> at <time>`) once it has one, and the
   chief of staff's goal and attention (`Attention: none` when nothing needs
   you), or `no status yet`. Open owner gates appear under the workstream even
   before a status is written. Reading the charter records any edit you made to
   it; see [charter](charter.md).
 - `status <workstream-id>` shows one workstream of the active project: the same
-  facts and owner gates, then `Units:` with one line per unit of the sealed plan or follow-up and its state
+  facts and owner gates, its latest drift rebase with its reason, then `Units:` with one line per unit of the sealed plan or follow-up and its state
   and the latest available card (headline, happened and any owner action) beneath it
   once the workstream is building, and for a landed unit its commit on the
   feature branch, the reviewed candidate and base with the approval that
@@ -268,6 +270,15 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   active project fails with `not_found` (exit 4). While an extraction is still
   pending or running, another is refused with `conflict` (exit 5) naming the
   extraction to wait for.
+- `project rebase <project-id>` asks for a [drift rebase](service.md#drift-rebases)
+  of every `building` or `assembled` workstream of the active project that is
+  not paused, whatever its `upstream_rebase` cadence. The command returns once
+  the request is recorded and lists each covered workstream with the number of
+  the drift rebase that answers it (`Covered: <workstream> drift rebase <n>`),
+  and each skipped workstream with why (`Skipped: <workstream>: <reason>`). The
+  foreman runs the drift rebases on the project's lander once no landing or
+  other drift rebase holds it; follow them with `status`. A project ID that is
+  not the active project fails with `not_found` (exit 4).
 - `project remove <project-id>` takes the active project out of
   `active_projects` and closes its runtime state. The trace directory and the
   clone are kept. Adding the same upstream again afterwards creates a new

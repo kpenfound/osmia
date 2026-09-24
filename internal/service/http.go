@@ -239,6 +239,18 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, result)
 		return
 	}
+	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/projects/rebase" {
+		var v ProjectRebaseRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		if out, api := s.rebaseProject(r.Context(), v); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
 	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/conversation/"); ok && r.Method == http.MethodPost {
 		var v SendRequest
 		if !decode(w, r, &v) {

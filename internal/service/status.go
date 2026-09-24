@@ -46,6 +46,14 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 		} else {
 			view.Advisories = advisories
 		}
+		drift, err := latestDrift(active.repository, w.Workstream, w.Subjects)
+		if err != nil {
+			if _, ok := unreadable[w.Workstream]; !ok {
+				unreadable[w.Workstream] = Diagnostic{"drift", Internal, fmt.Sprintf("cannot read the drift rebases of workstream %s; check the trace repository", w.Workstream)}
+			}
+		} else {
+			view.Drift = drift
+		}
 		for i := range view.Units {
 			for _, gate := range view.Gates {
 				if gate.Kind == UnitContested && gate.Reference == view.Units[i].Unit {

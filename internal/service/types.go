@@ -95,6 +95,34 @@ type ExtractionState struct {
 type ProjectExtractRequest struct {
 	Project config.ProjectID `json:"project"`
 }
+
+// ProjectRebaseRequest asks for a drift rebase of every building or
+// assembled workstream of the active project that is not paused.
+type ProjectRebaseRequest struct {
+	Project config.ProjectID `json:"project"`
+}
+
+// ProjectRebaseResponse reports a recorded drift rebase request: Covered
+// holds each workstream it asks a drift rebase for, with the number of the
+// drift rebase that answers it, and Skipped each other workstream with why.
+type ProjectRebaseResponse struct {
+	Project config.ProjectID `json:"project"`
+	Covered []DriftCoverage  `json:"covered"`
+	Skipped []DriftSkip      `json:"skipped"`
+}
+
+// DriftCoverage is one workstream a drift rebase request covers.
+type DriftCoverage struct {
+	Workstream config.WorkstreamID `json:"workstream"`
+	Drift      int                 `json:"drift"`
+}
+
+// DriftSkip is one workstream a drift rebase request skips, and why.
+type DriftSkip struct {
+	Workstream config.WorkstreamID `json:"workstream"`
+	Reason     string              `json:"reason"`
+}
+
 type ExtractionResponse struct {
 	Project    ProjectView     `json:"project"`
 	Extraction ExtractionState `json:"extraction"`
@@ -291,8 +319,8 @@ type StatusResponse struct {
 // recorded; Units is empty until the units' states are recorded, and each
 // unit carries its latest reported card when present; Advisories holds the
 // active overlap advisories about other workstreams of the project; Gates is
-// empty while no owner decision waits; Status is null until the chief of staff
-// writes one.
+// empty while no owner decision waits; Drift is null before the first drift
+// rebase; Status is null until the chief of staff writes one.
 type WorkstreamStatus struct {
 	Workstream    config.WorkstreamID `json:"workstream"`
 	Project       config.ProjectID    `json:"project"`
@@ -302,7 +330,17 @@ type WorkstreamStatus struct {
 	OpenQuestions int                 `json:"open_questions"`
 	Gates         []trace.OwnerGate   `json:"gates"`
 	ContextMode   bundle.Mode         `json:"context_mode"`
+	Drift         *DriftStatus        `json:"drift"`
 	Status        *StatusView         `json:"status"`
+}
+
+// DriftStatus is a workstream's latest drift rebase: its number, its
+// outcome (requested while it has none), and when and why that was recorded.
+type DriftStatus struct {
+	Drift   int       `json:"drift"`
+	Outcome string    `json:"outcome"`
+	At      time.Time `json:"at"`
+	Reason  string    `json:"reason"`
 }
 
 // StatusView is one status revision as the chief of staff wrote it.

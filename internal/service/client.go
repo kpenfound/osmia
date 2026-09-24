@@ -137,6 +137,14 @@ func (c *Client) ExtractProject(ctx context.Context, id config.ProjectID) (Extra
 	return v, err
 }
 
+// RebaseProject asks for a drift rebase of every eligible workstream of a
+// project and reports the workstreams the request covers.
+func (c *Client) RebaseProject(ctx context.Context, id config.ProjectID) (ProjectRebaseResponse, error) {
+	var v ProjectRebaseResponse
+	err := c.Do(ctx, "POST", Prefix+"/projects/rebase", ProjectRebaseRequest{Project: id}, &v)
+	return v, err
+}
+
 // HandIn hands work to a project and returns the workstream it created.
 func (c *Client) HandIn(ctx context.Context, req HandInRequest) (HandInResponse, error) {
 	var v HandInResponse

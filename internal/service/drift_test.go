@@ -55,12 +55,15 @@ func seals(t *testing.T, repository *trace.Repository, stream config.WorkstreamI
 	return out
 }
 
+// testDrift makes every eligible workstream due for a drift rebase.
+func testDrift(config.WorkstreamID) (string, error) { return "the test asks for a drift rebase", nil }
+
 // requestDrift asks for drift rebases and returns the one operation it
 // asked for, for the workstream.
 func requestDrift(t *testing.T, d drifter, stream config.WorkstreamID) coreadapter.Operation {
 	t.Helper()
 	asked := len(driftOperations(t, d.repository, stream))
-	requested, err := d.requestDrifts(context.Background())
+	requested, err := d.requestDrifts(context.Background(), testDrift)
 	must(t, err)
 	if !slices.Equal(requested, []config.WorkstreamID{stream}) {
 		t.Fatalf("drift rebases asked for %v, want %s", requested, stream)
@@ -234,7 +237,7 @@ func TestPausedWorkstreamIsSkippedByDriftRebases(t *testing.T) {
 	must(t, err)
 	defer repository.Close()
 	d = drifter{&foreman{masons: newMasonController(f.s, repository)}}
-	if requested, err := d.requestDrifts(ctx); err != nil || len(requested) != 0 {
+	if requested, err := d.requestDrifts(ctx, testDrift); err != nil || len(requested) != 0 {
 		t.Fatalf("drift rebases asked for a paused workstream: %v %v", requested, err)
 	}
 	if ops := driftOperations(t, repository, stream); len(ops) != 1 {
@@ -365,7 +368,7 @@ func TestDriftRebaseIsSerializedWithLandings(t *testing.T) {
 		t.Fatalf("landing operations %+v", landings)
 	}
 	advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
-	if requested, err := d.requestDrifts(ctx); err != nil || len(requested) != 0 {
+	if requested, err := d.requestDrifts(ctx, testDrift); err != nil || len(requested) != 0 {
 		t.Fatalf("drift rebases asked for while a landing has no result: %v %v", requested, err)
 	}
 	if ops := driftOperations(t, repository, stream); len(ops) != 0 {
