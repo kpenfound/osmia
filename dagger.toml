@@ -6,11 +6,11 @@
 [modules]
 
 [modules.go]
-source = "dagger.io/go"
+source = ".dagger/modules/osmia-go"
 
 [modules.go.settings]
 # Match the toolchain used by the core dependency and keep factory state out
 # of module discovery, including any go.mod files left in session directories.
 base = "golang:1.26-bookworm"
-test = ["**", "!.bees/**"]
-generate = ["**", "!.bees/**"]
+test = ["**", "!.bees/**", "!.dagger"]
+generate = ["**", "!.bees/**", "!.dagger"]
