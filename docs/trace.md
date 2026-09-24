@@ -845,3 +845,44 @@ each a `plan.Problem` with a kind and the unit, the criterion or both:
 
 An empty list means the plan can be presented. The validator does not judge
 whether a unit is too large.
+
+## Walking the trace
+
+A trace walk follows one workstream's record from a sealed criterion, a unit
+or a commit. A walk reads the workstream's records once, so it sees one
+revision of the trace, and records nothing. It reads delivered and abandoned
+workstreams like any other, and two walks of the same trace give the same
+answer.
+
+- **Criterion.** From `spec#<n>`: the latest seal, the `spec.md` and
+  `plan.json` revisions it pins and the criterion's text in that spec
+  revision, the owner's ratification of those revisions, the question rulings
+  that cite the criterion, every unit of the sealed plan or a follow-up that
+  addresses it, the final report's evidence or gap for it, and the delivery.
+  Each unit's reports and verdicts are narrowed to the criterion.
+- **Unit.** Its definition and planned proofs, every revision of its reports,
+  verdicts, rebases and landings, the owner's contested rulings and the
+  question rulings about it, its turns with their cost, and every record of
+  the unit in time order.
+- **Commit.** Every record that names the commit and the role it gives it:
+  landing, candidate, base, unit or final rebase, final review, delivery
+  approval or publication. A landing leads back to the review revision that
+  approved it, the report that review read, and the seal, spec and plan
+  revisions and criteria the landing records. A reviewed or published
+  delivery commit leads to every unit's latest landing. The `Osmia-Operation`
+  trailer of the commit's message, when the caller supplies it, finds the
+  landing or publication of a commit rebased or squashed after it was
+  recorded.
+
+A walk follows the revision a record names, never a newer one: a landing's
+criteria read from the spec revision the landing records, a publication's
+approval is the revision it published. A link it cannot follow is a gap with
+one of three states:
+
+| State | Meaning |
+| --- | --- |
+| `unavailable` | The trace should hold the link by now, or a record names it, and it does not hold or cannot read it. |
+| `unfinished` | The work under way produces it, such as the report of an implementing unit or the landing of an approved one. |
+| `not-created` | Nothing has started to produce it, or the workstream was delivered or abandoned before it did. |
+
+A walk is complete when it has no gap, including those of its units.
