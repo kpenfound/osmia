@@ -134,7 +134,7 @@ func (a *amendmentDrafter) Inspect(_ context.Context, op coreadapter.Operation) 
 		return coreadapter.Observation{}, err
 	}
 	if result, err := a.outcome(stream, request.ID, op.ID); err != nil || result != nil {
-		return coreadapter.Observation{State: coreadapter.EffectCompleted, Result: result}, err
+		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: resultEvidence(result), Result: result}, err
 	}
 	thread, err := a.repository.Thread(stream, architectAgent)
 	if err != nil {
@@ -145,7 +145,14 @@ func (a *amendmentDrafter) Inspect(_ context.Context, op coreadapter.Operation) 
 			return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "architect turn is running"}, nil
 		}
 	}
-	return coreadapter.Observation{State: coreadapter.EffectAbsent}, nil
+	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "no amendment outcome or running architect turn"}, nil
+}
+
+func resultEvidence(result *coreadapter.OperationResult) string {
+	if result == nil {
+		return "amendment outcome lookup found no result"
+	}
+	return "amendment outcome recorded: " + result.Evidence
 }
 
 func (a *amendmentDrafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
