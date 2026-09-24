@@ -653,7 +653,8 @@ A role's question, the chief of staff's one choice for it and the answer's
 way back are records under `workstreams/<id>/questions/<n>/`, where `n` counts
 the workstream's questions from 1. Each question also has a workflow subject,
 `trace.QuestionSubject(n)` (`question_<n>`), whose state is `open`, `answered`,
-`escalated` or, once the owner ruled on an escalation, `ruled`. The state
+`escalated`, `routed` to an amendment or, once the owner ruled on an escalation,
+`ruled`. The state
 leaves `open` once, so a question gets exactly one choice; an escalated
 question moves on to `ruled` and then `answered`. Every write below is one commit through the journaled publication
 boundary: the records, the transition in `events.jsonl` and any event appear
@@ -668,6 +669,7 @@ the agent, and writes nothing.
 | `Ask(ctx, agent, scope, text, at)` | Revision 1 of `Question` `n`: `asked_by` (the agent), `thread`, `turn` and the scope's unit, with `question` as asked. | `question_<n>_open`, from nothing to `open`, with one `notice` event for the chief of staff: `Question <n> is open, asked by the <role>: <question>`. |
 | `AnswerQuestion(ctx, agent, scope, n, text, citations, at)` | Revision 1 of `Ruling` `n`: `question_id`, the question's latest revision, `decision` `answer`, `returned_answer` and `citations`. | `question_<n>_answered`, `open` to `answered`. |
 | `EscalateQuestions(ctx, agent, scope, request, at)` | For every listed question, its next `Question` revision: `sent_to_owner` holds the rephrasing and `escalation` holds `batch`, the batch's `questions`, `blocked`, `options` and `recommendation`. The batch ID is `escalation_` and the first listed question. `inbox` is the escalation's inbox number: one more than the highest of the project's escalations, in any workstream, so it is unique in the project and never reused. | `question_<n>_escalated` for each, `open` to `escalated`. |
+| `FileAmendment` with a question | Revision 1 of `Amendment` under `amendments/<n>/request.jsonl`, naming the open question and its asker. | `question_<n>_routed`, `open` to `routed`, together with the amendment filing and any unit wait. |
 
 In every record the actor is the calling agent, the cause is its turn
 request's ID and the depth is one more than the request's.
