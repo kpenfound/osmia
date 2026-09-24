@@ -167,3 +167,14 @@ func readDocs(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, 
 	}
 	return docs
 }
+
+func TestAmendmentAffectedSetIncludesEveryAddressingUnit(t *testing.T) {
+	t.Parallel()
+	graph, err := plan.Parse([]byte(parallelPlan))
+	must(t, err)
+	revised := strings.Replace(validSpec, "1. An interrupted upload resumes from the last acknowledged chunk.", "1. An interrupted upload resumes from a durable checkpoint.", 1)
+	got := affectedRevision(validSpec, revised, graph, graph)
+	if !slices.Equal(got.Criteria, []string{"spec#1"}) || !slices.Equal(got.Units, []string{"resume", "upload"}) || !slices.Equal(got.Proofs, []string{"resume:spec#1", "upload:spec#1"}) {
+		t.Fatalf("affected set %+v", got)
+	}
+}
