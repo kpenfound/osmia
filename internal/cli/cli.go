@@ -772,6 +772,9 @@ func showWorkstreams(w io.Writer, all service.StatusResponse) {
 		fmt.Fprintf(w, "  %s %s\n", st.Workstream, facts(st))
 		for _, gate := range st.Gates {
 			fmt.Fprintf(w, "    Gate: %s %s\n", gate.Kind, gate.Reference)
+			if gate.Reason != "" {
+				fmt.Fprintf(w, "      Reason: %s\n", gate.Reason)
+			}
 		}
 		if st.Status == nil {
 			fmt.Fprintln(w, "    no status yet")
@@ -786,11 +789,17 @@ func showStatus(w io.Writer, st service.WorkstreamStatus) {
 	fmt.Fprintf(w, "Workstream: %s %s\n", st.Workstream, facts(st))
 	for _, gate := range st.Gates {
 		fmt.Fprintf(w, "Gate: %s %s\n", gate.Kind, gate.Reference)
+		if gate.Reason != "" {
+			fmt.Fprintf(w, "  Reason: %s\n", gate.Reason)
+		}
 	}
 	if len(st.Units) > 0 {
 		fmt.Fprintln(w, "Units:")
 		for _, u := range st.Units {
 			fmt.Fprintf(w, "  %s %s\n", u.Unit, u.State)
+			if u.Reason != "" {
+				fmt.Fprintf(w, "    Reason: %s\n", u.Reason)
+			}
 			if u.Card != nil {
 				fmt.Fprintf(w, "    Headline: %s\n    Happened: %s\n", u.Card.Headline, u.Card.Happened)
 				if u.Card.NeedsYou != "" {
