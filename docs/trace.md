@@ -785,6 +785,13 @@ the same turn returns the same request. A request requires a building or
 assembled workstream and citations that resolve in its spec or plan. Waiting
 preserves the underlying implementation or review stage and its candidate.
 
+The architect's proposed `spec.md`, `plan.json` and `affected.json` are
+recorded under the same `amendments/<n>/` directory. The affected record lists
+criterion citations, unit IDs and `unit:criterion` proof references. These
+documents and the `proposed` workflow transition are committed together; the
+root spec and plan remain sealed until the owner decides. A declined or invalid
+draft records the reason in its workflow transition without candidate files.
+
 Before `answer` records anything, `questions.Resolve` checks every citation
 against the trace, and the first one that names nothing refuses the answer
 with its reason:

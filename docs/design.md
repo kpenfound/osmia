@@ -137,7 +137,7 @@ The directed graph of units. For each unit: the criteria it addresses, how each 
       spec.md                    every revision in the repository's history
       plan.json
       shed/round-<n>/            one file per committee member, the architect's reply, your rulings
-      amendments/<n>/            request, its round, the decision
+      amendments/<n>/            request, draft spec and plan, affected set, its round, the decision
       questions/<n>/             as asked, the decision, what you were sent, what you said, what went back
       units/<u>/                 bundle, review/, landing.json
       agents/<id>/log.jsonl      every turn's request and final response, with provenance
@@ -217,6 +217,8 @@ You are in the shed on purpose. This is the one place the design makes you a blo
 A big feature hits a constraint mid-unit that nobody saw at planning. Without an amendment path the mason either improvises or stalls. So a mason or a reviewer may file an amendment request, scoped to the sealed spec: which criteria, what change, why. It gets one short shed round with the same rules, the chief of staff presents it, and you decide. The unit that raised it waits. Others continue unless the change touches their footprint, in which case they are notified in their next bundle or, if the meaning of a criterion they address changed, sent back to implementing.
 
 An amendment is not a feature-state cycle. The feature stays in building, or assembled if final review has begun. The approved amendment versions the spec and/or plan, updates the seal if the spec changes, and identifies affected units and proofs. It does not directly edit code. A rejected request leaves the prior documents in force and the requester receives the ruling. Any approval or final report based on changed criteria is invalidated before further landing or delivery.
+
+The architect drafts a proposed revision from the sealed documents, request, charter and context. The proposal keeps the sealed spec and plan in force until the owner decides. The trace records the proposed spec, plan and an affected set of criteria, units and proofs under the request. Invalid drafts leave the sealed documents untouched.
 
 ### 5.5 Delivery
 
