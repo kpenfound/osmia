@@ -58,6 +58,30 @@ owner as actor and cause `owner-edit`, then uses that revision. Reading again
 without an edit records nothing. Every edit you make is versioned before any
 reader sees it.
 
+## Rules from your rulings
+
+When a ruling you gave a workstream is a standing rule for the project, its
+chief of staff proposes the rule for the charter. You ratify or decline it with
+`osmia charter` or by telling the chief of staff (see the
+[command line](cli.md) and [charter proposals](service.md#charter-proposals)).
+A ratified rule is appended to `charter.md` by the service, not by you: it
+takes the number after your highest rule and goes under a `## Standing rulings`
+heading at the end, which is added when the charter does not already end under
+it:
+
+```markdown
+## Standing rulings
+
+7. Uploads resume after a restart. <!-- ratified from workstreams/w_…/questions/3/rulings.jsonl revision 2 -->
+```
+
+The comment names the ruling the rule came from; it is not part of the rule's
+text. The revision that appends the rule is recorded with the actor
+`service`/`charter`. If you edit the charter while the rule is being written,
+your edit is recorded as your revision and the rule is appended after it.
+Every later bundle on the project carries the ratified rule as a notice. A
+declined proposal leaves the charter as it is.
+
 ## Status and hand-in
 
 `osmia status` shows whether the charter is ready (has at least one rule), how

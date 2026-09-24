@@ -156,3 +156,59 @@ func joinInts(v []int) string {
 	}
 	return strings.Join(s, ", ")
 }
+
+// StandingRulings is the heading AppendRule files ratified rules under.
+const StandingRulings = "Standing rulings"
+
+// Next returns the number the next rule takes: one more than the highest
+// rule number, or 1 for an empty charter.
+func (c Charter) Next() int {
+	n := 0
+	for _, r := range c.Rules {
+		n = max(n, r.Number)
+	}
+	return n + 1
+}
+
+// AppendRule returns content with "number. text" as its last rule, followed
+// by source as an HTML comment, so the rule's text is what is cited and the
+// file still records where the rule came from. The rule goes under a
+// StandingRulings heading at the end of the charter, which is added when the
+// charter's last heading is another one. Text must be one line.
+func AppendRule(content string, number int, text, source string) string {
+	var b strings.Builder
+	b.WriteString(content)
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		b.WriteString("\n")
+	}
+	if lastHeading(content) != StandingRulings {
+		b.WriteString("\n## " + StandingRulings + "\n")
+	}
+	fmt.Fprintf(&b, "\n%d. %s <!-- %s -->\n", number, text, source)
+	return b.String()
+}
+
+// lastHeading returns the text of the last heading outside comments and
+// fenced code, as Parse reads headings.
+func lastHeading(content string) string {
+	var last, code string
+	comment := false
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimRight(raw, "\r")
+		if code != "" {
+			if strings.HasPrefix(strings.TrimSpace(line), code) {
+				code = ""
+			}
+			continue
+		}
+		line, comment = stripComments(line, comment)
+		if m := fence.FindStringSubmatch(line); m != nil {
+			code = m[1]
+			continue
+		}
+		if m := heading.FindStringSubmatch(line); m != nil {
+			last = strings.TrimSpace(strings.TrimRight(m[2], "#"))
+		}
+	}
+	return last
+}

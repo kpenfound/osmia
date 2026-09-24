@@ -299,7 +299,7 @@ func documentPath(p string, stream bool) error {
 	if !stream && (p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && (p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts)) {
+	if stream && (p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || charterProposalPath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)

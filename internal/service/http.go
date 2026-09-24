@@ -265,6 +265,44 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if r.URL.Path == Prefix+"/charter" && r.Method == http.MethodGet {
+		if out, api := s.charterProposals(); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
+	if target, ok := strings.CutPrefix(r.URL.Path, Prefix+"/charter/"); ok {
+		stream, question, found := strings.Cut(target, "/")
+		if !found || question == "" || strings.Contains(question, "/") {
+			failWith(w, &APIError{Validation, "expected charter/<workstream>/<question>"})
+			return
+		}
+		var (
+			out CharterProposalView
+			api *APIError
+		)
+		switch r.Method {
+		case http.MethodGet:
+			out, api = s.charterProposal(stream, question)
+		case http.MethodPost:
+			var v CharterDecisionRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			out, api = s.decideCharter(r.Context(), stream, question, v)
+		default:
+			fail(w, Unsupported)
+			return
+		}
+		if api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
 	if target, ok := strings.CutPrefix(r.URL.Path, Prefix+"/amendment/"); ok {
 		stream, id, found := strings.Cut(target, "/")
 		if !found || id == "" || strings.Contains(id, "/") {

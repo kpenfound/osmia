@@ -196,6 +196,29 @@ func (c *Client) Amendment(ctx context.Context, id config.WorkstreamID, amendmen
 	return v, err
 }
 
+// CharterProposals lists the charter proposals waiting for the owner's
+// decision.
+func (c *Client) CharterProposals(ctx context.Context) (CharterProposalsResponse, error) {
+	var v CharterProposalsResponse
+	err := c.Do(ctx, "GET", Prefix+"/charter", nil, &v)
+	return v, err
+}
+
+// CharterProposal reads the charter proposal made from one question of a
+// workstream.
+func (c *Client) CharterProposal(ctx context.Context, id config.WorkstreamID, question string) (CharterProposalView, error) {
+	var v CharterProposalView
+	err := c.Do(ctx, "GET", Prefix+"/charter/"+url.PathEscape(string(id))+"/"+url.PathEscape(question), nil, &v)
+	return v, err
+}
+
+// DecideCharter records the owner's decision on a charter proposal.
+func (c *Client) DecideCharter(ctx context.Context, id config.WorkstreamID, question string, req CharterDecisionRequest) (CharterProposalView, error) {
+	var v CharterProposalView
+	err := c.Do(ctx, "POST", Prefix+"/charter/"+url.PathEscape(string(id))+"/"+url.PathEscape(question), req, &v)
+	return v, err
+}
+
 // DecideAmendment records the owner's decision on a revision of an
 // amendment's packet.
 func (c *Client) DecideAmendment(ctx context.Context, id config.WorkstreamID, amendment string, req AmendmentDecisionRequest) (AmendmentResponse, error) {

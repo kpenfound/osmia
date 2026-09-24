@@ -82,6 +82,7 @@ does not infer authority, readiness or workflow transitions from them.
 | `Amendment` | `amendments/<id>/request.jsonl` | Requester and submitting turn, unit, citations, proposed change, reason and cited seal identity; see [tools and delivery](#tools-and-delivery) |
 | `Document` | `amendments/<id>/round-<n>/<member>.json`, `amendments/<id>/round-<n>/reply.json`, `amendments/<id>/packet.json`, `amendments/<id>/decision.json`, `amendments/<id>/application.json` | Pinned committee contributions and the architect answer of each debate round, the owner presentation packet (one revision per presentation), the owner's decisions (one revision per decision) and how an approved amendment applies to the units (one revision at the reseal, one once applied) |
 | `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer, scope, citations and affected references; a ruling holds a returned answer, an owner response or both, and a scope only with a returned answer; see [questions](#questions) |
+| `Document` | `questions/<question-id>/charter.json` | The chief of staff's proposal to make the owner's ruling on the question a charter rule, the owner's decision and, once ratified, the number and charter revision that record it; see [charter proposals](#charter-proposals) |
 | `Agent` | `agents/<id>/identity.jsonl` | Stable role/thread identity and backend session at that revision |
 | `TurnRequest` | `agents/<agent-id>/log.jsonl` | Thread/turn identity, accepted profile, system prompt, request and caller-supplied context |
 | `TurnResponse` | `agents/<agent-id>/log.jsonl` | Exact request revision, thread/turn identity, adapter result (including the accepted `done` report and card) and any execution failure |
@@ -119,7 +120,9 @@ workstream's feature branch onto upstream, `final/report.json`, its
 criterion-by-criterion final report, `final/delivery.json`, the
 [owner's delivery approval](service.md#owner-delivery-approval),
 `final/publication.json`, its [publication](service.md#publication) to the
-fork and pull request, and the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
+fork and pull request, `questions/<n>/charter.json`, a
+[charter proposal](#charter-proposals) made from the owner's ruling on question
+`n`, and the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
 round: `shed/round-<n>/owner.json`, the owner's objections, a record of the
 same shape as a member's; `shed/round-<n>/rulings.json`, what the owner ruled
 and overruled about the objections that stand; `shed/round-<n>/more.json`, the
@@ -194,8 +197,9 @@ recording `charter.md` as a new revision by the owner (`owner`/`local`, cause
 edit records nothing. The file itself is not rewritten, and the commit takes
 the recorded bytes, so an edit saved meanwhile is recorded by the next read.
 `Append` of a project `charter.md` revision is refused with `ErrConflict`
-unless the file matches the latest recorded revision. The rule format is
-described in [charter](charter.md).
+unless the file matches the latest recorded revision. This is how the service
+appends a [ratified rule](#charter-proposals) without overwriting an owner
+edit. The rule format is described in [charter](charter.md).
 
 ## Owner-edited workstream documents
 
@@ -637,8 +641,11 @@ subject (`FeatureSubject`), empty until a transition records one. A question
 is open while no ruling names it. A damaged record fails the whole read.
 An escalated inbox batch is one gate until ruled. A recorded ratification
 packet is a gate while its workstream remains in the shed. A contested unit
-is a gate while its unit state is contested. Gates give a kind and reference:
-the inbox number, workstream ID or unit ID respectively. Mason contest gates
+is a gate while its unit state is contested. A charter proposal is a gate
+while it is `proposed`, unless its workstream is abandoned. Gates give a kind
+and reference: `escalation` and the inbox number, `ratification` and the
+workstream ID, `contested` and the unit ID, or `charter` and the question
+number. Mason contest gates
 also carry the contest transition's reason (`gave_up` or bound exhaustion).
 
 A mason ruling and its transition back to implementing share one trace
@@ -772,6 +779,46 @@ in the [workstream status](#workstream-status). A `notify` ruling is a notice
 in every later [bundle](context.md) on the project; a `local` one reaches only
 the askers.
 
+### Charter proposals
+
+When the owner's ruling on a question is a standing rule for the project, the
+chief of staff proposes it as a charter rule, and the owner ratifies or
+declines it. The proposal is the document `questions/<n>/charter.json` of the
+question's workstream (record ID `charter_<n>`), and its workflow subject is
+`trace.CharterSubject(n)` (`charter_<n>`). Every revision holds the whole
+proposal: `question`, `ruling` and `ruling_revision` (the record path and
+revision of the owner's ruling), `owner_response` (the owner's words in it),
+`rule` and `number`.
+
+| Step | Revision of `charter.json` | Transition |
+| --- | --- | --- |
+| `ProposeCharter(ctx, agent, scope, n, rule, next, at)`, the chief of staff's `propose_charter` | 1: the rule and the number it would take, which `next` computes from `charter.md` as it is on disk when proposed (one more than its highest rule); that read records nothing. The actor is the agent, the cause its turn request's ID. | `charter_<n>_proposed`, from nothing to `proposed`. |
+| The owner's [decision](service.md#charter-proposals) | 2: adds `decision`, `ratify` or `decline`, and `note`. The actor is the owner. | `charter_<n>_ratified`, `proposed` to `ratified`, or `charter_<n>_declined`, `proposed` to `declined`, which carries a `notice` for the chief of staff. |
+| The service records a ratified rule in the charter | 3: `number` is the number the rule took and `charter` the `charter.md` revision that holds it. The actor is `service`/`charter`. | `charter_<n>_chartered`, `ratified` to `chartered`, with a `notice` for the chief of staff. |
+
+Each row is one commit. `ProposeCharter` fails for a scope that is not the
+chief of staff's, and refuses with `*QuestionRefused` a question that does
+not exist, one without a ruling the owner gave (a chief of staff's own answer
+is not one), a ruling that already has a proposal in any state, and a rule
+that is empty, spans lines or holds an HTML comment marker.
+
+The ratified rule is appended to `charter.md` as one `Append` of the next
+charter revision, whose actor is `service`/`charter` and whose cause is the
+proposal's path, `workstreams/<id>/questions/<n>/charter.json`. That cause is
+how a restart between the charter write and the `chartered` commit finds the
+rule already written rather than appending it twice. The rule is written as
+`<number>. <rule> <!-- ratified from <ruling path> revision <r> -->` under a
+`## Standing rulings` heading at the end of the charter, added when the
+charter's last heading is another one, so the file records the source ruling
+while the comment stays out of the rule's text. The number is one more than
+the highest rule of the charter read just before the write. An owner edit
+saved between that read and the write makes `Append` refuse, and the service
+reads the charter again, which records the edit as the owner's revision, and
+appends the rule after it.
+
+`CharterProposals()` returns every proposal of the project, oldest first,
+with its first and latest revision, the latest content and its workflow state.
+
 ### Tools and delivery
 
 `internal/questions` holds the tools. `questions.Tools(repository, agent,
@@ -791,7 +838,7 @@ tool result, `{"recorded":false,"reason":"…"}`, so the agent reads why.
 | `relay_ruling` | `question`, `text`, `scope` (`local` or `notify`) | `{"recorded":true,"questions":[…],"scope":"…","next":"…"}`, naming every question of the batch |
 | `amend` | `citations` (`spec#<n>` and/or `plan#<unit>`), `change`, `reason` | `{"recorded":true,"amendment":"<n>","next":"…"}`; the requesting unit enters `waiting`. |
 | `route_amendment` | `question`, `citations`, `change`, `reason` | The same amendment result; the open question becomes `routed`. |
-| `propose_charter` | any object | `{"recorded":false,"reason":"reserved until standing rulings (M4)"}`. |
+| `propose_charter` | `question`, `rule` | `{"recorded":true,"question":"<n>","number":<rule number>,"next":"…"}`; see [charter proposals](#charter-proposals). |
 
 `amendments/<n>/request.jsonl` records the request with its submitting turn,
 requester, unit, cited criteria or plan units, proposed change, reason, and
