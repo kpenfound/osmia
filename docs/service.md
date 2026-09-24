@@ -444,10 +444,10 @@ owner read:
 
 A decision requires a `building` or `assembled` workstream and an amendment in
 state `presented`; a packet revision other than the latest is refused with
-`conflict`. Approval and overrule are also refused once `seal.json` has a later
-revision than the one the request was filed against: another amendment moved
-the sealed documents, or a [drift rebase](#drift-rebases) moved the seal's
-base, so the request is rejected and filed again. Every
+`conflict`. Approval and overrule are refused when the seal number, spec hash,
+or sealed spec or plan revision differs from the seal the request was filed
+against. A later `seal.json` revision that only moves the upstream base during
+a [drift rebase](#drift-rebases) does not stale the request. Every
 decision is one revision of `amendments/<n>/decision.json`, committed with its
 transition `amendment-<n>-decided-<k>` and a notice for the chief of staff. It
 records the decision, the note, the debate round, the packet revision, the
@@ -463,12 +463,14 @@ The amendment controller then applies the decision on the next pass:
   `seal.json` gets a revision naming them. A changed spec takes the next seal
   number and its hash; a plan-only change keeps the seal number and spec hash
   and records the new plan's footprints. The base commit, feature branch and
-  feature state stay as they are, and no code is edited. The documents, the
+  feature state stay as they are, and no code is edited. When a drift rebase
+  has moved the base since the owner decided, the next seal revision starts
+  from the current seal and retains that base. The documents, the
   seal, the first revision of `amendments/<n>/application.json` and
   transition `amendment-<n>-resealed` are one commit, so a restart between
   the decision and the reseal completes it once. An approval that can no
-  longer apply, because the sealed documents moved or the plan's footprints
-  no longer resolve, moves to `unapplied` with the reason and leaves the
+  longer apply, because the sealed spec or plan identity moved or the plan's
+  footprints no longer resolve, moves to `unapplied` with the reason and leaves the
   sealed documents in force.
 - **Rejected**: nothing is versioned and the sealed documents stay in force.
 

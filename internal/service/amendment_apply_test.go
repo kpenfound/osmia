@@ -86,6 +86,45 @@ func approveAmendment(t *testing.T, f *shedFixture, repository *trace.Repository
 	return amendmentDebate{&debate{s: f.s, repository: repository}}, request
 }
 
+func TestApprovedAmendmentUsesCurrentDriftBase(t *testing.T) {
+	f, stream, repository := newApprovedFixture(t, "drifted-amendment")
+	defer repository.Close()
+	a, req := approveAmendment(t, f, repository, stream, amendedSpec, independentPlan)
+	moved := recordAmendmentSealRevision(t, f, repository, stream, func(s *seal.Seal) { s.Base.Commit = "later-upstream-commit" })
+	step(t, a, stream, req, amendmentResealed)
+	current, doc, found, err := seal.Latest(repository, stream)
+	must(t, err)
+	if !found || doc.Revision != 3 || current.Base != moved.Base || current.Seal != moved.Seal+1 || current.SpecHash != seal.SpecHash(amendedSpec) {
+		t.Fatalf("resealed %+v at revision %d, want current base %+v", current, doc.Revision, moved.Base)
+	}
+	applications, err := amendment.Read(repository, stream)
+	must(t, err)
+	if len(applications) != 1 || applications[0].From.SealRevision != 2 || applications[0].To.SealRevision != 3 {
+		t.Fatalf("application %+v", applications)
+	}
+}
+
+func TestApprovedAmendmentWithChangedSealedDocumentsIsUnapplied(t *testing.T) {
+	for name, change := range map[string]func(*seal.Seal){
+		"spec": func(s *seal.Seal) { s.Revision.Spec++; s.SpecHash = seal.SpecHash(amendedSpec) },
+		"plan": func(s *seal.Seal) { s.Revision.Plan++ },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, stream, repository := newApprovedFixture(t, "stale-"+name)
+			defer repository.Close()
+			a, req := approveAmendment(t, f, repository, stream, amendedSpec, independentPlan)
+			recordAmendmentSealRevision(t, f, repository, stream, change)
+			step(t, a, stream, req, amendmentUnapplied)
+			if got := transitionByID(t, repository, stream, "amendment-1-unapplied").Reason; !strings.Contains(got, "sealed spec or plan changed") {
+				t.Fatalf("unapplied reason %q", got)
+			}
+			if docs := streamDocuments(t, repository, stream, seal.DocumentID); len(docs) != 2 {
+				t.Fatalf("unexpected reseal: %+v", docs)
+			}
+		})
+	}
+}
+
 // step runs the amendment controller once on amendment 1 and checks the
 // state it leaves it in.
 func step(t *testing.T, a amendmentDebate, stream config.WorkstreamID, req trace.Amendment, want string) {
