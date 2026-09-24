@@ -87,20 +87,20 @@ func (f *foreman) history(stream config.WorkstreamID) (driftHistory, error) {
 	return h, nil
 }
 
-// driftDue returns why the workstream takes a drift rebase at now, or ""
-// when it takes none: the owner asked for one it has not had, or the
+// driftDue returns why the sealed workstream takes a drift rebase at now, or
+// "" when it takes none: the owner asked for one it has not had, or the
 // project's upstream_rebase interval has elapsed since its latest drift
 // rebase, final rebase or, before either, its sealing.
 func (f *foreman) driftDue(stream config.WorkstreamID, now time.Time) (string, error) {
 	h, err := f.history(stream)
-	if err != nil {
+	if err != nil || h.Since.IsZero() {
 		return "", err
 	}
 	if h.Requested > h.Drift {
 		return fmt.Sprintf("the owner asked for a drift rebase at %s", h.RequestedAt.Format(time.RFC3339)), nil
 	}
 	interval := f.cfg.Project.RebaseInterval()
-	if interval <= 0 || h.Since.IsZero() || now.Sub(h.Since) < interval {
+	if interval <= 0 || now.Sub(h.Since) < interval {
 		return "", nil
 	}
 	return fmt.Sprintf("upstream_rebase %s has elapsed since the %s at %s", interval, h.What, h.Since.Format(time.RFC3339)), nil

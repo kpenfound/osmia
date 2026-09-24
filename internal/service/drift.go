@@ -83,9 +83,9 @@ func driftIDs(k int) (transition, event string) {
 }
 
 // requestDrifts asks for a drift rebase of every building or assembled
-// workstream of the project that is not paused, has no final review in
-// flight and has a seal, for which due returns why it takes one now, and
-// returns the workstreams it asked for. Drift rebases share the project's
+// workstream of the project that is not paused and has no final review in
+// flight, for which due returns why it takes one now and that has a seal,
+// and returns the workstreams it asked for. Drift rebases share the project's
 // lander with landings: while a landing or drift rebase of the project has
 // no result, it asks for nothing.
 func (f *foreman) requestDrifts(ctx context.Context, due func(config.WorkstreamID) (string, error)) ([]config.WorkstreamID, error) {
@@ -129,16 +129,16 @@ func (f *foreman) requestDrifts(ctx context.Context, due func(config.WorkstreamI
 		} else if reason != "" {
 			continue
 		}
-		if _, _, found, err := seal.Latest(f.repository, stream); err != nil {
-			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
-		} else if !found {
-			continue
-		}
 		why, err := due(stream)
 		if err != nil {
 			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
 		}
 		if why == "" {
+			continue
+		}
+		if _, _, found, err := seal.Latest(f.repository, stream); err != nil {
+			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
+		} else if !found {
 			continue
 		}
 		if err := f.requestDrift(ctx, stream, why); err != nil {
