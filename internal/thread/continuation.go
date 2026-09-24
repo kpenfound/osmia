@@ -106,6 +106,9 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		a.Result = &captured
 		if runErr != nil {
 			a.Failure = runErr.Error()
+			if errors.Is(runErr, coreadapter.ErrSessionCostCap) {
+				a.FailureClass = coreadapter.Infrastructure
+			}
 		}
 		q.Attempts[len(q.Attempts)-1] = a
 		if err := r.Store.RecordAttempt(context.WithoutCancel(ctx), q.Request.Workstream, q.Request.AgentID, q.Request.TurnID, q.Claim.Token, a); err != nil {

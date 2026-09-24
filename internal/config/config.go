@@ -4,10 +4,12 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +24,7 @@ type Config struct {
 	ActiveProjects []string           `toml:"active_projects" json:"active_projects"`
 	Listen         Listen             `toml:"listen" json:"listen"`
 	Capacity       Capacity           `toml:"capacity" json:"capacity"`
+	Budget         Budget             `toml:"budget" json:"budget"`
 	Profiles       map[string]Profile `toml:"profiles" json:"profiles"`
 	Roles          map[string]Role    `toml:"roles" json:"roles"`
 	Shed           Shed               `toml:"shed" json:"shed"`
@@ -38,6 +41,19 @@ type Capacity struct {
 	Committee     int `toml:"committee" json:"committee"`
 	PerWorkstream int `toml:"per_workstream" json:"per_workstream"`
 }
+type Budget struct {
+	PerSession string `toml:"per_session" json:"per_session,omitempty"`
+	PerUnit    string `toml:"per_unit" json:"per_unit,omitempty"`
+	PerDay     string `toml:"per_day" json:"per_day,omitempty"`
+}
+
+var decimalUSD = regexp.MustCompile(`^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$`)
+
+func (b Budget) SessionLimitUSD() float64 {
+	v, _ := strconv.ParseFloat(b.PerSession, 64)
+	return v
+}
+
 type Shed struct {
 	MaxRounds  int `toml:"max_rounds" json:"max_rounds"`
 	MaxBounces int `toml:"max_bounces" json:"max_bounces"`
@@ -158,6 +174,15 @@ func Load(options Options) (*Config, error) {
 	}
 	if d, err := time.ParseDuration(c.Events.Window); err != nil || d <= 0 {
 		return nil, fieldError(path, "events.window", "must be a positive Go duration")
+	}
+	for _, value := range []struct{ field, amount string }{{"per_session", c.Budget.PerSession}, {"per_unit", c.Budget.PerUnit}, {"per_day", c.Budget.PerDay}} {
+		if !md.IsDefined("budget", value.field) {
+			continue
+		}
+		n, err := strconv.ParseFloat(value.amount, 64)
+		if !decimalUSD.MatchString(value.amount) || err != nil || n <= 0 || math.IsInf(n, 0) {
+			return nil, fieldError(path, "budget."+value.field, "must be a positive decimal USD string")
+		}
 	}
 	if err := c.validateProfiles(path, md); err != nil {
 		return nil, err
@@ -313,12 +338,12 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "sandbox", "image"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window"}, path)
+	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {
 	switch key[0] {
-	case "budget", "hearsay", "notify", "upstream_rebase", "hearsay_scope", "pause", "priority":
+	case "hearsay", "notify", "upstream_rebase", "hearsay_scope", "pause", "priority":
 		return "unsupported in M1; requires a later milestone"
 	}
 	if key.String() == "listen.tailnet" || key.String() == "listen.web" {
@@ -433,7 +458,7 @@ func (c *Config) NamedProfile(name string) (coreadapter.Profile, error) {
 		return coreadapter.Profile{}, fmt.Errorf("unknown profile %q", name)
 	}
 	timeout, err := time.ParseDuration(p.Timeout)
-	return coreadapter.Profile{Name: name, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns}, err
+	return coreadapter.Profile{Name: name, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: c.Budget.SessionLimitUSD()}, err
 }
 
 // Execution returns adapter inputs, not verified isolation or permission to run.
@@ -447,7 +472,7 @@ func (c *Config) Execution(role, profile string) (coreadapter.Profile, coreadapt
 		if next == profile {
 			p := c.Profiles[next]
 			timeout, err := time.ParseDuration(p.Timeout)
-			return coreadapter.Profile{Name: next, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image}, err
+			return coreadapter.Profile{Name: next, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: c.Budget.SessionLimitUSD()}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image}, err
 		}
 	}
 	return coreadapter.Profile{}, coreadapter.ExecutionSettings{}, fmt.Errorf("profile %q is not in role %q's fallback chain", profile, role)

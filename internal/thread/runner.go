@@ -60,6 +60,9 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: req.ThreadID, TurnID: req.TurnID, RequestID: req.ID, RequestRevision: req.Revision, Result: result}
 	if runErr != nil {
 		response.Failure = runErr.Error()
+		if errors.Is(runErr, coreadapter.ErrSessionCostCap) {
+			response.FailureClass = coreadapter.Infrastructure
+		}
 	}
 	if t.Identity.Role == "mason" {
 		response.Classification = trace.ClassifyMasonTurn(result, response.Failure)

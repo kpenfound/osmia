@@ -64,6 +64,25 @@ func queueBackend(t *testing.T, r *trace.Repository, id, backend string) trace.T
 	}
 	return req
 }
+
+func TestSessionCostCapPersistsInfrastructureFailure(t *testing.T) {
+	repo, _, _ := setup(t)
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_cap", Project: project, Workstream: stream, At: timestamp, Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "owner-message", Depth: 3}, AgentID: "agent", ThreadID: "thread", TurnID: "cap", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test", CostLimitUSD: 1}, Prompt: "Work"}
+	if _, err := repo.EnqueueTurn(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: fakeTurns(func(_ context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+		return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, IsError: true, ErrorSubtype: "session_cost_cap", Usage: coreadapter.Usage{CostUSD: 1, CostKnown: true}}, coreadapter.ErrSessionCostCap
+	})}
+	q, err := runner.RunNext(context.Background(), stream, "agent", coreadapter.PreparedTurn{SessionDirectory: "/owned/cap"})
+	if !errors.Is(err, coreadapter.ErrSessionCostCap) || len(q.Attempts) != 1 || q.Attempts[0].FailureClass != coreadapter.Infrastructure || q.Response == nil || q.Response.FailureClass != coreadapter.Infrastructure {
+		t.Fatalf("cap attempt: %+v %v", q, err)
+	}
+	stored, err := repo.Thread(stream, "agent")
+	if err != nil || len(stored.Turns) != 1 || stored.Turns[0].Attempts[0].FailureClass != coreadapter.Infrastructure {
+		t.Fatalf("durable attempt: %+v %v", stored, err)
+	}
+}
 func TestRunnerSerialDeliveryAndProvenance(t *testing.T) {
 	repo, root, p := setup(t)
 	first := queue(t, repo, "first")
