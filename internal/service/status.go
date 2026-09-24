@@ -37,6 +37,13 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]*APIEr
 			unreadable[w.Workstream] = &APIError{Internal, fmt.Sprintf("cannot read the unit states of workstream %s; check the trace repository", w.Workstream)}
 		}
 		view.Units = append(view.Units, units...)
+		for i := range view.Units {
+			for _, gate := range view.Gates {
+				if gate.Kind == UnitContested && gate.Reference == view.Units[i].Unit {
+					view.Units[i].Reason = gate.Reason
+				}
+			}
+		}
 		out = append(out, view)
 	}
 	return out, unreadable, nil

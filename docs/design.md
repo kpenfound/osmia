@@ -184,7 +184,7 @@ planned -> ready -> implementing -> reviewing -> approved -> merged
                         ^              |
                         +--------------+ changes requested, bounded by max_bounces
 
-any state may also be: waiting (a question is open), contested (bounce count over threshold)
+any state may also be: waiting (a question is open), contested (review bounces or a mason clean-turn decision)
 ```
 
 | State | Meaning | Handled by |
@@ -196,9 +196,9 @@ any state may also be: waiting (a question is open), contested (bounce count ove
 | approved | The reviewer is satisfied. Waiting for the foreman. | scheduler |
 | merged | Squashed to one commit on the feature branch, message generated from the criteria it addresses. Units still in flight are rebased. | foreman |
 | waiting | A sub-state of any of the above: the unit's role asked a question and its turn ended. Nothing else on the unit moves until the answer arrives. Other units continue. | chief of staff, owner |
-| contested | The bounce count passed `max_bounces`. Raised to you through the chief of staff. Nothing on the unit moves until you rule. | owner |
+| contested | Review bounces reached `max_bounces`, or the mason gave up or exhausted its clean-turn bound. Raised to you through the chief of staff with the reason. Nothing on the unit moves until you rule. | owner |
 
-Waiting and contested preserve the underlying unit stage and the candidate under discussion. An answer or ruling resumes that stage through a recorded transition; it does not bypass review or landing checks. Plan dependencies must reference existing units and form an acyclic graph. Invalid plans cannot be ratified, and an amendment must preserve those properties.
+Waiting and contested preserve the underlying unit stage and any candidate under discussion. An answer or ruling resumes that stage through a recorded transition; it does not bypass review or landing checks. A mason contest has no candidate, so the owner can only return it to implementing with a note and a fresh clean-turn allowance. Plan dependencies must reference existing units and form an acyclic graph. Invalid plans cannot be ratified, and an amendment must preserve those properties.
 
 ### 5.3 The shed
 

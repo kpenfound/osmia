@@ -110,7 +110,8 @@ the [landing](service.md#landing-a-unit) of the unit's approval as one feature
 branch commit, `units/<unit>/rebase.json`, the
 [rebase](service.md#rebasing-units-in-flight) of the unit's workspace onto a
 moved feature branch, `units/<unit-subject>/ruling-<n>.json`,
-the owner's direction after bounce `n`, `final/rebase.json`, the
+the owner's direction after bounce `n`, `units/<unit-subject>/mason-ruling-<n>.json`,
+the owner's `revise` direction after mason turn `n`, `final/rebase.json`, the
 [final rebase](service.md#running-a-final-review) of an assembled
 workstream's feature branch onto upstream, `final/report.json`, its
 criterion-by-criterion final report, `final/delivery.json`, the
@@ -635,7 +636,14 @@ is open while no ruling names it. A damaged record fails the whole read.
 An escalated inbox batch is one gate until ruled. A recorded ratification
 packet is a gate while its workstream remains in the shed. A contested unit
 is a gate while its unit state is contested. Gates give a kind and reference:
-the inbox number, workstream ID or unit ID respectively.
+the inbox number, workstream ID or unit ID respectively. Mason contest gates
+also carry the contest transition's reason (`gave_up` or bound exhaustion).
+
+A mason ruling and its transition back to implementing share one trace
+transaction. The ruling's `reset_turn` establishes where clean-turn attempt
+counting restarts. Reconciliation queues the owner's note on the existing
+mason thread after restart using a stable turn ID, so repeated passes cannot
+duplicate the ruling, transition or turn.
 
 `internal/status` holds the checks and the tool. `status.Check` is the one
 function that decides whether content is acceptable. Its heuristics reject:

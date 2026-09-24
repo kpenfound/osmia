@@ -321,7 +321,7 @@ func amendmentRoundPath(parts []string) bool {
 
 // unitPath reports whether parts name a unit record of a workstream,
 // units/<unit>/report.json, review.json, landing.json, rebase.json or
-// ruling-<n>.json, where the unit is a key.
+// ruling-<n>.json or mason-ruling-<n>.json, where the unit is a key.
 func unitPath(parts []string) bool {
 	if len(parts) != 3 || parts[0] != "units" || !key(parts[1]) {
 		return false
@@ -330,7 +330,11 @@ func unitPath(parts []string) bool {
 		return true
 	}
 	n := strings.TrimSuffix(strings.TrimPrefix(parts[2], "ruling-"), ".json")
-	return strings.HasPrefix(parts[2], "ruling-") && strings.HasSuffix(parts[2], ".json") && shedRound.MatchString("round-"+n)
+	if strings.HasPrefix(parts[2], "ruling-") && strings.HasSuffix(parts[2], ".json") && shedRound.MatchString("round-"+n) {
+		return true
+	}
+	n = strings.TrimSuffix(strings.TrimPrefix(parts[2], "mason-ruling-"), ".json")
+	return strings.HasPrefix(parts[2], "mason-ruling-") && strings.HasSuffix(parts[2], ".json") && shedRound.MatchString("round-"+n)
 }
 
 // finalPath reports whether parts name a final review record of a
