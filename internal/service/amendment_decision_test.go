@@ -30,6 +30,36 @@ var (
 	amendedPlan = strings.Replace(validPlan, "TestResume", "TestResumeAfterRestart", 1)
 )
 
+// recordAmendmentSealRevision simulates a later seal revision while leaving
+// amendment and owner workflow state untouched.
+func recordAmendmentSealRevision(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, change func(*seal.Seal)) seal.Seal {
+	t.Helper()
+	current, doc, found, err := seal.Latest(repository, stream)
+	must(t, err)
+	if !found {
+		t.Fatal("the workstream has no seal")
+	}
+	before := current
+	change(&current)
+	content, err := seal.Encode(current)
+	must(t, err)
+	docs := []trace.Document{}
+	if current.Revision.Spec != before.Revision.Spec {
+		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.SpecDocument, Revision: current.Revision.Spec, Project: repository.Project(), Workstream: stream, At: f.clock.Now(), Actor: architectActor, Cause: "fixture-drift"}, Path: plan.SpecPath, Content: amendedSpec})
+	}
+	if current.Revision.Plan != before.Revision.Plan {
+		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.PlanDocument, Revision: current.Revision.Plan, Project: repository.Project(), Workstream: stream, At: f.clock.Now(), Actor: architectActor, Cause: "fixture-drift"}, Path: plan.PlanPath, Content: validPlan})
+	}
+	doc.Revision++
+	doc.At = f.clock.Now()
+	doc.Actor = foremanActor
+	doc.Cause = "fixture-drift"
+	doc.Content = string(content)
+	docs = append(docs, doc)
+	must(t, repository.RecordDocuments(context.Background(), docs))
+	return current
+}
+
 // builtForAmendment returns a fixture with a building workstream on seal 1,
 // a committee of one and the given shed.max_rounds.
 func builtForAmendment(t *testing.T, rounds int) (*shedFixture, config.WorkstreamID) {
@@ -351,6 +381,43 @@ func TestOwnerOverrulesAVetoToApproveAnAmendment(t *testing.T) {
 		t.Fatalf("seal.json revisions %v", got)
 	}
 	f.resumed(t, stream, UnitImplementing)
+}
+
+func TestAmendmentDecisionAcrossSealRevisions(t *testing.T) {
+	for _, decision := range []string{AmendmentApprove, AmendmentOverrule} {
+		t.Run(decision+" base move", func(t *testing.T) {
+			f, stream := builtForAmendment(t, 1)
+			defer f.stop(t)
+			if decision == AmendmentOverrule {
+				presentAmendment(t, f, stream, masonRole, amendedSpec, validPlan, amendmentObjection(shed.Charter))
+			} else {
+				presentAmendment(t, f, stream, masonRole, amendedSpec, validPlan)
+			}
+			recordAmendmentSealRevision(t, f, f.repository(), stream, func(s *seal.Seal) { s.Base.Commit = "later-upstream-commit" })
+			out, err := f.c.DecideAmendment(context.Background(), stream, "1", AmendmentDecisionRequest{Decision: decision, Packet: 1})
+			must(t, err)
+			if out.State != amendmentApproved || out.Decision == nil || out.Decision.SealRevision != 2 {
+				t.Fatalf("decision %+v", out)
+			}
+		})
+	}
+	for name, change := range map[string]func(*seal.Seal){
+		"spec": func(s *seal.Seal) { s.Revision.Spec++; s.SpecHash = seal.SpecHash(amendedSpec) },
+		"plan": func(s *seal.Seal) { s.Revision.Plan++ },
+	} {
+		t.Run(name+" changed", func(t *testing.T) {
+			f, stream := builtForAmendment(t, 1)
+			defer f.stop(t)
+			presentAmendment(t, f, stream, masonRole, amendedSpec, validPlan)
+			recordAmendmentSealRevision(t, f, f.repository(), stream, change)
+			if _, err := f.c.DecideAmendment(context.Background(), stream, "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1}); !failed(err, Conflict) || !strings.Contains(err.Error(), "sealed spec or plan changed") {
+				t.Fatalf("decision with changed %s: %v", name, err)
+			}
+			if got := f.revisions(t, stream, amendmentDecisionID("1")); len(got) != 0 {
+				t.Fatalf("refused decision recorded: %v", got)
+			}
+		})
+	}
 }
 
 // Asking for another round returns the amendment to the bounded shed flow:
