@@ -151,7 +151,9 @@ func (m *masons) Pass(ctx context.Context) error {
 			} else if queued {
 				b.inFlight = append(b.inFlight, u.ID)
 				b.implementing++
-				implementing++
+				if !paused(stream) {
+					implementing++
+				}
 				continue
 			}
 			moved, stuck, err := m.finish(ctx, b, u.ID)
@@ -320,8 +322,11 @@ func (m *masons) resumeMasonRuling(ctx context.Context, stream config.Workstream
 		return false, err
 	}
 	th, err := m.repository.Thread(stream, masonAgent(unit))
-	if err != nil || len(th.Turns) == 0 {
+	if err != nil {
 		return false, err
+	}
+	if len(th.Turns) == 0 {
+		return false, fmt.Errorf("ruled mason thread for unit %s is empty", unit)
 	}
 	last := th.Turns[len(th.Turns)-1]
 	if last.Sequence > ruling.ResetTurn {
