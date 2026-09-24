@@ -111,11 +111,15 @@ reads:
 ```text
 The owner ruled on your question 2. The chief of staff relays the ruling.
 
-You asked:
-May I change the upload API's response?
-
-Answer:
-The upload API stays unchanged; add a new endpoint for resumable uploads.
+<<< osmia:question | asker (copied by Osmia) | bytes=39 >>>
+| May I change the upload API's response?
+<<< /osmia:question >>>
+<<< osmia:owner_response | owner (copied by Osmia) | bytes=52 >>>
+| Keep the upload API as it is and add a new endpoint.
+<<< /osmia:owner_response >>>
+<<< osmia:returned_answer | chief of staff relay | bytes=73 >>>
+| The upload API stays unchanged; add a new endpoint for resumable uploads.
+<<< /osmia:returned_answer >>>
 ```
 
 The context of the first message said `No project-wide notices.` The context
@@ -124,7 +128,12 @@ of the second message ends with the ruling as a project notice:
 ```text
 ## Notices
 - workstreams/w_…/questions/2/rulings.jsonl (record 2 revision 2, workstream w_…)
-  notice: The upload API stays unchanged; add a new endpoint for resumable uploads.
+<<< osmia:owner_response | owner (copied by Osmia) | bytes=52 >>>
+| Keep the upload API as it is and add a new endpoint.
+<<< /osmia:owner_response >>>
+<<< osmia:returned_answer | chief of staff relay | bytes=73 >>>
+| The upload API stays unchanged; add a new endpoint for resumable uploads.
+<<< /osmia:returned_answer >>>
 ```
 
 ### 6. The record

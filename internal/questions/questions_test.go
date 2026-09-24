@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -358,7 +359,7 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 		t.Fatalf("answer turns: %+v %v", th.Turns, err)
 	}
 	req := th.Turns[1].Request
-	wantPrompt := "Answer to your question 1.\n\nYou asked:\nWhere does state live?\n\nAnswer:\nIn files under the root.\n\nCitations:\n- charter#2\n- kb/store.md\n"
+	wantPrompt := "Answer to your question 1.\n\n<<< osmia:question | asker (copied by Osmia) | bytes=22 >>>\n| Where does state live?\n<<< /osmia:question >>>\n<<< osmia:answer | chief of staff | bytes=24 >>>\n| In files under the root.\n<<< /osmia:answer >>>\n<<< osmia:citations | chief of staff | bytes=21 >>>\n| charter#2\n| kb/store.md\n<<< /osmia:citations >>>\n"
 	if req.TurnID != "answer_1" || req.TurnID != questions.TurnID("1") || req.ID != "request_answer_1" || req.AgentID != "mason1" || req.ThreadID != "mason1_thread" || req.Unit != "resume" ||
 		req.Prompt != wantPrompt || req.SystemPrompt != "You are the mason." || req.Actor != questions.Actor || req.Cause != "question_1_answered" ||
 		req.Profile != (coreadapter.Profile{Name: "strong", Backend: "fake", Model: "for-mason"}) || !req.At.Equal(start.Add(2*time.Hour)) {
@@ -519,7 +520,7 @@ func TestRelayRulingDeliversToEachAsker(t *testing.T) {
 	if _, err := f.repo.Rule(ctx, 1, "Both are part of the contract.", owner, start.Add(2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	// The owner's words alone are not what the askers receive.
+	// The owner's words are delivered after the relay is recorded.
 	if err := d.Pass(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -555,7 +556,7 @@ func TestRelayRulingDeliversToEachAsker(t *testing.T) {
 	for agent, question := range map[string]string{"mason1": "Where does state live?", "reviewer1": "Is the log format fixed?"} {
 		got := turns(agent)
 		id := ids[agent]
-		want := "The owner ruled on your question " + id + ". The chief of staff relays the ruling.\n\nYou asked:\n" + question + "\n\nAnswer:\nState and the log format are both fixed.\n"
+		want := "The owner ruled on your question " + id + ". The chief of staff relays the ruling.\n\n<<< osmia:question | asker (copied by Osmia) | bytes=" + fmt.Sprint(len(question)) + " >>>\n| " + question + "\n<<< /osmia:question >>>\n<<< osmia:owner_response | owner (copied by Osmia) | bytes=30 >>>\n| Both are part of the contract.\n<<< /osmia:owner_response >>>\n<<< osmia:returned_answer | chief of staff relay | bytes=40 >>>\n| State and the log format are both fixed.\n<<< /osmia:returned_answer >>>\n"
 		if len(got) != 2 || got[1].Request.TurnID != "answer_"+id || got[1].Request.ThreadID != agent+"_thread" || got[1].Request.Prompt != want || got[1].Request.Cause != "question_"+id+"_answered" {
 			t.Fatalf("%s turns: %+v", agent, got)
 		}
