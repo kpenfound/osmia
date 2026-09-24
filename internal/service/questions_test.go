@@ -227,7 +227,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		if !slices.Equal(names, []string{"answer", "escalate", "file_read", "propose_charter", "relay_ruling", "route_amendment"}) {
 			problem("chief of staff tools %v", names)
 		}
-		for _, part := range []string{"You are the chief of staff for workstream " + string(stream), questions.Guidance, "- charter#1 [Charter]: Keep state in files under the root."} {
+		for _, part := range []string{"You are the chief of staff for workstream " + string(stream), questions.Guidance, "- charter#1 [Charter]: Keep state in files under the root.", "## Latest status", "## Open inbox escalations"} {
 			if !strings.Contains(req.SystemPrompt, part) {
 				problem("event turn system prompt lacks %q:\n%s", part, req.SystemPrompt)
 			}

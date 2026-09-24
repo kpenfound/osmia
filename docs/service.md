@@ -1877,7 +1877,8 @@ The accepted request fixes, at acceptance:
   override;
 - the prompt, which is the message text as sent;
 - the system prompt, which names the workstream and carries the workstream's
-  [context bundle](context.md) rendered at acceptance.
+  [context bundle](context.md), latest stored status and open inbox escalations
+  rendered from the trace at acceptance.
 
 Its actor is the owner (`owner`/`local`) and its turn ID is `message_`
 followed by 32 random hexadecimal digits.
@@ -2066,10 +2067,13 @@ override when one is set, which may name any configured profile, otherwise the
 role binding. The turn is queued
 with `EnqueueTurn`, so a turn in flight on the chief-of-staff thread finishes
 first, and the scheduler dispatches it in the same pass otherwise.
-The turn's system prompt names the workstream, carries
-`questions.Guidance` (what to do with an open question and with the owner's ruling) and the workstream's
-[context bundle](context.md) assembled from the local files and trace when the
-turn is queued, which is the chief of staff's whole context for a question.
+When the turn is queued, its system prompt names the workstream, carries
+`questions.Guidance` (what to do with an open question and with the owner's
+ruling), and renders the workstream's [context bundle](context.md), latest
+stored status and open inbox escalations from the trace. The bundle and durable
+status and escalation context are assembled at enqueue time for event turns and
+owner conversation turns alike. This gives a fresh backend session the current
+values even when bounded replay omits the tool calls that recorded them.
 
 Delivery claims every event with one new attempt token and queues the turn
 `events.TurnID(token)`. An event stays unacknowledged until that turn

@@ -353,7 +353,7 @@ Durable threads are why a reviewer remembers what it found last round, a committ
 
 ### 9.2 The owned message log
 
-Every turn's request and final response is captured by the service, per agent, in `agents/<id>/log.jsonl`, with provenance: what caused the turn and at what depth. The service does not read the agent binary's own transcript files. Their schema is unofficial and versioned, and owning the log is what makes a thread survive a profile switch: when the next turn cannot resume the backend session, it starts a fresh session with the thread's log as context. One capture path per backend, since each exposes turn results differently.
+Every turn's request and final response is captured by the service, per agent, in `agents/<id>/log.jsonl`, with provenance: what caused the turn and at what depth. The service does not read the agent binary's own transcript files. Their schema is unofficial and versioned, and owning the log is what makes a thread survive a profile switch: when the next turn cannot resume the backend session, it starts a fresh session with a bounded replay of the owned log. Chief-of-staff event and owner conversation turns also receive the current workstream bundle, latest stored status and open inbox escalations in their system prompt, so durable context remains available when bounded replay omits the tool calls that recorded it. One capture path per backend, since each exposes turn results differently.
 
 ### 9.3 Profiles
 
