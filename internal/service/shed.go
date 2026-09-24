@@ -1216,10 +1216,10 @@ func (d *debate) pinned(stream config.WorkstreamID, in roundInput) (spec, graph 
 	}
 	for _, doc := range docs {
 		if in.Amendment != "" {
-			if doc.Path == "amendments/"+in.Amendment+"/spec.md" {
+			if doc.Path == "amendments/"+in.Amendment+"/spec.md" && doc.Revision == in.Spec {
 				spec = doc
 			}
-			if doc.Path == "amendments/"+in.Amendment+"/plan.json" {
+			if doc.Path == "amendments/"+in.Amendment+"/plan.json" && doc.Revision == in.Plan {
 				graph = doc
 			}
 			continue
