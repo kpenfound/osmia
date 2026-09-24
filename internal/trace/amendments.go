@@ -23,6 +23,67 @@ type AmendmentRequest struct {
 	SpecHash     string
 }
 
+// FileBudgetAmendment records one service budget request and its filed state
+// together. It leaves every unit state untouched.
+func (r *Repository) FileBudgetAmendment(ctx context.Context, stream config.WorkstreamID, req AmendmentRequest, at time.Time) (Amendment, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	log, v, err := r.loadWorkflow(stream)
+	if err != nil {
+		return Amendment{}, err
+	}
+	records, _, err := r.scan()
+	if err != nil {
+		return Amendment{}, err
+	}
+	n := 1
+	for _, record := range records {
+		a, ok := record.(Amendment)
+		if !ok || a.Workstream != stream {
+			continue
+		}
+		if a.Role == "service" && a.Cause == "budget-per-unit" {
+			return a, nil
+		}
+		if i, err := strconv.Atoi(a.ID); err == nil && i >= n {
+			n = i + 1
+		}
+	}
+	if state := v.states[FeatureSubject].Value; state != "building" && state != "assembled" {
+		return Amendment{}, refused("budget amendments require a building or assembled workstream")
+	}
+	if len(req.Citations) == 0 || !present(req.Change) || !present(req.Reason) || req.Seal < 1 || req.SealRevision < 1 || !present(req.SpecHash) {
+		return Amendment{}, refused("citations, proposed change, reason and sealed revision are required")
+	}
+	var latestSeal Document
+	for _, record := range records {
+		if d, ok := record.(Document); ok && d.Workstream == stream && d.Path == "seal.json" && d.Revision >= latestSeal.Revision {
+			latestSeal = d
+		}
+	}
+	if latestSeal.ID == "" || latestSeal.Revision != req.SealRevision {
+		return Amendment{}, fmt.Errorf("%w: the sealed revision changed", ErrConflict)
+	}
+	id := strconv.Itoa(n)
+	actor := Actor{Kind: "service", ID: "budget"}
+	h := Header{Schema: "osmia.trace.amendment", Version: Version, ID: id, Revision: 1, Project: r.project, Workstream: stream, At: at, Actor: actor, Cause: "budget-per-unit", Depth: 1}
+	a := Amendment{Header: h, Requester: actor, Role: "service", Thread: "budget", Turn: "budget", Citations: req.Citations, Change: req.Change, Reason: req.Reason, Seal: req.Seal, SealRevision: req.SealRevision, SpecHash: req.SpecHash}
+	if err := validate(a); err != nil {
+		return Amendment{}, err
+	}
+	transitionID := "amendment_" + id + "_filed"
+	tx := Transaction{ExpectedVersion: 0, Transition: Transition{Header: Header{Schema: "osmia.trace.transition", Version: Version, ID: transitionID, Revision: 1, Project: r.project, Workstream: stream, At: at, Actor: actor, Cause: h.Cause, Depth: 2}, Subject: "amendment_" + id, To: "filed", Reason: "per-unit budget exceeded"}, Events: []Event{Notice(transitionID, "amendment", fmt.Sprintf("Budget amendment %s filed for workstream %s: %s", id, stream, req.Reason))}}
+	files, _, err := r.stage(stream, log, v, []Record{a}, tx)
+	if err != nil {
+		return Amendment{}, err
+	}
+	if err := r.publish(ctx, files); err != nil {
+		return Amendment{}, err
+	}
+	_ = r.wake.Notify(context.Background())
+	return a, nil
+}
+
 // FileAmendment atomically records a request, its notice and the requester's
 // waiting transition. Repeated calls from the same turn return the same ID.
 func (r *Repository) FileAmendment(ctx context.Context, agent string, scope coreadapter.Scope, req AmendmentRequest, at time.Time) (Amendment, error) {
