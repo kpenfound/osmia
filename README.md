@@ -77,6 +77,10 @@ workstreams on shared mason slots: disjoint units in parallel, entangled units
 in sequence, freed slots by priority and then in turn, an overlap advisory to
 each chief of staff, and a restart in the middle of a mason's turn.
 
+The [M4 amendments and standing rulings demonstration](docs/m4-amendments.md)
+follows a mason's amendment through the shed and owner decision, then a
+ratified charter rule into another workstream's bundle.
+
 The [charter reference](docs/charter.md) documents the charter template, the
 numbered-rule format and how owner edits are recorded.
 
