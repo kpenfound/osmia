@@ -228,6 +228,7 @@ fork = "my-account/repository"      # required, distinct from upstream
 clone = "~/src/repository"          # required; may not yet exist
 base_branch = "main"
 landing = "commit-per-unit"
+classifier = "default"              # optional; omitted by default
 
 [capacity]
 per_workstream = 2                  # defaults to top-level capacity.per_workstream
@@ -240,6 +241,14 @@ Git branch-name constraints. `landing` accepts `commit-per-unit` (default) or
 `squash`: it chooses whether an approved workstream is
 [published](service.md#publication) with each unit's commit or as one commit. Project `capacity.per_workstream` is a positive integer overriding the
 global default.
+
+`classifier` names a top-level profile for clean mason turns with no accepted
+outcome. When omitted, code heuristics classify the response without a model
+call. An unknown profile is rejected. The classifier inherits the mason's
+sandbox, uses an empty read-only workspace and receives no tools. A Claude
+sandbox requires a Claude classifier profile. Its attempts are limited to two,
+each with a 30 second maximum timeout. Invalid or unavailable answers retain
+the code classification.
 
 ## Milestone and restart behavior
 

@@ -159,7 +159,7 @@ func (e *demoEngine) Run(ctx context.Context, req agent.Request) (*agent.Result,
 	e.sessions.mu.Lock()
 	tools := e.sessions.byKey[req.Env["OSMIA_MCP_TOKEN"]]
 	e.sessions.mu.Unlock()
-	if turn == nil || tools == nil {
+	if turn == nil || (tools == nil && req.Profile.Name != "classifier") {
 		return nil, fmt.Errorf("unexpected turn %q", req.Name)
 	}
 	return turn(ctx, req, verified, tools)

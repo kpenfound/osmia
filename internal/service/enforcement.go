@@ -82,8 +82,16 @@ func Enforce(opts Options, e Enforcement) Options {
 			Workspaces:         threadWorkspaces{units: units},
 			Views:              isolation.Views{Directory: views},
 			PreserveMasonViews: true,
-			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant},
+			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, "classifier": {}},
 			Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
+				if scope.Role == "classifier" && scope.Project == project {
+					workspace := filepath.Join(root, "classifier", project)
+					if err := os.MkdirAll(workspace, 0700); err != nil {
+						return isolation.Selection{}, err
+					}
+					role := cfg.Roles[masonRole]
+					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Execution: coreadapter.ExecutionSettings{Mode: role.Sandbox, Image: role.Image}}, nil
+				}
 				role, ok := cfg.Roles[scope.Role]
 				if !ok || scope.Project != project {
 					return isolation.Selection{}, errors.New("view selection denied")
@@ -130,7 +138,21 @@ func Enforce(opts Options, e Enforcement) Options {
 				return units.capture(ctx, scope, view, result)
 			},
 		}
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: &questions.Turns{Turns: &verdictTurns{Turns: &reportingTurns{Turns: turns, reports: reports}, reports: verdicts}, Repository: r}, Now: now},
+		runner := thread.Runner{Store: r, Turns: &questions.Turns{Turns: &verdictTurns{Turns: &reportingTurns{Turns: turns, reports: reports}, reports: verdicts}, Repository: r}, Now: now}
+		if cfg.Project.Classifier != "" {
+			profile, err := cfg.NamedProfile(cfg.Project.Classifier)
+			if err != nil {
+				return nil, err
+			}
+			runner.ClassifierProfile = &profile
+			runner.Classifier = func(ctx context.Context, input coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+				if err := os.MkdirAll(input.SessionDirectory, 0700); err != nil {
+					return coreadapter.SessionResult{}, err
+				}
+				return turns.Run(ctx, input)
+			}
+		}
+		return thread.Dispatcher{Runner: runner,
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				directory := filepath.Join(root, "threads", project, string(in.Workstream), in.Agent, in.Turn)
 				return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)

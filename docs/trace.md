@@ -451,6 +451,14 @@ For a mason turn that completes without an outcome or failure, the owned
 absence of one), the final 2,000 Unicode characters of the response and counts
 of service MCP tool calls made by that turn. Failed and interrupted turns, and
 turns with an accepted `ask` or `done` outcome, have no classification.
+When the project names a classifier profile, the service may replace the
+heuristic class and evidence with a schema-validated model answer before
+capturing the response. The same response retains the heuristic input window
+and tool counts. Its `classifier_usage` holds usage from each started model
+attempt, including invalid answers. Each usage entry produces an additional
+`Cost` under the mason turn's scope; its attempt ID identifies the classifier
+attempt. The captured response makes cost recording safe to retry after a
+restart.
 A thread whose status is `waiting` and that has no unfinished turn is parked
 (`Thread.Parked`); queuing a turn unparks it.
 All mutations use the state/outbox publication boundary and signal its wakeup

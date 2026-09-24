@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/busybees/core/agent"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -59,6 +60,70 @@ func TestMasonCleanTurnPolicy(t *testing.T) {
 				time.Sleep(50 * time.Millisecond)
 			}
 			f.awaitEventTurns(t, stream, "classified "+tc.class)
+			f.engine.mu.Lock()
+			for _, name := range f.engine.runs {
+				if strings.Contains(name, "-classifier-") {
+					t.Errorf("classifier ran without a configured profile: %s", name)
+				}
+			}
+			f.engine.mu.Unlock()
+		})
+	}
+}
+
+func TestMasonModelClassifier(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		replies  []string
+		failed   bool
+		want     string
+		attempts int
+	}{
+		{"valid", []string{`{"class":"claims_done","evidence":"finished"}`}, false, "claims_done", 1},
+		{"invalid", []string{`invalid`, `{"class":"gave_up","evidence":"cannot continue"}`}, false, "gave_up", 2},
+		{"exhausted", []string{`invalid`, `invalid`}, false, "unclear", 2},
+		{"failed", nil, true, "unclear", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, fake := newConfiguredMasonFixture(t, "masons = 1\n", validPlan, "default")
+			defer f.stop(t)
+			fake.response = map[string]string{masonTurnID("resume"): "Edited the file."}
+			f.engine.mu.Lock()
+			for i := 1; i <= tc.attempts; i++ {
+				i := i
+				f.engine.turns[masonTurnID("resume")+"-classifier-"+string(rune('0'+i))] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+					if req.Profile.Name != "classifier" {
+						t.Errorf("classifier profile: %+v", req.Profile)
+					}
+					if tc.failed {
+						return &agent.Result{ClaudeID: "classifier", SessionDir: req.SessionDir, ResultText: "unavailable", NumTurns: 1, CostUSD: .02, CostKnown: true, IsError: true}, nil
+					}
+					return &agent.Result{ClaudeID: "classifier", SessionDir: req.SessionDir, ResultText: tc.replies[i-1], NumTurns: 1, CostUSD: .02, CostKnown: true}, nil
+				}
+			}
+			f.engine.mu.Unlock()
+			stream, _ := f.builtAs(t, "model-classifier")
+			th := f.awaitMasonRan(t, stream, "resume")
+			if got := th.Turns[0].Response.Classification.Class; got != tc.want {
+				f.engine.mu.Lock()
+				runs := append([]string(nil), f.engine.runs...)
+				f.engine.mu.Unlock()
+				t.Fatalf("class %s want %s; runs %v; response %+v", got, tc.want, runs, th.Turns[0].Response)
+			}
+			if got := len(th.Turns[0].Response.ClassifierUsage); got != tc.attempts {
+				t.Fatalf("usage count %d", got)
+			}
+			costs, err := trace.Read[trace.Cost](f.repository(), stream)
+			must(t, err)
+			count := 0
+			for _, cost := range costs {
+				if cost.Entry.Scope.Turn == masonTurnID("resume") && cost.Entry.AttemptID != "" && cost.Entry.Usage == (coreadapter.Usage{CostUSD: .02, CostKnown: true, Turns: 1}) {
+					count++
+				}
+			}
+			if !tc.failed && count != tc.attempts {
+				t.Fatalf("classifier costs %d want %d", count, tc.attempts)
+			}
 		})
 	}
 }

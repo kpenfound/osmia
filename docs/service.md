@@ -1177,7 +1177,10 @@ while the build ran; the workstream is <state>`).
 
 The `[mason] max_clean_turns` setting defaults to 3 and must be positive. A
 mason turn that ends cleanly without `ask` or `done` is classified from its
-final response and tool counts. The controller records a chief-of-staff event
+final response and tool counts. When the project configures `classifier`, the
+service gives a bounded model classifier at most two attempts to supply a
+strict JSON class and evidence. A failed or invalid answer leaves the
+heuristic class in place. The controller records a chief-of-staff event
 for every such turn. For `asked_in_prose` it queues a turn on the same thread
 that names `ask`; for `claims_done` it names `done`. An `unclear` response gets
 a turn naming both tools. `gave_up` contests the unit immediately. When the
