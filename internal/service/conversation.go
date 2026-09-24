@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -74,7 +73,7 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 	if err != nil {
 		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("role %s has no usable profile %q; check osmia profiles", trace.ChiefOfStaff, name)}
 	}
-	b, err := s.Context().Assemble(ctx, project, bundle.Scope{Workstream: stream})
+	context, err := chiefContext(ctx, s.Context(), repository, project, stream)
 	if err != nil {
 		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot assemble the context of workstream %s; check the charter, the knowledge base and the trace repository", stream)}
 	}
@@ -94,7 +93,7 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 		ThreadID:     trace.ChiefOfStaff,
 		TurnID:       "message_" + id,
 		Profile:      profile,
-		SystemPrompt: fmt.Sprintf(chiefPrompt, stream) + "\n\n" + b.Render(),
+		SystemPrompt: fmt.Sprintf(chiefPrompt, stream) + "\n\n" + context,
 		Prompt:       req.Text,
 	})
 	if err != nil {

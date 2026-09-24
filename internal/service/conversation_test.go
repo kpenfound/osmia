@@ -190,7 +190,7 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 		if p.Prompt != prompt || p.Scope.Role != trace.ChiefOfStaff || p.Scope.Thread != trace.ChiefOfStaff || p.Profile.Name != "default" {
 			t.Fatalf("turn %d: %+v", i, p)
 		}
-		for _, part := range []string{"You are the chief of staff for workstream " + string(stream), "# Project context", "workstream: " + string(stream), "charter#1 [Rules]: Keep the upload API stable."} {
+		for _, part := range []string{"You are the chief of staff for workstream " + string(stream), "# Project context", "workstream: " + string(stream), "charter#1 [Rules]: Keep the upload API stable.", "## Latest status", "## Open inbox escalations"} {
 			if !strings.Contains(p.SystemPrompt, part) {
 				t.Fatalf("turn %d system prompt lacks %q:\n%s", i, part, p.SystemPrompt)
 			}

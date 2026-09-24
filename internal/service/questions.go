@@ -21,11 +21,11 @@ const chiefEvents = "You are the chief of staff for workstream %s. The prompt li
 func (s *Service) chiefEventsPrompt(project config.ProjectID, repository *trace.Repository) func(context.Context, config.WorkstreamID) (string, error) {
 	files := bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return repository, nil }, Now: func() time.Time { return time.Now().UTC() }}
 	return func(ctx context.Context, stream config.WorkstreamID) (string, error) {
-		b, err := files.Assemble(ctx, project, bundle.Scope{Workstream: stream})
+		context, err := chiefContext(ctx, files, repository, project, stream)
 		if err != nil {
-			return "", fmt.Errorf("context of workstream %s: %w", stream, err)
+			return "", err
 		}
-		return fmt.Sprintf(chiefEvents, stream) + "\n\n" + questions.Guidance + "\n\n" + b.Render(), nil
+		return fmt.Sprintf(chiefEvents, stream) + "\n\n" + questions.Guidance + "\n\n" + context, nil
 	}
 }
 
