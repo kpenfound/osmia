@@ -446,7 +446,8 @@ A decision requires a `building` or `assembled` workstream and an amendment in
 state `presented`; a packet revision other than the latest is refused with
 `conflict`. Approval and overrule are also refused once `seal.json` has a later
 revision than the one the request was filed against: another amendment moved
-the sealed documents, so the request is rejected and filed again. Every
+the sealed documents, or a [drift rebase](#drift-rebases) moved the seal's
+base, so the request is rejected and filed again. Every
 decision is one revision of `amendments/<n>/decision.json`, committed with its
 transition `amendment-<n>-decided-<k>` and a notice for the chief of staff. It
 records the decision, the note, the debate round, the packet revision, the
