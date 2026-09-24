@@ -23,7 +23,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const walkSpec = "# Feature\n\n## Acceptance criteria\n\n1. Specs parse.\n2. Plans validate.\n"
+const walkSpec = "# Feature\n\n## Acceptance criteria\n\n1. Specs parse.\n2. Plans validate.\n3. Plans encode.\n"
 
 // walkFixture records a workstream's trace directly in a temporary trace
 // repository, one record at a time on a clock that advances per record.
@@ -110,14 +110,14 @@ func (f *walkFixture) append(r trace.Record) {
 	must(f.t, f.repo.Append(context.Background(), r))
 }
 
-// sealed records the spec, the plan with units a (spec#1) and b (spec#2,
-// after a), the owner's ratification and seal 1 on the upstream commit 0...0
+// sealed records the spec, the plan with units a (spec#1) and b (spec#2
+// and spec#3, after a), the owner's ratification and seal 1 on the upstream commit 0...0
 // and moves the workstream to building.
 func (f *walkFixture) sealed() {
 	f.doc(plan.SpecDocument, plan.SpecPath, "", walkSpec)
 	graph := plan.Plan{Version: plan.Version, Units: []plan.Unit{
 		{ID: "a", Title: "Parse specs", Addresses: []plan.Address{{Criterion: "spec#1", Proof: plan.Proof{Kind: plan.NewTest, Name: "TestParse"}}}, DependsOn: []string{}, Footprint: []string{"spec"}},
-		{ID: "b", Title: "Validate plans", Addresses: []plan.Address{{Criterion: "spec#2", Proof: plan.Proof{Kind: plan.ExistingTest, Name: "TestValidate"}}}, DependsOn: []string{"a"}, Footprint: []string{"plan"}},
+		{ID: "b", Title: "Validate plans", Addresses: []plan.Address{{Criterion: "spec#2", Proof: plan.Proof{Kind: plan.ExistingTest, Name: "TestValidate"}}, {Criterion: "spec#3", Proof: plan.Proof{Kind: plan.NewTest, Name: "TestEncode"}}}, DependsOn: []string{"a"}, Footprint: []string{"plan"}},
 	}}
 	encoded, err := plan.Encode(graph)
 	must(f.t, err)
@@ -134,27 +134,33 @@ func (f *walkFixture) sealed() {
 	f.unit("b", UnitPlanned)
 }
 
-func (f *walkFixture) report(unit, candidate, base, criterion string) {
-	f.doc(reportDocument(unit), fmt.Sprintf(reportPath, unit), unit, UnitReport{Unit: unit, Turn: "mason-" + unit + "-1", Seal: 1, Outcome: "done", Branch: "osmia/unit-" + unit, Base: base, Candidate: candidate,
-		Criteria: []CriterionReport{{Criterion: criterion, Done: "implemented", Evidence: "tests pass at " + candidate, Proof: "TestParse"}}})
+func (f *walkFixture) report(unit, candidate, base string, criteria ...string) {
+	r := UnitReport{Unit: unit, Turn: "mason-" + unit + "-1", Seal: 1, Outcome: "done", Branch: "osmia/unit-" + unit, Base: base, Candidate: candidate}
+	for _, c := range criteria {
+		r.Criteria = append(r.Criteria, CriterionReport{Criterion: c, Done: "implemented", Evidence: "tests pass at " + candidate, Proof: "test of " + c})
+	}
+	f.doc(reportDocument(unit), fmt.Sprintf(reportPath, unit), unit, r)
 }
 
 // review records the identity a review is asked for, then its verdict on
 // the given report revision.
-func (f *walkFixture) review(unit string, report int, candidate, base, criterion, decision string, bounces int) {
+func (f *walkFixture) review(unit string, report int, candidate, base, decision string, bounces int, criteria ...string) {
 	identity := UnitReviewIdentity{Subject: string(stream) + "/" + unit, Candidate: coreadapter.Candidate{Revision: candidate, BaseRevision: base, SpecRevision: "1", PlanRevision: "1"}, DiffSHA256: "digest-" + candidate[:4], Report: fmt.Sprintf("units/%s/report.json revision %d", unit, report), Seal: 1}
 	path := fmt.Sprintf("units/%s/review.json", unit)
 	f.doc(reviewDocument(unit), path, unit, identity)
-	verdict := UnitVerdict{Decision: decision, Evidence: []ReviewEvidence{{Criterion: criterion, Evidence: "reviewed " + candidate}}, Findings: []ReviewFinding{}}
-	if decision == "material_findings" {
-		verdict.Findings = []ReviewFinding{{Criterion: criterion, Severity: "major", Evidence: "missing case", Action: "add it"}}
+	verdict := UnitVerdict{Decision: decision, Findings: []ReviewFinding{}}
+	for _, c := range criteria {
+		verdict.Evidence = append(verdict.Evidence, ReviewEvidence{Criterion: c, Evidence: "reviewed " + candidate})
+		if decision == "material_findings" {
+			verdict.Findings = append(verdict.Findings, ReviewFinding{Criterion: c, Severity: "major", Evidence: "missing case", Action: "add it"})
+		}
 	}
 	f.doc(reviewDocument(unit), path, unit, UnitReviewResult{Identity: identity, Turn: fmt.Sprintf("review-%s-%d", unit, report), Verdict: verdict, Bounces: bounces})
 }
 
-func (f *walkFixture) land(unit string, review int, candidate, base, commit, criterion string) {
+func (f *walkFixture) land(unit string, review int, candidate, base, commit string, criteria ...string) {
 	f.doc(landingDocument(unit), fmt.Sprintf("units/%s/landing.json", unit), unit, UnitLanding{Unit: unit, Operation: "op-land-" + unit, Approval: fmt.Sprintf("units/%s/review.json revision %d", unit, review), Turn: "review", Candidate: candidate, Base: base,
-		Spec: "1", Plan: "1", Seal: 1, Criteria: []string{criterion}, Branch: "osmia/feature", Commit: commit, Message: "Land " + unit + "\n\nOsmia-Operation: op-land-" + unit + "\n"})
+		Spec: "1", Plan: "1", Seal: 1, Criteria: criteria, Branch: "osmia/feature", Commit: commit, Message: "Land " + unit + "\n\nOsmia-Operation: op-land-" + unit + "\n"})
 }
 
 // buildA takes unit a through a send-back to its merge: candidate 1...1 is
@@ -173,11 +179,11 @@ func (f *walkFixture) buildA() {
 	f.append(trace.Cost{Header: f.header("cost", "cost-mason-a-1", "a", 1, ownerActor), Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(project), Workstream: string(stream), Unit: "a", Thread: "mason-a", Turn: "mason-a-1", Role: "mason"}, AttemptID: "attempt-1", At: f.at, Usage: usage}})
 	f.report("a", sha('1'), sha('0'), "spec#1")
 	f.unit("a", UnitReviewing)
-	f.review("a", 1, sha('1'), sha('0'), "spec#1", "material_findings", 1)
+	f.review("a", 1, sha('1'), sha('0'), "material_findings", 1, "spec#1")
 	f.unit("a", UnitImplementing)
 	f.report("a", sha('2'), sha('0'), "spec#1")
 	f.unit("a", UnitReviewing)
-	f.review("a", 2, sha('2'), sha('0'), "spec#1", "satisfactory", 1)
+	f.review("a", 2, sha('2'), sha('0'), "satisfactory", 1, "spec#1")
 	f.unit("a", UnitApproved)
 	f.land("a", 4, sha('2'), sha('0'), sha('a'), "spec#1")
 	f.unit("a", UnitMerged)
@@ -187,11 +193,11 @@ func (f *walkFixture) buildA() {
 // buildB lands unit b as b...b on top of a...a.
 func (f *walkFixture) buildB() {
 	f.unit("b", UnitImplementing)
-	f.report("b", sha('3'), sha('a'), "spec#2")
+	f.report("b", sha('3'), sha('a'), "spec#2", "spec#3")
 	f.unit("b", UnitReviewing)
-	f.review("b", 1, sha('3'), sha('a'), "spec#2", "satisfactory", 0)
+	f.review("b", 1, sha('3'), sha('a'), "satisfactory", 0, "spec#2", "spec#3")
 	f.unit("b", UnitApproved)
-	f.land("b", 2, sha('3'), sha('a'), sha('b'), "spec#2")
+	f.land("b", 2, sha('3'), sha('a'), sha('b'), "spec#2", "spec#3")
 	f.unit("b", UnitMerged)
 }
 
@@ -201,7 +207,7 @@ func (f *walkFixture) deliver() {
 	f.move(trace.FeatureSubject, "", AssembledState)
 	upstream := seal.Base{Remote: "upstream", Branch: "main", Commit: sha('9')}
 	f.doc(finalReportDocument, finalReportPath, "", FinalReport{Review: 1, Operation: "op-final", Outcome: finalReviewed, Branch: "osmia/feature", Before: sha('b'), Commit: sha('f'), Upstream: &upstream, Seal: 1, SpecHash: seal.SpecHash(walkSpec), Spec: 1, Plan: 1, Charter: 1, Turn: "final-1-member-1",
-		Criteria: []FinalCriterion{{Criterion: "spec#1", Text: "Specs parse.", Evidence: "TestParse"}, {Criterion: "spec#2", Text: "Plans validate.", Evidence: "TestValidate"}}})
+		Criteria: []FinalCriterion{{Criterion: "spec#1", Text: "Specs parse.", Evidence: "TestParse"}, {Criterion: "spec#2", Text: "Plans validate.", Evidence: "TestValidate"}, {Criterion: "spec#3", Text: "Plans encode.", Evidence: "TestEncode"}}})
 	approval := f.doc(deliveryDocument, deliveryPath, "", DeliveryApproval{Review: 1, ReviewRevision: 1, Commit: sha('f'), Seal: 1, Spec: 1, Plan: 1, Charter: 1, Description: "Deliver", DescriptionHash: descriptionHash("Deliver"), At: f.at})
 	f.doc(publicationDocument, publicationPath, "", DeliveryPublication{Approval: approval.Revision, Operation: "op-publish", Status: publicationOpened, Style: squashStyle, Fork: "owner/project", Remote: "origin", Branch: "osmia/feature", Reviewed: sha('f'), Commit: sha('d'), Upstream: "upstream/project", Base: "main", PullRequest: 7, URL: "https://example.test/pull/7", Title: "Deliver", Description: "Deliver", DescriptionHash: descriptionHash("Deliver")})
 	f.move(trace.FeatureSubject, "", DeliveredState)
@@ -278,6 +284,14 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 	if len(a.Turns) != 1 || a.Turns[0].Status != "idle" || a.Turns[0].Role != "mason" || a.Turns[0].CostUSD != 0.25 || a.CostUSD != 0.25 {
 		t.Fatalf("unit a turns %+v cost %v", a.Turns, a.CostUSD)
 	}
+	// Unit b addresses spec#2 and spec#3; the walk of spec#2 keeps only its
+	// own evidence.
+	two, err := traceCriterion(f.repo, stream, "spec#2")
+	must(t, err)
+	b := two.Units[0]
+	if len(b.Addresses) != 1 || len(b.Reports[0].Criteria) != 1 || b.Reports[0].Criteria[0].Criterion != "spec#2" || len(b.Reviews[0].Evidence) != 1 || b.Reviews[0].Evidence[0].Criterion != "spec#2" {
+		t.Fatalf("spec#2 evidence of unit b %+v", b)
+	}
 	if c.Final == nil || c.Final.Evidence != "TestParse" {
 		t.Fatalf("final account %+v", c.Final)
 	}
@@ -344,6 +358,13 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 		t.Fatalf("rebased commit %+v", rebased)
 	}
 
+	// The approved candidate leads to the commit it landed as.
+	approved, err := traceCommit(f.repo, stream, sha('2'), "")
+	must(t, err)
+	if !approved.Complete || len(approved.Landings) != 1 || approved.Landings[0].Landing.Commit != sha('a') {
+		t.Fatalf("approved candidate %+v", approved)
+	}
+
 	// A candidate that was sent back names the unit and leads to no
 	// landing; the unit landed another candidate, so nothing is missing.
 	sentBack, err := traceCommit(f.repo, stream, sha('1'), "")
@@ -396,16 +417,24 @@ func TestTraceWalkIncompleteChain(t *testing.T) {
 	if b.Complete || !reflect.DeepEqual(gapStates(b.Gaps), map[string]string{"units/b/report.json": LinkUnfinished}) {
 		t.Fatalf("unit b gaps %+v", b.Gaps)
 	}
+	// A mason waiting for an answer is still producing the report.
+	f.unit("b", UnitWaiting)
+	u, err := traceUnit(f.repo, stream, "b")
+	must(t, err)
+	if !reflect.DeepEqual(gapStates(u.Gaps), map[string]string{"units/b/report.json": LinkUnfinished}) {
+		t.Fatalf("waiting unit gaps %+v", u.Gaps)
+	}
+	f.unit("b", UnitImplementing)
 
 	// A reported unit waits for its verdict, then for its landing.
-	f.report("b", sha('3'), sha('a'), "spec#2")
+	f.report("b", sha('3'), sha('a'), "spec#2", "spec#3")
 	f.unit("b", UnitReviewing)
-	u, err := traceUnit(f.repo, stream, "b")
+	u, err = traceUnit(f.repo, stream, "b")
 	must(t, err)
 	if !reflect.DeepEqual(gapStates(u.Gaps), map[string]string{"verdict on units/b/report.json revision 1": LinkUnfinished}) {
 		t.Fatalf("reviewing gaps %+v", u.Gaps)
 	}
-	f.review("b", 1, sha('3'), sha('a'), "spec#2", "satisfactory", 0)
+	f.review("b", 1, sha('3'), sha('a'), "satisfactory", 0, "spec#2", "spec#3")
 	f.unit("b", UnitApproved)
 	u, err = traceUnit(f.repo, stream, "b")
 	must(t, err)
@@ -421,7 +450,7 @@ func TestTraceWalkIncompleteChain(t *testing.T) {
 
 	// A landing that names an approval the trace does not hold is
 	// unavailable, not resolved to the latest review.
-	f.land("b", 9, sha('3'), sha('a'), sha('b'), "spec#2")
+	f.land("b", 9, sha('3'), sha('a'), sha('b'), "spec#2", "spec#3")
 	f.unit("b", UnitMerged)
 	u, err = traceUnit(f.repo, stream, "b")
 	must(t, err)
@@ -437,7 +466,7 @@ func TestTraceWalkIncompleteChain(t *testing.T) {
 	// Unknown commits, criteria and units are not in the trace.
 	for _, err := range []error{
 		func() error { _, err := traceCommit(f.repo, stream, sha('7'), ""); return err }(),
-		func() error { _, err := traceCriterion(f.repo, stream, "spec#3"); return err }(),
+		func() error { _, err := traceCriterion(f.repo, stream, "spec#4"); return err }(),
 		func() error { _, err := traceUnit(f.repo, stream, "z"); return err }(),
 	} {
 		if !errors.Is(err, errTraceNotFound) {
