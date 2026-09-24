@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 )
@@ -66,9 +67,64 @@ func disk(t *testing.T, in Inputs) []byte {
 }
 func pauses() []Pause {
 	return []Pause{
-		{Target: Target{Scope: "factory"}, Mode: "soft", Source: "operator", Reason: "travelling"},
-		{Target: Target{Scope: "project", Project: pid}, Mode: "hard", Source: "operator"},
-		{Target: Target{Scope: "workstream", Project: pid, Workstream: w1}, Mode: "soft", Source: "operator"},
+		{Target: Target{Scope: "factory"}, Mode: "soft", Source: PauseOwner, Reason: "travelling"},
+		{Target: Target{Scope: "project", Project: pid}, Mode: "hard", Source: PauseOwner, Reason: "test"},
+		{Target: Target{Scope: "workstream", Project: pid, Workstream: w1}, Mode: "soft", Source: PauseOwner, Reason: "test"},
+	}
+}
+
+func TestPauseAttributionAndClearing(t *testing.T) {
+	in := fixture(t)
+	s := open(t, in)
+	targets := []Target{{Scope: "factory"}, {Scope: "project", Project: pid}, {Scope: "workstream", Project: pid, Workstream: w1}}
+	sources := []string{PauseOwner, PauseDailyBudget, PauseProviderUsageLimit}
+	for i, target := range targets {
+		must(t, s.SetPause(Pause{Target: target, Mode: "soft", Reason: "limit reached", Source: sources[i]}))
+	}
+	if err := s.SetPause(Pause{Target: targets[0], Mode: "soft", Reason: "automatic", Source: PauseDailyBudget}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("replaced owner pause: %v", err)
+	}
+	reopened := open(t, in)
+	state, _ := reopened.Snapshot()
+	if len(state.Pauses) != 3 {
+		t.Fatal(state)
+	}
+	for _, p := range state.Pauses {
+		if p.Reason != "limit reached" || p.SetAt.IsZero() {
+			t.Fatalf("missing attribution: %+v", p)
+		}
+		if err := reopened.ClearPause(p.Target, PauseDailyBudget); p.Source != PauseDailyBudget && (err == nil || !strings.Contains(err.Error(), "cannot clear")) {
+			t.Fatalf("unauthorized clear: %v", err)
+		}
+	}
+	must(t, reopened.ClearPause(targets[2], PauseProviderUsageLimit))
+	if err := reopened.ClearPause(targets[0], PauseProviderUsageLimit); err == nil { t.Fatal("provider cleared owner pause") }
+	for _, p := range state.Pauses {
+		must(t, reopened.ClearPause(p.Target, PauseOwner))
+	}
+	if got, _ := reopened.Snapshot(); len(got.Pauses) != 0 {
+		t.Fatal(got)
+	}
+	for _, source := range []string{"", "operator", "other"} {
+		if err := reopened.SetPause(Pause{Target: targets[0], Mode: "soft", Reason: "reason", Source: source}); !errors.Is(err, ErrValidation) {
+			t.Fatalf("accepted source %q: %v", source, err)
+		}
+	}
+	if err := reopened.SetPause(Pause{Target: targets[0], Mode: "soft", Source: PauseOwner}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("accepted empty reason: %v", err)
+	}
+}
+
+func TestLegacyPauseOpensAsOwner(t *testing.T) {
+	in := fixture(t)
+	must(t, os.WriteFile(filepath.Join(in.Config.Root.String(), "runtime.json"), []byte(`{"version":1,"pauses":[{"target":{"scope":"factory"},"mode":"soft","source":"operator"}]}`), 0600))
+	s := open(t, in)
+	state, _ := s.Snapshot()
+	if len(state.Pauses) != 1 || state.Pauses[0].Source != PauseOwner || state.Pauses[0].Reason == "" || state.Pauses[0].SetAt.IsZero() {
+		t.Fatal(state)
+	}
+	if !bytes.Contains(disk(t, in), []byte(`"source": "owner"`)) {
+		t.Fatal("legacy pause was not persisted as owner")
 	}
 }
 func TestRoundTripsAndChangedDefaults(t *testing.T) {
@@ -118,7 +174,7 @@ func TestRoundTripsAndChangedDefaults(t *testing.T) {
 	must(t, restarted.ClearProfile("mason"))
 	must(t, restarted.ClearPriority(pid))
 	for _, p := range pauses() {
-		must(t, restarted.ClearPause(p.Target))
+		must(t, restarted.ClearPause(p.Target, PauseOwner))
 	}
 	cleared := open(t, in)
 	effective, ds = cleared.Effective()
@@ -203,10 +259,10 @@ func TestRejectedMutationsPreserveState(t *testing.T) {
 	bads := []func() error{
 		func() error { return s.SetProfile("fake", "default") }, func() error { return s.SetProfile("mason", "missing") }, func() error { return s.SetProfile("mason", "") },
 		func() error {
-			return s.SetPause(Pause{Target: Target{Scope: "factory"}, Mode: "unknown", Source: "operator"})
+			return s.SetPause(Pause{Target: Target{Scope: "factory"}, Mode: "unknown", Source: PauseOwner, Reason: "test"})
 		},
 		func() error {
-			return s.SetPause(Pause{Target: Target{Scope: "workstream", Project: pid, Workstream: "w_3123456789abcdef0123456789abcdef"}, Mode: "soft", Source: "operator"})
+			return s.SetPause(Pause{Target: Target{Scope: "workstream", Project: pid, Workstream: "w_3123456789abcdef0123456789abcdef"}, Mode: "soft", Source: PauseOwner, Reason: "test"})
 		},
 		func() error { return s.SetPriority(Priority{pid, []config.WorkstreamID{w1, w1}}) },
 		func() error {
@@ -295,7 +351,7 @@ func TestConcurrentMutationsAndReaderIsolation(t *testing.T) {
 	var wg sync.WaitGroup
 	for _, w := range in.Workstreams {
 		wg.Go(func() {
-			err := s.SetPause(Pause{Target: Target{Scope: "workstream", Project: pid, Workstream: w}, Mode: "soft", Source: "operator"})
+			err := s.SetPause(Pause{Target: Target{Scope: "workstream", Project: pid, Workstream: w}, Mode: "soft", Source: PauseOwner, Reason: "test"})
 			if err != nil {
 				t.Error(err)
 			}
@@ -332,7 +388,7 @@ func TestConcurrentMutationsAndReaderIsolation(t *testing.T) {
 }
 func TestUnknownReferencesDiagnosedOnLoad(t *testing.T) {
 	in := fixture(t)
-	st := State{Version: Version, Profiles: map[string]string{"fake": "default", "mason": "missing"}, Pauses: []Pause{{Target: Target{Scope: "workstream", Project: pid, Workstream: "w_3123456789abcdef0123456789abcdef"}, Mode: "soft", Source: "operator"}}}
+	st := State{Version: Version, Profiles: map[string]string{"fake": "default", "mason": "missing"}, Pauses: []Pause{{Target: Target{Scope: "workstream", Project: pid, Workstream: "w_3123456789abcdef0123456789abcdef"}, Mode: "soft", Source: PauseOwner, Reason: "test", SetAt: time.Now().UTC()}}}
 	data, err := json.Marshal(st)
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(in.Config.Root.String(), "runtime.json"), data, 0600))
@@ -348,7 +404,7 @@ func TestUnknownReferencesDiagnosedOnLoad(t *testing.T) {
 	}
 	must(t, s.ClearProfile("fake"))
 	must(t, s.ClearProfile("mason"))
-	must(t, s.ClearPause(st.Pauses[0].Target))
+	must(t, s.ClearPause(st.Pauses[0].Target, PauseOwner))
 	_, ds = s.Snapshot()
 	if len(ds) != 0 {
 		t.Fatal(ds)
@@ -394,10 +450,10 @@ func TestProjectlessInputs(t *testing.T) {
 	if err := s.SetPriority(Priority{Project: pid, Workstreams: []config.WorkstreamID{}}); err == nil || !errors.Is(err, ErrValidation) {
 		t.Fatal("priority stored without a project")
 	}
-	if err := s.SetPause(Pause{Target: Target{Scope: "project", Project: pid}, Mode: "soft", Source: "operator"}); err == nil || !errors.Is(err, ErrValidation) {
+	if err := s.SetPause(Pause{Target: Target{Scope: "project", Project: pid}, Mode: "soft", Source: PauseOwner, Reason: "test"}); err == nil || !errors.Is(err, ErrValidation) {
 		t.Fatal("project pause stored without a project")
 	}
-	must(t, s.SetPause(Pause{Target: Target{Scope: "factory"}, Mode: "soft", Source: "operator"}))
+	must(t, s.SetPause(Pause{Target: Target{Scope: "factory"}, Mode: "soft", Source: PauseOwner, Reason: "test"}))
 	withWorkstreams := in
 	withWorkstreams.Workstreams = []config.WorkstreamID{w1}
 	if err := s.Resolve(withWorkstreams); err == nil {

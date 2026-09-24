@@ -472,13 +472,22 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		if !decode(w, r, &v) {
 			return
 		}
+		if v.Source != "" && v.Source != runtime.PauseOwner {
+			fail(w, Validation)
+			return
+		}
+		v.Source = runtime.PauseOwner
+		v.SetAt = s.now()
+		if strings.TrimSpace(v.Reason) == "" {
+			v.Reason = "Owner requested pause"
+		}
 		err = s.store.SetPause(v)
 	case r.Method == http.MethodDelete && r.URL.Path == Prefix+"/runtime/pause":
 		var v ClearPauseRequest
 		if !decode(w, r, &v) {
 			return
 		}
-		err = s.store.ClearPause(v)
+		err = s.store.ClearPause(v, runtime.PauseOwner)
 	case r.Method == http.MethodPut && r.URL.Path == Prefix+"/runtime/priority":
 		var v PriorityRequest
 		if !decode(w, r, &v) {

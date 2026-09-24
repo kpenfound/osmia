@@ -18,7 +18,7 @@ func TestHeldCoversPausedScopes(t *testing.T) {
 	worker := Candidate{Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: "mason"}}}
 	chief := Candidate{Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: trace.ChiefOfStaff}}}
 	pause := func(scope string, p config.ProjectID, w config.WorkstreamID) runtime.Pause {
-		return runtime.Pause{Target: runtime.Target{Scope: scope, Project: p, Workstream: w}, Mode: "soft", Source: "operator"}
+		return runtime.Pause{Target: runtime.Target{Scope: scope, Project: p, Workstream: w}, Mode: "soft", Source: "owner"}
 	}
 	for _, tc := range []struct {
 		name   string
@@ -72,7 +72,7 @@ func TestPauseHoldsWorkerTurnsWhileChiefOfStaffRuns(t *testing.T) {
 	var mu sync.Mutex
 	var pauses []runtime.Pause
 	var ran []string
-	paused := runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Source: "operator"}
+	paused := runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Source: "owner"}
 	turns := turnsFunc(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		mu.Lock()
 		defer mu.Unlock()

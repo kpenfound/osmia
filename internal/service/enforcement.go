@@ -35,10 +35,9 @@ func CoreEnforcement() Enforcement {
 	}
 }
 
-// chiefGrant is what a chief-of-staff thread turn may call: its status,
-// priority, amendment and charter decision and question tools. The chief of staff reads its context from the
-// prompt.
-var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName, prioritiseTool, decideAmendmentTool, decideCharterTool}, questions.ChiefTools...)}
+// chiefGrant is what a chief-of-staff thread turn may call: status, runtime
+// controls, owner decisions and question tools.
+var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName, prioritiseTool, pauseTool, resumeTool, decideAmendmentTool, decideCharterTool}, questions.ChiefTools...)}
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
 // its view of its unit's workspace, ask the chief of staff, file an amendment
@@ -127,7 +126,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					return nil, err
 				}
 				chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
-				return append([]coreadapter.Tool{set, controls.prioritise(r, scope, now), controls.decideAmendment(r, scope), controls.decideCharter(r, scope)}, chief...), err
+				return append([]coreadapter.Tool{set, controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope)}, chief...), err
 			},
 			Hosts:  e.Hosts,
 			Engine: e.Engine,

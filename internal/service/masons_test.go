@@ -362,7 +362,7 @@ func TestMasonSlotsFollowPriorityAndPause(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
 	first, _ := f.builtAs(t, "first")
 	second, _ := f.builtAs(t, "second")
 	settle()
@@ -389,7 +389,7 @@ func TestMasonSlotsFollowPriorityAndPause(t *testing.T) {
 	}
 	f.checkUnits(t, lo, []UnitStatus{f.deferred(t, lo, "resume", slotless(1)), {Unit: "dedupe", State: UnitPlanned}})
 
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: hi}, Mode: "soft", Source: "operator"})
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: hi}, Mode: "soft", Source: "owner"})
 	f.awaitMasonRan(t, lo, "resume")
 	masons.check(t)
 	if got, want := masonTransitions(t, f, lo), []transitionMove{started("resume", f.startedReason(t, lo, "resume"))}; !reflect.DeepEqual(got, want) {
@@ -410,7 +410,7 @@ func TestImplementingUnitGetsItsMasonTurnAfterARestart(t *testing.T) {
 	f, masons := newMasonFixture(t, 4, validPlan)
 	defer func() { f.stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
 	stream, _ := f.builtAs(t, "design")
 	f.stop(t)
 
@@ -484,7 +484,7 @@ func TestStaleSpecLeavesTheUnitReady(t *testing.T) {
 	f, masons := newMasonFixture(t, 4, validPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
 	stream, _ := f.builtAs(t, "design")
 	f.editSpec(t, stream, staleSpec)
 	mutation(t, f.c, "DELETE", "pause", factory)
@@ -531,7 +531,7 @@ func TestUnitWorkspaceFailureBlocksItsWorkstreamAlone(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
 	a, _ := f.builtAs(t, "first")
 	b, _ := f.builtAs(t, "second")
 	broken, other := lowHigh(a, b)
@@ -582,7 +582,7 @@ func TestBlockedImplementingUnitHoldsNoSlot(t *testing.T) {
 			f, masons := newMasonFixture(t, 1, validPlan)
 			defer func() { f.stop(t) }()
 			factory := runtime.Target{Scope: "factory"}
-			mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+			mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
 			a, _ := f.builtAs(t, "first")
 			b, _ := f.builtAs(t, "second")
 			blocked, other := lowHigh(a, b)

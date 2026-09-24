@@ -296,7 +296,8 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   the spec and the plan wait for your `ratify`. The output then ends with
   `Debate: skipped; ratify the spec and the plan once they are drafted`.
 - `pause <all|project-id|workstream-id> [--hard] [--reason TEXT]` stores an
-  operator pause; the default mode is soft.
+  owner-attributed pause; the default mode is soft. The status and command output
+  show each pause's source, reason and UTC set time.
 - `resume <all|project-id|workstream-id>` clears that scope's pause. Parent pauses
   still apply; all effective pauses are displayed.
 - `priority set <workstream-id>...` stores the active project's ordered list.

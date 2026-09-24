@@ -1,4 +1,4 @@
-// Package runtime persists operator overrides independently of configuration.
+// Package runtime persists runtime overrides independently of configuration.
 package runtime
 
 import (
@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 )
@@ -24,11 +25,19 @@ type Target struct {
 	Workstream config.WorkstreamID `json:"workstream,omitempty"`
 }
 type Pause struct {
-	Target Target `json:"target"`
-	Mode   string `json:"mode"`
-	Reason string `json:"reason,omitempty"`
-	Source string `json:"source"`
+	Target Target    `json:"target"`
+	Mode   string    `json:"mode"`
+	Reason string    `json:"reason"`
+	Source string    `json:"source"`
+	SetAt  time.Time `json:"set_at"`
 }
+
+const (
+	PauseOwner              = "owner"
+	PauseDailyBudget        = "daily-budget"
+	PauseProviderUsageLimit = "provider-usage-limit"
+)
+
 type Priority struct {
 	Project     config.ProjectID      `json:"project"`
 	Workstreams []config.WorkstreamID `json:"workstreams"`
@@ -99,6 +108,28 @@ func Open(in Inputs) (*Store, []Diagnostic, error) {
 				err = fmt.Errorf("runtime.json: trailing JSON")
 			}
 		}
+		migrated := false
+		if err == nil {
+			for i := range s.state.Pauses {
+				p := &s.state.Pauses[i]
+				if p.Source != "operator" {
+					continue
+				}
+				migrated = true
+				p.Source = PauseOwner
+				if strings.TrimSpace(p.Reason) == "" {
+					p.Reason = "Owner requested pause"
+				}
+				if p.SetAt.IsZero() {
+					info, statErr := root.Stat("runtime.json")
+					if statErr != nil {
+						err = statErr
+						break
+					}
+					p.SetAt = info.ModTime().UTC()
+				}
+			}
+		}
 		if err == nil {
 			err = validate(s.state)
 		}
@@ -107,6 +138,19 @@ func Open(in Inputs) (*Store, []Diagnostic, error) {
 			return nil, nil, fmt.Errorf("runtime.json: %w", err)
 		}
 		s.disk = bytes.Clone(data)
+		if migrated {
+			updated, encodeErr := s.ops.encode(s.state)
+			if encodeErr != nil {
+				root.Close()
+				return nil, nil, encodeErr
+			}
+			updated = append(updated, '\n')
+			if err := s.persist(updated); err != nil {
+				root.Close()
+				return nil, nil, err
+			}
+			s.disk = updated
+		}
 	}
 	_, diagnostics := resolve(s.state, s.input)
 	return s, diagnostics, nil
@@ -283,8 +327,14 @@ func validate(st State) error {
 		if p.Mode != "soft" && p.Mode != "hard" {
 			return fmt.Errorf("invalid pause mode %q", p.Mode)
 		}
-		if p.Source != "operator" {
-			return fmt.Errorf("M1 pause source must be operator")
+		if p.Source != PauseOwner && p.Source != PauseDailyBudget && p.Source != PauseProviderUsageLimit {
+			return fmt.Errorf("invalid pause source %q", p.Source)
+		}
+		if strings.TrimSpace(p.Reason) == "" {
+			return fmt.Errorf("pause reason must be non-empty")
+		}
+		if p.SetAt.IsZero() {
+			return fmt.Errorf("pause set time must be non-zero")
 		}
 	}
 	projects := map[config.ProjectID]bool{}
@@ -337,12 +387,20 @@ func (s *Store) mutate(f func(*State, Inputs) error) error {
 	return nil
 }
 func (s *Store) SetPause(p Pause) error {
+	if p.SetAt.IsZero() {
+		p.SetAt = time.Now().UTC()
+	}
 	return s.mutate(func(st *State, in Inputs) error {
 		if err := validateTarget(p.Target); err != nil {
 			return err
 		}
 		if err := targetReference(p.Target, in); err != nil {
 			return err
+		}
+		for _, current := range st.Pauses {
+			if current.Target == p.Target && p.Source != PauseOwner && current.Source != p.Source {
+				return fmt.Errorf("%s cannot replace %s pause; only the owner may replace it", p.Source, current.Source)
+			}
 		}
 		st.Pauses = slices.DeleteFunc(st.Pauses, func(v Pause) bool { return v.Target == p.Target })
 		st.Pauses = append(st.Pauses, p)
@@ -351,10 +409,18 @@ func (s *Store) SetPause(p Pause) error {
 }
 
 // Clear operations also accept stale keys, allowing explicit removal.
-func (s *Store) ClearPause(t Target) error {
+func (s *Store) ClearPause(t Target, actor string) error {
 	return s.mutate(func(st *State, _ Inputs) error {
 		if err := validateTarget(t); err != nil {
 			return err
+		}
+		if actor != PauseOwner && actor != PauseDailyBudget && actor != PauseProviderUsageLimit {
+			return fmt.Errorf("invalid pause clearing source %q", actor)
+		}
+		for _, p := range st.Pauses {
+			if p.Target == t && actor != PauseOwner && actor != p.Source {
+				return fmt.Errorf("%s cannot clear %s pause; only the owner or %s may clear it", actor, p.Source, p.Source)
+			}
 		}
 		st.Pauses = slices.DeleteFunc(st.Pauses, func(p Pause) bool { return p.Target == t })
 		return nil
