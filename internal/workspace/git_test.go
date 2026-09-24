@@ -145,6 +145,48 @@ func TestFetchReturnsTheUpstreamCommit(t *testing.T) {
 	}
 }
 
+func TestPushMovesTheForkBranchOnlyFromTheExpectedCommit(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base := git(t, "-C", f.clone, "rev-parse", "HEAD")
+	first := f.advance(t, "first.txt")
+	second := f.advance(t, "second.txt")
+	if _, err := f.provider.Fetch(ctx, "upstream", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if commit, exists, err := f.provider.RemoteBranch(ctx, "fork", "osmia/w"); err != nil || exists || commit != "" {
+		t.Fatalf("an absent branch reads %q %v %v", commit, exists, err)
+	}
+	if err := f.provider.Push(ctx, "fork", first, "osmia/w", base); err == nil {
+		t.Fatal("pushed over an absent branch expected at a commit")
+	}
+	if err := f.provider.Push(ctx, "fork", first, "osmia/w", ""); err != nil {
+		t.Fatal(err)
+	}
+	if commit, exists, err := f.provider.RemoteBranch(ctx, "fork", "osmia/w"); err != nil || !exists || commit != first {
+		t.Fatalf("the pushed branch reads %q %v %v, want %s", commit, exists, err, first)
+	}
+	if err := f.provider.Push(ctx, "fork", second, "osmia/w", ""); err == nil {
+		t.Fatal("pushed over an existing branch expected absent")
+	}
+	if err := f.provider.Push(ctx, "fork", base, "osmia/w", second); err == nil {
+		t.Fatal("pushed over a branch expected at another commit")
+	}
+	if commit, _, err := f.provider.RemoteBranch(ctx, "fork", "osmia/w"); err != nil || commit != first {
+		t.Fatalf("a refused push moved the branch to %q: %v", commit, err)
+	}
+	if err := f.provider.Push(ctx, "fork", base, "osmia/w", first); err != nil {
+		t.Fatalf("a push from the expected commit that rewinds the branch: %v", err)
+	}
+	if commit, _, err := f.provider.RemoteBranch(ctx, "fork", "osmia/w"); err != nil || commit != base {
+		t.Fatalf("the branch is at %q, want %s: %v", commit, base, err)
+	}
+	if _, _, err := f.provider.RemoteBranch(ctx, "nowhere", "osmia/w"); err == nil {
+		t.Fatal("asked a remote the clone does not have")
+	}
+}
+
 func TestAcquireCreatesTheBranchAndTheWorktreeOnce(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

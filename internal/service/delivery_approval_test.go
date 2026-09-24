@@ -24,7 +24,7 @@ func deliveryFixture(t *testing.T) (*shedFixture, config.WorkstreamID, *trace.Re
 	must(t, a.Pass(ctx))
 	in, sealed, err := a.governing(ctx, stream)
 	must(t, err)
-	report := FinalReport{Review: 1, Outcome: finalReviewed, Branch: featureBranch(stream), Commit: in.Commit, Seal: in.Seal, SpecHash: sealed.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Summary: "Resumable uploads", Criteria: []FinalCriterion{
+	report := FinalReport{Review: 1, Outcome: finalReviewed, Branch: featureBranch(stream), Commit: in.Commit, Seal: in.Seal, SpecHash: sealed.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Upstream: &sealed.Base, Summary: "Resumable uploads", Criteria: []FinalCriterion{
 		{Criterion: "spec#1", Text: "Resume upload", Evidence: "resume.go and TestResume"},
 		{Criterion: "spec#2", Text: "Skip duplicate chunks", Evidence: "dedupe.go and TestDedupe"},
 	}}

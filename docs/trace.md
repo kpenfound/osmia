@@ -90,7 +90,10 @@ moved feature branch, `units/<unit-subject>/ruling-<n>.json`,
 the owner's direction after bounce `n`, `final/rebase.json`, the
 [final rebase](service.md#running-a-final-review) of an assembled
 workstream's feature branch onto upstream, `final/report.json`, its
-criterion-by-criterion final report, and the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
+criterion-by-criterion final report, `final/delivery.json`, the
+[owner's delivery approval](service.md#owner-delivery-approval),
+`final/publication.json`, its [publication](service.md#publication) to the
+fork and pull request, and the files of [the owner's own part](service.md#the-owner-in-the-shed) in a
 round: `shed/round-<n>/owner.json`, the owner's objections, a record of the
 same shape as a member's; `shed/round-<n>/rulings.json`, what the owner ruled
 and overruled about the objections that stand; `shed/round-<n>/more.json`, the
