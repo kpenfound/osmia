@@ -153,10 +153,17 @@ func (m *masons) Pass(ctx context.Context) error {
 			if moved {
 				continue
 			}
+			classified, contested, err := m.classify(ctx, stream, u.ID, state)
+			if err != nil {
+				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
+			}
+			if contested {
+				continue
+			}
 			b.inFlight = append(b.inFlight, u.ID)
 			b.implementing++
-			queued := false
-			if !stuck {
+			queued := classified
+			if !stuck && !queued {
 				if queued, err = m.recoverTurn(ctx, stream, u.ID); err != nil {
 					return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
 				}
@@ -211,6 +218,81 @@ func (m *masons) Pass(ctx context.Context) error {
 		candidates[i] = b
 	}
 	return nil
+}
+
+// classify records one chief event per clean mason response, then either
+// queues a bounded continuation or contests the unit. Stable IDs make a pass
+// after a crash finish the same decision without duplicating its side effects.
+func (m *masons) classify(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) (queued, contested bool, err error) {
+	th, err := m.repository.Thread(stream, masonAgent(unit))
+	if errors.Is(err, os.ErrNotExist) || err == nil && len(th.Turns) == 0 {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	last := th.Turns[len(th.Turns)-1]
+	if last.CompletedAt.IsZero() || last.Response == nil || last.Response.Classification == nil {
+		return false, false, nil
+	}
+	c := last.Response.Classification
+	attempts := 0
+	for _, turn := range th.Turns {
+		if !turn.CompletedAt.IsZero() && turn.Response != nil && turn.Response.Classification != nil {
+			attempts++
+		}
+	}
+	// The classification state is a receipt for the event. Its subject is
+	// unique to this response and cannot be confused with a unit transition.
+	id := trace.EventID(last.Response.ID, "classification")
+	subject := id
+	receipt, err := m.repository.Workflow(stream, subject)
+	if err != nil {
+		return false, false, err
+	}
+	if receipt.Value == "" {
+		reason := fmt.Sprintf("mason turn %s classified %s: %s; tool counts %v", last.Request.TurnID, c.Class, c.Evidence, c.ToolCounts)
+		if c.Class == "gave_up" {
+			reason += "; unit contested"
+		} else if attempts >= m.cfg.Mason.MaxCleanTurns {
+			reason += fmt.Sprintf("; clean-turn bound exhausted (%d/%d), unit contested", attempts, m.cfg.Mason.MaxCleanTurns)
+		}
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: last.Response.ID}
+		_, err = m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: h, Subject: subject, From: "", To: "recorded", Reason: reason}, Events: []trace.Event{trace.Notice(id, "chief", reason)}})
+		if err != nil && !errors.Is(err, trace.ErrConflict) {
+			return false, false, err
+		}
+	}
+	if c.Class == "gave_up" || attempts >= m.cfg.Mason.MaxCleanTurns {
+		reason := "mason classified " + c.Class
+		if c.Class != "gave_up" {
+			reason = fmt.Sprintf("mason clean-turn bound exhausted (%d/%d) after %s", attempts, m.cfg.Mason.MaxCleanTurns, c.Class)
+		}
+		id := trace.EventID(last.Response.ID, "contested")
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: last.Response.ID}
+		_, err := m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitImplementing, To: UnitContested, Reason: reason}})
+		if errors.Is(err, trace.ErrConflict) {
+			return false, false, nil
+		}
+		return false, err == nil, err
+	}
+	profile, _, err := m.s.roleExecution(m.cfg, masonRole)
+	if err != nil {
+		return false, false, err
+	}
+	turnID := masonAgent(unit) + "-clarify-" + fmt.Sprint(last.Sequence)
+	prompt := "Your last turn ended without calling an outcome tool. Continue the unit from your workspace."
+	switch c.Class {
+	case "asked_in_prose":
+		prompt += " You asked a question in prose. Call ask with the question if you need an answer."
+	case "claims_done":
+		prompt += " You claimed completion in prose. Call done with the required report if the criteria and proofs hold."
+	default:
+		prompt += " Call ask if you need a decision, or done with the required report when the criteria and proofs hold."
+	}
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: last.Response.ID, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: last.Request.SystemPrompt, Prompt: prompt}
+	_, err = m.repository.EnqueueTurn(ctx, req)
+	return err == nil, false, err
 }
 
 // nextStart returns the index of the first workstream, in the given order,

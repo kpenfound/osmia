@@ -88,6 +88,9 @@ per_workstream = 2
 max_rounds = 3
 max_bounces = 3
 
+[mason]
+max_clean_turns = 3
+
 [events]
 window = "5s"
 

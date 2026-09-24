@@ -25,6 +25,7 @@ type Config struct {
 	Profiles       map[string]Profile `toml:"profiles" json:"profiles"`
 	Roles          map[string]Role    `toml:"roles" json:"roles"`
 	Shed           Shed               `toml:"shed" json:"shed"`
+	Mason          Mason              `toml:"mason" json:"mason"`
 	Events         Events             `toml:"events" json:"events"`
 	Project        Project            `toml:"-" json:"project"`
 }
@@ -40,6 +41,9 @@ type Capacity struct {
 type Shed struct {
 	MaxRounds  int `toml:"max_rounds" json:"max_rounds"`
 	MaxBounces int `toml:"max_bounces" json:"max_bounces"`
+}
+type Mason struct {
+	MaxCleanTurns int `toml:"max_clean_turns" json:"max_clean_turns"`
 }
 type Events struct {
 	Window string `toml:"window" json:"window"`
@@ -99,7 +103,7 @@ func Load(options Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Events: Events{"5s"}}
+	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Mason: Mason{3}, Events: Events{"5s"}}
 	md, err := decode(path, c, false)
 	if err != nil {
 		return nil, err
@@ -145,6 +149,7 @@ func Load(options Options) (*Config, error) {
 		{"capacity.masons", c.Capacity.Masons}, {"capacity.reviewers", c.Capacity.Reviewers},
 		{"capacity.committee", c.Capacity.Committee}, {"capacity.per_workstream", c.Capacity.PerWorkstream},
 		{"shed.max_rounds", c.Shed.MaxRounds}, {"shed.max_bounces", c.Shed.MaxBounces},
+		{"mason.max_clean_turns", c.Mason.MaxCleanTurns},
 	} {
 		if value.n <= 0 {
 			return nil, fieldError(path, value.field, "must be positive")
@@ -286,7 +291,7 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "sandbox", "image"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "events", "events.window"}, path)
+	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {

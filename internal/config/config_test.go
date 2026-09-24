@@ -56,7 +56,7 @@ func TestDefaults(t *testing.T) {
 	if c.Root != root || c.Listen.Socket != filepath.Join(root.String(), "osmia.sock") {
 		t.Fatalf("root/socket: %+v", c)
 	}
-	if c.Capacity != (Capacity{4, 2, 3, 2}) || c.Shed != (Shed{3, 3}) {
+	if c.Capacity != (Capacity{4, 2, 3, 2}) || c.Shed != (Shed{3, 3}) || c.Mason.MaxCleanTurns != 3 {
 		t.Fatalf("numeric defaults: %+v", c)
 	}
 	if c.Project.ID != pid || c.Project.BaseBranch != "main" || c.Project.Landing != "commit-per-unit" || c.Project.Capacity.PerWorkstream != 2 {
@@ -97,6 +97,8 @@ per_workstream = 5
 [shed]
 max_rounds = 1
 max_bounces = 2
+[mason]
+max_clean_turns = 2
 [events]
 window = "250ms"
 [roles.mason]
@@ -164,6 +166,7 @@ func TestInvalid(t *testing.T) {
 		{"zero wip", topConfig + "[capacity]\nper_workstream = 0\n", "", "capacity.per_workstream"},
 		{"negative rounds", topConfig + "[shed]\nmax_rounds = -1\n", "", "shed.max_rounds"},
 		{"zero bounces", topConfig + "[shed]\nmax_bounces = 0\n", "", "shed.max_bounces"},
+		{"zero clean turns", topConfig + "[mason]\nmax_clean_turns = 0\n", "", "mason.max_clean_turns"},
 		{"zero event window", topConfig + "[events]\nwindow = \"0s\"\n", "", "events.window"},
 		{"malformed event window", topConfig + "[events]\nwindow = \"soon\"\n", "", "events.window"},
 		{"unknown events key", topConfig + "[events]\nlimit = 1\n", "", "events.limit"},

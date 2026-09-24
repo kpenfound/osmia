@@ -59,6 +59,9 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	if runErr != nil {
 		response.Failure = runErr.Error()
 	}
+	if t.Identity.Role == "mason" {
+		response.Classification = trace.ClassifyMasonTurn(result, response.Failure)
+	}
 	q.Response = &response
 	if persistErr != nil {
 		return q, errors.Join(runErr, persistErr)
