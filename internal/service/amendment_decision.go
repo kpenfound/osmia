@@ -411,8 +411,8 @@ func entryIDs(entries []shed.Entry) string {
 // of amendments/<n>/application.json classifies the affected units, so from
 // the resealing on no approval the amendment affects can land. The
 // documents, the seal and the move to resealed are one commit, so a restart
-// finds either all of them or none. An approval that can no longer apply moves to
-// unapplied with the reason, and the sealed documents stay in force.
+// finds either all of them or none. An approval that can no longer apply
+// moves to unapplied with the reason, and the sealed documents stay in force.
 func (a amendmentDebate) reseal(ctx context.Context, stream config.WorkstreamID, req trace.Amendment, state trace.WorkflowState) error {
 	decisions, err := amendmentDecisions(a.repository, stream, req.ID)
 	if err != nil {

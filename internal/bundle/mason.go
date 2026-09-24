@@ -19,8 +19,8 @@ import (
 
 // Mason is the bundle a mason builds one unit of a sealed workstream from:
 // the spec at its sealed hash, the unit's criteria and planned proofs, its
-// footprint and dependencies, and the project context scoped to its
-// footprint.
+// footprint and dependencies, the notices of approved amendments that affect
+// it, and the project context scoped to its footprint.
 type Mason struct {
 	Workstream config.WorkstreamID `json:"workstream"`
 	Seal       int                 `json:"seal"`
@@ -196,8 +196,8 @@ func revision(repo *trace.Repository, stream config.WorkstreamID, id string, rev
 }
 
 // Render returns the mason bundle as the text a turn request carries: the
-// unit, its criteria and proofs, its dependencies and footprint, the sealed
-// spec, and the rendered project context.
+// unit, its criteria and proofs, its dependencies and footprint, its
+// amendment notices, the sealed spec, and the rendered project context.
 func (m Mason) Render() string {
 	var w strings.Builder
 	line := func(format string, args ...any) { fmt.Fprintf(&w, format+"\n", args...) }
