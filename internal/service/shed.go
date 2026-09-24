@@ -83,11 +83,12 @@ type Committee struct {
 // from its reply to the round: it comes from the operation's action, not from
 // its recorded input.
 type roundInput struct {
-	Round   int  `json:"round"`
-	Spec    int  `json:"spec"`
-	Plan    int  `json:"plan"`
-	Resume  int  `json:"resume,omitempty"`
-	Redraft bool `json:"-"`
+	Round     int    `json:"round"`
+	Amendment string `json:"amendment,omitempty"`
+	Spec      int    `json:"spec"`
+	Plan      int    `json:"plan"`
+	Resume    int    `json:"resume,omitempty"`
+	Redraft   bool   `json:"-"`
 }
 
 func (in roundInput) pin() shed.Pin { return shed.Pin{Spec: in.Spec, Plan: in.Plan} }
@@ -118,6 +119,19 @@ func roundIDs(n int) (transition, event string) {
 func roundTurnPrefix(n int, agent string) string { return fmt.Sprintf("shed-%d-%s-", n, agent) }
 func roundTurnID(n int, agent string, attempt int) string {
 	return roundTurnPrefix(n, agent) + strconv.Itoa(attempt)
+}
+
+func (in roundInput) memberPrefix(agent string) string {
+	if in.Amendment != "" {
+		return fmt.Sprintf("amend-%s-round-%d-%s-", in.Amendment, in.Round, agent)
+	}
+	return roundTurnPrefix(in.Round, agent)
+}
+func (in roundInput) memberChain(t trace.Thread, asked []trace.QuestionState) map[string]string {
+	return askChain(t, in.memberPrefix(t.Identity.ID), asked)
+}
+func (in roundInput) memberTurns(t trace.Thread, asked []trace.QuestionState) []trace.QueuedTurn {
+	return chainTurns(t, in.memberChain(t, asked))
 }
 
 // shedStates are the kinds of shed-subject value, each followed by the round
@@ -884,8 +898,8 @@ func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream
 		if err != nil {
 			return empty, "", err
 		}
-		turns := roundTurns(t, in.Round, asked)
-		tries := len(attempts(turns, roundChain(t, in.Round, asked)))
+		turns := in.memberTurns(t, asked)
+		tries := len(attempts(turns, in.memberChain(t, asked)))
 		// Turns run in sequence, so the oldest unfinished turn of the chain is
 		// the one to drive: the answer to a question may be queued behind the
 		// turn that asked it while a service stop left that turn unfinished.
@@ -931,7 +945,7 @@ func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream
 		case last == nil || last.Status() == "interrupted":
 			if last != nil {
 				if id := askedBy(asked, t.Identity.ThreadID, last.Request.TurnID); id != "" {
-					record, err := d.contributed(stream, roundChain(t, in.Round, asked)[last.Request.TurnID], empty)
+					record, err := d.contributed(stream, in.memberChain(t, asked)[last.Request.TurnID], empty)
 					return record, id, err
 				}
 			}
@@ -950,7 +964,7 @@ func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream
 				return empty, "", err
 			}
 		default:
-			record, err := d.contributed(stream, roundChain(t, in.Round, asked)[last.Request.TurnID], empty)
+			record, err := d.contributed(stream, in.memberChain(t, asked)[last.Request.TurnID], empty)
 			if err != nil {
 				return empty, "", err
 			}
@@ -1013,7 +1027,7 @@ func (d *debate) enqueue(ctx context.Context, cfg *config.Config, stream config.
 	if err != nil {
 		return err
 	}
-	earlier, err := d.earlier(stream, in.Round)
+	earlier, err := d.earlierRound(stream, in)
 	if err != nil {
 		return err
 	}
@@ -1023,10 +1037,10 @@ func (d *debate) enqueue(ctx context.Context, cfg *config.Config, stream config.
 			standing = append(standing, dissent)
 		}
 	}
-	answers := received(t, roundChain(t, in.Round, asked), asked)
-	turn := roundTurnID(in.Round, member, attempt)
+	answers := received(t, in.memberChain(t, asked), asked)
+	turn := in.memberPrefix(member) + strconv.Itoa(attempt)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: shedActor, Cause: operation, Depth: 1},
-		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: committeeSystemPrompt(cfg.Project), Prompt: committeePrompt(in, standing, answers)}
+		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: amendmentCommitteeSystemPrompt(cfg.Project, in), Prompt: amendmentCommitteePrompt(in, standing, answers)}
 	_, err = d.repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -1038,6 +1052,13 @@ func (d *debate) earlier(stream config.WorkstreamID, n int) ([]shed.Record, erro
 		return nil, err
 	}
 	return slices.DeleteFunc(records, func(r shed.Record) bool { return r.Round >= n }), nil
+}
+
+func (d *debate) earlierRound(stream config.WorkstreamID, in roundInput) ([]shed.Record, error) {
+	if in.Amendment != "" {
+		return amendmentRecords(d.repository, stream, in.Amendment)
+	}
+	return d.earlier(stream, in.Round)
 }
 
 // turnDirectory is the service-owned directory of one committee turn: its
@@ -1139,7 +1160,7 @@ func (d *debate) tools(scope coreadapter.Scope, in roundInput) ([]coreadapter.To
 	if err != nil {
 		return nil, err
 	}
-	origin, ok := roundChain(threads[i], in.Round, asked)[scope.Turn]
+	origin, ok := in.memberChain(threads[i], asked)[scope.Turn]
 	if !ok {
 		return nil, errors.New("turn scope denied")
 	}
@@ -1152,7 +1173,7 @@ func (d *debate) tools(scope coreadapter.Scope, in roundInput) ([]coreadapter.To
 	if err != nil {
 		return nil, err
 	}
-	earlier, err := d.earlier(stream, in.Round)
+	earlier, err := d.earlierRound(stream, in)
 	if err != nil {
 		return nil, err
 	}
@@ -1194,6 +1215,15 @@ func (d *debate) pinned(stream config.WorkstreamID, in roundInput) (spec, graph 
 		return spec, graph, err
 	}
 	for _, doc := range docs {
+		if in.Amendment != "" {
+			if doc.Path == "amendments/"+in.Amendment+"/spec.md" && doc.Revision == in.Spec {
+				spec = doc
+			}
+			if doc.Path == "amendments/"+in.Amendment+"/plan.json" && doc.Revision == in.Plan {
+				graph = doc
+			}
+			continue
+		}
 		switch {
 		case doc.ID == plan.SpecDocument && doc.Revision == in.Spec:
 			spec = doc
@@ -1270,6 +1300,28 @@ func (d *debate) stage(ctx context.Context, clone string, stream config.Workstre
 			files[doc.Path] = doc.Content
 			if !slices.Contains(paths, directory) {
 				paths = append(paths, directory)
+			}
+		}
+	}
+	if in.Amendment != "" {
+		requests, err := trace.Read[trace.Amendment](d.repository, stream)
+		if err != nil {
+			return nil, err
+		}
+		for _, request := range requests {
+			if request.ID == in.Amendment {
+				data, err := json.MarshalIndent(request, "", "  ")
+				if err != nil {
+					return nil, err
+				}
+				files["request.json"] = string(data)
+				paths = append(paths, "request.json")
+			}
+		}
+		for _, doc := range docs {
+			if doc.Path == "amendments/"+in.Amendment+"/affected.json" {
+				files["affected.json"] = doc.Content
+				paths = append(paths, "affected.json")
 			}
 		}
 	}

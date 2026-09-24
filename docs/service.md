@@ -248,7 +248,6 @@ affected set names changed criteria, units touched by changed criteria or plan
 entries, and their proofs. An invalid or declined turn records its reason and
 leaves the current documents and feature state in force. A captured turn is
 recovered from the architect thread after restart.
-
 The architect controller runs at the start of every reconciliation pass,
 before event delivery and the scheduler, with or without `Options.Threads`.
 For every workstream in feature state `handed`, except the librarian's, it
@@ -406,6 +405,18 @@ since nothing runs: the answer is not delivered, and `draft` stays
 `waiting-<n>`, or the shed `asked-<n>`. A turn that asked while the workstream
 was abandoned fails the draft or the reply as any turn of an abandoned
 workstream does.
+
+## Amendment debate
+
+A proposed amendment runs one automatic committee round against its candidate
+spec and plan. Each member's contribution and the architect's single reply are
+recorded under `amendments/<n>/round-1/`. The committee applies the shed's
+charter veto, fit advice, size split and proof tests. A restart resumes the
+same turns and round. The chief of staff receives an attention item for the
+owner with the request, proposed change, affected units and proofs, dissent
+and recommendation; the complete packet is `amendments/<n>/packet.json`.
+This round is capped at one even when `shed.max_rounds` is higher. Reaching the
+cap leaves objections standing and cannot approve the amendment.
 
 ## The shed: debate
 

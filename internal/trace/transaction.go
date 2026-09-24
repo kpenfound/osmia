@@ -287,7 +287,7 @@ func publicationPath(name string) error {
 		if len(parts) == 5 && parts[2] == "amendments" && key(parts[3]) && parts[4] == "request.jsonl" {
 			return nil
 		}
-		if len(parts) == 5 && amendmentDraftPath(parts[2:]) {
+		if len(parts) >= 5 && (amendmentDraftPath(parts[2:]) || amendmentRoundPath(parts[2:])) {
 			return nil
 		}
 		if shedPath(parts[2:]) || unitPath(parts[2:]) || finalPath(parts[2:]) {

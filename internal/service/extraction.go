@@ -276,13 +276,14 @@ func (s *Service) extractProject(ctx context.Context, req ProjectExtractRequest)
 // the architect's replies to its debate, everything else to the bound thread
 // reconciler.
 type runnerAdapter struct {
-	turns   coreadapter.Reconciler
-	extract *extractor
-	refresh *refresher
-	draft   *drafter
-	amend   *amendmentDrafter
-	rounds  *debate
-	finals  *finalReviewer
+	turns       coreadapter.Reconciler
+	extract     *extractor
+	refresh     *refresher
+	draft       *drafter
+	amend       *amendmentDrafter
+	amendRounds amendmentDebate
+	rounds      *debate
+	finals      *finalReviewer
 }
 
 func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
@@ -297,6 +298,9 @@ func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (c
 	}
 	if op.Action == AmendmentDraftAction {
 		return a.amend.Inspect(ctx, op)
+	}
+	if op.Action == AmendmentRoundAction || op.Action == AmendmentReplyAction {
+		return a.amendRounds.Inspect(ctx, op)
 	}
 	if op.Action == RoundAction {
 		return a.rounds.Inspect(ctx, op)
@@ -324,6 +328,9 @@ func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (cor
 	}
 	if op.Action == AmendmentDraftAction {
 		return a.amend.Apply(ctx, op)
+	}
+	if op.Action == AmendmentRoundAction || op.Action == AmendmentReplyAction {
+		return a.amendRounds.Apply(ctx, op)
 	}
 	if op.Action == RoundAction {
 		return a.rounds.Apply(ctx, op)
