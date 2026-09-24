@@ -14,7 +14,7 @@ import (
 
 func TestMasonAmendmentFreesSlotForAnotherUnit(t *testing.T) {
 	t.Parallel()
-	f, masons := newMasonFixture(t, 1, independentPlan)
+	f, masons := newParallelMasonFixture(t, 1, 1, parallelPlan)
 	defer f.stop(t)
 	masons.play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		got, err := callTool(ctx, tools, questions.AmendTool, map[string]any{"citations": []string{"spec#1", "plan#resume"}, "change": "Clarify restart state", "reason": "The planned proof needs another state"})
@@ -38,7 +38,10 @@ func TestMasonAmendmentFreesSlotForAnotherUnit(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	f.awaitMasonRan(t, stream, "dedupe")
+	f.awaitMasonRan(t, stream, "upload")
+	if state, err := f.unitState(stream, "dedupe"); err != nil || state != UnitReady {
+		t.Fatalf("entangled unit state %q: %v", state, err)
+	}
 	requests, err := trace.Read[trace.Amendment](f.repository(), stream)
 	if err != nil || len(requests) != 1 {
 		t.Fatalf("requests %+v: %v", requests, err)
