@@ -280,6 +280,7 @@ type runnerAdapter struct {
 	extract *extractor
 	refresh *refresher
 	draft   *drafter
+	amend   *amendmentDrafter
 	rounds  *debate
 	finals  *finalReviewer
 }
@@ -293,6 +294,9 @@ func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (c
 	}
 	if op.Action == DraftAction {
 		return a.draft.Inspect(ctx, op)
+	}
+	if op.Action == AmendmentDraftAction {
+		return a.amend.Inspect(ctx, op)
 	}
 	if op.Action == RoundAction {
 		return a.rounds.Inspect(ctx, op)
@@ -317,6 +321,9 @@ func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (cor
 	}
 	if op.Action == DraftAction {
 		return a.draft.Apply(ctx, op)
+	}
+	if op.Action == AmendmentDraftAction {
+		return a.amend.Apply(ctx, op)
 	}
 	if op.Action == RoundAction {
 		return a.rounds.Apply(ctx, op)

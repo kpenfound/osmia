@@ -705,8 +705,8 @@ func (d *drafter) continued(stream config.WorkstreamID, turn string) (string, er
 // attempt completes: the turn that delivers the answer to the architect's
 // question adds to what the turn that asked it delivered.
 func (d *drafter) draftTool(scope coreadapter.Scope, attempt string) coreadapter.Tool {
-	return coreadapter.Tool{Name: DraftTool, Description: "Deliver spec.md or plan.json. The service records the delivered files as the draft; only they are kept.", Effect: coreadapter.ToolMemory,
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","enum":["spec.md","plan.json"]},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`),
+	return coreadapter.Tool{Name: DraftTool, Description: "Deliver spec.md, plan.json, or an amendment decline.txt. The service records and validates delivered files.", Effect: coreadapter.ToolMemory,
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","enum":["spec.md","plan.json","decline.txt"]},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`),
 		Handle: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			var input struct{ Path, Content string }
 			dec := json.NewDecoder(bytes.NewReader(raw))
@@ -714,7 +714,7 @@ func (d *drafter) draftTool(scope coreadapter.Scope, attempt string) coreadapter
 			if err := dec.Decode(&input); err != nil {
 				return nil, err
 			}
-			if input.Path != plan.SpecPath && input.Path != plan.PlanPath {
+			if input.Path != plan.SpecPath && input.Path != plan.PlanPath && !(input.Path == "decline.txt" && strings.HasPrefix(scope.Turn, "amend-")) {
 				return nil, fmt.Errorf("path must be %s or %s", plan.SpecPath, plan.PlanPath)
 			}
 			if len(input.Content) > MaxHandedBytes {
@@ -753,7 +753,7 @@ func (d *drafter) selectView(ctx context.Context, scope coreadapter.Scope) (isol
 		return isolation.Selection{}, err
 	}
 	workspace := filepath.Join(d.turnDirectory(stream, scope.Turn), "workspace")
-	paths, err := d.stage(ctx, stream, workspace)
+	paths, err := d.stage(ctx, stream, scope.Turn, workspace)
 	if err != nil {
 		return isolation.Selection{}, err
 	}
@@ -763,7 +763,7 @@ func (d *drafter) selectView(ctx context.Context, scope coreadapter.Scope) (isol
 // stage builds the view: the handed input under handed/, charter.md, the
 // rendered context bundle as context.md and, once a draft is recorded, its
 // latest spec.md and plan.json under draft/. It returns the paths to select.
-func (d *drafter) stage(ctx context.Context, stream config.WorkstreamID, workspace string) ([]string, error) {
+func (d *drafter) stage(ctx context.Context, stream config.WorkstreamID, turn, workspace string) ([]string, error) {
 	if err := os.RemoveAll(workspace); err != nil {
 		return nil, err
 	}
@@ -779,12 +779,32 @@ func (d *drafter) stage(ctx context.Context, stream config.WorkstreamID, workspa
 	if err != nil {
 		return nil, err
 	}
-	b, err := d.s.Context().Assemble(ctx, d.repository.Project(), bundle.Scope{Workstream: stream})
+	b, err := (bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return d.repository, nil }, Now: d.s.now}).Assemble(ctx, d.repository.Project(), bundle.Scope{Workstream: stream})
 	if err != nil {
 		return nil, err
 	}
 	files := map[string]string{handed.Path: handed.Content, "charter.md": charter.Content, "context.md": b.Render()}
 	paths := []string{"handed", "charter.md", "context.md"}
+	if id, ok := amendmentTurnID(turn); ok {
+		requests, err := trace.Read[trace.Amendment](d.repository, stream)
+		if err != nil {
+			return nil, err
+		}
+		for _, request := range requests {
+			if request.ID == id {
+				data, err := json.MarshalIndent(request, "", "  ")
+				if err != nil {
+					return nil, err
+				}
+				files["request.json"] = string(data)
+				paths = append(paths, "request.json")
+				break
+			}
+		}
+		if _, ok := files["request.json"]; !ok {
+			return nil, fmt.Errorf("amendment %s is missing", id)
+		}
+	}
 	drafted := false
 	for _, id := range []string{plan.SpecDocument, plan.PlanDocument} {
 		if doc, ok := latest[id]; ok {
