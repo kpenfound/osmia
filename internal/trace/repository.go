@@ -580,10 +580,14 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 // records already written remain available for later reconciliation. A
 // project charter revision is refused with ErrConflict unless charter.md
 // matches the latest recorded revision; Charter records owner edits. Status
-// records are refused with ErrConflict: SetStatus is their only writer.
+// and priority records are refused with ErrConflict: SetStatus and
+// SetPriority are their only writers.
 func (r *Repository) Append(ctx context.Context, v Record) error {
-	if _, ok := v.(Status); ok {
+	switch v.(type) {
+	case Status:
 		return fmt.Errorf("%w: status records require SetStatus", ErrConflict)
+	case PriorityChange:
+		return fmt.Errorf("%w: priority records require SetPriority", ErrConflict)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

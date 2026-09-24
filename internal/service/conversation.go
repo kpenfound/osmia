@@ -19,7 +19,7 @@ import (
 var ownerActor = trace.Actor{Kind: "owner", ID: "local"}
 
 // chiefPrompt opens the system prompt of every owner message turn; the
-// workstream's rendered bundle follows it.
+// priority guidance and the workstream's rendered bundle follow it.
 const chiefPrompt = "You are the chief of staff for workstream %s. The prompt is a message from the owner. The project context below was assembled when the message was accepted."
 
 // now is the service clock: the reconciliation clock when one is supplied.
@@ -93,7 +93,7 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 		ThreadID:     trace.ChiefOfStaff,
 		TurnID:       "message_" + id,
 		Profile:      profile,
-		SystemPrompt: fmt.Sprintf(chiefPrompt, stream) + "\n\n" + context,
+		SystemPrompt: fmt.Sprintf(chiefPrompt, stream) + "\n\n" + priorityGuidance + "\n\n" + context,
 		Prompt:       req.Text,
 	})
 	if err != nil {

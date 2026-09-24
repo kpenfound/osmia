@@ -55,8 +55,8 @@ osmia status w_…
 ```
 
 `send` records the message as a `queued` turn. The chief of staff's turn has
-`set_status`, `answer`, `escalate`, `relay_ruling`, `route_amendment` and
-`propose_charter`, and no file tools. It first calls `set_status` with an agent
+`set_status`, `prioritise`, `answer`, `escalate`, `relay_ruling`,
+`route_amendment` and `propose_charter`, and no file tools. It first calls `set_status` with an agent
 line that names an agent ID. The call is refused with the reason
 `agents[0] contains an Osmia or backend identifier ("agent_mason"); refer to
 the work or the agent in words`, and nothing is stored. It then writes a

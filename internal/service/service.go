@@ -85,6 +85,9 @@ type Options struct {
 	// workstreams. It defaults to the GitHub REST API with the service's
 	// GITHUB_TOKEN environment variable, which no session receives.
 	PullRequests pulls.Client
+	// controls is set by Enforce so the chief-of-staff tools it binds reach
+	// the runtime state of the service started with these options.
+	controls *runtimeControls
 }
 
 // activeProject is the runtime state of the configured project: its open trace
@@ -159,6 +162,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, err
 	}
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{})}
+	if opts.controls != nil {
+		opts.controls.service.Store(s)
+	}
 	cfg, s.pending = s.recoverPending(ctx, cfg)
 	active, err := s.open(cfg)
 	if err != nil {
