@@ -258,7 +258,7 @@ func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
 			use(ctx, session, "status", "set_status", refused)
 			use(ctx, session, "status", "set_status", map[string]any{"goal": chiefDemoStatus.Goal, "attention": chiefDemoStatus.Attention, "note": chiefDemoStatus.Note, "agents": chiefDemoStatus.Agents})
 			return questionResult(req, "session-chief", chiefDemoReply), nil
-		case len(sent) > 1 && req.Name == sent[1].Turn:
+		case len(sent) > 1 && req.Name != sent[0].Turn && !strings.HasPrefix(req.Name, "events_"):
 			return questionResult(req, "session-chief", "The upload API stays as it is."), nil
 		case !strings.HasPrefix(req.Name, "events_"):
 		// Prompts replay nothing here: a resumed session receives only the new
@@ -417,6 +417,30 @@ func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	if got := runs(); !reflect.DeepEqual(got, before) {
 		t.Fatalf("the restart ran %v, had run %v", got, before)
 	}
+	mu.Lock()
+	openMessage, err := c.Send(ctx, stream, "What is waiting on me?")
+	sent = append(sent, openMessage)
+	mu.Unlock()
+	must(t, err)
+	settle(s)
+	mu.Lock()
+	openPrompt := prompts[openMessage.Turn].SystemPrompt
+	mu.Unlock()
+	for _, part := range []string{
+		"Goal: " + chiefDemoStatus.Goal,
+		"Attention: None",
+		"Note: " + chiefDemoStatus.Note,
+		"- " + chiefDemoStatus.Agents[0],
+		"Revision: 1",
+		"Inbox: 1",
+		"Batch: escalation_2",
+		"Question for the owner: May the upload API's response change?",
+		"- 2: " + chiefDemoQuestion,
+	} {
+		if !strings.Contains(openPrompt, part) {
+			t.Fatalf("owner conversation system prompt lacks %q:\n%s", part, openPrompt)
+		}
+	}
 
 	// 5. The owner rules. The chief of staff rephrases the ruling as a
 	// project notice, the reviewer resumes with it, and the next message's
@@ -444,14 +468,14 @@ func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	settle(s)
 	list, err = c.Conversation(ctx, stream)
 	must(t, err)
-	if got := states(list); len(got) != 4 || got[3] != "response:done" {
+	if got := states(list); len(got) != 6 || got[5] != "response:done" {
 		t.Fatalf("conversation after the ruling: %v", got)
 	}
 	stop(s, c)
 
 	// 6. Only the chief of staff received event turns, and the trace holds
 	// the question, the choice, the ruling and what was sent back.
-	if got := runs(); !reflect.DeepEqual(got, map[string]int{"extract-1-1": 1, "message": 2, "build": 1, "build2": 1, "review": 1, "events": 2, "answer_1": 1, "answer_2": 1}) {
+	if got := runs(); !reflect.DeepEqual(got, map[string]int{"extract-1-1": 1, "message": 3, "build": 1, "build2": 1, "review": 1, "events": 2, "answer_1": 1, "answer_2": 1}) {
 		t.Fatalf("runs: %v", got)
 	}
 	repo, err = trace.Open(cfg.Root, cfg.Project)
@@ -513,10 +537,10 @@ func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	notice := "## Notices\n- workstreams/" + string(stream) + "/questions/2/rulings.jsonl (record 2 revision 2, workstream " + string(stream) + ")\n" + section
-	if first := prompts[sent[0].Turn].SystemPrompt; !strings.HasSuffix(first, "## Notices\nNo project-wide notices.\n") {
+	if first := prompts[sent[0].Turn].SystemPrompt; !strings.Contains(first, "## Notices\nNo project-wide notices.\n") {
 		t.Fatalf("a notice before the ruling:\n%s", first)
 	}
-	if later := prompts[sent[1].Turn].SystemPrompt; !strings.HasSuffix(later, notice) {
+	if later := prompts[sent[2].Turn].SystemPrompt; !strings.Contains(later, notice) {
 		t.Fatalf("the later bundle lacks the notice:\n%s", later)
 	}
 	wantResults := map[string][]string{
