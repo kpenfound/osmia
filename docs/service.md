@@ -1891,9 +1891,10 @@ The accepted request fixes, at acceptance:
 - the profile the `chief_of_staff` role is bound to, including a runtime
   override;
 - the prompt, which is the message text as sent;
-- the system prompt, which names the workstream and carries the workstream's
-  [context bundle](context.md), latest stored status and open inbox escalations
-  rendered from the trace at acceptance.
+- the system prompt, which names the workstream, tells the chief of staff how
+  to [set the priority order](#priority-at-the-owners-request) and carries the
+  workstream's [context bundle](context.md), latest stored status and open
+  inbox escalations rendered from the trace at acceptance.
 
 Its actor is the owner (`owner`/`local`) and its turn ID is `message_`
 followed by 32 random hexadecimal digits.
@@ -1923,6 +1924,32 @@ These messages name the workstream or project. A rejected message is not
 recorded. Messages are accepted without a turn reconciler, but only a service
 with `Options.Threads` runs them.
 
+### Priority at the owner's request
+
+The owner can ask the chief of staff to change which workstreams go first.
+The chief of staff's `prioritise` tool sets the project's runtime priority
+order, the same state `PUT /v1/runtime/priority` and `osmia priority set`
+store, so `GET /v1/runtime`, `osmia status` and the scheduler see the order it
+sets. It changes the order only; pauses and workstream states stay as they
+are.
+
+Its input is `{"workstreams": [...]}`: workstream IDs, highest priority first.
+Workstreams it leaves out come after those it names. The order is refused,
+and nothing changes, when it is empty, names something that is not a
+workstream ID, names a workstream twice, names a workstream the project's
+trace does not hold (the librarian's included), or names a `delivered` or
+`abandoned` workstream. It is also refused in a turn that does not answer a
+message from the owner, such as an event turn, and when the runtime store
+refuses the order or finds `runtime.json` changed outside the service. A
+refusal is an ordinary tool result, `{"recorded":false,"reason":"…"}`. An
+accepted order replaces the project's previous one and returns
+`{"recorded":true,"workstreams":[…]}`, the order in force.
+
+Each accepted order is recorded as a [priority change](trace.md#priority-changes)
+in the trace of the workstream whose chief of staff set it, with the owner
+who asked as its actor. When the trace cannot record it, the runtime order is
+put back as it was and the tool call fails.
+
 ## Running turns
 
 `osmia serve` starts the service with `service.Enforce(opts,
@@ -1938,8 +1965,8 @@ sketched, and every queued chief-of-staff turn. All four use one `Enforcement`:
 | `Hosts` | `coreadapter.MCPHost` serving host turns with `CoreTransport` and container turns with `ContainerTransport` |
 
 `Options.Threads` binds the thread dispatcher to isolated turns that grant
-the chief of staff `set_status`, `answer`, `escalate`, `relay_ruling`,
-`route_amendment` and `propose_charter`; the mason may write and execute in its
+the chief of staff `set_status`, [`prioritise`](#priority-at-the-owners-request),
+`answer`, `escalate`, `relay_ruling`, `route_amendment` and `propose_charter`; the mason may write and execute in its
 view and holds `file_read`, `file_write`, `ask`, `amend` and
 [`done`](#finishing-units). The reviewer holds `file_read`, `ask`, `amend` and
 `verdict`. A thread turn of any other role

@@ -496,6 +496,8 @@ func refOf(r trace.Record) TraceRef {
 		ref.Kind, h = "cost", v.Header
 	case trace.Status:
 		ref.Kind, h = "status", v.Header
+	case trace.PriorityChange:
+		ref.Kind, h = "priority", v.Header
 	}
 	ref.ID, ref.Revision, ref.At, ref.Actor, ref.Cause = h.ID, h.Revision, h.At, h.Actor, h.Cause
 	return ref
@@ -520,6 +522,8 @@ func recordHeader(r trace.Record) trace.Header {
 	case trace.Cost:
 		return v.Header
 	case trace.Status:
+		return v.Header
+	case trace.PriorityChange:
 		return v.Header
 	}
 	return trace.Header{}

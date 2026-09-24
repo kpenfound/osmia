@@ -35,9 +35,10 @@ func CoreEnforcement() Enforcement {
 	}
 }
 
-// chiefGrant is what a chief-of-staff thread turn may call: its status and
-// question tools. The chief of staff reads its context from the prompt.
-var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName}, questions.ChiefTools...)}
+// chiefGrant is what a chief-of-staff thread turn may call: its status,
+// priority and question tools. The chief of staff reads its context from the
+// prompt.
+var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName, prioritiseTool}, questions.ChiefTools...)}
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
 // its view of its unit's workspace, ask the chief of staff, file an amendment
@@ -63,6 +64,10 @@ func Enforce(opts Options, e Enforcement) Options {
 		clock = time.Now
 	}
 	now := func() time.Time { return clock().UTC() }
+	if opts.controls == nil {
+		opts.controls = &runtimeControls{}
+	}
+	controls := opts.controls
 	opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
 		root := cfg.Root.String()
 		views := filepath.Join(root, "views")
@@ -114,7 +119,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					return nil, err
 				}
 				chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
-				return append([]coreadapter.Tool{set}, chief...), err
+				return append([]coreadapter.Tool{set, controls.prioritise(r, scope, now)}, chief...), err
 			},
 			Hosts:  e.Hosts,
 			Engine: e.Engine,

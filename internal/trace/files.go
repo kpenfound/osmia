@@ -236,6 +236,8 @@ func decodeRecord(data []byte) (Record, error) {
 		r = Cost{}
 	case "osmia.trace.status":
 		r = Status{}
+	case "osmia.trace.priority":
+		r = PriorityChange{}
 	default:
 		return nil, fmt.Errorf("unsupported record schema %q", marker.Schema)
 	}
@@ -269,6 +271,9 @@ func decodeRecord(data []byte) (Record, error) {
 		err := decode(data, &v)
 		return v, err
 	case Status:
+		err := decode(data, &v)
+		return v, err
+	case PriorityChange:
 		err := decode(data, &v)
 		return v, err
 	}

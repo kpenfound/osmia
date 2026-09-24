@@ -86,6 +86,7 @@ does not infer authority, readiness or workflow transitions from them.
 | `TurnResponse` | `agents/<agent-id>/log.jsonl` | Exact request revision, thread/turn identity, adapter result (including the accepted `done` report and card) and any execution failure |
 | `Cost` | `ledger.jsonl` | Adapter ledger entry with attempt, full scope, time and explicit cost knowledge |
 | `Status` | `status.jsonl` | The chief of staff's goal, attention, note and agent lines; see [workstream status](#workstream-status) |
+| `PriorityChange` | `priority.jsonl` | The chief of staff's agent and turn and the project's priority order it set at the owner's request; see [priority changes](#priority-changes) |
 
 Only documents can be project-scoped. Project document paths are `charter.md`,
 `kb/entities.json`, `kb/<name>.md` and `notes/<role>.md`; workstream document paths
@@ -142,7 +143,8 @@ are refused. The same card is copied beside the report in the unit's
 `units/<unit>/report.json` document.
 
 `Append(ctx, record)` accepts concrete record values other than `Status`,
-which only `SetStatus` writes. Revisions must begin at one
+which only `SetStatus` writes, and `PriorityChange`, which only `SetPriority`
+writes. Revisions must begin at one
 and increase consecutively for each kind/ID within its scope. It preserves prior
 JSONL entries, writes the latest document content to its ordinary file and commits
 the affected files. For example, changing a spec retains both full document
@@ -646,6 +648,27 @@ status the check refuses is an ordinary tool result,
 `{"stored":false,"reason":"…"}`, so the chief of staff reads why; a stored
 one returns `{"stored":true,"revision":n}`. Turn isolation grants the tool to
 `chief_of_staff` only; see [turn isolation](isolation.md#capabilities).
+
+## Priority changes
+
+A `PriorityChange` records a change the chief of staff made to the project's
+runtime priority order because the owner asked. Its record ID is always
+`priority`, and revisions are numbered from one per workstream in
+`workstreams/<id>/priority.jsonl`, the workstream whose chief of staff made
+the change. The actor is the owner whose message the turn answers, the cause
+is that turn's request ID and the depth is one more than the request's.
+`agent` and `turn` name the chief of staff and its turn, and `order` is the
+project's order in force after the change, possibly empty.
+
+`Repository.SetPriority(ctx, agent, scope, at, apply)` records the next
+revision. The scope must name this service session's active, uncaptured turn
+of a `chief_of_staff` thread; another role or turn is an ordinary error. A
+turn whose request the owner did not make returns `*PriorityRefused` with a
+reason written for the chief of staff. In both cases `apply` is not called.
+Otherwise `apply` makes the change and returns the order in force, which is
+recorded; an error from `apply` records nothing and is returned as it is. The
+service's [`prioritise` tool](service.md#priority-at-the-owners-request)
+passes an `apply` that writes the runtime store.
 
 ## Questions
 

@@ -216,6 +216,8 @@ func kind(r Record) string {
 		return "cost"
 	case Status:
 		return "status"
+	case PriorityChange:
+		return "priority"
 	default:
 		return ""
 	}
@@ -262,6 +264,8 @@ func validate(r Record) error {
 		valid = key(v.AgentID) && key(v.ThreadID) && key(v.TurnID) && key(v.RequestID) && v.RequestRevision > 0 && !v.Result.StartedAt.IsZero() && v.Result.Duration >= 0 && validUsage(v.Result.Usage) && (validSession(v.Result.Session) || (v.Result.Session == (coreadapter.BackendSession{}) && present(v.Failure)))
 	case Status:
 		valid = h.ID == StatusID && h.Unit == "" && v.valid()
+	case PriorityChange:
+		valid = v.valid()
 	case Cost:
 		s := v.Entry.Scope
 		valid = s.Project == string(h.Project) && s.Workstream == string(h.Workstream) && key(s.Thread) && key(s.Turn) && key(s.Role) && (s.Unit == "" || key(s.Unit)) && key(v.Entry.AttemptID) && !v.Entry.At.IsZero() && validUsage(v.Entry.Usage)
@@ -354,6 +358,8 @@ func recordPath(r Record) string {
 		return prefix + "ledger.jsonl"
 	case Status:
 		return prefix + "status.jsonl"
+	case PriorityChange:
+		return prefix + "priority.jsonl"
 	}
 	return ""
 }

@@ -259,6 +259,8 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
 - `resume <all|project-id|workstream-id>` clears that scope's pause. Parent pauses
   still apply; all effective pauses are displayed.
 - `priority set <workstream-id>...` stores the active project's ordered list.
+  The chief of staff sets the same list when you ask it to in a message; see
+  [service](service.md#priority-at-the-owners-request).
   `priority clear` removes that preference. Both, and `pause`/`resume` of a
   workstream, need an active project and say so otherwise.
 - `profiles` displays effective bindings and runtime diagnostics.
