@@ -79,6 +79,10 @@ var roleTools = map[string]string{"set_status": "chief_of_staff", "answer": "chi
 // deniedTools names tools one role may never hold, whatever the service grant says.
 var deniedTools = map[string]string{"ask": "chief_of_staff"}
 
+func roleRestrictedTool(role, name string) bool {
+	return name == "amend" && role != "mason" && role != "reviewer"
+}
+
 func roleGrant(role string, grant coreadapter.Capabilities) (coreadapter.Capabilities, error) {
 	switch role {
 	case "mason", "librarian":
@@ -89,7 +93,7 @@ func roleGrant(role string, grant coreadapter.Capabilities) (coreadapter.Capabil
 	}
 	grant.Tools = slices.DeleteFunc(slices.Clone(grant.Tools), func(name string) bool {
 		owner, reserved := roleTools[name]
-		return reserved && owner != role || deniedTools[name] == role
+		return reserved && owner != role || deniedTools[name] == role || roleRestrictedTool(role, name)
 	})
 	return grant, nil
 }

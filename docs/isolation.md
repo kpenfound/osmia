@@ -52,7 +52,8 @@ permissions. A missing role grant fails. The M1 workspace-write ceiling permits
 `mason` and `librarian`; other known roles are read-only and have no execute or
 fetch permission. Some tools belong to one role: `set_status`, `answer`,
 `escalate`, `relay_ruling`, `route_amendment` and `propose_charter` are removed from every
-other role's grant, so only `chief_of_staff` can see them, and `ask` is removed
+other role's grant, so only `chief_of_staff` can see them. `amend` is limited to
+`mason` and `reviewer`, and `ask` is removed
 from the `chief_of_staff` grant, so every other role can hold it and the chief
 of staff cannot. `object`, `concede` and `final_report` are removed from every
 grant but the `committee`'s, `reply` from every grant but the `architect`'s, and `verdict`

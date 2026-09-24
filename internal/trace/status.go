@@ -142,7 +142,8 @@ func latestStatus(records []Record, stream config.WorkstreamID) *Status {
 // owns. Status is nil until the chief of staff first writes one. State is the
 // FeatureSubject workflow state, empty until one is recorded, and Subjects
 // the state of every workflow subject that has one, read with it.
-// OpenQuestions counts questions without a ruling. Gates lists open owner
+// OpenQuestions counts questions without a ruling that have not been routed
+// to an amendment. Gates lists open owner
 // decisions.
 type WorkstreamStatus struct {
 	Workstream    config.WorkstreamID
@@ -182,7 +183,7 @@ func (r *Repository) Statuses() ([]WorkstreamStatus, error) {
 		}
 		open := 0
 		for id := range asked {
-			if !ruled[id] {
+			if !ruled[id] && view.states[QuestionSubject(id)].Value != QuestionRouted {
 				open++
 			}
 		}

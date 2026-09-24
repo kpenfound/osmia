@@ -1192,7 +1192,8 @@ It then starts `ready` units of `building` or `assembled` workstreams while
 fewer than `capacity.masons` units are `implementing` in workstreams no pause
 covers. A workstream starts no unit while `capacity.per_workstream` of its
 units are `implementing`, whether or not a turn of theirs is queued or
-running. A `waiting` unit counts toward neither limit. A
+running. A `waiting` unit counts toward neither limit; a unit waiting on an
+amendment leaves its slot free for a disjoint ready unit. A
 workstream a runtime pause covers (a `factory` pause, a `project` pause on the
 active project or a `workstream` pause on it) starts no unit, and its
 `implementing` units take no mason slot, so the slots go to workstreams that
@@ -1382,7 +1383,7 @@ the same reviewer. The scheduler admits reviewer turns within
 queued. Pauses hold new review turns. The review prompt includes the recorded
 identity, exact diff, sealed spec and plan, criterion report, resolved
 footprint and local context. The reviewer has a read-only, isolated turn with
-`ask` and `verdict` tools.
+`ask`, `amend` and `verdict` tools.
 
 `verdict` requires `satisfactory` or `material_findings`, evidence for every
 unit criterion, and, for material findings, at least one finding naming a
@@ -1946,11 +1947,12 @@ sketched, and every queued chief-of-staff turn. All four use one `Enforcement`:
 | `Engine` | `coreadapter.CoreEngine`: each role's enforcer for its configured `sandbox` and `image` |
 | `Hosts` | `coreadapter.MCPHost` serving host turns with `CoreTransport` and container turns with `ContainerTransport` |
 
-`Options.Threads` binds the thread dispatcher to isolated turns that grant only
-the chief of staff, with `set_status`, `answer`, `escalate`, `relay_ruling`,
-`route_amendment` and `propose_charter`, and the mason, which may write and
-execute in its view and holds `file_read`, `file_write`, `ask` and
-[`done`](#finishing-units). A thread turn of any other role
+`Options.Threads` binds the thread dispatcher to isolated turns that grant
+the chief of staff `set_status`, `answer`, `escalate`, `relay_ruling`,
+`route_amendment` and `propose_charter`; the mason may write and execute in its
+view and holds `file_read`, `file_write`, `ask`, `amend` and
+[`done`](#finishing-units). The reviewer holds `file_read`, `ask`, `amend` and
+`verdict`. A thread turn of any other role
 fails with the recorded reason `role has no service grant`. A mason turn works
 on a view of its [unit's workspace](#unit-workspaces), which is copied back into
 the workspace after the turn. The chief of staff's workspace is an empty

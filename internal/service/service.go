@@ -49,8 +49,8 @@ type Options struct {
 	// workstream's chief of staff as queued turns, one per event window, and
 	// each recorded answer to a question is queued on its asker's thread.
 	// The mason controller starts ready units of building workstreams and
-	// final-review follow-ups of assembled workstreams,
-	// one implementing or waiting unit per workstream within capacity.masons,
+	// final-review follow-ups of assembled workstreams within capacity, choosing
+	// ready units disjoint from implementing and waiting units of their workstream,
 	// and queues each started unit's first mason turn for the scheduler. It
 	// parks a unit in waiting when its mason asks, and resumes it once the
 	// answer is queued as the mason's next turn. The reviewer controller

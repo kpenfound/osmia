@@ -395,7 +395,7 @@ func TestQuestionToolsFollowTheRole(t *testing.T) {
 			r, _, h, engine, input := fixture(t, role, "container")
 			// Every role is granted every question tool by name, and the
 			// service registers them all.
-			granted := append([]string{"ask"}, chief...)
+			granted := append([]string{"ask", "amend"}, chief...)
 			r.Grants[role] = a.Capabilities{Tools: granted}
 			handle := func(context.Context, json.RawMessage) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }
 			r.Scoped = func(context.Context, a.Scope) ([]a.Tool, error) {
@@ -415,6 +415,8 @@ func TestQuestionToolsFollowTheRole(t *testing.T) {
 			want := []string{"ask"}
 			if role == "chief_of_staff" {
 				want = chief
+			} else if role == "mason" || role == "reviewer" {
+				want = []string{"ask", "amend"}
 			}
 			var allowed []string
 			for _, name := range want {

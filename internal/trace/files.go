@@ -222,6 +222,8 @@ func decodeRecord(data []byte) (Record, error) {
 		r = Transition{}
 	case "osmia.trace.question":
 		r = Question{}
+	case "osmia.trace.amendment":
+		r = Amendment{}
 	case "osmia.trace.ruling":
 		r = Ruling{}
 	case "osmia.trace.agent":
@@ -246,6 +248,9 @@ func decodeRecord(data []byte) (Record, error) {
 		err := decode(data, &v)
 		return v, err
 	case Question:
+		err := decode(data, &v)
+		return v, err
+	case Amendment:
 		err := decode(data, &v)
 		return v, err
 	case Ruling:

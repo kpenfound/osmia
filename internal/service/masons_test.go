@@ -32,7 +32,7 @@ const masonRoles = chiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = 
 const masonWrote = "internal/trace/built.go"
 
 // fakeMasons plays every mason turn of the fixture. Each turn checks that it
-// holds its view's file tools, ask and done alone, records what it saw,
+// holds its view's file tools, ask, amend and done, records what it saw,
 // writes masonWrote into its view and then plays what play holds for the
 // turn, which ends the turn failed by returning errFailTurn.
 type fakeMasons struct {
@@ -55,7 +55,7 @@ func (m *fakeMasons) turn(ctx context.Context, req agent.Request, _ *agent.Turn,
 	for _, tool := range listed.Tools {
 		names = append(names, tool.Name)
 	}
-	if slices.Sort(names); !slices.Equal(names, []string{"ask", doneTool, "file_read", "file_write"}) {
+	if slices.Sort(names); !slices.Equal(names, []string{"amend", "ask", doneTool, "file_read", "file_write"}) {
 		m.problems = append(m.problems, fmt.Sprintf("mason tools %v", names))
 	}
 	view := req.Workspace.Directory()

@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -20,17 +22,19 @@ const (
 	EscalateTool       = "escalate"
 	RelayRulingTool    = "relay_ruling"
 	RouteAmendmentTool = "route_amendment"
+	AmendTool          = "amend"
 	ProposeCharterTool = "propose_charter"
 )
 
-// Reserved is the reason route_amendment and propose_charter return.
-const Reserved = "reserved until amendments and standing rulings (M4)"
+// Reserved is the reason propose_charter returns.
+const Reserved = "reserved until standing rulings (M4)"
 
 // Guidance tells the chief of staff what to do with a question. It belongs
 // in the system prompt of every turn that may carry one.
 const Guidance = "When a service event says a question is open, choose exactly once for it. " +
 	"Call answer when the project context below or the workstream's spec and plan already settle it, citing what settles it: " + CitationForms + ". " +
 	"Call escalate when answering would be a new decision, or when your answer would contradict an earlier ruling: never answer against a ruling, escalate instead. " +
+	"Call route_amendment when the honest answer changes the sealed spec or plan. " +
 	"Escalate several open questions that need the same decision as one batch. Never answer for the owner because time is passing; a question waits as long as it needs. " +
 	"When a service event says the owner ruled on an inbox entry, call relay_ruling exactly once for it, naming one of its questions: rephrase the ruling for the askers without changing what it decides, " +
 	"and choose scope local when it matters only to them, or notify when it applies across the project."
@@ -44,8 +48,9 @@ type refusal struct {
 }
 
 // Tools returns the question tools of the claimed turn scope names: ask for
-// every role but the chief of staff, and answer, escalate, relay_ruling,
-// route_amendment and propose_charter for the chief of staff. A request the trace refuses is
+// every role but the chief of staff, amend for masons and reviewers, and
+// answer, escalate, relay_ruling, route_amendment and propose_charter for
+// the chief of staff. A request the trace refuses is
 // an ordinary result, {"recorded":false,"reason":...}, so the agent reads why.
 func Tools(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
 	if repository == nil || now == nil {
@@ -74,7 +79,83 @@ func Tools(repository *trace.Repository, agent string, scope coreadapter.Scope, 
 			Next     string `json:"next"`
 		}{true, q.ID, "End your turn now. The answer arrives as your next turn on this thread."})
 	}
+	if scope.Role == "mason" || scope.Role == "reviewer" {
+		return []coreadapter.Tool{ask, amendmentTool(repository, agent, scope, now, false)}, nil
+	}
 	return []coreadapter.Tool{ask}, nil
+}
+
+func amendmentTool(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time, routed bool) coreadapter.Tool {
+	name := AmendTool
+	if routed {
+		name = RouteAmendmentTool
+	}
+	properties := `"citations":{"type":"array","items":{"type":"string"}},"change":{"type":"string"},"reason":{"type":"string"}`
+	required := `"citations","change","reason"`
+	if routed {
+		properties = `"question":{"type":"string"},` + properties
+		required = `"question",` + required
+	}
+	tool := coreadapter.Tool{Name: name, Effect: coreadapter.ToolMemory,
+		Description: "File an amendment request against sealed spec#<n> and/or plan#<unit> citations. Give the proposed change and reason. The request is recorded and the requesting unit waits; end this turn when accepted.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{` + properties + `},"required":[` + required + `],"additionalProperties":false}`)}
+	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		var input struct {
+			Question  string   `json:"question"`
+			Citations []string `json:"citations"`
+			Change    string   `json:"change"`
+			Reason    string   `json:"reason"`
+		}
+		if err := decodeInput(raw, &input); err != nil {
+			return nil, err
+		}
+		stream := config.WorkstreamID(scope.Workstream)
+		if len(input.Citations) == 0 {
+			return encode(refusal{Reason: "at least one spec#<n> or plan#<unit> citation is required"})
+		}
+		for _, c := range input.Citations {
+			if _, ok := plan.ParseCitation(c); !ok && !strings.HasPrefix(c, "plan#") {
+				return encode(refusal{Reason: "amendments cite only spec#<n> or plan#<unit>"})
+			}
+			if err := Resolve(ctx, repository, stream, c, now()); err != nil {
+				var unresolved *Unresolved
+				if errors.As(err, &unresolved) {
+					return encode(refusal{Reason: unresolved.Error()})
+				}
+				return nil, err
+			}
+		}
+		documents, err := trace.Read[trace.Document](repository, stream)
+		if err != nil {
+			return nil, err
+		}
+		var document trace.Document
+		for _, d := range documents {
+			if d.Path == "seal.json" {
+				document = d
+			}
+		}
+		if document.ID == "" {
+			return encode(refusal{Reason: "this workstream has no seal"})
+		}
+		var sealed struct {
+			Seal     int    `json:"seal"`
+			SpecHash string `json:"spec_hash"`
+		}
+		if err := json.Unmarshal([]byte(document.Content), &sealed); err != nil {
+			return nil, err
+		}
+		a, err := repository.FileAmendment(ctx, agent, scope, trace.AmendmentRequest{QuestionID: input.Question, Citations: input.Citations, Change: input.Change, Reason: input.Reason, Seal: sealed.Seal, SealRevision: document.Revision, SpecHash: sealed.SpecHash}, now())
+		if err != nil {
+			return refuse(err)
+		}
+		return encode(struct {
+			Recorded  bool   `json:"recorded"`
+			Amendment string `json:"amendment"`
+			Next      string `json:"next"`
+		}{true, a.ID, "End your turn now. The request is with the chief of staff."})
+	}
+	return tool
 }
 
 func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time) []coreadapter.Tool {
@@ -157,9 +238,8 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 			Next      string   `json:"next"`
 		}{true, relayed, input.Scope, "The ruling is delivered to each asker as its next turn."})
 	}
-	tools := []coreadapter.Tool{answer, escalate, relay}
+	tools := []coreadapter.Tool{answer, escalate, relay, amendmentTool(repository, agent, scope, now, true)}
 	for _, reserved := range []struct{ name, description string }{
-		{RouteAmendmentTool, "Route a question as an amendment to the sealed spec or plan. " + Reserved + "."},
 		{ProposeCharterTool, "Propose a charter amendment for an answer that is a standing rule. " + Reserved + "."},
 	} {
 		tools = append(tools, coreadapter.Tool{Name: reserved.name, Effect: coreadapter.ToolMemory, Description: reserved.description,
