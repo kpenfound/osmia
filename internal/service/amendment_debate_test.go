@@ -164,7 +164,14 @@ func TestAmendmentRoundResumesCompletedMember(t *testing.T) {
 	f := newDebateFixture(t, 2, 3)
 	for i := 1; i <= 2; i++ {
 		turn := "amend-1-round-1-" + committeeAgent(i) + "-1"
-		f.script(turn, nil, nil)
+		if i == 1 {
+			f.script(turn, nil, func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
+				_, err := callTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": string(shed.Fit), "part": "plan", "argument": "Keep the checkpoint proof visible.", "citations": []string{"spec#1"}})
+				return err
+			})
+		} else {
+			f.script(turn, nil, nil)
+		}
 	}
 	f.script("amend-1-reply-1", nil, nil)
 	stream := f.handIn(t, "amend-restart", handedDesign)
@@ -225,5 +232,9 @@ func TestAmendmentRoundResumesCompletedMember(t *testing.T) {
 	}
 	if replyCount != 1 || packetCount != 1 {
 		t.Fatalf("restart duplicated artifacts: reply %d packet %d", replyCount, packetCount)
+	}
+	packet := readDocs(t, repo, stream, "amendment-1-presented-packet")
+	if len(packet) != 1 || !strings.Contains(packet[0].Content, "Keep the checkpoint proof visible.") {
+		t.Fatalf("restart lost the first member's objection: %+v", packet)
 	}
 }
