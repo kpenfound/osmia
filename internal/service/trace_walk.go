@@ -772,8 +772,8 @@ func (w *traceWalk) unitTurns(t *UnitTrace) {
 	}
 }
 
-// unitHistory lists every record of the unit but its costs in time order;
-// records at the same time keep their recorded order.
+// unitHistory lists every record of the unit in time order; records at the
+// same time keep their recorded order.
 func (w *traceWalk) unitHistory(t *UnitTrace) {
 	for _, r := range w.records {
 		h := recordHeader(r)
@@ -796,6 +796,8 @@ func (w *traceWalk) unitHistory(t *UnitTrace) {
 			summary = fmt.Sprintf("turn %s requested of %s", v.TurnID, v.AgentID)
 		case trace.TurnResponse:
 			summary = fmt.Sprintf("turn %s of %s ended", v.TurnID, v.AgentID)
+		case trace.Cost:
+			summary = fmt.Sprintf("cost of turn %s attempt %s: $%.4f (known=%t)", v.Entry.Scope.Turn, v.Entry.AttemptID, v.Entry.Usage.CostUSD, v.Entry.Usage.CostKnown)
 		default:
 			continue
 		}
