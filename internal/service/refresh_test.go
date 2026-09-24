@@ -75,7 +75,7 @@ func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fake
 
 func awaitRefresh(t *testing.T, f *shedFixture) trace.OperationRecord {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(demoTimeout)
 	for time.Now().Before(deadline) {
 		ops, err := f.repository().Operations(librarianWorkstream(f.project))
 		must(t, err)
@@ -87,8 +87,56 @@ func awaitRefresh(t *testing.T, f *shedFixture) trace.OperationRecord {
 		time.Sleep(50 * time.Millisecond)
 	}
 	ops, _ := f.repository().Operations(librarianWorkstream(f.project))
-	t.Fatalf("refresh did not complete: %+v", ops)
+	thread, threadErr := f.repository().Thread(librarianWorkstream(f.project), librarianAgent)
+	t.Fatalf("refresh did not complete within %s: operations %+v; librarian thread %+v (error %v)", demoTimeout, ops, thread, threadErr)
 	return trace.OperationRecord{}
+}
+
+func TestRefreshResultFollowsSlowLibrarianTurn(t *testing.T) {
+	t.Parallel()
+	f, _ := refreshFixture(t, "# Internal\n\nPrevious project knowledge.\n\nTrace snapshots require a clean worktree.\n", false)
+	defer f.stop(t)
+	entered := make(chan struct{})
+	release := make(chan struct{}, 1)
+	f.engine.mu.Lock()
+	previous := f.engine.turns["*"]
+	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		if strings.HasPrefix(req.Name, "refresh-") {
+			close(entered)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return previous(ctx, req, verified, tools)
+	}
+	f.engine.mu.Unlock()
+	stream, _ := f.builtAs(t, "refresh-in-flight")
+	f.awaitMerged(t, stream, "resume")
+	select {
+	case <-entered:
+	case <-time.After(demoTimeout):
+		t.Fatal("librarian turn was not dispatched")
+	}
+	ops, err := f.repository().Operations(librarianWorkstream(f.project))
+	must(t, err)
+	var pending *trace.OperationRecord
+	for i := range ops {
+		if ops[i].Operation.Action == RefreshAction {
+			pending = &ops[i]
+		}
+	}
+	if pending == nil || pending.Claim == nil || !pending.EffectStarted || pending.Result != nil {
+		t.Fatalf("expected an in-flight refresh: %+v", ops)
+	}
+	// Keep the effect in flight past the former short polling deadline.
+	timer := time.AfterFunc(21*time.Second, func() { release <- struct{}{} })
+	defer timer.Stop()
+	op := awaitRefresh(t, f)
+	if op.Operation.ID != pending.Operation.ID || op.Result.Outcome != "succeeded" {
+		t.Fatalf("in-flight refresh did not reconcile: %+v", op)
+	}
 }
 
 func TestLandedLearningsRefreshKnowledgeAndSurviveRestart(t *testing.T) {
