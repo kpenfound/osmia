@@ -277,9 +277,9 @@ type MutationResponse struct {
 	Applied bool `json:"applied"`
 }
 
-// StatusResponse lists every workstream of the active project. It is empty
-// without an active project or its trace, and when the trace cannot be read,
-// which a diagnostic reports.
+// StatusResponse lists every workstream of the active project and every role's
+// effective profile. Workstreams is empty without an active project or trace,
+// or when the trace cannot be read, which a diagnostic reports.
 type StatusResponse struct {
 	Workstreams []WorkstreamStatus          `json:"workstreams"`
 	Profiles    map[string]EffectiveProfile `json:"profiles"`
