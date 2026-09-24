@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -282,5 +283,28 @@ func TestServiceReconcilesOperationsInStageOrder(t *testing.T) {
 		if want := []int{0, 0, 1, 1, 1, 1, 2, 2}[i]; stage != want {
 			t.Fatalf("operation %d is %s: %v", i+1, action, adapter.applied)
 		}
+	}
+}
+
+func TestServiceReportsScheduleFailure(t *testing.T) {
+	t.Parallel()
+	opts := fixture(t)
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, time.Now(), trace.Actor{Kind: "service", ID: "test"})
+	must(t, err)
+	must(t, repository.Close())
+	failure := errors.New("injected schedule failure")
+	opts.Reconciliation.Schedule = func(context.Context) error { return failure }
+	s, err := Start(context.Background(), opts)
+	must(t, err)
+	defer s.Close()
+	select {
+	case <-s.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("service did not stop after schedule failure")
+	}
+	if err := s.Wait(); !errors.Is(err, failure) || !strings.Contains(err.Error(), "configured pass:") {
+		t.Fatalf("service error = %v, want named pass and originating error", err)
 	}
 }

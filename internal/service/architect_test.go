@@ -46,15 +46,16 @@ const (
 // tracked files seed the entity map, and the fake engine the architect's
 // turns run in.
 type architectFixture struct {
-	opts     Options
-	s        *Service
-	c        *Client
-	project  config.ProjectID
-	trace    string
-	clone    string
-	engine   *demoEngine
-	sessions *demoSessions
-	clock    *demoClock
+	opts        Options
+	s           *Service
+	serviceDone chan struct{}
+	c           *Client
+	project     config.ProjectID
+	trace       string
+	clone       string
+	engine      *demoEngine
+	sessions    *demoSessions
+	clock       *demoClock
 }
 
 // architectContainer runs the architect in a container, the only sandbox
@@ -107,12 +108,25 @@ func (f *architectFixture) start(t *testing.T) {
 	s, err := Start(context.Background(), f.opts)
 	must(t, err)
 	f.s, f.c = s, NewClient(s.Socket())
+	if f.opts.WriteTimeout > f.c.defaultTimeout {
+		f.c.defaultTimeout = f.opts.WriteTimeout
+	}
+	done := make(chan struct{})
+	f.serviceDone = done
+	go func() {
+		defer close(done)
+		if err := s.Wait(); err != nil {
+			t.Errorf("service stopped: %v", err)
+		}
+	}()
 }
 
 func (f *architectFixture) stop(t *testing.T) {
 	t.Helper()
 	f.c.Close()
-	must(t, f.s.Close())
+	err := f.s.Close()
+	<-f.serviceDone
+	must(t, err)
 }
 
 func (f *architectFixture) handIn(t *testing.T, key, content string) config.WorkstreamID {

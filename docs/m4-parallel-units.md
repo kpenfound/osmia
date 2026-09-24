@@ -18,6 +18,12 @@ dagger core container from --address golang:1.26-bookworm \
   combined-output
 ```
 
+The mason fixtures allow one minute for API responses so instrumented, concurrent
+status snapshots can finish. Each fixture reports an unexpected service exit,
+including the failing reconciliation pass and its originating error. A failed
+status assertion also reports elapsed time and whether the service and Unix
+socket remain available.
+
 ## Setup
 
 The configuration sets `capacity.masons = 2` and `capacity.per_workstream = 3`.

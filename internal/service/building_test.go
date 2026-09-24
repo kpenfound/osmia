@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -131,16 +133,36 @@ func (f *architectFixture) buildOperation(stream config.WorkstreamID, k int) cor
 func (f *architectFixture) checkUnits(t *testing.T, stream config.WorkstreamID, want []UnitStatus) {
 	t.Helper()
 	ctx := context.Background()
+	started := time.Now()
 	one, err := f.c.Status(ctx, stream)
-	must(t, err)
+	f.checkStatusError(t, err, time.Since(started))
 	if one.State == nil || *one.State != BuildingState || !reflect.DeepEqual(one.Units, want) {
 		t.Fatalf("status %+v, want units %+v", one, want)
 	}
+	started = time.Now()
 	list, err := f.c.Statuses(ctx)
-	must(t, err)
+	f.checkStatusError(t, err, time.Since(started))
 	i := slices.IndexFunc(list.Workstreams, func(w WorkstreamStatus) bool { return w.Workstream == stream })
 	if i < 0 || !reflect.DeepEqual(list.Workstreams[i].Units, want) {
 		t.Fatalf("status list %+v, want units %+v", list, want)
+	}
+}
+
+func (f *architectFixture) checkStatusError(t *testing.T, err error, elapsed time.Duration) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	select {
+	case <-f.s.done:
+		t.Fatalf("status API after %s: %v; service stopped: %v", elapsed, err, f.s.Wait())
+	case <-time.After(10 * time.Second):
+		conn, dialErr := net.DialTimeout("unix", f.s.Socket(), time.Second)
+		if conn != nil {
+			conn.Close()
+		}
+		info, statErr := os.Lstat(f.s.Socket())
+		t.Fatalf("status API after %s: %v; service ready: %t; socket: %v, stat: %v; dial: %v", elapsed, err, f.s.ready.Load(), info, statErr, dialErr)
 	}
 }
 
