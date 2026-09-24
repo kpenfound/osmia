@@ -38,6 +38,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   shed redraft <workstream-id> <note> [--json]
   ratify <workstream-id> [--json]
   delivery <workstream-id> [--json]
+  trace <workstream-id> [unit <id>|criterion <spec#n>|commit <sha>] [--json]
   approve <workstream-id> [description-file] [--json]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
@@ -160,6 +161,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 1
 	case "delivery":
 		valid = len(a) == 1
+	case "trace":
+		valid = len(a) == 1 || len(a) == 3 && (a[1] == "unit" || a[1] == "criterion" || a[1] == "commit")
 	case "approve":
 		valid = len(a) == 1 || len(a) == 2
 	case "conversation":
@@ -212,7 +215,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "ratify" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "ratify" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "trace" || cmd == "status" && len(a) == 1)
 	}
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
@@ -450,6 +453,33 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, approved)
 		}
 		fmt.Fprintf(stdout, "Approved final review %d at %s with description %s\n", approved.Review, approved.Commit, approved.DescriptionHash)
+		return 0
+	}
+	if cmd == "trace" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		var result any
+		if len(a) == 1 {
+			result, err = c.Trace(ctx, id)
+		} else {
+			switch a[1] {
+			case "unit":
+				result, err = c.TraceUnit(ctx, id, a[2])
+			case "criterion":
+				result, err = c.TraceCriterion(ctx, id, a[2])
+			case "commit":
+				result, err = c.TraceCommit(ctx, id, a[2])
+			}
+		}
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		showTrace(stdout, result)
 		return 0
 	}
 	if cmd == "send" || cmd == "conversation" {

@@ -148,6 +148,17 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		if path, ok := strings.CutPrefix(r.URL.Path, Prefix+"/trace/"); ok {
+			stream, kind, selector, valid := splitTracePath(path)
+			if !valid {
+				failWith(w, &APIError{Validation, "expected trace/<workstream>[/unit|criterion|commit/<selector>]"})
+			} else if out, api := s.traceView(r.Context(), stream, kind, selector); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
 		if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/conversation/"); ok {
 			if out, api := s.conversationList(id); api != nil {
 				failWith(w, api)

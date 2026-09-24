@@ -9,6 +9,10 @@ osmia serve --root ~/.osmia
 # In another terminal:
 osmia status --root ~/.osmia
 osmia status w_0123456789abcdef0123456789abcdef
+osmia trace w_0123456789abcdef0123456789abcdef
+osmia trace w_0123456789abcdef0123456789abcdef criterion spec#1
+osmia trace w_0123456789abcdef0123456789abcdef unit parser
+osmia trace w_0123456789abcdef0123456789abcdef commit 0123456789abcdef0123456789abcdef01234567
 osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
 osmia project extract p_0123456789abcdef0123456789abcdef
 osmia project remove p_0123456789abcdef0123456789abcdef
@@ -71,6 +75,13 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   staff writes one. A workstream the project does not hold fails with
   `not_found` (exit 4); with no project configured it fails with `no_project`
   (exit 4). See [workstream status](service.md#workstream-status).
+- `trace <workstream-id> [unit <id>|criterion <spec#n>|commit <full-sha>]`
+  walks the active project's durable trace through the service API. With no
+  selector it lists sealed revisions, criteria, units and delivery. Selectors
+  show revision identifiers, provenance, evidence and explicit gaps. `--json`
+  returns the complete typed response. Delivered and abandoned workstreams
+  remain readable. A missing selector returns `not_found` (exit 4); malformed
+  input returns `validation` (exit 4).
 - `send <workstream-id> <message>` sends a message to the workstream's chief
   of staff. The message is one argument; quote it. The service records it
   before answering, and the output names the message's turn ID and its state
@@ -326,7 +337,7 @@ existing owner, and ensure the socket path is unused or stale. Do not delete a
 live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
-Detached management, install/upgrade commands, completion, web/tailnet, reload
-and trace navigation are unavailable. The command examples in
+Detached management, install/upgrade commands, completion, web/tailnet and reload
+are unavailable. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.
