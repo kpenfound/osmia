@@ -314,7 +314,7 @@ func amendmentRoundPath(parts []string) bool {
 		return false
 	}
 	if len(parts) == 3 {
-		return parts[2] == "packet.json" || parts[2] == "decision.json"
+		return parts[2] == "packet.json" || parts[2] == "decision.json" || parts[2] == "application.json"
 	}
 	return len(parts) == 4 && shedRound.MatchString(parts[2]) && strings.HasSuffix(parts[3], ".json") && key(strings.TrimSuffix(parts[3], ".json"))
 }

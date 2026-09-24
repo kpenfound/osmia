@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -79,8 +80,14 @@ func presentAmendment(t *testing.T, f *shedFixture, stream config.WorkstreamID, 
 	document := func(id, path, content string) trace.Document {
 		return trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: f.project, Workstream: stream, At: at, Actor: architectActor, Cause: "fixture"}, Path: path, Content: content}
 	}
+	sealedPlan, err := plan.Parse([]byte(validPlan))
+	must(t, err)
+	proposedPlan, err := plan.Parse([]byte(graph))
+	must(t, err)
+	affected, err := json.Marshal(affectedRevision(validSpec, spec, sealedPlan, proposedPlan))
+	must(t, err)
 	docs := []trace.Document{document("amendment_1_spec", "amendments/1/spec.md", spec), document("amendment_1_plan", "amendments/1/plan.json", graph),
-		document("amendment_1_affected", "amendments/1/affected.json", `{"criteria":["spec#1"],"units":["resume"],"proofs":["resume:spec#1"]}`),
+		document("amendment_1_affected", "amendments/1/affected.json", string(affected)),
 		document("amendment-1-presented-packet", amendmentPacketPath("1"), `{"round":1}`+"\n")}
 	for _, r := range records {
 		data, err := shed.Encode(r)
@@ -234,6 +241,12 @@ func TestOwnerApprovesAnAmendmentAndTheSpecIsResealed(t *testing.T) {
 		t.Fatalf("ruling request %+v", req)
 	}
 	f.resumed(t, stream, UnitImplementing)
+	// The requester's unit addresses the changed criterion: it was held while
+	// it waited, and is reworked once the ruling resumed it.
+	rework := f.awaitTurn(t, stream, requester, amendmentMasonTurn("resume", "1"))
+	if moved := f.transition(t, stream, amendmentUnitID("resume", "1", true)); moved.From != UnitImplementing || moved.To != UnitImplementing || rework.Request.Cause != moved.ID || rework.Sequence <= turns[0].Sequence {
+		t.Fatalf("rework %+v after the ruling, turn %+v", moved, rework.Request)
+	}
 
 	again, err := f.c.DecideAmendment(ctx, stream, "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1})
 	must(t, err)
@@ -285,6 +298,10 @@ func TestOwnerApprovesAPlanOnlyAmendment(t *testing.T) {
 	if len(turns) != 1 || !strings.Contains(turns[0].Request.Prompt, "Your review of the same candidate resumes") || !strings.Contains(turns[0].Request.Prompt, "plan.json revision 2") {
 		t.Fatalf("reviewer ruling %+v", turns)
 	}
+	f.resumed(t, stream, UnitReviewing)
+	// The plan change keeps the meaning of the unit's criterion: it was held
+	// while it waited, and is notified in review once the ruling resumed it.
+	f.awaitTransition(t, stream, amendmentUnitID("resume", "1", false), UnitReviewing, UnitReviewing)
 	f.resumed(t, stream, UnitReviewing)
 }
 
@@ -437,12 +454,15 @@ func TestAmendmentDecisionIsCompletedOnceAfterARestart(t *testing.T) {
 	must(t, err)
 	requests, err := trace.Read[trace.Amendment](f.repository(), stream)
 	must(t, err)
-	// Applying and ruling again, as a pass that read the earlier state would,
-	// records nothing more.
-	must(t, a.reseal(ctx, stream, requests[0], trace.WorkflowState{Value: amendmentApproved, Version: state.Version - 2}))
-	must(t, a.rule(ctx, stream, requests[0], trace.WorkflowState{Value: amendmentResealed, Version: state.Version - 1}))
-	if got := f.revisions(t, stream, seal.DocumentID); !slices.Equal(got, []int{1, 2}) {
-		t.Fatalf("seal.json revisions after a replay %v", got)
+	// Resealing, applying and ruling again, as a pass that read the earlier
+	// state would, records nothing more.
+	must(t, a.reseal(ctx, stream, requests[0], trace.WorkflowState{Value: amendmentApproved, Version: state.Version - 3}))
+	must(t, a.apply(ctx, stream, requests[0], trace.WorkflowState{Value: amendmentResealed, Version: state.Version - 2}))
+	must(t, a.rule(ctx, stream, requests[0], trace.WorkflowState{Value: amendmentApplied, Version: state.Version - 1}))
+	for id, want := range map[string][]int{seal.DocumentID: {1, 2}, amendment.DocumentID("1"): {1, 2}} {
+		if got := f.revisions(t, stream, id); !slices.Equal(got, want) {
+			t.Fatalf("%s revisions after a replay %v, want %v", id, got, want)
+		}
 	}
 	if turns := f.ruling(t, stream, requester); len(turns) != 1 {
 		t.Fatalf("ruling turns after a replay %+v", turns)

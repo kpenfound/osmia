@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
+	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -145,7 +147,14 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	if err != nil {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
 	}
-	if !found || s.Seal != report.Seal {
+	if !found {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("workstream %s has no seal", stream)
+	}
+	applications, err := amendment.FromDocuments(docs)
+	if err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	if s.Seal != report.Seal && !amendment.CarriesReport(applications, unit, report.Seal, s.Seal) {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("unit %s report seal %d is not the current seal", unit, report.Seal)
 	}
 	footprint, err := reviewFootprint(m.repository, stream, s, unit)
@@ -184,13 +193,42 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	sum := sha256.Sum256([]byte(diff))
 	identity := UnitReviewIdentity{Subject: string(stream) + "/" + unit, Candidate: coreadapter.Candidate{Revision: report.Candidate, BaseRevision: report.Base, SpecRevision: fmt.Sprint(s.Revision.Spec), PlanRevision: fmt.Sprint(s.Revision.Plan)}, DiffSHA256: hex.EncodeToString(sum[:]), Report: fmt.Sprintf("%s revision %d", reportDoc.Path, reportDoc.Revision), Seal: s.Seal}
 	encodedFootprint, _ := json.Marshal(footprint)
-	return coreadapter.ReviewRequest{Subject: identity.Subject, Candidate: identity.Candidate, Diff: diff, Context: []coreadapter.ContextItem{
+	items := []coreadapter.ContextItem{
 		{Source: mason.Spec.Source, Content: mason.Spec.Content},
 		{Source: mason.Plan.Source, Content: mason.Plan.Content},
 		{Source: reportDoc.Path, Content: reportDoc.Content},
 		{Source: "seal.json footprint", Content: string(encodedFootprint)},
-		{Source: "local context", Content: mason.Context.Render()},
-	}}, identity, nil
+	}
+	if notices := mason.RenderAmendments(); notices != "" {
+		items = append(items, coreadapter.ContextItem{Source: "amendment notices", Content: notices})
+	}
+	items = append(items, coreadapter.ContextItem{Source: "local context", Content: mason.Context.Render()})
+	return coreadapter.ReviewRequest{Subject: identity.Subject, Candidate: identity.Candidate, Diff: diff, Context: items}, identity, nil
+}
+
+// carried returns the reviewed identity with the current identity's seal,
+// spec and plan revisions when the amendments applied since the review leave
+// the review of the unit in force, and the reviewed identity unchanged
+// otherwise.
+func (m *masons) carried(stream config.WorkstreamID, unit string, reviewed, current UnitReviewIdentity) (UnitReviewIdentity, error) {
+	pin := func(i UnitReviewIdentity) (amendment.Pin, bool) {
+		spec, specErr := strconv.Atoi(i.Candidate.SpecRevision)
+		graph, planErr := strconv.Atoi(i.Candidate.PlanRevision)
+		return amendment.Pin{Seal: i.Seal, Spec: spec, Plan: graph}, specErr == nil && planErr == nil
+	}
+	from, ok := pin(reviewed)
+	to, now := pin(current)
+	if !ok || !now || from == to {
+		return reviewed, nil
+	}
+	applications, err := amendment.Read(m.repository, stream)
+	if err != nil {
+		return reviewed, err
+	}
+	if amendment.CarriesReview(applications, unit, from, to) {
+		reviewed.Seal, reviewed.Candidate.SpecRevision, reviewed.Candidate.PlanRevision = current.Seal, current.Candidate.SpecRevision, current.Candidate.PlanRevision
+	}
+	return reviewed, nil
 }
 
 func reviewFootprint(repo *trace.Repository, stream config.WorkstreamID, s seal.Seal, unit string) (seal.Footprint, error) {
