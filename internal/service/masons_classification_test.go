@@ -85,4 +85,5 @@ func TestMasonCleanTurnBound(t *testing.T) {
 		t.Fatalf("contest reason: %s", transition.Reason)
 	}
 	f.awaitEventTurns(t, stream, "classified unclear")
+	f.awaitEventTurns(t, stream, "bound exhausted")
 }

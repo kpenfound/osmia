@@ -252,6 +252,11 @@ func (m *masons) classify(ctx context.Context, stream config.WorkstreamID, unit 
 	}
 	if receipt.Value == "" {
 		reason := fmt.Sprintf("mason turn %s classified %s: %s; tool counts %v", last.Request.TurnID, c.Class, c.Evidence, c.ToolCounts)
+		if c.Class == "gave_up" {
+			reason += "; unit contested"
+		} else if attempts >= m.cfg.Mason.MaxCleanTurns {
+			reason += fmt.Sprintf("; clean-turn bound exhausted (%d/%d), unit contested", attempts, m.cfg.Mason.MaxCleanTurns)
+		}
 		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: last.Response.ID}
 		_, err = m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: h, Subject: subject, From: "", To: "recorded", Reason: reason}, Events: []trace.Event{trace.Notice(id, "chief", reason)}})
 		if err != nil && !errors.Is(err, trace.ErrConflict) {
