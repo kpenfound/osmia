@@ -80,6 +80,7 @@ does not infer authority, readiness or workflow transitions from them.
 | `Transition` | `events.jsonl` | Subject, prior/resulting state and reason |
 | `Question` | `questions/<id>/question.jsonl` | Asking actor, its thread and turn, the question as asked, and once escalated the owner-facing text and the escalation; a routed question's workflow state links it to an amendment; see [questions](#questions) |
 | `Amendment` | `amendments/<id>/request.jsonl` | Requester and submitting turn, unit, citations, proposed change, reason and cited seal identity; see [tools and delivery](#tools-and-delivery) |
+| `Document` | `amendments/<id>/round-1/<member>.json`, `amendments/<id>/round-1/reply.json`, `amendments/<id>/packet.json` | Pinned committee contributions, the architect answer and the owner presentation packet |
 | `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer, scope, citations and affected references; a ruling holds a returned answer, an owner response or both, and a scope only with a returned answer; see [questions](#questions) |
 | `Agent` | `agents/<id>/identity.jsonl` | Stable role/thread identity and backend session at that revision |
 | `TurnRequest` | `agents/<agent-id>/log.jsonl` | Thread/turn identity, accepted profile, system prompt, request and caller-supplied context |

@@ -519,8 +519,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	finals := &finalReviewer{s: s, repository: repository}
 	publish := &publisher{s: s, repository: repository}
 	amend := &amendmentDrafter{drafter: draft}
-	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, rounds: rounds, finals: finals}
-	hooks := []func(context.Context) error{draft.Pass, amend.Pass, rounds.Pass, seals.Pass, build.Pass, refresh.Pass, land.Pass, finals.Pass, publish.Pass}
+	amendRounds := amendmentDebate{rounds}
+	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals}
+	hooks := []func(context.Context) error{draft.Pass, amend.Pass, amendRounds.Pass, rounds.Pass, seals.Pass, build.Pass, refresh.Pass, land.Pass, finals.Pass, publish.Pass}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, options.Schedule)
 	}
@@ -576,7 +577,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 // drafts.
 func stagePriority(op coreadapter.Operation) int {
 	switch op.Action {
-	case RoundAction, ReplyAction, RedraftAction:
+	case RoundAction, ReplyAction, RedraftAction, AmendmentRoundAction, AmendmentReplyAction:
 		return 1
 	case DraftAction, AmendmentDraftAction:
 		return 2
