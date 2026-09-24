@@ -1315,6 +1315,48 @@ same in plain language. The first reason that holds is recorded:
 [Status](#workstream-status) shows a unit's latest deferral while the unit
 is `ready` in the state it was decided on.
 
+### Overlapping workstreams
+
+Workstreams of one project share no spec, so the only entanglement between
+them is code. Every pass, after the building controller, the overlap
+controller compares the latest seals of each pair of the project's `building`
+or `assembled` workstreams that no runtime pause covers; a delivered or
+abandoned workstream, and every other project, is left out. Two sealed
+footprints overlap when both name an entity, or when an entity's path patterns
+in the [entity map](knowledge-base.md) can cover a path the other footprint's
+sealed patterns cover. The overlap names:
+
+- the shared entities, most specific first: an entity another shared entity
+  is `part_of` is left out;
+- their subsystems: each shared entity's top-level `part_of` ancestors, or the
+  entity itself when it is part of nothing;
+- the sealed path patterns of either footprint that overlap the other's.
+
+An overlapping pair warns the chief of staff of each workstream about the
+other. In workstream `<w>`, the transition
+`overlap-<other>-<seal>-<other seal>` (actor `service`/`foreman`, cause
+`seal-<revision>` of its seal document) moves the workflow subject
+`overlap-<other>` to `seals-<seal>-<other seal>` with one outbox event of kind
+`overlap-advisory`, [delivered](#event-delivery) like a notice. Its body, also
+the transition's reason, is `Workstream <other> of this project builds in
+subsystem <subsystems>: both sealed footprints cover <entities> (seal <k> of
+this workstream, seal <k> of that one). Its changes may conflict with this
+workstream's before both pull requests are open. This is an advisory and
+blocks neither workstream; the owner can pause or reprioritise either.` When
+no entity is shared, `subsystem ...: both sealed footprints cover <entities>`
+reads `the same code: both sealed footprints cover the paths <patterns>`.
+
+A pair is warned once for each pair of seals: a subject that already records
+them is not written again, so passes and restarts repeat nothing, and a new
+seal of either workstream that still overlaps warns both again. The advisory
+holds no unit and no turn; the owner acts on it with the existing
+[pause](#contract) and [priority](#priority-at-the-owners-request)
+controls. A paused workstream is not compared, so it is warned once the pause
+is cleared and it still overlaps.
+
+[Status](#workstream-status) lists an advisory while both workstreams are
+`building` or `assembled` on the seals it compared.
+
 ### A mason's question
 
 A mason holds `ask`. Its question is recorded and reaches the chief of staff
@@ -1874,6 +1916,7 @@ order, except the librarian's, which carries no feature (see
 | `workstream`, `project` | The workstream and its project |
 | `state` | The feature workflow state, or `null` before one is recorded |
 | `units` | One `{"unit", "state"}` per unit of the sealed plan and each final-review follow-up, in order, once their states are recorded; `reason` gives a mason contest's classification or bound exhaustion, `deferral` holds the [decision](#why-a-ready-unit-waits) that keeps a `ready` unit waiting, with its `message` as `reason`, `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
+| `advisories` | The workstream's active [overlap advisories](#overlapping-workstreams): `workstream`, the other workstream; `seal` and `other_seal`, the seals compared; `subsystems`, `entities` and `paths`, what they share; and `message`, the advisory as the chief of staff received it; empty when none is active |
 | `open_questions` | Questions in the workstream without a ruling |
 | `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, or `contested` with the unit ID; a mason contest also has `reason`; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
@@ -1883,7 +1926,8 @@ order, except the librarian's, which carries no feature (see
 refuses a non-empty one when no gate is open. The chief of staff writes the
 wording. A refusal is an ordinary `{"stored":false,"reason":"…"}` result;
 an open-gate reason names its kind and reference. `osmia status` prints the
-gates under each workstream status.
+gates and the overlap advisories' messages under each workstream status, and
+`osmia status <workstream>` prints them before its units.
 `osmia status <workstream>` prints why each waiting `ready` unit waits, and
 each available unit card and landing, beneath its unit, apart from the chief
 of staff's status.
@@ -1893,7 +1937,10 @@ cannot be read, the list is empty and carries a `workstreams` diagnostic with
 code `internal`. A workstream whose sealed plan cannot be read is listed with
 no `units`, and the list carries a `units` diagnostic with code `internal`
 naming it (`cannot read the unit states of workstream <id>; check the trace
-repository`); the other workstreams are listed as ever. For one workstream, a
+repository`); one whose overlap advisories cannot be read is listed with no
+`advisories` and, unless it already has a `units` diagnostic, an
+`advisories` diagnostic (`cannot read the overlap advisories of workstream
+<id>; check the trace repository`); the other workstreams are listed as ever. For one workstream, a
 malformed ID returns `validation`, no configured project returns
 `no_project`, a workstream the active trace does not hold (or no trace at all)
 returns `not_found`, and an unreadable trace, or unit states of that

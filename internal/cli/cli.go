@@ -761,7 +761,8 @@ func showRuntime(w io.Writer, rt service.RuntimeResponse) {
 	diagnostics(w, rt.Diagnostics)
 }
 
-// showWorkstreams prints each workstream's goal and attention.
+// showWorkstreams prints each workstream's gates, overlap advisories, goal and
+// attention.
 func showWorkstreams(w io.Writer, all service.StatusResponse) {
 	fmt.Fprintln(w, "Workstreams:")
 	if len(all.Workstreams) == 0 && len(all.Diagnostics) == 0 {
@@ -775,6 +776,9 @@ func showWorkstreams(w io.Writer, all service.StatusResponse) {
 			if gate.Reason != "" {
 				fmt.Fprintf(w, "      Reason: %s\n", gate.Reason)
 			}
+		}
+		for _, a := range st.Advisories {
+			fmt.Fprintf(w, "    Overlap: %s\n", a.Message)
 		}
 		if st.Status == nil {
 			fmt.Fprintln(w, "    no status yet")
@@ -792,6 +796,9 @@ func showStatus(w io.Writer, st service.WorkstreamStatus) {
 		if gate.Reason != "" {
 			fmt.Fprintf(w, "  Reason: %s\n", gate.Reason)
 		}
+	}
+	for _, a := range st.Advisories {
+		fmt.Fprintf(w, "Overlap: %s\n", a.Message)
 	}
 	if len(st.Units) > 0 {
 		fmt.Fprintln(w, "Units:")

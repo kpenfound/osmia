@@ -95,10 +95,10 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
 	handed := "handed"
-	full := service.WorkstreamStatus{Workstream: stream, Project: project, State: &handed, Units: []service.UnitStatus{}, Gates: []trace.OwnerGate{}, ContextMode: "file", Status: &service.StatusView{
+	full := service.WorkstreamStatus{Workstream: stream, Project: project, State: &handed, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, ContextMode: "file", Status: &service.StatusView{
 		Goal: "Ship resumable uploads.", Note: "The plan is drafted. Review is underway.",
 		Agents: []string{"The architect is preparing the packet.", "A reviewer is idle."}, Revision: 1, UpdatedAt: written}}
-	none := service.WorkstreamStatus{Workstream: quiet, Project: project, Units: []service.UnitStatus{}, Gates: []trace.OwnerGate{}, ContextMode: "file"}
+	none := service.WorkstreamStatus{Workstream: quiet, Project: project, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, ContextMode: "file"}
 	if !all.Health.Ready || all.Configuration.Project == nil || !reflect.DeepEqual(all.Status, service.StatusResponse{Workstreams: []service.WorkstreamStatus{full, none}, Diagnostics: []service.Diagnostic{}}) {
 		t.Fatalf("status --json: %+v", all.Status)
 	}
@@ -253,5 +253,18 @@ func TestStatusPrintsUnitLanding(t *testing.T) {
 	want := "Units:\n  parser merged\n    Landed: 1a4d3d on osmia/feature\n    Candidate: c0ffee from ba5e, approved by units/parser/review.json revision 2\n    Criteria: spec#1, spec#3\n  validator ready\n"
 	if !strings.Contains(out.String(), want) {
 		t.Fatalf("status lacks the landing:\n%s", out.String())
+	}
+}
+
+func TestStatusPrintsOverlapAdvisories(t *testing.T) {
+	warning := "Workstream w_00000000000000000000000000000002 of this project builds in subsystem internal: both sealed footprints cover internal.trace (seal 1 of this workstream, seal 1 of that one)."
+	st := service.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Advisories: []service.OverlapAdvisory{{Workstream: "w_00000000000000000000000000000002", Seal: 1, OtherSeal: 1, Subsystems: []string{"internal"}, Entities: []string{"internal.trace"}, Paths: []string{"internal/trace"}, Message: warning}}}
+	var one, all strings.Builder
+	showStatus(&one, st)
+	showWorkstreams(&all, service.StatusResponse{Workstreams: []service.WorkstreamStatus{st}})
+	for _, pair := range [][2]string{{one.String(), "\nOverlap: " + warning + "\n"}, {all.String(), "\n    Overlap: " + warning + "\n"}} {
+		if !strings.Contains(pair[0], pair[1]) {
+			t.Fatalf("status lacks the advisory:\n%s", pair[0])
+		}
 	}
 }

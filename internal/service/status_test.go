@@ -147,7 +147,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	list, err := c.Statuses(ctx)
 	must(t, err)
 	empty := func(w config.WorkstreamID) WorkstreamStatus {
-		return WorkstreamStatus{Workstream: w, Project: project, Units: []UnitStatus{}, Gates: []trace.OwnerGate{}, ContextMode: "file"}
+		return WorkstreamStatus{Workstream: w, Project: project, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, Gates: []trace.OwnerGate{}, ContextMode: "file"}
 	}
 	if want := []WorkstreamStatus{empty(stream), empty(quiet)}; !sameStatuses(list.Workstreams, want) || len(list.Diagnostics) != 0 {
 		t.Fatalf("before the chief of staff wrote: %+v", list)
@@ -292,7 +292,7 @@ func TestStatusViewCarriesTraceFacts(t *testing.T) {
 	stored := &trace.Status{Header: trace.Header{Revision: 4, At: at}, StatusContent: trace.StatusContent{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}}}
 	state := "building"
 	got := statusView(project, bundle.ModeFile, trace.WorkstreamStatus{Workstream: stream, State: state, OpenQuestions: 2, Status: stored})
-	want := WorkstreamStatus{Workstream: stream, Project: project, State: &state, Units: []UnitStatus{}, OpenQuestions: 2, Gates: []trace.OwnerGate{}, ContextMode: "file",
+	want := WorkstreamStatus{Workstream: stream, Project: project, State: &state, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, OpenQuestions: 2, Gates: []trace.OwnerGate{}, ContextMode: "file",
 		Status: &StatusView{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}, Revision: 4, UpdatedAt: at}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
