@@ -116,7 +116,9 @@ ready unit, `units/<unit-subject>/ruling-<n>.json`,
 the owner's direction after bounce `n`, `units/<unit-subject>/mason-ruling-<n>.json`,
 the owner's `revise` direction after mason turn `n`, `final/rebase.json`, the
 [final rebase](service.md#running-a-final-review) of an assembled
-workstream's feature branch onto upstream, `final/report.json`, its
+workstream's feature branch onto upstream, `drift/rebase.json`, each
+[drift rebase](service.md#drift-rebases) of a workstream's feature branch
+onto upstream, `final/report.json`, its
 criterion-by-criterion final report, `final/delivery.json`, the
 [owner's delivery approval](service.md#owner-delivery-approval),
 `final/publication.json`, its [publication](service.md#publication) to the
