@@ -78,6 +78,26 @@ type AmendmentDecisionRequest struct {
 	Packet   int    `json:"packet"`
 }
 
+// amendmentSealMatches compares the sealed documents in force at a recorded
+// seal revision with the current seal. An upstream base move keeps that identity.
+func amendmentSealMatches(repository *trace.Repository, stream config.WorkstreamID, revision int, current seal.Seal) (bool, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return false, err
+	}
+	for _, doc := range docs {
+		if doc.ID != seal.DocumentID || doc.Revision != revision {
+			continue
+		}
+		original, err := seal.Parse([]byte(doc.Content))
+		if err != nil {
+			return false, fmt.Errorf("seal.json revision %d: %w", revision, err)
+		}
+		return original.Seal == current.Seal && original.SpecHash == current.SpecHash && original.Revision == current.Revision, nil
+	}
+	return false, fmt.Errorf("seal.json revision %d is missing", revision)
+}
+
 // AmendmentResponse describes one amendment: its state, the debate round it
 // reached, its latest packet and revision, and the owner's latest decision.
 type AmendmentResponse struct {
@@ -221,7 +241,7 @@ func (s *Service) decideAmendment(ctx context.Context, raw, id string, req Amend
 // packet revision the owner already decided returns that decision when it
 // is the same and is refused when it differs, so a retry never decides
 // twice. Approval is refused while an objection blocks it, and approval or
-// overrule once the sealed documents moved since the request was filed.
+// overrule once the sealed spec or plan moved since the request was filed.
 func (s *Service) recordAmendmentDecision(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, id string, req AmendmentDecisionRequest, actor trace.Actor, cause string) (AmendmentResponse, *APIError) {
 	failed := &APIError{Internal, fmt.Sprintf("cannot record the decision on amendment %s of workstream %s; check the trace repository", id, stream)}
 	decision := strings.TrimSpace(req.Decision)
@@ -260,7 +280,7 @@ func (s *Service) recordAmendmentDecision(ctx context.Context, project config.Pr
 	if req.Packet != c.packet.Revision {
 		return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("packet revision %d of amendment %s is not the latest; revision %d is presented, read it with osmia amendment", req.Packet, id, c.packet.Revision)}
 	}
-	_, sealDoc, sealed, err := seal.Latest(repository, stream)
+	current, sealDoc, sealed, err := seal.Latest(repository, stream)
 	if err != nil || !sealed {
 		return AmendmentResponse{}, failed
 	}
@@ -273,8 +293,12 @@ func (s *Service) recordAmendmentDecision(ctx context.Context, project config.Pr
 	var to, reason string
 	switch decision {
 	case AmendmentApprove, AmendmentOverrule:
-		if sealDoc.Revision != c.request.SealRevision {
-			return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("the sealed documents changed since amendment %s was filed against seal.json revision %d; revision %d is in force, so reject it and file a new request", id, c.request.SealRevision, sealDoc.Revision)}
+		matching, err := amendmentSealMatches(repository, stream, c.request.SealRevision, current)
+		if err != nil {
+			return AmendmentResponse{}, failed
+		}
+		if !matching {
+			return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("the sealed spec or plan changed since amendment %s was filed against seal.json revision %d; revision %d is in force, so reject it and file a new request", id, c.request.SealRevision, sealDoc.Revision)}
 		}
 		if decision == AmendmentApprove {
 			if blocked := shed.Blocked(entries); len(blocked) > 0 {
@@ -440,8 +464,12 @@ func (a amendmentDebate) reseal(ctx context.Context, stream config.WorkstreamID,
 	if !found {
 		return unapplied("the workstream has no seal")
 	}
-	if sealDoc.Revision != d.SealRevision {
-		return unapplied(fmt.Sprintf("seal.json revision %d is in force, not revision %d the decision was on", sealDoc.Revision, d.SealRevision))
+	matching, err := amendmentSealMatches(a.repository, stream, d.SealRevision, current)
+	if err != nil {
+		return err
+	}
+	if !matching {
+		return unapplied(fmt.Sprintf("the sealed spec or plan changed since the decision on seal.json revision %d; revision %d is in force", d.SealRevision, sealDoc.Revision))
 	}
 	docs, err := trace.Read[trace.Document](a.repository, stream)
 	if err != nil {
