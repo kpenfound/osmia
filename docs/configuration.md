@@ -263,13 +263,16 @@ registration and removal require a new load/service start. Root and listen
 changes will still require a service restart when live reload arrives.
 
 The optional `[budget]` table accepts `per_session`, `per_unit` and `per_day` as
-positive decimal USD strings. `per_session` caps known spend on each new turn;
-the other two limits are loaded for later budget policy. Missing values impose
-no cap. Unknown cost does not establish that a cap was reached.
+positive decimal USD strings. `per_session` caps known spend on each new turn.
+When a building or assembled workstream's known trace cost exceeds `per_unit`,
+the service files one amendment request for that workstream and continues its
+normal workflow. The request states the known spend as a lower bound and counts
+attempts whose cost is unknown. `per_day` is loaded for later budget policy.
+Missing values impose no cap. Unknown cost does not establish that a cap was reached.
 
 The full design's `listen.tailnet`, `listen.web`, `notify`, `hearsay`,
 project `upstream_rebase` and `hearsay_scope` settings are rejected as unsupported
-in M1, even if supplied empty. Per-unit and daily budget actions, hard pauses that stop turns in flight,
+in M1, even if supplied empty. Daily budget actions, hard pauses that stop turns in flight,
 and live reload are M4 work, tailnet/web and notifications belong to M5, multi-project operation to M7, and
 Hearsay to M8. Unsupported keys do not silently enable later behavior.
 

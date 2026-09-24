@@ -522,12 +522,13 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	publish := &publisher{s: s, repository: repository}
 	amend := &amendmentDrafter{drafter: draft}
 	amendRounds := amendmentDebate{rounds}
+	budget := budgetSignals{s: s, repository: repository}
 	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals}
 	type scheduleHook struct {
 		name string
 		pass func(context.Context) error
 	}
-	hooks := []scheduleHook{{"draft", draft.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
+	hooks := []scheduleHook{{"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})
 	}
