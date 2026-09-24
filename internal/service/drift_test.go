@@ -383,12 +383,12 @@ func TestInterruptedDriftRebaseRecoversWithoutReplayingAgain(t *testing.T) {
 
 // Drift rebases share the project's one lander with landings: none is asked
 // for while a landing has no result, and no landing or unit rebase is asked
-// for while a drift rebase has none. Once the drift rebase has its result,
-// the lander rebases the units it left behind onto the rebased branch.
+// for while a drift rebase has none. The drift operation holds the lander
+// until its unit rebases are recorded and the units are current.
 func TestDriftRebaseIsSerializedWithLandings(t *testing.T) {
 	t.Parallel()
 	f, stream, repository := newApprovedFixture(t, "drift-lander")
-	defer repository.Close()
+	defer func() { repository.Close() }()
 	lands := &foreman{masons: newMasonController(f.s, repository)}
 	d := drifter{lands}
 	ctx := context.Background()
@@ -418,17 +418,131 @@ func TestDriftRebaseIsSerializedWithLandings(t *testing.T) {
 	if ops := rebaseOperations(t, repository, stream, "dedupe"); len(ops) != 0 {
 		t.Fatalf("unit rebases asked for while a drift rebase has no result: %+v", ops)
 	}
-	if result := settleOperation(t, f.s, repository, stream, op, d); !strings.Contains(result.Evidence, "seal 1 moves") {
-		t.Fatalf("drift rebase result %+v", result)
+	if _, err := d.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "awaits unit carryover") {
+		t.Fatalf("drift did not wait for unit carryover: %v", err)
+	}
+	if _, err := d.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "awaits unit carryover") {
+		t.Fatalf("drift retry did not wait for the recorded unit rebase: %v", err)
 	}
 	tip, _, err := featureWorkspaces(f.s.cfg).Branch(ctx, featureBranch(stream))
 	must(t, err)
-	must(t, lands.Pass(ctx))
 	ops := rebaseOperations(t, repository, stream, "dedupe")
 	if len(ops) != 1 {
-		t.Fatalf("unit rebases after the drift rebase %+v", ops)
+		t.Fatalf("unit rebases during the drift rebase %+v", ops)
+	}
+	if drift := driftOperations(t, repository, stream); len(drift) != 1 || drift[0].Result != nil {
+		t.Fatalf("drift completed before unit carryover: %+v", drift)
+	}
+	must(t, repository.Close())
+	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	lands.repository = repository
+	if _, err := d.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "awaits unit carryover") {
+		t.Fatalf("restarted drift did not resume its recorded unit rebase: %v", err)
+	}
+	ops = rebaseOperations(t, repository, stream, "dedupe")
+	if len(ops) != 1 {
+		t.Fatalf("restart duplicated the unit rebase: %+v", ops)
 	}
 	if in, err := decodeRebase(ops[0].Operation); err != nil || in.Onto != tip {
 		t.Fatalf("unit rebase %+v onto the drifted tip %s: %v", in, tip, err)
 	}
+	settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands})
+	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
+	must(t, err)
+	if state.Value != UnitReviewing {
+		t.Fatalf("rebased approved unit remained %s", state.Value)
+	}
+	if result := settleOperation(t, f.s, repository, stream, op, d); result.Outcome != "succeeded" {
+		t.Fatalf("drift rebase result %+v", result)
+	}
+	must(t, lands.Pass(ctx))
+	if got := landOperations(t, repository, stream); len(got) != 1 {
+		t.Fatalf("rebased unit landed under its old approval: %+v", got)
+	}
+}
+
+func TestDriftWaitsForActiveMasonBeforeRebasingItsWorkspace(t *testing.T) {
+	t.Parallel()
+	f, stream, repository := newRebaseFixture(t, "drift-writer")
+	defer repository.Close()
+	ctx := context.Background()
+	units := newUnitWorkspaces(f.s.cfg)
+	w, before, found, err := units.find(ctx, stream, "dedupe")
+	must(t, err)
+	if !found {
+		t.Fatal("dedupe has no workspace")
+	}
+	_, err = repository.ClaimTurn(ctx, stream, masonAgent("dedupe"), "active-mason", f.s.cfg.Root.String(), f.clock.Now())
+	must(t, err)
+	advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
+	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
+	op := requestDrift(t, d, stream)
+	if _, err := d.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "awaits unit carryover") {
+		t.Fatalf("drift did not wait for the active mason: %v", err)
+	}
+	if ops := rebaseOperations(t, repository, stream, "dedupe"); len(ops) != 0 {
+		t.Fatalf("active mason's workspace was scheduled for rebase: %+v", ops)
+	}
+	if head, _, err := units.git.Branch(ctx, w.Branch); err != nil || head != before {
+		t.Fatalf("active mason's workspace moved from %s to %s: %v", before, head, err)
+	}
+}
+
+func TestDriftQueuesUnitConflictOnce(t *testing.T) {
+	t.Parallel()
+	f, stream, repository := newRebaseFixture(t, "drift-unit-conflict")
+	defer func() { repository.Close() }()
+	ctx := context.Background()
+	units := newUnitWorkspaces(f.s.cfg)
+	w, base, found, err := units.find(ctx, stream, "dedupe")
+	must(t, err)
+	if !found {
+		t.Fatal("dedupe has no workspace")
+	}
+	must(t, os.WriteFile(filepath.Join(w.Path, "CONFLICT.md"), []byte("unit\n"), 0600))
+	_, err = units.git.Snapshot(ctx, w, base)
+	must(t, err)
+	advanceUpstream(t, f, map[string]string{"CONFLICT.md": "upstream\n"})
+	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
+	op := requestDrift(t, d, stream)
+	if _, err := d.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "awaits unit carryover") {
+		t.Fatalf("drift did not wait for conflicted unit: %v", err)
+	}
+	rebases := rebaseOperations(t, repository, stream, "dedupe")
+	if len(rebases) != 1 {
+		t.Fatalf("unit rebase requests %+v", rebases)
+	}
+	settleOperation(t, f.s, repository, stream, rebases[0].Operation, rebaser{d.foreman})
+	for _, other := range rebaseOperations(t, repository, stream, "resume") {
+		settleOperation(t, f.s, repository, stream, other.Operation, rebaser{d.foreman})
+	}
+	if result := settleOperation(t, f.s, repository, stream, op, d); result.Outcome != "succeeded" {
+		t.Fatalf("drift result %+v", result)
+	}
+	check := func() {
+		th, err := repository.Thread(stream, masonAgent("dedupe"))
+		must(t, err)
+		count := 0
+		for _, turn := range th.Turns {
+			if turn.Request.TurnID == resolveTurnID("dedupe", 1) {
+				count++
+				if !strings.Contains(turn.Request.Prompt, "sealed spec") || !strings.Contains(turn.Request.Prompt, "CONFLICT.md") {
+					t.Fatalf("conflict turn has no sealed spec or path: %q", turn.Request.Prompt)
+				}
+			}
+		}
+		if count != 1 {
+			t.Fatalf("conflict turn queued %d times", count)
+		}
+	}
+	check()
+	must(t, repository.Close())
+	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	d.repository = repository
+	if _, err := d.Apply(ctx, op); err != nil {
+		t.Fatalf("drift after restart: %v", err)
+	}
+	check()
 }
