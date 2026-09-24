@@ -295,7 +295,7 @@ type traceWalk struct {
 	stream  config.WorkstreamID
 	records []trace.Record
 	docs    []trace.Document
-	// states holds the state of every workflow subject and entered the
+	// states holds the state of every workflow subject, and entered the
 	// transition that last moved it.
 	states  map[string]string
 	entered map[string]trace.Transition
@@ -337,9 +337,7 @@ func loadTraceWalk(repository *trace.Repository, stream config.WorkstreamID) (*t
 		}
 	}
 	w.feature = w.states[trace.FeatureSubject]
-	if err := w.loadSeal(); err != nil {
-		return nil, err
-	}
+	w.loadSeal()
 	return w, nil
 }
 
@@ -377,15 +375,18 @@ func featureProgress(state string) int {
 	return 0
 }
 
-func (w *traceWalk) loadSeal() error {
+// loadSeal reads the latest seal, the spec and plan revisions it pins and
+// the follow-ups, and records a gap for each it cannot read.
+func (w *traceWalk) loadSeal() {
 	latest, ok := w.latest(seal.DocumentID)
 	if !ok {
 		w.gaps = append(w.gaps, TraceGap{Link: seal.Path, State: w.state(featureProgress(w.feature), 1, 2), Reason: fmt.Sprintf("the workstream is %s and has no seal", orNone(w.feature))})
-		return nil
+		return
 	}
 	s, err := seal.Parse([]byte(latest.Content))
 	if err != nil {
-		return fmt.Errorf("%s revision %d: %w", latest.Path, latest.Revision, err)
+		w.gaps = append(w.gaps, unreadable(latest, "", err))
+		return
 	}
 	w.sealed = s
 	w.seal = &TraceSeal{Ref: refOf(latest), Seal: s.Seal, Round: s.Round, Base: s.Base, Branch: s.Branch}
@@ -402,7 +403,7 @@ func (w *traceWalk) loadSeal() error {
 		w.planDoc = &d
 		p, err := plan.Parse([]byte(d.Content))
 		if err != nil {
-			return fmt.Errorf("%s revision %d: %w", d.Path, d.Revision, err)
+			w.gaps = append(w.gaps, unreadable(d, "", err))
 		}
 		for _, u := range p.Units {
 			w.units = append(w.units, walkUnit{unit: u, source: unitFromPlan, def: d})
@@ -414,13 +415,12 @@ func (w *traceWalk) loadSeal() error {
 		}
 		var batch []followup.Unit
 		if err := json.Unmarshal([]byte(d.Content), &batch); err != nil {
-			return fmt.Errorf("%s revision %d: %w", d.Path, d.Revision, err)
+			w.gaps = append(w.gaps, unreadable(d, "", err))
 		}
 		for _, u := range batch {
 			w.units = append(w.units, walkUnit{unit: u.Unit, source: unitFromFollowup, def: d})
 		}
 	}
-	return nil
 }
 
 func missingRevision(path string, revision int, by string) TraceGap {
