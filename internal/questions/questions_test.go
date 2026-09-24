@@ -219,6 +219,19 @@ func TestReviewerAndRoutedAmendments(t *testing.T) {
 	if states(t, f)["1"].State != trace.QuestionRouted {
 		t.Fatal("question was not routed")
 	}
+	transitions, err := trace.Read[trace.Transition](f.repo, stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var routedWait trace.Transition
+	for _, tr := range transitions {
+		if tr.Cause == "amendment_2_filed" && tr.Subject == unit {
+			routedWait = tr
+		}
+	}
+	if routedWait.From != "waiting" || routedWait.To != "waiting" {
+		t.Fatalf("routed unit wait %+v", routedWait)
+	}
 }
 
 // turn queues and claims a turn of the agent, creating its thread first, and
