@@ -1807,7 +1807,56 @@ remote, branch and commit, the branch commit and the conflicted paths, and
 `drift-<k>-conflicted` moves `drift` to `conflicted-<k>` with the reason
 `feature branch <branch> does not rebase cleanly onto <remote>/<branch> at
 <commit>: <paths> conflicted; the branch stays at <commit> and the seal is
-unchanged`.
+unchanged until a mason's resolution of the conflicts against the sealed spec
+is approved by a reviewer`. The operation then stays pending, holding the
+project's lander, until the resolution is approved: no landing, unit rebase or
+other drift rebase of the project is asked for meanwhile.
+
+The conflicts are resolved in a resolution workspace of the workstream's own:
+a Git worktree of the clone at `<root>/drifts/<project-id>/<workstream-id>`,
+on the branch `osmia-drift/<workstream-id>/<k>`, created from the feature
+branch's tip. The foreman replays the feature branch onto the recorded
+upstream commit there, one commit at a time. At each commit that conflicts
+the replay stops with the conflict markers in the workspace, and
+`drift/rebase.json` records outcome `conflicted` with the stop's number
+(`round`), the commit it stopped at (`stop`) and its conflicted paths. The
+workstream's drift mason (thread `drift-mason`, role `mason`) gets one turn,
+`drift-mason-<k>-resolve-<round>`, that names the conflicted paths and
+carries the sealed spec, with the instruction to resolve every conflict
+against it and remove every marker. The turn works on a
+[private view](isolation.md) of the resolution workspace, as a unit's mason
+does on its unit's workspace, holds `file_read`, `file_write` and `done`
+alone, and has its view copied back. Its `done` takes the resolution's
+`outcome`. A turn that ends with a marker left in a conflicted path gets one
+`drift-mason-markers-<n>` turn that names the marked paths. Once none is
+left, the foreman stages the workspace's files and goes on with the replay to
+the next stop or its end.
+
+The replayed branch is the candidate: `drift/rebase.json` records outcome
+`resolved` with the `candidate` commit and the `review` number, and the
+workstream's drift reviewer (thread `drift-reviewer`, role `reviewer`) gets
+the turn `drift-reviewer-<k>-<review>` with the conflicted paths, the feature
+branch's change before the rebase, the candidate's change on upstream and the
+sealed spec. It holds `file_read` and `verdict` alone. A verdict with material
+findings is recorded as outcome `rejected` with the `verdict`, and the drift
+mason gets the turn `drift-mason-<k>-review-<review>` with the findings; once
+it is done with no marker left, the foreman snapshots the resolution
+workspace as the next candidate, which is reviewed again. The feature branch
+stays at its old tip throughout. A satisfactory verdict records the candidate
+as the replay's commit with outcome `replayed`, and the drift rebase goes on
+as after a clean replay: the feature branch moves to the approved candidate
+and the seal's base to the upstream commit, and the resolution workspace is
+removed.
+
+A resolution resumes from what the trace, the threads and the resolution
+workspace hold: a restart neither replays a stopped workspace again nor
+queues a turn twice. A drift mason turn a stop interrupted has its surviving
+view copied back and one `drift-mason-recover-<n>` continuation queued, and
+an interrupted review gets one continuation over the same candidate. A drift
+or review turn that fails, or a review that ends without a verdict, holds the
+resolution where it is. A workstream that stops being `building` or
+`assembled` while its conflicts are resolved is skipped, and its resolution
+workspace removed.
 
 A clean replay is recorded in `drift/rebase.json` with outcome `replayed` and
 the rebased commit before anything moves. The feature branch and its
