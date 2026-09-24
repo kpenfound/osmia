@@ -58,6 +58,8 @@ set through `Options` by embedders.
 | GET | `/conversation/<workstream-id>` | `ConversationResponse`: the workstream's conversation with its chief of staff |
 | GET | `/inbox` | `InboxResponse`: the escalations of the active project that wait for the owner's ruling |
 | POST | `/inbox/<number>` | `AnswerRequest`: text; records the owner's ruling and returns `AnswerResponse` |
+| GET | `/amendment/<workstream-id>/<n>` | `AmendmentResponse`: amendment `n`'s state, debate round, latest packet and its revision, and the owner's latest decision; see [amendment decisions](#amendment-decisions) |
+| POST | `/amendment/<workstream-id>/<n>` | `AmendmentDecisionRequest`: decision (`approve`, `reject`, `round` or `overrule`), optional note and the packet revision decided; returns `AmendmentResponse` |
 | POST | `/contested/<workstream-id>/<unit-id>` | `ContestedRulingRequest`: decision (`review` or `revise`) and note; records the owner's direction and returns `ContestedRulingResponse` |
 | GET | `/delivery/<workstream-id>` | Current final report, trace-based draft description, any matching approval and the latest publication record |
 | POST | `/delivery/<workstream-id>` | Final review number and report revision, commit, draft hash and optional edited description; records the owner's approval |
@@ -409,14 +411,79 @@ workstream does.
 ## Amendment debate
 
 A proposed amendment runs one automatic committee round against its candidate
-spec and plan. Each member's contribution and the architect's single reply are
-recorded under `amendments/<n>/round-1/`. The committee applies the shed's
-charter veto, fit advice, size split and proof tests. A restart resumes the
-same turns and round. The chief of staff receives an attention item for the
-owner with the request, proposed change, affected units and proofs, dissent
-and recommendation; the complete packet is `amendments/<n>/packet.json`.
-This round is capped at one even when `shed.max_rounds` is higher. Reaching the
-cap leaves objections standing and cannot approve the amendment.
+spec and plan. Each member's contribution to round `r` and the architect's
+single reply to it are recorded under `amendments/<n>/round-<r>/`. The
+committee applies the shed's charter veto, fit advice, size split and proof
+tests. A restart resumes the same turns and round. The chief of staff receives
+an attention item for the owner with the request, proposed change, affected
+units and proofs, dissent and recommendation; the complete packet is
+`amendments/<n>/packet.json`, whose revision is the one the owner decides. The
+automatic debate is one round even when `shed.max_rounds` is higher; a further
+round runs only when the owner asks for it, and every round presents a new
+packet revision. Reaching the cap leaves objections standing and cannot approve
+the amendment.
+
+The transitions of round 1 are `amendment-<n>-debating`, `-heard`,
+`-answering`, `-answered` and `-presented`; a later round `r` appends `-<r>`
+to each.
+
+## Amendment decisions
+
+The owner decides a presented amendment with `POST /v1/amendment/<workstream-id>/<n>`,
+`osmia amendment <workstream-id> <n> <decision> [note]`, or by telling the
+workstream's chief of staff, which records the decision with its
+`decide_amendment` tool. The decision names the revision of `packet.json` the
+owner read:
+
+| Decision | Allowed when | Amendment moves to |
+| --- | --- | --- |
+| `approve` | no standing objection blocks; fit advice does not block, a charter veto, size split or proof objection does | `approved` |
+| `overrule` | an objection stands; the decision records every standing objection it sets aside | `approved` |
+| `reject` | always | `rejected` |
+| `round` | the rounds run so far are fewer than `shed.max_rounds` | `proposed`, and debate round `r+1` runs |
+
+A decision requires a `building` or `assembled` workstream and an amendment in
+state `presented`; a packet revision other than the latest is refused with
+`conflict`. Approval and overrule are also refused once `seal.json` has a later
+revision than the one the request was filed against: another amendment moved
+the sealed documents, so the request is rejected and filed again. Every
+decision is one revision of `amendments/<n>/decision.json`, committed with its
+transition `amendment-<n>-decided-<k>` and a notice for the chief of staff. It
+records the decision, the note, the debate round, the packet revision, the
+revisions of the proposed `amendments/<n>/spec.md` and `plan.json`, the
+`seal.json` revision in force and any overruled objections. The same decision
+on the same packet revision again returns the recorded one; a different
+decision on it is refused with `conflict`, so a retry never decides twice.
+
+The amendment controller then applies the decision on the next pass:
+
+- **Approved**: the proposed spec and plan become the next revisions of
+  `spec.md` and `plan.json` when they differ from the sealed ones, and
+  `seal.json` gets a revision naming them. A changed spec takes the next seal
+  number and its hash; a plan-only change keeps the seal number and spec hash
+  and records the new plan's footprints. The base commit, feature branch and
+  feature state stay as they are, and no code is edited. The documents, the
+  seal and transition `amendment-<n>-resealed` are one commit, so a restart
+  between the decision and the reseal completes it once. An approval that can
+  no longer apply, because the sealed documents moved or the plan's footprints
+  no longer resolve, moves to `unapplied` with the reason and leaves the
+  sealed documents in force.
+- **Rejected**: nothing is versioned and the sealed documents stay in force.
+
+For `resealed`, `rejected` and `unapplied`, the controller queues turn
+`amendment_<n>_ruling` on the requester's thread: the mason's thread, or the
+unit's reviewer thread for a reviewer's request. The turn carries the decision
+and its outcome, with the request and the owner's note quoted in the shared
+envelope. The unit the request parked then moves from `waiting` back to the
+stage its waiting transition preserved, `implementing` or `reviewing`, through
+transition `<unit-subject>_resumed_amendment_<n>`, and the amendment moves to
+`ruled`. Each step finds what an earlier pass did, so a restart between them
+completes the rest once. Units, approvals and final reports the approved
+amendment affects are not reconsidered here.
+
+`GET /v1/amendment/<workstream-id>/<n>` and `osmia amendment <workstream-id> <n>`
+show the amendment's state, round, latest packet with its revision and latest
+decision. An unknown amendment returns `not_found`.
 
 ## The shed: debate
 
@@ -2068,6 +2135,18 @@ in the trace of the workstream whose chief of staff set it, with the owner
 who asked as its actor. When the trace cannot record it, the runtime order is
 put back as it was and the tool call fails.
 
+### Amendment decisions at the owner's request
+
+The chief of staff's `decide_amendment` tool records the owner's decision on a
+presented amendment when the owner gives it in a message. Its input is
+`{"amendment":"<n>","packet":<revision>,"decision":"approve|reject|round|overrule","note":"…"}`.
+It records exactly what [`POST /v1/amendment`](#amendment-decisions) records,
+with the owner whose message the turn answers as the decision's actor and the
+turn's request as its cause. A turn that answers no message from the owner,
+and every decision the service refuses, record nothing and return
+`{"recorded":false,"reason":"…"}`. An accepted decision returns
+`{"recorded":true,"amendment":"<n>","state":"…","detail":"…"}`.
+
 ## Running turns
 
 `osmia serve` starts the service with `service.Enforce(opts,
@@ -2084,7 +2163,7 @@ sketched, and every queued chief-of-staff turn. All four use one `Enforcement`:
 
 `Options.Threads` binds the thread dispatcher to isolated turns that grant
 the chief of staff `set_status`, [`prioritise`](#priority-at-the-owners-request),
-`answer`, `escalate`, `relay_ruling`, `route_amendment` and `propose_charter`; the mason may write and execute in its
+[`decide_amendment`](#amendment-decisions-at-the-owners-request), `answer`, `escalate`, `relay_ruling`, `route_amendment` and `propose_charter`; the mason may write and execute in its
 view and holds `file_read`, `file_write`, `ask`, `amend` and
 [`done`](#finishing-units). The reviewer holds `file_read`, `ask`, `amend` and
 `verdict`. A thread turn of any other role

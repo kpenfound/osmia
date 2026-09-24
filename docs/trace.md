@@ -80,7 +80,7 @@ does not infer authority, readiness or workflow transitions from them.
 | `Transition` | `events.jsonl` | Subject, prior/resulting state and reason |
 | `Question` | `questions/<id>/question.jsonl` | Asking actor, its thread and turn, the question as asked, and once escalated the owner-facing text and the escalation; a routed question's workflow state links it to an amendment; see [questions](#questions) |
 | `Amendment` | `amendments/<id>/request.jsonl` | Requester and submitting turn, unit, citations, proposed change, reason and cited seal identity; see [tools and delivery](#tools-and-delivery) |
-| `Document` | `amendments/<id>/round-1/<member>.json`, `amendments/<id>/round-1/reply.json`, `amendments/<id>/packet.json` | Pinned committee contributions, the architect answer and the owner presentation packet |
+| `Document` | `amendments/<id>/round-<n>/<member>.json`, `amendments/<id>/round-<n>/reply.json`, `amendments/<id>/packet.json`, `amendments/<id>/decision.json` | Pinned committee contributions and the architect answer of each debate round, the owner presentation packet (one revision per presentation) and the owner's decisions (one revision per decision) |
 | `Ruling` | `questions/<question-id>/rulings.jsonl` | Question revision, decision, owner response, returned answer, scope, citations and affected references; a ruling holds a returned answer, an owner response or both, and a scope only with a returned answer; see [questions](#questions) |
 | `Agent` | `agents/<id>/identity.jsonl` | Stable role/thread identity and backend session at that revision |
 | `TurnRequest` | `agents/<agent-id>/log.jsonl` | Thread/turn identity, accepted profile, system prompt, request and caller-supplied context |
@@ -810,6 +810,16 @@ criterion citations, unit IDs and `unit:criterion` proof references. These
 documents and the `proposed` workflow transition are committed together; the
 root spec and plan remain sealed until the owner decides. A declined or invalid
 draft records the reason in its workflow transition without candidate files.
+
+Each owner decision on a presented amendment is one revision of
+`amendments/<n>/decision.json`, committed with the amendment's transition
+`amendment-<n>-decided-<k>`: the decision, the note, the debate round, the
+revision of `packet.json` decided, the revisions of the proposed spec and plan,
+the `seal.json` revision in force and any overruled objections. An approval
+records the proposed documents as the next revisions of `spec.md` and/or
+`plan.json` and the next revision of `seal.json` in one commit with the
+`resealed` transition; their actor is `service`/`amendments` and their cause
+the decision transition. See [amendment decisions](service.md#amendment-decisions).
 
 Before `answer` records anything, `questions.Resolve` checks every citation
 against the trace, and the first one that names nothing refuses the answer
