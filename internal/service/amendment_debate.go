@@ -184,8 +184,17 @@ func (a amendmentDebate) one(ctx context.Context, stream config.WorkstreamID, re
 		return a.present(ctx, stream, req, round, state)
 	case amendmentApproved:
 		return a.reseal(ctx, stream, req, state)
-	case amendmentResealed, amendmentRejected, amendmentUnapplied:
+	case amendmentResealed:
+		return a.apply(ctx, stream, req, state)
+	case amendmentApplied:
+		if err := a.follow(ctx, stream, req); err != nil {
+			return err
+		}
 		return a.rule(ctx, stream, req, state)
+	case amendmentRejected, amendmentUnapplied:
+		return a.rule(ctx, stream, req, state)
+	case amendmentRuled:
+		return a.follow(ctx, stream, req)
 	}
 	return nil
 }

@@ -546,7 +546,8 @@ func (m *masons) follow(ctx context.Context, stream config.WorkstreamID, unit st
 }
 
 // read returns the workstream's unit states and effective plan while it is
-// building or assembled, and when it last started a unit.
+// building or assembled, and when it last started a unit. The effective plan
+// is the latest sealed plan followed by the recorded follow-up units.
 func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
 	feature, err := m.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil || (feature.Value != BuildingState && feature.Value != AssembledState) {
@@ -564,14 +565,12 @@ func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
 	if err != nil {
 		return building{}, false, err
 	}
-	if feature.Value == AssembledState {
-		added, err := followup.Read(m.repository, stream)
-		if err != nil {
-			return building{}, false, err
-		}
-		for _, u := range added {
-			p.Units = append(p.Units, u.Unit)
-		}
+	added, err := followup.Read(m.repository, stream)
+	if err != nil {
+		return building{}, false, err
+	}
+	for _, u := range added {
+		p.Units = append(p.Units, u.Unit)
 	}
 	states, err := m.repository.WorkflowStates(stream)
 	if err != nil {

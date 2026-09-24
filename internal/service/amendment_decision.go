@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/envelope"
@@ -406,9 +407,11 @@ func entryIDs(entries []shed.Entry) string {
 // sealed ones, and the next revision of seal.json naming them. A changed spec
 // takes the next seal number and its hash; a plan-only change keeps the seal
 // number and hash and records the plan's footprints. The base commit, the
-// feature branch and the feature state stay as they are. The documents, the
-// seal and the move to resealed are one commit, so a restart finds either
-// all of them or none. An approval that can no longer apply moves to
+// feature branch and the feature state stay as they are. The first revision
+// of amendments/<n>/application.json classifies the affected units, so from
+// the resealing on no approval the amendment affects can land. The
+// documents, the seal and the move to resealed are one commit, so a restart
+// finds either all of them or none. An approval that can no longer apply moves to
 // unapplied with the reason, and the sealed documents stay in force.
 func (a amendmentDebate) reseal(ctx context.Context, stream config.WorkstreamID, req trace.Amendment, state trace.WorkflowState) error {
 	decisions, err := amendmentDecisions(a.repository, stream, req.ID)
@@ -444,7 +447,7 @@ func (a amendmentDebate) reseal(ctx context.Context, stream config.WorkstreamID,
 	if err != nil {
 		return err
 	}
-	var sealedSpec, sealedPlan, draftSpec, draftPlan trace.Document
+	var sealedSpec, sealedPlan, draftSpec, draftPlan, affectedDoc trace.Document
 	latestSpec, latestPlan := 0, 0
 	for _, doc := range docs {
 		switch {
@@ -462,10 +465,12 @@ func (a amendmentDebate) reseal(ctx context.Context, stream config.WorkstreamID,
 			draftSpec = doc
 		case doc.Path == "amendments/"+req.ID+"/"+plan.PlanPath && doc.Revision == d.Plan:
 			draftPlan = doc
+		case doc.Path == "amendments/"+req.ID+"/affected.json" && doc.Revision >= affectedDoc.Revision:
+			affectedDoc = doc
 		}
 	}
-	if sealedSpec.ID == "" || sealedPlan.ID == "" || draftSpec.ID == "" || draftPlan.ID == "" {
-		return fmt.Errorf("amendment %s: the sealed or proposed spec and plan revisions are missing", req.ID)
+	if sealedSpec.ID == "" || sealedPlan.ID == "" || draftSpec.ID == "" || draftPlan.ID == "" || affectedDoc.ID == "" {
+		return fmt.Errorf("amendment %s: the sealed or proposed spec and plan revisions or the affected set are missing", req.ID)
 	}
 	at := a.s.now()
 	document := func(id, path string, revision int, content string) trace.Document {
@@ -504,6 +509,17 @@ func (a amendmentDebate) reseal(ctx context.Context, stream config.WorkstreamID,
 		return err
 	}
 	recorded = append(recorded, document(seal.DocumentID, seal.Path, sealDoc.Revision+1, string(content)))
+	application, err := classifyAmendment(req, d, affectedDoc, sealedPlan, draftPlan,
+		amendment.Pin{Seal: current.Seal, SealRevision: sealDoc.Revision, Spec: current.Revision.Spec, Plan: current.Revision.Plan},
+		amendment.Pin{Seal: next.Seal, SealRevision: sealDoc.Revision + 1, Spec: next.Revision.Spec, Plan: next.Revision.Plan})
+	if err != nil {
+		return unapplied(err.Error())
+	}
+	content, err = json.MarshalIndent(application, "", "  ")
+	if err != nil {
+		return err
+	}
+	recorded = append(recorded, document(amendment.DocumentID(req.ID), amendment.Path(req.ID), 1, string(content)+"\n"))
 	feature, err := a.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return err
@@ -526,9 +542,10 @@ func (a amendmentDebate) amendmentHeader(id string, stream config.WorkstreamID, 
 	return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.repository.Project(), Workstream: stream, Unit: unit, At: a.s.now(), Actor: amendmentActor, Cause: cause}
 }
 
-// rule delivers the owner's ruling on a decided amendment to its requester's
-// thread as the requester's next turn, resumes the unit the request parked in
-// the stage it preserved, and moves the amendment to ruled. Each step finds
+// rule delivers the owner's ruling on a decided amendment, rejected,
+// unapplied or applied, to its requester's thread as the requester's next
+// turn, resumes the unit the request parked in the stage it preserved, and
+// moves the amendment to ruled. Each step finds
 // what an earlier pass did, so a restart between them completes the rest
 // once.
 func (a amendmentDebate) rule(ctx context.Context, stream config.WorkstreamID, req trace.Amendment, state trace.WorkflowState) error {
@@ -545,16 +562,16 @@ func (a amendmentDebate) rule(ctx context.Context, stream config.WorkstreamID, r
 	if err != nil {
 		return err
 	}
-	outcome := ""
+	var outcomes []string
 	for _, t := range transitions {
-		if t.Subject == amendmentSubject(req.ID) && t.To == state.Value {
-			outcome = t.Reason
+		if t.Subject == amendmentSubject(req.ID) && (t.To == state.Value || state.Value == amendmentApplied && t.To == amendmentResealed) {
+			outcomes = append(outcomes, t.Reason)
 		}
 	}
-	if err := a.deliverRuling(ctx, stream, req, d, cause, outcome); err != nil {
+	if err := a.deliverRuling(ctx, stream, req, d, cause, strings.Join(outcomes, "; ")); err != nil {
 		return err
 	}
-	verb := map[string]string{amendmentResealed: "approved", amendmentRejected: "rejected", amendmentUnapplied: "approved but could not apply"}[state.Value]
+	verb := map[string]string{amendmentApplied: "approved", amendmentRejected: "rejected", amendmentUnapplied: "approved but could not apply"}[state.Value]
 	if err := a.resumeUnit(ctx, stream, req, cause, verb, transitions); err != nil {
 		return err
 	}
