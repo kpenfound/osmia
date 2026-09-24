@@ -210,7 +210,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	engine.turns["build"] = asker("session-mason", "Where does state live?")
 	engine.turns["build2"] = asker("session-mason2", "")
 	engine.turns["review"] = asker("session-reviewer", "Is the log format fixed?")
-	answerPrompt := "Answer to your question 1.\n\nYou asked:\nWhere does state live?\n\nAnswer:\nIn files under the root.\n\nCitations:\n- charter#1\n"
+	answerPrompt := questions.Prompt(trace.Question{Header: trace.Header{ID: "1"}, Question: "Where does state live?"}, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "In files under the root.", Citations: []string{"charter#1"}})
 	// The answer arrives on the thread that asked, after its earlier turn.
 	engine.turns["answer_1"] = asker("session-mason", "Which file holds the index?", answerPrompt, "Work: build")
 

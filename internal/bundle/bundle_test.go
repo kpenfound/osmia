@@ -346,18 +346,16 @@ func TestBundleNotices(t *testing.T) {
 	}
 	source := sourceOf("q-wide")
 	want := []bundle.Notice{
-		{Source: source, Workstream: first, Record: "wide", Revision: 2, At: timestamp.Add(2 * time.Minute), Text: "The owner allows no new\ndependencies."},
-		{Source: sourceOf("q-wider"), Workstream: first, Record: "wider", Revision: 1, At: timestamp.Add(2 * time.Minute), Text: "Logs stay JSON."},
-		{Source: sourceOf("q-later"), Workstream: first, Record: "later", Revision: 1, At: timestamp.Add(3 * time.Minute), Text: "The owner allows no new\ndependencies."},
+		{Source: source, Workstream: first, Record: "wide", Revision: 2, At: timestamp.Add(2 * time.Minute), OwnerResponse: "No new dependencies", ReturnedAnswer: "The owner allows no new\ndependencies."},
+		{Source: sourceOf("q-wider"), Workstream: first, Record: "wider", Revision: 1, At: timestamp.Add(2 * time.Minute), OwnerResponse: "No new dependencies", ReturnedAnswer: "Logs stay JSON."},
+		{Source: sourceOf("q-later"), Workstream: first, Record: "later", Revision: 1, At: timestamp.Add(3 * time.Minute), OwnerResponse: "No new dependencies", ReturnedAnswer: "The owner allows no new\ndependencies."},
 	}
 	for _, scope := range []bundle.Scope{{}, {Workstream: first}, {Workstream: second}, {Entities: []string{"internal"}}} {
 		b := f.assemble(t, scope)
 		if !reflect.DeepEqual(b.Notices, want) {
 			t.Fatalf("notices of scope %+v: %#v", scope, b.Notices)
 		}
-		if !strings.HasSuffix(b.Render(), "\n## Notices\n- "+source+" (record wide revision 2, workstream "+string(first)+")\n  notice: The owner allows no new\n    dependencies.\n"+
-			"- "+sourceOf("q-wider")+" (record wider revision 1, workstream "+string(first)+")\n  notice: Logs stay JSON.\n"+
-			"- "+sourceOf("q-later")+" (record later revision 1, workstream "+string(first)+")\n  notice: The owner allows no new\n    dependencies.\n") {
+		if !strings.Contains(b.Render(), "<<< osmia:owner_response | owner (copied by Osmia) | bytes=19 >>>\n| No new dependencies\n<<< /osmia:owner_response >>>\n<<< osmia:returned_answer | chief of staff relay | bytes=37 >>>\n| The owner allows no new\n| dependencies.\n<<< /osmia:returned_answer >>>") || strings.Count(b.Render(), "<<< osmia:owner_response") != 3 {
 			t.Fatalf("render of scope %+v:\n%s", scope, b.Render())
 		}
 	}
