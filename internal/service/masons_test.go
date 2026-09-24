@@ -16,6 +16,7 @@ import (
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -107,12 +108,20 @@ func (m *fakeMasons) check(t *testing.T) {
 // mason turn is played by the returned fake masons.
 func newMasonFixture(t *testing.T, masons int, drafted string) (*shedFixture, *fakeMasons) {
 	t.Helper()
+	return newCappedMasonFixture(t, fmt.Sprintf("masons = %d\n", masons), drafted)
+}
+
+// newCappedMasonFixture is newMasonFixture with capacity, the settings
+// written into the configuration's [capacity] section, in place of
+// capacity.masons alone.
+func newCappedMasonFixture(t *testing.T, capacity, drafted string) (*shedFixture, *fakeMasons) {
+	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, masonRoles, func(opts *Options) {
 		opts.Threads = Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts}).Threads
 		path := filepath.Join(opts.Config.Root, "config.toml")
 		data, err := os.ReadFile(path)
 		must(t, err)
-		must(t, os.WriteFile(path, []byte(strings.Replace(string(data), "committee = 1\n", fmt.Sprintf("committee = 1\nmasons = %d\n", masons), 1)), 0600))
+		must(t, os.WriteFile(path, []byte(strings.Replace(string(data), "committee = 1\n", "committee = 1\n"+capacity, 1)), 0600))
 	})
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: drafted}, nil)
 	f.upstream(t)
@@ -245,9 +254,8 @@ func (f *shedFixture) awaitAcknowledgedNotices(t *testing.T, stream config.Works
 // first turn runs once, on a view of the unit's own workspace created from
 // the feature branch, with the unit's bundle in its prompt. What the mason
 // wrote is in the workspace afterwards. The workstream's other ready unit
-// waits: one unit at a time per workstream, however many mason slots are
-// free.
-func TestMasonStartsOneReadyUnitPerWorkstream(t *testing.T) {
+// shares its footprint and waits, however many mason slots are free.
+func TestMasonStartsTheFirstOfTwoEntangledUnits(t *testing.T) {
 	t.Parallel()
 	f, masons := newMasonFixture(t, 4, independentPlan)
 	defer f.stop(t)
@@ -583,9 +591,44 @@ func TestNextReadyFollowsTheDependencyOrder(t *testing.T) {
 		ready []string
 		want  string
 	}{{[]string{"c", "b"}, "b"}, {[]string{"c", "d"}, "c"}, {[]string{"d"}, "d"}, {nil, ""}} {
-		got, ok := nextReady(building{plan: p, states: states(tc.ready...)})
-		if got != tc.want || ok != (tc.want != "") {
-			t.Fatalf("ready %v: next %q %v, want %q", tc.ready, got, ok, tc.want)
+		got, ok, err := nextReady(building{plan: p, states: states(tc.ready...)}, kb.Map{})
+		if err != nil || got != tc.want || ok != (tc.want != "") {
+			t.Fatalf("ready %v: next %q %v %v, want %q", tc.ready, got, ok, err, tc.want)
+		}
+	}
+}
+
+// A ready unit entangled with a unit in flight is passed over for the next
+// ready unit that is not, and a unit whose footprint does not resolve waits
+// for every unit in flight.
+func TestNextReadySkipsEntangledUnits(t *testing.T) {
+	t.Parallel()
+	entities := kb.Map{Version: kb.Version, Entities: []kb.Entity{
+		{ID: "internal.trace", Name: "internal/trace", Aliases: []string{}, Paths: []string{"internal/trace"}, Owners: []string{}, PartOf: []string{}},
+		{ID: "internal.upload", Name: "internal/upload", Aliases: []string{}, Paths: []string{"internal/upload"}, Owners: []string{}, PartOf: []string{}},
+	}}
+	unit := func(id string, footprint ...string) plan.Unit { return plan.Unit{ID: id, Footprint: footprint} }
+	p := plan.Plan{Units: []plan.Unit{unit("a", "internal.trace"), unit("c", "internal.trace"), unit("d", "unknown"), unit("b", "internal.upload")}}
+	for _, tc := range []struct {
+		inFlight, ready []string
+		want            string
+	}{
+		{nil, []string{"a", "c", "d", "b"}, "a"},
+		{[]string{"a"}, []string{"c", "d", "b"}, "b"},
+		{[]string{"a"}, []string{"c", "d"}, ""},
+		{[]string{"b"}, []string{"d", "c"}, "c"},
+		{nil, []string{"d"}, "d"},
+	} {
+		states := map[string]trace.WorkflowState{}
+		for _, id := range tc.inFlight {
+			states[trace.UnitSubject(id)] = trace.WorkflowState{Value: UnitImplementing}
+		}
+		for _, id := range tc.ready {
+			states[trace.UnitSubject(id)] = trace.WorkflowState{Value: UnitReady}
+		}
+		got, ok, err := nextReady(building{plan: p, states: states, inFlight: tc.inFlight}, entities)
+		if err != nil || got != tc.want || ok != (tc.want != "") {
+			t.Fatalf("in flight %v, ready %v: next %q %v %v, want %q", tc.inFlight, tc.ready, got, ok, err, tc.want)
 		}
 	}
 }

@@ -77,8 +77,8 @@ func resumed(unit, q string) transitionMove {
 
 // A mason that asks parks its unit in waiting: its workspace keeps what the
 // mason wrote, the chief of staff receives the question, the unit's mason
-// slot goes to another workstream and its own workstream starts no other
-// unit. The parked unit and its question survive a restart. The owner's
+// slot goes to another workstream and its own workstream does not start
+// dedupe, which shares its footprint. The parked unit and its question survive a restart. The owner's
 // ruling, relayed by the chief of staff, is the mason's next turn on the same
 // thread, in the same workspace, and the unit is implementing again before
 // that turn runs, though no mason slot is free. Every move is recorded by the
@@ -221,7 +221,8 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 // A mason that asks again in the turn that delivers its answer parks the unit
 // again, and each answer resumes it: every park and resume is its own
 // transition, named after its question. While the unit waits, its workstream
-// starts no other unit, though mason slots are free.
+// does not start dedupe, which shares its footprint, though mason slots are
+// free.
 func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 	t.Parallel()
 	p := &faults{}
