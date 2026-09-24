@@ -81,9 +81,6 @@ func amendmentCommitteePrompt(in roundInput, standing []shed.Dissent, answers []
 	return fmt.Sprintf("This is the single bounded shed round for amendment %s to sealed documents. Read request.json and affected.json with the proposed spec.md and plan.json. Apply the normal charter veto, fit advice, size split and proof tests. The owner alone decides the amendment.\n\n%s", in.Amendment, p)
 }
 func (a amendmentDebate) Pass(ctx context.Context) error {
-	if a.s.options.Committee == nil {
-		return nil
-	}
 	streams, err := a.repository.Workstreams()
 	if err != nil {
 		return err
@@ -107,6 +104,9 @@ func (a amendmentDebate) Pass(ctx context.Context) error {
 			}
 			switch state.Value {
 			case "proposed":
+				if a.s.options.Committee == nil {
+					continue
+				}
 				if err := a.ensureCommittee(ctx, stream, a.s.current().Capacity.Committee); err != nil {
 					return err
 				}
@@ -299,6 +299,9 @@ func (a amendmentDebate) round(ctx context.Context, op coreadapter.Operation, st
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
 }
 func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, stream config.WorkstreamID, id string) (coreadapter.OperationResult, error) {
+	if a.s.options.Architect == nil {
+		return coreadapter.OperationResult{}, errNoArchitect
+	}
 	records, err := amendmentRecords(a.repository, stream, id)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
