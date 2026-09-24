@@ -233,9 +233,88 @@ func (d *exitDemo) chief(ctx context.Context, req agent.Request, _ *agent.Turn, 
 	return &agent.Result{ClaudeID: "session-chief", ResultText: "Noted", SessionDir: req.SessionDir, NumTurns: 1}, nil
 }
 
+// awaitRecoveredSeal watches the operation that must finish before the
+// workstream can start building. Reads run separately so a trace read waiting
+// behind publication cannot hide the test deadline.
+func (f *shedFixture) awaitRecoveredSeal(t *testing.T, stream config.WorkstreamID) {
+	t.Helper()
+	type snapshot struct {
+		feature, sealing trace.WorkflowState
+		ops              []trace.OperationRecord
+		err              error
+	}
+	repo := f.repository()
+	read := func() snapshot {
+		feature, err := repo.Workflow(stream, trace.FeatureSubject)
+		if err != nil {
+			return snapshot{err: err}
+		}
+		sealing, err := repo.Workflow(stream, sealSubject)
+		if err != nil {
+			return snapshot{feature: feature, err: err}
+		}
+		ops, err := repo.Operations(stream)
+		if err != nil {
+			return snapshot{feature: feature, sealing: sealing, err: err}
+		}
+		ops = slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != SealAction })
+		return snapshot{feature: feature, sealing: sealing, ops: ops}
+	}
+	deadline := time.NewTimer(demoTimeout)
+	defer deadline.Stop()
+	last := "no trace read completed"
+	for {
+		result := make(chan snapshot, 1)
+		go func() { result <- read() }()
+		select {
+		case <-f.serviceDone:
+			t.Fatalf("service stopped before sealing recovery completed: %v; %s", f.s.Wait(), last)
+		case <-deadline.C:
+			t.Fatalf("sealing recovery did not complete: %s", last)
+		case got := <-result:
+			var operations []string
+			for _, op := range got.ops {
+				result := "pending"
+				if op.Result != nil {
+					result = op.Result.Outcome + ": " + op.Result.Evidence
+				}
+				var history []string
+				for _, action := range op.History {
+					step := action.Kind
+					if action.Observation != nil {
+						step += fmt.Sprintf("(%s: %s)", action.Observation.State, action.Observation.Evidence)
+					}
+					if action.Failure != "" {
+						step += "(" + action.Failure + ")"
+					}
+					history = append(history, step)
+				}
+				operations = append(operations, fmt.Sprintf("%s result=%q acknowledged=%t retry-at=%s history=[%s]", op.Operation.ID, result, op.Acknowledged, op.RetryAt, strings.Join(history, ", ")))
+			}
+			last = fmt.Sprintf("feature=%q seal-subject=%q operations=[%s] read-error=%v", got.feature.Value, got.sealing.Value, strings.Join(operations, "; "), got.err)
+			if got.err != nil {
+				t.Fatalf("reading sealing recovery: %s", last)
+			}
+			if len(got.ops) > 1 {
+				t.Fatalf("sealing was requested more than once: %s", last)
+			}
+			if len(got.ops) == 1 && got.ops[0].Result != nil && got.ops[0].Result.Outcome != "succeeded" {
+				t.Fatalf("sealing recovery failed: %s", last)
+			}
+			if got.feature.Value == BuildingState && len(got.ops) == 1 && got.ops[0].Result != nil && got.ops[0].Result.Outcome == "succeeded" && got.ops[0].Acknowledged {
+				return
+			}
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("sealing recovery did not complete: %s", last)
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
 // TestM2HandInToRatifiedPlan demonstrates the M2 exit: see docs/m2-exit.md.
 func TestM2HandInToRatifiedPlan(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	opts, clone, engine, sessions, clock := newArchitectOptions(t)
 	home := filepath.Dir(clone)
@@ -589,13 +668,19 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	if _, _, found, err := seal.Latest(repo, capped); err != nil || found {
 		t.Fatalf("a seal before the restart: %v %v", found, err)
 	}
+	interrupted, err := repo.Operations(capped)
+	must(t, err)
+	interrupted = slices.DeleteFunc(interrupted, func(o trace.OperationRecord) bool { return o.Operation.Action != SealAction })
+	if len(interrupted) != 1 || interrupted[0].Result != nil || interrupted[0].Acknowledged || !interrupted[0].EffectStarted {
+		t.Fatalf("sealing at the restart boundary: %+v", interrupted)
+	}
 	must(t, repo.Close())
 
 	// 10. The next service finishes the sealing once, on the branch the
 	// clone holds.
 	f.start(t)
 	defer f.stop(t)
-	f.awaitFeature(t, capped, BuildingState)
+	f.awaitRecoveredSeal(t, capped)
 	record := f.ratification(t, capped, 2)
 	if record.Revision != (shed.Pin{Spec: 1, Plan: 1}) || len(record.Dispositions) != 1 || record.Dispositions[0] != (shed.Ruling{Objection: cappedVeto, Disposition: shed.Overruled, Note: exitOverrule}) {
 		t.Fatalf("the ratification %+v", record)
@@ -609,7 +694,7 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	}) {
 		t.Fatalf("the sealing did not resume from the branch: %+v", ops[0].History)
 	}
-	if s := sealOf(capped); s.Base.Commit != commit || s.Revision != (shed.Pin{Spec: 1, Plan: 1}) || branchAt(capped) != commit {
+	if s := sealOf(capped); s.Seal != 1 || s.Base != (seal.Base{Remote: "upstream", Branch: "main", Commit: commit}) || s.SpecHash != seal.SpecHash(validSpec) || s.Revision != (shed.Pin{Spec: 1, Plan: 1}) || s.Branch != featureBranch(capped) || branchAt(capped) != commit {
 		t.Fatalf("the capped seal %+v", s)
 	}
 	// Unit workspaces, which building opens as units start, are left out.
