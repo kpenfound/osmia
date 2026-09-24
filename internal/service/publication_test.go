@@ -452,3 +452,21 @@ func TestPublicationRepublishesABranchAnEarlierPublicationPushed(t *testing.T) {
 		t.Fatalf("republished %s over %s with %+v", tip, pushed, p.pulls.prs)
 	}
 }
+
+func TestServicePublishesAnApprovedWorkstreamAfterRestart(t *testing.T) {
+	t.Parallel()
+	p := newPublicationFixture(t, "commit-per-unit")
+	approval := p.approve(t, nil)
+	p.repository.Close()
+	p.opts.PullRequests = p.pulls
+	p.start(t)
+	defer p.stop(t)
+	p.awaitFeature(t, p.stream, DeliveredState)
+	if tip, _ := p.forkBranch(t); tip != p.report.Commit || p.pulls.creates != 1 || p.pulls.prs[0].Body != approval.Description {
+		t.Fatalf("the fork branch is at %s; pull requests %+v", tip, p.pulls.prs)
+	}
+	transition, _ := publishIDs(1)
+	if got := transitionByID(t, p.shedFixture.repository(), p.stream, transition+"-published"); got.To != "published-1" {
+		t.Fatalf("publication outcome %+v", got)
+	}
+}

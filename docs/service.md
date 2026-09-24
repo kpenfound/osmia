@@ -55,7 +55,7 @@ set through `Options` by embedders.
 | GET | `/inbox` | `InboxResponse`: the escalations of the active project that wait for the owner's ruling |
 | POST | `/inbox/<number>` | `AnswerRequest`: text; records the owner's ruling and returns `AnswerResponse` |
 | POST | `/contested/<workstream-id>/<unit-id>` | `ContestedRulingRequest`: decision (`review` or `revise`) and note; records the owner's direction and returns `ContestedRulingResponse` |
-| GET | `/delivery/<workstream-id>` | Current final report, trace-based draft description and any matching approval |
+| GET | `/delivery/<workstream-id>` | Current final report, trace-based draft description, any matching approval and the latest publication record |
 | POST | `/delivery/<workstream-id>` | Final review number and report revision, commit, draft hash and optional edited description; records the owner's approval |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
@@ -1681,10 +1681,62 @@ also pins the final report revision, branch commit, seal, spec hash, spec,
 plan and charter revisions. Its owner workflow transition and document are
 one trace commit. Repeating the same decision returns the recorded ruling.
 Restarting preserves an edited description; a newly drafted description does
-not replace it. Publication must check the current final report and the
-description it proposes to send against this approval. A changed branch or
+not replace it. [Publication](#publication) checks the current final report
+and the description it sends against this approval. A changed branch or
 governing revision requires a new review and approval; a changed description
-requires a new approval.
+requires a new approval. Approving a delivered workstream returns `conflict`.
+Approving again after a publication was refused records a new approval
+revision even when nothing else changed, which asks for another publication.
+
+### Publication
+
+The publication controller runs after the assembly controller in every pass.
+For an assembled, unpaused workstream whose latest approval passes the
+delivery gate, it asks for one `publish` repository-boundary operation per
+approval revision `k`, moving the `publication` subject to `requested-<k>`.
+The operation pins the approval revision, reviewed commit and description
+hash, and the project's `landing` style, fork, upstream and base branch at that
+time, so a retry publishes the same way. While a publication has no result,
+no other publication of the workstream is asked for.
+
+Each attempt first checks the approval: the workstream must be `assembled`,
+and the current final report, feature branch, governing revisions and latest
+approval must still match approval `k` and its description. Otherwise the
+publication is refused before the fork or GitHub is touched. The delivery
+commit is the reviewed commit with `commit-per-unit`, which keeps each unit's
+reviewed commit. With `squash`, it is one commit on the upstream commit the
+final review rebased onto, holding the reviewed commit's tree, with the
+description's title as its subject. The local feature branch never moves.
+
+The service then asks the fork remote, the clone's remote whose URL names the
+configured fork, for its `osmia/<workstream-id>` branch. The branch may
+already be at the delivery commit. If it is absent, or at a commit that an
+earlier publication of the workstream recorded, the service pushes with that
+commit as the expected value, so a concurrent change makes the push fail.
+Any other commit refuses the publication. `final/publication.json` records
+the delivery commit with status `pushing` before the push. Next, the service
+lists the pull requests on the upstream repository from that fork branch. It
+keeps one open pull request against the base branch whose head is the
+delivery commit and whose body is the approved description. It opens a pull
+request if none exists and refuses any other state, including a closed pull
+request. The title is the first line of the description without heading
+marks. One trace commit then records `final/publication.json` with status
+`opened`, the fork branch, delivery and reviewed commits, style, pull request
+number and URL, title and description. The same commit records the feature
+transition to `delivered`, with a notice for the chief of staff, and
+`published-<k>`.
+
+A refusal records `refused-<k>` with its reason and tells the chief of staff;
+the workstream stays assembled. Git, GitHub and storage errors leave the
+operation pending, and each retry inspects the fork branch and pull requests
+again. A push or pull request creation interrupted by a failure or a restart
+therefore resumes without a second push or pull request.
+
+The service pushes with the owner's Git configuration, SSH agent and
+credential helper, as it fetches. It finds and opens pull requests through
+the GitHub REST API with the `GITHUB_TOKEN` of its own environment, or through
+`Options.PullRequests`. No session, prompt, tool or workspace receives either
+credential.
 
 ## Abandoning
 

@@ -98,7 +98,8 @@ var _ coreadapter.Reconciler = (*publisher)(nil)
 
 // Pass asks for the publication of an assembled workstream's latest owner
 // approval once it passes the delivery gate, unless a publication of the
-// workstream has no result yet or one of that approval was already asked for.
+// workstream has neither a result nor a recorded outcome yet, or one of that
+// approval was already asked for.
 func (p *publisher) Pass(ctx context.Context) error {
 	streams, err := p.repository.Workstreams()
 	if err != nil {
@@ -141,8 +142,13 @@ func (p *publisher) request(ctx context.Context, stream config.WorkstreamID) err
 		if err != nil {
 			return err
 		}
-		if o.Result == nil || in.Approval == decision.Revision {
+		if in.Approval == decision.Revision {
 			return nil
+		}
+		if o.Result == nil {
+			if result, err := p.outcome(stream, in.Approval); err != nil || result == nil {
+				return err
+			}
 		}
 	}
 	if _, reason, err := p.s.deliveryGate(ctx, p.repository, stream, approval.Description); err != nil || reason != "" {

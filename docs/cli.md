@@ -170,6 +170,19 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   right what failed it. A workstream with no packet yet fails with `not_found`
   (exit 4). See [the ratification gate](service.md#the-ratification-gate) and
   [sealing](service.md#sealing).
+- `delivery <workstream-id>` shows an assembled workstream's final report,
+  unshown criteria first, and the drafted pull request description, then any
+  approved description and the state of its publication. For a delivered
+  workstream it shows the report, the approved description and the pull
+  request it was delivered as.
+- `approve <workstream-id> [description-file]` approves the drafted
+  description, or the file's text instead, for the presented final report.
+  The service then pushes the branch to your fork and opens the pull request
+  itself; `delivery` shows its progress. A report with gaps, a presentation
+  that changed and a delivered workstream fail with `conflict` (exit 5). After
+  a publication was refused, approving again asks for another one. See
+  [owner delivery approval](service.md#owner-delivery-approval) and
+  [publication](service.md#publication).
 - Editing the documents needs no command. You edit `spec.md` and `plan.json` in
   the workstream's directory under the trace yourself. The service records what
   you changed as a new revision of yours before any turn reads it, and the next

@@ -234,7 +234,8 @@ Repository references contain two nonempty owner/repository components using
 ASCII letters, digits, `.`, `_` and `-`, beginning with a letter or digit, without
 a `.git` suffix. Fork and upstream must differ ignoring case. `base_branch` follows
 Git branch-name constraints. `landing` accepts `commit-per-unit` (default) or
-`squash`. Project `capacity.per_workstream` is a positive integer overriding the
+`squash`: it chooses whether an approved workstream is
+[published](service.md#publication) with each unit's commit or as one commit. Project `capacity.per_workstream` is a positive integer overriding the
 global default.
 
 ## Milestone and restart behavior
