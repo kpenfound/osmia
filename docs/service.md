@@ -237,6 +237,18 @@ architect for the workstream's spec and plan; see
 
 ## Architect drafting
 
+For a filed amendment on a building or assembled workstream, the architect
+receives the request, current sealed spec and plan, charter and context bundle.
+Its `architect-amendment-draft` operation uses the existing architect thread.
+It may deliver a changed `spec.md` and/or `plan.json`, or a `decline.txt` reason.
+The service validates a proposal against the spec, plan, entity map and merged
+units. A valid proposal records both candidate documents and `affected.json`
+under `amendments/<n>/` in the same commit as the `proposed` transition. The
+affected set names changed criteria, units touched by changed criteria or plan
+entries, and their proofs. An invalid or declined turn records its reason and
+leaves the current documents and feature state in force. A captured turn is
+recovered from the architect thread after restart.
+
 The architect controller runs at the start of every reconciliation pass,
 before event delivery and the scheduler, with or without `Options.Threads`.
 For every workstream in feature state `handed`, except the librarian's, it

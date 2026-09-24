@@ -518,8 +518,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	refresh := &refresher{extractor: &extractor{s: s, repository: repository}}
 	finals := &finalReviewer{s: s, repository: repository}
 	publish := &publisher{s: s, repository: repository}
-	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, rounds: rounds, finals: finals}
-	hooks := []func(context.Context) error{draft.Pass, rounds.Pass, seals.Pass, build.Pass, refresh.Pass, land.Pass, finals.Pass, publish.Pass}
+	amend := &amendmentDrafter{drafter: draft}
+	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, rounds: rounds, finals: finals}
+	hooks := []func(context.Context) error{draft.Pass, amend.Pass, rounds.Pass, seals.Pass, build.Pass, refresh.Pass, land.Pass, finals.Pass, publish.Pass}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, options.Schedule)
 	}
@@ -577,7 +578,7 @@ func stagePriority(op coreadapter.Operation) int {
 	switch op.Action {
 	case RoundAction, ReplyAction, RedraftAction:
 		return 1
-	case DraftAction:
+	case DraftAction, AmendmentDraftAction:
 		return 2
 	}
 	return 0

@@ -134,7 +134,7 @@ func (f *architectFixture) script(turn string, files map[string]string, check fu
 		if check != nil {
 			err = check(ctx, req, verified, tools)
 		}
-		for _, path := range []string{plan.SpecPath, plan.PlanPath} {
+		for _, path := range []string{plan.SpecPath, plan.PlanPath, "decline.txt"} {
 			content, ok := files[path]
 			if !ok {
 				continue
