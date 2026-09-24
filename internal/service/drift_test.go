@@ -204,39 +204,6 @@ func TestDriftRebaseMovesTheFeatureBranchAndTheSeal(t *testing.T) {
 	}
 }
 
-// A drift rebase whose replay conflicts leaves the feature branch and the
-// seal where they were and records the upstream commit and the conflicted
-// paths.
-func TestConflictingDriftRebaseLeavesTheBranchAndTheSeal(t *testing.T) {
-	t.Parallel()
-	f, stream, repository, _ := newFinalFixture(t, "conflicted-drift")
-	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
-	ctx := context.Background()
-	before := moveFeature(t, f, stream, map[string]string{"CODEOWNERS": "/internal/ @feature\n"})
-	upstream := advanceUpstream(t, f, map[string]string{"CODEOWNERS": "/internal/ @upstream\n"})
-	sealed := streamDocuments(t, repository, stream, seal.DocumentID)
-
-	op := requestDrift(t, d, stream)
-	result := settleOperation(t, f.s, repository, stream, op, d)
-	wantReason := fmt.Sprintf("feature branch %s does not rebase cleanly onto upstream/main at %s: CODEOWNERS conflicted; the branch stays at %s and the seal is unchanged", featureBranch(stream), upstream, before)
-	if result.Outcome != "succeeded" || result.Evidence != wantReason {
-		t.Fatalf("drift rebase result %+v", result)
-	}
-	if tip, _, err := featureWorkspaces(f.s.cfg).Branch(ctx, featureBranch(stream)); err != nil || tip != before {
-		t.Fatalf("a conflicted drift rebase moved the feature branch to %s: %v", tip, err)
-	}
-	if after := streamDocuments(t, repository, stream, seal.DocumentID); !reflect.DeepEqual(after, sealed) {
-		t.Fatalf("a conflicted drift rebase changed the seal: %+v", after)
-	}
-	want := []DriftRebase{{Drift: 1, Operation: op.ID, Outcome: driftConflicted, Branch: featureBranch(stream), Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, Before: before, Conflicts: []string{"CODEOWNERS"}}}
-	if records := driftRecords(t, repository, stream); !reflect.DeepEqual(records, want) {
-		t.Fatalf("drift/rebase.json %+v, want %+v", records, want)
-	}
-	if conflicted := transitionByID(t, repository, stream, "drift-1-conflicted"); conflicted.To != "conflicted-1" || conflicted.Reason != wantReason {
-		t.Fatalf("the outcome %+v", conflicted)
-	}
-}
-
 // A paused workstream takes no drift rebase: none is asked for while the
 // pause is in force, and one asked for before the pause is recorded skipped
 // with nothing changed.

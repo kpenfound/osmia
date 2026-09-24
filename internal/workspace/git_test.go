@@ -876,3 +876,99 @@ func TestExportWritesTheCommitsTrackedFiles(t *testing.T) {
 		t.Fatalf("run.sh lost its executable bit: %v %v", info, err)
 	}
 }
+
+// A replay in a worktree stops at each commit that conflicts with the
+// conflict markers in the worktree, reports the stop and its paths, and goes
+// on from the worktree's resolved files, stop after stop, to a branch whose
+// commits keep their messages and authors on upstream. The feature branch
+// the worktree was made from does not move.
+func TestReplayInStopsAtEachConflictAndContinuesFromTheResolvedFiles(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base, feature, _ := rebaseFixture(t, f)
+	first := f.commitFiles(t, feature, base, map[string]string{"README": "feature\n", "clean.go": "clean\n"})
+	second := f.commitFiles(t, feature, first, map[string]string{"NOTES": "feature notes\n"})
+	if err := os.WriteFile(filepath.Join(f.scratch, "README"), []byte("upstream\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.scratch, "NOTES"), []byte("upstream notes\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, "-C", f.scratch, "add", "README", "NOTES")
+	git(t, "-C", f.scratch, "commit", "--quiet", "-m", "upstream README and NOTES")
+	git(t, "-C", f.scratch, "push", "--quiet", "origin", "main")
+	upstream, err := f.provider.Fetch(ctx, "upstream", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired, err := f.provider.Acquire(ctx, vcs.Request{Name: "drift/w1", Ref: second, Branch: "osmia-drift/w1/1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := acquired.(Worktree)
+	if _, _, replaying, err := f.provider.Replaying(ctx, w); err != nil || replaying {
+		t.Fatalf("a fresh worktree is replaying: %t %v", replaying, err)
+	}
+	at := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	commit, conflicts, err := f.provider.ReplayIn(ctx, w, upstream, at)
+	if err != nil || commit != "" || !slices.Equal(conflicts, []string{"README"}) {
+		t.Fatalf("replay %q %v: %v", commit, conflicts, err)
+	}
+	stop, unmerged, replaying, err := f.provider.Replaying(ctx, w)
+	if err != nil || !replaying || stop != first || !slices.Equal(unmerged, []string{"README"}) {
+		t.Fatalf("the first stop %s %v %t: %v", stop, unmerged, replaying, err)
+	}
+	if stopped, found, err := f.provider.Workspace(ctx, "drift/w1"); err != nil || !found || stopped.Branch != "osmia-drift/w1/1" {
+		t.Fatalf("the stopped worktree %+v %t: %v", stopped, found, err)
+	}
+	if again, err := f.provider.Acquire(ctx, vcs.Request{Name: "drift/w1", Ref: second, Branch: "osmia-drift/w1/1"}); err != nil || again.Directory() != w.Path {
+		t.Fatalf("the stopped worktree acquired again %+v: %v", again, err)
+	}
+	if marked, err := f.provider.MarkedFiles(w, []string{"README", "clean.go", "missing"}); err != nil || !slices.Equal(marked, []string{"README"}) {
+		t.Fatalf("marked files %v: %v", marked, err)
+	}
+	if err := os.WriteFile(filepath.Join(w.Path, "README"), []byte("upstream and feature\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if marked, err := f.provider.MarkedFiles(w, []string{"README"}); err != nil || len(marked) != 0 {
+		t.Fatalf("a resolved file is marked %v: %v", marked, err)
+	}
+	commit, conflicts, err = f.provider.ContinueReplay(ctx, w, at)
+	if err != nil || commit != "" || !slices.Equal(conflicts, []string{"NOTES"}) {
+		t.Fatalf("continue %q %v: %v", commit, conflicts, err)
+	}
+	if stop, _, _, err := f.provider.Replaying(ctx, w); err != nil || stop != second {
+		t.Fatalf("the second stop %s, want %s: %v", stop, second, err)
+	}
+	if err := os.WriteFile(filepath.Join(w.Path, "NOTES"), []byte("upstream and feature notes\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	commit, conflicts, err = f.provider.ContinueReplay(ctx, w, at)
+	if err != nil || commit == "" || len(conflicts) != 0 {
+		t.Fatalf("the last continue %q %v: %v", commit, conflicts, err)
+	}
+	if _, _, replaying, err := f.provider.Replaying(ctx, w); err != nil || replaying {
+		t.Fatalf("a finished replay is replaying: %t %v", replaying, err)
+	}
+	if tip, _, err := f.provider.Branch(ctx, "osmia-drift/w1/1"); err != nil || tip != commit {
+		t.Fatalf("the worktree's branch is at %s, not %s: %v", tip, commit, err)
+	}
+	if parent := git(t, "-C", f.clone, "rev-parse", commit+"~2"); parent != upstream {
+		t.Fatalf("the replay starts from %s, not upstream %s", parent, upstream)
+	}
+	for i, original := range []string{second, first} {
+		replayed := fmt.Sprintf("%s~%d", commit, i)
+		if got, want := git(t, "-C", f.clone, "log", "-1", "--format=%B%an", replayed), git(t, "-C", f.clone, "log", "-1", "--format=%B%an", original); got != want {
+			t.Fatalf("replayed %s is %q, original %q", replayed, got, want)
+		}
+	}
+	for path, want := range map[string]string{"README": "upstream and feature", "NOTES": "upstream and feature notes", "clean.go": "clean"} {
+		if got := git(t, "-C", f.clone, "show", commit+":"+path); got != want {
+			t.Fatalf("%s holds %q, want %q", path, got, want)
+		}
+	}
+	if tip, _, err := f.provider.Branch(ctx, "osmia/w1"); err != nil || tip != second {
+		t.Fatalf("the replay moved the feature branch to %s, %v", tip, err)
+	}
+}

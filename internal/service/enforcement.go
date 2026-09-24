@@ -50,7 +50,10 @@ var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questi
 // staff, mason and reviewer; a turn of any other role fails with a recorded
 // reason. A mason turn works on a view of its unit's workspace, copied back
 // into the workspace after the turn, and a mason turn whose done the service
-// accepted ends with the outcome done, the mason's report and its card. Each role's
+// accepted ends with the outcome done, the mason's report and its card. A
+// drift mason turn works the same way on its workstream's drift resolution
+// workspace, with file tools and done alone, and a drift reviewer turn holds
+// file_read and verdict alone. Each role's
 // sandbox comes from its configuration, and a sandbox the platform cannot
 // enforce fails the turn with core's reason. Thread turns take their role's sandbox and the root from the
 // configuration the service has loaded, and record UTC times.
@@ -75,10 +78,11 @@ func Enforce(opts Options, e Enforcement) Options {
 		}
 		project := string(r.Project())
 		units := newUnitWorkspaces(cfg)
+		drifts := resolutions{git: driftWorkspaces(cfg)}
 		reports := &masonReports{}
 		verdicts := &reviewerReports{}
 		turns := &isolation.Turns{
-			Workspaces:         threadWorkspaces{units: units},
+			Workspaces:         threadWorkspaces{units: units, drifts: drifts},
 			Views:              isolation.Views{Directory: views},
 			PreserveMasonViews: true,
 			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, "classifier": {}},
@@ -96,20 +100,35 @@ func Enforce(opts Options, e Enforcement) Options {
 					return isolation.Selection{}, errors.New("view selection denied")
 				}
 				execution := coreadapter.ExecutionSettings{Mode: role.Sandbox, Image: role.Image}
+				if scope.Role == masonRole && scope.Thread == driftMasonAgent {
+					return drifts.selection(ctx, scope, execution)
+				}
 				if scope.Role == masonRole {
 					return units.selection(ctx, scope, execution)
 				}
-				// The chief of staff is handed an empty workspace.
+				// The chief of staff and the reviewers are handed an empty
+				// workspace; a drift reviewer may only read it and record
+				// its verdict.
 				workspace := filepath.Join(root, "workspaces", project, scope.Workstream)
 				if err := os.MkdirAll(workspace, 0700); err != nil {
 					return isolation.Selection{}, err
 				}
-				return isolation.Selection{
+				selection := isolation.Selection{
 					Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace},
 					Execution: execution,
-				}, nil
+				}
+				if scope.Role == reviewerRole && scope.Thread == driftReviewerAgent {
+					selection.Narrow = &coreadapter.Capabilities{Tools: []string{"file_read", verdictTool}}
+				}
+				return selection, nil
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
+				if scope.Role == masonRole && scope.Thread == driftMasonAgent {
+					return []coreadapter.Tool{reports.driftTool(scope)}, nil
+				}
+				if scope.Role == reviewerRole && scope.Thread == driftReviewerAgent {
+					return []coreadapter.Tool{verdicts.tool(scope)}, nil
+				}
 				if scope.Role == masonRole {
 					ask, err := questions.Tools(r, masonAgent(scope.Unit), scope, now)
 					return append(ask, reports.tool(r, scope)), err
@@ -133,6 +152,9 @@ func Enforce(opts Options, e Enforcement) Options {
 			Capture: func(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView, result coreadapter.SessionResult) error {
 				if scope.Role != masonRole {
 					return nil
+				}
+				if scope.Thread == driftMasonAgent {
+					return drifts.capture(ctx, scope, view)
 				}
 				return units.capture(ctx, scope, view, result)
 			},
@@ -160,11 +182,18 @@ func Enforce(opts Options, e Enforcement) Options {
 	return opts
 }
 
-// threadWorkspaces lends a mason turn its unit's workspace and every other
+// threadWorkspaces lends a drift mason turn its workstream's resolution
+// workspace, every other mason turn its unit's workspace and every other
 // thread turn the directory its selection stages.
-type threadWorkspaces struct{ units unitWorkspaces }
+type threadWorkspaces struct {
+	units  unitWorkspaces
+	drifts resolutions
+}
 
 func (w threadWorkspaces) Acquire(ctx context.Context, req coreadapter.WorkspaceRequest) (coreadapter.WorkspaceLease, error) {
+	if req.Scope.Role == masonRole && req.Scope.Thread == driftMasonAgent {
+		return w.drifts.Acquire(ctx, req)
+	}
 	if req.Scope.Role == masonRole {
 		return w.units.Acquire(ctx, req)
 	}
