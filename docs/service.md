@@ -1809,23 +1809,25 @@ unchanged`.
 
 A clean replay is recorded in `drift/rebase.json` with outcome `replayed` and
 the rebased commit before anything moves. The feature branch and its
-workspace then move to the rebased commit. One trace commit then records the
-next revision of `drift/rebase.json` with outcome `rebased`, the seal and the
-`seal.json` revision in force afterwards; the next revision of `seal.json`
-(actor `service`/`foreman`, cause the operation), identical but for `base`,
-which names the fetched commit, unless the seal was already on it; and
-`drift-<k>-rebased`, which moves `drift` to `rebased-<k>` with the reason
-`feature branch <branch> is rebased from <before> onto <remote>/<branch> at
-<commit> as <rebased>; seal <n> moves from base <old> to <new> in seal.json
-revision <r>`. The seal number is unchanged. With the branch moved, the
-landing controller [rebases the units](#rebasing-units-in-flight) it left
-behind.
+workspace then move to the rebased commit. The seal's next revision records
+the fetched upstream base while keeping the seal number. If unfinished unit
+workspaces are behind the new tip, `drift/rebase.json` records `carrying` and
+the operation remains pending. The foreman uses the durable
+[unit rebase path](#rebasing-units-in-flight): it waits for active mason
+writers, rebases idle workspaces, returns changed approved candidates to
+review, and queues one sealed-spec mason turn for each conflict. Once every
+unfinished workspace descends from the new tip and every conflict turn is
+queued, `drift/rebase.json` records `rebased` and `drift-<k>-rebased` moves the
+workflow to `rebased-<k>`. A workstream with no unit workspace to carry moves
+straight to `rebased`. A final report recorded before the seal's base moved
+cannot authorise delivery; the assembled workstream gets a new final read.
 
 A drift rebase that is interrupted resumes from what the trace records. A
 recorded replay is not replayed again: the branch moves to its commit, even
 when upstream moved since. A branch already at that commit is not moved
-again, and a recorded outcome completes the operation on inspection. So each
-drift rebase records one outcome and at most one `seal.json` revision. A
+again, and recorded unit rebase operations and conflict turns are reused.
+The drift operation completes only after unit carryover. Each drift rebase
+records one final outcome and at most one `seal.json` revision. A
 skipped drift rebase moves `drift` to `skipped-<k>` with the reason `drift
 rebase <k> changed nothing: <why>`, as does one whose branch moved to a
 commit other than the one it replayed or the rebased one. Fetch and Git

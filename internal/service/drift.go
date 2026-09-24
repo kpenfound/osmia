@@ -497,6 +497,20 @@ func (d drifter) finishCarry(ctx context.Context, stream config.WorkstreamID, re
 	if !current {
 		return coreadapter.OperationResult{}, fmt.Errorf("drift rebase %d awaits unit carryover", rebase.Drift)
 	}
+	units := newUnitWorkspaces(d.cfg)
+	for _, unit := range b.plan.Units {
+		state := b.states[trace.UnitSubject(unit.ID)].Value
+		if state == "" || state == UnitPlanned || state == UnitMerged {
+			continue
+		}
+		behind, err := units.behind(ctx, stream, unit.ID)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if behind {
+			return coreadapter.OperationResult{}, fmt.Errorf("drift rebase %d awaits unit %s's workspace at %s", rebase.Drift, unit.ID, rebase.Commit)
+		}
+	}
 	rebase.Outcome = driftRebased
 	reason := fmt.Sprintf("feature branch %s and every unfinished unit are current at %s, or a conflict turn is queued", rebase.Branch, rebase.Commit)
 	return d.record(ctx, stream, rebase, nil, driftRebased, reason)
