@@ -43,12 +43,17 @@ The version 1 JSON representation is:
 
 A pause target is `factory` (no IDs), `project` (project ID only), or `workstream`
 (both IDs). One record per target is allowed. Modes are `soft` and `hard`; M1
-records only the `operator` source and an optional free-form reason. These records
-have no dispatch or cancellation effects in M1.
+records only the `operator` source and an optional free-form reason. A pause of
+either mode holds new worker turns and unit starts in its scope, and the units
+a paused workstream has in flight take no mason slot
+([service](service.md#starting-units)). Neither mode cancels a turn that is
+already running.
 
 Priority contains a unique ordered subset of workstream IDs, scoped to a project.
 An empty array is allowed; null is not. Unlisted workstreams have no explicit
-preference. There is one priority record per project. Profiles map global role
+preference. There is one priority record per project. Free mason slots and
+turn slots go first to the workstreams it names, in its order
+([service](service.md#starting-units)). Profiles map global role
 names to named profiles; bindings must satisfy the role's sandbox requirements,
 including the selected profile's fallback chain.
 

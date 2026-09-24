@@ -72,6 +72,11 @@ The [M3 final review and delivery demonstration](docs/m3-exit.md#final-review-an
 routes a final-review gap through a follow-up unit, then exercises owner
 approval and resumable publication in both delivery styles with local fakes.
 
+The [M4 parallel units demonstration](docs/m4-parallel-units.md) builds two
+workstreams on shared mason slots: disjoint units in parallel, entangled units
+in sequence, freed slots by priority and then in turn, an overlap advisory to
+each chief of staff, and a restart in the middle of a mason's turn.
+
 The [charter reference](docs/charter.md) documents the charter template, the
 numbered-rule format and how owner edits are recorded.
 
