@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"sync"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
@@ -189,12 +190,21 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	}
 	var approved []coreadapter.Tool
 	var names []string
+	var countMu sync.Mutex
+	counts := map[string]int{}
 	for _, name := range capabilities.Tools {
 		tool, exists := registry[name]
 		if !exists {
 			return result, fmt.Errorf("granted tool %q is not registered by the service", name)
 		}
 		if coreadapter.ToolPermitted(capabilities, tool) && !slices.Contains(names, name) {
+			original := tool.Handle
+			tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+				countMu.Lock()
+				counts[name]++
+				countMu.Unlock()
+				return original(ctx, raw)
+			}
 			approved = append(approved, tool)
 			names = append(names, name)
 		}
@@ -227,6 +237,11 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 		prepared.MCP = []coreadapter.Endpoint{hosted.Endpoint}
 	}
 	result, err = (&coreadapter.TurnRunner{Executor: executor}).Run(ctx, prepared)
+	countMu.Lock()
+	if len(counts) != 0 {
+		result.ToolCounts = maps.Clone(counts)
+	}
+	countMu.Unlock()
 	if r.Capture != nil {
 		err = errors.Join(err, r.Capture(context.WithoutCancel(ctx), input.Scope, view, result))
 	}

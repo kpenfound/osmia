@@ -206,6 +206,7 @@ type SessionResult struct {
 	ErrorSubtype                    string
 	Outcome                         *Outcome
 	Usage                           Usage
+	ToolCounts                      map[string]int `json:"tool_counts,omitempty"`
 	Limit                           *ProviderLimit
 }
 type ProviderLimit struct {

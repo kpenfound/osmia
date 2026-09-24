@@ -145,6 +145,7 @@ type TurnResponse struct {
 	RequestRevision int                       `json:"request_revision"`
 	Result          coreadapter.SessionResult `json:"result"`
 	Failure         string                    `json:"failure,omitempty"`
+	Classification  *TurnClassification       `json:"classification,omitempty"`
 }
 
 func (TurnResponse) traceRecord() {}
@@ -238,6 +239,14 @@ func validate(r Record) error {
 		valid = key(v.AgentID) && key(v.ThreadID) && key(v.TurnID) && key(v.Profile.Name) && present(v.Profile.Backend) && present(v.Profile.Model) && present(v.Prompt) && v.Profile.Timeout >= 0 && v.Profile.MaxTurns >= 0 && v.Profile.CostLimitUSD >= 0 && !math.IsNaN(v.Profile.CostLimitUSD) && !math.IsInf(v.Profile.CostLimitUSD, 0) && (v.Resume == nil || validSession(*v.Resume))
 	case TurnResponse:
 		valid = key(v.AgentID) && key(v.ThreadID) && key(v.TurnID) && key(v.RequestID) && v.RequestRevision > 0 && !v.Result.StartedAt.IsZero() && v.Result.Duration >= 0 && validUsage(v.Result.Usage) && (validSession(v.Result.Session) || (v.Result.Session == (coreadapter.BackendSession{}) && present(v.Failure)))
+		if v.Classification != nil {
+			c := v.Classification
+			valid = valid && v.Failure == "" && v.Result.Outcome == nil && !v.Result.Cancelled && !v.Result.IsError && !v.Result.TimedOut && v.Result.ExitCode == 0 && v.Result.Signal == 0 &&
+				slices.Contains([]string{"asked_in_prose", "claims_done", "gave_up", "unclear"}, c.Class) && present(c.Evidence) && len([]rune(c.Window)) <= 2000
+			for _, count := range c.ToolCounts {
+				valid = valid && count >= 0
+			}
+		}
 	case Status:
 		valid = h.ID == StatusID && h.Unit == "" && v.valid()
 	case Cost:

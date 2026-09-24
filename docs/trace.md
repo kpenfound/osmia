@@ -442,6 +442,12 @@ under an existing turn are rejected. `CompleteTurn` requires a captured result
 and atomically releases the reservation, making the oldest successor eligible.
 It retains a status of `idle`, `waiting`, `failed` or `interrupted` based on the
 result. These are thread execution states, not feature or unit transitions.
+For a mason turn that completes without an outcome or failure, the owned
+`TurnResponse.classification` records one of `asked_in_prose`, `claims_done`,
+`gave_up` or `unclear`. Its evidence includes the matching phrase (or the
+absence of one), the final 2,000 Unicode characters of the response and counts
+of service MCP tool calls made by that turn. Failed and interrupted turns, and
+turns with an accepted `ask` or `done` outcome, have no classification.
 A thread whose status is `waiting` and that has no unfinished turn is parked
 (`Thread.Parked`); queuing a turn unparks it.
 All mutations use the state/outbox publication boundary and signal its wakeup

@@ -1175,6 +1175,16 @@ while the build ran; the workstream is <state>`).
 
 ### Starting units
 
+The `[mason] max_clean_turns` setting defaults to 3 and must be positive. A
+mason turn that ends cleanly without `ask` or `done` is classified from its
+final response and tool counts. The controller records a chief-of-staff event
+for every such turn. For `asked_in_prose` it queues a turn on the same thread
+that names `ask`; for `claims_done` it names `done`. An `unclear` response gets
+a turn naming both tools. `gave_up` contests the unit immediately. When the
+number of clean turns without an outcome reaches `max_clean_turns`, the unit
+becomes `contested` with a bound-exhaustion reason instead of receiving another
+turn. These decisions are read from owned responses after a restart.
+
 With `Options.Threads` set, the mason controller runs in every reconciliation
 pass, after answer delivery and before the scheduler. It first
 [parks and resumes](#a-masons-question) units on their masons' questions.
