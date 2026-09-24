@@ -31,8 +31,10 @@ var (
 )
 
 type fixture struct {
-	repo *trace.Repository
-	dir  string
+	repo    *trace.Repository
+	dir     string
+	root    config.Root
+	project config.Project
 }
 
 func setup(t *testing.T) fixture {
@@ -78,7 +80,145 @@ func setup(t *testing.T) fixture {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return fixture{repo: repo, dir: dir}
+	return fixture{repo: repo, dir: dir, root: root, project: p}
+}
+
+func TestFileAmendmentParksAndSurvivesRestart(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	feature := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "building", Revision: 1, Project: project, Workstream: stream, At: start, Actor: owner, Cause: "test"}
+	if _, err := f.repo.SetFeatureState(ctx, feature, "building", "test"); err != nil {
+		t.Fatal(err)
+	}
+	unit := trace.UnitSubject("resume")
+	_, err := f.repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "implementing", Revision: 1, Project: project, Workstream: stream, Unit: "resume", At: start, Actor: owner, Cause: "test"}, Subject: unit, To: "implementing", Reason: "test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seal := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "seal", Revision: 1, Project: project, Workstream: stream, At: start, Actor: owner, Cause: "test"}, Path: "seal.json", Content: `{"seal":1,"spec_hash":"sha256:test"}`}
+	if err := f.repo.RecordDocuments(ctx, []trace.Document{seal}); err != nil {
+		t.Fatal(err)
+	}
+	scope := f.turn(t, "mason1", "mason", "build1")
+	tool := tools(t, f, "mason1", scope, start)[questions.AmendTool]
+	input := `{"citations":["spec#1","plan#resume"],"change":"Clarify restart behavior","reason":"The proof needs another state"}`
+	if got := call(t, tool, input); !strings.Contains(got, `"amendment":"1"`) {
+		t.Fatal(got)
+	}
+	if got := call(t, tool, input); !strings.Contains(got, `"amendment":"1"`) {
+		t.Fatal(got)
+	}
+	state, err := f.repo.Workflow(stream, unit)
+	if err != nil || state.Value != "waiting" {
+		t.Fatalf("state %+v: %v", state, err)
+	}
+	if err := f.repo.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.repo, err = trace.Open(f.root, f.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.repo.Close() })
+	requests, err := trace.Read[trace.Amendment](f.repo, stream)
+	if err != nil || len(requests) != 1 {
+		t.Fatalf("requests %+v: %v", requests, err)
+	}
+	if requests[0].Requester.ID != "mason1" || requests[0].Unit != "resume" || requests[0].SpecHash != "sha256:test" {
+		t.Fatalf("request %+v", requests[0])
+	}
+	transitions, err := trace.Read[trace.Transition](f.repo, stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, tr := range transitions {
+		if tr.ID == "amendment_1_filed" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("filing transitions: %d", n)
+	}
+	outbox, err := f.repo.Outbox(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n = 0
+	for _, entry := range outbox {
+		if entry.TransitionID == "amendment_1_filed" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("filing notices: %d", n)
+	}
+}
+
+func TestReviewerAndRoutedAmendments(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	seal := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "seal", Revision: 1, Project: project, Workstream: stream, At: start, Actor: owner, Cause: "test"}, Path: "seal.json", Content: `{"seal":1,"spec_hash":"sha256:test"}`}
+	if err := f.repo.RecordDocuments(ctx, []trace.Document{seal}); err != nil {
+		t.Fatal(err)
+	}
+	reviewer := f.turn(t, "reviewer1", "reviewer", "review1")
+	tool := tools(t, f, "reviewer1", reviewer, start)[questions.AmendTool]
+	valid := `{"citations":["plan#resume"],"change":"Add a proof","reason":"Review found a gap"}`
+	before := f.head(t)
+	if got := call(t, tool, valid); !strings.Contains(got, "building or assembled") {
+		t.Fatal(got)
+	}
+	if got := f.head(t); got != before {
+		t.Fatal("invalid lifecycle changed trace")
+	}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "building", Revision: 1, Project: project, Workstream: stream, At: start, Actor: owner, Cause: "test"}
+	if _, err := f.repo.SetFeatureState(ctx, h, "building", "test"); err != nil {
+		t.Fatal(err)
+	}
+	unit := trace.UnitSubject("resume")
+	_, err := f.repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "reviewing", Revision: 1, Project: project, Workstream: stream, Unit: "resume", At: start, Actor: owner, Cause: "test"}, Subject: unit, To: "reviewing", Reason: "test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before = f.head(t)
+	for _, bad := range []string{`{"citations":["spec#9"],"change":"x","reason":"y"}`, `{"citations":["plan#missing"],"change":"x","reason":"y"}`} {
+		if got := call(t, tool, bad); !strings.Contains(got, `"recorded":false`) {
+			t.Fatal(got)
+		}
+	}
+	if got := f.head(t); got != before {
+		t.Fatal("invalid citation changed trace")
+	}
+	if got := call(t, tool, valid); !strings.Contains(got, `"amendment":"1"`) {
+		t.Fatal(got)
+	}
+	state, err := f.repo.Workflow(stream, unit)
+	if err != nil || state.Value != "waiting" {
+		t.Fatalf("reviewer state %+v: %v", state, err)
+	}
+	mason := f.turn(t, "mason1", "mason", "build1")
+	if _, err := f.repo.Ask(ctx, "mason1", mason, "Should criterion 1 change?", start); err != nil {
+		t.Fatal(err)
+	}
+	chief := f.turn(t, "chief", trace.ChiefOfStaff, "chief1")
+	route := tools(t, f, "chief", chief, start)[questions.RouteAmendmentTool]
+	if got := call(t, route, `{"question":"1","citations":["spec#1"],"change":"Clarify restart","reason":"The question requires it"}`); !strings.Contains(got, `"amendment":"2"`) {
+		t.Fatal(got)
+	}
+	if got := call(t, route, `{"question":"1","citations":["spec#1"],"change":"Clarify restart","reason":"The question requires it"}`); !strings.Contains(got, `"amendment":"2"`) {
+		t.Fatal(got)
+	}
+	requests, err := trace.Read[trace.Amendment](f.repo, stream)
+	if err != nil || len(requests) != 2 {
+		t.Fatalf("requests %+v: %v", requests, err)
+	}
+	if requests[1].Requester.ID != "mason1" || requests[1].Actor.ID != "chief" || requests[1].QuestionID != "1" || requests[1].Unit != "resume" {
+		t.Fatalf("routed %+v", requests[1])
+	}
+	if states(t, f)["1"].State != trace.QuestionRouted {
+		t.Fatal("question was not routed")
+	}
 }
 
 // turn queues and claims a turn of the agent, creating its thread first, and
@@ -216,7 +356,11 @@ func TestToolsFollowTheRole(t *testing.T) {
 		t.Fatalf("chief of staff tools: %v", got)
 	}
 	for _, role := range []string{"mason", "reviewer", "architect", "committee", "foreman", "librarian"} {
-		if got := names(f.turn(t, role+"1", role, "turn_"+role), role+"1"); !reflect.DeepEqual(got, []string{"ask"}) {
+		want := []string{"ask"}
+		if role == "mason" || role == "reviewer" {
+			want = append(want, "amend")
+		}
+		if got := names(f.turn(t, role+"1", role, "turn_"+role), role+"1"); !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s tools: %v", role, got)
 		}
 	}
@@ -248,16 +392,16 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 
 	// An answer without a citation, or with one that names nothing, records
 	// nothing and says why. The reserved tools say so and record nothing.
-	reserved := `{"recorded":false,"reason":"reserved until amendments and standing rulings (M4)"}`
+	reserved := `{"recorded":false,"reason":"reserved until standing rulings (M4)"}`
 	before := f.head(t)
 	for _, c := range [][3]string{
 		{"answer", `{"question":"1","text":"In files.","citations":[]}`, `{"recorded":false,"reason":"an answer needs at least one citation; escalate a question the record does not settle"}`},
 		{"answer", `{"question":"1","text":"In files.","citations":["kb/missing.md"]}`, `{"recorded":false,"reason":"citation \"kb/missing.md\" does not resolve: the knowledge base has no file kb/missing.md"}`},
 		{"answer", `{"question":"1","text":"In files.","citations":["the code"]}`, `{"recorded":false,"reason":"citation \"the code\" does not resolve: it is not one of ` + questions.CitationForms + `"}`},
 		{"answer", `{"question":"1","text":"In files.","citations":["spec#9"]}`, `{"recorded":false,"reason":"citation \"spec#9\" does not resolve: the spec has no acceptance criterion numbered 9 exactly once"}`},
-		{"route_amendment", `{"question":"1","text":"Amend criterion 1."}`, reserved},
+		{"route_amendment", `{"question":"1","citations":["spec#1"],"change":"Amend criterion 1.","reason":"Needed"}`, `{"recorded":false,"reason":"this workstream has no seal"}`},
 		{"propose_charter", `{"question":"1","text":"Amend criterion 1."}`, reserved},
-		{"route_amendment", `{}`, reserved},
+		{"route_amendment", `{"question":"1","citations":["spec#9"],"change":"Amend","reason":"Needed"}`, `{"recorded":false,"reason":"citation \"spec#9\" does not resolve: the spec has no acceptance criterion numbered 9 exactly once"}`},
 		{"propose_charter", `{}`, reserved},
 	} {
 		if got := call(t, chief[c[0]], c[1]); got != c[2] {

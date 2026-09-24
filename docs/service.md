@@ -1178,9 +1178,11 @@ while the build ran; the workstream is <state>`).
 With `Options.Threads` set, the mason controller runs in every reconciliation
 pass, after answer delivery and before the scheduler. It first
 [parks and resumes](#a-masons-question) units on their masons' questions.
-It then starts units of `building` or `assembled` workstreams, at most one `implementing` or
-`waiting` unit per workstream, while fewer than `capacity.masons` units are
-`implementing` in workstreams no pause covers. A
+It then starts units of `building` or `assembled` workstreams, at most one
+`implementing` or question-waiting unit per workstream, while fewer than
+`capacity.masons` units are `implementing` in workstreams no pause covers. A
+unit waiting on an amendment leaves its workstream eligible to start another
+ready unit; its slot is free while the request awaits a decision. A
 workstream a runtime pause covers (a `factory` pause, a `project` pause on the
 active project or a `workstream` pause on it) starts no unit, and its
 `implementing` unit takes no mason slot, so the slot goes to a workstream that
@@ -1358,7 +1360,7 @@ the same reviewer. The scheduler admits reviewer turns within
 queued. Pauses hold new review turns. The review prompt includes the recorded
 identity, exact diff, sealed spec and plan, criterion report, resolved
 footprint and local context. The reviewer has a read-only, isolated turn with
-`ask` and `verdict` tools.
+`ask`, `amend` and `verdict` tools.
 
 `verdict` requires `satisfactory` or `material_findings`, evidence for every
 unit criterion, and, for material findings, at least one finding naming a

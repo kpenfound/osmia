@@ -190,7 +190,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
-			if !slices.Equal(names, []string{"ask", "file_read"}) {
+			if !slices.Equal(names, []string{"amend", "ask", "file_read"}) {
 				problem("%s tools %v", req.Name, names)
 			}
 			for _, part := range want {
@@ -471,7 +471,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	reserved := `{"recorded":false,"reason":"reserved until amendments and standing rulings (M4)"}`
+	reserved := `{"recorded":false,"reason":"reserved until standing rulings (M4)"}`
 	want := map[string][]string{
 		"build":    {`{"recorded":true,"question":"1","next":"End your turn now. The answer arrives as your next turn on this thread."}`},
 		"review":   {`{"recorded":true,"question":"2","next":"End your turn now. The answer arrives as your next turn on this thread."}`},
@@ -479,7 +479,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		"chief-answers": {
 			`{"recorded":false,"reason":"an answer needs at least one citation; escalate a question the record does not settle"}`,
 			`{"recorded":false,"reason":"citation \"charter#7\" does not resolve: the charter has no rule numbered 7 exactly once"}`,
-			reserved, reserved,
+			`{"recorded":false,"reason":"at least one spec#<n> or plan#<unit> citation is required"}`, reserved,
 			`{"recorded":true,"question":"1","next":"The answer is delivered to the asker as its next turn."}`,
 			`{"recorded":false,"reason":"question 1 is already answered"}`,
 		},

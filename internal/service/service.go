@@ -50,7 +50,8 @@ type Options struct {
 	// each recorded answer to a question is queued on its asker's thread.
 	// The mason controller starts ready units of building workstreams and
 	// final-review follow-ups of assembled workstreams,
-	// one implementing or waiting unit per workstream within capacity.masons,
+	// one implementing or question-waiting unit per workstream within capacity.masons;
+	// amendment-waiting units leave ready siblings eligible,
 	// and queues each started unit's first mason turn for the scheduler. It
 	// parks a unit in waiting when its mason asks, and resumes it once the
 	// answer is queued as the mason's next turn. The reviewer controller
