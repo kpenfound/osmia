@@ -95,17 +95,30 @@ type QuestionState struct {
 
 // Questions returns every question of the workstream, oldest first.
 func (r *Repository) Questions(stream config.WorkstreamID) ([]QuestionState, error) {
+	questions, _, err := r.QuestionActions(stream)
+	return questions, err
+}
+
+// QuestionActions reads questions and filed amendment requests from one trace
+// snapshot, so a turn can determine its durable waiting outcome in one scan.
+func (r *Repository) QuestionActions(stream config.WorkstreamID) ([]QuestionState, []Amendment, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	_, v, err := r.loadWorkflow(stream)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	records, _, err := r.scan()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return questions(records, v, stream), nil
+	var amendments []Amendment
+	for _, record := range records {
+		if a, ok := record.(Amendment); ok && a.Workstream == stream {
+			amendments = append(amendments, a)
+		}
+	}
+	return questions(records, v, stream), amendments, nil
 }
 
 func questions(records []Record, v *workflowView, stream config.WorkstreamID) []QuestionState {

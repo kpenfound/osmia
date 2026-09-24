@@ -28,7 +28,7 @@ func (t *Turns) Run(ctx context.Context, prepared coreadapter.PreparedTurn) (cor
 		return coreadapter.SessionResult{}, errors.New("question turns require a runner and a trace")
 	}
 	result, err := t.Turns.Run(ctx, prepared)
-	states, readErr := t.Repository.Questions(config.WorkstreamID(prepared.Scope.Workstream))
+	states, amendments, readErr := t.Repository.QuestionActions(config.WorkstreamID(prepared.Scope.Workstream))
 	if readErr != nil {
 		return result, errors.Join(err, readErr)
 	}
@@ -37,13 +37,11 @@ func (t *Turns) Run(ctx context.Context, prepared coreadapter.PreparedTurn) (cor
 			result.Outcome = &coreadapter.Outcome{Status: Waiting, Report: "Asked question " + q.Asked.ID}
 		}
 	}
-	amendments, readErr := trace.Read[trace.Amendment](t.Repository, config.WorkstreamID(prepared.Scope.Workstream))
-	if readErr != nil {
-		return result, errors.Join(err, readErr)
-	}
-	for _, a := range amendments {
-		if a.Thread == prepared.Scope.Thread && a.Turn == prepared.Scope.Turn && a.Role != trace.ChiefOfStaff {
-			result.Outcome = &coreadapter.Outcome{Status: Waiting, Report: "Filed amendment " + a.ID}
+	if prepared.Scope.Role == "mason" || prepared.Scope.Role == "reviewer" {
+		for _, a := range amendments {
+			if a.Thread == prepared.Scope.Thread && a.Turn == prepared.Scope.Turn {
+				result.Outcome = &coreadapter.Outcome{Status: Waiting, Report: "Filed amendment " + a.ID}
+			}
 		}
 	}
 	return result, err

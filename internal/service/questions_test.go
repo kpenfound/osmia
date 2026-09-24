@@ -190,7 +190,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
-			if !slices.Equal(names, []string{"amend", "ask", "file_read"}) {
+			if !slices.Equal(names, []string{"ask", "file_read"}) {
 				problem("%s tools %v", req.Name, names)
 			}
 			for _, part := range want {
@@ -270,7 +270,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			}{
 				{"answer", map[string]any{"question": "1", "text": "In files under the root.", "citations": []string{}}},
 				{"answer", map[string]any{"question": "1", "text": "In files under the root.", "citations": []string{"charter#7"}}},
-				{"route_amendment", map[string]any{"question": "1"}},
+				{"route_amendment", map[string]any{"question": "1", "citations": []string{}, "change": "Clarify the criterion", "reason": "The answer changes it"}},
 				{"propose_charter", map[string]any{"question": "1"}},
 				{"answer", map[string]any{"question": "1", "text": "In files under the root.", "citations": []string{"charter#1"}}},
 				{"answer", map[string]any{"question": "1", "text": "In a database.", "citations": []string{"charter#1"}}},
