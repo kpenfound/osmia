@@ -79,6 +79,22 @@ func TestDefaults(t *testing.T) {
 		t.Fatalf("loader created clone: %v", err)
 	}
 }
+
+func TestProjectClassifier(t *testing.T) {
+	for _, tc := range []struct{ setting, want string }{{"", ""}, {"classifier = 'default'\n", "default"}} {
+		c, err := Load(fixture(t, topConfig, projectConfig+tc.setting))
+		if err != nil || c.Project.Classifier != tc.want {
+			t.Fatalf("classifier %q: %+v %v", tc.setting, c, err)
+		}
+	}
+	if _, err := Load(fixture(t, topConfig, projectConfig+"classifier = 'missing'\n")); err == nil || !strings.Contains(err.Error(), "classifier: unknown profile missing") {
+		t.Fatalf("unknown classifier: %v", err)
+	}
+	top := topConfig + "[profiles.other]\nagent = 'codex'\nmodel = 'other'\n[roles.mason]\nsandbox = 'claude'\n"
+	if _, err := Load(fixture(t, top, projectConfig+"classifier = 'other'\n")); err == nil || !strings.Contains(err.Error(), "claude classifier") {
+		t.Fatalf("incompatible classifier sandbox: %v", err)
+	}
+}
 func TestExplicit(t *testing.T) {
 	top := topConfig + `effort = "high"
 timeout = "2m"

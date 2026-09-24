@@ -16,6 +16,7 @@ import (
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -120,9 +121,20 @@ func newMasonFixture(t *testing.T, masons int, drafted string) (*shedFixture, *f
 // written into the configuration's [capacity] section, in place of
 // capacity.masons alone.
 func newCappedMasonFixture(t *testing.T, capacity, drafted string) (*shedFixture, *fakeMasons) {
+	return newConfiguredMasonFixture(t, capacity, drafted, "")
+}
+
+func newConfiguredMasonFixture(t *testing.T, capacity, drafted, classifier string) (*shedFixture, *fakeMasons) {
 	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, masonRoles, func(opts *Options) {
 		opts.Threads = Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts}).Threads
+		if classifier != "" {
+			original := opts.Threads
+			opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
+				cfg.Project.Classifier = classifier
+				return original(r, cfg)
+			}
+		}
 		path := filepath.Join(opts.Config.Root, "config.toml")
 		data, err := os.ReadFile(path)
 		must(t, err)

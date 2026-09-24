@@ -22,8 +22,10 @@ type Runner struct {
 	Now          func() time.Time
 	ReplayLimits ReplayLimits
 	// Fallbacks maps a selected profile name to a service-approved fallback.
-	Fallbacks  map[string]coreadapter.Profile
-	MaxRetries int
+	Fallbacks         map[string]coreadapter.Profile
+	MaxRetries        int
+	Classifier        func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error)
+	ClassifierProfile *coreadapter.Profile
 }
 
 // RunNext retries only proven unstarted attempts. Once claimed, persistence
@@ -61,6 +63,9 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	}
 	if t.Identity.Role == "mason" {
 		response.Classification = trace.ClassifyMasonTurn(result, response.Failure)
+		if response.Classification != nil && r.Classifier != nil && r.ClassifierProfile != nil {
+			r.classify(ctx, prepared, &response)
+		}
 	}
 	q.Response = &response
 	if persistErr != nil {

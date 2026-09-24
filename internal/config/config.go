@@ -78,6 +78,7 @@ type Project struct {
 	Clone      string          `toml:"clone" json:"clone"`
 	BaseBranch string          `toml:"base_branch" json:"base_branch"`
 	Landing    string          `toml:"landing" json:"landing"`
+	Classifier string          `toml:"classifier" json:"classifier"`
 	Capacity   ProjectCapacity `toml:"capacity" json:"capacity"`
 }
 type ProjectCapacity struct {
@@ -169,6 +170,9 @@ func Load(options Options) (*Config, error) {
 		return nil, err
 	}
 	c.Project = p
+	if err := c.validateClassifier(); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
@@ -186,7 +190,25 @@ func (c *Config) WithProject(id ProjectID, home string) (*Config, error) {
 	out := *c
 	out.ActiveProjects = []string{string(id)}
 	out.Project = p
+	if err := out.validateClassifier(); err != nil {
+		return nil, err
+	}
 	return &out, nil
+}
+
+func (c *Config) validateClassifier() error {
+	if c.Project.Classifier == "" {
+		return nil
+	}
+	if _, ok := c.Profiles[c.Project.Classifier]; !ok {
+		path, _ := c.Root.ProjectConfig(c.Project.ID)
+		return fieldError(path, "classifier", "unknown profile "+c.Project.Classifier)
+	}
+	if c.Roles["mason"].Sandbox == "claude" && c.Profiles[c.Project.Classifier].Agent != "claude" {
+		path, _ := c.Root.ProjectConfig(c.Project.ID)
+		return fieldError(path, "classifier", "mason claude sandbox requires a claude classifier profile")
+	}
+	return nil
 }
 
 // WithoutProject returns a copy of c with no active project.
@@ -277,7 +299,7 @@ func decode(path string, dest any, project bool) (toml.MetaData, error) {
 func knownKey(key toml.Key, project bool) bool {
 	path := key.String()
 	if project {
-		return slices.Contains([]string{"version", "name", "upstream", "fork", "clone", "base_branch", "landing", "capacity", "capacity.per_workstream"}, path)
+		return slices.Contains([]string{"version", "name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "capacity", "capacity.per_workstream"}, path)
 	}
 	if len(key) >= 2 && (key[0] == "profiles" || key[0] == "roles") {
 		if len(key) == 2 {
