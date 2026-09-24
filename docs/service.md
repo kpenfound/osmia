@@ -1215,7 +1215,9 @@ Each attempt, in order:
 the spec revision's content), `base` (`remote`, `branch`, `commit`), `branch`,
 `workspace` and `footprints`, one per unit in plan order with `unit`,
 `entities` and `paths`. Every sealing that completes records the next revision
-of the file; the seal in force is the latest.
+of the file; the seal in force is the latest. A
+[drift rebase](#drift-rebases) records the next revision with a new `base`
+and the same seal number.
 
 A fetch that fails, a remote the clone lacks, and a branch or worktree that
 cannot be created are infrastructure: the attempt returns the error, the
@@ -1640,7 +1642,8 @@ its next file-based bundle can include the new local knowledge.
 
 The landing controller runs in every reconciliation pass after the building
 controller. It runs one landing and rebase sequence at a time per project:
-while a landing operation of the project has no result, it asks for nothing.
+while a landing or [drift rebase](#drift-rebases) operation of the project
+has no result, it asks for nothing.
 Otherwise it first [rebases](#rebasing-units-in-flight) the units a landing
 left behind. While a unit of a building or assembled workstream that is not paused is
 behind its feature branch, or a rebase has no result, it asks for no landing.
@@ -1772,6 +1775,60 @@ does.
 
 A rebase whose outcome is recorded completes on inspection without touching
 the workspace.
+
+### Drift rebases
+
+A drift rebase brings a workstream's feature branch current with upstream
+before final review, and moves the seal's upstream base with it. Drift
+rebases share the project's one lander with landings. Asking for them takes
+every `building` or `assembled` workstream of the project that is not paused
+and has no final review in flight, and asks nothing while a landing or drift
+rebase of the project has no result. Each gets the operation `drift` (input
+`drift` `<k>`, the workstream's next drift number) on the repository boundary
+with the transition `drift-<k>` (actor `service`/`foreman`, cause the seal
+revision in force), which moves the workflow subject `drift` to
+`requested-<k>`. While a drift rebase has no result, the landing controller
+asks for no landing and no unit rebase.
+
+The operation checks the workstream again: one that is no longer `building`
+or `assembled`, is paused, or has no feature branch is skipped. The foreman
+then fetches the project's configured `base_branch` from the remote whose URL
+names its `upstream` and replays the feature branch onto the fetched commit,
+as a [final review](#running-a-final-review) does, committing as
+`Osmia <osmia@localhost>` at the time the drift rebase was asked for. A branch
+already on the fetched commit stays as it is.
+
+A replay that conflicts changes neither the branch nor the seal: one trace
+commit records `drift/rebase.json` with outcome `conflicted`, the upstream
+remote, branch and commit, the branch commit and the conflicted paths, and
+`drift-<k>-conflicted` moves `drift` to `conflicted-<k>` with the reason
+`feature branch <branch> does not rebase cleanly onto <remote>/<branch> at
+<commit>: <paths> conflicted; the branch stays at <commit> and the seal is
+unchanged`.
+
+A clean replay is recorded in `drift/rebase.json` with outcome `replayed` and
+the rebased commit before anything moves. The feature branch and its
+workspace then move to the rebased commit. One trace commit then records the
+next revision of `drift/rebase.json` with outcome `rebased`, the seal and the
+`seal.json` revision in force afterwards; the next revision of `seal.json`
+(actor `service`/`foreman`, cause the operation), identical but for `base`,
+which names the fetched commit, unless the seal was already on it; and
+`drift-<k>-rebased`, which moves `drift` to `rebased-<k>` with the reason
+`feature branch <branch> is rebased from <before> onto <remote>/<branch> at
+<commit> as <rebased>; seal <n> moves from base <old> to <new> in seal.json
+revision <r>`. The seal number is unchanged. With the branch moved, the
+landing controller [rebases the units](#rebasing-units-in-flight) it left
+behind.
+
+A drift rebase that is interrupted resumes from what the trace records. A
+recorded replay is not replayed again: the branch moves to its commit, even
+when upstream moved since. A branch already at that commit is not moved
+again, and a recorded outcome completes the operation on inspection. So each
+drift rebase records one outcome and at most one `seal.json` revision. A
+skipped drift rebase moves `drift` to `skipped-<k>` with the reason `drift
+rebase <k> changed nothing: <why>`, as does one whose branch moved to a
+commit other than the one it replayed or the rebased one. Fetch and Git
+errors leave the operation pending for another attempt.
 
 ### Unit workspaces
 
