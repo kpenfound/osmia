@@ -288,7 +288,9 @@ func TestStatusReportsUnreadableTrace(t *testing.T) {
 	message := fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", project)
 	list := s.statusList()
 	streaks := "cannot read the turn attempts of the active project; check the trace repository"
-	if want := []Diagnostic{{"failure_streaks", Internal, streaks}, {"workstreams", Internal, message}}; len(list.Workstreams) != 0 || len(list.FailureStreaks) != 0 || !reflect.DeepEqual(list.Diagnostics, want) {
+	usage := fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", project)
+	capacity := fmt.Sprintf("cannot read the turns of project %s; check the trace repository", project)
+	if want := []Diagnostic{{"failure_streaks", Internal, streaks}, {"provider_usage", Internal, usage}, {"capacity", Internal, capacity}, {"workstreams", Internal, message}}; len(list.Workstreams) != 0 || len(list.FailureStreaks) != 0 || list.Capacity != nil || list.ProviderUsage != nil || !reflect.DeepEqual(list.Diagnostics, want) {
 		t.Fatalf("damaged trace: %+v", list)
 	}
 	if _, api := s.workstreamStatus(string(stream)); api == nil || *api != (APIError{Internal, message}) {

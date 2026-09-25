@@ -504,15 +504,8 @@ func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(c
 	librarian := librarianWorkstream(project)
 	units := newUnitWorkspaces(cfg)
 	return func(ctx context.Context, c scheduler.Candidate) (bool, error) {
-		if c.Workstream == librarian || c.Thread.Identity.Role == architectRole || c.Thread.Identity.Role == committeeRole {
-			return false, nil
-		}
-		if gone, err := abandoned(repository, c.Workstream); err != nil || gone {
+		if held, err := s.holds(project, librarian, repository, c); err != nil || held {
 			return false, err
-		}
-		st, _ := s.effective()
-		if scheduler.Held(st.Pauses, project, c) {
-			return false, nil
 		}
 		if c.Thread.Identity.Role == masonRole && c.Turn.Request.Unit != "" {
 			behind, err := units.behind(ctx, c.Workstream, c.Turn.Request.Unit)
@@ -520,6 +513,21 @@ func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(c
 		}
 		return true, nil
 	}
+}
+
+// holds reports whether the dispatch gate declines the candidate whatever
+// the capacity: a turn of the librarian's workstream, an architect or
+// committee turn, which their own passes run, a turn of an abandoned
+// workstream, and a turn a pause in force holds.
+func (s *Service) holds(project config.ProjectID, librarian config.WorkstreamID, repository *trace.Repository, c scheduler.Candidate) (bool, error) {
+	if c.Workstream == librarian || c.Thread.Identity.Role == architectRole || c.Thread.Identity.Role == committeeRole {
+		return true, nil
+	}
+	if gone, err := abandoned(repository, c.Workstream); err != nil || gone {
+		return gone, err
+	}
+	st, _ := s.effective()
+	return scheduler.Held(st.Pauses, project, c), nil
 }
 
 // priorities returns the runtime priority order in force.

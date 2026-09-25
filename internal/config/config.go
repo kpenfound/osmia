@@ -148,6 +148,32 @@ func fieldError(path, field, reason string) error {
 // Load returns nil on every failure. The top-level file is required, and only
 // the explicitly active project is read; archived directories are not activated.
 func Load(options Options) (*Config, error) {
+	c, err := LoadTopLevel(options)
+	if err != nil {
+		return nil, err
+	}
+	if len(c.ActiveProjects) == 0 {
+		return c, nil
+	}
+	id, err := ParseProjectID(c.ActiveProjects[0])
+	if err != nil {
+		return nil, err
+	}
+	p, err := loadProject(c.Root, id, options.Home, c.Capacity.PerWorkstream)
+	if err != nil {
+		return nil, err
+	}
+	c.Project = p
+	if err := c.validateClassifier(); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// LoadTopLevel loads and validates the top-level file alone, as Load does,
+// and returns nil on every failure. It reads no project file: Project stays
+// zero whatever active_projects lists.
+func LoadTopLevel(options Options) (*Config, error) {
 	root, err := ResolveRoot(options.Root, options.Home)
 	if err != nil {
 		return nil, err
@@ -231,17 +257,6 @@ func Load(options Options) (*Config, error) {
 		}
 	}
 	if err := c.validateProfiles(path, md); err != nil {
-		return nil, err
-	}
-	if len(ids) == 0 {
-		return c, nil
-	}
-	p, err := loadProject(root, ids[0], options.Home, c.Capacity.PerWorkstream)
-	if err != nil {
-		return nil, err
-	}
-	c.Project = p
-	if err := c.validateClassifier(); err != nil {
 		return nil, err
 	}
 	return c, nil
