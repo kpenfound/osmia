@@ -576,7 +576,10 @@ type GoModule {
         # Nested Dagger clients find the workspace boundary by walking up to .git.
         .withNewFile(".git/HEAD", "ref: refs/heads/main\n")
         .withWorkdir(path)
-        .withExec(["otelgotest", "-timeout=30m", "./..."], experimentalPrivilegedNesting: true)
+        # -count=1 keeps go test from recording every file the tests touch
+        # for its result cache and reading that log back after each package:
+        # the service tests' log outgrows the engine's memory.
+        .withExec(["otelgotest", "-count=1", "-timeout=30m", "./..."], experimentalPrivilegedNesting: true)
     }
   }
 
@@ -717,7 +720,10 @@ type GoDirectory {
         # Nested Dagger clients find the workspace boundary by walking up to .git.
         .withNewFile(".git/HEAD", "ref: refs/heads/main\n")
         .withWorkdir(path)
-        .withExec(["otelgotest", "-timeout=30m"], experimentalPrivilegedNesting: true)
+        # -count=1 keeps go test from recording every file the tests touch
+        # for its result cache and reading that log back after each package:
+        # the service tests' log outgrows the engine's memory.
+        .withExec(["otelgotest", "-count=1", "-timeout=30m"], experimentalPrivilegedNesting: true)
     }
   }
 

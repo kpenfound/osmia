@@ -208,10 +208,13 @@ func TestStaleSocket(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	path := filepath.Join(opts.Config.Root, "osmia.sock")
-	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	// Bind without listening: a closed listener stays reachable while a
+	// child forked by a parallel test still holds its descriptor.
+	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	must(t, err)
-	l.SetUnlinkOnClose(false)
-	must(t, l.Close())
+	syscall.CloseOnExec(fd)
+	must(t, syscall.Bind(fd, &syscall.SockaddrUnix{Name: path}))
+	must(t, syscall.Close(fd))
 	_, c := start(t, opts)
 	_, err = c.Health(context.Background())
 	must(t, err)
