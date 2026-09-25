@@ -276,13 +276,14 @@ positive decimal USD strings. `per_session` caps known spend on each new turn.
 When a building or assembled workstream's known trace cost exceeds `per_unit`,
 the service files one amendment request for that workstream and continues its
 normal workflow. The request states the known spend as a lower bound and counts
-attempts whose cost is unknown. `per_day` is loaded for later budget policy.
+attempts whose cost is unknown. When known spend on the service host's local
+calendar day reaches `per_day`, the service pauses factory dispatch until the
+next local day ([daily budget](service.md#daily-budget)).
 Missing values impose no cap. Unknown cost does not establish that a cap was reached.
 
 The full design's `listen.tailnet`, `listen.web`, `notify`, `hearsay` and
 project `hearsay_scope` settings are rejected as unsupported
-in M1, even if supplied empty. Daily budget actions
-and live reload are M4 work, tailnet/web and notifications belong to M5, multi-project operation to M7, and
+in M1, even if supplied empty. Live reload is M4 work, tailnet/web and notifications belong to M5, multi-project operation to M7, and
 Hearsay to M8. Unsupported keys do not silently enable later behavior.
 
 Representative errors include the file and offending field:

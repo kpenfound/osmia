@@ -701,6 +701,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		diagnostics(stdout, cfg.Diagnostics)
 		showRuntime(stdout, rt)
+		showDailyBudget(stdout, all.DailyBudget)
 		showWorkstreams(stdout, all)
 		return 0
 	}
@@ -865,6 +866,19 @@ func showRuntime(w io.Writer, rt service.RuntimeResponse) {
 		fmt.Fprintf(w, "  %s: %s source=%s\n", r, p.Name, p.Source)
 	}
 	diagnostics(w, rt.Diagnostics)
+}
+
+// showDailyBudget prints today's known spend against the daily budget, if
+// one is configured.
+func showDailyBudget(w io.Writer, b *service.DailyBudgetStatus) {
+	if b == nil {
+		return
+	}
+	fmt.Fprintf(w, "Daily budget: USD %s of USD %s spent on %s", b.SpendUSD, b.LimitUSD, b.Day)
+	if b.LowerBound {
+		fmt.Fprintf(w, " (at least; %d attempt(s) have unknown cost)", b.UnknownCosts)
+	}
+	fmt.Fprintln(w)
 }
 
 // showWorkstreams prints each workstream's gates, overlap advisories, latest

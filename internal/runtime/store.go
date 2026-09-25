@@ -47,7 +47,14 @@ type State struct {
 	Pauses     []Pause           `json:"pauses,omitempty"`
 	Priorities []Priority        `json:"priorities,omitempty"`
 	Profiles   map[string]string `json:"profiles,omitempty"`
+	// BudgetPausedOn is the local calendar day, as YYYY-MM-DD, on which the
+	// daily budget last paused the factory.
+	BudgetPausedOn string `json:"budget_paused_on,omitempty"`
 }
+
+// DayLayout is the layout of BudgetPausedOn.
+const DayLayout = "2006-01-02"
+
 type Diagnostic struct {
 	Field  string `json:"field"`
 	Reason string `json:"reason"`
@@ -358,6 +365,11 @@ func validate(st State) error {
 			return fmt.Errorf("empty role or profile")
 		}
 	}
+	if st.BudgetPausedOn != "" {
+		if _, err := time.Parse(DayLayout, st.BudgetPausedOn); err != nil {
+			return fmt.Errorf("budget pause day must be YYYY-MM-DD")
+		}
+	}
 	return nil
 }
 func (s *Store) mutate(f func(*State, Inputs) error) error {
@@ -390,22 +402,38 @@ func (s *Store) SetPause(p Pause) error {
 	if p.SetAt.IsZero() {
 		p.SetAt = time.Now().UTC()
 	}
+	return s.mutate(func(st *State, in Inputs) error { return setPause(st, in, p) })
+}
+
+// SetBudgetPause records the daily budget's pause p and day, the local
+// calendar day it is set on, in one write. It follows SetPause's rules.
+func (s *Store) SetBudgetPause(p Pause, day string) error {
 	return s.mutate(func(st *State, in Inputs) error {
-		if err := validateTarget(p.Target); err != nil {
+		if p.Source != PauseDailyBudget {
+			return fmt.Errorf("budget pause source must be %s", PauseDailyBudget)
+		}
+		if err := setPause(st, in, p); err != nil {
 			return err
 		}
-		if err := targetReference(p.Target, in); err != nil {
-			return err
-		}
-		for _, current := range st.Pauses {
-			if current.Target == p.Target && p.Source != PauseOwner && current.Source != p.Source {
-				return fmt.Errorf("%s cannot replace %s pause; only the owner may replace it", p.Source, current.Source)
-			}
-		}
-		st.Pauses = slices.DeleteFunc(st.Pauses, func(v Pause) bool { return v.Target == p.Target })
-		st.Pauses = append(st.Pauses, p)
+		st.BudgetPausedOn = day
 		return nil
 	})
+}
+func setPause(st *State, in Inputs, p Pause) error {
+	if err := validateTarget(p.Target); err != nil {
+		return err
+	}
+	if err := targetReference(p.Target, in); err != nil {
+		return err
+	}
+	for _, current := range st.Pauses {
+		if current.Target == p.Target && p.Source != PauseOwner && current.Source != p.Source {
+			return fmt.Errorf("%s cannot replace %s pause; only the owner may replace it", p.Source, current.Source)
+		}
+	}
+	st.Pauses = slices.DeleteFunc(st.Pauses, func(v Pause) bool { return v.Target == p.Target })
+	st.Pauses = append(st.Pauses, p)
+	return nil
 }
 
 // Clear operations also accept stale keys, allowing explicit removal.
