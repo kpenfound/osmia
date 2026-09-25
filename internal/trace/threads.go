@@ -459,6 +459,55 @@ func (r *Repository) AbandonTurn(ctx context.Context, stream config.WorkstreamID
 	return ErrClaim
 }
 
+// RecoverUnclaimedTurn records the preparation of a session directory whose
+// claim was not published before the previous service stopped. The directory
+// is durable evidence that preparation reached this turn; no agent result is
+// assumed. Callers must check for the directory while holding service
+// ownership, before dispatch begins.
+func (r *Repository) RecoverUnclaimedTurn(ctx context.Context, stream config.WorkstreamID, agent, turn, directory string, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if directory == "" || at.IsZero() {
+		return fmt.Errorf("session directory and timestamp required")
+	}
+	log, _, err := r.loadWorkflow(stream)
+	if err != nil {
+		return err
+	}
+	t, ok := log.Threads[agent]
+	if !ok {
+		return os.ErrNotExist
+	}
+	if t.Active != "" {
+		return ErrClaimed
+	}
+	for i, q := range t.Turns {
+		if q.Request.TurnID != turn {
+			continue
+		}
+		if q.Claim != nil || q.Response != nil || !q.CompletedAt.IsZero() {
+			return ErrClaim
+		}
+		if at.Before(q.Request.At) {
+			at = q.Request.At
+		}
+		q.Claim = &TurnClaim{Token: EventID(q.Request.ID, "recovery-claim"), ServiceSession: r.session, SessionDirectory: directory, At: at}
+		h := q.Request.Header
+		h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", EventID(q.Request.ID, "response"), at, Actor{Kind: "service", ID: "thread-recovery"}
+		response := TurnResponse{Header: h, AgentID: agent, ThreadID: q.Request.ThreadID, TurnID: turn, RequestID: q.Request.ID, RequestRevision: q.Request.Revision,
+			Result:  coreadapter.SessionResult{SessionDirectory: directory, StartedAt: at, Cancelled: true, IsError: true, ErrorSubtype: "interrupted"},
+			Failure: "the service stopped before the turn claim was recorded"}
+		q.Response, q.CompletedAt = &response, at
+		t.Turns[i], t.Status = q, q.Status()
+		log.Threads[agent] = t
+		return r.saveThread(ctx, stream, log, response)
+	}
+	return ErrClaim
+}
+
 // settleAttempt makes a recovered turn's response and its final attempt one
 // value. A final attempt with a recorded result supplies the response's result
 // and failure; one without receives the response's.
