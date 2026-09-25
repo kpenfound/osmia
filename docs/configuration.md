@@ -33,6 +33,7 @@ configuration list; they belong to persisted workstream manifests.
 <root>/config.toml
 <root>/runtime.json
 <root>/osmia.sock
+<root>/tailnet/                                embedded Tailscale node state, when listen.tailnet is set
 <root>/project-add.json                       journal of one interrupted project registration
 <root>/projects/<project-id>/config.toml
 <root>/projects/<project-id>/                  dedicated project trace repository
@@ -80,6 +81,9 @@ The following optional settings show their defaults:
 socket = "osmia.sock"
 # Optional loopback host:port serving the same API over TCP; empty disables.
 web = ""
+# Optional hostname under which the service joins your tailnet and serves the
+# same API on port 80; empty disables.
+tailnet = ""
 
 [capacity]
 masons = 4
@@ -111,7 +115,15 @@ Unix socket; the loader neither binds nor removes it. `listen.web` is
 free port). An empty host, any other address or hostname, and a missing or
 named port are errors that name `listen.web`. The listener has no
 authentication: anyone who can connect to the host's loopback interface can
-use the API ([web listener](service.md#web-listener)). All capacity and shed values
+use the API ([web listener](service.md#web-listener)). `listen.tailnet` is
+one DNS label of 1 to 63 lowercase letters, digits and hyphens that neither
+starts nor ends with a hyphen, such as `osmia`; anything else is an error that
+names `listen.tailnet`. With it set, the service joins your tailnet through
+embedded Tailscale, keeps the node's state in `<root>/tailnet`, and logs in
+with the auth key in the `TS_AUTHKEY` environment variable or, without one,
+prints a login URL on first run. The auth key never belongs in these files.
+Tailnet membership is the boundary: there is no in-app authentication
+([tailnet listener](service.md#tailnet-listener)). All capacity and shed values
 must be positive integers. `events.window` is a positive Go duration: how long
 the oldest undelivered event of a workstream waits before the service delivers
 it, with every other ready event, as one
@@ -278,7 +290,7 @@ Runtime profile overrides, pauses and priorities belong in `runtime.json`, never
 these files; see [runtime overrides](runtime.md) for M1 persistence and resolution.
 `osmia reload` applies edited files to a running service after validating
 all of them ([reload](service.md#reload)). The root, `listen.socket`,
-`listen.web` and `active_projects` keep their loaded values until the service
+`listen.web`, `listen.tailnet` and `active_projects` keep their loaded values until the service
 restarts; project registration and removal change the active project without
 one.
 
@@ -292,9 +304,9 @@ calendar day reaches `per_day`, the service pauses factory dispatch until the
 next local day ([daily budget](service.md#daily-budget)).
 Missing values impose no cap. Unknown cost does not establish that a cap was reached.
 
-The full design's `listen.tailnet`, `notify`, `hearsay` and
+The full design's `notify`, `hearsay` and
 project `hearsay_scope` settings are rejected as unsupported
-in M1, even if supplied empty. Tailnet access and notifications belong to M5, multi-project operation to M7, and
+in M1, even if supplied empty. Notifications belong to M5, multi-project operation to M7, and
 Hearsay to M8. Unsupported keys do not silently enable later behavior.
 
 Representative errors include the file and offending field:

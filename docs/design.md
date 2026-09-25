@@ -607,7 +607,7 @@ The first release, at the end of M5, runs on git worktrees, without Hearsay, wit
 
 ## 15. Security
 
-- Tailnet membership is the boundary for the web interface and the API. The unix socket is the boundary locally, and the loopback interface is the boundary for the optional web listener, which binds no other address and refuses requests whose `Host` is not loopback or whose writes are not JSON. There is no in-app authentication and no multi-user isolation.
+- Tailnet membership is the boundary for the web interface and the API. The unix socket is the boundary locally, and the loopback interface is the boundary for the optional web listener, which binds no other address and refuses requests whose `Host` is not loopback or whose writes are not JSON. The tailnet listener refuses requests whose `Host` is neither an IP address nor one of the node's names, and writes that are not JSON. There is no in-app authentication and no multi-user isolation.
 - Sessions never hold a version control tool, so a session cannot push, force-push or rewrite history.
 - GitHub credentials reach the foreman's push and pull request calls as environment variables, never as arguments, and never reach a session.
 - No factory state is committed to the target project. Its repository sees the feature's code and tests through the branch and pull request.
