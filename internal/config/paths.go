@@ -105,6 +105,9 @@ func (r Root) Config() (string, error)  { return r.managed("config.toml") }
 func (r Root) Runtime() (string, error) { return r.managed("runtime.json") }
 func (r Root) Socket() (string, error)  { return r.managed("osmia.sock") }
 
+// Tailnet is the embedded Tailscale node's state directory.
+func (r Root) Tailnet() (string, error) { return r.managed("tailnet") }
+
 // PendingProject is the journal of one interrupted project registration.
 func (r Root) PendingProject() (string, error) { return r.managed("project-add.json") }
 

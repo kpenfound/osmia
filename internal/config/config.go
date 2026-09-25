@@ -39,6 +39,9 @@ type Listen struct {
 	// Web is an optional loopback host:port that serves the same API as the
 	// socket; empty disables it.
 	Web string `toml:"web" json:"web,omitempty"`
+	// Tailnet is an optional hostname under which the service joins the
+	// owner's tailnet and serves the same API; empty disables it.
+	Tailnet string `toml:"tailnet" json:"tailnet,omitempty"`
 }
 type Capacity struct {
 	Masons        int `toml:"masons" json:"masons"`
@@ -195,6 +198,11 @@ func Load(options Options) (*Config, error) {
 	if c.Listen.Web != "" {
 		if err := validateWeb(c.Listen.Web); err != nil {
 			return nil, fieldError(path, "listen.web", err.Error())
+		}
+	}
+	if c.Listen.Tailnet != "" {
+		if err := validateTailnet(c.Listen.Tailnet); err != nil {
+			return nil, fieldError(path, "listen.tailnet", err.Error())
 		}
 	}
 	for _, value := range []struct {
@@ -402,16 +410,13 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "sandbox", "image"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "listen.web", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window"}, path)
+	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {
 	switch key[0] {
 	case "hearsay", "notify", "hearsay_scope", "pause", "priority":
 		return "unsupported in M1; requires a later milestone"
-	}
-	if key.String() == "listen.tailnet" {
-		return "unsupported in M1; only a local Unix socket and loopback web listener are supported"
 	}
 	return "unknown configuration key"
 }
@@ -573,6 +578,23 @@ func validateWeb(addr string) error {
 		return nil
 	}
 	return fmt.Errorf("host must be localhost or a loopback address; other interfaces are not supported")
+}
+
+// validateTailnet accepts a single DNS label: 1 to 63 lowercase letters,
+// digits and hyphens that neither starts nor ends with a hyphen.
+func validateTailnet(hostname string) error {
+	if len(hostname) > 63 {
+		return fmt.Errorf("hostname must be at most 63 characters")
+	}
+	for _, r := range hostname {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+			return fmt.Errorf("hostname must be one label of lowercase letters, digits and hyphens, such as osmia")
+		}
+	}
+	if strings.HasPrefix(hostname, "-") || strings.HasSuffix(hostname, "-") {
+		return fmt.Errorf("hostname must not start or end with a hyphen")
+	}
+	return nil
 }
 
 // LoopbackHost reports whether host, without a port or brackets, is

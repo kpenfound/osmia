@@ -18,7 +18,7 @@ func TestLoadFailuresNameTheFileAndField(t *testing.T) {
 		{"project validation", topConfig, projectConfig + "landing = 'merge'\n", "projects/" + pid + "/config.toml", "landing", "expected commit-per-unit or squash"},
 		{"wrong type", topConfig + "[capacity]\nmasons = 'secret-value'\n", projectConfig, "config.toml", "capacity.masons", "value has the wrong type at line 7"},
 		{"project wrong type", topConfig, projectConfig + "upstream_rebase = 0\n", "projects/" + pid + "/config.toml", "upstream_rebase", "value has the wrong type at line 5"},
-		{"syntax", topConfig + "token = 'secret-value'\n[broken", projectConfig, "config.toml", "profiles.default", "invalid TOML at line 6"},
+		{"syntax", topConfig + "token = 'secret-value'\n[broken", projectConfig, "config.toml", "profiles.default", "invalid TOML at line 7"},
 		{"unknown key", topConfig + "secret = 'secret-value'\n", projectConfig, "config.toml", "profiles.default.secret", "unknown configuration key"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

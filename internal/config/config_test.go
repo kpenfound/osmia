@@ -229,7 +229,14 @@ func TestInvalid(t *testing.T) {
 		{"missing image", topConfig + "[roles.mason]\nsandbox = 'container'\n", "", "roles.mason.image"},
 		{"unused image", topConfig + "[roles.mason]\nimage = 'image'\n", "", "roles.mason.image"},
 		{"fallback sandbox", topConfig + "fallback = 'other'\n[profiles.other]\nagent = 'codex'\nmodel = 'test'\n[roles.mason]\nsandbox = 'claude'\n", "", "entire fallback chain"},
-		{"tailnet", topConfig + "[listen]\ntailnet = ''\n", "", "unsupported in M1"},
+		{"tailnet uppercase", topConfig + "[listen]\ntailnet = 'Osmia'\n", "", "listen.tailnet"},
+		{"tailnet dotted", topConfig + "[listen]\ntailnet = 'osmia.example'\n", "", "listen.tailnet"},
+		{"tailnet underscore", topConfig + "[listen]\ntailnet = 'my_osmia'\n", "", "listen.tailnet"},
+		{"tailnet space", topConfig + "[listen]\ntailnet = 'my osmia'\n", "", "listen.tailnet"},
+		{"tailnet leading hyphen", topConfig + "[listen]\ntailnet = '-osmia'\n", "", "listen.tailnet"},
+		{"tailnet trailing hyphen", topConfig + "[listen]\ntailnet = 'osmia-'\n", "", "listen.tailnet"},
+		{"tailnet long", topConfig + "[listen]\ntailnet = '" + strings.Repeat("a", 64) + "'\n", "", "listen.tailnet"},
+		{"tailnet wrong type", topConfig + "[listen]\ntailnet = true\n", "", "config.toml:"},
 		{"web empty host", topConfig + "[listen]\nweb = ':8080'\n", "", "listen.web"},
 		{"web any address", topConfig + "[listen]\nweb = '0.0.0.0:8080'\n", "", "listen.web"},
 		{"web any ipv6", topConfig + "[listen]\nweb = '[::]:8080'\n", "", "listen.web"},
@@ -278,6 +285,21 @@ func TestInvalid(t *testing.T) {
 			c, err := Load(fixture(t, top, project))
 			if c != nil || err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got config=%+v err=%v; want nil and %q", c, err, tc.want)
+			}
+		})
+	}
+}
+
+// listen.tailnet accepts one DNS label; empty disables it.
+func TestListenTailnet(t *testing.T) {
+	for _, value := range []string{"", "osmia", "o", "osmia-2", "7", strings.Repeat("a", 63)} {
+		t.Run(value, func(t *testing.T) {
+			c, err := Load(fixture(t, topConfig+"[listen]\ntailnet = '"+value+"'\n", projectConfig))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Listen.Tailnet != value {
+				t.Fatalf("listen.tailnet %q loaded as %q", value, c.Listen.Tailnet)
 			}
 		})
 	}

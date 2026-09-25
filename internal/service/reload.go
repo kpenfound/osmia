@@ -116,7 +116,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 
 // candidate loads the configuration on disk as a reload applies it over cfg.
 // Changed settings that need a restart keep cfg's values and are named: the
-// listen socket, the web listener, and the active project list, which only
+// listen socket, the web and tailnet listeners, and the active project list, which only
 // project add and remove change in a running service. The loaded project's
 // file is validated even when the disk lists another project.
 func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error) {
@@ -140,6 +140,9 @@ func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error
 	}
 	if next.Listen.Web != cfg.Listen.Web {
 		restart = append(restart, "listen.web")
+	}
+	if next.Listen.Tailnet != cfg.Listen.Tailnet {
+		restart = append(restart, "listen.tailnet")
 	}
 	if next.Listen != cfg.Listen {
 		pinned := *next
