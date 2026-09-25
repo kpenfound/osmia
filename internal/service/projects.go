@@ -379,6 +379,7 @@ func (s *Service) activate(id config.ProjectID) (config.Project, error) {
 	}
 	s.cfg, s.active, s.pending = cfg, active, nil
 	s.launch(active)
+	s.hub.publish(Event{Kind: EventResync})
 	return cfg.Project, nil
 }
 
@@ -439,6 +440,7 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 	if err := errors.Join(s.stop(active), s.store.Resolve(runtime.Inputs{Config: s.current()})); err != nil {
 		return ProjectResponse{}, &APIError{Internal, "the project is removed from configuration but its runtime state did not close cleanly; restart the service"}
 	}
+	s.hub.publish(Event{Kind: EventResync})
 	view := projectView(cfg.Root, cfg.Project)
 	return ProjectResponse{Project: view, NextStep: "The trace at " + view.Trace + " and the clone are retained; adding the project again starts a new trace under a new ID."}, nil
 }

@@ -81,6 +81,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		s.mu.Lock()
 		s.reloadErr = failed
 		s.mu.Unlock()
+		s.hub.publish(Event{Kind: EventConfig})
 		return ReloadResponse{}, &APIError{Validation, failed.Message + "; the loaded configuration is unchanged"}
 	}
 	unchanged := &APIError{Internal, "cannot apply the reloaded configuration to the running project; the loaded configuration is unchanged"}
@@ -103,6 +104,13 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	if staged != nil {
 		active.pipeline.next.Store(staged)
 	}
+	// The runtime's effective profiles and the daily budget's limit follow the
+	// configuration.
+	var project config.ProjectID
+	if next.HasProject() {
+		project = next.Project.ID
+	}
+	s.hub.publish(Event{Kind: EventConfig}, Event{Kind: EventRuntime}, Event{Kind: EventSpend, Project: project})
 	return ReloadResponse{Digest: digest(next), RestartRequired: restart}, nil
 }
 

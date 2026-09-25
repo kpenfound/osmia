@@ -27,8 +27,8 @@ A live socket is never removed, even if its listener does not hold the Osmia loc
 A socket is considered stale only when connecting returns connection-refused;
 other probe failures are not proof of staleness. Replacement happens under root
 ownership. Regular files and symlinks are not deleted to make room for a socket.
-Shutdown stops accepting work and gives accepted requests five seconds to finish
-(configurable for embedding); it then closes remaining connections, joins handlers,
+Shutdown stops accepting work, ends open [event streams](#event-stream) and gives
+accepted requests five seconds to finish (configurable for embedding); it then closes remaining connections, joins handlers,
 closes the store and releases the lock. Cleanup removes only the socket inode it
 created. An acknowledged mutation is durable; an interrupted client must read the
 runtime view to reconcile whether its request committed.
@@ -88,10 +88,11 @@ request in flight over the tailnet finishes within the shutdown grace period.
 All paths start with `/v1`. Shared request, response and error types and a Unix-only
 `Client` live in `internal/service`. `NewClient(socket)` accepts an explicit socket
 path; it never reads configuration or runtime files. `Do` supports all operations,
-and `Health`, `Configuration` and `Runtime` provide typed read helpers. Close the
+`Health`, `Configuration` and `Runtime` provide typed read helpers, and `Events`
+reads the [event stream](#event-stream). Close the
 client to release idle connections. API version 1 uses snake_case JSON fields.
 Client calls have a 15-second response budget, including connection and response
-reading. `AddProject` uses a 60-second budget for clone traversal and trace
+reading; for `Events` it covers connecting and the response header only. `AddProject` uses a 60-second budget for clone traversal and trace
 seeding. A caller's shorter context deadline takes precedence. The service's
 read-header, read and write timeouts default to 5, 10 and 10 seconds and can be
 set through `Options` by embedders.
@@ -103,6 +104,7 @@ set through `Options` by embedders.
 | POST | `/reload` | No body; [reloads](#reload) the configuration and returns `ReloadResponse`: the loaded `digest` and the `restart_required` settings |
 | GET | `/runtime` | Effective runtime state, each role's next-turn profile (`name` and `source`: `configuration` or `owner_override`), each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
 | GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, each role's effective profile and source, today's [daily budget](#daily-budget) spend, and diagnostics |
+| GET | `/events` | The [event stream](#event-stream): server-sent events naming the views that changed |
 | GET | `/status/<workstream-id>` | `WorkstreamStatus` for one workstream of the active project |
 | GET | `/trace/<workstream-id>` | `TraceSummary`: sealed revisions, criteria, unit walks, delivery and explicit gaps |
 | GET | `/trace/<workstream-id>/unit/<unit-id>` | `UnitTrace`: document revisions, reports, reviews, rulings, landings, turns, costs, history and gaps |
@@ -185,17 +187,58 @@ response before caller's context deadline`, and an unreachable or closed socket
 reports `cannot reach Osmia Unix socket`.
 
 Health readiness means the loaded stores can serve requests; disk diagnostics do
-not discard that valid view. Lifecycle endpoints and streaming are outside
-M1. Pauses hold queued turns, capacity
+not discard that valid view. Lifecycle endpoints are outside M1. Pauses hold queued turns, capacity
 bounds dispatch, and a `waiting` turn parks its thread, as described with the
 queued-turn scheduler below.
-
 
 The service opens the active project's existing trace and starts the
 [local operation reconciliation loop](trace.md#durable-local-operations).
 Startup scans durable intent even without wakeups. Missing reconciliation
 adapters leave work pending; corrupt or locked traces prevent startup. Shutdown
 cancels and joins the loop before releasing trace ownership.
+
+## Event stream
+
+`GET /v1/events` keeps clients current without polling. It is a
+`text/event-stream` response of server-sent events; each event's name is its
+kind and its data one JSON `Event` object with `kind` and, where they apply,
+`project` and `workstream`. An event only names the view that changed; the read
+endpoints stay the source of truth, and a client reads them again for the
+views an event names.
+
+| Kind | Fields | Announces | Read again |
+| --- | --- | --- | --- |
+| `resync` | none | Anything may have changed | Every view |
+| `workstream` | `project`, `workstream` | A change in the workstream's trace: its state, status, units, agents, gates or questions | `/status`, `/status/<id>` |
+| `conversation` | `project`, `workstream` | A message to or a turn of the workstream's chief of staff | `/conversation/<id>` |
+| `inbox` | `project`, `workstream` | A question of the workstream asked, escalated, ruled or answered, or another workflow transition, which can abandon the workstream | `/inbox` |
+| `runtime` | none | A pause, priority, profile override or provider limit set or cleared, by the owner or by the service | `/runtime`, `/status` |
+| `config` | none | A reload, successful or failed | `/config` |
+| `spend` | `project` when one is configured | A recorded cost, or a reload, which can change the daily limit | `/status` |
+
+A successful reload also announces `runtime` and `spend`, whose views follow
+the configuration. Adding or removing a project announces `resync`. The
+librarian's workstream announces only its spend. A change that follows only
+from the passage of time, such as the daily budget's new day, is not announced.
+
+Every stream, including one a client opens again after losing the last, starts
+with `resync`, so a client reconciles what it missed before incremental events
+arrive; the stream carries no event IDs and does not replay. Events are not
+guaranteed to arrive one for each change: one already waiting for a client is
+not queued twice, and when more than 64 wait, they are replaced by one
+`resync`. Publishing never waits on a client. A client that stops reading is
+disconnected once a write waits longer than the service's write timeout, and
+the service writes a comment line after 15 seconds of silence to find clients
+that went away. Shutdown ends every stream at once.
+
+`Client.Events` calls a function with each event until its context ends, the
+stream ends or the function returns an error. The response budget covers
+connecting and the response header; the stream itself has none. It returns the
+function's error, the context's error once the context ends, and otherwise
+`unavailable` when the service closed the stream or cannot be reached; a
+caller that connects again reads everything on the new stream's `resync`. On
+the [web](#web-listener) and [tailnet](#tailnet-listener) listeners the stream is a `GET`
+like the other reads.
 
 ## Projects
 

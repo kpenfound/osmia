@@ -129,7 +129,11 @@ func (r *Repository) publishTree(ctx context.Context, files map[string][]byte, r
 		return err
 	}
 	// After publication cancellation cannot roll back a committed transaction.
-	return r.recoverPublication(context.WithoutCancel(ctx))
+	if err := r.recoverPublication(context.WithoutCancel(ctx)); err != nil {
+		return err
+	}
+	r.observed(Commit{Paths: append(p.Paths, p.Removed...), Content: files})
+	return nil
 }
 
 // syncObjects flushes every object this handle has not flushed yet, and the
