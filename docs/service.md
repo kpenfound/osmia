@@ -80,7 +80,7 @@ The tailnet never takes the service down. A node that cannot join at startup,
 whether for a missing auth key, a pending login, an unreachable control server
 or an unusable state directory, leaves `osmia serve` running: the socket, any
 web listener and the scheduler serve as usual, and the service tries to join
-again every `Options.TailnetRetry` (5 seconds by default). A tailnet that drops
+again at once and then every `Options.TailnetRetry` (5 seconds by default). A tailnet that drops
 while the service runs, so that its listener stops accepting, is left and
 joined again the same way; requests in flight on the other listeners carry on.
 The local CLI keeps working over the socket throughout. Shutdown stops

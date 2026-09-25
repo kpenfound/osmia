@@ -68,11 +68,17 @@ func (l tsnetListener) State(ctx context.Context) TailnetStatus {
 	if err != nil {
 		return TailnetStatus{State: TailnetDown, Reason: err.Error()}
 	}
-	switch status.BackendState {
+	return tailnetState(status.BackendState, status.AuthURL)
+}
+
+// tailnetState maps a Tailscale backend state and its login URL to the
+// listener's state.
+func tailnetState(backend, authURL string) TailnetStatus {
+	switch backend {
 	case "Running":
 		return TailnetStatus{State: TailnetUp}
 	case "NeedsLogin":
-		return TailnetStatus{State: TailnetNeedsLogin, LoginURL: status.AuthURL}
+		return TailnetStatus{State: TailnetNeedsLogin, LoginURL: authURL}
 	case "NeedsMachineAuth":
 		return TailnetStatus{State: TailnetNeedsLogin, Reason: "the node awaits approval on the tailnet"}
 	case "Stopped":

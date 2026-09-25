@@ -493,3 +493,24 @@ func TestShutdownLeavesTheTailnet(t *testing.T) {
 		t.Fatal("tailnet node open after shutdown")
 	}
 }
+
+// The embedded node's backend states map to the listener's states.
+func TestTailnetStateMapsBackendStates(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		backend, url string
+		want         TailnetStatus
+	}{
+		{"Running", "", TailnetStatus{State: TailnetUp}},
+		{"NeedsLogin", "https://login.example/a/1", TailnetStatus{State: TailnetNeedsLogin, LoginURL: "https://login.example/a/1"}},
+		{"NeedsLogin", "", TailnetStatus{State: TailnetNeedsLogin}},
+		{"NeedsMachineAuth", "https://ignored", TailnetStatus{State: TailnetNeedsLogin, Reason: "the node awaits approval on the tailnet"}},
+		{"Stopped", "", TailnetStatus{State: TailnetDown, Reason: "the node is stopped"}},
+		{"Starting", "", TailnetStatus{State: TailnetConnecting}},
+		{"", "", TailnetStatus{State: TailnetConnecting}},
+	} {
+		if got := tailnetState(c.backend, c.url); got != c.want {
+			t.Errorf("%q %q: %+v, want %+v", c.backend, c.url, got, c.want)
+		}
+	}
+}

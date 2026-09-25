@@ -270,7 +270,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		// to retry; it never fails startup.
 		if node, err := s.joinTailnet(root, cfg.Listen.Tailnet); err != nil {
 			s.tailnet.set(nil, err.Error())
-			log.Printf("osmia tailnet: join %s: %v; retrying in %s", cfg.Listen.Tailnet, err, opts.TailnetRetry)
+			log.Printf("osmia tailnet: join %s: %v; the supervisor will retry", cfg.Listen.Tailnet, err)
 		} else {
 			s.tailnet.set(node, "")
 		}
