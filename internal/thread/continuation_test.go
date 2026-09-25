@@ -27,7 +27,7 @@ func (f resumableTurns) CheckResume(ctx context.Context, old, next coreadapter.P
 }
 
 func TestContinuationAcrossReopen(t *testing.T) {
-	for _, mode := range []string{"resume", "profile-compatible", "profile-incompatible", "backend", "missing", "corrupt", "unsupported", "rejected", "fallback", "ambiguous"} {
+	for _, mode := range []string{"resume", "profile-compatible", "profile-incompatible", "backend", "missing", "corrupt", "unsupported", "rejected", "fallback", "started"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
@@ -61,7 +61,6 @@ func TestContinuationAcrossReopen(t *testing.T) {
 			}
 			checks, calls := 0, 0
 			runner.Store = repo
-			runner.MaxRetries = 1
 			runner.Fallbacks = map[string]coreadapter.Profile{"default": {Name: "fallback", Backend: "other", Model: "small"}}
 			runner.Turns = resumableTurns{
 				check: func(_ context.Context, old, next coreadapter.Profile, s coreadapter.BackendSession) error {
@@ -82,7 +81,7 @@ func TestContinuationAcrossReopen(t *testing.T) {
 					if p.Scope.Turn != "second" || p.Prompt != second.Prompt {
 						t.Fatalf("turn identity changed: %#v", p)
 					}
-					wantResume := calls == 1 && (mode == "resume" || mode == "profile-compatible" || mode == "rejected" || mode == "fallback" || mode == "ambiguous")
+					wantResume := calls == 1 && (mode == "resume" || mode == "profile-compatible" || mode == "rejected" || mode == "fallback" || mode == "started")
 					if (p.Resume != nil) != wantResume {
 						t.Fatalf("resume=%v, want %v", p.Resume, wantResume)
 					}
@@ -105,26 +104,22 @@ func TestContinuationAcrossReopen(t *testing.T) {
 							return coreadapter.SessionResult{}, coreadapter.ErrResumeUnavailable
 						case "fallback":
 							return coreadapter.SessionResult{}, coreadapter.ErrNotStarted
-						case "ambiguous":
+						case "started":
 							return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "partial"}, FinalResponse: "partial"}, coreadapter.ErrNotStarted
 						}
 					}
-					if mode == "fallback" && p.Profile.Name != "fallback" {
+					if (mode == "fallback" || mode == "started") && p.Profile.Name != "fallback" {
 						t.Fatalf("fallback not selected: %#v", p.Profile)
 					}
 					return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: p.Profile.Backend, ID: "final"}, FinalResponse: "next final"}, nil
 				},
 			}
 			q, err := runner.RunNext(ctx, stream, "agent", coreadapter.PreparedTurn{SessionDirectory: "/owned/second"})
-			if mode == "ambiguous" {
-				if !errors.Is(err, coreadapter.ErrNotStarted) {
-					t.Fatal(err)
-				}
-			} else if err != nil {
+			if err != nil {
 				t.Fatal(err)
 			}
 			wantCalls := 1
-			if mode == "rejected" || mode == "fallback" {
+			if mode == "rejected" || mode == "fallback" || mode == "started" {
 				wantCalls = 2
 			}
 			if calls != wantCalls || len(q.Attempts) != wantCalls {
@@ -327,31 +322,5 @@ func TestNotesIsolationAndReopen(t *testing.T) {
 	}
 	if _, err := tools[1].Handle(ctx, json.RawMessage(`{"text":"escape","expected_sha256":"stale"}`)); err == nil {
 		t.Fatal("symlink write accepted")
-	}
-}
-
-func TestSafeRetryStopsForUncertainResults(t *testing.T) {
-	for _, mode := range []string{"cancelled", "timeout", "malformed-session"} {
-		t.Run(mode, func(t *testing.T) {
-			t.Parallel()
-			repo, _, _ := setup(t)
-			queue(t, repo, "first")
-			calls := 0
-			runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 1, Fallbacks: map[string]coreadapter.Profile{"default": {Name: "fallback", Backend: "other"}}}
-			runner.Turns = fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
-				calls++
-				if mode == "malformed-session" {
-					return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: " "}}, coreadapter.ErrNotStarted
-				}
-				if mode == "cancelled" {
-					return coreadapter.SessionResult{}, errors.Join(coreadapter.ErrNotStarted, context.Canceled)
-				}
-				return coreadapter.SessionResult{TimedOut: true}, coreadapter.ErrNotStarted
-			})
-			q, err := runner.RunNext(context.Background(), stream, "agent", coreadapter.PreparedTurn{SessionDirectory: "/owned"})
-			if err == nil || calls != 1 || len(q.Attempts) != 1 || q.CompletedAt.IsZero() {
-				t.Fatalf("retried cancelled/timed out attempt: %d %#v %v", calls, q, err)
-			}
-		})
 	}
 }

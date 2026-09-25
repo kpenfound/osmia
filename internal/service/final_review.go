@@ -757,7 +757,7 @@ func (a *finalReviewer) enqueue(ctx context.Context, cfg *config.Config, stream 
 
 // dispatch runs the turn through the thread dispatcher and runner.
 func (a *finalReviewer) dispatch(ctx context.Context, stream config.WorkstreamID, in finalReviewInput, report FinalReport, member, turn string) (coreadapter.OperationResult, error) {
-	dispatcher := thread.Dispatcher{Runner: thread.Runner{Store: a.repository, Turns: a.turns(stream, in, report), Now: a.s.now}, Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	dispatcher := thread.Dispatcher{Runner: threadRunner(a.s.current(), a.repository, a.turns(stream, in, report), a.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(a.turnDirectory(input.Workstream, input.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 	}}

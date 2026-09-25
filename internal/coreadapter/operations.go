@@ -31,16 +31,21 @@ func (RetryAdapter) Decide(ctx context.Context, req RetryRequest) (RetryDecision
 	}
 	kind := ops.ClassifyFailure(raw)
 	decision := RetryDecision{Kind: Behavioural, Reason: "reported outcome or clean exit without outcome"}
-	if kind == ops.FailureInfra {
+	switch {
+	case r.ErrorSubtype == invalidOutcome:
+		// The session ran and reported; the role may not report that status.
+		kind, decision.Reason = ops.FailureBehavioural, "reported an outcome the role does not allow"
+	case kind == ops.FailureInfra:
 		decision.Kind = Infrastructure
 		decision.Reason = ops.InfraReason(raw)
 	}
-	// Cancellation and unsupported execution need caller intervention, not retries.
-	retryable := kind == ops.FailureInfra && !r.Cancelled && !errors.Is(req.Err, context.Canceled) && !errors.Is(req.Err, ErrUnsupported)
-	next := (ops.RetryPolicy{Retries: req.MaxRetries, Delay: req.Delay, WithFallback: req.FallbackProfile != ""}).Decide(req.Attempt, retryable)
-	decision.Retry, decision.Delay = next.Retry, next.Delay
-	if next.UseFallback {
-		decision.FallbackProfile = req.FallbackProfile
+	// Cancellation and unsupported execution need caller intervention, and a
+	// retry of a session that recorded state could record it again.
+	retryable := kind == ops.FailureInfra && !r.Cancelled && !errors.Is(req.Err, context.Canceled) && !errors.Is(req.Err, ErrUnsupported) && r.Records == 0
+	if next := (ops.RetryPolicy{Retries: req.MaxRetries, Delay: req.Delay}).Decide(req.Attempt, retryable); next.Retry {
+		decision.Retry, decision.Delay = true, next.Delay
+	} else if retryable && req.FallbackProfile != "" {
+		decision.Retry, decision.Delay, decision.FallbackProfile = true, req.Delay, req.FallbackProfile
 	}
 	return decision, nil
 }

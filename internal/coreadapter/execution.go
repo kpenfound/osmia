@@ -103,7 +103,7 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 			if validationErr := agent.ValidateOutcome(turn.Scope.Role, raw.Outcome.Status, req.ValidOutcomes); validationErr != nil {
 				runErr = errors.Join(runErr, validationErr)
 				result.IsError = true
-				result.ErrorSubtype = "invalid_outcome"
+				result.ErrorSubtype = invalidOutcome
 			} else {
 				result.Outcome = &Outcome{Status: raw.Outcome.Status, Report: raw.Outcome.Note}
 			}
@@ -143,6 +143,10 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 	}
 	return result, runErr
 }
+
+// invalidOutcome is the error subtype of a session that reported an outcome
+// its role may not report.
+const invalidOutcome = "invalid_outcome"
 
 func translateTurn(t PreparedTurn) (agent.Request, error) {
 	var req agent.Request

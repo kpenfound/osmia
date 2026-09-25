@@ -22,14 +22,17 @@ type Runner struct {
 	Now          func() time.Time
 	ReplayLimits ReplayLimits
 	// Fallbacks maps a selected profile name to a service-approved fallback.
-	Fallbacks         map[string]coreadapter.Profile
+	Fallbacks map[string]coreadapter.Profile
+	// MaxRetries bounds the same-profile retries of an infrastructure failure.
 	MaxRetries        int
 	Classifier        func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error)
 	ClassifierProfile *coreadapter.Profile
 }
 
-// RunNext retries only proven unstarted attempts. Once claimed, persistence
-// errors leave the turn reserved for reconciliation with its durable evidence.
+// RunNext retries infrastructure failures within the turn, as execute
+// describes, and records each attempt before and after it runs. Once claimed,
+// persistence errors leave the turn reserved for reconciliation with its
+// durable evidence.
 // Callers must not share per-turn resource leases between competing invocations.
 func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent string, prepared coreadapter.PreparedTurn) (trace.QueuedTurn, error) {
 	if r.Store == nil || r.Turns == nil || r.Now == nil {
@@ -59,13 +62,15 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", trace.EventID(req.ID, "response"), r.Now(), trace.Actor{Kind: "service", ID: "thread-runner"}
 	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: req.ThreadID, TurnID: req.TurnID, RequestID: req.ID, RequestRevision: req.Revision, Result: result}
 	var stop *Stop
-	if errors.As(runErr, &stop) {
+	switch {
+	case errors.As(runErr, &stop):
 		response.Stop = &stop.TurnStop
-	} else if runErr != nil {
+	case len(q.Attempts) > 0:
+		// The final attempt is the turn's result.
+		last := q.Attempts[len(q.Attempts)-1]
+		response.Failure, response.FailureClass = last.Failure, last.FailureClass
+	case runErr != nil:
 		response.Failure = runErr.Error()
-		if errors.Is(runErr, coreadapter.ErrSessionCostCap) {
-			response.FailureClass = coreadapter.Infrastructure
-		}
 	}
 	if t.Identity.Role == "mason" {
 		response.Classification = trace.ClassifyMasonTurn(result, response.Failure)

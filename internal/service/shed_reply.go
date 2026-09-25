@@ -768,7 +768,7 @@ func (d *debate) returned(turns []trace.QueuedTurn) string {
 // dispatchReply runs the turn through the thread dispatcher and runner.
 func (d *debate) dispatchReply(ctx context.Context, stream config.WorkstreamID, in roundInput, turn string) (coreadapter.OperationResult, error) {
 	dr := d.drafter()
-	dispatcher := thread.Dispatcher{Runner: thread.Runner{Store: d.repository, Turns: &questions.Turns{Turns: d.replyPath(stream, in), Repository: d.repository}, Now: d.s.now}, Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	dispatcher := thread.Dispatcher{Runner: threadRunner(d.s.current(), d.repository, &questions.Turns{Turns: d.replyPath(stream, in), Repository: d.repository}, d.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(dr.turnDirectory(input.Workstream, input.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 	}}

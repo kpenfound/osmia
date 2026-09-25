@@ -314,7 +314,23 @@ type StatusResponse struct {
 	Workstreams []WorkstreamStatus          `json:"workstreams"`
 	Profiles    map[string]EffectiveProfile `json:"profiles"`
 	DailyBudget *DailyBudgetStatus          `json:"daily_budget"`
-	Diagnostics []Diagnostic                `json:"diagnostics"`
+	// FailureStreaks lists the roles and profiles whose latest turn attempts
+	// failed with infrastructure failures; it is omitted when there are none.
+	FailureStreaks []FailureStreak `json:"failure_streaks,omitempty"`
+	Diagnostics    []Diagnostic    `json:"diagnostics"`
+}
+
+// FailureStreak counts the consecutive infrastructure failures of one role's
+// turn attempts on one profile, across the active project's workstreams. Any
+// attempt on that profile that ends without one resets the count; an attempt
+// the service stopped or interrupted leaves it as it is. LastFailure and
+// LastAt are the latest failure and the time its attempt started.
+type FailureStreak struct {
+	Role        string    `json:"role"`
+	Profile     string    `json:"profile"`
+	Consecutive int       `json:"consecutive"`
+	LastFailure string    `json:"last_failure"`
+	LastAt      time.Time `json:"last_at"`
 }
 
 // DailyBudgetStatus is the known spend of the service host's current local

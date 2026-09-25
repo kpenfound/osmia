@@ -282,7 +282,8 @@ func TestStatusReportsUnreadableTrace(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(directory, "workstreams", string(stream), "status.jsonl"), []byte("{not json}\n"), 0600))
 	message := fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", project)
 	list := s.statusList()
-	if want := []Diagnostic{{"workstreams", Internal, message}}; len(list.Workstreams) != 0 || !reflect.DeepEqual(list.Diagnostics, want) {
+	streaks := "cannot read the turn attempts of the active project; check the trace repository"
+	if want := []Diagnostic{{"failure_streaks", Internal, streaks}, {"workstreams", Internal, message}}; len(list.Workstreams) != 0 || len(list.FailureStreaks) != 0 || !reflect.DeepEqual(list.Diagnostics, want) {
 		t.Fatalf("damaged trace: %+v", list)
 	}
 	if _, api := s.workstreamStatus(string(stream)); api == nil || *api != (APIError{Internal, message}) {

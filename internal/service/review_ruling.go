@@ -125,6 +125,24 @@ func (s *Service) ruleContested(ctx context.Context, rawStream, unit string, req
 	if err != nil {
 		return ContestedRulingResponse{}, &APIError{Internal, "cannot read contested transition"}
 	}
+	if failedReview(contest, unit) {
+		// A failed review turn left no findings, so the unit can only be reviewed again.
+		if req.Decision != "review" {
+			return ContestedRulingResponse{}, &APIError{Validation, "the reviewer's turn failed and left no findings; use review"}
+		}
+		ruling := ContestedRuling{Decision: "review", Note: strings.TrimSpace(req.Note), Contest: contest.ID}
+		id := trace.EventID(contest.ID, "ruling")
+		reason := fmt.Sprintf("owner ruled review on contest %s, raised when the reviewer's turn failed; a new review turn runs: %s", contest.ID, ruling.Note)
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.now(), Actor: ownerActor, Cause: contest.ID}
+		tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitContested, To: UnitReviewing, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", reason)}}
+		if _, err := repo.Transact(ctx, tx); err != nil {
+			if errors.Is(err, trace.ErrConflict) {
+				return ContestedRulingResponse{}, &APIError{Conflict, "unit already has a ruling"}
+			}
+			return ContestedRulingResponse{}, &APIError{Internal, "cannot record contested ruling"}
+		}
+		return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: ruling}, nil
+	}
 	if mason {
 		if req.Decision == "review" {
 			return ContestedRulingResponse{}, &APIError{Validation, "no candidate under review; use revise"}
@@ -176,6 +194,10 @@ func (s *Service) ruleContested(ctx context.Context, rawStream, unit string, req
 }
 
 func (r *reviewers) resumeContested(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) error {
+	// Only a contest raised by review bounces is resumed by a bounce ruling.
+	if contest, _, err := masonContest(r.repository, stream, unit); err != nil || contest.From != UnitReviewing || contest.Actor != reviewerActor || failedReview(contest, unit) {
+		return err
+	}
 	result, ok, err := r.storedResult(stream, unit, state)
 	if err != nil || !ok {
 		return err

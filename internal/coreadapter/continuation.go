@@ -11,7 +11,7 @@ import (
 var ErrResumeUnavailable = errors.New("resumable session unavailable")
 
 // ErrNotStarted proves that no work was accepted and no side effects can still
-// complete. A service may select an explicitly configured fallback on this error.
+// complete. It is an infrastructure failure.
 var ErrNotStarted = errors.New("turn not started")
 
 // ResumeChecker checks backend capabilities, profile compatibility and opaque

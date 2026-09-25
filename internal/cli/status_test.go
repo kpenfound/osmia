@@ -214,6 +214,17 @@ func TestStatusPrintsTheDailyBudget(t *testing.T) {
 	}
 }
 
+func TestStatusPrintsFailureStreaks(t *testing.T) {
+	var out strings.Builder
+	showFailureStreaks(&out, nil)
+	at := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	showFailureStreaks(&out, []service.FailureStreak{{Role: "mason", Profile: "default", Consecutive: 3, LastFailure: "the agent exited with code 1", LastAt: at}, {Role: "reviewer", Profile: "backup", Consecutive: 1, LastFailure: "timed out", LastAt: at.Add(time.Minute)}})
+	if want := "Infrastructure failures: mason on profile default failed 3 time(s) in a row; last at 2026-09-24T12:00:00Z: the agent exited with code 1\n" +
+		"Infrastructure failures: reviewer on profile backup failed 1 time(s) in a row; last at 2026-09-24T12:01:00Z: timed out\n"; out.String() != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
+	}
+}
+
 func TestStatusPrintsOwnerGates(t *testing.T) {
 	st := service.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Gates: []trace.OwnerGate{{Kind: "escalation", Reference: "12"}, {Kind: "contested", Reference: "upload-index"}}}
 	var one, all strings.Builder

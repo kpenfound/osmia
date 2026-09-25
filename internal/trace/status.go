@@ -241,7 +241,8 @@ func ownerGates(records []Record, stream config.WorkstreamID, view *workflowView
 			for _, rec := range records {
 				if transition, ok := rec.(Transition); ok && transition.Workstream == stream && transition.Subject == subject && transition.To == "contested" {
 					gate.Reason = ""
-					if transition.From == "implementing" && transition.Actor.Kind == "service" && transition.Actor.ID == "mason" {
+					if transition.From == "implementing" && transition.Actor.Kind == "service" && transition.Actor.ID == "mason" ||
+						transition.From == "reviewing" && transition.Actor.Kind == "service" && transition.Actor.ID == "reviewer" && transition.Cause != subject+"-review" {
 						gate.Reason = transition.Reason
 					}
 				}

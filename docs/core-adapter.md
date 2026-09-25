@@ -169,11 +169,16 @@ storage and reconciliation of these records.
 ## Operational adapters
 
 `RetryAdapter` translates session results for `ops.ClassifyFailure` and passes
-one-based attempt counts, limits and delay to `RetryPolicy.Decide`. Any nonempty
-reported outcome takes precedence over infrastructure flags. Clean exits without
-an outcome are behavioural; transport errors, signals and provider limits are
-infrastructure. Cancellation and unsupported capabilities do not receive retry
-advice. A supplied fallback profile is returned only with an eligible retry.
+one-based attempt counts on the current profile, limits and delay to
+`RetryPolicy.Decide`. Any nonempty reported outcome takes precedence over
+infrastructure flags, and an outcome the role may not report is behavioural
+too. Clean exits without an outcome are behavioural; transport errors,
+signals and provider limits are infrastructure. Cancellation, unsupported
+capabilities and a session that recorded state through a service tool do not
+receive retry advice. An eligible infrastructure failure
+is retried on the same profile while the attempt count is within
+`MaxRetries`, then once on the supplied fallback profile, whose own attempts
+the caller counts afresh.
 Core's `ops.SelectProfile` walks a profile's `Fallback` chain across agents, but
 resolving Osmia's named profiles and choosing when to offer a fallback belong to
 the caller. The adapter neither waits nor starts work.

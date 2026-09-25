@@ -702,6 +702,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		diagnostics(stdout, cfg.Diagnostics)
 		showRuntime(stdout, rt)
 		showDailyBudget(stdout, all.DailyBudget)
+		showFailureStreaks(stdout, all.FailureStreaks)
 		showWorkstreams(stdout, all)
 		return 0
 	}
@@ -879,6 +880,14 @@ func showDailyBudget(w io.Writer, b *service.DailyBudgetStatus) {
 		fmt.Fprintf(w, " (at least; %d attempt(s) have unknown cost)", b.UnknownCosts)
 	}
 	fmt.Fprintln(w)
+}
+
+// showFailureStreaks prints each role and profile whose latest turn attempts
+// failed with infrastructure failures.
+func showFailureStreaks(w io.Writer, streaks []service.FailureStreak) {
+	for _, f := range streaks {
+		fmt.Fprintf(w, "Infrastructure failures: %s on profile %s failed %d time(s) in a row; last at %s: %s\n", f.Role, f.Profile, f.Consecutive, f.LastAt.Format(time.RFC3339), f.LastFailure)
+	}
 }
 
 // showWorkstreams prints each workstream's gates, overlap advisories, latest

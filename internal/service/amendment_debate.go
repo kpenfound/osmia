@@ -448,7 +448,7 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 	turn := queued.Request.TurnID
 	if queued.CompletedAt.IsZero() {
 		path := a.replyTurns(stream, id, n, open)
-		dispatcher := thread.Dispatcher{Runner: thread.Runner{Store: a.repository, Turns: &questions.Turns{Turns: path, Repository: a.repository}, Now: a.s.now}, Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
+		dispatcher := thread.Dispatcher{Runner: threadRunner(a.s.current(), a.repository, &questions.Turns{Turns: path, Repository: a.repository}, a.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 			dir := filepath.Join(a.drafter().turnDirectory(input.Workstream, input.Turn), "session")
 			return coreadapter.PreparedTurn{SessionDirectory: dir}, os.MkdirAll(dir, 0700)
 		}}

@@ -173,6 +173,11 @@ func (m *masons) Pass(ctx context.Context) error {
 			if contested {
 				continue
 			}
+			if contested, err := m.contestFailure(ctx, stream, u.ID, state); err != nil {
+				return fmt.Errorf("workstream %s unit %s: %w", stream, u.ID, err)
+			} else if contested {
+				continue
+			}
 			b.inFlight = append(b.inFlight, u.ID)
 			b.implementing++
 			queued := classified
