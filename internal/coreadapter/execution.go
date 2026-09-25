@@ -210,8 +210,8 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 
 // AllowedTools names each granted tool the way the backend identifies MCP
 // tools, under every service server, so the allow list pins exactly the hosted
-// tools. Bare names would match nothing. The pinned core forwards this list to
-// Claude only; other backends are bounded by the scoped MCP registry alone.
+// tools. Bare names would match nothing. Core uses the scoped MCP registry to
+// bound these tools on every supported backend.
 func AllowedTools(servers, tools []string) []string {
 	var allowed []string
 	for _, server := range slices.Sorted(slices.Values(servers)) {

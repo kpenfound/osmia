@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	github.com/BurntSushi/toml v1.4.0
-	github.com/kpenfound/busybees/core v0.4.4
+	github.com/kpenfound/busybees/core v0.5.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 )
 

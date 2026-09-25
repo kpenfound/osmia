@@ -56,48 +56,6 @@ func (p *demoProblems) check(t *testing.T) {
 	}
 }
 
-// requestedBackend carries the backend the service asked a turn to run on.
-type requestedBackend struct{}
-
-// backendOf returns the backend the service asked the fake turn to run on.
-func backendOf(ctx context.Context, req agent.Request) string {
-	if backend, ok := ctx.Value(requestedBackend{}).(string); ok {
-		return backend
-	}
-	return req.Profile.Agent
-}
-
-// anyBackendEngine is the fixture's fake engine with fake backends that
-// restrict their built-in tools as claude does. The pinned core restricts
-// built-in tools for claude only and refuses any other backend for a turn
-// whose grants name its tools, which every role's grants do. Each session
-// admits and plays a request as claude and hands the fake turn the backend
-// the service asked for in its context.
-type anyBackendEngine struct{ *demoEngine }
-
-func (e anyBackendEngine) Enforcer(s coreadapter.ExecutionSettings) (agent.Enforcer, error) {
-	inner, err := e.demoEngine.Enforcer(s)
-	return anyBackendEnforcer{inner}, err
-}
-
-type anyBackendEnforcer struct{ agent.Enforcer }
-
-func (e anyBackendEnforcer) Prepare(ctx context.Context, g agent.Grants) (agent.Session, error) {
-	session, err := e.Enforcer.Prepare(ctx, g)
-	if err != nil {
-		return nil, err
-	}
-	return anyBackendSession{session}, nil
-}
-
-type anyBackendSession struct{ agent.Session }
-
-func (s anyBackendSession) Run(ctx context.Context, req agent.Request) (*agent.Result, error) {
-	ctx = context.WithValue(ctx, requestedBackend{}, req.Profile.Agent)
-	req.Profile.Agent = agent.AgentClaude
-	return s.Session.Run(ctx, req)
-}
-
 // eventually polls cond until it holds, failing with what after demoTimeout.
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
@@ -158,6 +116,15 @@ func factoryPauseOf(t *testing.T, c *Client) (runtime.Pause, bool) {
 // crash during landing interrupt it. See docs/m4-reliability.md.
 func TestM4ReliabilityDemonstration(t *testing.T) {
 	t.Parallel()
+	reliabilityDemonstration(t, agent.AgentCodex)
+}
+
+func TestM4ReliabilityDemonstrationOpenCode(t *testing.T) {
+	t.Parallel()
+	reliabilityDemonstration(t, agent.AgentOpenCode)
+}
+
+func reliabilityDemonstration(t *testing.T, fallbackBackend string) {
 	ctx := context.Background()
 	f, masons := newParallelMasonFixture(t, 1, 4, reliabilityPlan)
 	defer func() { f.stop(t) }()
@@ -165,6 +132,11 @@ func TestM4ReliabilityDemonstration(t *testing.T) {
 
 	// The owner allows USD 1.00 a day; days follow UTC.
 	f.stop(t)
+	if fallbackBackend != agent.AgentCodex {
+		data, err := os.ReadFile(configPath)
+		must(t, err)
+		must(t, os.WriteFile(configPath, []byte(strings.Replace(string(data), "agent = \"codex\"", "agent = \""+fallbackBackend+"\"", 1)), 0600))
+	}
 	configFile, err := os.OpenFile(configPath, os.O_APPEND|os.O_WRONLY, 0)
 	must(t, err)
 	_, err = configFile.WriteString("[budget]\nper_day = \"1.00\"\n")
@@ -172,7 +144,7 @@ func TestM4ReliabilityDemonstration(t *testing.T) {
 	f.opts.Location = time.UTC
 	// The thread runner reports provider limits to the service through the
 	// runtime controls Enforce binds.
-	enforced := Enforce(f.opts, Enforcement{Engine: anyBackendEngine{f.engine}, Hosts: f.opts.Committee.Hosts})
+	enforced := Enforce(f.opts, Enforcement{Engine: f.engine, Hosts: f.opts.Committee.Hosts})
 	f.opts.Threads, f.opts.controls = enforced.Threads, enforced.controls
 	f.start(t)
 	const crash = "crash: the feature branch moved"
@@ -248,7 +220,7 @@ func TestM4ReliabilityDemonstration(t *testing.T) {
 	// first turn runs.
 	f.engine.turns[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
-		dedupeBackends = append(dedupeBackends, backendOf(ctx, req))
+		dedupeBackends = append(dedupeBackends, req.Profile.Agent)
 		mu.Unlock()
 		var ack MutationResponse
 		if err := c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{masonRole, "other"}, &ack); err != nil || !ack.Applied {
@@ -260,7 +232,7 @@ func TestM4ReliabilityDemonstration(t *testing.T) {
 	f.engine.turns[dedupeClarified] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
 		dedupeContinuation = req
-		dedupeBackends = append(dedupeBackends, backendOf(ctx, req))
+		dedupeBackends = append(dedupeBackends, req.Profile.Agent)
 		mu.Unlock()
 		close(clarifyEntered)
 		select {
@@ -272,7 +244,7 @@ func TestM4ReliabilityDemonstration(t *testing.T) {
 	}
 	// resume's first session on claude hits the provider's usage limit.
 	f.engine.turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		backend := backendOf(ctx, req)
+		backend := req.Profile.Agent
 		mu.Lock()
 		resumeAttempts = append(resumeAttempts, req)
 		resumeBackends = append(resumeBackends, backend)
@@ -388,14 +360,14 @@ func TestM4ReliabilityDemonstration(t *testing.T) {
 		t.Fatalf("dedupe's first turn %+v", th.Turns)
 	}
 	first, next := th.Turns[0], th.Turns[1]
-	if next.Request.TurnID != dedupeClarified || next.Request.Profile.Name != "other" || next.Request.Profile.Backend != agent.AgentCodex {
+	if next.Request.TurnID != dedupeClarified || next.Request.Profile.Name != "other" || next.Request.Profile.Backend != fallbackBackend {
 		t.Fatalf("dedupe's follow-up request %+v", next.Request)
 	}
 	if a := next.Attempts; len(a) != 1 || a[0].Path != "replay" || a[0].ReplayFrom != first.Sequence || a[0].Profile.Name != "other" {
 		t.Fatalf("dedupe's follow-up attempts %+v", a)
 	}
 	mu.Lock()
-	if req := dedupeContinuation; !slices.Equal(dedupeBackends, []string{agent.AgentClaude, agent.AgentCodex}) || req.ResumeID != "" || !strings.Contains(req.Prompt, "osmia-owned-log") || !strings.Contains(req.Prompt, "Half of dedupe is built") {
+	if req := dedupeContinuation; !slices.Equal(dedupeBackends, []string{agent.AgentClaude, fallbackBackend}) || req.ResumeID != "" || !strings.Contains(req.Prompt, "osmia-owned-log") || !strings.Contains(req.Prompt, "Half of dedupe is built") {
 		t.Fatalf("dedupe's sessions ran on %v; the follow-up as %+v", dedupeBackends, req)
 	}
 	mu.Unlock()
@@ -450,7 +422,7 @@ func TestM4ReliabilityDemonstration(t *testing.T) {
 		t.Fatalf("resume's attempts %+v", limited.Attempts)
 	}
 	mu.Lock()
-	if !slices.Equal(resumeBackends, []string{agent.AgentClaude, agent.AgentCodex}) || resumeAttempts[1].ResumeID != "" || !strings.Contains(resumeAttempts[1].Prompt, "osmia-owned-log") {
+	if !slices.Equal(resumeBackends, []string{agent.AgentClaude, fallbackBackend}) || resumeAttempts[1].ResumeID != "" || !strings.Contains(resumeAttempts[1].Prompt, "osmia-owned-log") {
 		t.Fatalf("resume's sessions ran on %v: %+v", resumeBackends, resumeAttempts)
 	}
 	mu.Unlock()
