@@ -2339,6 +2339,7 @@ order, except the librarian's, which carries no feature (see
 | `open_questions` | Questions in the workstream without a ruling |
 | `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, `contested` with the unit ID, or a `charter` proposal with its question number; a mason contest, and a contest raised by a failed reviewer turn, also has `reason`; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
+| `agents` | Service-owned execution facts from durable thread snapshots, ordered by agent ID. One entry per active or parked waiting turn; empty for idle and completed threads. Each has `role`, `unit` (empty without a unit), `state` (`running`, `captured`, `waiting`, or `interrupted`), `started_at` (RFC 3339 timestamp of the turn claim), `elapsed` (whole wall-clock seconds since the claim, measured at the read for active or interrupted turns and through the response time for captured or waiting turns), and `profile` (the effective profile name). `attempt` (number) and `path` (`resume` or `replay`) appear when an attempt is recorded. A parked waiting turn also has `question_id`, the durable trace question number it asked. These facts do not alter the chief of staff's `status.agents` prose. |
 | `status` | `null` until the chief of staff writes one; otherwise `goal`, `attention` (empty when nothing needs the owner), `note`, `agents`, `revision` and `updated_at` |
 
 `GET /v1/status` also carries `daily_budget`, today's spend against
@@ -2372,8 +2373,11 @@ cannot be read, the list is empty and carries a `workstreams` diagnostic with
 code `internal`. A workstream whose sealed plan cannot be read is listed with
 no `units`, and the list carries a `units` diagnostic with code `internal`
 naming it (`cannot read the unit states of workstream <id>; check the trace
-repository`); one whose overlap advisories cannot be read is listed with no
-`advisories` and, unless it already has a `units` diagnostic, an
+repository`); one whose agent turns cannot be read is listed with a null
+`agents` and an `agents` diagnostic with code `internal` (`cannot read the
+agent turns of workstream <id>; check the trace repository`), which a `units`
+diagnostic does not replace; one whose overlap advisories cannot be read is
+listed with no `advisories` and, unless it already has a diagnostic, an
 `advisories` diagnostic (`cannot read the overlap advisories of workstream
 <id>; check the trace repository`), and one whose drift rebases cannot be
 read is listed with a null `drift` and, unless it already has a diagnostic, a
@@ -2381,8 +2385,9 @@ read is listed with a null `drift` and, unless it already has a diagnostic, a
 the trace repository`); the other workstreams are listed as ever. For one workstream, a
 malformed ID returns `validation`, no configured project returns
 `no_project`, a workstream the active trace does not hold (or no trace at all)
-returns `not_found`, and an unreadable trace, or unit states of that
-workstream that cannot be read, returns `internal`; these messages name the
+returns `not_found`, and an unreadable trace, or agent turns, unit states,
+overlap advisories or drift rebases of that workstream that cannot be read,
+returns `internal`; these messages name the
 workstream or project.
 
 ## Inbox and rulings
