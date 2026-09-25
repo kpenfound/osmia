@@ -45,7 +45,7 @@ set through `Options` by embedders.
 
 | Method | Path after `/v1` | Input / response |
 | --- | --- | --- |
-| GET | `/health` | Readiness, service name, API version, supplied build version and commit |
+| GET | `/health` | Readiness, service name, API version, and the build version and commit (`osmia serve` reports the ones `osmia --version` prints; see [releases](release.md)) |
 | GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics, and `last_error`, the last failed [reload](#reload) (`path`, `field`, `message`, `at`), until a reload succeeds |
 | POST | `/reload` | No body; [reloads](#reload) the configuration and returns `ReloadResponse`: the loaded `digest` and the `restart_required` settings |
 | GET | `/runtime` | Effective runtime state, each role's next-turn profile (`name` and `source`: `configuration` or `owner_override`), each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
