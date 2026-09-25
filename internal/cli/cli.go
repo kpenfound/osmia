@@ -18,12 +18,14 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/kpenfound/osmia/internal/buildinfo"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
 const usage = `Usage: osmia <command> [--root PATH]
+       osmia --version
   serve
   status [workstream-id] [--json]
   project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH [--base-branch NAME] [--json]
@@ -62,7 +64,7 @@ type options struct {
 	root, socket, reason                string
 	upstream, fork, clone, baseBranch   string
 	json, hard, reasonSet, help, target bool
-	skipDebate                          bool
+	skipDebate, version                 bool
 	args                                []string
 }
 
@@ -112,7 +114,7 @@ func parse(args []string) (o options, err error) {
 				o.baseBranch = value
 				o.target = true
 			}
-		case "--json", "--hard", "--skip-debate", "--help", "-h":
+		case "--json", "--hard", "--skip-debate", "--version", "--help", "-h":
 			if has {
 				return o, errors.New("boolean flags take no value")
 			}
@@ -123,6 +125,8 @@ func parse(args []string) (o options, err error) {
 				o.hard = true
 			case "--skip-debate":
 				o.skipDebate = true
+			case "--version":
+				o.version = true
 			default:
 				o.help = true
 			}
@@ -136,6 +140,25 @@ func parse(args []string) (o options, err error) {
 // enforcement is what serve runs role turns through.
 var enforcement = service.CoreEnforcement
 
+// build is the version and commit stamped into this binary. An unstamped
+// build reports version dev and an empty commit.
+func build() service.Identity {
+	version := buildinfo.Version
+	if version == "" {
+		version = "dev"
+	}
+	return service.Identity{Version: version, Commit: buildinfo.Commit}
+}
+
+// versionLine is what osmia --version prints: the version, followed by the
+// commit in parentheses when one was stamped.
+func versionLine(b service.Identity) string {
+	if b.Commit == "" {
+		return "osmia " + b.Version
+	}
+	return "osmia " + b.Version + " (" + b.Commit + ")"
+}
+
 // Run reads hand-in input from stdin, writes results to stdout and
 // diagnostics to stderr, and returns a documented exit code. Client execution
 // never loads configuration or opens runtime files.
@@ -147,6 +170,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	if o.help {
 		fmt.Fprint(stdout, usage)
+		return 0
+	}
+	if o.version {
+		fmt.Fprintln(stdout, versionLine(build()))
 		return 0
 	}
 	if len(o.args) == 0 {
@@ -207,7 +234,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return 2
 	}
 	if cmd == "serve" {
-		if err := service.Run(ctx, service.Enforce(service.Options{Config: config.Options{Root: root.String()}}, enforcement())); err != nil {
+		if err := service.Run(ctx, service.Enforce(service.Options{Config: config.Options{Root: root.String()}, Build: build()}, enforcement())); err != nil {
 			// Startup errors may contain raw TOML values or paths; do not echo them.
 			fmt.Fprintln(stderr, "service startup failed: check root/configuration/runtime permissions and validity; stop any existing owner before starting; socket must be unused or stale")
 			return 6

@@ -342,6 +342,9 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
 Every command accepts `--root PATH`, defaulting to `~/.osmia`. Flags may occur
 before or after positional arguments; value flags also accept `--flag=value`.
 Duplicate and unknown flags are errors. `--help` prints the supported syntax.
+`--version` prints the stamped [release](release.md) version and commit and
+exits 0 without contacting the service; like `--help`, it takes precedence
+over a command.
 
 Clients connect to `osmia.sock` under the root. If configuration specifies another
 socket name, pass `--socket PATH` to each client command; relative paths resolve
