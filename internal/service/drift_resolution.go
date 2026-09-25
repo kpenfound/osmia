@@ -194,11 +194,20 @@ func resolvingMove(repository *trace.Repository, stream config.WorkstreamID) (tr
 // the feature branch to onto, and whether it did: a unit rebased onto onto
 // is carried by that drift rebase.
 func carriedOnto(repository *trace.Repository, stream config.WorkstreamID, onto string) (trace.UpstreamMove, bool, error) {
-	r, found, err := latestDriftRecord(repository, stream)
-	if err != nil || !found || (r.Outcome != driftCarrying && r.Outcome != driftRebased) || r.Commit != onto {
+	r, found, err := carryDrift(repository, stream, onto)
+	if err != nil || !found {
 		return trace.UpstreamMove{}, false, err
 	}
 	return r.move(), true, nil
+}
+
+// carryDrift identifies the drift whose approved result is onto.
+func carryDrift(repository *trace.Repository, stream config.WorkstreamID, onto string) (DriftRebase, bool, error) {
+	r, found, err := latestDriftRecord(repository, stream)
+	if err != nil || !found || (r.Outcome != driftCarrying && r.Outcome != driftRebased) || r.Commit != onto {
+		return DriftRebase{}, false, err
+	}
+	return r, true, nil
 }
 
 // unitDrift returns the drift rebase whose carry produced the candidate the

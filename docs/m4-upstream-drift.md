@@ -82,8 +82,8 @@ conflicted` with one `Moved:` line.
 
 The drift mason's turn `drift-mason-1-resolve-1` names the conflicted path
 and carries the sealed spec. Its view of the resolution workspace holds the
-conflict markers. The mason replaces them with the feature's file, which
-supersedes upstream's placeholder.
+conflict markers. The mason writes a resolution distinct from both the
+feature's file and upstream's placeholder.
 
 ### 3. A restart while the mason works
 
@@ -106,9 +106,11 @@ and the resolution workspace is removed.
 ### 5. The approval returns to review
 
 `audit`'s approved workspace does not descend from the new tip. The drift
-carries it with `rebase-audit-1`, which is clean. The candidate changed, so
-`audit` moves from `approved` back to `reviewing` with the reason `the
-approval no longer holds: ...`, and the chief of staff gets a second upstream
+carries it with `rebase-audit-1`, which is clean. The carry keeps the reviewed
+resolution of `internal/trace/built.go` and `audit`'s own change in
+`internal/trace/audit.go`; its recorded base is the feature tip before drift.
+The candidate changed, so `audit` moves from `approved` back to `reviewing`
+with the reason `the approval no longer holds: ...`, and the chief gets an upstream
 moved event: `unit audit's approval no longer holds`. The drift rebase then
 records `rebased`. `audit`'s reviewer reads the rebased candidate on the new
 base and approves it. Only then, after drift rebase 1 has its result, is
