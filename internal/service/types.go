@@ -492,3 +492,28 @@ type ConversationEntry struct {
 	At    time.Time `json:"at"`
 	State TurnState `json:"state"`
 }
+
+// EventKind names the view an event of the client event stream announces a
+// change to.
+type EventKind string
+
+const (
+	// EventResync asks the client to read every view again. It is the first
+	// event of every stream and replaces the events a subscriber could not
+	// keep up with.
+	EventResync       EventKind = "resync"
+	EventWorkstream   EventKind = "workstream"
+	EventInbox        EventKind = "inbox"
+	EventConversation EventKind = "conversation"
+	EventRuntime      EventKind = "runtime"
+	EventConfig       EventKind = "config"
+	EventSpend        EventKind = "spend"
+)
+
+// Event is one notification of the client event stream. It names what
+// changed, never its new state, which the read endpoints report.
+type Event struct {
+	Kind       EventKind           `json:"kind"`
+	Project    config.ProjectID    `json:"project,omitempty"`
+	Workstream config.WorkstreamID `json:"workstream,omitempty"`
+}

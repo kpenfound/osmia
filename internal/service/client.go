@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -67,17 +68,7 @@ func (c *Client) do(ctx context.Context, method, path string, input, output any,
 	defer resp.Body.Close()
 	d := json.NewDecoder(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var out ErrorResponse
-		if err := d.Decode(&out); err != nil {
-			if isTimeout(ctx, err) {
-				return transportError(ctx, err, timeout)
-			}
-			return &APIError{Internal, "invalid API error response"}
-		}
-		if out.Error.Code == "" {
-			return &APIError{Internal, "invalid API error response"}
-		}
-		return &out.Error
+		return errorResponse(ctx, d, timeout)
 	}
 	if output == nil {
 		_, err = io.Copy(io.Discard, resp.Body)
@@ -88,6 +79,94 @@ func (c *Client) do(ctx context.Context, method, path string, input, output any,
 		return transportError(ctx, err, timeout)
 	}
 	return nil
+}
+
+// errorResponse decodes the API error of a failed response.
+func errorResponse(ctx context.Context, d *json.Decoder, timeout time.Duration) error {
+	var out ErrorResponse
+	if err := d.Decode(&out); err != nil {
+		if isTimeout(ctx, err) {
+			return transportError(ctx, err, timeout)
+		}
+		return &APIError{Internal, "invalid API error response"}
+	}
+	if out.Error.Code == "" {
+		return &APIError{Internal, "invalid API error response"}
+	}
+	return &out.Error
+}
+
+// Events reads the service's event stream and passes each event to handle
+// until ctx ends, the stream ends or handle returns an error. The first event
+// of every stream is EventResync. The default response budget covers
+// connecting and the response header; the stream itself has none. Events
+// returns handle's error, ctx's error once ctx ends, and otherwise an
+// unavailable error: the service closed the stream or cannot be reached. A
+// caller that reconnects reads everything again on the new stream's resync.
+func (c *Client) Events(ctx context.Context, handle func(Event) error) error {
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	req, err := http.NewRequestWithContext(streamCtx, "GET", "http://osmia"+Prefix+"/events", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	budget := time.AfterFunc(c.defaultTimeout, cancel)
+	resp, err := c.http.Do(req)
+	late := !budget.Stop()
+	if late && ctx.Err() == nil {
+		if err == nil {
+			resp.Body.Close()
+		}
+		return &APIError{Unavailable, fmt.Sprintf("no response within %s", c.defaultTimeout)}
+	}
+	if err != nil {
+		return transportError(ctx, err, c.defaultTimeout)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return errorResponse(ctx, json.NewDecoder(io.LimitReader(resp.Body, 4<<20)), c.defaultTimeout)
+	}
+	err = readEvents(bufio.NewReader(resp.Body), handle)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
+
+// readEvents parses server-sent events and passes each one to handle. Comments,
+// fields other than event and data, and events without data are skipped.
+func readEvents(r *bufio.Reader, handle func(Event) error) error {
+	var kind string
+	var data []string
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return &APIError{Unavailable, "the event stream ended"}
+		}
+		line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+		if line == "" {
+			if len(data) > 0 {
+				var e Event
+				if json.Unmarshal([]byte(strings.Join(data, "\n")), &e) != nil || (kind != "" && EventKind(kind) != e.Kind) {
+					return &APIError{Internal, "invalid event in the event stream"}
+				}
+				if err := handle(e); err != nil {
+					return err
+				}
+			}
+			kind, data = "", nil
+			continue
+		}
+		field, value, _ := strings.Cut(line, ":")
+		value = strings.TrimPrefix(value, " ")
+		switch field {
+		case "event":
+			kind = value
+		case "data":
+			data = append(data, value)
+		}
+	}
 }
 
 func transportError(ctx context.Context, err error, timeout time.Duration) error {

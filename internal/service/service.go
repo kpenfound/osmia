@@ -128,6 +128,8 @@ type Service struct {
 	ready      atomic.Bool
 	requests   sync.WaitGroup
 	boundary   func(string) error
+	// hub carries change notifications to the client event stream.
+	hub *hub
 	// driftAsked is set once an owner's drift rebase request is recorded,
 	// so the next pass reads the drift schedule.
 	driftAsked atomic.Bool
@@ -171,7 +173,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{})}
+	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub()}
 	if opts.controls != nil {
 		opts.controls.service.Store(s)
 	}
@@ -199,6 +201,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
+	st.Observe(func() { s.hub.publish(Event{Kind: EventRuntime}) })
 	defer func() {
 		if err != nil {
 			st.Close()
@@ -290,6 +293,8 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			serving--
 		}
 		s.ready.Store(false)
+		// Event streams never go idle, so they end before the drain.
+		s.hub.close()
 		drain, stop := context.WithTimeout(context.Background(), opts.ShutdownTimeout)
 		if e := s.server.Shutdown(drain); e != nil {
 			s.server.Close()
@@ -552,6 +557,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		}
 		return nil, nil, nil, err
 	}
+	repository.Observe(s.hub.traceEvents(cfg.Project.ID))
 	if options.Worker == "" {
 		options.Worker = "local-operations"
 	}
