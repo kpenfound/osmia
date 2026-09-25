@@ -86,6 +86,11 @@ The [M4 amendments and standing rulings demonstration](docs/m4-amendments.md)
 follows a mason's amendment through the shed and owner decision, then a
 ratified charter rule into another workstream's bundle.
 
+The [M4 reliability demonstration](docs/m4-reliability.md) keeps one
+workstream going through the daily budget, a hard pause, a live profile
+switch, a configuration reload, a provider usage limit and a crash while a
+unit lands, then a restart.
+
 The [charter reference](docs/charter.md) documents the charter template, the
 numbered-rule format and how owner edits are recorded.
 
