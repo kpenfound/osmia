@@ -1340,6 +1340,16 @@ the existing mason thread resumes in its workspace with the note. A `review`
 ruling is refused because there is no candidate under review. The mason's
 later `done` report still enters the normal reviewer and landing path.
 
+A mason turn that ends with an infrastructure failure has already been
+retried on its profile and every fallback (see
+[retries and fallbacks](trace.md#retries-and-fallbacks)). The unit becomes
+`contested`, with a notice for the chief of staff; the reason, shown on the
+contested owner gate, lists each attempt's profile, failure class and
+failure. The owner rules `revise` the same way, and the mason's next turn
+continues in its workspace. A mason turn that ends with a behavioural failure
+is not retried and does not contest the unit: the unit stays `implementing`
+with its failed turn.
+
 With `Options.Threads` set, the mason controller runs in every reconciliation
 pass, after answer delivery and before the scheduler. It first
 [parks and resumes](#a-masons-question) units on their masons' questions.
@@ -1629,7 +1639,11 @@ unit enters `contested` and raises an owner gate instead. The owner uses
 `osmia contested <workstream> <unit> <review|revise> <note>` to record a
 direction for that candidate. `review` resumes review and still needs a new
 reviewer verdict; `revise` passes the findings to the mason. A ruling on a review contest is
-recorded before the transition so restart reconciles it once. The mason's
+recorded before the transition so restart reconciles it once. A reviewer turn
+that ends with an infrastructure failure after its retries and fallbacks also
+contests the unit, with its attempts in the gate's reason. That contest has no
+findings, so only `review` is accepted: it returns the unit to `reviewing`
+and a new review turn runs over the same candidate. The mason's
 next report makes a new candidate and the reviewer sees a new exact request.
 
 A reviewer question moves the unit to `waiting` and reaches the chief of
@@ -2221,13 +2235,25 @@ order, except the librarian's, which carries no feature (see
 | `advisories` | The workstream's active [overlap advisories](#overlapping-workstreams): `workstream`, the other workstream; `seal` and `other_seal`, the seals compared; `subsystems`, `entities` and `paths`, what they share; and `message`, the advisory as the chief of staff received it; empty when none is active |
 | `drift` | The workstream's latest [drift rebase](#drift-rebases): `drift`, its number; `outcome`, `requested` once it is asked for, `conflicted` while its conflicts are resolved and `carrying` while unfinished units follow the branch, then `rebased` or `skipped`; `at` and `reason`, the time and reason of the transition that recorded that outcome; `moved`, the bodies of its [upstream moved events](#upstream-moved-events), oldest first, and empty when it raised none; `null` before the first |
 | `open_questions` | Questions in the workstream without a ruling |
-| `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, `contested` with the unit ID, or a `charter` proposal with its question number; a mason contest also has `reason`; empty when none wait |
+| `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, `contested` with the unit ID, or a `charter` proposal with its question number; a mason contest, and a contest raised by a failed reviewer turn, also has `reason`; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
 | `status` | `null` until the chief of staff writes one; otherwise `goal`, `attention` (empty when nothing needs the owner), `note`, `agents`, `revision` and `updated_at` |
 
 `GET /v1/status` also carries `daily_budget`, today's spend against
 `budget.per_day` ([daily budget](#daily-budget)), or `null` without one.
 `osmia status` prints it on a `Daily budget:` line before the workstreams.
+
+`failure_streaks` lists, by `role` and `profile`, the active project's
+consecutive `infrastructure` turn-attempt failures
+([retries and fallbacks](trace.md#retries-and-fallbacks)) across its
+workstreams, with `consecutive`, `last_failure` and `last_at` (when the
+latest failing attempt started). Any later attempt of that role on that
+profile that does not fail with an infrastructure failure resets the streak,
+and a reset streak is left out; a cancelled or stopped attempt leaves it as
+it is. The field is omitted when no streak runs. When the turn attempts
+cannot be read, the response carries a `failure_streaks` diagnostic with code
+`internal`. `osmia status` prints each streak on an
+`Infrastructure failures:` line after the daily budget.
 
 `set_status` requires a non-empty `attention` while any gate is open and
 refuses a non-empty one when no gate is open. The chief of staff writes the

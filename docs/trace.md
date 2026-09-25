@@ -561,7 +561,9 @@ Inspection reads only the thread snapshot:
 | Queued and next | Absent. Apply calls `Prepare` for per-turn resources, then `Runner.RunNext` |
 
 A captured backend or isolation failure is a terminal result with outcome
-`failed` or `interrupted`, not an infrastructure retry. A turn that is still not
+`failed` or `interrupted`: the runner has already retried it, as
+[retries and fallbacks](#retries-and-fallbacks) describes, and the operation
+does not run it again. A turn that is still not
 complete after Apply returns an error and stays pending. A restarted controller
 finds this work by scanning operations, so no wakeup from before shutdown is
 needed.
@@ -604,13 +606,33 @@ must match the final attempt. Request, turn and claim identities remain stable
 across all attempts; only one response is appended to the owned log.
 
 A typed `ErrResumeUnavailable` returned before any work is accepted permits one
-fresh replay attempt. A typed `ErrNotStarted` permits a service-approved fallback
-from `Runner.Fallbacks`, bounded by `MaxRetries` (default zero, maximum ten).
-Fallback always starts fresh. These errors must prove there are no outstanding
-effects; output, outcome, usage or a resulting session prevents automatic retry.
-Ordinary failures and cancellations are recorded without retry. An intent without
-a result remains interrupted and reserved after reopen. Per-turn leases span
-these safe retries and release once.
+fresh replay attempt. An intent without a result remains interrupted and
+reserved after reopen, so a restart never repeats an attempt. Per-turn leases
+span every attempt of the turn and release once.
+
+### Retries and fallbacks
+
+Every failed attempt the service did not stop records a `failure` and a
+`failure_class`, and the turn's response carries its final attempt's. The
+runner classifies the attempt with the adapter's `RetryAdapter`:
+
+- `behavioural`: the session ran and reported an outcome, including one its
+  role may not report. The turn ends with its failure and the role's
+  controller handles it; it is never retried.
+- `infrastructure`: a transport or isolation error, a timeout, a nonzero
+  exit, a signal, a provider limit, the session cost cap or a missing session
+  reference, whether or not the session started.
+
+An infrastructure failure is retried on the same profile up to
+`Runner.MaxRetries` times (default zero, maximum ten), then on the profile's
+fallback from `Runner.Fallbacks` with the same bound, and so on down the
+chain. A fallback never returns to a profile the turn already ran on, and it
+always replays the owned log. A cancelled attempt, one the service stopped and
+one whose execution is unsupported are not retried. Each retry's attempt
+`reason` names the retry or fallback and the failure that caused it. The
+service sets `MaxRetries` to 2 and derives `Fallbacks` from each profile's
+configured `fallback`, for every role. A turn that still ends with an
+infrastructure failure has exhausted its chain.
 
 ## Private role notes
 

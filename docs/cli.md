@@ -65,7 +65,10 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   context mode (`file`, a normal mode; see [context](context.md)), with
   `budget.per_day` today's known spend against it (`Daily budget: USD <spend>
   of USD <limit> spent on <day>`, marked `at least` with the count of attempts
-  whose cost is unknown; see [daily budget](service.md#daily-budget)), then each
+  whose cost is unknown; see [daily budget](service.md#daily-budget)), each
+  role and profile whose latest turn attempts failed with infrastructure
+  failures (`Infrastructure failures: <role> on profile <profile> failed <n>
+  time(s) in a row; last at <time>: <failure>`), then each
   workstream with its state, open question count and context mode, its latest
   drift rebase (`Drift: rebase <n> <outcome> at <time>`) once it has one, and the
   chief of staff's goal and attention (`Attention: none` when nothing needs
