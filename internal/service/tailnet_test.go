@@ -1,15 +1,20 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -17,18 +22,39 @@ import (
 )
 
 // fakeTailnet stands in for the embedded Tailscale node with a loopback TCP
-// listener, so no test reaches a real tailnet.
+// listener, so no test reaches a real tailnet. Leaving ends the connections
+// it accepted, as leaving a real tailnet does.
 type fakeTailnet struct {
 	net.Listener
 	hostname, dir string
 	names         []string
-	closed        atomic.Bool
+	closed, left  atomic.Bool
+	mu            sync.Mutex
+	conns         []net.Conn
 }
 
 func (f *fakeTailnet) Names(context.Context) []string { return f.names }
+func (f *fakeTailnet) Accept() (net.Conn, error) {
+	conn, err := f.Listener.Accept()
+	if err == nil {
+		f.mu.Lock()
+		f.conns = append(f.conns, conn)
+		f.mu.Unlock()
+	}
+	return conn, err
+}
 func (f *fakeTailnet) Close() error {
 	f.closed.Store(true)
 	return f.Listener.Close()
+}
+func (f *fakeTailnet) Leave() error {
+	f.left.Store(true)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, conn := range f.conns {
+		conn.Close()
+	}
+	return nil
 }
 
 // withTailnet sets opts to join a fake tailnet that reports names, and
@@ -189,7 +215,7 @@ func TestReloadKeepsTheTailnetListener(t *testing.T) {
 	}
 	now, err := c.Configuration(ctx)
 	must(t, err)
-	if now.Effective.Listen.Tailnet != "osmia" || !hasCode(now.Diagnostics, "configuration", RestartRequired) || s.TailnetAddr() != addr || *joined != node || node.closed.Load() {
+	if now.Effective.Listen.Tailnet != "osmia" || !hasCode(now.Diagnostics, "configuration", RestartRequired) || s.TailnetAddr() != addr || *joined != node || node.closed.Load() || node.left.Load() {
 		t.Fatalf("after reload: %+v, bound %s", now, s.TailnetAddr())
 	}
 	if code, body := exchange(t, webHTTP(), "GET", "http://"+addr+Prefix+"/health", "", "", "osmia"); code != 200 {
@@ -199,7 +225,7 @@ func TestReloadKeepsTheTailnetListener(t *testing.T) {
 	files.write(t, strings.Replace(files.topText, "[listen]\ntailnet = \"osmia\"\n", "", 1), files.projectText)
 	reloaded, err = c.Reload(ctx)
 	must(t, err)
-	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet"}) || s.TailnetAddr() != addr || node.closed.Load() {
+	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet"}) || s.TailnetAddr() != addr || node.closed.Load() || node.left.Load() {
 		t.Fatalf("removed listen.tailnet: %+v, bound %s", reloaded, s.TailnetAddr())
 	}
 
@@ -208,11 +234,15 @@ func TestReloadKeepsTheTailnetListener(t *testing.T) {
 }
 
 // A tailnet that cannot be joined fails startup and leaves neither the
-// socket nor the root lock behind.
+// socket, the web listener nor the root lock behind.
 func TestTailnetJoinFailureFailsStartup(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
+	reserved, err := net.Listen("tcp", "127.0.0.1:0")
+	must(t, err)
+	web := reserved.Addr().String()
+	must(t, reserved.Close())
+	withListen(t, opts, "web = \""+web+"\"\ntailnet = \"osmia\"\n")
 	opts.JoinTailnet = func(string, string) (TailnetListener, error) {
 		return nil, errors.New("control server unreachable")
 	}
@@ -227,8 +257,49 @@ func TestTailnetJoinFailureFailsStartup(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(opts.Config.Root, "osmia.sock")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("socket left after failed startup: %v", err)
 	}
+	// Starting again on the same web address fails if the first attempt
+	// left its listener bound.
 	withTailnet(t, &opts)
-	start(t, opts)
+	s, _ = start(t, opts)
+	if s.WebAddr() != web {
+		t.Fatalf("web listener bound %s, configured %s", s.WebAddr(), web)
+	}
+}
+
+// Shutdown drains a request in flight over the tailnet before it leaves the
+// tailnet.
+func TestShutdownDrainsTailnetRequestsBeforeLeaving(t *testing.T) {
+	t.Parallel()
+	opts := fixture(t)
+	withListen(t, opts, "tailnet = \"osmia\"\n")
+	joined := withTailnet(t, &opts)
+	s, err := Start(context.Background(), opts)
+	must(t, err)
+	conn, err := net.Dial("tcp", s.TailnetAddr())
+	must(t, err)
+	defer conn.Close()
+	body := `{"role":"mason","profile":"other"}`
+	_, err = fmt.Fprintf(conn, "PUT /v1/runtime/profile HTTP/1.1\r\nHost: osmia\r\nContent-Type: application/json\r\nExpect: 100-continue\r\nContent-Length: %d\r\n\r\n", len(body))
+	must(t, err)
+	reader := bufio.NewReader(conn)
+	interim, err := http.ReadResponse(reader, nil)
+	must(t, err)
+	if interim.StatusCode != 100 {
+		t.Fatal(interim.StatusCode)
+	}
+	s.cancel()
+	_, err = io.WriteString(conn, body)
+	must(t, err)
+	resp, err := http.ReadResponse(reader, nil)
+	must(t, err)
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatal(resp.StatusCode)
+	}
+	must(t, s.Wait())
+	if node := *joined; !node.closed.Load() || !node.left.Load() {
+		t.Fatalf("after shutdown: closed %v, left %v", node.closed.Load(), node.left.Load())
+	}
 }
 
 // Shutdown leaves the tailnet before Close returns.
@@ -243,7 +314,7 @@ func TestShutdownLeavesTheTailnet(t *testing.T) {
 		t.Fatalf("tailnet before shutdown: %d", code)
 	}
 	must(t, s.Close())
-	if !(*joined).closed.Load() {
+	if !(*joined).closed.Load() || !(*joined).left.Load() {
 		t.Fatal("tailnet node open after shutdown")
 	}
 }

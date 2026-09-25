@@ -14,12 +14,14 @@ import (
 )
 
 // TailnetListener accepts HTTP connections from the owner's tailnet. Closing
-// it leaves the tailnet.
+// it stops accepting and keeps accepted connections open.
 type TailnetListener interface {
 	net.Listener
 	// Names lists the DNS names the node answers to besides its configured
 	// hostname, such as its MagicDNS name, or nil while it has none.
 	Names(context.Context) []string
+	// Leave leaves the tailnet, which ends every connection still open.
+	Leave() error
 }
 
 // JoinTailnet joins the tailnet as hostname, keeping the node's state in dir,
@@ -44,12 +46,11 @@ type tsnetListener struct {
 	server *tsnet.Server
 }
 
-func (l tsnetListener) Close() error {
-	err := l.Listener.Close()
-	if e := l.server.Close(); e != nil && !errors.Is(e, net.ErrClosed) {
-		err = errors.Join(err, e)
+func (l tsnetListener) Leave() error {
+	if err := l.server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		return err
 	}
-	return err
+	return nil
 }
 
 func (l tsnetListener) Names(ctx context.Context) []string {

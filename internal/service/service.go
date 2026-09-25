@@ -432,6 +432,7 @@ func (s *Service) cleanupSocket() {
 	}
 	if s.tailnet != nil {
 		s.tailnet.Close()
+		s.tailnet.Leave()
 	}
 	if info, err := os.Lstat(s.cfg.Listen.Socket); err == nil && os.SameFile(info, s.socketInfo) {
 		os.Remove(s.cfg.Listen.Socket)

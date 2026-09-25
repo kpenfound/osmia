@@ -79,8 +79,9 @@ gets `forbidden`.
 Joining is part of startup: an error from the node, such as an unusable state
 directory, is a startup error that names `listen.tailnet`, and startup then
 removes the socket and closes the web listener. A node waiting for login does
-not fail startup. Shutdown closes the listener and leaves the tailnet before
-cleanup continues.
+not fail startup. Shutdown stops accepting on the tailnet listener like the
+others and leaves the tailnet only after accepted requests have drained, so a
+request in flight over the tailnet finishes within the shutdown grace period.
 
 ## Contract
 
