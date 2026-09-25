@@ -67,9 +67,9 @@ func digest(c *config.Config) string {
 }
 func (s *Service) configuration() ConfigResponse {
 	s.mu.Lock()
-	cfg, pending := s.cfg, s.pending
+	cfg, pending, reloadErr := s.cfg, s.pending, s.reloadErr
 	s.mu.Unlock()
-	out := ConfigResponse{Root: cfg.Root.String(), Digest: digest(cfg), Effective: cfg, Diagnostics: []Diagnostic{}}
+	out := ConfigResponse{Root: cfg.Root.String(), Digest: digest(cfg), Effective: cfg, Diagnostics: []Diagnostic{}, LastError: reloadErr}
 	if cfg.HasProject() {
 		view := projectView(cfg.Root, cfg.Project)
 		// A project without a trace, or removed since the snapshot, has no
@@ -93,11 +93,16 @@ func (s *Service) configuration() ConfigResponse {
 	if pending != nil {
 		out.Diagnostics = append(out.Diagnostics, Diagnostic{"projects", Internal, "an interrupted project registration is incomplete; run osmia project add again to finish it, or inspect project-add.json under the root"})
 	}
-	current, err := config.Load(s.options.Config)
+	next, restart, err := s.candidate(cfg)
 	if err != nil {
-		out.Diagnostics = append(out.Diagnostics, Diagnostic{"configuration", Validation, "disk configuration is invalid or unreadable; loaded configuration retained"})
-	} else if digest(current) != out.Digest {
-		out.Diagnostics = append(out.Diagnostics, Diagnostic{"configuration", RestartRequired, "disk configuration differs; restart to apply it"})
+		out.Diagnostics = append(out.Diagnostics, Diagnostic{"configuration", Validation, "disk configuration is invalid (" + reloadError(err, time.Time{}).Message + "); loaded configuration retained"})
+		return out
+	}
+	if digest(next) != out.Digest {
+		out.Diagnostics = append(out.Diagnostics, Diagnostic{"configuration", ReloadRequired, "disk configuration differs; run osmia reload to apply it"})
+	}
+	if len(restart) > 0 {
+		out.Diagnostics = append(out.Diagnostics, Diagnostic{"configuration", RestartRequired, "disk configuration changes " + strings.Join(restart, ", ") + "; restart the service to apply it"})
 	}
 	return out
 }
@@ -190,6 +195,14 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+	}
+	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/reload" {
+		if out, api := s.reload(); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
 	}
 	if r.Method == http.MethodPut && (r.URL.Path == Prefix+"/config/root" || r.URL.Path == Prefix+"/config/listen") {
 		fail(w, RestartRequired)

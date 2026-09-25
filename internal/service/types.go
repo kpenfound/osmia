@@ -22,6 +22,7 @@ const (
 	Conflict        Code = "conflict"
 	Unsupported     Code = "unsupported"
 	RestartRequired Code = "restart_required"
+	ReloadRequired  Code = "reload_required"
 	Unavailable     Code = "unavailable"
 	Internal        Code = "internal"
 	NoProject       Code = "no_project"
@@ -57,13 +58,32 @@ type Diagnostic struct {
 }
 
 // ConfigResponse contains validated fields only, never raw configuration text.
-// Project is null until a project is registered.
+// Project is null until a project is registered. LastError is the last failed
+// reload, until a reload succeeds.
 type ConfigResponse struct {
 	Root        string         `json:"root"`
 	Digest      string         `json:"digest"`
 	Effective   *config.Config `json:"effective"`
 	Project     *ProjectView   `json:"project"`
 	Diagnostics []Diagnostic   `json:"diagnostics"`
+	LastError   *ReloadError   `json:"last_error,omitempty"`
+}
+
+// ReloadResponse reports an applied reload: the digest of the configuration
+// now loaded and each changed setting that keeps its loaded value until the
+// service restarts.
+type ReloadResponse struct {
+	Digest          string   `json:"digest"`
+	RestartRequired []string `json:"restart_required"`
+}
+
+// ReloadError is a reload that failed validation: the file and field at
+// fault when known, a message naming them, and when it failed.
+type ReloadError struct {
+	Path    string    `json:"path,omitempty"`
+	Field   string    `json:"field,omitempty"`
+	Message string    `json:"message"`
+	At      time.Time `json:"at"`
 }
 
 // ProjectView names a registered project, its trace and its charter file.
