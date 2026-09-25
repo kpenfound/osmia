@@ -32,6 +32,36 @@ func apiError(t *testing.T, err error, code Code, message string) {
 	}
 }
 
+func TestQuickReplyEligibility(t *testing.T) {
+	for _, word := range []string{"push", "merge", "deliver", "abandon", "force", "delete", "rebase", "overrule", "deploy", "ratify", "veto", "revert", "reset", "discard", "PUSHES", "merged", "ratified", "vetoing", "abandoned", "force-push", "Merge,please"} {
+		t.Run(word, func(t *testing.T) {
+			entry := trace.InboxEntry{State: trace.QuestionEscalated, Recommendation: "Please " + word + " this.", Questions: []trace.QuestionState{{}}}
+			if got := inboxView(entry).QuickReply; got != "" {
+				t.Fatalf("quick reply for %q: %q", word, got)
+			}
+		})
+	}
+	for _, recommendation := range []string{"", " \n", "Discuss the merger, pushover, forceful work and released notes.", "Use the files as written."} {
+		entry := trace.InboxEntry{State: trace.QuestionEscalated, Recommendation: recommendation, Questions: []trace.QuestionState{{}}}
+		want := recommendation
+		if strings.TrimSpace(want) == "" {
+			want = ""
+		}
+		if got := inboxView(entry).QuickReply; got != want {
+			t.Fatalf("quick reply for %q: %q, want %q", recommendation, got, want)
+		}
+	}
+	for _, decision := range []string{"ratification", "contested-unit", "amendment-decision", "delivery-approval"} {
+		entry := trace.InboxEntry{State: decision, Recommendation: "Proceed with the plan.", Questions: []trace.QuestionState{{}}}
+		if got := inboxView(entry).QuickReply; got != "" {
+			t.Fatalf("%s quick reply: %q", decision, got)
+		}
+	}
+	if got := inboxView(trace.InboxEntry{State: trace.QuestionEscalated, Recommendation: "Proceed with the plan."}).QuickReply; got != "" {
+		t.Fatalf("entry without questions has quick reply %q", got)
+	}
+}
+
 // Fake askers in two workstreams park on escalated questions. The owner reads
 // one inbox, answers the batch once, and the service restarts after the
 // ruling, after the relay and with the answer turns queued but not run. Each
@@ -191,7 +221,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 		batch, single = single, batch
 	}
 	wantBatch := InboxEntry{Number: batch.Number, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format part of the contract?", Blocked: "The upload unit and its review.",
-		Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", EscalatedAt: f.clock.Now(),
+		Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", EscalatedAt: f.clock.Now(),
 		Asked: []InboxQuestion{{ID: "1", AskedBy: demoAgent, Question: "Where does state live?"}, {ID: "2", AskedBy: "agent_reviewer", Question: "Is the log format fixed?"}}}
 	// The two askers run in one pass, in either order.
 	if batch.Asked[0].Question != "Where does state live?" {

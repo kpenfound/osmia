@@ -18,6 +18,10 @@ import (
 // and a single escalated question, as fake askers and a fake chief of staff
 // left them.
 func withInbox(t *testing.T) service.Options {
+	return withInboxRecommendations(t, "Both fixed.", "No.")
+}
+
+func withInboxRecommendations(t *testing.T, first, second string) service.Options {
 	t.Helper()
 	ctx := context.Background()
 	opts := fixture(t)
@@ -45,8 +49,8 @@ func withInbox(t *testing.T) service.Options {
 	}
 	chief := claim("chief", trace.ChiefOfStaff, "events")
 	for _, req := range []trace.EscalationRequest{
-		{Questions: []string{"1", "2"}, Rephrasing: "Are state files and the log format\npart of the contract?", Blocked: "The upload unit and its review.", Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed."},
-		{Questions: []string{"3"}, Rephrasing: "May the index unit add a dependency?", Blocked: "The index unit.", Recommendation: "No."},
+		{Questions: []string{"1", "2"}, Rephrasing: "Are state files and the log format\npart of the contract?", Blocked: "The upload unit and its review.", Options: []string{"Both fixed", "Both free"}, Recommendation: first},
+		{Questions: []string{"3"}, Rephrasing: "May the index unit add a dependency?", Blocked: "The index unit.", Recommendation: second},
 	} {
 		_, err := repo.EscalateQuestions(ctx, "chief", chief, req, written.Add(time.Hour))
 		must(t, err)
@@ -67,9 +71,9 @@ func TestInboxAndAnswer(t *testing.T) {
 	var list service.InboxResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "inbox", "--json")), &list))
 	want := service.InboxResponse{Entries: []service.InboxEntry{
-		{Number: 1, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format\npart of the contract?", Blocked: "The upload unit and its review.", Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", EscalatedAt: escalated,
+		{Number: 1, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format\npart of the contract?", Blocked: "The upload unit and its review.", Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", EscalatedAt: escalated,
 			Asked: []service.InboxQuestion{{ID: "1", AskedBy: "mason1", Question: "Where does state live?"}, {ID: "2", AskedBy: "reviewer1", Question: "Is the log format fixed?"}}},
-		{Number: 2, Workstream: stream, Batch: "escalation_3", Question: "May the index unit add a dependency?", Blocked: "The index unit.", Options: []string{}, Recommendation: "No.", EscalatedAt: escalated,
+		{Number: 2, Workstream: stream, Batch: "escalation_3", Question: "May the index unit add a dependency?", Blocked: "The index unit.", Options: []string{}, Recommendation: "No.", QuickReply: "No.", EscalatedAt: escalated,
 			Asked: []service.InboxQuestion{{ID: "3", AskedBy: "mason2", Question: "May I add a dependency?"}}},
 	}}
 	if !reflect.DeepEqual(list, want) {
@@ -115,5 +119,48 @@ func TestInboxAndAnswer(t *testing.T) {
 	}
 	if got := successful(t, root, "inbox", "--json"); got != "{\"entries\":[]}\n" {
 		t.Fatalf("empty inbox --json: %q", got)
+	}
+}
+
+func TestAnswerAccept(t *testing.T) {
+	const recommendation = "  Keep the files as written.  "
+	opts := withInboxRecommendations(t, recommendation, "Please force-push this.")
+	s, err := service.Start(context.Background(), opts)
+	must(t, err)
+	t.Cleanup(func() { s.Close() })
+	root := opts.Config.Root
+	code, out, diag := invoke(t, root, "answer", "2", "--accept")
+	if code != 4 || out != "" || diag != "validation: inbox entry 2 has no eligible quick reply; give a ruling explicitly\n" {
+		t.Fatalf("refused accept: %d %q %q", code, out, diag)
+	}
+	var list service.InboxResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "inbox", "--json")), &list))
+	if len(list.Entries) != 2 || list.Entries[1].QuickReply != "" || list.Entries[0].QuickReply != recommendation {
+		t.Fatalf("inbox after refusal: %+v", list)
+	}
+	var accepted service.AnswerResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "answer", "1", "--accept", "--json")), &accepted))
+	if accepted.Ruling != recommendation {
+		t.Fatalf("accepted ruling: %q", accepted.Ruling)
+	}
+	if got := successful(t, root, "answer", "2", "A typed ruling."); got == "" {
+		t.Fatal("typed ruling produced no confirmation")
+	}
+	must(t, s.Close())
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	repo, err := trace.Open(cfg.Root, cfg.Project)
+	must(t, err)
+	t.Cleanup(func() { repo.Close() })
+	questions, err := repo.Questions(stream)
+	must(t, err)
+	for _, q := range questions {
+		if q.Asked.ID == "3" {
+			if q.Ruling == nil || q.Ruling.OwnerResponse != "A typed ruling." {
+				t.Fatalf("typed trace ruling: %+v", q)
+			}
+		} else if q.Ruling == nil || q.Ruling.OwnerResponse != recommendation {
+			t.Fatalf("accepted trace ruling: %+v", q)
+		}
 	}
 }
