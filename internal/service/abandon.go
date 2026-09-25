@@ -99,7 +99,7 @@ type runningTurns struct {
 }
 
 // runningTurn is one turn operation in flight. Stop is nil for a turn no
-// pause stops.
+// pause stops, and cancel nil for one abandonment cancels otherwise.
 type runningTurn struct {
 	project config.ProjectID
 	cancel  context.CancelFunc
@@ -134,7 +134,9 @@ func (r *runningTurns) cancel(stream config.WorkstreamID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, turn := range r.streams[stream] {
-		turn.cancel()
+		if turn.cancel != nil {
+			turn.cancel()
+		}
 	}
 }
 

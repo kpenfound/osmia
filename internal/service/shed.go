@@ -575,6 +575,10 @@ func (d *debate) committee(stream config.WorkstreamID) ([]string, error) {
 // request publishes a round, or the resumption of a parked one, as a durable
 // operation.
 func (d *debate) request(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, in roundInput, cause string) error {
+	// A paused workstream is asked for nothing until the pause is lifted.
+	if _, paused := d.s.pausing(d.repository.Project(), stream); paused {
+		return nil
+	}
 	transition, event := in.runIDs()
 	input, err := encodeRound(in)
 	if err != nil {
@@ -935,6 +939,8 @@ func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream
 				turnCtx = ctx
 			} else if d.s.options.Committee == nil {
 				return empty, "", errNoCommittee
+			} else if err := d.s.held(d.repository, stream); err != nil {
+				return empty, "", err
 			}
 			if _, err := d.dispatch(turnCtx, stream, in, member, pending.Request.TurnID); err != nil {
 				return empty, "", err
@@ -953,12 +959,22 @@ func (d *debate) member(ctx, running context.Context, cfg *config.Config, stream
 				empty.Failure = "the workstream was abandoned, so the member ran no turn"
 				return empty, "", err
 			}
-			if tries >= maxRoundAttempts {
+			// A turn a hard pause stopped is continued within its attempt.
+			if !stoppedTurn(last) && tries >= maxRoundAttempts {
 				empty.Failure = fmt.Sprintf("the member's turn was interrupted %d times by service stops", tries)
 				return empty, "", nil
 			}
 			if d.s.options.Committee == nil {
 				return empty, "", errNoCommittee
+			}
+			if err := d.s.held(d.repository, stream); err != nil {
+				return empty, "", err
+			}
+			if stoppedTurn(last) {
+				if _, err := d.s.continueStopped(ctx, d.repository, cfg, committeeRole, *last); err != nil {
+					return empty, "", err
+				}
+				continue
 			}
 			if err := d.enqueue(ctx, cfg, stream, in, member, tries+1, operation, asked); err != nil {
 				return empty, "", err
@@ -1093,8 +1109,11 @@ func (d *debate) contributed(stream config.WorkstreamID, turn string, empty shed
 	return record, nil
 }
 
-// dispatch runs the turn through the thread dispatcher and runner.
+// dispatch runs the turn through the thread dispatcher and runner, stopped by
+// a hard pause covering the workstream.
 func (d *debate) dispatch(ctx context.Context, stream config.WorkstreamID, in roundInput, member, turn string) (coreadapter.OperationResult, error) {
+	ctx, release := d.s.stoppable(ctx, d.repository.Project(), stream)
+	defer release()
 	dispatcher := thread.Dispatcher{Runner: d.s.threadRunner(d.s.current(), d.repository, &questions.Turns{Turns: d.turns(stream, in), Repository: d.repository}, d.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(d.turnDirectory(input.Workstream, input.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)

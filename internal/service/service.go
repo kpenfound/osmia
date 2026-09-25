@@ -542,6 +542,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if options.Priority == nil {
 		options.Priority = stagePriority
 	}
+	if options.Hold == nil {
+		options.Hold = s.holding(repository)
+	}
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
 		repository.Close()

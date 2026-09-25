@@ -159,6 +159,10 @@ func (d *debate) requestRedraft(ctx context.Context, stream config.WorkstreamID,
 // requestAnswer publishes one architect turn of the shed as a durable
 // operation and moves the shed to the state that says it is running.
 func (d *debate) requestAnswer(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, in roundInput, cause, reason, body string) error {
+	// A paused workstream is asked for nothing until the pause is lifted.
+	if _, paused := d.s.pausing(d.repository.Project(), stream); paused {
+		return nil
+	}
 	if err := d.drafter().ensureThread(ctx, stream); err != nil {
 		return err
 	}
@@ -400,6 +404,8 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 				turnCtx = ctx
 			} else if d.s.options.Architect == nil {
 				return none, errNoArchitect
+			} else if err := d.s.held(d.repository, stream); err != nil {
+				return none, err
 			}
 			if _, err := d.dispatchReply(turnCtx, stream, in, pending.Request.TurnID); err != nil {
 				return none, err
@@ -423,13 +429,23 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 				}
 				return d.replyFailed(ctx, op.ID, stream, in, abandonedReply(in))
 			}
+			// A turn a hard pause stopped is continued within its attempt.
 			interrupted := len(slices.DeleteFunc(slices.Clone(turns), func(q trace.QueuedTurn) bool { return q.Status() != "interrupted" }))
-			if interrupted >= maxReplyAttempts {
+			if !stoppedTurn(last) && interrupted >= maxReplyAttempts {
 				reply.Failure = fmt.Sprintf("the architect's turn was interrupted %d times by service stops", interrupted)
 				return d.recordReply(ctx, op.ID, stream, in, chain, reply, nil)
 			}
 			if d.s.options.Architect == nil {
 				return none, errNoArchitect
+			}
+			if err := d.s.held(d.repository, stream); err != nil {
+				return none, err
+			}
+			if stoppedTurn(last) {
+				if _, err := d.s.continueStopped(ctx, d.repository, cfg, architectRole, *last); err != nil {
+					return none, err
+				}
+				continue
 			}
 			if err := d.enqueueReply(ctx, cfg, stream, in, turns, op.ID, received(t, origins, asked)); err != nil {
 				return none, err
@@ -448,6 +464,9 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 			}
 			if d.s.options.Architect == nil {
 				return none, errNoArchitect
+			}
+			if err := d.s.held(d.repository, stream); err != nil {
+				return none, err
 			}
 			if err := d.enqueueReply(ctx, cfg, stream, in, turns, op.ID, received(t, origins, asked)); err != nil {
 				return none, err
@@ -532,7 +551,9 @@ func (d *debate) answers(stream config.WorkstreamID, turns []trace.QueuedTurn) (
 	var answers []shed.Answer
 	turn := ""
 	for _, q := range turns {
-		if q.CompletedAt.IsZero() || q.Status() == "interrupted" {
+		// A turn a hard pause stopped kept what it answered; its continuation
+		// adds to it.
+		if q.CompletedAt.IsZero() || q.Status() == "interrupted" && !stoppedTurn(&q) {
 			continue
 		}
 		turn = q.Request.TurnID
@@ -767,6 +788,8 @@ func (d *debate) returned(turns []trace.QueuedTurn) string {
 
 // dispatchReply runs the turn through the thread dispatcher and runner.
 func (d *debate) dispatchReply(ctx context.Context, stream config.WorkstreamID, in roundInput, turn string) (coreadapter.OperationResult, error) {
+	ctx, release := d.s.stoppable(ctx, d.repository.Project(), stream)
+	defer release()
 	dr := d.drafter()
 	dispatcher := thread.Dispatcher{Runner: d.s.threadRunner(d.s.current(), d.repository, &questions.Turns{Turns: d.replyPath(stream, in), Repository: d.repository}, d.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(dr.turnDirectory(input.Workstream, input.Turn), "session")

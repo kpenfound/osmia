@@ -9,22 +9,30 @@ import (
 
 // askChain maps every turn of one operation on the thread to the attempt it
 // continues: an attempt turn, named with prefix, to itself, and the turn that
-// delivers the answer to a question one of them asked to that attempt. asked
-// is the workstream's questions, oldest first, so a question asked in an
-// answer turn follows the question that turn answered.
+// delivers the answer to a question one of them asked, and the turn that
+// continues one of them after a hard pause stopped it, to that attempt.
 func askChain(t trace.Thread, prefix string, asked []trace.QuestionState) map[string]string {
 	origins := map[string]string{}
 	for _, q := range t.Turns {
-		if strings.HasPrefix(q.Request.TurnID, prefix) {
+		if strings.HasPrefix(q.Request.TurnID, prefix) && !isContinuation(q.Request.TurnID) {
 			origins[q.Request.TurnID] = q.Request.TurnID
 		}
 	}
-	for _, q := range asked {
-		if q.Asked.Thread != t.Identity.ThreadID {
-			continue
+	// Answers and continuations follow each other in any order, so both are
+	// followed until neither adds a turn.
+	for added := true; added; {
+		added = false
+		for _, q := range asked {
+			answer := questions.TurnID(q.Asked.ID)
+			if origin, ok := origins[q.Asked.Turn]; ok && q.Asked.Thread == t.Identity.ThreadID && origins[answer] == "" {
+				origins[answer], added = origin, true
+			}
 		}
-		if origin, ok := origins[q.Asked.Turn]; ok {
-			origins[questions.TurnID(q.Asked.ID)] = origin
+		for _, q := range t.Turns {
+			id := q.Request.TurnID
+			if origin, ok := origins[continuedTurn(id)]; ok && isContinuation(id) && origins[id] == "" {
+				origins[id], added = origin, true
+			}
 		}
 	}
 	return origins

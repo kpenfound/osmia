@@ -54,6 +54,10 @@ func (a *amendmentDrafter) Pass(ctx context.Context) error {
 		if feature.Value != "building" && feature.Value != "assembled" {
 			continue
 		}
+		// A paused workstream is asked for nothing until the pause is lifted.
+		if _, paused := a.s.pausing(a.repository.Project(), stream); paused {
+			continue
+		}
 		requests, err := trace.Read[trace.Amendment](a.repository, stream)
 		if err != nil {
 			return err
@@ -141,7 +145,7 @@ func (a *amendmentDrafter) Inspect(_ context.Context, op coreadapter.Operation) 
 		return coreadapter.Observation{}, err
 	}
 	for _, turn := range thread.Turns {
-		if id, ok := amendmentTurnID(turn.Request.TurnID); ok && id == request.ID && turn.Claim != nil && turn.Response == nil && thread.Status != "interrupted" {
+		if id, ok := amendmentTurnID(continuedTurn(turn.Request.TurnID)); ok && id == request.ID && turn.Claim != nil && turn.Response == nil && thread.Status != "interrupted" {
 			return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "architect turn is running"}, nil
 		}
 	}
@@ -178,21 +182,39 @@ func (a *amendmentDrafter) Apply(ctx context.Context, op coreadapter.Operation) 
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
+		// A turn a hard pause stopped is continued within its attempt, so
+		// only the attempts' own turns count.
 		var turns []trace.QueuedTurn
+		tries := 0
 		for _, turn := range thread.Turns {
-			if id, ok := amendmentTurnID(turn.Request.TurnID); ok && id == request.ID {
+			if id, ok := amendmentTurnID(continuedTurn(turn.Request.TurnID)); ok && id == request.ID {
 				turns = append(turns, turn)
+				if !isContinuation(turn.Request.TurnID) {
+					tries++
+				}
 			}
 		}
+		if len(turns) > 0 && stoppedTurn(&turns[len(turns)-1]) {
+			if err := a.s.held(a.repository, stream); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			if _, err := a.s.continueStopped(ctx, a.repository, cfg, architectRole, turns[len(turns)-1]); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			continue
+		}
 		if len(turns) == 0 || turns[len(turns)-1].Status() == "interrupted" {
-			if len(turns) >= maxDraftAttempts {
+			if tries >= maxDraftAttempts {
 				return a.finish(ctx, op.ID, stream, request.ID, "invalid", "the architect turn was interrupted too many times", nil)
+			}
+			if err := a.s.held(a.repository, stream); err != nil {
+				return coreadapter.OperationResult{}, err
 			}
 			profile, _, err := a.s.roleExecution(cfg, architectRole)
 			if err != nil {
 				return coreadapter.OperationResult{}, err
 			}
-			turn := fmt.Sprintf("amend-%s-%d", request.ID, len(turns)+1)
+			turn := fmt.Sprintf("amend-%s-%d", request.ID, tries+1)
 			prompt := fmt.Sprintf("Draft amendment %s. Read request.json, draft/spec.md, draft/plan.json, charter.md and context.md. Deliver only the changed spec.md and/or plan.json with %s; unchanged documents will be carried forward. To decline, deliver decline.txt with your reason. Keep merged units identical. Do not edit code. Every dependency must name an existing unit, the graph must be acyclic, and every footprint must resolve against the entity map.", request.ID, DraftTool)
 			system := fmt.Sprintf("You are the architect of the %s project (%s). Draft a revision to the sealed spec and plan for the amendment request. Read only your scoped files, deliver through %s, and do not edit implementation code or use version control.", cfg.Project.Name, cfg.Project.Upstream, DraftTool)
 			req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: draftingActor, Cause: op.ID, Depth: 1}, AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: system, Prompt: prompt}
@@ -209,6 +231,11 @@ func (a *amendmentDrafter) Apply(ctx context.Context, op coreadapter.Operation) 
 			continue
 		}
 		if last.CompletedAt.IsZero() {
+			if last.Response == nil {
+				if err := a.s.held(a.repository, stream); err != nil {
+					return coreadapter.OperationResult{}, err
+				}
+			}
 			if _, err := a.dispatch(ctx, stream, last.Request.TurnID); err != nil {
 				return coreadapter.OperationResult{}, err
 			}
@@ -220,7 +247,7 @@ func (a *amendmentDrafter) Apply(ctx context.Context, op coreadapter.Operation) 
 		if last.Status() != "idle" {
 			return a.finish(ctx, op.ID, stream, request.ID, "invalid", "architect turn failed: "+last.Response.Failure, nil)
 		}
-		return a.record(ctx, op.ID, stream, request, last.Request.TurnID)
+		return a.record(ctx, op.ID, stream, request, continuedTurn(last.Request.TurnID))
 	}
 }
 

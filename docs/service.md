@@ -2663,8 +2663,8 @@ the pause covers: mason, reviewer, drift mason and drift reviewer turns. A turn
 operation that was dispatched before the pause and starts while it is in force
 is stopped the same way before its agent session starts. Chief-of-staff turns
 are never stopped, and turns of workstreams outside the pause keep running.
-The architect's drafts, shed and amendment rounds and final reviews run through
-their own reconcilers and are not stopped.
+The turns the service's own reconcilers run stop the same way
+([reconcilers](#pauses-in-the-services-reconcilers)).
 
 Stopping cancels the agent session only. A mason's view is copied back into
 its workspace as after any turn, and the turn is captured and completed with
@@ -2684,6 +2684,36 @@ controller its mason's or reviewer's continuation once the drift resumes. The
 gate holds each continuation until the pause is cleared, and it then resumes
 the stopped session. A pause cleared while a stop is settling does not undo
 it: the turn still completes as stopped and its continuation runs.
+
+### Pauses in the service's reconcilers
+
+The architect's drafts, its replies and redrafts in the shed, shed rounds,
+amendment drafts, rounds and replies, and final reviews run their turns inside
+their own operations (`architect-draft`, `shed-reply`, `shed-redraft`,
+`shed-round`, `architect-amendment-draft`, `amendment-round`,
+`amendment-reply` and `final-review`), not through the scheduler. They follow
+the same pause contract. While a pause covers a workstream, its controllers
+request no new draft, round, reply, redraft, amendment step or final review,
+and the reconciliation loop holds that workstream's pending operations of
+these kinds: a held operation is not claimed and records nothing until the
+pause is cleared. An operation already applying lets a running turn finish
+under a soft pause and records what it delivered; where it would queue or
+start another turn, such as a member's next attempt or the answer to a
+question, it stops first and records one `retry` naming the pause. The
+operations of an abandoned workstream are not held, so they end as
+abandonment has them end.
+
+A hard pause stops these turns as it stops a mason's: the agent session is
+cancelled, the turn completes as `interrupted` with its `stop` record, and a
+turn that starts while the hard pause is in force stops before its session
+runs. Its operation stays pending and held. After the pause is cleared, the
+operation queues `<turn>-continue-<sequence>` on the same thread, with the
+stopped turn's prompt and a note that a hard pause stopped it, and runs it. The
+continuation resumes the stopped session and belongs to the stopped turn's
+attempt: what that turn delivered (draft files, contributions, answers or a
+final report) is kept and the continuation adds to or replaces it. A stop
+spends none of the attempts that service stops may spend, is recorded as no
+failure and moves no workflow state.
 
 ### Daily budget
 
@@ -2726,8 +2756,9 @@ role pass to copy the surviving view into the workspace before release.
 | Architect, committee and librarian | Draft, debate, final review, amendment, extraction and refresh passes rederive their pending operation from the trace and queue its next attempt. These operations already own the work and its attempt limit, so a separate recovery turn would duplicate it. |
 
 A hard-paused turn already has a completed `stop` result. Startup leaves that
-result in place; the relevant mason or reviewer pass continues it after the
-pause clears, without recording a crash or failure.
+result in place; the relevant mason or reviewer pass, or the architect or
+committee operation, continues it after the pause clears, without recording a
+crash or failure.
 
 The scheduler also dispatches within the configured `[capacity]`. Mason
 turns use `capacity.masons`, reviewer turns use `capacity.reviewers`, and both
