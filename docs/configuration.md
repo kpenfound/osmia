@@ -288,8 +288,9 @@ and landing preferences as declarative inputs. Review slot
 configuration is `capacity.reviewers`; no separate review-policy schema is defined.
 Runtime profile overrides, pauses and priorities belong in `runtime.json`, never
 these files; see [runtime overrides](runtime.md) for M1 persistence and resolution.
-`osmia reload` applies edited files to a running service after validating
-all of them ([reload](service.md#reload)). The root, `listen.socket`,
+`osmia config` shows whether each file on disk differs from what is loaded
+([disk drift](service.md#disk-drift)), and `osmia reload` applies edited files
+to a running service after validating all of them ([reload](service.md#reload)). The root, `listen.socket`,
 `listen.web`, `listen.tailnet` and `active_projects` keep their loaded values until the service
 restarts; project registration and removal change the active project without
 one.

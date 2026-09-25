@@ -38,6 +38,7 @@ osmia resume all
 osmia profiles
 osmia profiles set mason default
 osmia profiles clear mason
+osmia config
 osmia reload
 osmia status --json
 ```
@@ -57,7 +58,9 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   refused; a provably stale socket is recovered automatically. The service
   runs the librarian, architect, committee and chief-of-staff turns in each role's
   configured sandbox; see [running turns](service.md#running-turns).
-- `status` shows health, loaded configuration digest/root, the active project
+- `status` shows health, loaded configuration digest/root, each configuration
+  file on disk against the loaded configuration as `config` prints it, the
+  active project
   and its trace path (or that none is configured), its charter state (ready or
   empty, rule count, recorded revision and numbering diagnostics), its latest
   knowledge-base extraction (number, `pending`, `running`, `succeeded` or
@@ -68,7 +71,19 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   context mode (`file`, a normal mode; see [context](context.md)), with
   `budget.per_day` today's known spend against it (`Daily budget: USD <spend>
   of USD <limit> spent on <day>`, marked `at least` with the count of attempts
-  whose cost is unknown; see [daily budget](service.md#daily-budget)), each
+  whose cost is unknown; see [daily budget](service.md#daily-budget)), today's
+  [provider usage](service.md#provider-usage) (`Provider usage on <day>:`,
+  then per provider `<provider>: USD <spend> known spend`, marked `at least`
+  like the daily budget, with `Limit: <status> kind=<kind> until <time>` or
+  `until cleared` while a usage limit is in force, `Fallback: <role> runs
+  <profile> in place of <configured>` and `Paused: <role> has no fallback
+  available` for the roles the limit affects, and an `unattributed:` line for
+  costs no attempt names a provider for), the
+  [capacity](service.md#capacity) (`Capacity (per workstream <n>):`, then
+  `<role>: <used> of <limit> slot(s) in use` for mason, reviewer and
+  committee, each followed by `Waiting: <workstream> turn <turn> of <agent>
+  (<reason>)` or `Waiting: <workstream> unit <unit> (<reason>)` for the work
+  waiting for a slot), each
   role and profile whose latest turn attempts failed with infrastructure
   failures (`Infrastructure failures: <role> on profile <profile> failed <n>
   time(s) in a row; last at <time>: <failure>`), then each
@@ -355,6 +370,12 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   shows the same profile information.
   `profiles set <role> <profile>` overrides a binding.
   `profiles clear <role>` restores its configured default.
+- `config` shows the loaded configuration's digest and root, then one line
+  per configuration file comparing it on disk with the loaded configuration
+  (`Config file: <path>[ (project <id>)]: unchanged`, `changed`, or
+  `invalid: <field>: <reason>`; see [disk drift](service.md#disk-drift)),
+  the configuration diagnostics and the last failed reload. Reading it applies
+  nothing; `reload` does. It takes no argument.
 - `reload` asks the service to [reload its configuration](service.md#reload)
   and prints `Configuration reloaded: <digest>`, followed by `Restart required
   to apply: <settings>` when the files change settings that only a restart
@@ -395,7 +416,7 @@ All client commands accept `--json`. Status returns an object with `health`,
 every workstream except the librarian's with its full status (`null` before
 the first) and each role's effective profile and source;
 `status <workstream-id>` returns that workstream's status response; profiles returns the runtime
-response; `reload` returns the API's reload response: `digest` and
+response; `config` returns the API's configuration response; `reload` returns the API's reload response: `digest` and
 `restart_required`. `abandon` returns the API's abandon response: `project`,
 `workstream`, `state` and `reason`. `send` returns the accepted message entry and `conversation` the
 API's conversation response (see [conversation](service.md#conversation)).
