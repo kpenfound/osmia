@@ -2311,8 +2311,11 @@ cannot be read, the list is empty and carries a `workstreams` diagnostic with
 code `internal`. A workstream whose sealed plan cannot be read is listed with
 no `units`, and the list carries a `units` diagnostic with code `internal`
 naming it (`cannot read the unit states of workstream <id>; check the trace
-repository`); one whose overlap advisories cannot be read is listed with no
-`advisories` and, unless it already has a `units` diagnostic, an
+repository`); one whose agent turns cannot be read is listed with a null
+`agents` and an `agents` diagnostic with code `internal` (`cannot read the
+agent turns of workstream <id>; check the trace repository`), which a `units`
+diagnostic does not replace; one whose overlap advisories cannot be read is
+listed with no `advisories` and, unless it already has a diagnostic, an
 `advisories` diagnostic (`cannot read the overlap advisories of workstream
 <id>; check the trace repository`), and one whose drift rebases cannot be
 read is listed with a null `drift` and, unless it already has a diagnostic, a
@@ -2320,8 +2323,9 @@ read is listed with a null `drift` and, unless it already has a diagnostic, a
 the trace repository`); the other workstreams are listed as ever. For one workstream, a
 malformed ID returns `validation`, no configured project returns
 `no_project`, a workstream the active trace does not hold (or no trace at all)
-returns `not_found`, and an unreadable trace, or unit states of that
-workstream that cannot be read, returns `internal`; these messages name the
+returns `not_found`, and an unreadable trace, or agent turns, unit states,
+overlap advisories or drift rebases of that workstream that cannot be read,
+returns `internal`; these messages name the
 workstream or project.
 
 ## Inbox and rulings

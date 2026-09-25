@@ -15,9 +15,9 @@ import (
 
 // statuses reports every workstream of the active project, or none when no
 // project or trace is active. The librarian's workstream carries no feature
-// and is left out. A workstream whose unit states or overlap advisories cannot
-// be read is reported without them and its first such failure in unreadable,
-// by workstream.
+// and is left out. A workstream whose agent turns, unit states, overlap
+// advisories or drift rebases cannot be read is reported without them and its
+// first such failure in unreadable, by workstream.
 func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagnostic, *APIError) {
 	s.mu.Lock()
 	active, cfg := s.active, s.cfg
@@ -39,16 +39,23 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 		}
 		view := statusView(cfg.Project.ID, mode, w)
 		agents, err := agentStatuses(active.repository, w.Workstream, time.Now())
+		if err == nil {
+			err = s.step("status-agents")
+		}
 		if err != nil {
 			unreadable[w.Workstream] = Diagnostic{"agents", Internal, fmt.Sprintf("cannot read the agent turns of workstream %s; check the trace repository", w.Workstream)}
 		} else {
 			view.Agents = agents
 		}
 		units, err := unitStates(active.repository, w.Workstream, w.Subjects)
+		if err == nil {
+			err = s.step("status-units")
+		}
 		if err != nil {
 			if _, ok := unreadable[w.Workstream]; !ok {
 				unreadable[w.Workstream] = Diagnostic{"units", Internal, fmt.Sprintf("cannot read the unit states of workstream %s; check the trace repository", w.Workstream)}
 			}
+			units = nil
 		}
 		view.Units = append(view.Units, units...)
 		advisories, err := overlapAdvisories(active.repository, w.Workstream, w.Subjects)

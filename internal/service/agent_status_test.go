@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -86,6 +88,27 @@ func TestAgentStatusFromDurableTurns(t *testing.T) {
 	if api != nil || len(view.Agents) != 1 || view.Agents[0].State != "interrupted" {
 		t.Fatalf("restart API status: %+v %v", view, api)
 	}
+
+	// Unreadable agent turns are reported as such, and a units failure that
+	// follows does not replace that diagnostic.
+	agentsMessage := "cannot read the agent turns of workstream " + string(stream) + "; check the trace repository"
+	for _, failing := range [][]string{{"status-agents"}, {"status-agents", "status-units"}} {
+		s.boundary = func(name string) error {
+			if slices.Contains(failing, name) {
+				return errors.New("unreadable")
+			}
+			return nil
+		}
+		list, unreadable, api := s.statuses()
+		if api != nil || len(list) != 1 || list[0].Agents != nil || unreadable[stream] != (Diagnostic{"agents", Internal, agentsMessage}) {
+			t.Fatalf("failing %v: %+v %+v %v", failing, list, unreadable, api)
+		}
+		if _, api := s.workstreamStatus(string(stream)); api == nil || *api != (APIError{Internal, agentsMessage}) {
+			t.Fatalf("failing %v: workstream status %v", failing, api)
+		}
+	}
+	s.boundary = nil
+
 	must(t, repo.AbandonTurn(ctx, stream, actor.ID, "two", started.Add(9*time.Second)))
 	if got, err := agentStatuses(repo, stream, started.Add(10*time.Second)); err != nil || len(got) != 0 {
 		t.Fatalf("completed thread: %+v %v", got, err)
