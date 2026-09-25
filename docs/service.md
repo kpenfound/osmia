@@ -2023,13 +2023,15 @@ already be at the delivery commit. If it is absent, or at a commit that an
 earlier publication of the workstream recorded, the service pushes with that
 commit as the expected value, so a concurrent change makes the push fail.
 Any other commit refuses the publication. `final/publication.json` records
-the delivery commit with status `pushing` before the push. Next, the service
-lists the pull requests on the upstream repository from that fork branch. It
-keeps one open pull request against the base branch whose head is the
-delivery commit and whose body is the approved description. It opens a pull
-request if none exists and refuses any other state, including a closed pull
-request. The title is the first line of the description without heading
-marks. One trace commit then records `final/publication.json` with status
+the delivery commit with status `pushing` before the push. The service checks
+an existing pull request before moving the branch: it must be open, target
+the approved base and have the approved description and current branch head.
+After a push, the service reads it again to verify that GitHub advanced its
+head to the delivery commit. If no pull request exists, the service opens one
+and verifies its head, base and description before recording delivery. A
+closed or mismatching pull request is refused. The title is the first line of
+the description without heading marks. One trace commit then records
+`final/publication.json` with status
 `opened`, the fork branch, delivery and reviewed commits, style, pull request
 number and URL, title and description. The same commit records the feature
 transition to `delivered`, with a notice for the chief of staff, and
