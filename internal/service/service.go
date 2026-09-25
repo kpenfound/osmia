@@ -86,6 +86,9 @@ type Options struct {
 	// workstreams. It defaults to the GitHub REST API with the service's
 	// GITHUB_TOKEN environment variable, which no session receives.
 	PullRequests pulls.Client
+	// Location is the service host's time zone, whose calendar days the daily
+	// budget counts. It defaults to the host's local time zone.
+	Location *time.Location
 	// controls is set by Enforce so the chief-of-staff tools it binds reach
 	// the runtime state of the service started with these options.
 	controls *runtimeControls
@@ -490,7 +493,7 @@ func (s *Service) stop(active *activeProject) error {
 // committee rounds and the architect's replies to them, and final reviews, and the repository
 // boundary by the service's sealer for sealings, its builder for builds and
 // its foreman for landings and rebases and its publisher for publications;
-// the architect controller, then the shed controller, then the sealing
+// the daily budget, then the architect controller, then the shed controller, then the sealing
 // controller, then the building controller, then the overlap, charter, refresh, drift,
 // landing, assembly and publication controllers run at the start of every pass, and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
@@ -535,12 +538,13 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	amend := &amendmentDrafter{drafter: draft}
 	amendRounds := amendmentDebate{rounds}
 	budget := budgetSignals{s: s, repository: repository}
+	daily := dailyBudget{s: s, repository: repository}
 	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals}
 	type scheduleHook struct {
 		name string
 		pass func(context.Context) error
 	}
-	hooks := []scheduleHook{{"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
+	hooks := []scheduleHook{{"daily-budget", daily.Pass}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})
 	}

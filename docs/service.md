@@ -48,7 +48,7 @@ set through `Options` by embedders.
 | GET | `/health` | Readiness, service name, API version, supplied build version and commit |
 | GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics |
 | GET | `/runtime` | Effective runtime state, each role's next-turn profile (`name` and `source`: `configuration` or `owner_override`), each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
-| GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, each role's effective profile and source, and diagnostics |
+| GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, each role's effective profile and source, today's [daily budget](#daily-budget) spend, and diagnostics |
 | GET | `/status/<workstream-id>` | `WorkstreamStatus` for one workstream of the active project |
 | GET | `/trace/<workstream-id>` | `TraceSummary`: sealed revisions, criteria, unit walks, delivery and explicit gaps |
 | GET | `/trace/<workstream-id>/unit/<unit-id>` | `UnitTrace`: document revisions, reports, reviews, rulings, landings, turns, costs, history and gaps |
@@ -2225,6 +2225,10 @@ order, except the librarian's, which carries no feature (see
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
 | `status` | `null` until the chief of staff writes one; otherwise `goal`, `attention` (empty when nothing needs the owner), `note`, `agents`, `revision` and `updated_at` |
 
+`GET /v1/status` also carries `daily_budget`, today's spend against
+`budget.per_day` ([daily budget](#daily-budget)), or `null` without one.
+`osmia status` prints it on a `Daily budget:` line before the workstreams.
+
 `set_status` requires a non-empty `attention` while any gate is open and
 refuses a non-empty one when no gate is open. The chief of staff writes the
 wording. A refusal is an ordinary `{"stored":false,"reason":"…"}` result;
@@ -2614,6 +2618,32 @@ controller its mason's or reviewer's continuation once the drift resumes. The
 gate holds each continuation until the pause is cleared, and it then resumes
 the stopped session. A pause cleared while a stop is settling does not undo
 it: the turn still completes as stopped and its continuation runs.
+
+### Daily budget
+
+With `budget.per_day` configured, each reconciliation pass first sums the
+known cost of every workstream's attempts that started on the service host's
+current local calendar day. An attempt whose cost is unknown adds nothing. Once
+that sum reaches the limit, the service sets a factory-wide `soft` pause with
+source `daily-budget`, a reason giving the day, the spend and the limit, and,
+when some of the day's attempts have unknown cost, how many. The pause holds
+new dispatch like any soft pause; turns already running finish. The
+chief of staff stays reachable.
+
+The first pass after the next local midnight clears the budget's pause, and
+the new day's spend starts from zero. The budget pauses the factory at most
+once per local day: `runtime.json` records the day in `budget_paused_on`, so
+an owner who clears or replaces the budget's pause keeps the factory running
+for the rest of that day, across restarts. The budget never replaces a factory
+pause the owner set; once the owner clears that pause, the budget pauses if
+that day's spend has reached the limit and it has not yet paused that day.
+
+`daily_budget` in `GET /v1/status` reports `day` (`YYYY-MM-DD`),
+`spend_usd`, the day's known spend as a decimal string, `limit_usd`,
+`unknown_costs`, the number of that day's attempts with unknown cost, and
+`lower_bound`, true when there are any, since actual spend may then be higher.
+When the trace cannot be read, `daily_budget` is `null` and the response
+carries a `daily_budget` diagnostic with code `internal`.
 
 At startup, the service settles earlier sessions before dispatch. It reads
 claimed turns and the durable session directories under `threads`, `architect`,

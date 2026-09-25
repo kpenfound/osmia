@@ -18,8 +18,8 @@ The version 1 JSON representation is:
     {
       "target": {"scope": "factory"},
       "mode": "soft",
-      "reason": "Travelling",
-      "source": "owner",
+      "reason": "Daily budget reached: known spend on 2026-09-24 is USD 150.2 of the USD 150.00 per-day budget; dispatch resumes at the next local day",
+      "source": "daily-budget",
       "set_at": "2026-09-24T12:00:00Z"
     },
     {
@@ -29,8 +29,8 @@ The version 1 JSON representation is:
         "workstream": "w_0123456789abcdef0123456789abcdef"
       },
       "mode": "hard",
-      "reason": "Daily spending limit reached",
-      "source": "daily-budget",
+      "reason": "Travelling",
+      "source": "owner",
       "set_at": "2026-09-24T13:00:00Z"
     }
   ],
@@ -40,7 +40,8 @@ The version 1 JSON representation is:
       "workstreams": ["w_0123456789abcdef0123456789abcdef"]
     }
   ],
-  "profiles": {"mason": "default"}
+  "profiles": {"mason": "default"},
+  "budget_paused_on": "2026-09-24"
 }
 ```
 
@@ -59,6 +60,11 @@ running finish; a hard pause also stops it
 When opening a runtime file with an `operator` pause, the store attributes it to
 the owner, supplies a reason if absent, uses the file's modification time as its
 set time, and persists the updated record.
+
+`budget_paused_on` is the service host's local calendar day, `YYYY-MM-DD`, on
+which the [daily budget](service.md#daily-budget) last paused the factory.
+`SetBudgetPause` writes the budget's pause and this day together; the budget
+pauses at most once per day.
 
 Priority contains a unique ordered subset of workstream IDs, scoped to a project.
 An empty array is allowed; null is not. Unlisted workstreams have no explicit
@@ -121,5 +127,5 @@ symlinks. Replacing a parent path cannot redirect writes outside that root. Exte
 file changes cause subsequent mutations to fail until the store is reopened.
 Cross-process mutation and multiple writable stores are unsupported by the store:
 the [local service](service.md) enforces sole ownership with a lifetime root lock. Temporary rollback files are not an event log or a
-record/outbox transaction. M4 scheduling, provider/budget pauses and lifecycle
-controls are separate work.
+record/outbox transaction. Provider usage-limit pauses and lifecycle controls
+are separate work.

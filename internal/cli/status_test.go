@@ -203,6 +203,17 @@ func TestStatusTextWithoutAttentionOrAgents(t *testing.T) {
 	}
 }
 
+func TestStatusPrintsTheDailyBudget(t *testing.T) {
+	var out strings.Builder
+	showDailyBudget(&out, nil)
+	showDailyBudget(&out, &service.DailyBudgetStatus{Day: "2026-09-24", SpendUSD: "12.5", LimitUSD: "150.00"})
+	showDailyBudget(&out, &service.DailyBudgetStatus{Day: "2026-09-24", SpendUSD: "150", LimitUSD: "150.00", UnknownCosts: 2, LowerBound: true})
+	if want := "Daily budget: USD 12.5 of USD 150.00 spent on 2026-09-24\n" +
+		"Daily budget: USD 150 of USD 150.00 spent on 2026-09-24 (at least; 2 attempt(s) have unknown cost)\n"; out.String() != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
+	}
+}
+
 func TestStatusPrintsOwnerGates(t *testing.T) {
 	st := service.WorkstreamStatus{Workstream: stream, Project: project, ContextMode: "file", Gates: []trace.OwnerGate{{Kind: "escalation", Reference: "12"}, {Kind: "contested", Reference: "upload-index"}}}
 	var one, all strings.Builder

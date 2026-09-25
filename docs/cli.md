@@ -62,7 +62,10 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   knowledge-base extraction (number, `pending`, `running`, `succeeded` or
   `failed`, the time of its last activity and the reason when it failed or
   waits to retry), diagnostics, effective runtime controls and the project's
-  context mode (`file`, a normal mode; see [context](context.md)), then each
+  context mode (`file`, a normal mode; see [context](context.md)), with
+  `budget.per_day` today's known spend against it (`Daily budget: USD <spend>
+  of USD <limit> spent on <day>`, marked `at least` with the count of attempts
+  whose cost is unknown; see [daily budget](service.md#daily-budget)), then each
   workstream with its state, open question count and context mode, its latest
   drift rebase (`Drift: rebase <n> <outcome> at <time>`) once it has one, and the
   chief of staff's goal and attention (`Attention: none` when nothing needs

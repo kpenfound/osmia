@@ -307,11 +307,27 @@ type MutationResponse struct {
 
 // StatusResponse lists every workstream of the active project and every role's
 // effective profile. Workstreams is empty without an active project or trace,
-// or when the trace cannot be read, which a diagnostic reports.
+// or when the trace cannot be read, which a diagnostic reports. DailyBudget is
+// null without budget.per_day or when today's spend cannot be read, which a
+// diagnostic reports.
 type StatusResponse struct {
 	Workstreams []WorkstreamStatus          `json:"workstreams"`
 	Profiles    map[string]EffectiveProfile `json:"profiles"`
+	DailyBudget *DailyBudgetStatus          `json:"daily_budget"`
 	Diagnostics []Diagnostic                `json:"diagnostics"`
+}
+
+// DailyBudgetStatus is the known spend of the service host's current local
+// calendar day, Day as YYYY-MM-DD, across every workstream, against the
+// configured budget.per_day. Amounts are decimal USD strings. UnknownCosts
+// counts that day's attempts whose cost is unknown; when there are any,
+// LowerBound is true and actual spend may be higher.
+type DailyBudgetStatus struct {
+	Day          string `json:"day"`
+	SpendUSD     string `json:"spend_usd"`
+	LimitUSD     string `json:"limit_usd"`
+	UnknownCosts int    `json:"unknown_costs"`
+	LowerBound   bool   `json:"lower_bound"`
 }
 
 // WorkstreamStatus is the chief of staff's status for one workstream, next to
