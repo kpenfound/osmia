@@ -269,11 +269,11 @@ func (p *publisher) Inspect(_ context.Context, op coreadapter.Operation) (coread
 // onto. The service then reads the fork branch: at the delivery commit it is
 // already pushed; absent, or at a commit an earlier publication of the
 // workstream recorded, it is pushed with that commit as the expected one;
-// at any other commit the publication is refused. final/publication.json
-// records the delivery commit before the push. The pull requests of the fork
-// branch are read next: one open against the base branch at the delivery
-// commit with the approved description is the one to keep, none means one is
-// opened, and anything else is refused. One commit then records the opened
+// at any other commit the publication is refused. An existing pull request
+// must match the approved base, description and current branch tip before a
+// push. final/publication.json records the delivery commit before the push.
+// After the push the pull request head is checked at the delivery commit; if
+// none exists, one is opened and checked. One commit then records the opened
 // publication, the workstream's move to delivered with a notice, and the
 // publication's outcome. A refusal records the reason and tells the chief of
 // staff. Git, GitHub and storage errors leave the operation pending for
@@ -356,14 +356,28 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	for _, d := range prior {
+		if d.Operation == op.ID && (d.Approval != in.Approval || d.Reviewed != in.Commit || d.Commit != published || d.DescriptionHash != in.DescriptionHash || d.Description != approval.Description || d.Style != in.Style || d.Fork != in.Fork || d.Remote != remote || d.Branch != branch || d.Upstream != in.Upstream || d.Base != in.Base) {
+			return p.refuse(ctx, stream, in, "the recorded publication does not match this owner approval and delivery")
+		}
+	}
 	tip, exists, err := g.RemoteBranch(ctx, remote, branch)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	if exists && tip != published && !slices.ContainsFunc(prior, func(d DeliveryPublication) bool { return d.Commit == tip && d.Branch == branch && d.Fork == in.Fork }) {
+		return p.refuse(ctx, stream, in, fmt.Sprintf("fork branch %s of %s is at %s, which no publication of this workstream pushed", branch, in.Fork, tip))
+	}
+	// An open PR at the old owned tip advances when the fork branch is pushed.
+	// Read it before the push so a closed or edited PR cannot be hidden by that advance.
+	before, err := client.Find(ctx, in.Upstream, in.Fork, branch)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if len(before) != 0 && (len(before) != 1 || !matchingPublicationPR(before[0], in, branch, approval.Description, tip)) {
+		return p.refusePR(ctx, stream, in, branch, published, before)
+	}
 	if !exists || tip != published {
-		if exists && !slices.ContainsFunc(prior, func(d DeliveryPublication) bool { return d.Commit == tip }) {
-			return p.refuse(ctx, stream, in, fmt.Sprintf("fork branch %s of %s is at %s, which no publication of this workstream pushed", branch, in.Fork, tip))
-		}
 		if !slices.ContainsFunc(prior, func(d DeliveryPublication) bool { return d.Operation == op.ID && d.Commit == published }) {
 			if err := p.recordPublication(ctx, stream, record); err != nil {
 				return coreadapter.OperationResult{}, err
@@ -383,29 +397,40 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	var pr pulls.PullRequest
-	switch {
-	case len(found) == 0:
-		if pr, err = client.Create(ctx, in.Upstream, pulls.New{HeadRepository: in.Fork, Head: branch, Base: in.Base, Title: title, Body: approval.Description}); err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		if pr.Number < 1 || pr.URL == "" {
-			return coreadapter.OperationResult{}, fmt.Errorf("GitHub opened no identifiable pull request from %s:%s", in.Fork, branch)
+	if len(found) == 0 {
+		created, createErr := client.Create(ctx, in.Upstream, pulls.New{HeadRepository: in.Fork, Head: branch, Base: in.Base, Title: title, Body: approval.Description})
+		if createErr != nil {
+			return coreadapter.OperationResult{}, createErr
 		}
 		if err := p.s.step("publish-opened"); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-	case len(found) == 1 && found[0].State == "open" && found[0].Base == in.Base && found[0].HeadCommit == published && found[0].Body == approval.Description:
-		pr = found[0]
-	default:
-		var seen []string
-		for _, f := range found {
-			seen = append(seen, fmt.Sprintf("#%d (%s, against %s at %s)", f.Number, f.State, f.Base, f.HeadCommit))
+		found, err = client.Find(ctx, in.Upstream, in.Fork, branch)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
 		}
-		return p.refuse(ctx, stream, in, fmt.Sprintf("%s of %s already has pull requests %s, and none is the one open against %s at %s with the approved description", branch, in.Fork, strings.Join(seen, ", "), in.Base, published))
+		if len(found) != 1 || found[0].Number != created.Number {
+			return coreadapter.OperationResult{}, fmt.Errorf("cannot verify pull request from %s:%s after creation", in.Fork, branch)
+		}
 	}
+	if len(found) != 1 || !matchingPublicationPR(found[0], in, branch, approval.Description, published) {
+		return p.refusePR(ctx, stream, in, branch, published, found)
+	}
+	pr := found[0]
 	record.Status, record.PullRequest, record.URL = publicationOpened, pr.Number, pr.URL
 	return p.deliver(ctx, stream, in, record)
+}
+
+func matchingPublicationPR(pr pulls.PullRequest, in publishInput, branch, description, commit string) bool {
+	return pr.Number > 0 && pr.URL != "" && pr.State == "open" && pr.HeadRepository == in.Fork && pr.Head == branch && pr.Base == in.Base && pr.HeadCommit == commit && pr.Body == description
+}
+
+func (p *publisher) refusePR(ctx context.Context, stream config.WorkstreamID, in publishInput, branch, commit string, found []pulls.PullRequest) (coreadapter.OperationResult, error) {
+	var seen []string
+	for _, f := range found {
+		seen = append(seen, fmt.Sprintf("#%d (%s, against %s at %s)", f.Number, f.State, f.Base, f.HeadCommit))
+	}
+	return p.refuse(ctx, stream, in, fmt.Sprintf("%s of %s already has pull requests %s, and none is the one open against %s at %s with the approved description", branch, in.Fork, strings.Join(seen, ", "), in.Base, commit))
 }
 
 // deliveryTitle is the pull request title and delivery commit subject: the

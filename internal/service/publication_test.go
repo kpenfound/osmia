@@ -343,6 +343,115 @@ func TestPublicationResumesInterruptedPushAndPullRequestCreationAcrossRestart(t 
 	}
 }
 
+func TestPublicationRecoveryRecordsOneDurableResult(t *testing.T) {
+	t.Parallel()
+	for _, point := range []string{"publish-recorded", "publish-pushed", "publish-opened", "after-trace"} {
+		t.Run(point, func(t *testing.T) {
+			t.Parallel()
+			p := newPublicationFixture(t, "squash")
+			p.approve(t, nil)
+			op := p.request(t)
+			pushIntents := 0
+			p.s.boundary = func(step string) error {
+				if step == "publish-recorded" {
+					pushIntents++
+				}
+				if step == point {
+					return errors.New("interrupted")
+				}
+				return nil
+			}
+			result, err := p.publisher().Apply(context.Background(), op)
+			if point == "after-trace" {
+				if err != nil || result.Outcome != "succeeded" {
+					t.Fatalf("delivery %+v: %v", result, err)
+				}
+			} else if err == nil {
+				t.Fatal("publication was not interrupted")
+			}
+			p.reopen(t)
+			p.s.boundary = func(step string) error {
+				if step == "publish-recorded" {
+					pushIntents++
+				}
+				return nil
+			}
+			result = settleOperation(t, p.s, p.repository, p.stream, op, p.publisher())
+			if result.Outcome != "succeeded" || p.pulls.creates != 1 || p.feature(t) != DeliveredState {
+				t.Fatalf("recovered %+v, creates %d, state %s", result, p.pulls.creates, p.feature(t))
+			}
+			ops, err := p.repository.Operations(p.stream)
+			must(t, err)
+			i := slices.IndexFunc(ops, func(record trace.OperationRecord) bool { return record.Operation.ID == op.ID })
+			if i < 0 || ops[i].Result == nil || ops[i].Result.Outcome != "succeeded" {
+				t.Fatalf("publish operation result %+v", ops)
+			}
+			if got := streamDocuments(t, p.repository, p.stream, publicationDocument); len(got) > 2 {
+				t.Fatalf("duplicate publication records: %d", len(got))
+			}
+			wantPushIntents := 1
+			if point == "publish-recorded" {
+				wantPushIntents = 2
+			}
+			if pushIntents != wantPushIntents {
+				t.Fatalf("push attempts %d, want %d", pushIntents, wantPushIntents)
+			}
+		})
+	}
+}
+
+func TestPublicationRefusesAnExistingClosedPRBeforeAdvancingOwnedBranch(t *testing.T) {
+	t.Parallel()
+	p := newPublicationFixture(t, "squash")
+	p.approve(t, nil)
+	first := p.request(t)
+	p.pulls.prs = []pulls.PullRequest{{Number: 7, URL: "https://github.com/dagger/dagger/pull/7", State: "closed", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", Base: "main"}}
+	result, err := p.publisher().Apply(context.Background(), first)
+	if err != nil || result.Outcome != "failed" {
+		t.Fatalf("first publication %+v: %v", result, err)
+	}
+	before, _ := p.forkBranch(t)
+	p.approve(t, nil)
+	second := p.request(t)
+	result, err = p.publisher().Apply(context.Background(), second)
+	if after, _ := p.forkBranch(t); err != nil || result.Outcome != "failed" || after != before {
+		t.Fatalf("closed PR moved branch from %s to %s: %+v, %v", before, after, result, err)
+	}
+}
+
+func TestPublicationVerifiesHeadAfterAutomaticPRAdvance(t *testing.T) {
+	t.Parallel()
+	p := newPublicationFixture(t, "squash")
+	p.approve(t, nil)
+	first := p.request(t)
+	p.pulls.prs = []pulls.PullRequest{{Number: 7, URL: "https://github.com/dagger/dagger/pull/7", State: "closed", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", Base: "main"}}
+	if result, err := p.publisher().Apply(context.Background(), first); err != nil || result.Outcome != "failed" {
+		t.Fatalf("first publication %+v: %v", result, err)
+	}
+	old, _ := p.forkBranch(t)
+	p.pulls.prs = nil
+	newDescription := "# A newly approved description\n"
+	p.approve(t, &newDescription)
+	second := p.request(t)
+	p.pulls.prs = []pulls.PullRequest{{Number: 8, URL: "https://github.com/dagger/dagger/pull/8", State: "open", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", HeadCommit: old, Base: "main", Body: newDescription}}
+	p.s.boundary = func(step string) error {
+		if step == "publish-pushed" {
+			p.pulls.prs[0].HeadCommit, _ = p.forkBranch(t)
+			return errors.New("interrupted after GitHub advanced the PR head")
+		}
+		return nil
+	}
+	if _, err := p.publisher().Apply(context.Background(), second); err == nil {
+		t.Fatal("the publication was not interrupted")
+	}
+	p.reopen(t)
+	p.s.boundary = nil
+	result := settleOperation(t, p.s, p.repository, p.stream, second, p.publisher())
+	if result.Outcome != "succeeded" || p.pulls.creates != 0 || p.pulls.prs[0].HeadCommit == old {
+		t.Fatalf("publication %+v, creates %d, PR %+v", result, p.pulls.creates, p.pulls.prs[0])
+	}
+}
+
 func TestPublicationAdoptsAPullRequestWhoseCreationLostItsResponse(t *testing.T) {
 	t.Parallel()
 	p := newPublicationFixture(t, "commit-per-unit")
