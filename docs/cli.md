@@ -86,7 +86,10 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   feature branch, the reviewed candidate and base with the approval that
   landed it, and the criteria it meets, then the full status (goal, attention, note, one line per active
   agent, and when it was written), or `Status: none yet` before the chief of
-  staff writes one. A workstream the project does not hold fails with
+  staff writes one. `Live agents:` below the narrative lines shows each active
+  or parked turn's role, optional unit, state, RFC 3339 start time, elapsed
+  seconds, effective profile, optional attempt number and `resume` or `replay`
+  path, and a parked question's trace number. A workstream the project does not hold fails with
   `not_found` (exit 4); with no project configured it fails with `no_project`
   (exit 4). See [workstream status](service.md#workstream-status).
 - `trace <workstream-id> [unit <id>|criterion <spec#n>|commit <full-sha>]`
@@ -347,6 +350,9 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
 Every command accepts `--root PATH`, defaulting to `~/.osmia`. Flags may occur
 before or after positional arguments; value flags also accept `--flag=value`.
 Duplicate and unknown flags are errors. `--help` prints the supported syntax.
+`--version` prints the stamped [release](release.md) version and commit and
+exits 0 without contacting the service; like `--help`, it takes precedence
+over a command.
 
 Clients connect to `osmia.sock` under the root. If configuration specifies another
 socket name, pass `--socket PATH` to each client command; relative paths resolve
@@ -417,7 +423,7 @@ existing owner, and ensure the socket path is unused or stale. Do not delete a
 live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
-Detached management, install/upgrade commands, completion and web/tailnet
-are unavailable. The command examples in
+Detached management, install/upgrade commands, completion and the web
+interface are unavailable. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.

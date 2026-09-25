@@ -1,11 +1,14 @@
 # M1 local service API
 
 `internal/service.Run` loads the M1 configuration and runtime store, then serves
-HTTP/JSON over the configured Unix socket until its context is cancelled.
+HTTP/JSON over the configured Unix socket, and over the optional loopback
+[web listener](#web-listener) and [tailnet listener](#tailnet-listener), until
+its context is cancelled.
 `RunSignals` also handles SIGINT and SIGTERM. Both run in the foreground and wait
-for cleanup. Embedders can use `Start`, `Socket`, `Wait` and `Close`; a successful
-`Start` means the stores are loaded and the listener is bound. No models,
-TCP listeners or authentication service are started. Agent turns run only when
+for cleanup. Embedders can use `Start`, `Socket`, `WebAddr`, `TailnetAddr`, `Wait` and
+`Close`; a successful `Start` means the stores are loaded, the socket and any
+web listener are bound, and any tailnet listener is listening. No models or
+authentication service are started. Agent turns run only when
 an embedder supplies a turn reconciler (see below).
 
 The root and its top-level configuration must already exist; a project is not
@@ -30,6 +33,56 @@ closes the store and releases the lock. Cleanup removes only the socket inode it
 created. An acknowledged mutation is durable; an interrupted client must read the
 runtime view to reconcile whether its request committed.
 
+## Web listener
+
+When `listen.web` is set, the service also binds that loopback TCP address and
+serves the same handlers on it as on the socket; `WebAddr` reports the bound
+address. A bind failure, such as an address in use, is a startup error that
+names `listen.web`, and startup then removes the socket it bound. Shutdown
+closes both listeners and joins both servers before cleanup continues.
+
+The loopback interface is the boundary: there is no authentication, and any
+local user or process that can connect may use the API. Two checks keep a
+browser from reaching it on another site's behalf. The `Host` header must name
+`localhost` or a loopback address, which refuses DNS rebinding, and requests
+other than `GET` and `HEAD` must send `Content-Type: application/json`, which a
+cross-site form cannot send without a CORS preflight the service never grants.
+A refused request gets `forbidden`. The socket applies neither check.
+
+## Tailnet listener
+
+When `listen.tailnet` is set, the service joins the owner's tailnet through
+embedded Tailscale under that hostname and serves the same handlers on the
+node's port 80, so a phone or laptop on the tailnet reaches the API at
+`http://<hostname>/`. The socket and any web listener keep serving beside it.
+`TailnetAddr` reports the listener's address. `Options.JoinTailnet` replaces
+embedded Tailscale for embedders and tests.
+
+The node's state, including its identity and keys, lives in `<root>/tailnet`,
+mode 0700, outside every target repository. On first run the node needs to log
+in. With `TS_AUTHKEY` set in the service's environment it uses that auth key;
+without one it prints a login URL to stderr every few seconds until someone
+opens it and approves the node. Later starts reuse the stored node state and
+need no key. The auth key is read only from the environment and is never
+written to configuration or runtime state, and agent sessions never inherit
+the service's environment. Tailscale may rename the node, for example to
+`osmia-1` when the hostname is already taken on the tailnet.
+
+Tailnet membership is the boundary: there is no in-app authentication, and
+any device the tailnet's access rules let reach the node may use the API. The
+same browser checks as on the web listener apply. The `Host` header must be an
+IP address, the configured hostname, or a name the node holds on the tailnet,
+such as its MagicDNS name, which refuses DNS rebinding; requests other than
+`GET` and `HEAD` must send `Content-Type: application/json`. A refused request
+gets `forbidden`.
+
+Joining is part of startup: an error from the node, such as an unusable state
+directory, is a startup error that names `listen.tailnet`, and startup then
+removes the socket and closes the web listener. A node waiting for login does
+not fail startup. Shutdown stops accepting on the tailnet listener like the
+others and leaves the tailnet only after accepted requests have drained, so a
+request in flight over the tailnet finishes within the shutdown grace period.
+
 ## Contract
 
 All paths start with `/v1`. Shared request, response and error types and a Unix-only
@@ -45,7 +98,7 @@ set through `Options` by embedders.
 
 | Method | Path after `/v1` | Input / response |
 | --- | --- | --- |
-| GET | `/health` | Readiness, service name, API version, supplied build version and commit |
+| GET | `/health` | Readiness, service name, API version, and the build version and commit (`osmia serve` reports the ones `osmia --version` prints; see [releases](release.md)) |
 | GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics, and `last_error`, the last failed [reload](#reload) (`path`, `field`, `message`, `at`), until a reload succeeds |
 | POST | `/reload` | No body; [reloads](#reload) the configuration and returns `ReloadResponse`: the loaded `digest` and the `restart_required` settings |
 | GET | `/runtime` | Effective runtime state, each role's next-turn profile (`name` and `source`: `configuration` or `owner_override`), each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
@@ -120,6 +173,7 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 | `project_active` | 409 | A project is active and single-project operation refuses another |
 | `not_found` | 404 | The project ID is not the active project, or the workstream is not in it |
 | `charter_empty` | 409 | Hand-in refused: the project's charter has no rules |
+| `forbidden` | 403 | A web listener request with a non-loopback `Host`, a tailnet listener request whose `Host` is not an IP address or the node's name, or a write over either without a JSON content type |
 
 Project operations compose their messages from the request's fields and
 identities: a validation failure names the field at fault, `project_active`
@@ -131,8 +185,8 @@ response before caller's context deadline`, and an unreachable or closed socket
 reports `cannot reach Osmia Unix socket`.
 
 Health readiness means the loaded stores can serve requests; disk diagnostics do
-not discard that valid view. Lifecycle endpoints, streaming and web/tailnet
-access are outside M1. Pauses hold queued turns, capacity
+not discard that valid view. Lifecycle endpoints and streaming are outside
+M1. Pauses hold queued turns, capacity
 bounds dispatch, and a `waiting` turn parks its thread, as described with the
 queued-turn scheduler below.
 
@@ -208,7 +262,9 @@ was queued with.
 
 Some settings keep their loaded values until the service restarts; the
 response lists each one the files change in `restart_required`, and `/config`
-reports them in a `restart_required` diagnostic: `listen.socket`, and
+reports them in a `restart_required` diagnostic: `listen.socket`,
+`listen.web`, which keeps the bound listener, `listen.tailnet`, which keeps
+the joined node and its hostname, and
 `active_projects`, which in a running service only `project add` and
 `project remove` change. The root is an option of the service, not a setting
 of the files.
@@ -2277,6 +2333,7 @@ order, except the librarian's, which carries no feature (see
 | `open_questions` | Questions in the workstream without a ruling |
 | `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, `contested` with the unit ID, or a `charter` proposal with its question number; a mason contest, and a contest raised by a failed reviewer turn, also has `reason`; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
+| `agents` | Service-owned execution facts from durable thread snapshots, ordered by agent ID. One entry per active or parked waiting turn; empty for idle and completed threads. Each has `role`, `unit` (empty without a unit), `state` (`running`, `captured`, `waiting`, or `interrupted`), `started_at` (RFC 3339 timestamp of the turn claim), `elapsed` (whole wall-clock seconds since the claim, measured at the read for active or interrupted turns and through the response time for captured or waiting turns), and `profile` (the effective profile name). `attempt` (number) and `path` (`resume` or `replay`) appear when an attempt is recorded. A parked waiting turn also has `question_id`, the durable trace question number it asked. These facts do not alter the chief of staff's `status.agents` prose. |
 | `status` | `null` until the chief of staff writes one; otherwise `goal`, `attention` (empty when nothing needs the owner), `note`, `agents`, `revision` and `updated_at` |
 
 `GET /v1/status` also carries `daily_budget`, today's spend against
@@ -2310,8 +2367,11 @@ cannot be read, the list is empty and carries a `workstreams` diagnostic with
 code `internal`. A workstream whose sealed plan cannot be read is listed with
 no `units`, and the list carries a `units` diagnostic with code `internal`
 naming it (`cannot read the unit states of workstream <id>; check the trace
-repository`); one whose overlap advisories cannot be read is listed with no
-`advisories` and, unless it already has a `units` diagnostic, an
+repository`); one whose agent turns cannot be read is listed with a null
+`agents` and an `agents` diagnostic with code `internal` (`cannot read the
+agent turns of workstream <id>; check the trace repository`), which a `units`
+diagnostic does not replace; one whose overlap advisories cannot be read is
+listed with no `advisories` and, unless it already has a diagnostic, an
 `advisories` diagnostic (`cannot read the overlap advisories of workstream
 <id>; check the trace repository`), and one whose drift rebases cannot be
 read is listed with a null `drift` and, unless it already has a diagnostic, a
@@ -2319,8 +2379,9 @@ read is listed with a null `drift` and, unless it already has a diagnostic, a
 the trace repository`); the other workstreams are listed as ever. For one workstream, a
 malformed ID returns `validation`, no configured project returns
 `no_project`, a workstream the active trace does not hold (or no trace at all)
-returns `not_found`, and an unreadable trace, or unit states of that
-workstream that cannot be read, returns `internal`; these messages name the
+returns `not_found`, and an unreadable trace, or agent turns, unit states,
+overlap advisories or drift rebases of that workstream that cannot be read,
+returns `internal`; these messages name the
 workstream or project.
 
 ## Inbox and rulings

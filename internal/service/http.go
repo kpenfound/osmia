@@ -37,6 +37,8 @@ func fail(w http.ResponseWriter, code Code) {
 		status, message = 409, "operation requires a service restart"
 	case Unavailable:
 		status, message = 503, "service is unavailable"
+	case Forbidden:
+		status, message = 403, "web and tailnet requests need a Host naming the listener and, except reads, Content-Type application/json"
 	}
 	respond(w, status, ErrorResponse{APIError{code, message}})
 }

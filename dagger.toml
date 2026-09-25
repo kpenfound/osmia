@@ -14,3 +14,6 @@ source = ".dagger/modules/osmia-go"
 base = "golang:1.26-bookworm"
 test = ["**", "!.bees/**", "!.dagger"]
 generate = ["**", "!.bees/**", "!.dagger"]
+
+[modules.release]
+source = ".dagger/modules/osmia-release"
