@@ -139,6 +139,11 @@ func (s *Service) deliveryPresentation(ctx context.Context, raw string) (Deliver
 	if api != nil {
 		return DeliveryPresentation{}, api
 	}
+	return s.presentDelivery(ctx, project, stream, repository)
+}
+
+// presentDelivery builds the presentation of one workstream of the project.
+func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository) (DeliveryPresentation, *APIError) {
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Internal, "cannot read feature state"}

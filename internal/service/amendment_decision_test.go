@@ -437,8 +437,20 @@ func TestOwnerAsksForAnotherAmendmentRound(t *testing.T) {
 		return err
 	})
 	presentAmendment(t, f, stream, masonRole, amendedSpec, validPlan, amendmentObjection(shed.Fit))
+	if entries := f.inboxEntries(t, stream, InboxAmendment); len(entries) != 1 || entries[0].Amendment != "1" || entries[0].Revision != 1 || entries[0].Unit != "resume" ||
+		!slices.Equal(entries[0].Options, []string{AmendmentApprove, AmendmentOverrule, AmendmentReject, AmendmentRound}) ||
+		!reflect.DeepEqual(entries[0].Answer, InboxAnswer{Method: "POST", Path: "/v1/amendment/" + string(stream) + "/1", Body: map[string]any{"packet": 1.0}}) {
+		t.Fatalf("inbox entries of the presented amendment %+v", entries)
+	}
 	out, err := f.c.DecideAmendment(ctx, stream, "1", AmendmentDecisionRequest{Decision: AmendmentRound, Note: "Debate the fit once more.", Packet: 1})
 	must(t, err)
+	// The decided revision leaves the inbox; the next is listed once it is
+	// presented.
+	for _, e := range f.inboxEntries(t, stream, InboxAmendment) {
+		if e.Revision == 1 {
+			t.Fatalf("inbox entry of the decided revision %+v", e)
+		}
+	}
 	if out.State != "proposed" || out.Round != 2 {
 		t.Fatalf("round decision %+v", out)
 	}
@@ -468,6 +480,11 @@ func TestOwnerAsksForAnotherAmendmentRound(t *testing.T) {
 	if _, err := f.c.DecideAmendment(ctx, stream, "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1}); !failed(err, Conflict) {
 		t.Fatalf("approving the first packet: %v", err)
 	}
+	// The second packet revision replaces the first, and the round cap is
+	// reached.
+	if entries := f.inboxEntries(t, stream, InboxAmendment); len(entries) != 1 || entries[0].Revision != 2 || !slices.Equal(entries[0].Options, []string{AmendmentApprove, AmendmentOverrule, AmendmentReject}) {
+		t.Fatalf("inbox entries of the second presentation %+v", entries)
+	}
 	if _, err := f.c.DecideAmendment(ctx, stream, "1", AmendmentDecisionRequest{Decision: AmendmentRound, Packet: 2}); !failed(err, Conflict) || !strings.Contains(err.Error(), "shed.max_rounds") {
 		t.Fatalf("a third round: %v", err)
 	}
@@ -475,6 +492,9 @@ func TestOwnerAsksForAnotherAmendmentRound(t *testing.T) {
 	must(t, err)
 	if approved.Decision == nil || approved.Decision.Round != 2 || approved.Decision.Packet != 2 {
 		t.Fatalf("approval %+v", approved)
+	}
+	if entries := f.inboxEntries(t, stream, InboxAmendment); len(entries) != 0 {
+		t.Fatalf("inbox entries after the approval %+v", entries)
 	}
 	f.awaitAmendment(t, stream, amendmentRuled)
 	if got := f.revisions(t, stream, amendmentDecisionID("1")); !slices.Equal(got, []int{1, 2}) {

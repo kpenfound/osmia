@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -39,6 +40,20 @@ func (f *shedFixture) awaitPacket(t *testing.T, stream config.WorkstreamID, reco
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// inboxEntries returns the inbox entries of one kind and workstream.
+func (f *shedFixture) inboxEntries(t *testing.T, stream config.WorkstreamID, kind string) []InboxEntry {
+	t.Helper()
+	inbox, err := f.c.Inbox(context.Background())
+	must(t, err)
+	var out []InboxEntry
+	for _, e := range inbox.Entries {
+		if e.Kind == kind && e.Workstream == stream {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func (f *shedFixture) ratification(t *testing.T, stream config.WorkstreamID, round int) shed.Ratification {
@@ -84,6 +99,11 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 	if len(docs) != 1 || docs[0].Path != shed.PacketPath(1) || docs[0].Actor != shedActor || docs[0].Cause != "ratification-packet" {
 		t.Fatalf("packet documents %+v", docs)
 	}
+	// The inbox lists the packet with the revisions ratifying it pins.
+	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 1 || entries[0].Revision != 1 || entries[0].Recommendation != blocked ||
+		!reflect.DeepEqual(entries[0].Answer, InboxAnswer{Method: "POST", Path: "/v1/ratify/" + string(stream), Body: map[string]any{"spec": 1.0, "plan": 1.0}}) {
+		t.Fatalf("inbox entries of the packet %+v", entries)
+	}
 	// The chief of staff is told to present it and to raise the attention
 	// item in its status.
 	if notice := f.concluded(t, stream, 1).Event.Body; !strings.Contains(notice, presentation(blocked)) {
@@ -115,6 +135,10 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 	if docs := f.documents(t, stream, shed.PacketDocumentID(1)); len(docs) != 2 || docs[1].Revision != 2 {
 		t.Fatalf("packet documents after the overrule %+v", docs)
 	}
+	// The inbox lists the latest revision alone.
+	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 1 || entries[0].Revision != 2 || entries[0].Recommendation != ratifiable {
+		t.Fatalf("inbox entries after the overrule %+v", entries)
+	}
 	// A disposition the owner takes back, and then takes again, leaves the
 	// packet saying what an earlier revision said. It is recorded all the
 	// same, because the revision the API serves is the decision in force.
@@ -138,6 +162,9 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 	}
 	if want := "the owner ratified spec.md revision 1 and plan.json revision 1 after round 1, over 1 objection the owner disposed of; the sealing is asked for"; ratified.Detail != want {
 		t.Fatalf("detail %q, want %q", ratified.Detail, want)
+	}
+	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 0 {
+		t.Fatalf("inbox entries after the ratification %+v", entries)
 	}
 	record := f.ratification(t, stream, 1)
 	if record.Revision != (shed.Pin{Spec: 1, Plan: 1}) || record.Round != 1 || len(record.Dispositions) != 1 ||

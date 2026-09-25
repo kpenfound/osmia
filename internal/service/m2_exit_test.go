@@ -517,17 +517,26 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	// 5. A member of the retention workstream's committee asks in round 1.
 	// The chief of staff escalates the question, and the owner answers it
 	// through the inbox.
+	// The other workstreams' packets wait in the inbox beside it.
+	escalations := func() []InboxEntry {
+		inbox, err := f.c.Inbox(ctx)
+		must(t, err)
+		var out []InboxEntry
+		for _, e := range inbox.Entries {
+			if e.Kind == InboxEscalation {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
 	var entry InboxEntry
 	deadline := time.Now().Add(demoTimeout)
 	for {
-		inbox, err := f.c.Inbox(ctx)
-		must(t, err)
-		if len(inbox.Entries) == 1 {
-			entry = inbox.Entries[0]
+		if entries := escalations(); len(entries) == 1 {
+			entry = entries[0]
 			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("inbox %+v", inbox)
+		} else if time.Now().After(deadline) {
+			t.Fatalf("escalations %+v", entries)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -555,8 +564,8 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	if !strings.Contains(answered, "| "+exitQuestion) || !strings.Contains(answered, "<<< osmia:owner_response") || !strings.Contains(answered, "| "+exitRelayed) {
 		t.Fatalf("the member heard:\n%s", answered)
 	}
-	if inbox, err := f.c.Inbox(ctx); err != nil || len(inbox.Entries) != 0 {
-		t.Fatalf("inbox after the answer %+v %v", inbox, err)
+	if entries := escalations(); len(entries) != 0 {
+		t.Fatalf("escalations after the answer %+v", entries)
 	}
 
 	// 7. The first workstream: a charter veto and a size objection, a

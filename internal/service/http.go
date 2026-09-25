@@ -182,7 +182,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			s.streamEvents(w, r)
 			return
 		case Prefix + "/inbox":
-			if out, api := s.inbox(); api != nil {
+			if out, api := s.inbox(r.Context()); api != nil {
 				failWith(w, api)
 			} else {
 				respond(w, 200, out)

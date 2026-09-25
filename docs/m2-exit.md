@@ -121,8 +121,8 @@ osmia inbox
 osmia answer 1 "No. The period starts at upload and deletion ends it."
 ```
 
-The inbox entry is number 1, batch `escalation_1`, with the member's question
-as asked. After the answer the inbox is empty.
+The escalation is inbox entry number 1, batch `escalation_1`, with the
+member's question as asked. After the answer the inbox holds no escalation.
 
 ### 6. The round concludes after the answer
 

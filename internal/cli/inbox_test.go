@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,19 +72,21 @@ func TestInboxAndAnswer(t *testing.T) {
 	var list service.InboxResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "inbox", "--json")), &list))
 	want := service.InboxResponse{Entries: []service.InboxEntry{
-		{Number: 1, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format\npart of the contract?", Blocked: "The upload unit and its review.", Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", EscalatedAt: escalated,
+		{Kind: service.InboxEscalation, Number: 1, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format\npart of the contract?", Blocked: "The upload unit and its review.", Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", OpenedAt: escalated, Answer: service.InboxAnswer{Method: "POST", Path: "/v1/inbox/1", Body: map[string]any{}},
 			Asked: []service.InboxQuestion{{ID: "1", AskedBy: "mason1", Question: "Where does state live?"}, {ID: "2", AskedBy: "reviewer1", Question: "Is the log format fixed?"}}},
-		{Number: 2, Workstream: stream, Batch: "escalation_3", Question: "May the index unit add a dependency?", Blocked: "The index unit.", Options: []string{}, Recommendation: "No.", QuickReply: "No.", EscalatedAt: escalated,
+		{Kind: service.InboxEscalation, Number: 2, Workstream: stream, Batch: "escalation_3", Question: "May the index unit add a dependency?", Blocked: "The index unit.", Options: []string{}, Recommendation: "No.", QuickReply: "No.", OpenedAt: escalated, Answer: service.InboxAnswer{Method: "POST", Path: "/v1/inbox/2", Body: map[string]any{}},
 			Asked: []service.InboxQuestion{{ID: "3", AskedBy: "mason2", Question: "May I add a dependency?"}}},
 	}}
 	if !reflect.DeepEqual(list, want) {
 		t.Fatalf("inbox --json:\n%+v\nwant\n%+v", list, want)
 	}
 	stamp := escalated.Format(time.RFC3339)
-	if want := "Inbox: 2 waiting; answer one with osmia answer <number> \"...\"\n" +
+	if want := "Inbox: 2 waiting; each entry names the command that answers it\n" +
 		"\n[1] " + stamp + " " + stream + " (escalation_1)\n  Question: Are state files and the log format\n    part of the contract?\n  Blocked: The upload unit and its review.\n  Option 1: Both fixed\n  Option 2: Both free\n  Recommendation: Both fixed.\n" +
 		"  Asked by mason1 as question 1: Where does state live?\n  Asked by reviewer1 as question 2: Is the log format fixed?\n" +
-		"\n[2] " + stamp + " " + stream + " (escalation_3)\n  Question: May the index unit add a dependency?\n  Blocked: The index unit.\n  Recommendation: No.\n  Asked by mason2 as question 3: May I add a dependency?\n"; successful(t, root, "inbox") != want {
+		"  Answer: osmia answer 1 \"...\"\n  Accept the recommendation: osmia answer 1 --accept\n" +
+		"\n[2] " + stamp + " " + stream + " (escalation_3)\n  Question: May the index unit add a dependency?\n  Blocked: The index unit.\n  Recommendation: No.\n  Asked by mason2 as question 3: May I add a dependency?\n" +
+		"  Answer: osmia answer 2 \"...\"\n  Accept the recommendation: osmia answer 2 --accept\n"; successful(t, root, "inbox") != want {
 		t.Fatalf("inbox:\n%s\nwant:\n%s", successful(t, root, "inbox"), want)
 	}
 
@@ -115,7 +118,7 @@ func TestInboxAndAnswer(t *testing.T) {
 	if !reflect.DeepEqual(answered, service.AnswerResponse{Number: 2, Workstream: stream, Batch: "escalation_3", Questions: []string{"3"}, Ruling: "No new dependencies.", At: written.Add(2 * time.Hour)}) {
 		t.Fatalf("answer --json: %+v", answered)
 	}
-	if got := successful(t, root, "inbox"); got != "Inbox: no questions are waiting for you\n" {
+	if got := successful(t, root, "inbox"); got != "Inbox: no decisions are waiting for you\n" {
 		t.Fatalf("empty inbox: %q", got)
 	}
 	if got := successful(t, root, "inbox", "--json"); got != "{\"entries\":[]}\n" {
@@ -169,5 +172,35 @@ func TestAnswerAccept(t *testing.T) {
 		} else if q.Ruling == nil || q.Ruling.OwnerResponse != recommendation {
 			t.Fatalf("accepted trace ruling: %+v", q)
 		}
+	}
+}
+
+func TestInboxPrintsEveryDecisionKind(t *testing.T) {
+	opened := written.Add(time.Hour)
+	stamp := opened.Format(time.RFC3339)
+	list := service.InboxResponse{Entries: []service.InboxEntry{
+		{Kind: service.InboxRatification, Workstream: stream, Revision: 2, Question: "Ratify spec.md revision 1 and plan.json revision 3? Debate ended after round 1: settled", Blocked: "Sealing.",
+			Options: []string{"ratify"}, Recommendation: "ratify: no objection stands", OpenedAt: opened, Answer: service.InboxAnswer{Method: "POST", Path: "/v1/ratify/" + stream, Body: map[string]any{"spec": 1.0, "plan": 3.0}}},
+		{Kind: service.InboxContested, Workstream: stream, Unit: "resume", Question: "Unit resume is contested: two bounces", Blocked: "Unit resume.", Options: []string{"review", "revise"}, OpenedAt: opened},
+		{Kind: service.InboxAmendment, Workstream: stream, Amendment: "2", Unit: "resume", Revision: 4, Question: "Amend it?", Blocked: "Unit resume waits for the decision.",
+			Options: []string{"approve", "reject"}, Recommendation: "approve: no objection stands", OpenedAt: opened},
+		{Kind: service.InboxDelivery, Workstream: stream, Revision: 5, Question: "Deliver it?", Blocked: "Publishing the pull request.", Options: []string{"approve"}, OpenedAt: opened,
+			Answer: service.InboxAnswer{Method: "POST", Path: "/v1/delivery/" + stream, Body: map[string]any{"review": 2.0, "review_revision": 5.0, "commit": "abc123", "draft_hash": "f00"}}},
+		{Kind: service.InboxEscalation, Workstream: stream, Number: 3, Batch: "escalation_4", Question: "Which format?", Blocked: "The unit.", Options: []string{}, Recommendation: "Merge them.", OpenedAt: opened},
+	}}
+	var out strings.Builder
+	showInbox(&out, list)
+	want := "Inbox: 5 waiting; each entry names the command that answers it\n" +
+		"\n[ratification] " + stamp + " " + stream + "\n  Question: Ratify spec.md revision 1 and plan.json revision 3? Debate ended after round 1: settled\n  Blocked: Sealing.\n  Options: ratify\n  Recommendation: ratify: no objection stands\n" +
+		"  Decided on: spec.md revision 1 and plan.json revision 3 in packet revision 2\n  Answer: osmia ratify " + stream + "\n" +
+		"\n[contested] " + stamp + " " + stream + " unit resume\n  Question: Unit resume is contested: two bounces\n  Blocked: Unit resume.\n  Options: review, revise\n" +
+		"  Answer: osmia contested " + stream + " resume <review|revise> \"...\"\n" +
+		"\n[amendment] " + stamp + " " + stream + " amendment 2\n  Question: Amend it?\n  Blocked: Unit resume waits for the decision.\n  Options: approve, reject\n  Recommendation: approve: no objection stands\n" +
+		"  Decided on: packet revision 4\n  Answer: osmia amendment " + stream + " 2 <approve|reject> [note]\n" +
+		"\n[delivery] " + stamp + " " + stream + "\n  Question: Deliver it?\n  Blocked: Publishing the pull request.\n  Options: approve\n" +
+		"  Decided on: final review 2 (report revision 5) of commit abc123\n  Answer: osmia delivery " + stream + ", then osmia approve " + stream + " [description-file]\n" +
+		"\n[3] " + stamp + " " + stream + " (escalation_4)\n  Question: Which format?\n  Blocked: The unit.\n  Recommendation: Merge them.\n  Answer: osmia answer 3 \"...\"\n"
+	if out.String() != want {
+		t.Fatalf("inbox:\n%s\nwant:\n%s", out.String(), want)
 	}
 }

@@ -680,7 +680,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				return fail(err)
 			}
 			for _, entry := range list.Entries {
-				if entry.Number == number {
+				if entry.Kind == service.InboxEscalation && entry.Number == number {
 					ruling = entry.QuickReply
 					break
 				}
@@ -1096,14 +1096,16 @@ func showConversation(w io.Writer, list service.ConversationResponse) {
 	}
 }
 
-// showInbox prints each entry's number and rephrased question, then what it
-// blocks, the options, the recommendation and the questions as asked.
+// showInbox prints each entry's kind, when it opened, its workstream and what
+// identifies it, then the question, what it blocks, the options, the
+// recommendation, an escalation's questions as asked, what the answer is
+// taken on and the command that answers it.
 func showInbox(w io.Writer, list service.InboxResponse) {
 	if len(list.Entries) == 0 {
-		fmt.Fprintln(w, "Inbox: no questions are waiting for you")
+		fmt.Fprintln(w, "Inbox: no decisions are waiting for you")
 		return
 	}
-	fmt.Fprintf(w, "Inbox: %d waiting; answer one with osmia answer <number> \"...\"\n", len(list.Entries))
+	fmt.Fprintf(w, "Inbox: %d waiting; each entry names the command that answers it\n", len(list.Entries))
 	block := func(label, text string) {
 		lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 		fmt.Fprintf(w, "  %s: %s\n", label, lines[0])
@@ -1112,15 +1114,49 @@ func showInbox(w io.Writer, list service.InboxResponse) {
 		}
 	}
 	for _, e := range list.Entries {
-		fmt.Fprintf(w, "\n[%d] %s %s (%s)\n", e.Number, e.EscalatedAt.Format(time.RFC3339), e.Workstream, e.Batch)
+		stamp, stream := e.OpenedAt.Format(time.RFC3339), string(e.Workstream)
+		switch e.Kind {
+		case service.InboxEscalation:
+			fmt.Fprintf(w, "\n[%d] %s %s (%s)\n", e.Number, stamp, stream, e.Batch)
+		case service.InboxContested:
+			fmt.Fprintf(w, "\n[contested] %s %s unit %s\n", stamp, stream, e.Unit)
+		case service.InboxAmendment:
+			fmt.Fprintf(w, "\n[amendment] %s %s amendment %s\n", stamp, stream, e.Amendment)
+		default:
+			fmt.Fprintf(w, "\n[%s] %s %s\n", e.Kind, stamp, stream)
+		}
 		block("Question", e.Question)
 		block("Blocked", e.Blocked)
-		for i, option := range e.Options {
-			block(fmt.Sprintf("Option %d", i+1), option)
+		if e.Kind == service.InboxEscalation {
+			for i, option := range e.Options {
+				block(fmt.Sprintf("Option %d", i+1), option)
+			}
+		} else {
+			block("Options", strings.Join(e.Options, ", "))
 		}
-		block("Recommendation", e.Recommendation)
+		if e.Recommendation != "" {
+			block("Recommendation", e.Recommendation)
+		}
 		for _, q := range e.Asked {
 			block(fmt.Sprintf("Asked by %s as question %s", q.AskedBy, q.ID), q.Question)
+		}
+		switch e.Kind {
+		case service.InboxEscalation:
+			block("Answer", fmt.Sprintf("osmia answer %d \"...\"", e.Number))
+			if e.QuickReply != "" {
+				block("Accept the recommendation", fmt.Sprintf("osmia answer %d --accept", e.Number))
+			}
+		case service.InboxRatification:
+			block("Decided on", fmt.Sprintf("spec.md revision %v and plan.json revision %v in packet revision %d", e.Answer.Body["spec"], e.Answer.Body["plan"], e.Revision))
+			block("Answer", "osmia ratify "+stream)
+		case service.InboxContested:
+			block("Answer", fmt.Sprintf("osmia contested %s %s <%s> \"...\"", stream, e.Unit, strings.Join(e.Options, "|")))
+		case service.InboxAmendment:
+			block("Decided on", fmt.Sprintf("packet revision %d", e.Revision))
+			block("Answer", fmt.Sprintf("osmia amendment %s %s <%s> [note]", stream, e.Amendment, strings.Join(e.Options, "|")))
+		case service.InboxDelivery:
+			block("Decided on", fmt.Sprintf("final review %v (report revision %d) of commit %v", e.Answer.Body["review"], e.Revision, e.Answer.Body["commit"]))
+			block("Answer", fmt.Sprintf("osmia delivery %s, then osmia approve %s [description-file]", stream, stream))
 		}
 	}
 }

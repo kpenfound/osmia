@@ -430,26 +430,54 @@ type StatusView struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// InboxResponse lists the escalations waiting for the owner's ruling, by
-// inbox number.
+// InboxResponse lists every owner decision of the active project that waits
+// for the owner, oldest first.
 type InboxResponse struct {
 	Entries []InboxEntry `json:"entries"`
 }
 
-// InboxEntry is one escalation: the questions the chief of staff sent the
-// owner as one ask. Number is what osmia answer accepts. Question is the chief
-// of staff's rephrasing and Asked holds the questions as their askers put them.
+// The kinds of owner decision the inbox lists.
+const (
+	InboxEscalation   = "escalation"
+	InboxRatification = "ratification"
+	InboxContested    = "contested"
+	InboxAmendment    = "amendment"
+	InboxDelivery     = "delivery"
+)
+
+// InboxEntry is one open owner decision. Kind says which, and Answer how it
+// is answered. Number and Batch identify an escalation, the questions the
+// chief of staff sent the owner as one ask, and Asked holds its questions as
+// their askers put them. Unit names a contested unit, or the unit an
+// amendment was filed from; Amendment names an amendment. Revision is the
+// revision of the record the decision is taken on. Question is the chief of
+// staff's rephrasing of an escalation, and the service's statement of the
+// decision for the other kinds.
 type InboxEntry struct {
-	Number         int                 `json:"number"`
+	Kind           string              `json:"kind"`
 	Workstream     config.WorkstreamID `json:"workstream"`
+	Number         int                 `json:"number"`
 	Batch          string              `json:"batch"`
+	Unit           string              `json:"unit"`
+	Amendment      string              `json:"amendment"`
+	Revision       int                 `json:"revision"`
 	Question       string              `json:"question"`
 	Blocked        string              `json:"blocked"`
 	Options        []string            `json:"options"`
 	Recommendation string              `json:"recommendation"`
 	QuickReply     string              `json:"quick_reply"`
-	EscalatedAt    time.Time           `json:"escalated_at"`
+	OpenedAt       time.Time           `json:"opened_at"`
 	Asked          []InboxQuestion     `json:"asked"`
+	Answer         InboxAnswer         `json:"answer"`
+}
+
+// InboxAnswer is the existing endpoint that answers an inbox entry. Body
+// holds the request fields that pin what the owner read; the client adds the
+// decision fields of that endpoint's request.
+type InboxAnswer struct {
+	Method string         `json:"method"`
+	Path   string         `json:"path"`
+	Body   map[string]any `json:"body"`
 }
 
 // InboxQuestion is one question of an escalation as its asker put it.
