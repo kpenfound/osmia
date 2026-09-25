@@ -178,6 +178,9 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		case Prefix + "/status":
 			respond(w, 200, s.statusList())
 			return
+		case Prefix + "/events":
+			s.streamEvents(w, r)
+			return
 		case Prefix + "/inbox":
 			if out, api := s.inbox(); api != nil {
 				failWith(w, api)
