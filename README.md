@@ -77,6 +77,11 @@ workstreams on shared mason slots: disjoint units in parallel, entangled units
 in sequence, freed slots by priority and then in turn, an overlap advisory to
 each chief of staff, and a restart in the middle of a mason's turn.
 
+The [M4 upstream drift demonstration](docs/m4-upstream-drift.md) keeps two
+workstreams current with upstream on the project's cadence, then resolves an
+owner-requested drift rebase's conflict through a reviewed mason turn across a
+restart. Along the way it returns an approval to review before it lands.
+
 The [M4 amendments and standing rulings demonstration](docs/m4-amendments.md)
 follows a mason's amendment through the shed and owner decision, then a
 ratified charter rule into another workstream's bundle.
