@@ -102,7 +102,8 @@ func TestInboxAndAnswer(t *testing.T) {
 	if code != 4 || out != "" || diag != "validation: text must not be empty\n" {
 		t.Fatalf("empty ruling: %d %q %q", code, out, diag)
 	}
-	for _, args := range [][]string{{"answer", "2"}, {"answer", "two", "No."}, {"answer", "0", "No."}, {"answer", "2", "No.", "more"}, {"inbox", "2"}, {"inbox", "--hard"}} {
+	for _, args := range [][]string{{"answer", "2"}, {"answer", "two", "No."}, {"answer", "0", "No."}, {"answer", "2", "No.", "more"}, {"inbox", "2"}, {"inbox", "--hard"},
+		{"answer", "2", "No.", "--accept"}, {"answer", "--accept"}, {"answer", "2", "--accept=true"}, {"inbox", "--accept"}} {
 		code, out, diag := invoke(t, root, args...)
 		if code != 2 || out != "" || diag != "invalid arguments; use osmia --help\n" {
 			t.Fatalf("%v: %d %q %q", args, code, out, diag)
@@ -142,6 +143,12 @@ func TestAnswerAccept(t *testing.T) {
 	must(t, json.Unmarshal([]byte(successful(t, root, "answer", "1", "--accept", "--json")), &accepted))
 	if accepted.Ruling != recommendation {
 		t.Fatalf("accepted ruling: %q", accepted.Ruling)
+	}
+	for _, number := range []string{"1", "9"} {
+		code, out, diag := invoke(t, root, "answer", number, "--accept")
+		if code != 4 || out != "" || diag != "validation: inbox entry "+number+" has no eligible quick reply; give a ruling explicitly\n" {
+			t.Fatalf("accept of unlisted entry %s: %d %q %q", number, code, out, diag)
+		}
 	}
 	if got := successful(t, root, "answer", "2", "A typed ruling."); got == "" {
 		t.Fatal("typed ruling produced no confirmation")
