@@ -8,7 +8,7 @@ returns configured results/errors, records calls, honours pre-cancellation and
 fails when exhausted. It does not emulate an enforcing sandbox or durable store.
 
 The direct dependency is pinned to
-`github.com/kpenfound/busybees/core v0.4.4`.
+`github.com/kpenfound/busybees/core v0.5.0`.
 Only public core packages may be imported inside adapters. No sibling checkout
 or local replacement is needed. The public `vcs.Workspace` compile-time fixture
 keeps the dependency checked by Go without executing a session or repository.
@@ -68,12 +68,15 @@ priority, owner gates, durable queues/logs/outbox and VCS delivery outside core.
 core's profile name; the selected backend/model/effort and limits remain explicit.
 MCP endpoints receive deterministic names, and granted tools are allow-listed
 under those server names (`mcp__<server>__<tool>`), the form the backend matches;
-granted tools without a service endpoint fail translation. Core restricts
-built-in tools for Claude only, so `CoreExecutor` refuses other backends: they
-would need every built-in tool granted. History is prepended as supplied by the caller, and
-resume requests are rejected for incompatible backends or malformed references. `TurnRunner.CheckResume` also requires the executor to
-implement `ResumeChecker`: it verifies saved-session availability and the exact
-previous/next profile capabilities. An executor without this capability selects
+granted tools without a service endpoint fail translation. Core enforces explicit
+built-in tool grants for writable Codex and OpenCode turns in supported placements,
+including Osmia's container sandbox. Neither backend runs in Claude's host
+sandbox; that combination fails before launch. Osmia does not grant all built-in
+tools to make a turn admissible. History is prepended as supplied by the caller,
+and resume requests are rejected for incompatible backends or malformed
+references. `TurnRunner.CheckResume` also requires the executor to implement
+`ResumeChecker`: it verifies saved-session availability and the exact previous
+and next profile capabilities. An executor without this capability selects
 owned-log replay. The pinned Codex backend always selects replay. Empty outcome
 allowlists accept nothing, including when core's nil list would accept everything.
 
@@ -88,8 +91,8 @@ access flag is always false.
 production), with grants built from the verified isolation, and refuses a
 session whose policy differs from them; see
 [enforced execution](isolation.md#enforced-execution). The fake engine
-tests validate request translation and grants, not actual isolation. Unresolved
-credential references, unsupported sandbox/backend modes, and backend
+tests exercise core's admission and request translation, not actual OS isolation.
+Unresolved credential references, unsupported sandbox/backend modes, and backend
 turn limits or resume modes that core ignores also fail before execution.
 The local execution boundary monitors known stream costs for a per-session cap
 and records an infrastructure failure when the cap is reached. Claude reports

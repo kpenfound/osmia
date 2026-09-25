@@ -336,14 +336,39 @@ func (allowAll) Start(cmd *exec.Cmd, _ agent.Confinement) error {
 	return errors.New("fixture confiner starts nothing")
 }
 
-func TestNonClaudeBackendsAreRefused(t *testing.T) {
+func TestWritableCodexAndOpenCodeTurns(t *testing.T) {
 	for _, backend := range []string{"codex", "opencode"} {
 		t.Run(backend, func(t *testing.T) {
-			turn := boundaryTurn(t, "container")
+			turn := toolTurn(t, "container")
+			turn.Scope.Role = "mason"
 			turn.Profile.Backend = backend
+			turn.Sandbox.Verified.Workspace.Access = a.ReadWrite
+			turn.Sandbox.Verified.Capabilities.WriteFiles = true
+			turn.Sandbox.Verified.Capabilities.Execute = true
+			turn.Sandbox.Verified.Capabilities.Tools = []string{"file_read", "file_write", "ask", "amend", "done"}
+			engine := &adaptertest.Engine{}
+			result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
+			if err != nil || result.FinalResponse != "fixture response" || len(engine.Requests) != 1 {
+				t.Fatalf("result=%+v err=%v launches=%d", result, err, len(engine.Requests))
+			}
+			req := engine.Requests[0]
+			if req.Profile.Agent != backend || req.Grants == nil || !reflect.DeepEqual(req.Grants.Tools, []string{"mcp__osmia_0"}) || req.Grants.Mounts[0].Access != agent.ReadWrite || !engine.Released() {
+				t.Fatalf("admitted request=%+v released=%v", req, engine.Released())
+			}
+		})
+	}
+}
+
+func TestNonClaudeBackendsRejectClaudeSandbox(t *testing.T) {
+	for _, backend := range []string{"codex", "opencode"} {
+		t.Run(backend, func(t *testing.T) {
+			turn := toolTurn(t, "claude")
+			turn.Profile.Backend = backend
+			turn.Sandbox.Verified.Workspace.Access = a.ReadWrite
+			turn.Sandbox.Verified.Capabilities.WriteFiles = true
 			engine := &adaptertest.Engine{}
 			_, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
-			if !errors.Is(err, a.ErrUnsupported) || !errors.Is(err, agent.ErrUnsupported) || len(engine.Requests) != 0 {
+			if !errors.Is(err, a.ErrUnsupported) || !strings.Contains(err.Error(), "claude") || len(engine.Requests) != 0 {
 				t.Fatalf("err=%v launches=%d", err, len(engine.Requests))
 			}
 		})
