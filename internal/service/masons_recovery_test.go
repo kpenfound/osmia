@@ -21,8 +21,7 @@ func TestCompletedMasonTurnFinishesAfterRestart(t *testing.T) {
 	t.Parallel()
 	f, _ := newMasonFixture(t, 1, validPlan)
 	defer func() { f.stop(t) }()
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "owner"})
-	stream, _ := f.builtAs(t, "finish-recovery")
+	stream := f.builtPaused(t, runtime.Target{Scope: "factory"}, "finish-recovery")[0]
 	f.stop(t)
 	ctx := context.Background()
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
@@ -86,8 +85,7 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	t.Parallel()
 	f, _ := newMasonFixture(t, 1, validPlan)
 	defer func() { f.stop(t) }()
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "owner"})
-	stream, _ := f.builtAs(t, "recover")
+	stream := f.builtPaused(t, runtime.Target{Scope: "factory"}, "recover")[0]
 	f.stop(t)
 	ctx := context.Background()
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
@@ -185,8 +183,7 @@ func TestRestartCountsImplementingUnitsBeforeStarting(t *testing.T) {
 	f, masons := newParallelMasonFixture(t, 2, 3, disjointPlan)
 	defer func() { f.stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
-	stream, _ := f.builtAs(t, "start-recovery")
+	stream := f.builtPaused(t, factory, "start-recovery")[0]
 	f.stop(t)
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)

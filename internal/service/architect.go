@@ -398,7 +398,9 @@ var errNoArchitect = errors.New("this service has no agent runner for the archit
 // to waiting-<n>, the operation ends waiting, and the controller requests the
 // draft again once the answer is queued. Abandoning the workstream cancels
 // the running turn, and the draft of an abandoned workstream fails without
-// starting another.
+// starting another. A pause covering the workstream leaves the operation
+// pending instead of starting a turn, and a turn a hard pause stopped is
+// continued within its attempt once the pause is lifted.
 // A failed turn and an invalid draft are terminal failures recorded as draft
 // transitions; storage errors and a missing architect runner leave the
 // operation pending for another attempt.

@@ -25,11 +25,10 @@ func TestM3SequentialImplementation(t *testing.T) {
 	f, fake, _ := newAskingMasonFixture(t, 1, validPlan, p)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
 	f.engine.mu.Lock()
 	f.engine.turns[masonTurnID("resume")] = fake.asking(p, "", "1")
 	f.engine.mu.Unlock()
-	stream, _ := f.builtAs(t, "sequential")
+	stream := f.builtPaused(t, factory, "sequential")[0]
 	f.awaitDispatches(t, stream, "resume", 1)
 	f.checkUnits(t, stream, []UnitStatus{f.deferred(t, stream, "resume", factoryPaused), {Unit: "dedupe", State: UnitPlanned}})
 	if got := masonTransitions(t, f, stream); len(got) != 0 {

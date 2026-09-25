@@ -808,7 +808,9 @@ var errNoCommittee = errors.New("this service has no agent runner for the commit
 // the running turns and fails a round that has no record; a round whose files
 // are committed is heard all the same. Storage errors and a missing committee
 // runner leave the operation pending for another attempt, which finds the
-// turns that already ended in the threads.
+// turns that already ended in the threads, as does a pause covering the
+// workstream: a member's turn a hard pause stopped is continued within its
+// attempt once the pause is lifted.
 func (d *debate) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	in, err := decodeRound(op)
 	if err != nil {

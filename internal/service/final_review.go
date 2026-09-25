@@ -463,8 +463,10 @@ func (a *finalReviewer) Inspect(ctx context.Context, op coreadapter.Operation) (
 // One commit records final/report.json with the review's move to reviewed or
 // failed and a notice for the chief of staff. A review whose inputs changed,
 // whose replay conflicted, or whose reader recorded no report fails with the
-// reason in its report. Storage, fetch and Git errors, and a missing
-// committee runner, leave the operation pending for another attempt.
+// reason in its report. Storage, fetch and Git errors, a missing committee
+// runner and a pause covering the workstream leave the operation pending for
+// another attempt; a reader's turn a hard pause stopped is continued within
+// its attempt once the pause is lifted.
 func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	in, err := decodeFinalReview(op)
 	if err != nil {

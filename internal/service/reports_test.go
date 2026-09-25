@@ -350,10 +350,8 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, independentPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
-	a, _ := f.builtAs(t, "first")
-	b, _ := f.builtAs(t, "second")
-	blocked, other := lowHigh(a, b)
+	built := f.builtPaused(t, factory, "first", "second")
+	blocked, other := lowHigh(built[0], built[1])
 	var lock string
 	masons.play[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if sessionStream(req) != string(blocked) {

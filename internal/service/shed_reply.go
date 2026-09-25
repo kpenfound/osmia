@@ -786,7 +786,8 @@ func (d *debate) returned(turns []trace.QueuedTurn) string {
 	return ""
 }
 
-// dispatchReply runs the turn through the thread dispatcher and runner.
+// dispatchReply runs the turn through the thread dispatcher and runner,
+// stopped by a hard pause covering the workstream.
 func (d *debate) dispatchReply(ctx context.Context, stream config.WorkstreamID, in roundInput, turn string) (coreadapter.OperationResult, error) {
 	ctx, release := d.s.stoppable(ctx, d.repository.Project(), stream)
 	defer release()

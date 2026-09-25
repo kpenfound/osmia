@@ -99,7 +99,8 @@ type runningTurns struct {
 }
 
 // runningTurn is one turn operation in flight. Stop is nil for a turn no
-// pause stops, and cancel nil for one abandonment cancels otherwise.
+// pause stops, and cancel nil for a turn whose operation abandonment cancels
+// through an entry of its own.
 type runningTurn struct {
 	project config.ProjectID
 	cancel  context.CancelFunc

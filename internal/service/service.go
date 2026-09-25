@@ -503,6 +503,8 @@ func (s *Service) stop(active *activeProject) error {
 // mason controller parks, resumes and starts units, and the scheduler runs, whose gate holds turns that a runtime pause covers and mason turns of units behind their feature branch;
 // without it, the configured Schedule hook runs instead. The hooks and
 // adapters come from the pipeline, which a reload may restage for the next pass.
+// The loop holds the pending operations of the architect and committee
+// reconcilers while a pause covers their workstream.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, *pipeline, error) {
 	options := s.options.Reconciliation
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)

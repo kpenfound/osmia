@@ -90,10 +90,8 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	f, masons, _ := newAskingMasonFixture(t, 1, independentPlan, p)
 	defer func() { f.stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
-	a, _ := f.builtAs(t, "first")
-	b, _ := f.builtAs(t, "second")
-	c, _ := f.builtAs(t, "third")
+	built := f.builtPaused(t, factory, "first", "second", "third")
+	a, b, c := built[0], built[1], built[2]
 	// Among equal workstreams, the slot goes in ID order.
 	ids := []config.WorkstreamID{a, b, c}
 	slices.Sort(ids)
