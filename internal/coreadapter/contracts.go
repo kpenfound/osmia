@@ -273,8 +273,11 @@ type RetryDecision struct {
 	FallbackProfile string
 }
 
-// Retries classifies one completed attempt (one-based) using caller-supplied
-// limits. It neither sleeps, launches retries nor changes profile bindings.
+// Retries classifies one completed attempt using caller-supplied limits.
+// Attempt is one-based and counts the attempts on the current profile. A
+// retryable infrastructure failure retries on the same profile while Attempt
+// is at most MaxRetries, and then on FallbackProfile when the caller names
+// one. It neither sleeps, launches retries nor changes profile bindings.
 type Retries interface {
 	Decide(context.Context, RetryRequest) (RetryDecision, error)
 }

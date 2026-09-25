@@ -684,21 +684,25 @@ func TestRecoverySettlesFinalAttempt(t *testing.T) {
 	}
 	stopped := coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "partial"}, SessionDirectory: "/owned/session/claim1", StartedAt: at, FinalResponse: "Partial", Cancelled: true}
 	finished := coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "done"}, SessionDirectory: "/owned/session/claim1", StartedAt: at, FinalResponse: "Done"}
+	crashed := coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "crashed"}, SessionDirectory: "/owned/session/claim1", StartedAt: at, ExitCode: 1}
 	for _, c := range []struct {
 		name     string
 		result   *coreadapter.SessionResult
 		recorded string // the failure the stopped session recorded with the result
+		class    coreadapter.FailureKind
 		recover  func(context.Context, *Repository) error
 		failure  string
 		subtype  string
 		status   string
 	}{
-		{"abandon intent", nil, "", abandon, "the service stopped before the turn captured a result", "interrupted", "interrupted"},
-		{"cancel intent", nil, "", cancel, "gone", "cancelled", "interrupted"},
-		{"abandon stopped result", &stopped, "stopped", abandon, "stopped", "", "interrupted"},
-		{"cancel stopped result", &stopped, "stopped", cancel, "stopped", "", "interrupted"},
-		{"abandon finished result", &finished, "", abandon, "", "", "idle"},
-		{"cancel finished result", &finished, "", cancel, "", "", "idle"},
+		{"abandon intent", nil, "", "", abandon, "the service stopped before the turn captured a result", "interrupted", "interrupted"},
+		{"cancel intent", nil, "", "", cancel, "gone", "cancelled", "interrupted"},
+		{"abandon stopped result", &stopped, "stopped", "", abandon, "stopped", "", "interrupted"},
+		{"cancel stopped result", &stopped, "stopped", "", cancel, "stopped", "", "interrupted"},
+		{"abandon finished result", &finished, "", "", abandon, "", "", "idle"},
+		{"cancel finished result", &finished, "", "", cancel, "", "", "idle"},
+		{"abandon crashed result", &crashed, "exit 1", coreadapter.Infrastructure, abandon, "exit 1", "", "failed"},
+		{"cancel crashed result", &crashed, "exit 1", coreadapter.Infrastructure, cancel, "exit 1", "", "failed"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -713,7 +717,7 @@ func TestRecoverySettlesFinalAttempt(t *testing.T) {
 				t.Fatal(err)
 			}
 			if c.result != nil {
-				a.Result, a.Failure = c.result, c.recorded
+				a.Result, a.Failure, a.FailureClass = c.result, c.recorded, c.class
 				if err := r.RecordAttempt(ctx, streamID, "mason", "one", "claim1", a); err != nil {
 					t.Fatal(err)
 				}
@@ -735,7 +739,7 @@ func TestRecoverySettlesFinalAttempt(t *testing.T) {
 			th := mustThread(t, r)
 			got := th.Turns[0]
 			last := got.Attempts[0]
-			if got.Response == nil || last.Result == nil || !reflect.DeepEqual(*last.Result, got.Response.Result) || last.Failure != c.failure || got.Response.Failure != c.failure {
+			if got.Response == nil || last.Result == nil || !reflect.DeepEqual(*last.Result, got.Response.Result) || last.Failure != c.failure || got.Response.Failure != c.failure || got.Response.FailureClass != c.class {
 				t.Fatalf("turn %+v", got)
 			}
 			if got.Response.Result.ErrorSubtype != c.subtype || got.Status() != c.status || th.Status != c.status || th.Active != "" {

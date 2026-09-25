@@ -509,8 +509,8 @@ func (r *Repository) RecoverUnclaimedTurn(ctx context.Context, stream config.Wor
 }
 
 // settleAttempt makes a recovered turn's response and its final attempt one
-// value. A final attempt with a recorded result supplies the response's result
-// and failure; one without receives the response's.
+// value. A final attempt with a recorded result supplies the response's result,
+// failure and failure class; one without receives the response's.
 func settleAttempt(q *QueuedTurn, response *TurnResponse) {
 	n := len(q.Attempts)
 	if n == 0 {
@@ -519,11 +519,11 @@ func settleAttempt(q *QueuedTurn, response *TurnResponse) {
 	q.Attempts = slices.Clone(q.Attempts)
 	last := &q.Attempts[n-1]
 	if last.Result != nil {
-		response.Result, response.Failure = *last.Result, last.Failure
+		response.Result, response.Failure, response.FailureClass = *last.Result, last.Failure, last.FailureClass
 		return
 	}
 	result := response.Result
-	last.Result, last.Failure = &result, response.Failure
+	last.Result, last.Failure, last.FailureClass = &result, response.Failure, response.FailureClass
 }
 
 // CancelTurns completes every unfinished turn of the workstream that no runner

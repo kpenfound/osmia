@@ -30,6 +30,7 @@ func TestRetryAdvice(t *testing.T) {
 		{"transport", SessionResult{}, errors.New("transport"), Infrastructure, true},
 		{"cancel", SessionResult{}, context.Canceled, Infrastructure, false},
 		{"unsupported", SessionResult{}, unsupported("backend", "missing"), Infrastructure, false},
+		{"invalid outcome", SessionResult{IsError: true, ErrorSubtype: invalidOutcome}, errors.New("status \"x\" is not valid"), Behavioural, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -38,10 +39,16 @@ func TestRetryAdvice(t *testing.T) {
 			if err != nil || got.Kind != tt.kind || got.Retry != tt.retry {
 				t.Fatalf("%+v %v", got, err)
 			}
-			if tt.retry && (got.Delay != req.Delay || got.FallbackProfile != req.FallbackProfile) {
+			// Retries stay on the same profile while the bound allows.
+			if tt.retry && (got.Delay != req.Delay || got.FallbackProfile != "") {
 				t.Fatalf("lost caller policy: %+v", got)
 			}
 			req.Attempt = 3
+			got, err = (RetryAdapter{}).Decide(context.Background(), req)
+			if err != nil || got.Retry != tt.retry || tt.retry && (got.FallbackProfile != req.FallbackProfile || got.Delay != req.Delay) || !tt.retry && (got.FallbackProfile != "" || got.Delay != 0) {
+				t.Fatalf("fallback after same-profile retries: %+v %v", got, err)
+			}
+			req.FallbackProfile = ""
 			got, err = (RetryAdapter{}).Decide(context.Background(), req)
 			if err != nil || got.Retry || got.FallbackProfile != "" || got.Delay != 0 {
 				t.Fatalf("exhausted: %+v %v", got, err)

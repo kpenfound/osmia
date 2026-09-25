@@ -39,11 +39,18 @@ func source(t trace.Thread, before uint64) (coreadapter.Profile, coreadapter.Bac
 	return profile, session, boundary, healthy
 }
 
-// execute runs the turn's attempts. The agent session runs under the context
+// failed reports whether an attempt that was not stopped ended in failure.
+func failed(result coreadapter.SessionResult, runErr error) bool {
+	return runErr != nil || result.Cancelled || result.IsError || result.TimedOut || result.ExitCode != 0 || result.Signal != 0
+}
+
+// execute runs the turn's attempts. An infrastructure failure is retried on
+// the same profile up to MaxRetries times, then on each fallback in turn with
+// the same bound; a behavioural failure ends the turn. The agent session runs under the context
 // Stoppable attached to ctx; a turn stopped before or during its session
 // returns its Stop as runErr, and an attempt a stop ended records no failure.
 func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn, prepared coreadapter.PreparedTurn) (result coreadapter.SessionResult, runErr, persistErr error) {
-	// Leases span all proven-unstarted attempts and are released exactly once.
+	// Leases span every attempt of the turn and are released exactly once.
 	cleanup, workspace, retain := prepared.Cleanup, prepared.WorkspaceLease, prepared.RetainWorkspace
 	prepared.Cleanup, prepared.WorkspaceLease = nil, nil
 	defer func() {
@@ -72,9 +79,11 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 	if err != nil {
 		return result, nil, err
 	}
-	retryCount := 0
+	// attempts counts the attempts on the current profile; tried holds every
+	// profile the turn has run on, so a fallback never returns to one.
+	attempts, tried := 1, map[string]bool{prepared.Profile.Name: true}
 	forceReplay := false
-	reason := "no compatible completed session"
+	reason, retry := "no compatible completed session", ""
 	for {
 		prepared.Resume, prepared.History = nil, history
 		path := "replay"
@@ -91,7 +100,11 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 				}
 			}
 		}
-		a := trace.TurnAttempt{Number: len(q.Attempts) + 1, Profile: prepared.Profile, Path: path, Reason: reason, SourceSession: session, SourceSequence: boundary, ReplayFrom: from, Omitted: omitted, At: r.Now()}
+		why := reason
+		if retry != "" {
+			why = retry + "; " + reason
+		}
+		a := trace.TurnAttempt{Number: len(q.Attempts) + 1, Profile: prepared.Profile, Path: path, Reason: why, SourceSession: session, SourceSequence: boundary, ReplayFrom: from, Omitted: omitted, At: r.Now()}
 		if path == "resume" {
 			a.ReplayFrom, a.Omitted = 0, 0
 		}
@@ -124,34 +137,49 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		}
 		captured := result
 		a.Result = &captured
-		if runErr != nil && stop == nil {
-			a.Failure = runErr.Error()
-			if errors.Is(runErr, coreadapter.ErrSessionCostCap) {
-				a.FailureClass = coreadapter.Infrastructure
+		var decision coreadapter.RetryDecision
+		if stop == nil && failed(result, runErr) {
+			fallback := r.Fallbacks[prepared.Profile.Name]
+			if tried[fallback.Name] {
+				fallback = coreadapter.Profile{}
+			}
+			decision, err = coreadapter.RetryAdapter{}.Decide(context.WithoutCancel(ctx), coreadapter.RetryRequest{Result: result, Err: runErr, Attempt: attempts, MaxRetries: r.MaxRetries, FallbackProfile: fallback.Name})
+			if err != nil {
+				return result, runErr, err
+			}
+			a.FailureClass, a.Failure = decision.Kind, "the session failed: "+decision.Reason
+			if runErr != nil {
+				a.Failure = runErr.Error()
 			}
 		}
 		q.Attempts[len(q.Attempts)-1] = a
 		if err := r.Store.RecordAttempt(context.WithoutCancel(ctx), q.Request.Workstream, q.Request.AgentID, q.Request.TurnID, q.Claim.Token, a); err != nil {
 			return result, runErr, err
 		}
+		if run.Err() != nil {
+			break
+		}
 		// Explicit no-work errors must not be accompanied by evidence of execution.
 		unstarted := result.FinalResponse == "" && result.Outcome == nil && result.Usage.Turns == 0 && result.Usage.CostUSD == 0 && !hadSession
-		if run.Err() != nil || result.Cancelled || result.TimedOut || errors.Is(runErr, context.DeadlineExceeded) || !unstarted {
-			break
-		}
-		if path == "resume" && errors.Is(runErr, coreadapter.ErrResumeUnavailable) {
-			forceReplay, reason = true, "resume rejected before work; replay"
+		if unstarted && path == "resume" && errors.Is(runErr, coreadapter.ErrResumeUnavailable) {
+			forceReplay, reason, retry = true, "resume rejected before work; replay", ""
 			continue
 		}
-		fallback, ok := r.Fallbacks[prepared.Profile.Name]
-		if !ok || retryCount >= r.MaxRetries || !errors.Is(runErr, coreadapter.ErrNotStarted) {
+		if !decision.Retry {
 			break
 		}
+		if decision.FallbackProfile == "" {
+			attempts++
+			retry = fmt.Sprintf("retry %d of %d on profile %s after an infrastructure failure: %s", attempts-1, r.MaxRetries, prepared.Profile.Name, decision.Reason)
+			continue
+		}
+		fallback := r.Fallbacks[prepared.Profile.Name]
 		if fallback.Name == "" || fallback.Backend == "" {
 			return result, runErr, fmt.Errorf("invalid fallback profile")
 		}
-		retryCount++
-		prepared.Profile, forceReplay, reason = fallback, true, "fallback after proven unstarted attempt"
+		retry = fmt.Sprintf("fallback from profile %s to %s after %d infrastructure failures: %s", prepared.Profile.Name, fallback.Name, attempts, decision.Reason)
+		prepared.Profile, forceReplay, reason = fallback, true, "a fallback profile replays the owned log"
+		attempts, tried[fallback.Name] = 1, true
 	}
 	return result, runErr, nil
 }
