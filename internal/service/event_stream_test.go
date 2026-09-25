@@ -246,9 +246,11 @@ func TestSubscriberQueueIsBoundedAndCoalesced(t *testing.T) {
 }
 
 // stalledWriter is a stream response whose reader stopped reading: every write
-// after the first blocks until its write deadline passes.
+// after the first blocks until its write deadline passes. It closes wrote once
+// the first write returns.
 type stalledWriter struct {
 	header   http.Header
+	wrote    chan struct{}
 	mu       sync.Mutex
 	deadline time.Time
 	writes   int
@@ -262,6 +264,7 @@ func (w *stalledWriter) Write(b []byte) (int, error) {
 	first, deadline := w.writes == 1, w.deadline
 	w.mu.Unlock()
 	if first {
+		close(w.wrote)
 		return len(b), nil
 	}
 	if deadline.IsZero() {
@@ -287,11 +290,13 @@ func TestStalledEventReaderIsDroppedWithoutBlockingOthers(t *testing.T) {
 	t.Parallel()
 	s := &Service{hub: newHub(), options: Options{WriteTimeout: 200 * time.Millisecond}}
 	other, _ := s.hub.subscribe()
-	served := make(chan struct{})
+	served, stalled := make(chan struct{}), &stalledWriter{header: http.Header{}, wrote: make(chan struct{})}
 	go func() {
-		s.streamEvents(&stalledWriter{header: http.Header{}}, httptest.NewRequest("GET", Prefix+"/events", nil))
+		s.streamEvents(stalled, httptest.NewRequest("GET", Prefix+"/events", nil))
 		close(served)
 	}()
+	// The stream has subscribed once its resync is written.
+	<-stalled.wrote
 	began := time.Now()
 	for i := range 10 * eventQueue {
 		s.hub.publish(Event{Kind: EventWorkstream, Project: project, Workstream: config.WorkstreamID(fmt.Sprintf("w_%032x", i))})
