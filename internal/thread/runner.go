@@ -23,6 +23,10 @@ type Runner struct {
 	ReplayLimits ReplayLimits
 	// Fallbacks maps a selected profile name to a service-approved fallback.
 	Fallbacks map[string]coreadapter.Profile
+	// OnProviderLimit records a blocked provider report after its attempt is durable.
+	OnProviderLimit func(coreadapter.Profile, coreadapter.ProviderLimit) error
+	// AdmitRole checks a role pause before claiming a queued turn.
+	AdmitRole func(string) bool
 	// MaxRetries bounds the same-profile retries of an infrastructure failure.
 	MaxRetries        int
 	Classifier        func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error)
@@ -40,6 +44,15 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	}
 	if r.MaxRetries < 0 || r.MaxRetries > 10 {
 		return trace.QueuedTurn{}, fmt.Errorf("max retries must be between zero and ten")
+	}
+	if r.AdmitRole != nil {
+		thread, err := r.Store.Thread(stream, agent)
+		if err != nil {
+			return trace.QueuedTurn{}, err
+		}
+		if !r.AdmitRole(thread.Identity.Role) {
+			return trace.QueuedTurn{}, fmt.Errorf("provider usage limit pauses role %s", thread.Identity.Role)
+		}
 	}
 	q, err := r.Store.ClaimTurn(ctx, stream, agent, rand.Text(), prepared.SessionDirectory, r.Now())
 	if err != nil {

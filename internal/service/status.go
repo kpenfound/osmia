@@ -71,7 +71,7 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 }
 
 func (s *Service) statusList() StatusResponse {
-	state, _ := s.store.Effective()
+	state, _ := s.effective()
 	profiles := s.effectiveProfiles(state)
 	budget, unread := s.dailyBudgetStatus()
 	diagnostics := []Diagnostic{}
@@ -84,14 +84,14 @@ func (s *Service) statusList() StatusResponse {
 	}
 	list, unreadable, api := s.statuses()
 	if api != nil {
-		return StatusResponse{Workstreams: []WorkstreamStatus{}, Profiles: profiles, DailyBudget: budget, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{"workstreams", api.Code, api.Message})}
+		return StatusResponse{Workstreams: []WorkstreamStatus{}, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{"workstreams", api.Code, api.Message})}
 	}
 	for _, w := range list {
 		if d, ok := unreadable[w.Workstream]; ok {
 			diagnostics = append(diagnostics, d)
 		}
 	}
-	return StatusResponse{Workstreams: list, Profiles: profiles, DailyBudget: budget, FailureStreaks: streaks, Diagnostics: diagnostics}
+	return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, FailureStreaks: streaks, Diagnostics: diagnostics}
 }
 
 // failureStreaks returns the active project's nonzero infrastructure failure

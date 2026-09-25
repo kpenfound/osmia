@@ -5,6 +5,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -27,4 +28,29 @@ func threadRunner(cfg *config.Config, store *trace.Repository, turns coreadapter
 		}
 	}
 	return thread.Runner{Store: store, Turns: turns, Now: now, Fallbacks: fallbacks, MaxRetries: turnRetries}
+}
+
+func (s *Service) threadRunner(cfg *config.Config, store *trace.Repository, turns coreadapter.Turns, now func() time.Time) thread.Runner {
+	r := threadRunner(cfg, store, turns, now)
+	r.OnProviderLimit = s.recordProviderLimit
+	r.AdmitRole = s.admitRole
+	return r
+}
+
+func (s *Service) admitRole(role string) bool {
+	st, _ := s.effective()
+	for _, p := range st.Pauses {
+		if p.Target.Scope == "role" && p.Target.Role == role {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) recordProviderLimit(profile coreadapter.Profile, limit coreadapter.ProviderLimit) error {
+	return s.store.SetProviderLimit(runtime.ProviderLimit{Backend: profile.Backend, Status: limit.Status, Kind: limit.Kind, SetAt: s.now(), ResetsAt: limit.ResetsAt})
+}
+
+func (s *Service) effective() (runtime.State, []runtime.Diagnostic) {
+	return s.store.EffectiveAt(s.now())
 }

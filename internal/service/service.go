@@ -397,7 +397,7 @@ func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(c
 		if gone, err := abandoned(repository, c.Workstream); err != nil || gone {
 			return false, err
 		}
-		st, _ := s.store.Effective()
+		st, _ := s.effective()
 		if scheduler.Held(st.Pauses, project, c) {
 			return false, nil
 		}
@@ -411,7 +411,7 @@ func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(c
 
 // priorities returns the runtime priority order in force.
 func (s *Service) priorities() []runtime.Priority {
-	st, _ := s.store.Effective()
+	st, _ := s.effective()
 	return st.Priorities
 }
 
@@ -426,7 +426,7 @@ func (s *Service) chiefProfile(cfg *config.Config) func() (coreadapter.Profile, 
 // chiefOverride resolves the chief of staff's effective profile name, which
 // may be any configured profile, not only one in the role's fallback chain.
 func (s *Service) chiefOverride(cfg *config.Config) (string, coreadapter.Profile, error) {
-	st, _ := s.store.Effective()
+	st, _ := s.effective()
 	name := st.Profiles[trace.ChiefOfStaff]
 	if name == "" {
 		name = cfg.Roles[trace.ChiefOfStaff].Profile

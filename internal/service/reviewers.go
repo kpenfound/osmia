@@ -156,7 +156,7 @@ func (r *reviewers) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	state, _ := r.s.store.Effective()
+	state, _ := r.s.effective()
 	for _, stream := range streams {
 		if stream == librarianWorkstream(r.repository.Project()) {
 			continue

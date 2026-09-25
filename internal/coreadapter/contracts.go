@@ -216,6 +216,11 @@ type ProviderLimit struct {
 	ResetsAt     time.Time
 }
 
+// Blocking reports whether the provider says new sessions cannot proceed.
+func (l ProviderLimit) Blocking() bool {
+	return l.Status != "" && l.Status != "allowed" && l.Status != "allowed_warning"
+}
+
 // Turns returns partial results alongside errors when available. A reported
 // outcome is data for Osmia, never permission for an adapter to transition state.
 type Turns interface {

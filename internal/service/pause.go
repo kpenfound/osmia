@@ -96,7 +96,7 @@ func (s *Service) setPause(p runtime.Pause) error {
 	if err := s.store.SetPause(p); err != nil {
 		return err
 	}
-	st, _ := s.store.Effective()
+	st, _ := s.effective()
 	s.turns.stop(st.Pauses)
 	return nil
 }

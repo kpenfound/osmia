@@ -1095,7 +1095,7 @@ func (d *debate) contributed(stream config.WorkstreamID, turn string, empty shed
 
 // dispatch runs the turn through the thread dispatcher and runner.
 func (d *debate) dispatch(ctx context.Context, stream config.WorkstreamID, in roundInput, member, turn string) (coreadapter.OperationResult, error) {
-	dispatcher := thread.Dispatcher{Runner: threadRunner(d.s.current(), d.repository, &questions.Turns{Turns: d.turns(stream, in), Repository: d.repository}, d.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	dispatcher := thread.Dispatcher{Runner: d.s.threadRunner(d.s.current(), d.repository, &questions.Turns{Turns: d.turns(stream, in), Repository: d.repository}, d.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(d.turnDirectory(input.Workstream, input.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 	}}

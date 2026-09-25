@@ -186,7 +186,7 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 	defer a.s.turns.track(in.Workstream, running)()
 	// Held before the pause is read, the turn is stopped here or by the pause.
 	if running.stop != nil && a.s.store != nil {
-		state, _ := a.s.store.Effective()
+		state, _ := a.s.effective()
 		if p, ok := scheduler.Stopping(state.Pauses, running.project, in.Workstream); ok {
 			running.stop(pauseStop(p))
 		}
