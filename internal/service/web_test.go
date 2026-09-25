@@ -228,9 +228,15 @@ func TestShutdownClosesBothListeners(t *testing.T) {
 		t.Fatalf("web before shutdown: %d", code)
 	}
 	must(t, s.Close())
-	if conn, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
-		conn.Close()
-		t.Fatal("web listener still accepts after shutdown")
+	// Dialing the freed port could reach another test's listener, so ask the
+	// listener itself whether it is closed.
+	web := s.web.(*net.TCPListener)
+	web.SetDeadline(time.Now().Add(time.Second))
+	if conn, err := web.Accept(); !errors.Is(err, net.ErrClosed) {
+		if conn != nil {
+			conn.Close()
+		}
+		t.Fatalf("web listener open after shutdown: %v", err)
 	}
 	if _, err := os.Lstat(socket); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("socket after shutdown: %v", err)
