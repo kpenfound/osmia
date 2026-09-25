@@ -125,7 +125,7 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	}
 	raw := map[string]json.RawMessage{}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json", quiet)), &raw))
-	if string(raw["status"]) != "null" || string(raw["state"]) != "null" || string(raw["units"]) != "[]" || string(raw["gates"]) != "[]" || string(raw["context_mode"]) != `"file"` || string(raw["open_questions"]) != "0" {
+	if string(raw["status"]) != "null" || string(raw["state"]) != "null" || string(raw["units"]) != "[]" || string(raw["gates"]) != "[]" || string(raw["context_mode"]) != `"file"` || string(raw["open_questions"]) != "0" || string(raw["drift"]) != "null" {
 		t.Fatalf("no status JSON: %v", raw)
 	}
 
@@ -266,5 +266,51 @@ func TestStatusPrintsOverlapAdvisories(t *testing.T) {
 		if !strings.Contains(pair[0], pair[1]) {
 			t.Fatalf("status lacks the advisory:\n%s", pair[0])
 		}
+	}
+}
+
+// project rebase reports the workstreams it covers and skips, and status
+// shows each workstream's latest drift rebase.
+func TestProjectRebaseAndDriftStatus(t *testing.T) {
+	opts := withStatus(t)
+	ctx := context.Background()
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	repo, err := trace.Open(cfg.Root, cfg.Project)
+	must(t, err)
+	reason := "drift rebase 1 changed nothing: the workstream is handed, not building or assembled"
+	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "drift-1-skipped", Revision: 1, Project: project, Workstream: stream, At: written, Actor: trace.Actor{Kind: "service", ID: "foreman"}, Cause: "drift-1-run"}
+	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: "drift", To: "skipped-1", Reason: reason}})
+	must(t, err)
+	must(t, repo.Close())
+	s, err := service.Start(ctx, opts)
+	must(t, err)
+	t.Cleanup(func() { s.Close() })
+	root := opts.Config.Root
+
+	if out := successful(t, root, "status"); !strings.Contains(out, "  "+stream+" state=handed open_questions=0 context_mode=file\n    Drift: rebase 1 skipped at 2026-09-16T10:00:00Z\n    Goal: ") {
+		t.Fatalf("overview lacks the drift rebase:\n%s", out)
+	}
+	if out := successful(t, root, "status", stream); !strings.Contains(out, "\nDrift: rebase 1 skipped at 2026-09-16T10:00:00Z\n  Reason: "+reason+"\n") {
+		t.Fatalf("status <workstream> lacks the drift rebase:\n%s", out)
+	}
+	var one service.WorkstreamStatus
+	must(t, json.Unmarshal([]byte(successful(t, root, "status", stream, "--json")), &one))
+	if want := (&service.DriftStatus{Drift: 1, Outcome: "skipped", At: written, Reason: reason, Moved: []string{}}); !reflect.DeepEqual(one.Drift, want) {
+		t.Fatalf("status drift %+v, want %+v", one.Drift, want)
+	}
+
+	skipped := []service.DriftSkip{{Workstream: stream, Reason: "the workstream is handed, not building or assembled"}, {Workstream: quiet, Reason: "the workstream is not started, not building or assembled"}}
+	if out := successful(t, root, "project", "rebase", project); out != "Drift rebase requested for project "+project+"\nCovered: none\nSkipped: "+stream+": "+skipped[0].Reason+"\nSkipped: "+quiet+": "+skipped[1].Reason+"\n" {
+		t.Fatalf("project rebase:\n%s", out)
+	}
+	var got service.ProjectRebaseResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "project", "rebase", project, "--json")), &got))
+	if want := (service.ProjectRebaseResponse{Project: project, Covered: []service.DriftCoverage{}, Skipped: skipped}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("project rebase --json: %+v", got)
+	}
+	other := "p_ffffffffffffffffffffffffffffffff"
+	if code, out, diag := invoke(t, root, "project", "rebase", other); code != 4 || out != "" || !strings.Contains(diag, "not_found: project "+other+" is not an active project") {
+		t.Fatalf("project rebase of another project: %d %s %s", code, out, diag)
 	}
 }

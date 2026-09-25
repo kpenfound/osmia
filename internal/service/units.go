@@ -143,7 +143,13 @@ func (u unitWorkspaces) Acquire(ctx context.Context, req coreadapter.WorkspaceRe
 // workspace's files but its symlinks and special files, which a view never
 // holds.
 func (u unitWorkspaces) paths(w workspace.Worktree) ([]string, error) {
-	entries, err := os.ReadDir(w.Path)
+	return viewPaths(w.Path)
+}
+
+// viewPaths selects every directory and regular file at the top of the
+// workspace at dir but its VCS metadata.
+func viewPaths(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}

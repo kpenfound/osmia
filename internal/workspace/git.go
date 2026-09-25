@@ -398,6 +398,21 @@ func (g *Git) Replay(ctx context.Context, head, onto string, at time.Time) (stri
 	if _, err := g.run(ctx, "worktree", "add", "--quiet", "--detach", dir, head); err != nil {
 		return "", nil, err
 	}
+	if _, err := g.runIn(ctx, dir, replayEnvironment(at), "rebase", "--quiet", "--no-autostash", onto); err != nil {
+		conflicts, unmergedErr := g.unmerged(ctx, dir)
+		if unmergedErr != nil || len(conflicts) == 0 {
+			return "", nil, errors.Join(err, unmergedErr)
+		}
+		return "", conflicts, nil
+	}
+	commit, err := g.runIn(ctx, dir, nil, "rev-parse", "--verify", "HEAD^{commit}")
+	return commit, nil, err
+}
+
+// replayEnvironment is the environment a replay runs Git in: commits are
+// committed by Osmia at the given time, no editor opens and the owner's
+// rebase settings that would change what is replayed are off.
+func replayEnvironment(at time.Time) []string {
 	date := fmt.Sprintf("@%d +0000", at.Unix())
 	env := append(slices.Clone(identity), "GIT_COMMITTER_DATE="+date, "GIT_EDITOR=true", "GIT_SEQUENCE_EDITOR=true")
 	settings := []string{"rebase.autoStash=false", "rebase.autoSquash=false", "rebase.updateRefs=false", "rebase.rebaseMerges=false", "commit.gpgSign=false"}
@@ -406,22 +421,110 @@ func (g *Git) Replay(ctx context.Context, head, onto string, at time.Time) (stri
 		key, value, _ := strings.Cut(setting, "=")
 		env = append(env, fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", i, key), fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", i, value))
 	}
-	if _, err := g.runIn(ctx, dir, env, "rebase", "--quiet", "--no-autostash", onto); err != nil {
-		out, diffErr := g.runInRaw(ctx, dir, nil, "diff", "--name-only", "--diff-filter=U", "-z")
-		var conflicts []string
-		for _, path := range strings.Split(out, "\x00") {
-			if path != "" && !slices.Contains(conflicts, path) {
-				conflicts = append(conflicts, path)
-			}
+	return env
+}
+
+// unmerged returns the paths the index of the worktree at dir holds
+// unmerged, sorted.
+func (g *Git) unmerged(ctx context.Context, dir string) ([]string, error) {
+	out, err := g.runInRaw(ctx, dir, nil, "diff", "--name-only", "--diff-filter=U", "-z")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, path := range strings.Split(out, "\x00") {
+		if path != "" && !slices.Contains(paths, path) {
+			paths = append(paths, path)
 		}
-		if diffErr != nil || len(conflicts) == 0 {
-			return "", nil, errors.Join(err, diffErr)
+	}
+	slices.Sort(paths)
+	return paths, nil
+}
+
+// ReplayIn replays the worktree's branch onto onto in the worktree itself,
+// as Replay does, and returns the commit its branch then points at. A
+// replay that conflicts stops at the commit it cannot apply, with the
+// conflicted paths, sorted, holding conflict markers in the worktree, and
+// returns those paths; ContinueReplay goes on once they are resolved. A
+// worktree that already descends from onto is left as it is.
+func (g *Git) ReplayIn(ctx context.Context, w Worktree, onto string, at time.Time) (string, []string, error) {
+	return g.replayStep(ctx, w, at, "rebase", "--quiet", "--no-autostash", onto)
+}
+
+// ContinueReplay stages every file of the worktree, as Snapshot does, and
+// goes on with the replay ReplayIn stopped, as it stopped: to the next
+// commit that conflicts, whose paths it returns, or to the end, whose commit
+// it returns. A replay step whose resolution leaves its commit's change
+// empty drops the commit.
+func (g *Git) ContinueReplay(ctx context.Context, w Worktree, at time.Time) (string, []string, error) {
+	if _, err := g.runIn(ctx, w.Path, []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.excludesFile", "GIT_CONFIG_VALUE_0=" + os.DevNull}, "add", "--all"); err != nil {
+		return "", nil, err
+	}
+	return g.replayStep(ctx, w, at, "rebase", "--continue")
+}
+
+// replayStep runs one rebase command in the worktree and reports where it
+// left the replay.
+func (g *Git) replayStep(ctx context.Context, w Worktree, at time.Time, args ...string) (string, []string, error) {
+	if _, err := g.runIn(ctx, w.Path, replayEnvironment(at), args...); err != nil {
+		conflicts, unmergedErr := g.unmerged(ctx, w.Path)
+		if unmergedErr != nil || len(conflicts) == 0 {
+			return "", nil, errors.Join(err, unmergedErr)
 		}
-		slices.Sort(conflicts)
 		return "", conflicts, nil
 	}
-	commit, err := g.runIn(ctx, dir, nil, "rev-parse", "--verify", "HEAD^{commit}")
+	commit, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "HEAD^{commit}")
 	return commit, nil, err
+}
+
+// Replaying returns the commit the replay in the worktree stopped at, with
+// the paths its index holds unmerged, and whether a replay is in progress
+// there. A replay in progress that stopped at no commit returns "".
+func (g *Git) Replaying(ctx context.Context, w Worktree) (string, []string, bool, error) {
+	dir, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--path-format=absolute", "--git-path", "rebase-merge")
+	if err != nil {
+		return "", nil, false, err
+	}
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		return "", nil, false, nil
+	} else if err != nil {
+		return "", nil, false, err
+	}
+	stop, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "--quiet", "REBASE_HEAD^{commit}")
+	if err != nil && !exitCode(err, 1) {
+		return "", nil, false, err
+	}
+	conflicts, err := g.unmerged(ctx, w.Path)
+	return stop, conflicts, true, err
+}
+
+// MarkedFiles returns the paths, of those given, whose file in the worktree
+// holds a conflict marker line, as Markers finds them in a commit. A path
+// the worktree does not hold as a regular file has none.
+func (g *Git) MarkedFiles(w Worktree, paths []string) ([]string, error) {
+	root, err := os.OpenRoot(w.Path)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	var marked []string
+	for _, path := range paths {
+		info, err := root.Lstat(filepath.FromSlash(path))
+		if errors.Is(err, os.ErrNotExist) || err == nil && !info.Mode().IsRegular() {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		content, err := root.ReadFile(filepath.FromSlash(path))
+		if err != nil {
+			return nil, err
+		}
+		if conflicted(string(content)) {
+			marked = append(marked, path)
+		}
+	}
+	return marked, nil
 }
 
 // dropReplay removes Replay's temporary worktree at dir, and what a stop left
@@ -534,7 +637,9 @@ func (g *Git) own(entry listed, name string) bool {
 }
 
 // Workspace returns the worktree named name when the clone has one. One
-// whose directory is gone is forgotten first, so it can be made again.
+// whose directory is gone is forgotten first, so it can be made again. A
+// worktree a replay in progress holds detached is on the branch the replay
+// returns to.
 func (g *Git) Workspace(ctx context.Context, name string) (Worktree, bool, error) {
 	entries, err := g.list(ctx)
 	if err != nil {
@@ -547,9 +652,36 @@ func (g *Git) Workspace(ctx context.Context, name string) (Worktree, bool, error
 		if entry.prunable {
 			return Worktree{}, false, g.forget(ctx, entry)
 		}
-		return Worktree{Path: g.path(name), Branch: entry.branch, git: filepath.Join(g.Clone, ".git")}, true, nil
+		branch := entry.branch
+		if branch == "" {
+			if branch, err = g.replayedBranch(ctx, g.path(name)); err != nil {
+				return Worktree{}, false, err
+			}
+		}
+		return Worktree{Path: g.path(name), Branch: branch, git: filepath.Join(g.Clone, ".git")}, true, nil
 	}
 	return Worktree{}, false, nil
+}
+
+// replayedBranch returns the branch the replay in progress in the worktree
+// at dir returns to, or "" when no replay of a branch is in progress there.
+func (g *Git) replayedBranch(ctx context.Context, dir string) (string, error) {
+	path, err := g.runIn(ctx, dir, nil, "rev-parse", "--path-format=absolute", "--git-path", "rebase-merge/head-name")
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	branch, _ := strings.CutPrefix(strings.TrimSpace(string(data)), "refs/heads/")
+	if branch == "detached HEAD" {
+		return "", nil
+	}
+	return branch, nil
 }
 
 // forget removes one worktree's metadata from the clone.

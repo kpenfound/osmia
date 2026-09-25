@@ -384,7 +384,23 @@ func (m *masons) nextStart(streams []building, entities kb.Map) (int, string, er
 // the service stops during recovery. The claim is released only after the
 // copy, so another turn cannot overwrite work that has not been recovered.
 func (m *masons) recoverInterrupted(ctx context.Context, stream config.WorkstreamID, unit string) error {
-	th, err := m.repository.Thread(stream, masonAgent(unit))
+	return m.recoverView(ctx, stream, masonAgent(unit), func() (string, error) {
+		w, _, found, err := newUnitWorkspaces(m.cfg).find(ctx, stream, unit)
+		if err != nil {
+			return "", err
+		}
+		if !found {
+			return "", fmt.Errorf("unit %s of workstream %s has no workspace", unit, stream)
+		}
+		return w.Path, nil
+	})
+}
+
+// recoverView copies the surviving view of the agent's interrupted turn
+// into the workspace directory returns, as recoverInterrupted does for a
+// unit's mason, and releases the thread claim.
+func (m *masons) recoverView(ctx context.Context, stream config.WorkstreamID, agent string, workspace func() (string, error)) error {
+	th, err := m.repository.Thread(stream, agent)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -401,7 +417,7 @@ func (m *masons) recoverInterrupted(ctx context.Context, stream config.Workstrea
 	if pending == nil {
 		return fmt.Errorf("interrupted mason thread has no active turn")
 	}
-	dir := filepath.Join(m.cfg.Root.String(), "views", string(m.repository.Project()), string(stream), masonAgent(unit), pending.Request.TurnID)
+	dir := filepath.Join(m.cfg.Root.String(), "views", string(m.repository.Project()), string(stream), agent, pending.Request.TurnID)
 	entries, err := os.ReadDir(dir)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -428,16 +444,13 @@ func (m *masons) recoverInterrupted(ctx context.Context, stream config.Workstrea
 			if err := os.RemoveAll(view); err != nil {
 				return err
 			}
-			return m.repository.AbandonTurn(ctx, stream, masonAgent(unit), pending.Request.TurnID, m.s.now())
+			return m.repository.AbandonTurn(ctx, stream, agent, pending.Request.TurnID, m.s.now())
 		}
-		w, _, found, err := newUnitWorkspaces(m.cfg).find(ctx, stream, unit)
+		path, err := workspace()
 		if err != nil {
 			return err
 		}
-		if !found {
-			return fmt.Errorf("unit %s of workstream %s has no workspace", unit, stream)
-		}
-		if err := mirror(view, w.Path); err != nil {
+		if err := mirror(view, path); err != nil {
 			return err
 		}
 		if err := os.RemoveAll(view); err != nil {
@@ -447,11 +460,12 @@ func (m *masons) recoverInterrupted(ctx context.Context, stream config.Workstrea
 	if err := os.Remove(filepath.Join(dir, "ready")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return m.repository.AbandonTurn(ctx, stream, masonAgent(unit), pending.Request.TurnID, m.s.now())
+	return m.repository.AbandonTurn(ctx, stream, agent, pending.Request.TurnID, m.s.now())
 }
 
 // recoverTurn queues one continuation for an interrupted mason turn unless
 // that turn asked a question. The answer turn then supplies the continuation.
+// A turn a hard pause stopped is interrupted too, and continues the same way.
 func (m *masons) recoverTurn(ctx context.Context, stream config.WorkstreamID, unit string) (bool, error) {
 	th, err := m.repository.Thread(stream, masonAgent(unit))
 	if errors.Is(err, os.ErrNotExist) || err == nil && len(th.Turns) == 0 {
@@ -481,7 +495,7 @@ func (m *masons) recoverTurn(ctx context.Context, stream config.WorkstreamID, un
 	req.TurnID = masonAgent(unit) + "-recover-" + fmt.Sprint(last.Sequence)
 	req.At = m.s.now()
 	req.Cause = last.Response.ID
-	req.Prompt = last.Request.Prompt + "\n\nThe service stopped during your last turn. Your workspace includes the files left by that turn. Continue from those files, check the unit's criteria and proofs, and report done when they hold."
+	req.Prompt = last.Request.Prompt + "\n\n" + interruption(last) + " Your workspace includes the files left by that turn. Continue from those files, check the unit's criteria and proofs, and report done when they hold."
 	_, err = m.repository.EnqueueTurn(ctx, req)
 	return err == nil, err
 }
@@ -824,4 +838,13 @@ func masonPrompt(m bundle.Mason) string {
 Your view holds the project's files as the feature branch had them when the unit started, with the work done on the unit since. Make each of the unit's criteria below hold, and put in place and pass the proof the plan names for it. Stay within the unit's footprint. The spec below is the one the owner ratified; build against it. When every criterion of the unit holds and its proof is in place and passing, call done with the outcome of your work and a report on every criterion of the unit: what you did, the evidence that it holds and where its proof lives. Include any new project facts you learned in learnings; leave that list empty when there are none. Add a short headline, what happened in concrete terms, and needs_you only when the owner has a specific action. Then end your turn.
 
 %s`, m.Unit, m.Render())
+}
+
+// interruption says what ended an interrupted turn, for the prompt of the
+// turn that continues it.
+func interruption(q trace.QueuedTurn) string {
+	if q.Response != nil && q.Response.Stop != nil {
+		return "A hard pause stopped your last turn."
+	}
+	return "The service stopped during your last turn."
 }

@@ -4,10 +4,12 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +24,7 @@ type Config struct {
 	ActiveProjects []string           `toml:"active_projects" json:"active_projects"`
 	Listen         Listen             `toml:"listen" json:"listen"`
 	Capacity       Capacity           `toml:"capacity" json:"capacity"`
+	Budget         Budget             `toml:"budget" json:"budget"`
 	Profiles       map[string]Profile `toml:"profiles" json:"profiles"`
 	Roles          map[string]Role    `toml:"roles" json:"roles"`
 	Shed           Shed               `toml:"shed" json:"shed"`
@@ -38,6 +41,19 @@ type Capacity struct {
 	Committee     int `toml:"committee" json:"committee"`
 	PerWorkstream int `toml:"per_workstream" json:"per_workstream"`
 }
+type Budget struct {
+	PerSession string `toml:"per_session" json:"per_session,omitempty"`
+	PerUnit    string `toml:"per_unit" json:"per_unit,omitempty"`
+	PerDay     string `toml:"per_day" json:"per_day,omitempty"`
+}
+
+var decimalUSD = regexp.MustCompile(`^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$`)
+
+func (b Budget) SessionLimitUSD() float64 {
+	v, _ := strconv.ParseFloat(b.PerSession, 64)
+	return v
+}
+
 type Shed struct {
 	MaxRounds  int `toml:"max_rounds" json:"max_rounds"`
 	MaxBounces int `toml:"max_bounces" json:"max_bounces"`
@@ -70,17 +86,29 @@ type Role struct {
 	Image   string `toml:"image" json:"image"`
 }
 type Project struct {
-	ID         ProjectID       `toml:"-" json:"id"`
-	Version    int             `toml:"version" json:"version"`
-	Name       string          `toml:"name" json:"name"`
-	Upstream   string          `toml:"upstream" json:"upstream"`
-	Fork       string          `toml:"fork" json:"fork"`
-	Clone      string          `toml:"clone" json:"clone"`
-	BaseBranch string          `toml:"base_branch" json:"base_branch"`
-	Landing    string          `toml:"landing" json:"landing"`
-	Classifier string          `toml:"classifier" json:"classifier"`
-	Capacity   ProjectCapacity `toml:"capacity" json:"capacity"`
+	ID         ProjectID `toml:"-" json:"id"`
+	Version    int       `toml:"version" json:"version"`
+	Name       string    `toml:"name" json:"name"`
+	Upstream   string    `toml:"upstream" json:"upstream"`
+	Fork       string    `toml:"fork" json:"fork"`
+	Clone      string    `toml:"clone" json:"clone"`
+	BaseBranch string    `toml:"base_branch" json:"base_branch"`
+	Landing    string    `toml:"landing" json:"landing"`
+	Classifier string    `toml:"classifier" json:"classifier"`
+	// UpstreamRebase is the Go duration between a workstream's scheduled
+	// drift rebases; zero disables them.
+	UpstreamRebase string          `toml:"upstream_rebase" json:"upstream_rebase"`
+	Capacity       ProjectCapacity `toml:"capacity" json:"capacity"`
 }
+
+// RebaseInterval is how long after a workstream's latest drift or final
+// rebase its next drift rebase is scheduled, or zero when scheduled drift
+// rebases are disabled.
+func (p Project) RebaseInterval() time.Duration {
+	d, _ := time.ParseDuration(p.UpstreamRebase)
+	return d
+}
+
 type ProjectCapacity struct {
 	PerWorkstream int `toml:"per_workstream" json:"per_workstream"`
 }
@@ -159,6 +187,15 @@ func Load(options Options) (*Config, error) {
 	if d, err := time.ParseDuration(c.Events.Window); err != nil || d <= 0 {
 		return nil, fieldError(path, "events.window", "must be a positive Go duration")
 	}
+	for _, value := range []struct{ field, amount string }{{"per_session", c.Budget.PerSession}, {"per_unit", c.Budget.PerUnit}, {"per_day", c.Budget.PerDay}} {
+		if !md.IsDefined("budget", value.field) {
+			continue
+		}
+		n, err := strconv.ParseFloat(value.amount, 64)
+		if !decimalUSD.MatchString(value.amount) || err != nil || n <= 0 || math.IsInf(n, 0) {
+			return nil, fieldError(path, "budget."+value.field, "must be a positive decimal USD string")
+		}
+	}
 	if err := c.validateProfiles(path, md); err != nil {
 		return nil, err
 	}
@@ -224,7 +261,7 @@ func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Proje
 	if err != nil {
 		return Project{}, err
 	}
-	p := Project{BaseBranch: "main", Landing: "commit-per-unit", Capacity: ProjectCapacity{perWorkstream}}
+	p := Project{BaseBranch: "main", Landing: "commit-per-unit", UpstreamRebase: "6h", Capacity: ProjectCapacity{perWorkstream}}
 	if _, err := decode(projectPath, &p, true); err != nil {
 		return Project{}, err
 	}
@@ -255,6 +292,9 @@ func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Proje
 	}
 	if !slices.Contains([]string{"commit-per-unit", "squash"}, p.Landing) {
 		return Project{}, fieldError(projectPath, "landing", "expected commit-per-unit or squash")
+	}
+	if d, err := time.ParseDuration(p.UpstreamRebase); err != nil || d < 0 || d > 0 && d < time.Minute {
+		return Project{}, fieldError(projectPath, "upstream_rebase", "must be a Go duration of at least 1m, or 0 to disable scheduled drift rebases")
 	}
 	if p.Capacity.PerWorkstream <= 0 {
 		return Project{}, fieldError(projectPath, "capacity.per_workstream", "must be positive")
@@ -299,7 +339,7 @@ func decode(path string, dest any, project bool) (toml.MetaData, error) {
 func knownKey(key toml.Key, project bool) bool {
 	path := key.String()
 	if project {
-		return slices.Contains([]string{"version", "name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "capacity", "capacity.per_workstream"}, path)
+		return slices.Contains([]string{"version", "name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "capacity", "capacity.per_workstream"}, path)
 	}
 	if len(key) >= 2 && (key[0] == "profiles" || key[0] == "roles") {
 		if len(key) == 2 {
@@ -313,12 +353,12 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "sandbox", "image"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window"}, path)
+	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {
 	switch key[0] {
-	case "budget", "hearsay", "notify", "upstream_rebase", "hearsay_scope", "pause", "priority":
+	case "hearsay", "notify", "hearsay_scope", "pause", "priority":
 		return "unsupported in M1; requires a later milestone"
 	}
 	if key.String() == "listen.tailnet" || key.String() == "listen.web" {
@@ -433,7 +473,7 @@ func (c *Config) NamedProfile(name string) (coreadapter.Profile, error) {
 		return coreadapter.Profile{}, fmt.Errorf("unknown profile %q", name)
 	}
 	timeout, err := time.ParseDuration(p.Timeout)
-	return coreadapter.Profile{Name: name, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns}, err
+	return coreadapter.Profile{Name: name, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: c.Budget.SessionLimitUSD()}, err
 }
 
 // Execution returns adapter inputs, not verified isolation or permission to run.
@@ -447,7 +487,7 @@ func (c *Config) Execution(role, profile string) (coreadapter.Profile, coreadapt
 		if next == profile {
 			p := c.Profiles[next]
 			timeout, err := time.ParseDuration(p.Timeout)
-			return coreadapter.Profile{Name: next, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image}, err
+			return coreadapter.Profile{Name: next, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: c.Budget.SessionLimitUSD()}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image}, err
 		}
 	}
 	return coreadapter.Profile{}, coreadapter.ExecutionSettings{}, fmt.Errorf("profile %q is not in role %q's fallback chain", profile, role)

@@ -90,7 +90,7 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	f, masons, _ := newAskingMasonFixture(t, 1, independentPlan, p)
 	defer func() { f.stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "operator"})
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
 	a, _ := f.builtAs(t, "first")
 	b, _ := f.builtAs(t, "second")
 	c, _ := f.builtAs(t, "third")
@@ -208,12 +208,12 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	// waits until fewer than one are, here because pauses take theirs away.
 	f.checkUnits(t, other, []UnitStatus{{Unit: "resume", State: UnitImplementing}, f.deferred(t, other, "dedupe", overlapping("resume"))})
 	f.checkUnits(t, third, []UnitStatus{f.deferred(t, third, "resume", slotless(1)), f.deferred(t, third, "dedupe", slotless(1))})
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: other}, Mode: "soft", Source: "operator"})
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: other}, Mode: "soft", Source: "owner"})
 	settle()
 	if got := masonTransitions(t, f, third); len(got) != 0 {
 		t.Fatalf("%s started a unit while one was implementing with one mason slot: %+v", third, got)
 	}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: asking}, Mode: "soft", Source: "operator"})
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: asking}, Mode: "soft", Source: "owner"})
 	f.awaitMasonRan(t, third, "resume")
 	masons.check(t)
 }

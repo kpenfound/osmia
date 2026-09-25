@@ -93,6 +93,9 @@ type Amendment struct {
 	Seal         int      `json:"seal"`
 	SealRevision int      `json:"seal_revision"`
 	SpecHash     string   `json:"spec_hash"`
+	// Upstream is the drift rebase whose upstream change prompted the
+	// request, when one did.
+	Upstream *UpstreamMove `json:"upstream,omitempty"`
 }
 
 func (Amendment) traceRecord() {}
@@ -163,11 +166,27 @@ type TurnResponse struct {
 	RequestRevision int                       `json:"request_revision"`
 	Result          coreadapter.SessionResult `json:"result"`
 	Failure         string                    `json:"failure,omitempty"`
+	FailureClass    coreadapter.FailureKind   `json:"failure_class,omitempty"`
 	Classification  *TurnClassification       `json:"classification,omitempty"`
 	ClassifierUsage []coreadapter.Usage       `json:"classifier_usage,omitempty"`
+	// Stop is set when the service stopped the turn on purpose. A stopped
+	// turn is interrupted, not failed, and records no failure.
+	Stop *TurnStop `json:"stop,omitempty"`
 }
 
 func (TurnResponse) traceRecord() {}
+
+// TurnStopHardPause is the cause of a turn stopped by a hard pause.
+const TurnStopHardPause = "hard_pause"
+
+// TurnStop records why the service stopped a turn: the cause, and the
+// scope, source and reason of the pause that stopped it.
+type TurnStop struct {
+	Cause  string `json:"cause"`
+	Scope  string `json:"scope"`
+	Source string `json:"source"`
+	Reason string `json:"reason"`
+}
 
 // Status is the chief of staff's status for one workstream. Each revision
 // replaces the previous one as a whole; the record ID is always StatusID.
@@ -255,7 +274,7 @@ func validate(r Record) error {
 	case Question:
 		valid = validActor(v.AskedBy) && present(v.Question) && (v.Thread == "" || key(v.Thread)) && (v.Turn == "" || key(v.Turn)) && (v.Escalation == nil || present(v.SentToOwner) && v.Escalation.valid(h.ID))
 	case Amendment:
-		valid = validActor(v.Requester) && (v.Role == "mason" || v.Role == "reviewer" || v.Role == ChiefOfStaff) && key(v.Thread) && key(v.Turn) && (v.QuestionID == "" || key(v.QuestionID)) && len(v.Citations) > 0 && present(v.Change) && present(v.Reason) && v.Seal > 0 && v.SealRevision > 0 && present(v.SpecHash) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
+		valid = validActor(v.Requester) && (v.Role == "mason" || v.Role == "reviewer" || v.Role == ChiefOfStaff || v.Role == "service" && v.Actor.Kind == "service" && v.Cause == "budget-per-unit") && key(v.Thread) && key(v.Turn) && (v.QuestionID == "" || key(v.QuestionID)) && len(v.Citations) > 0 && present(v.Change) && present(v.Reason) && v.Seal > 0 && v.SealRevision > 0 && present(v.SpecHash) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Ruling:
 		valid = key(v.QuestionID) && v.QuestionRevision > 0 && present(v.Decision) && (present(v.ReturnedAnswer) || present(v.OwnerResponse)) && validRulingScope(v) && !slices.ContainsFunc(v.Citations, func(c string) bool { return !present(c) })
 	case Agent:
@@ -263,9 +282,13 @@ func validate(r Record) error {
 	case TurnRequest:
 		valid = key(v.AgentID) && key(v.ThreadID) && key(v.TurnID) && key(v.Profile.Name) && present(v.Profile.Backend) && present(v.Profile.Model) && present(v.Prompt) && v.Profile.Timeout >= 0 && v.Profile.MaxTurns >= 0 && v.Profile.CostLimitUSD >= 0 && !math.IsNaN(v.Profile.CostLimitUSD) && !math.IsInf(v.Profile.CostLimitUSD, 0) && (v.Resume == nil || validSession(*v.Resume))
 	case TurnResponse:
-		valid = key(v.AgentID) && key(v.ThreadID) && key(v.TurnID) && key(v.RequestID) && v.RequestRevision > 0 && !v.Result.StartedAt.IsZero() && v.Result.Duration >= 0 && validUsage(v.Result.Usage) && (validSession(v.Result.Session) || (v.Result.Session == (coreadapter.BackendSession{}) && present(v.Failure)))
+		valid = key(v.AgentID) && key(v.ThreadID) && key(v.TurnID) && key(v.RequestID) && v.RequestRevision > 0 && !v.Result.StartedAt.IsZero() && v.Result.Duration >= 0 && validUsage(v.Result.Usage) && (validSession(v.Result.Session) || (v.Result.Session == (coreadapter.BackendSession{}) && (present(v.Failure) || v.Stop != nil)))
 		valid = valid && len(v.ClassifierUsage) <= 2
+		valid = valid && (v.FailureClass == "" || v.Failure != "" && (v.FailureClass == coreadapter.Infrastructure || v.FailureClass == coreadapter.Behavioural))
 		valid = valid && (len(v.ClassifierUsage) == 0 || v.Classification != nil)
+		if s := v.Stop; s != nil {
+			valid = valid && s.Cause == TurnStopHardPause && present(s.Scope) && present(s.Source) && present(s.Reason) && v.Result.Cancelled && v.Failure == "" && v.Classification == nil
+		}
 		for _, usage := range v.ClassifierUsage {
 			valid = valid && validUsage(usage)
 		}

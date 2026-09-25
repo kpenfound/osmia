@@ -1,4 +1,4 @@
-# M1 runtime overrides
+# Runtime overrides
 
 `internal/runtime.Open` takes a configuration from `config.Load` and the active
 project's known persisted workstream IDs. Without an active project the list is
@@ -19,7 +19,8 @@ The version 1 JSON representation is:
       "target": {"scope": "factory"},
       "mode": "soft",
       "reason": "Travelling",
-      "source": "operator"
+      "source": "owner",
+      "set_at": "2026-09-24T12:00:00Z"
     },
     {
       "target": {
@@ -28,7 +29,9 @@ The version 1 JSON representation is:
         "workstream": "w_0123456789abcdef0123456789abcdef"
       },
       "mode": "hard",
-      "source": "operator"
+      "reason": "Daily spending limit reached",
+      "source": "daily-budget",
+      "set_at": "2026-09-24T13:00:00Z"
     }
   ],
   "priorities": [
@@ -42,12 +45,20 @@ The version 1 JSON representation is:
 ```
 
 A pause target is `factory` (no IDs), `project` (project ID only), or `workstream`
-(both IDs). One record per target is allowed. Modes are `soft` and `hard`; M1
-records only the `operator` source and an optional free-form reason. A pause of
+(both IDs). One record per target is allowed. Modes are `soft` and `hard`. Every
+pause records a non-empty reason, its set time, and one of `owner`, `daily-budget`,
+or `provider-usage-limit` as its source. The owner can clear any pause. A budget
+or provider mechanism may clear only a pause it set; neither can clear an owner
+pause. A pause of
 either mode holds new worker turns and unit starts in its scope, and the units
 a paused workstream has in flight take no mason slot
-([service](service.md#starting-units)). Neither mode cancels a turn that is
-already running.
+([service](service.md#starting-units)). A soft pause lets a turn that is already
+running finish; a hard pause also stops it
+([service](service.md#hard-pause)).
+
+When opening a runtime file with an `operator` pause, the store attributes it to
+the owner, supplies a reason if absent, uses the file's modification time as its
+set time, and persists the updated record.
 
 Priority contains a unique ordered subset of workstream IDs, scoped to a project.
 An empty array is allowed; null is not. Unlisted workstreams have no explicit
@@ -59,7 +70,7 @@ including the selected profile's fallback chain.
 
 `SetPause`, `SetPriority` and `SetProfile` validate new overrides against the current
 resolver input before writing. The corresponding `Clear` operations remove the
-exact key, including a stale key. They never rewrite `config.toml`. `Resolve`
+exact key, including a stale key, subject to the pause clearing rule. They never rewrite `config.toml`. `Resolve`
 copies a newly validated configuration and identity list into the resolver without
 changing runtime state or files; changing the root requires reopening. This is a
 repository operation, not live reload orchestration.
@@ -75,7 +86,7 @@ pause rather than losing a factory pause behind a workstream record.
 ## Invalid and stale state
 
 Malformed JSON, duplicate object keys, unknown fields or schema versions, invalid target shapes, modes,
-sources, empty bindings and duplicate pause/priority identities reject the whole
+sources, missing reasons or set times, empty bindings and duplicate pause/priority identities reject the whole
 file: `Open` returns no store and leaves the file intact. Failed mutations leave
 both the previous snapshot and file authoritative.
 

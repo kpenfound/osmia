@@ -53,6 +53,21 @@ type refusal struct {
 // the chief of staff. A request the trace refuses is
 // an ordinary result, {"recorded":false,"reason":...}, so the agent reads why.
 func Tools(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
+	return tools(repository, agent, scope, now, nil)
+}
+
+// DriftTools is Tools for a mason or reviewer turn that reads what drift
+// rebase move did: an amendment the turn files cites move's upstream
+// commit. A mason turn with no unit, which resolves the feature branch's
+// conflicts with upstream, holds amend alone, and its request parks nothing.
+func DriftTools(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time, move trace.UpstreamMove) ([]coreadapter.Tool, error) {
+	if scope.Role != "mason" && scope.Role != "reviewer" {
+		return nil, errors.New("only mason and reviewer turns read a drift rebase")
+	}
+	return tools(repository, agent, scope, now, &move)
+}
+
+func tools(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time, move *trace.UpstreamMove) ([]coreadapter.Tool, error) {
 	if repository == nil || now == nil {
 		return nil, errors.New("question tools require a trace and a clock")
 	}
@@ -79,13 +94,16 @@ func Tools(repository *trace.Repository, agent string, scope coreadapter.Scope, 
 			Next     string `json:"next"`
 		}{true, q.ID, "End your turn now. The answer arrives as your next turn on this thread."})
 	}
+	if scope.Role == "mason" && scope.Unit == "" && move != nil {
+		return []coreadapter.Tool{amendmentTool(repository, agent, scope, now, false, move)}, nil
+	}
 	if scope.Role == "mason" || scope.Role == "reviewer" {
-		return []coreadapter.Tool{ask, amendmentTool(repository, agent, scope, now, false)}, nil
+		return []coreadapter.Tool{ask, amendmentTool(repository, agent, scope, now, false, move)}, nil
 	}
 	return []coreadapter.Tool{ask}, nil
 }
 
-func amendmentTool(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time, routed bool) coreadapter.Tool {
+func amendmentTool(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time, routed bool, move *trace.UpstreamMove) coreadapter.Tool {
 	name := AmendTool
 	if routed {
 		name = RouteAmendmentTool
@@ -96,8 +114,17 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 		properties = `"question":{"type":"string"},` + properties
 		required = `"question",` + required
 	}
+	description := "File an amendment request against sealed spec#<n> and/or plan#<unit> citations. Give the proposed change and reason. The request is recorded and the requesting unit waits; end this turn when accepted."
+	next := "End your turn now. The request is with the chief of staff."
+	if move != nil {
+		description = fmt.Sprintf("File an amendment request when upstream's change from %s to %s alters what a sealed criterion means. Cite the sealed spec#<n> and/or plan#<unit> it changes, and give the proposed change and reason; the request cites upstream commit %s. The request is recorded and the requesting unit waits; end this turn when accepted.", move.From, move.To, move.To)
+		if scope.Unit == "" {
+			description = fmt.Sprintf("File an amendment request when upstream's change from %s to %s alters what a sealed criterion means. Cite the sealed spec#<n> and/or plan#<unit> it changes, and give the proposed change and reason; the request cites upstream commit %s and goes to the owner. Nothing waits for it: finish the resolution against the sealed spec as it stands.", move.From, move.To, move.To)
+			next = "The request is with the chief of staff. Finish the resolution against the sealed spec as it stands, then call done."
+		}
+	}
 	tool := coreadapter.Tool{Name: name, Effect: coreadapter.ToolMemory,
-		Description: "File an amendment request against sealed spec#<n> and/or plan#<unit> citations. Give the proposed change and reason. The request is recorded and the requesting unit waits; end this turn when accepted.",
+		Description: description,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{` + properties + `},"required":[` + required + `],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
@@ -145,7 +172,7 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 		if err := json.Unmarshal([]byte(document.Content), &sealed); err != nil {
 			return nil, err
 		}
-		a, err := repository.FileAmendment(ctx, agent, scope, trace.AmendmentRequest{QuestionID: input.Question, Citations: input.Citations, Change: input.Change, Reason: input.Reason, Seal: sealed.Seal, SealRevision: document.Revision, SpecHash: sealed.SpecHash}, now())
+		a, err := repository.FileAmendment(ctx, agent, scope, trace.AmendmentRequest{QuestionID: input.Question, Citations: input.Citations, Change: input.Change, Reason: input.Reason, Seal: sealed.Seal, SealRevision: document.Revision, SpecHash: sealed.SpecHash, Upstream: move}, now())
 		if err != nil {
 			return refuse(err)
 		}
@@ -153,7 +180,7 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 			Recorded  bool   `json:"recorded"`
 			Amendment string `json:"amendment"`
 			Next      string `json:"next"`
-		}{true, a.ID, "End your turn now. The request is with the chief of staff."})
+		}{true, a.ID, next})
 	}
 	return tool
 }
@@ -262,7 +289,7 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 			Next     string `json:"next"`
 		}{true, proposal.Question, proposal.Number, "The owner ratifies or declines the proposal; make it the attention of your status until they do."})
 	}
-	return []coreadapter.Tool{answer, escalate, relay, amendmentTool(repository, agent, scope, now, true), propose}
+	return []coreadapter.Tool{answer, escalate, relay, amendmentTool(repository, agent, scope, now, true, nil), propose}
 }
 
 // refuse turns a refusal into the tool's result and passes other errors on.

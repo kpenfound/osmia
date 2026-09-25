@@ -101,8 +101,8 @@ func TestZeroProjectStart(t *testing.T) {
 	_, err = c.RemoveProject(ctx, project)
 	assertCode(t, err, NoProject)
 	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{}}, nil), Validation)
-	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: project}, Mode: "soft", Source: "operator"}, nil), Validation)
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "operator"})
+	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: project}, Mode: "soft", Source: "owner"}, nil), Validation)
+	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "owner"})
 	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
 	must(t, s.Close())
 	_, c = start(t, opts)
@@ -190,7 +190,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	// so wait for both before snapshotting the trace below.
 	awaitExtractionAcknowledged(t, s)
 	// The runtime store resolves against the new project without a restart.
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: id}, Mode: "soft", Source: "operator"})
+	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: id}, Mode: "soft", Source: "owner"})
 	mutation(t, c, "PUT", "priority", PriorityRequest{Project: id, Workstreams: []config.WorkstreamID{}})
 	rt, err := c.Runtime(ctx)
 	must(t, err)

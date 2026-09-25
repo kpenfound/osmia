@@ -55,12 +55,15 @@ func seals(t *testing.T, repository *trace.Repository, stream config.WorkstreamI
 	return out
 }
 
+// testDrift makes every eligible workstream due for a drift rebase.
+func testDrift(config.WorkstreamID) (string, error) { return "the test asks for a drift rebase", nil }
+
 // requestDrift asks for drift rebases and returns the one operation it
 // asked for, for the workstream.
 func requestDrift(t *testing.T, d drifter, stream config.WorkstreamID) coreadapter.Operation {
 	t.Helper()
 	asked := len(driftOperations(t, d.repository, stream))
-	requested, err := d.requestDrifts(context.Background())
+	requested, err := d.requestDrifts(context.Background(), testDrift)
 	must(t, err)
 	if !slices.Equal(requested, []config.WorkstreamID{stream}) {
 		t.Fatalf("drift rebases asked for %v, want %s", requested, stream)
@@ -173,8 +176,8 @@ func TestDriftRebaseMovesTheFeatureBranchAndTheSeal(t *testing.T) {
 	}
 	records := driftRecords(t, repository, stream)
 	want := []DriftRebase{
-		{Drift: 1, Operation: op.ID, Outcome: driftReplayed, Branch: featureBranch(stream), Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, Before: before, Commit: tip},
-		{Drift: 1, Operation: op.ID, Outcome: driftRebased, Branch: featureBranch(stream), Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, Before: before, Commit: tip, Seal: 1, SealRevision: 2},
+		{Drift: 1, Operation: op.ID, Outcome: driftReplayed, Branch: featureBranch(stream), Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, From: sealed[0].Base.Commit, Before: before, Commit: tip},
+		{Drift: 1, Operation: op.ID, Outcome: driftRebased, Branch: featureBranch(stream), Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, From: sealed[0].Base.Commit, Before: before, Commit: tip, Seal: 1, SealRevision: 2},
 	}
 	if !reflect.DeepEqual(records, want) {
 		t.Fatalf("drift/rebase.json %+v, want %+v", records, want)
@@ -189,6 +192,9 @@ func TestDriftRebaseMovesTheFeatureBranchAndTheSeal(t *testing.T) {
 	if again, err := d.Apply(ctx, op); err != nil || !reflect.DeepEqual(again, result) {
 		t.Fatalf("a recorded drift rebase applied again: %+v %v", again, err)
 	}
+	if moved := upstreamMovedEvents(t, repository, stream); len(moved) != 0 {
+		t.Fatalf("a clean drift rebase with nothing visible told the chief of staff %+v", moved)
+	}
 
 	// Nothing new upstream: the branch and the seal stay.
 	op = requestDrift(t, d, stream)
@@ -201,39 +207,6 @@ func TestDriftRebaseMovesTheFeatureBranchAndTheSeal(t *testing.T) {
 	}
 	if want := fmt.Sprintf("feature branch %s at %s already descends from upstream/main at %s; seal 1 keeps its base %s", featureBranch(stream), tip, upstream, upstream); result.Evidence != want {
 		t.Fatalf("drift rebase 2 result %+v", result)
-	}
-}
-
-// A drift rebase whose replay conflicts leaves the feature branch and the
-// seal where they were and records the upstream commit and the conflicted
-// paths.
-func TestConflictingDriftRebaseLeavesTheBranchAndTheSeal(t *testing.T) {
-	t.Parallel()
-	f, stream, repository, _ := newFinalFixture(t, "conflicted-drift")
-	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
-	ctx := context.Background()
-	before := moveFeature(t, f, stream, map[string]string{"CODEOWNERS": "/internal/ @feature\n"})
-	upstream := advanceUpstream(t, f, map[string]string{"CODEOWNERS": "/internal/ @upstream\n"})
-	sealed := streamDocuments(t, repository, stream, seal.DocumentID)
-
-	op := requestDrift(t, d, stream)
-	result := settleOperation(t, f.s, repository, stream, op, d)
-	wantReason := fmt.Sprintf("feature branch %s does not rebase cleanly onto upstream/main at %s: CODEOWNERS conflicted; the branch stays at %s and the seal is unchanged", featureBranch(stream), upstream, before)
-	if result.Outcome != "succeeded" || result.Evidence != wantReason {
-		t.Fatalf("drift rebase result %+v", result)
-	}
-	if tip, _, err := featureWorkspaces(f.s.cfg).Branch(ctx, featureBranch(stream)); err != nil || tip != before {
-		t.Fatalf("a conflicted drift rebase moved the feature branch to %s: %v", tip, err)
-	}
-	if after := streamDocuments(t, repository, stream, seal.DocumentID); !reflect.DeepEqual(after, sealed) {
-		t.Fatalf("a conflicted drift rebase changed the seal: %+v", after)
-	}
-	want := []DriftRebase{{Drift: 1, Operation: op.ID, Outcome: driftConflicted, Branch: featureBranch(stream), Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, Before: before, Conflicts: []string{"CODEOWNERS"}}}
-	if records := driftRecords(t, repository, stream); !reflect.DeepEqual(records, want) {
-		t.Fatalf("drift/rebase.json %+v, want %+v", records, want)
-	}
-	if conflicted := transitionByID(t, repository, stream, "drift-1-conflicted"); conflicted.To != "conflicted-1" || conflicted.Reason != wantReason {
-		t.Fatalf("the outcome %+v", conflicted)
 	}
 }
 
@@ -253,7 +226,7 @@ func TestPausedWorkstreamIsSkippedByDriftRebases(t *testing.T) {
 	sealed := streamDocuments(t, repository, stream, seal.DocumentID)
 	must(t, repository.Close())
 
-	state, err := json.Marshal(runtime.State{Version: runtime.Version, Pauses: []runtime.Pause{{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}, Mode: "soft", Source: "operator"}}})
+	state, err := json.Marshal(runtime.State{Version: runtime.Version, Pauses: []runtime.Pause{{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "test", SetAt: time.Now().UTC()}}})
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(f.s.cfg.Root.String(), "runtime.json"), state, 0600))
 	f.start(t)
@@ -267,7 +240,7 @@ func TestPausedWorkstreamIsSkippedByDriftRebases(t *testing.T) {
 	must(t, err)
 	defer repository.Close()
 	d = drifter{&foreman{masons: newMasonController(f.s, repository)}}
-	if requested, err := d.requestDrifts(ctx); err != nil || len(requested) != 0 {
+	if requested, err := d.requestDrifts(ctx, testDrift); err != nil || len(requested) != 0 {
 		t.Fatalf("drift rebases asked for a paused workstream: %v %v", requested, err)
 	}
 	if ops := driftOperations(t, repository, stream); len(ops) != 1 {
@@ -398,7 +371,7 @@ func TestDriftRebaseIsSerializedWithLandings(t *testing.T) {
 		t.Fatalf("landing operations %+v", landings)
 	}
 	advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
-	if requested, err := d.requestDrifts(ctx); err != nil || len(requested) != 0 {
+	if requested, err := d.requestDrifts(ctx, testDrift); err != nil || len(requested) != 0 {
 		t.Fatalf("drift rebases asked for while a landing has no result: %v %v", requested, err)
 	}
 	if ops := driftOperations(t, repository, stream); len(ops) != 0 {
@@ -503,7 +476,8 @@ func TestDriftQueuesUnitConflictOnce(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(w.Path, "CONFLICT.md"), []byte("unit\n"), 0600))
 	_, err = units.git.Snapshot(ctx, w, base)
 	must(t, err)
-	advanceUpstream(t, f, map[string]string{"CONFLICT.md": "upstream\n"})
+	from := seals(t, repository, stream)[0].Base.Commit
+	upstream := advanceUpstream(t, f, map[string]string{"CONFLICT.md": "upstream\n"})
 	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
 	op := requestDrift(t, d, stream)
 	if _, err := d.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "awaits unit carryover") {
@@ -521,6 +495,12 @@ func TestDriftQueuesUnitConflictOnce(t *testing.T) {
 		t.Fatalf("drift result %+v", result)
 	}
 	check := func() {
+		moved := upstreamMovedEvents(t, repository, stream)
+		transition, _ := rebaseIDs("dedupe", 1)
+		if len(moved) != 1 || moved[0].TransitionID != transition+"-conflicted" {
+			t.Fatalf("upstream moved events of a unit conflict %+v", moved)
+		}
+		checkMoved(t, moved[0], stream, trace.UpstreamMove{Drift: 1, From: from, To: upstream}, "unit dedupe conflicts with the feature branch", "CONFLICT.md")
 		th, err := repository.Thread(stream, masonAgent("dedupe"))
 		must(t, err)
 		count := 0

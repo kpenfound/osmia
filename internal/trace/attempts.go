@@ -23,6 +23,7 @@ type TurnAttempt struct {
 	At             time.Time                  `json:"at"`
 	Result         *coreadapter.SessionResult `json:"result,omitempty"`
 	Failure        string                     `json:"failure,omitempty"`
+	FailureClass   coreadapter.FailureKind    `json:"failure_class,omitempty"`
 }
 
 // RecordAttempt appends a new intent or captures the exact current attempt.
@@ -61,7 +62,7 @@ func (r *Repository) RecordAttempt(ctx context.Context, stream config.Workstream
 				return ErrConflict
 			}
 			intent := a
-			intent.Result, intent.Failure = nil, ""
+			intent.Result, intent.Failure, intent.FailureClass = nil, "", ""
 			if !equalJSON(old, intent) {
 				return ErrConflict
 			}
@@ -87,7 +88,8 @@ func validateAttempts(q QueuedTurn) error {
 			a.SourceSequence >= q.Sequence || a.ReplayFrom > a.SourceSequence || a.Omitted < 0 ||
 			(a.Path == "resume" && !coreadapter.ValidSession(a.SourceSession)) ||
 			(i < len(q.Attempts)-1 && a.Result == nil) ||
-			(a.Result == nil && a.Failure != "") {
+			(a.Result == nil && (a.Failure != "" || a.FailureClass != "")) ||
+			(a.FailureClass != "" && (a.Failure == "" || a.FailureClass != coreadapter.Infrastructure && a.FailureClass != coreadapter.Behavioural)) {
 			return fmt.Errorf("invalid turn attempt")
 		}
 		if a.Result != nil && a.Result.Session.Backend != "" && a.Result.Session.Backend != a.Profile.Backend {
@@ -96,7 +98,7 @@ func validateAttempts(q QueuedTurn) error {
 	}
 	if q.Response != nil && len(q.Attempts) > 0 {
 		last := q.Attempts[len(q.Attempts)-1]
-		if last.Result == nil || !equalJSON(*last.Result, q.Response.Result) || last.Failure != q.Response.Failure {
+		if last.Result == nil || !equalJSON(*last.Result, q.Response.Result) || last.Failure != q.Response.Failure || last.FailureClass != q.Response.FailureClass {
 			return fmt.Errorf("response differs from final attempt")
 		}
 	}

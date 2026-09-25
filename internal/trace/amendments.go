@@ -13,6 +13,8 @@ import (
 
 // AmendmentRequest contains the checked citation and seal identity supplied
 // by the tool. The trace checks lifecycle and turn identity under its lock.
+// Upstream names the drift rebase whose upstream change the requesting turn
+// read, when it read one.
 type AmendmentRequest struct {
 	QuestionID   string
 	Citations    []string
@@ -21,10 +23,77 @@ type AmendmentRequest struct {
 	Seal         int
 	SealRevision int
 	SpecHash     string
+	Upstream     *UpstreamMove
+}
+
+// FileBudgetAmendment records one service budget request and its filed state
+// together. It leaves every unit state untouched.
+func (r *Repository) FileBudgetAmendment(ctx context.Context, stream config.WorkstreamID, req AmendmentRequest, at time.Time) (Amendment, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	log, v, err := r.loadWorkflow(stream)
+	if err != nil {
+		return Amendment{}, err
+	}
+	records, _, err := r.scan()
+	if err != nil {
+		return Amendment{}, err
+	}
+	n := 1
+	for _, record := range records {
+		a, ok := record.(Amendment)
+		if !ok || a.Workstream != stream {
+			continue
+		}
+		if a.Role == "service" && a.Cause == "budget-per-unit" {
+			return a, nil
+		}
+		if i, err := strconv.Atoi(a.ID); err == nil && i >= n {
+			n = i + 1
+		}
+	}
+	if state := v.states[FeatureSubject].Value; state != "building" && state != "assembled" {
+		return Amendment{}, refused("budget amendments require a building or assembled workstream")
+	}
+	if len(req.Citations) == 0 || !present(req.Change) || !present(req.Reason) || req.Seal < 1 || req.SealRevision < 1 || !present(req.SpecHash) {
+		return Amendment{}, refused("citations, proposed change, reason and sealed revision are required")
+	}
+	var latestSeal Document
+	for _, record := range records {
+		if d, ok := record.(Document); ok && d.Workstream == stream && d.Path == "seal.json" && d.Revision >= latestSeal.Revision {
+			latestSeal = d
+		}
+	}
+	if latestSeal.ID == "" || latestSeal.Revision != req.SealRevision {
+		return Amendment{}, fmt.Errorf("%w: the sealed revision changed", ErrConflict)
+	}
+	id := strconv.Itoa(n)
+	actor := Actor{Kind: "service", ID: "budget"}
+	h := Header{Schema: "osmia.trace.amendment", Version: Version, ID: id, Revision: 1, Project: r.project, Workstream: stream, At: at, Actor: actor, Cause: "budget-per-unit", Depth: 1}
+	a := Amendment{Header: h, Requester: actor, Role: "service", Thread: "budget", Turn: "budget", Citations: req.Citations, Change: req.Change, Reason: req.Reason, Seal: req.Seal, SealRevision: req.SealRevision, SpecHash: req.SpecHash}
+	if err := validate(a); err != nil {
+		return Amendment{}, err
+	}
+	transitionID := "amendment_" + id + "_filed"
+	tx := Transaction{ExpectedVersion: 0, Transition: Transition{Header: Header{Schema: "osmia.trace.transition", Version: Version, ID: transitionID, Revision: 1, Project: r.project, Workstream: stream, At: at, Actor: actor, Cause: h.Cause, Depth: 2}, Subject: "amendment_" + id, To: "filed", Reason: "per-unit budget exceeded"}, Events: []Event{Notice(transitionID, "amendment", fmt.Sprintf("Budget amendment %s filed for workstream %s: %s", id, stream, req.Reason))}}
+	files, _, err := r.stage(stream, log, v, []Record{a}, tx)
+	if err != nil {
+		return Amendment{}, err
+	}
+	if err := r.publish(ctx, files); err != nil {
+		return Amendment{}, err
+	}
+	_ = r.wake.Notify(context.Background())
+	return a, nil
 }
 
 // FileAmendment atomically records a request, its notice and the requester's
 // waiting transition. Repeated calls from the same turn return the same ID.
+// A request that cites a drift rebase also raises an upstream moved event in
+// the same commit; another request of the same agent and thread citing the
+// same drift rebase returns the one already filed, so a turn that recovers
+// an interrupted one files nothing twice. A mason turn with no unit, which
+// resolves the feature branch's conflicts with upstream, parks nothing.
 func (r *Repository) FileAmendment(ctx context.Context, agent string, scope coreadapter.Scope, req AmendmentRequest, at time.Time) (Amendment, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -39,6 +108,16 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 	for _, record := range records {
 		if a, ok := record.(Amendment); ok && a.Workstream == stream && a.Actor.ID == agent && a.Thread == scope.Thread && a.Turn == scope.Turn {
 			return a, nil
+		}
+	}
+	if req.Upstream != nil {
+		if scope.Role == ChiefOfStaff || req.Upstream.Drift < 1 || !present(req.Upstream.From) || !present(req.Upstream.To) {
+			return Amendment{}, fmt.Errorf("an amendment cites a drift rebase by its number and upstream commits, from a mason or reviewer turn")
+		}
+		for _, record := range records {
+			if a, ok := record.(Amendment); ok && a.Workstream == stream && a.Actor.ID == agent && a.Thread == scope.Thread && a.Upstream != nil && a.Upstream.Drift == req.Upstream.Drift {
+				return a, nil
+			}
 		}
 	}
 	if scope.Role != ChiefOfStaff {
@@ -84,7 +163,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 		return Amendment{}, refused("only the chief of staff may route a question")
 	}
 	var from string
-	if parkRole == "mason" || parkRole == "reviewer" {
+	if (parkRole == "mason" || parkRole == "reviewer") && !(scope.Role != ChiefOfStaff && unit == "" && req.Upstream != nil) {
 		stage := map[string]string{"mason": "implementing", "reviewer": "reviewing"}[parkRole]
 		from = v.states[UnitSubject(unit)].Value
 		if unit == "" || from != stage && !(scope.Role == ChiefOfStaff && from == "waiting") {
@@ -101,7 +180,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 	}
 	id := strconv.Itoa(n)
 	h := Header{Schema: "osmia.trace.amendment", Version: Version, ID: id, Revision: 1, Project: r.project, Workstream: stream, Unit: unit, At: at, Actor: Actor{Kind: "agent", ID: agent}, Cause: turn.Request.ID, Depth: turn.Request.Depth + 1}
-	a := Amendment{Header: h, Requester: requester, Role: scope.Role, Thread: scope.Thread, Turn: scope.Turn, QuestionID: req.QuestionID, Citations: req.Citations, Change: req.Change, Reason: req.Reason, Seal: req.Seal, SealRevision: req.SealRevision, SpecHash: req.SpecHash}
+	a := Amendment{Header: h, Requester: requester, Role: scope.Role, Thread: scope.Thread, Turn: scope.Turn, QuestionID: req.QuestionID, Citations: req.Citations, Change: req.Change, Reason: req.Reason, Seal: req.Seal, SealRevision: req.SealRevision, SpecHash: req.SpecHash, Upstream: req.Upstream}
 	if err := validate(a); err != nil {
 		return Amendment{}, err
 	}
@@ -112,7 +191,13 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 	}
 	transitionID := "amendment_" + id + "_filed"
 	transition := Transition{Header: Header{Schema: "osmia.trace.transition", Version: Version, ID: transitionID, Revision: 1, Project: r.project, Workstream: stream, Unit: unit, At: at, Actor: h.Actor, Cause: h.Cause, Depth: h.Depth}, Subject: "amendment_" + id, From: "", To: "filed", Reason: fmt.Sprintf("%s filed amendment %s", scope.Role, id)}
-	txs = append(txs, Transaction{ExpectedVersion: 0, Transition: transition, Events: []Event{Notice(transitionID, "amendment", fmt.Sprintf("Amendment %s was filed by the %s for %s: %s", id, scope.Role, strings.Join(req.Citations, ", "), strings.TrimSpace(req.Reason)))}})
+	cited := strings.Join(req.Citations, ", ")
+	events := []Event{Notice(transitionID, "amendment", fmt.Sprintf("Amendment %s was filed by the %s for %s: %s", id, scope.Role, cited, strings.TrimSpace(req.Reason)))}
+	if m := req.Upstream; m != nil {
+		events[0].Body = fmt.Sprintf("Amendment %s was filed by the %s for %s, citing upstream commit %s: %s", id, scope.Role, cited, m.To, strings.TrimSpace(req.Reason))
+		events = append(events, UpstreamMoved(transitionID, stream, *m, fmt.Sprintf("amendment %s was filed by the %s: upstream commit %s changes what %s means", id, scope.Role, m.To, cited)))
+	}
+	txs = append(txs, Transaction{ExpectedVersion: 0, Transition: transition, Events: events})
 	if from != "" {
 		subject := UnitSubject(unit)
 		stage := map[string]string{"mason": "implementing", "reviewer": "reviewing"}[parkRole]

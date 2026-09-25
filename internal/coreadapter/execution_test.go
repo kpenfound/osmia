@@ -79,6 +79,75 @@ func TestTurnTranslationAndProvenance(t *testing.T) {
 		t.Fatalf("result: %+v", result)
 	}
 }
+
+func TestSessionCostCap(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		limit  float64
+		cost   float64
+		known  bool
+		capped bool
+	}{
+		{"reached", 2, 2, true, true},
+		{"below", 2, 1, true, false},
+		{"unknown", 2, 0, false, false},
+		{"absent", 0, 20, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			turn := prepared(t)
+			turn.Profile.CostLimitUSD = tc.limit
+			fake := &fakeExecutor{run: func(context.Context) (*agent.Result, error) {
+				return &agent.Result{ClaudeID: "session", SessionDir: turn.SessionDirectory, CostUSD: tc.cost, CostKnown: tc.known, HasOutcome: true, Outcome: agent.Outcome{Status: "done"}}, nil
+			}}
+			result, err := (&TurnRunner{Executor: fake}).Run(context.Background(), turn)
+			if errors.Is(err, ErrSessionCostCap) != tc.capped || result.IsError != tc.capped || (result.ErrorSubtype == "session_cost_cap") != tc.capped || (result.Outcome == nil) != tc.capped {
+				t.Fatalf("result %+v, error %v", result, err)
+			}
+		})
+	}
+}
+
+func TestStreamCostMonitorStopsKnownSpend(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	m := &costMonitor{backend: "opencode", limit: 1, cancel: cancel}
+	for _, line := range []string{`{"type":"step_finish","part":{"cost":0.4}}`, `{"type":"step_finish","part":{"cost":0.6}}`} {
+		if _, err := m.Write([]byte(line + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spent, known, reached := m.snapshot()
+	if spent != 1 || !known || !reached || !errors.Is(context.Cause(ctx), ErrSessionCostCap) {
+		t.Fatalf("monitor: %v %v %v %v", spent, known, reached, context.Cause(ctx))
+	}
+	unknownCtx, unknownCancel := context.WithCancelCause(context.Background())
+	unknown := &costMonitor{backend: "codex", limit: 1, cancel: unknownCancel}
+	unknown.Write([]byte(`{"type":"turn.completed"}` + "\n"))
+	_, known, reached = unknown.snapshot()
+	if known || reached || unknownCtx.Err() != nil {
+		t.Fatalf("unknown cost reached cap: %v %v", known, reached)
+	}
+}
+
+func TestTurnStopsAtStreamCostCap(t *testing.T) {
+	turn := prepared(t)
+	turn.Profile.Backend = "opencode"
+	turn.Profile.MaxTurns = 0
+	turn.Profile.CostLimitUSD = 1
+	fake := &fakeExecutor{run: func(ctx context.Context) (*agent.Result, error) {
+		monitor := ctx.Value(costMonitorKey{}).(*costMonitor)
+		monitor.Write([]byte(`{"type":"step_finish","part":{"cost":1}}` + "\n"))
+		<-ctx.Done()
+		return &agent.Result{ClaudeID: "session", SessionDir: turn.SessionDirectory, CostKnown: false}, ctx.Err()
+	}}
+	result, err := (&TurnRunner{Executor: fake}).Run(context.Background(), turn)
+	if !errors.Is(err, ErrSessionCostCap) || errors.Is(err, context.Canceled) || result.Cancelled || !result.IsError || result.ErrorSubtype != "session_cost_cap" || result.Usage != (Usage{CostUSD: 1, CostKnown: true}) {
+		t.Fatalf("stream cap: %+v %v", result, err)
+	}
+	decision, decideErr := (RetryAdapter{}).Decide(context.Background(), RetryRequest{Result: result, Err: err, Attempt: 1, MaxRetries: 1})
+	if decideErr != nil || decision.Kind != Infrastructure || !decision.Retry {
+		t.Fatalf("retry advice: %+v %v", decision, decideErr)
+	}
+}
 func TestUnsupportedBeforeExecution(t *testing.T) {
 	tests := map[string]func(*PreparedTurn){
 		"backend":         func(r *PreparedTurn) { r.Profile.Backend = "unknown" },
@@ -90,7 +159,6 @@ func TestUnsupportedBeforeExecution(t *testing.T) {
 			r.Resume = &BackendSession{Backend: "codex", ID: "x"}
 		},
 		"turn limit": func(r *PreparedTurn) { r.Profile.Backend = "codex" },
-		"cost":       func(r *PreparedTurn) { r.Profile.CostLimitUSD = 2 },
 		"credential": func(r *PreparedTurn) { r.Sandbox.Verified.Credentials = []CredentialRef{{"TOKEN", "secret-ref"}} },
 	}
 	for name, mutate := range tests {

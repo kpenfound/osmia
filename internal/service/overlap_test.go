@@ -242,7 +242,7 @@ func TestOverlapAdvisoriesWarnEachChiefOncePerSeal(t *testing.T) {
 		}
 		must(t, repo.Close())
 	}
-	state, err := json.Marshal(runtime.State{Version: runtime.Version, Pauses: []runtime.Pause{{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: paused}, Mode: "soft", Source: "operator"}}})
+	state, err := json.Marshal(runtime.State{Version: runtime.Version, Pauses: []runtime.Pause{{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: paused}, Mode: "soft", Source: runtime.PauseOwner, Reason: "test", SetAt: time.Now().UTC()}}})
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(cfg.Root.String(), "runtime.json"), state, 0600))
 

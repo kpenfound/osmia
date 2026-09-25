@@ -79,6 +79,10 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		prioritise(ctx, session, "event", []string{string(quiet), string(stream)})
+		out, err := callTool(ctx, session, pauseTool, map[string]any{"scope": "factory", "reason": "travel"})
+		if err != nil || !strings.Contains(out, "only an owner message") {
+			problems = append(problems, fmt.Sprintf("event pause: %s %v", out, err))
+		}
 		return questionResult(req, "session-chief", "Nothing to do"), nil
 	}
 	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
@@ -106,6 +110,15 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 			}
 		case "Put quiet first, then the upload work.":
 			prioritise(ctx, session, "valid", []string{string(quiet), string(stream)})
+			out, err := callTool(ctx, session, pauseTool, map[string]any{"scope": "factory", "reason": "travel"})
+			if err != nil || out != `{"recorded":true}` {
+				problems = append(problems, fmt.Sprintf("owner pause: %s %v", out, err))
+			}
+		case "Resume all work.":
+			out, err := callTool(ctx, session, resumeTool, map[string]any{"scope": "factory"})
+			if err != nil || out != `{"recorded":true}` {
+				problems = append(problems, fmt.Sprintf("owner resume: %s %v", out, err))
+			}
 		default:
 			problems = append(problems, "unexpected turn "+req.Name)
 		}
@@ -155,9 +168,13 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 	if got := order(c); !slices.Equal(got, want) {
 		t.Fatalf("runtime priority %v, want %v", got, want)
 	}
+	paused, err := c.Runtime(ctx)
+	must(t, err)
+	if len(paused.Effective.Pauses) != 1 || paused.Effective.Pauses[0].Source != runtime.PauseOwner || paused.Effective.Pauses[0].Reason != "travel" || paused.Effective.Pauses[0].SetAt.IsZero() {
+		t.Fatalf("chief pause: %+v", paused.Effective.Pauses)
+	}
 
 	mu.Lock()
-	defer mu.Unlock()
 	if len(problems) > 0 {
 		t.Fatal(strings.Join(problems, "\n"))
 	}
@@ -184,7 +201,7 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 		}
 	}
 	slices.Sort(names)
-	if wantNames := []string{"answer", "decide_amendment", "decide_charter", "escalate", "prioritise", "propose_charter", "relay_ruling", "route_amendment", "set_status"}; !slices.Equal(names, wantNames) {
+	if wantNames := []string{"answer", "decide_amendment", "decide_charter", "escalate", "pause", "prioritise", "propose_charter", "relay_ruling", "resume", "route_amendment", "set_status"}; !slices.Equal(names, wantNames) {
 		t.Fatalf("chief-of-staff tools %v, want %v", names, wantNames)
 	}
 	for prompt, system := range prompts {
@@ -192,6 +209,7 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 			t.Fatalf("owner turn %q lacks the priority or amendment guidance:\n%s", prompt, system)
 		}
 	}
+	mu.Unlock()
 
 	check := func(got []trace.PriorityChange) {
 		t.Helper()
@@ -213,9 +231,22 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 	if got := order(c); !slices.Equal(got, want) {
 		t.Fatalf("runtime priority after restart %v, want %v", got, want)
 	}
+	reopened, err := c.Runtime(ctx)
+	must(t, err)
+	if !reflect.DeepEqual(reopened.Effective.Pauses, paused.Effective.Pauses) {
+		t.Fatalf("chief pause after restart: %+v", reopened.Effective.Pauses)
+	}
 	check(changes(s.active.repository))
 	st, _ := s.store.Effective()
 	if !reflect.DeepEqual(st.Priorities, []runtime.Priority{{Project: project, Workstreams: want}}) {
 		t.Fatalf("scheduler priorities %+v", st.Priorities)
+	}
+	_, err = c.Send(ctx, stream, "Resume all work.")
+	must(t, err)
+	awaitConversation(t, c, func(l ConversationResponse) bool { return len(l.Entries) == 6 && l.Entries[5].State == TurnDone })
+	resumed, err := c.Runtime(ctx)
+	must(t, err)
+	if len(resumed.Effective.Pauses) != 0 {
+		t.Fatalf("chief resume: %+v", resumed.Effective.Pauses)
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/kpenfound/busybees/core/vcs"
@@ -28,15 +27,17 @@ const DriftAction = "drift"
 const (
 	// driftSubject is the workflow subject that tracks a workstream's drift
 	// rebases: requested-<k> once drift rebase k is asked for, then
-	// rebased-<k>, conflicted-<k> or skipped-<k>.
+	// rebased-<k> or skipped-<k>, through conflicted-<k> while a conflict
+	// the replay left is resolved.
 	driftSubject = "drift"
 	// driftPath is the workstream document of drift rebases, and
 	// driftDocument its trace record ID.
 	driftPath     = "drift/rebase.json"
 	driftDocument = "drift-rebase"
 	// The outcomes a drift rebase document records: replayed once the
-	// rebased commit exists and before the branch moves, then rebased or
-	// conflicted.
+	// rebased commit exists and before the branch moves, then carrying
+	// while unfinished units follow the branch, and rebased. A replay that
+	// conflicts is recorded conflicted and resolved before it is replayed.
 	driftReplayed   = "replayed"
 	driftCarrying   = "carrying"
 	driftRebased    = "rebased"
@@ -51,21 +52,35 @@ type driftInput struct {
 
 // DriftRebase is the document drift/rebase.json: one drift rebase of a
 // workstream's feature branch. Before is the branch commit it rebased,
-// Upstream the upstream commit it rebased onto and Commit the rebased
-// commit. Conflicts lists the paths a conflicted replay left, and Seal the
-// seal and SealRevision the seal.json revision in force once the branch
-// moved.
+// From the upstream commit the seal's base named when it fetched, Upstream
+// the upstream commit it rebased onto and Commit the rebased commit.
+// Conflicts lists the paths a conflicted replay left, and Seal the seal and
+// SealRevision the seal.json revision in force once the branch moved. A conflicted replay is resolved in rounds: Round numbers the
+// replay's stops in the resolution workspace, Stop is the commit the
+// latest stopped at, Candidate the resolved branch under review, Review
+// the number of that review and Verdict the latest review's verdict.
 type DriftRebase struct {
-	Drift        int       `json:"drift"`
-	Operation    string    `json:"operation"`
-	Outcome      string    `json:"outcome"`
-	Branch       string    `json:"branch"`
-	Upstream     seal.Base `json:"upstream"`
-	Before       string    `json:"before"`
-	Commit       string    `json:"commit,omitempty"`
-	Conflicts    []string  `json:"conflicts,omitempty"`
-	Seal         int       `json:"seal,omitempty"`
-	SealRevision int       `json:"seal_revision,omitempty"`
+	Drift        int          `json:"drift"`
+	Operation    string       `json:"operation"`
+	Outcome      string       `json:"outcome"`
+	Branch       string       `json:"branch"`
+	Upstream     seal.Base    `json:"upstream"`
+	From         string       `json:"from,omitempty"`
+	Before       string       `json:"before"`
+	Commit       string       `json:"commit,omitempty"`
+	Conflicts    []string     `json:"conflicts,omitempty"`
+	Round        int          `json:"round,omitempty"`
+	Stop         string       `json:"stop,omitempty"`
+	Candidate    string       `json:"candidate,omitempty"`
+	Review       int          `json:"review,omitempty"`
+	Verdict      *UnitVerdict `json:"verdict,omitempty"`
+	Seal         int          `json:"seal,omitempty"`
+	SealRevision int          `json:"seal_revision,omitempty"`
+}
+
+// move names the drift rebase and the upstream base it moves from and to.
+func (r DriftRebase) move() trace.UpstreamMove {
+	return trace.UpstreamMove{Drift: r.Drift, From: r.From, To: r.Upstream.Commit}
 }
 
 func driftIDs(k int) (transition, event string) {
@@ -75,10 +90,11 @@ func driftIDs(k int) (transition, event string) {
 
 // requestDrifts asks for a drift rebase of every building or assembled
 // workstream of the project that is not paused and has no final review in
-// flight, and returns the workstreams it asked for. Drift rebases share the
-// project's lander with landings: while a landing or drift rebase of the
-// project has no result, it asks for nothing.
-func (f *foreman) requestDrifts(ctx context.Context) ([]config.WorkstreamID, error) {
+// flight, for which due returns why it takes one now and that has a seal,
+// and returns the workstreams it asked for. Drift rebases share the project's
+// lander with landings: while a landing or drift rebase of the project has
+// no result, it asks for nothing.
+func (f *foreman) requestDrifts(ctx context.Context, due func(config.WorkstreamID) (string, error)) ([]config.WorkstreamID, error) {
 	streams, err := f.repository.Workstreams()
 	if err != nil {
 		return nil, err
@@ -114,12 +130,24 @@ func (f *foreman) requestDrifts(ctx context.Context) ([]config.WorkstreamID, err
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if _, found, err := f.read(stream); err != nil {
+		if reason, err := (drifter{f}).building(stream); err != nil {
+			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
+		} else if reason != "" {
+			continue
+		}
+		why, err := due(stream)
+		if err != nil {
+			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
+		}
+		if why == "" {
+			continue
+		}
+		if _, _, found, err := seal.Latest(f.repository, stream); err != nil {
 			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
 		} else if !found {
 			continue
 		}
-		if err := f.requestDrift(ctx, stream); err != nil {
+		if err := f.requestDrift(ctx, stream, why); err != nil {
 			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
 		}
 		requested = append(requested, stream)
@@ -127,21 +155,32 @@ func (f *foreman) requestDrifts(ctx context.Context) ([]config.WorkstreamID, err
 	return requested, nil
 }
 
+// driftNumber returns the number of the drift rebase a value of the drift
+// or drift request subject names, or 0 for the empty value.
+func driftNumber(value string) (int, error) {
+	if value == "" {
+		return 0, nil
+	}
+	_, n, _ := strings.Cut(value, "-")
+	var k int
+	if _, err := fmt.Sscanf(n, "%d", &k); err != nil {
+		return 0, fmt.Errorf("drift state %q names no drift rebase", value)
+	}
+	return k, nil
+}
+
 // requestDrift publishes the workstream's next drift rebase as a durable
-// operation.
-func (f *foreman) requestDrift(ctx context.Context, stream config.WorkstreamID) error {
+// operation, with why it is asked for.
+func (f *foreman) requestDrift(ctx context.Context, stream config.WorkstreamID, why string) error {
 	state, err := f.repository.Workflow(stream, driftSubject)
 	if err != nil {
 		return err
 	}
-	k := 1
-	if state.Value != "" {
-		_, n, _ := strings.Cut(state.Value, "-")
-		if _, err := fmt.Sscanf(n, "%d", &k); err != nil {
-			return fmt.Errorf("subject %s is %q", driftSubject, state.Value)
-		}
-		k++
+	k, err := driftNumber(state.Value)
+	if err != nil {
+		return err
 	}
+	k++
 	_, doc, found, err := seal.Latest(f.repository, stream)
 	if err != nil {
 		return err
@@ -155,7 +194,7 @@ func (f *foreman) requestDrift(ctx context.Context, stream config.WorkstreamID) 
 		return err
 	}
 	op := coreadapter.Operation{ID: trace.OperationID(f.repository.Project(), stream, event), Boundary: coreadapter.RepositoryBoundary, Action: DriftAction, Input: input}
-	reason := fmt.Sprintf("drift rebase %d fetches %s of %s and rebases %s onto it; the seal's upstream base moves once the branch has", k, f.cfg.Project.BaseBranch, f.cfg.Project.Upstream, featureBranch(stream))
+	reason := fmt.Sprintf("%s: drift rebase %d fetches %s of %s and rebases %s onto it; the seal's upstream base moves once the branch has", why, k, f.cfg.Project.BaseBranch, f.cfg.Project.Upstream, featureBranch(stream))
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: f.header(transition, stream, "", fmt.Sprintf("%s-%d", seal.DocumentID, doc.Revision), f.s.now()), Subject: driftSubject, From: state.Value, To: fmt.Sprintf("requested-%d", k), Reason: reason},
 		Events:     []trace.Event{{ID: event, Kind: DriftAction, Body: fmt.Sprintf("Rebase %s onto upstream", featureBranch(stream)), Operation: &op}}}
@@ -203,7 +242,7 @@ func (d drifter) stream(op coreadapter.Operation, in driftInput) (config.Workstr
 }
 
 // outcome returns the recorded result of drift rebase k: succeeded once it
-// is recorded rebased, conflicted or skipped, nil before.
+// is recorded rebased or skipped, nil before.
 func (d drifter) outcome(stream config.WorkstreamID, k int) (*coreadapter.OperationResult, error) {
 	transitions, err := trace.Read[trace.Transition](d.repository, stream)
 	if err != nil {
@@ -212,52 +251,20 @@ func (d drifter) outcome(stream config.WorkstreamID, k int) (*coreadapter.Operat
 	transition, _ := driftIDs(k)
 	for _, t := range transitions {
 		switch t.ID {
-		case transition + "-" + driftRebased, transition + "-" + driftConflicted, transition + "-" + driftSkipped:
+		case transition + "-" + driftRebased, transition + "-" + driftSkipped:
 			return &coreadapter.OperationResult{Outcome: "succeeded", Evidence: t.Reason}, nil
 		}
 	}
 	return nil, nil
 }
 
-// replayed returns the recorded replay of drift rebase k, and whether one is.
-func (d drifter) replayed(stream config.WorkstreamID, k int) (DriftRebase, bool, error) {
-	docs, err := trace.Read[trace.Document](d.repository, stream)
-	if err != nil {
+// latest returns the latest record of drift rebase k, and whether one is.
+func (d drifter) latest(stream config.WorkstreamID, k int) (DriftRebase, bool, error) {
+	records, err := d.records(stream, k)
+	if err != nil || len(records) == 0 {
 		return DriftRebase{}, false, err
 	}
-	for _, doc := range slices.Backward(docs) {
-		if doc.ID != driftDocument {
-			continue
-		}
-		var r DriftRebase
-		if err := json.Unmarshal([]byte(doc.Content), &r); err != nil {
-			return DriftRebase{}, false, fmt.Errorf("%s revision %d: %w", doc.Path, doc.Revision, err)
-		}
-		if r.Drift == k && r.Outcome == driftReplayed {
-			return r, true, nil
-		}
-	}
-	return DriftRebase{}, false, nil
-}
-
-func (d drifter) carrying(stream config.WorkstreamID, k int) (DriftRebase, bool, error) {
-	docs, err := trace.Read[trace.Document](d.repository, stream)
-	if err != nil {
-		return DriftRebase{}, false, err
-	}
-	for _, doc := range slices.Backward(docs) {
-		if doc.ID != driftDocument {
-			continue
-		}
-		var r DriftRebase
-		if err := json.Unmarshal([]byte(doc.Content), &r); err != nil {
-			return DriftRebase{}, false, err
-		}
-		if r.Drift == k && r.Outcome == driftCarrying {
-			return r, true, nil
-		}
-	}
-	return DriftRebase{}, false, nil
+	return records[len(records)-1], true, nil
 }
 
 // Inspect reads the recorded transitions and documents. A recorded outcome
@@ -280,10 +287,12 @@ func (d drifter) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 	if result != nil {
 		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "drift rebase " + result.Outcome, Result: result}, nil
 	}
-	if r, found, err := d.replayed(stream, in.Drift); err != nil {
+	if r, found, err := d.latest(stream, in.Drift); err != nil {
 		return coreadapter.Observation{}, err
-	} else if found {
+	} else if found && r.Outcome == driftReplayed {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("drift rebase %d replayed %s onto %s as %s; the branch moves to it and the seal follows", in.Drift, r.Before, r.Upstream.Commit, r.Commit)}, nil
+	} else if found && resolving(r.Outcome) {
+		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("drift rebase %d of %s onto %s is %s in its conflict resolution; the branch stays at %s until a reviewer approves the resolution", in.Drift, r.Before, r.Upstream.Commit, r.Outcome, r.Before)}, nil
 	}
 	branch := featureBranch(stream)
 	tip, exists, err := featureWorkspaces(d.cfg).Branch(ctx, branch)
@@ -302,7 +311,12 @@ func (d drifter) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 // exist; the foreman fetches the configured upstream base branch and replays
 // the feature branch onto it. A conflicted replay records the upstream
 // commit and the conflicted paths and changes neither the branch nor the
-// seal. A clean one records drift/rebase.json with the rebased commit before
+// seal: the conflicts are resolved and reviewed as resolve says, and the
+// operation stays pending, holding the project's lander, until a reviewer
+// approves the resolved branch, which is then the replay's commit. A
+// workstream that stops building or being assembled while its conflicts
+// are resolved is skipped, and its resolution workspace removed. A clean
+// replay records drift/rebase.json with the rebased commit before
 // the branch moves, so a retry moves it to the same commit. Once the branch
 // is at the rebased commit, one commit records the next revision of
 // drift/rebase.json, the next revision of seal.json with the upstream commit
@@ -325,15 +339,27 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		}
 		return *result, nil
 	}
-	if carrying, found, err := d.carrying(stream, in.Drift); err != nil {
-		return coreadapter.OperationResult{}, err
-	} else if found {
-		return d.finishCarry(ctx, stream, carrying)
-	}
-	rebase, replayed, err := d.replayed(stream, in.Drift)
+	rebase, found, err := d.latest(stream, in.Drift)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	if found && rebase.Outcome == driftCarrying {
+		return d.finishCarry(ctx, stream, rebase)
+	}
+	if found && resolving(rebase.Outcome) {
+		if reason, err := d.building(stream); err != nil {
+			return coreadapter.OperationResult{}, err
+		} else if reason != "" {
+			if err := d.release(ctx, stream); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			return d.skip(ctx, stream, in.Drift, op.ID, reason+"; its conflict resolution is dropped")
+		}
+		if rebase, err = d.resolve(ctx, stream, rebase); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+	}
+	replayed := found && rebase.Outcome == driftReplayed
 	g := featureWorkspaces(d.cfg)
 	branch := featureBranch(stream)
 	tip, exists, err := g.Branch(ctx, branch)
@@ -353,6 +379,13 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
+		sealed, _, found, err := seal.Latest(d.repository, stream)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if !found {
+			return coreadapter.OperationResult{}, fmt.Errorf("workstream %s has no seal", stream)
+		}
 		remote, err := g.Remote(ctx, d.cfg.Project.Upstream)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
@@ -361,7 +394,7 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		if err != nil {
 			return coreadapter.OperationResult{}, fmt.Errorf("fetch %s of %s: %w", d.cfg.Project.BaseBranch, remote, err)
 		}
-		rebase = DriftRebase{Drift: in.Drift, Operation: op.ID, Branch: branch, Upstream: seal.Base{Remote: remote, Branch: d.cfg.Project.BaseBranch, Commit: fetched}, Before: tip}
+		rebase = DriftRebase{Drift: in.Drift, Operation: op.ID, Branch: branch, Upstream: seal.Base{Remote: remote, Branch: d.cfg.Project.BaseBranch, Commit: fetched}, From: sealed.Base.Commit, Before: tip}
 		if err := d.s.step("drift-replaying"); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
@@ -371,15 +404,20 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		}
 		if len(conflicts) > 0 {
 			rebase.Outcome, rebase.Conflicts = driftConflicted, conflicts
-			reason := fmt.Sprintf("feature branch %s does not rebase cleanly onto %s/%s at %s: %s conflicted; the branch stays at %s and the seal is unchanged", branch, remote, rebase.Upstream.Branch, fetched, strings.Join(conflicts, ", "), tip)
-			return d.record(ctx, stream, rebase, nil, driftConflicted, reason)
-		}
-		rebase.Outcome, rebase.Commit = driftReplayed, commit
-		if err := d.recordReplay(ctx, stream, rebase); err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		if err := d.s.step("drift-replayed"); err != nil {
-			return coreadapter.OperationResult{}, err
+			if err := d.conflict(ctx, stream, rebase); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			if rebase, err = d.resolve(ctx, stream, rebase); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+		} else {
+			rebase.Outcome, rebase.Commit = driftReplayed, commit
+			if err := d.recordReplay(ctx, stream, rebase); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			if err := d.s.step("drift-replayed"); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
 		}
 	}
 	if !exists || (tip != rebase.Before && tip != rebase.Commit) {
@@ -387,6 +425,11 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 			tip = "nothing"
 		}
 		return d.skip(ctx, stream, in.Drift, op.ID, fmt.Sprintf("feature branch %s moved to %s during the drift rebase, which replayed %s", branch, tip, rebase.Before))
+	}
+	if rebase.Candidate != "" {
+		if err := d.release(ctx, stream); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
 	}
 	if rebase.Commit != rebase.Before {
 		acquired, err := g.Acquire(ctx, vcs.Request{Name: string(stream), Branch: branch})
@@ -427,6 +470,12 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if rebase.Commit == rebase.Before {
 		reason = fmt.Sprintf("feature branch %s at %s already descends from %s; %s", branch, rebase.Before, onto, resealed)
 	}
+	visible := ""
+	if moved != nil {
+		if visible, err = d.invalidates(stream); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+	}
 	b, found, err := d.read(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -448,12 +497,27 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	}
 	if needsCarry {
 		rebase.Outcome = driftCarrying
-		if _, err := d.record(ctx, stream, rebase, moved, driftCarrying, reason); err != nil {
+		if _, err := d.record(ctx, stream, rebase, moved, driftCarrying, reason, visible); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 		return d.finishCarry(ctx, stream, rebase)
 	}
-	return d.record(ctx, stream, rebase, moved, driftRebased, reason)
+	return d.record(ctx, stream, rebase, moved, driftRebased, reason, visible)
+}
+
+// invalidates returns what moving the seal's upstream base does to the
+// workstream's latest final report: why it no longer authorises delivery
+// when it is a completed final review on the base the seal names now, or ""
+// when there is no such report.
+func (d drifter) invalidates(stream config.WorkstreamID) (string, error) {
+	report, found, err := latestFinalReport(d.repository, stream)
+	if err != nil || !found || report.Outcome != finalReviewed {
+		return "", err
+	}
+	if stale, err := finalReportBaseStale(d.repository, stream); err != nil || stale {
+		return "", err
+	}
+	return fmt.Sprintf("final review %d read the feature branch on the old upstream base and no longer authorises delivery; a new final review is required", report.Review), nil
 }
 
 // finishCarry uses the unit rebase path while the drift operation holds the
@@ -513,22 +577,31 @@ func (d drifter) finishCarry(ctx context.Context, stream config.WorkstreamID, re
 	}
 	rebase.Outcome = driftRebased
 	reason := fmt.Sprintf("feature branch %s and every unfinished unit are current at %s, or a conflict turn is queued", rebase.Branch, rebase.Commit)
-	return d.record(ctx, stream, rebase, nil, driftRebased, reason)
+	return d.record(ctx, stream, rebase, nil, driftRebased, reason, "")
 }
 
 // eligible returns why the workstream takes no drift rebase now, or "" when
 // it is building or assembled and not paused.
 func (d drifter) eligible(stream config.WorkstreamID) (string, error) {
+	if reason, err := d.building(stream); err != nil || reason != "" {
+		return reason, err
+	}
+	state, _ := d.s.store.Effective()
+	if scheduler.Paused(state.Pauses, d.cfg.Project.ID, stream) {
+		return "the workstream is paused", nil
+	}
+	return "", nil
+}
+
+// building returns why the workstream is neither building nor assembled, or
+// "" when it is one of them.
+func (d drifter) building(stream config.WorkstreamID) (string, error) {
 	feature, err := d.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return "", err
 	}
 	if feature.Value != BuildingState && feature.Value != AssembledState {
 		return fmt.Sprintf("the workstream is %s, not building or assembled", featureState(feature.Value)), nil
-	}
-	state, _ := d.s.store.Effective()
-	if scheduler.Paused(state.Pauses, d.cfg.Project.ID, stream) {
-		return "the workstream is paused", nil
 	}
 	return "", nil
 }
@@ -557,9 +630,11 @@ func (d drifter) recordReplay(ctx context.Context, stream config.WorkstreamID, r
 }
 
 // record records, in one commit, drift/rebase.json, the moved seal when
-// there is one, and the drift subject's move to the outcome. An outcome
-// already recorded returns its result and records nothing more.
-func (d drifter) record(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase, moved *trace.Document, outcome, reason string) (coreadapter.OperationResult, error) {
+// there is one, and the drift subject's move to the outcome, with an
+// upstream moved event when visible says what the move does that is
+// visible. An outcome already recorded returns its result and records
+// nothing more.
+func (d drifter) record(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase, moved *trace.Document, outcome, reason, visible string) (coreadapter.OperationResult, error) {
 	doc, err := d.document(stream, rebase)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -575,6 +650,9 @@ func (d drifter) record(ctx context.Context, stream config.WorkstreamID, rebase 
 	transition, _ := driftIDs(rebase.Drift)
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: d.header(transition+"-"+outcome, stream, "", rebase.Operation, d.s.now()), Subject: driftSubject, From: state.Value, To: fmt.Sprintf("%s-%d", outcome, rebase.Drift), Reason: reason}}
+	if visible != "" {
+		tx.Events = []trace.Event{trace.UpstreamMoved(tx.Transition.ID, stream, rebase.move(), visible)}
+	}
 	if _, err := d.repository.RecordDocumentsWith(ctx, docs, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			if recorded, outcomeErr := d.outcome(stream, rebase.Drift); outcomeErr == nil && recorded != nil {

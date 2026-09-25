@@ -44,8 +44,9 @@ type Options struct {
 	// With Threads set, the service also dispatches every queued workstream turn
 	// on its own, never more than one turn per thread in flight and within the
 	// configured capacity, replacing Reconciliation.Schedule. A runtime pause
-	// holds new turns on the threads it covers, except chief-of-staff turns;
-	// clearing it lets them run. Outbox events are delivered to each
+	// holds new turns on the threads it covers, except chief-of-staff turns,
+	// and a hard pause also stops the turns running on them; clearing it lets
+	// them run. Outbox events are delivered to each
 	// workstream's chief of staff as queued turns, one per event window, and
 	// each recorded answer to a question is queued on its asker's thread.
 	// The mason controller starts ready units of building workstreams and
@@ -121,6 +122,9 @@ type Service struct {
 	ready      atomic.Bool
 	requests   sync.WaitGroup
 	boundary   func(string) error
+	// driftAsked is set once an owner's drift rebase request is recorded,
+	// so the next pass reads the drift schedule.
+	driftAsked atomic.Bool
 }
 
 // Start loads state and binds before returning. Wait joins shutdown and cleanup.
@@ -479,8 +483,8 @@ func (s *Service) stop(active *activeProject) error {
 // boundary by the service's sealer for sealings, its builder for builds and
 // its foreman for landings and rebases and its publisher for publications;
 // the architect controller, then the shed controller, then the sealing
-// controller, then the building controller, then the overlap, charter, refresh, landing,
-// assembly and publication controllers run at the start of every pass, and the pass reconciles operations in stagePriority order. With
+// controller, then the building controller, then the overlap, charter, refresh, drift,
+// landing, assembly and publication controllers run at the start of every pass, and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
 // chief of staff, recorded answers are queued on their askers' threads, the
 // mason controller parks, resumes and starts units, and the scheduler runs, whose gate holds turns that a runtime pause covers and mason turns of units behind their feature branch;
@@ -522,12 +526,13 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	publish := &publisher{s: s, repository: repository}
 	amend := &amendmentDrafter{drafter: draft}
 	amendRounds := amendmentDebate{rounds}
+	budget := budgetSignals{s: s, repository: repository}
 	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals}
 	type scheduleHook struct {
 		name string
 		pass func(context.Context) error
 	}
-	hooks := []scheduleHook{{"draft", draft.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
+	hooks := []scheduleHook{{"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})
 	}

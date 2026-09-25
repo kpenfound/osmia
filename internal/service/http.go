@@ -239,6 +239,18 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, result)
 		return
 	}
+	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/projects/rebase" {
+		var v ProjectRebaseRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		if out, api := s.rebaseProject(r.Context(), v); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
 	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/conversation/"); ok && r.Method == http.MethodPost {
 		var v SendRequest
 		if !decode(w, r, &v) {
@@ -472,13 +484,22 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		if !decode(w, r, &v) {
 			return
 		}
-		err = s.store.SetPause(v)
+		if v.Source != "" && v.Source != runtime.PauseOwner {
+			fail(w, Validation)
+			return
+		}
+		v.Source = runtime.PauseOwner
+		v.SetAt = s.now()
+		if strings.TrimSpace(v.Reason) == "" {
+			v.Reason = "Owner requested pause"
+		}
+		err = s.setPause(v)
 	case r.Method == http.MethodDelete && r.URL.Path == Prefix+"/runtime/pause":
 		var v ClearPauseRequest
 		if !decode(w, r, &v) {
 			return
 		}
-		err = s.store.ClearPause(v)
+		err = s.store.ClearPause(v, runtime.PauseOwner)
 	case r.Method == http.MethodPut && r.URL.Path == Prefix+"/runtime/priority":
 		var v PriorityRequest
 		if !decode(w, r, &v) {

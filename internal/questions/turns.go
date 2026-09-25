@@ -14,7 +14,8 @@ const Waiting = "waiting"
 
 // Turns ends every turn that asked a question or filed an amendment with the outcome waiting,
 // whatever the agent reported, so the thread parks and its slot is released.
-// The recorded question decides, not the agent's session.
+// The recorded question decides, not the agent's session. A drift mason's
+// amendment parks nothing, and its turn keeps its result.
 type Turns struct {
 	Turns      coreadapter.Turns
 	Repository *trace.Repository
@@ -39,7 +40,7 @@ func (t *Turns) Run(ctx context.Context, prepared coreadapter.PreparedTurn) (cor
 	}
 	if prepared.Scope.Role == "mason" || prepared.Scope.Role == "reviewer" {
 		for _, a := range amendments {
-			if a.Thread == prepared.Scope.Thread && a.Turn == prepared.Scope.Turn {
+			if a.Thread == prepared.Scope.Thread && a.Turn == prepared.Scope.Turn && (a.Unit != "" || a.Upstream == nil) {
 				result.Outcome = &coreadapter.Outcome{Status: Waiting, Report: "Filed amendment " + a.ID}
 			}
 		}

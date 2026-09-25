@@ -66,9 +66,10 @@ set through `Options` by embedders.
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
 | POST | `/projects/extract` | `ProjectExtractRequest`: project; returns `ExtractionResponse` |
+| POST | `/projects/rebase` | `ProjectRebaseRequest`: project; records the owner's [drift rebase](#drift-rebases) request and returns `ProjectRebaseResponse` |
 | POST | `/abandon/<workstream-id>` | `AbandonRequest`: reason; returns `AbandonResponse` |
 | POST | `/handin` | `HandInRequest`: project, key, one of path, url and stdin, optional skip_debate; returns `HandInResponse` |
-| PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason, source |
+| PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason; the local API attributes it to the owner and records its set time |
 | DELETE | `/runtime/pause` | `ClearPauseRequest`: scope, project, workstream |
 | PUT | `/runtime/priority` | `PriorityRequest`: project, workstreams |
 | DELETE | `/runtime/priority` | `ClearPriorityRequest`: project |
@@ -480,7 +481,8 @@ moves to `applied`.
 
 For `applied`, `rejected` and `unapplied`, the controller queues turn
 `amendment_<n>_ruling` on the requester's thread: the mason's thread, or the
-unit's reviewer thread for a reviewer's request. The turn carries the decision
+unit's reviewer thread for a reviewer's request; a drift mason's request gets
+none. The turn carries the decision
 and its outcome, with the request and the owner's note quoted in the shared
 envelope. The unit the request parked then moves from `waiting` back to the
 stage its waiting transition preserved, `implementing` or `reviewing`, through
@@ -1783,15 +1785,47 @@ the workspace.
 
 A drift rebase brings a workstream's feature branch current with upstream
 before final review, and moves the seal's upstream base with it. Drift
-rebases share the project's one lander with landings. Asking for them takes
-every `building` or `assembled` workstream of the project that is not paused
-and has no final review in flight, and asks nothing while a landing or drift
-rebase of the project has no result. Each gets the operation `drift` (input
-`drift` `<k>`, the workstream's next drift number) on the repository boundary
-with the transition `drift-<k>` (actor `service`/`foreman`, cause the seal
-revision in force), which moves the workflow subject `drift` to
-`requested-<k>`. While a drift rebase has no result, the landing controller
-asks for no landing and no unit rebase.
+rebases share the project's one lander with landings. The foreman asks for
+them on the project's `upstream_rebase` cadence (see
+[configuration](configuration.md#project-configtoml)) and when the owner
+asks. Before the landing controller, at most once a minute of service time
+and at the pass after an owner's request is recorded, it considers every
+`building` or `assembled` workstream of the project that is not paused, has a
+seal and has no final review in flight, and asks nothing while a landing or
+drift rebase of the project has no result. A workstream is due
+when the owner asked for a drift rebase it has not had yet, or when the
+`upstream_rebase` interval has elapsed since its latest drift rebase or
+[final rebase](#running-a-final-review), or, before either, since the sealing
+that created its feature branch. A zero `upstream_rebase` schedules nothing,
+and owner requests are still answered. The interval is measured from times
+the trace records, so a restart neither resets an elapsed interval nor asks
+for the same one twice, and a service stopped for several intervals asks for
+one drift rebase when it starts.
+
+Each due workstream gets the operation `drift` (input `drift` `<k>`, the
+workstream's next drift number) on the repository boundary with the
+transition `drift-<k>` (actor `service`/`foreman`, cause the seal revision in
+force), which moves the workflow subject `drift` to `requested-<k>`. Its
+reason begins with why it is due: `the owner asked for a drift rebase at
+<time>`, or `upstream_rebase <interval> has elapsed since the <drift rebase
+n|final rebase|sealing> at <time>`. While a drift rebase has no result, the
+landing controller asks for no landing and no unit rebase.
+
+`POST /v1/projects/rebase` with a `ProjectRebaseRequest` (`project`) records
+the owner's request for a drift rebase of every `building` or `assembled`
+workstream of the active project that is not paused, and returns once each
+request is durable. Each covered workstream gets the transition
+`drift-request-<k>` (actor `owner`/`local`), which moves the workflow subject
+`drift-request` to `requested-<k>`, where `k` is the next drift rebase the
+workstream has not been asked for; a request already waiting for that drift
+rebase is kept, so asking again before it runs records nothing more. The
+foreman answers the request with drift rebase `k` once the lander is free,
+whatever the cadence. The `ProjectRebaseResponse` names the `project`, the
+`covered` workstreams, each with the `drift` number that answers the
+request, and the `skipped` workstreams, each with the `reason` it was
+skipped: paused, or neither building nor assembled. A malformed project ID
+returns `validation`, an ID that is not the active project `not_found`, and a
+project without a trace or a trace that cannot be written `internal`.
 
 The operation checks the workstream again: one that is no longer `building`
 or `assembled`, is paused, or has no feature branch is skipped. The foreman
@@ -1803,11 +1837,62 @@ already on the fetched commit stays as it is.
 
 A replay that conflicts changes neither the branch nor the seal: one trace
 commit records `drift/rebase.json` with outcome `conflicted`, the upstream
-remote, branch and commit, the branch commit and the conflicted paths, and
+remote, branch and commit, the upstream commit the seal's base named before
+(`from`), the branch commit and the conflicted paths, and
 `drift-<k>-conflicted` moves `drift` to `conflicted-<k>` with the reason
 `feature branch <branch> does not rebase cleanly onto <remote>/<branch> at
 <commit>: <paths> conflicted; the branch stays at <commit> and the seal is
-unchanged`.
+unchanged until a mason's resolution of the conflicts against the sealed spec
+is approved by a reviewer`, and raises an
+[upstream moved event](#upstream-moved-events). The operation then stays pending, holding the
+project's lander, until the resolution is approved: no landing, unit rebase or
+other drift rebase of the project is asked for meanwhile.
+
+The conflicts are resolved in a resolution workspace of the workstream's own:
+a Git worktree of the clone at `<root>/drifts/<project-id>/<workstream-id>`,
+on the branch `osmia-drift/<workstream-id>/<k>`, created from the feature
+branch's tip. The foreman replays the feature branch onto the recorded
+upstream commit there, one commit at a time. At each commit that conflicts
+the replay stops with the conflict markers in the workspace, and
+`drift/rebase.json` records outcome `conflicted` with the stop's number
+(`round`), the commit it stopped at (`stop`) and its conflicted paths. The
+workstream's drift mason (thread `drift-mason`, role `mason`) gets one turn,
+`drift-mason-<k>-resolve-<round>`, that names the conflicted paths and
+carries the sealed spec, with the instruction to resolve every conflict
+against it and remove every marker. The turn works on a
+[private view](isolation.md) of the resolution workspace, as a unit's mason
+does on its unit's workspace, holds `file_read`, `file_write`, `amend` and
+`done` alone, and has its view copied back. Its `done` takes the resolution's
+`outcome`. A turn that ends with a marker left in a conflicted path gets one
+`drift-mason-markers-<n>` turn that names the marked paths. Once none is
+left, the foreman stages the workspace's files and goes on with the replay to
+the next stop or its end.
+
+The replayed branch is the candidate: `drift/rebase.json` records outcome
+`resolved` with the `candidate` commit and the `review` number, and the
+workstream's drift reviewer (thread `drift-reviewer`, role `reviewer`) gets
+the turn `drift-reviewer-<k>-<review>` with the conflicted paths, the feature
+branch's change before the rebase, the candidate's change on upstream and the
+sealed spec. It holds `file_read` and `verdict` alone. A verdict with material
+findings is recorded as outcome `rejected` with the `verdict`, and the drift
+mason gets the turn `drift-mason-<k>-review-<review>` with the findings; once
+it is done with no marker left, the foreman snapshots the resolution
+workspace as the next candidate, which is reviewed again. The feature branch
+stays at its old tip throughout. A satisfactory verdict records the candidate
+as the replay's commit with outcome `replayed`, and the drift rebase goes on
+as after a clean replay: the feature branch moves to the approved candidate
+and the seal's base to the upstream commit, and the resolution workspace is
+removed.
+
+A resolution resumes from what the trace, the threads and the resolution
+workspace hold: a restart neither replays a stopped workspace again nor
+queues a turn twice. A drift mason turn a stop interrupted has its surviving
+view copied back and one `drift-mason-recover-<n>` continuation queued, and
+an interrupted review gets one continuation over the same candidate. A drift
+or review turn that fails, or a review that ends without a verdict, holds the
+resolution where it is. A workstream that stops being `building` or
+`assembled` while its conflicts are resolved is skipped, and its resolution
+workspace removed.
 
 A clean replay is recorded in `drift/rebase.json` with outcome `replayed` and
 the rebased commit before anything moves. The feature branch and its
@@ -1834,6 +1919,43 @@ skipped drift rebase moves `drift` to `skipped-<k>` with the reason `drift
 rebase <k> changed nothing: <why>`, as does one whose branch moved to a
 commit other than the one it replayed or the rebased one. Fetch and Git
 errors leave the operation pending for another attempt.
+
+### Upstream moved events
+
+A drift rebase tells the workstream's chief of staff when it does something
+visible, with an outbox event of kind `upstream-moved`
+[delivered](#event-delivery) like a notice. Each is committed in the same
+transaction as the state change it reports, and its body names the
+workstream, the drift rebase, the upstream commits the seal's base moves from
+and to, and the outcome:
+
+| Outcome | Raised by |
+| --- | --- |
+| The feature branch conflicts with upstream | `drift-<k>-conflicted` |
+| A unit carried onto the rebased feature branch conflicts | the unit rebase's `conflicted` transition |
+| An approved unit's carried candidate returns to review | the unit's move from `approved` to `reviewing` |
+| The workstream's completed final report, on the old base, no longer authorises delivery | the drift outcome that moves the seal (`carrying` or `rebased`) |
+| A drift mason or unit reviewer files an amendment | `amendment_<n>_filed` |
+
+A drift rebase with none of these, including a clean one and one whose
+resolved conflicts are approved without further consequence, raises no
+event. Event IDs derive from the transition and the drift number, so a retry
+or a restart raises none twice, and a delivered event is not delivered again.
+The [workstream status](#workstream-status) lists, under `drift.moved`, the bodies of
+the latest drift rebase's events.
+
+When upstream's change alters what a sealed criterion means, the drift mason
+resolving the feature branch's conflicts, or the unit reviewer reading a
+candidate a drift rebase carried back to review, calls `amend` as usual.
+The request records the drift rebase and its upstream commits as `upstream`,
+its filing notice cites the upstream commit, and it then takes the normal
+[amendment](#architect-drafting) path to the owner; the owner's presentation
+names the drift rebase and its upstream commits. A reviewer's request parks
+its unit in `waiting`. The drift mason has no unit: its request parks
+nothing, the resolution goes on against the sealed spec as it stands, and
+its thread gets no ruling turn. A second request from the same agent and
+thread about the same drift rebase, such as one from a turn that recovers an
+interrupted one, returns the request already filed.
 
 ### Unit workspaces
 
@@ -2097,6 +2219,7 @@ order, except the librarian's, which carries no feature (see
 | `state` | The feature workflow state, or `null` before one is recorded |
 | `units` | One `{"unit", "state"}` per unit of the sealed plan and each follow-up of a final review or an amendment, in order, once their states are recorded; `reason` gives a mason contest's classification or bound exhaustion, `deferral` holds the [decision](#why-a-ready-unit-waits) that keeps a `ready` unit waiting, with its `message` as `reason`, `card` holds that unit's latest completed turn card when present, and `landing` its latest `units/<unit>/landing.json` once it [landed](#landing-a-unit): the reviewed candidate and base, the approval, the governing spec, plan and seal, the criteria and the feature branch commit; empty before |
 | `advisories` | The workstream's active [overlap advisories](#overlapping-workstreams): `workstream`, the other workstream; `seal` and `other_seal`, the seals compared; `subsystems`, `entities` and `paths`, what they share; and `message`, the advisory as the chief of staff received it; empty when none is active |
+| `drift` | The workstream's latest [drift rebase](#drift-rebases): `drift`, its number; `outcome`, `requested` once it is asked for, `conflicted` while its conflicts are resolved and `carrying` while unfinished units follow the branch, then `rebased` or `skipped`; `at` and `reason`, the time and reason of the transition that recorded that outcome; `moved`, the bodies of its [upstream moved events](#upstream-moved-events), oldest first, and empty when it raised none; `null` before the first |
 | `open_questions` | Questions in the workstream without a ruling |
 | `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, `contested` with the unit ID, or a `charter` proposal with its question number; a mason contest also has `reason`; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
@@ -2120,7 +2243,10 @@ naming it (`cannot read the unit states of workstream <id>; check the trace
 repository`); one whose overlap advisories cannot be read is listed with no
 `advisories` and, unless it already has a `units` diagnostic, an
 `advisories` diagnostic (`cannot read the overlap advisories of workstream
-<id>; check the trace repository`); the other workstreams are listed as ever. For one workstream, a
+<id>; check the trace repository`), and one whose drift rebases cannot be
+read is listed with a null `drift` and, unless it already has a diagnostic, a
+`drift` diagnostic (`cannot read the drift rebases of workstream <id>; check
+the trace repository`); the other workstreams are listed as ever. For one workstream, a
 malformed ID returns `validation`, no configured project returns
 `no_project`, a workstream the active trace does not hold (or no trace at all)
 returns `not_found`, and an unreadable trace, or unit states of that
@@ -2311,6 +2437,16 @@ in the trace of the workstream whose chief of staff set it, with the owner
 who asked as its actor. When the trace cannot record it, the runtime order is
 put back as it was and the tool call fails.
 
+### Pause and resume at the owner's request
+
+The chief of staff has `pause` and `resume` tools for factory, project, and
+workstream scopes. Both require a turn answering an owner message. A pause
+requires a reason, accepts `soft` or `hard` mode (default `soft`), and is stored
+with source `owner` and its set time. A hard pause stops the turns it covers
+([hard pause](#hard-pause)); the chief of staff's own turn keeps running. Resume clears the requested scope's pause,
+including one set by a budget or provider mechanism. A refused request returns
+`{"recorded":false,"reason":"…"}` and leaves runtime state untouched.
+
 ### Amendment decisions at the owner's request
 
 The chief of staff's `decide_amendment` tool records the owner's decision on a
@@ -2351,6 +2487,7 @@ sketched, and every queued chief-of-staff turn. All four use one `Enforcement`:
 
 `Options.Threads` binds the thread dispatcher to isolated turns that grant
 the chief of staff `set_status`, [`prioritise`](#priority-at-the-owners-request),
+[`pause` and `resume`](#pause-and-resume-at-the-owners-request),
 [`decide_amendment`](#amendment-decisions-at-the-owners-request),
 [`decide_charter`](#charter-decisions-at-the-owners-request), `answer`, `escalate`, `relay_ruling`, `route_amendment` and
 [`propose_charter`](#charter-proposals); the mason may write and execute in its
@@ -2440,12 +2577,43 @@ The gate holds a turn that a pause in `runtime.Effective` covers:
 a `factory` pause, a `project` pause on the active project, or a `workstream`
 pause on the turn's workstream. Chief-of-staff turns are never held, so the
 chief of staff stays reachable while everything is paused. A held turn gets no
-operation and stays queued; a turn already in flight is not interrupted, in
-either pause mode. The gate reads the runtime store on every pass, so after a
+operation and stays queued. A turn already in flight finishes under a soft
+pause and is stopped by a [hard pause](#hard-pause). The gate reads the runtime store on every pass, so after a
 pause is cleared the loop's next periodic pass runs the held turns with no new
 message or operation. The gate also holds every mason turn of a unit whose
 workspace does not descend from the tip of its workstream's feature branch,
 until the foreman [rebases](#rebasing-units-in-flight) the workspace onto it.
+
+### Hard pause
+
+A hard pause stops the turns it covers that are already running, as well as
+holding new ones. Setting a `hard` pause, through `PUT /runtime/pause` or the
+chief of staff's `pause` tool, stops every running thread turn of a workstream
+the pause covers: mason, reviewer, drift mason and drift reviewer turns. A turn
+operation that was dispatched before the pause and starts while it is in force
+is stopped the same way before its agent session starts. Chief-of-staff turns
+are never stopped, and turns of workstreams outside the pause keep running.
+The architect's drafts, shed and amendment rounds and final reviews run through
+their own reconcilers and are not stopped.
+
+Stopping cancels the agent session only. A mason's view is copied back into
+its workspace as after any turn, and the turn is captured and completed with
+`result.cancelled` set, status `interrupted`, no failure, and a `stop` record
+with cause `hard_pause` and the pause's scope, source and reason
+([trace](trace.md#continuation-and-bounded-replay)). The turn operation
+completes like any other turn, so nothing is retried, and a mason turn a stop
+ended gets no classification. The thread keeps its identity, its queued turns
+and the stopped session.
+
+The controllers continue a stopped turn as they continue one a service stop
+interrupted, on the same thread: the mason controller queues its
+`-recover-<sequence>` turn with the stopped turn's prompt and a note that a
+hard pause stopped it, the reviewer controller its review's
+`-recover-<sequence>` turn once the workstream is not paused, and the drift
+controller its mason's or reviewer's continuation once the drift resumes. The
+gate holds each continuation until the pause is cleared, and it then resumes
+the stopped session. A pause cleared while a stop is settling does not undo
+it: the turn still completes as stopped and its continuation runs.
 
 The scheduler also dispatches within the configured `[capacity]`. Mason
 turns use `capacity.masons`, reviewer turns use `capacity.reviewers`, and both

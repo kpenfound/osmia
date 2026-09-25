@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/kpenfound/osmia/internal/config"
 )
 
 // ErrFeatureState reports a feature state a transition refuses to leave.
@@ -92,4 +94,29 @@ func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string
 		return WorkflowState{}, err
 	}
 	return states[0], nil
+}
+
+// UpstreamMovedKind is the kind of outbox events that tell a workstream's
+// chief of staff what a drift rebase onto upstream did that is visible.
+const UpstreamMovedKind = "upstream-moved"
+
+// UpstreamMove names drift rebase Drift of a workstream, which moves the
+// workstream's upstream base from commit From to commit To.
+type UpstreamMove struct {
+	Drift int    `json:"drift"`
+	From  string `json:"from"`
+	To    string `json:"to"`
+}
+
+// UpstreamMovedKey is the event key of the upstream moved events of drift
+// rebase k: the one a transition raises has the ID
+// EventID(transition, UpstreamMovedKey(k)).
+func UpstreamMovedKey(k int) string { return fmt.Sprintf("upstream-moved-%d", k) }
+
+// UpstreamMoved returns the upstream moved event the transition raises for
+// the workstream: which drift rebase moved its upstream base from which
+// commit to which, and the visible outcome.
+func UpstreamMoved(transition string, stream config.WorkstreamID, move UpstreamMove, outcome string) Event {
+	return Event{ID: EventID(transition, UpstreamMovedKey(move.Drift)), Kind: UpstreamMovedKind,
+		Body: fmt.Sprintf("Upstream moved for workstream %s: drift rebase %d moves its upstream base from %s to %s. Outcome: %s", stream, move.Drift, move.From, move.To, outcome)}
 }

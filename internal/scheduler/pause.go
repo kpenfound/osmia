@@ -27,18 +27,35 @@ func Paused(pauses []runtime.Pause, project config.ProjectID, stream config.Work
 // project, and whether there is one.
 func Pausing(pauses []runtime.Pause, project config.ProjectID, stream config.WorkstreamID) (runtime.Pause, bool) {
 	for _, p := range pauses {
-		switch p.Target.Scope {
-		case "factory":
+		if covers(p, project, stream) {
 			return p, true
-		case "project":
-			if p.Target.Project == project {
-				return p, true
-			}
-		case "workstream":
-			if p.Target.Project == project && p.Target.Workstream == stream {
-				return p, true
-			}
 		}
 	}
 	return runtime.Pause{}, false
+}
+
+// Stopping returns the first hard pause in force that covers the workstream of
+// the project, and whether there is one. A hard pause also stops the turns
+// already running on the workstream's threads, except chief-of-staff turns.
+func Stopping(pauses []runtime.Pause, project config.ProjectID, stream config.WorkstreamID) (runtime.Pause, bool) {
+	for _, p := range pauses {
+		if p.Mode == "hard" && covers(p, project, stream) {
+			return p, true
+		}
+	}
+	return runtime.Pause{}, false
+}
+
+// covers reports whether the pause covers the workstream of the project: a
+// factory pause, a pause on the project or one on the workstream.
+func covers(p runtime.Pause, project config.ProjectID, stream config.WorkstreamID) bool {
+	switch p.Target.Scope {
+	case "factory":
+		return true
+	case "project":
+		return p.Target.Project == project
+	case "workstream":
+		return p.Target.Project == project && p.Target.Workstream == stream
+	}
+	return false
 }

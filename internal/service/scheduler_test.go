@@ -239,7 +239,7 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 	}
 
 	target := runtime.Target{Scope: "workstream", Project: project, Workstream: stream}
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "operator"})
+	mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
 	queueTurn(t, repo, "held", clock.Now())
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_chief", Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "message_chief", Depth: 1},
 		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "chief", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: chief"}

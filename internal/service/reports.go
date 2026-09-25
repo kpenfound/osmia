@@ -162,6 +162,44 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 	return done
 }
 
+// driftTool returns the done tool of the claimed drift mason turn scope
+// names: it takes the outcome of the mason's resolution, which the turn
+// then ends with as its report. Whether the resolution is complete is the
+// service's to check once the turn ends.
+func (r *masonReports) driftTool(scope coreadapter.Scope) coreadapter.Tool {
+	done := coreadapter.Tool{Name: doneTool, Effect: coreadapter.ToolMemory,
+		Description: "Report your resolution done, once no conflicted file carries a conflict marker. Give the outcome: what you resolved and how. The service checks the files and goes on with the rebase; end your turn as soon as this returns.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"}},"required":["outcome"],"additionalProperties":false}`)}
+	done.Handle = func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		var input struct {
+			Outcome string `json:"outcome"`
+		}
+		d := json.NewDecoder(bytes.NewReader(raw))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&input); err != nil {
+			return nil, fmt.Errorf("tool input: %w", err)
+		}
+		if strings.TrimSpace(input.Outcome) == "" {
+			return refuseReport("outcome is required: say what you resolved and how")
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		key := turnKey(scope)
+		if _, ok := r.accepted[key]; ok {
+			return refuseReport("this turn already reported its resolution done; end the turn")
+		}
+		if r.accepted == nil {
+			r.accepted = map[string]reportedDone{}
+		}
+		r.accepted[key] = reportedDone{Report: MasonReport{Outcome: input.Outcome}}
+		return json.Marshal(struct {
+			Recorded bool   `json:"recorded"`
+			Next     string `json:"next"`
+		}{true, "End your turn now. The service checks the conflicted files and goes on with the rebase."})
+	}
+	return done
+}
+
 func refuseReport(format string, args ...any) (json.RawMessage, error) {
 	return json.Marshal(struct {
 		Recorded bool   `json:"recorded"`
@@ -243,7 +281,8 @@ func checkReport(unit plan.Unit, report MasonReport) string {
 }
 
 // reportingTurns ends every mason turn whose done the service accepted with
-// the outcome masonDone and the report, whatever the agent reported.
+// the outcome masonDone and the report, with its card when it has one,
+// whatever the agent reported.
 type reportingTurns struct {
 	Turns   coreadapter.Turns
 	reports *masonReports
@@ -264,7 +303,10 @@ func (t *reportingTurns) Run(ctx context.Context, prepared coreadapter.PreparedT
 		if encodeErr != nil {
 			return result, errors.Join(err, encodeErr)
 		}
-		result.Outcome = &coreadapter.Outcome{Status: masonDone, Report: string(data), Card: &report.Card}
+		result.Outcome = &coreadapter.Outcome{Status: masonDone, Report: string(data)}
+		if report.Card != (coreadapter.Card{}) {
+			result.Outcome.Card = &report.Card
+		}
 	}
 	return result, err
 }
