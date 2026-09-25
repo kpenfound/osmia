@@ -46,7 +46,8 @@ set through `Options` by embedders.
 | Method | Path after `/v1` | Input / response |
 | --- | --- | --- |
 | GET | `/health` | Readiness, service name, API version, supplied build version and commit |
-| GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics |
+| GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics, and `last_error`, the last failed [reload](#reload) (`path`, `field`, `message`, `at`), until a reload succeeds |
+| POST | `/reload` | No body; [reloads](#reload) the configuration and returns `ReloadResponse`: the loaded `digest` and the `restart_required` settings |
 | GET | `/runtime` | Effective runtime state, each role's next-turn profile (`name` and `source`: `configuration` or `owner_override`), each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
 | GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, each role's effective profile and source, today's [daily budget](#daily-budget) spend, and diagnostics |
 | GET | `/status/<workstream-id>` | `WorkstreamStatus` for one workstream of the active project |
@@ -90,8 +91,10 @@ without a restart.
 The configuration digest hashes the canonical JSON of the effective loaded
 configuration, including defaults and the resolved socket/project paths, not TOML
 comments or formatting. Configuration reads validate current disk input for
-comparison but never apply it. Invalid/unreadable configuration yields a diagnostic
-and retains the loaded digest and view. Valid changes report `restart_required`.
+comparison but never apply it. Invalid/unreadable configuration yields a
+`validation` diagnostic naming the file and field and retains the loaded digest
+and view. Valid changes report a `reload_required` diagnostic, and changed
+settings that only a restart applies a `restart_required` one naming them.
 Runtime reads report external edits or unreadable input while retaining the last
 acknowledged view; further mutations reject changed disk state. Restore the exact
 runtime file or restart with valid state to reconcile it. No partial configuration
@@ -109,7 +112,7 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 | `malformed_input` | 400 | Malformed, ambiguous, unknown-field or oversized JSON |
 | `validation` | 422 | Invalid override or unavailable reference |
 | `conflict` | 409 | Runtime file changed outside the store, an extraction requested while one is pending or running, or a hand-in key reused for other input |
-| `unsupported` | 501 | Unknown path/method or later-milestone operation, including POST `/reload` |
+| `unsupported` | 501 | Unknown path/method or later-milestone operation |
 | `restart_required` | 409 | PUT `/config/root` or `/config/listen` |
 | `unavailable` | 503 | Service shutting down; also the client's code for transport failure |
 | `internal` | 500 | Storage or other internal failure, including an interrupted project registration |
@@ -128,8 +131,8 @@ response before caller's context deadline`, and an unreachable or closed socket
 reports `cannot reach Osmia Unix socket`.
 
 Health readiness means the loaded stores can serve requests; disk diagnostics do
-not discard that valid view. Reload application, lifecycle endpoints, streaming,
-and web/tailnet access are outside M1. Pauses hold queued turns, capacity
+not discard that valid view. Lifecycle endpoints, streaming and web/tailnet
+access are outside M1. Pauses hold queued turns, capacity
 bounds dispatch, and a `waiting` turn parks its thread, as described with the
 queued-turn scheduler below.
 
@@ -181,6 +184,40 @@ requests the next one and returns it as `pending`. A malformed project ID
 returns `validation`, an ID that is not the active project `not_found`, a
 project without a trace `internal`, and a request while an extraction is
 pending or running `conflict`, naming the extraction to wait for.
+
+## Reload
+
+`POST /v1/reload` (`osmia reload`) reads the top-level `config.toml` and the
+`config.toml` of every registered project (the active project, and the
+project `active_projects` lists when it differs) and validates them as one
+candidate. If any file fails, nothing changes: the loaded configuration and
+its digest stay in force, the request fails with `validation` and a message
+naming the file, the field and why (a file that is not valid TOML is named
+with the line, never its text), and `/config` reports the failure as
+`last_error` until a reload succeeds.
+
+When every file passes, the candidate replaces the loaded configuration in one
+step and the response carries its digest, which `/config` then reports.
+Profiles, role bindings and sandboxes, capacity, budgets, shed and mason
+limits, the event window and the project's settings apply to what the service
+decides next: requests served after the reload, and the reconciliation pass
+that starts after it, whose dispatch, controllers and turns are rebuilt from
+the new configuration. An operation already running, such as a turn, finishes
+on the configuration it started with, and a queued turn keeps the profile it
+was queued with.
+
+Some settings keep their loaded values until the service restarts; the
+response lists each one the files change in `restart_required`, and `/config`
+reports them in a `restart_required` diagnostic: `listen.socket`, and
+`active_projects`, which in a running service only `project add` and
+`project remove` change. The root is an option of the service, not a setting
+of the files.
+
+`runtime.json` is not read or written: pauses, priorities and profile
+overrides stay as they were. They are resolved against the new configuration,
+so an override naming a profile the new configuration lacks is excluded from
+the effective state with a diagnostic, and applies again once a reload brings
+the profile back.
 
 ## Hand-in
 

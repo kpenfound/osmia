@@ -38,6 +38,7 @@ osmia resume all
 osmia profiles
 osmia profiles set mason default
 osmia profiles clear mason
+osmia reload
 osmia status --json
 ```
 
@@ -61,7 +62,9 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   empty, rule count, recorded revision and numbering diagnostics), its latest
   knowledge-base extraction (number, `pending`, `running`, `succeeded` or
   `failed`, the time of its last activity and the reason when it failed or
-  waits to retry), diagnostics, effective runtime controls and the project's
+  waits to retry), diagnostics, the last failed reload (`Last reload failed at
+  <time>: <file>: <field>: <reason>`) until a reload succeeds, effective
+  runtime controls and the project's
   context mode (`file`, a normal mode; see [context](context.md)), with
   `budget.per_day` today's known spend against it (`Daily budget: USD <spend>
   of USD <limit> spent on <day>`, marked `at least` with the count of attempts
@@ -330,6 +333,11 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   shows the same profile information.
   `profiles set <role> <profile>` overrides a binding.
   `profiles clear <role>` restores its configured default.
+- `reload` asks the service to [reload its configuration](service.md#reload)
+  and prints `Configuration reloaded: <digest>`, followed by `Restart required
+  to apply: <settings>` when the files change settings that only a restart
+  applies. A file that fails validation fails with `validation` (exit 4),
+  naming the file and field; the loaded configuration stays in force.
 
 Every command accepts `--root PATH`, defaulting to `~/.osmia`. Flags may occur
 before or after positional arguments; value flags also accept `--flag=value`.
@@ -362,7 +370,8 @@ All client commands accept `--json`. Status returns an object with `health`,
 every workstream except the librarian's with its full status (`null` before
 the first) and each role's effective profile and source;
 `status <workstream-id>` returns that workstream's status response; profiles returns the runtime
-response. `abandon` returns the API's abandon response: `project`,
+response; `reload` returns the API's reload response: `digest` and
+`restart_required`. `abandon` returns the API's abandon response: `project`,
 `workstream`, `state` and `reason`. `send` returns the accepted message entry and `conversation` the
 API's conversation response (see [conversation](service.md#conversation)).
 `inbox` returns the API's inbox response and `answer` its answer response (see
@@ -383,7 +392,7 @@ including defaults after clearing overrides. If the mutation succeeds but readin
 the effective state fails, stderr says it was acknowledged; inspect status before
 retrying. Failures leave stdout empty and write actionable diagnostics to stderr.
 Raw configuration/parser and server error text is omitted from failure messages.
-Project, hand-in, abandon, single-workstream status, send, conversation, inbox and answer failures print the service's
+Project, hand-in, abandon, single-workstream status, send, conversation, inbox, answer and reload failures print the service's
 message, which names the field, project or workstream ID or path at fault and
 never raw file contents.
 
@@ -403,7 +412,7 @@ existing owner, and ensure the socket path is unused or stale. Do not delete a
 live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
-Detached management, install/upgrade commands, completion, web/tailnet and reload
+Detached management, install/upgrade commands, completion and web/tailnet
 are unavailable. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.

@@ -6,7 +6,8 @@ file pass. It creates no directories, repositories, sockets or state and does
 not launch agents. The [local service](service.md) owns startup and the Unix
 socket. Project registration through `osmia project add` writes the project
 file and edits `active_projects`; see [project registration](#project-registration).
-Reload and migrations are separate work.
+A running service applies edited files through [reload](service.md#reload).
+Migrations are separate work.
 
 ## Root and identity
 
@@ -210,7 +211,8 @@ repository; the archived trace stays untouched under `projects/<old-id>/` and is
 never reused, so archived history is immutable and every add is a fresh start.
 
 The service's loaded configuration changes only in its project after add and
-remove: `/config` reports no `restart_required` diagnostic for these edits.
+remove: `/config` reports no `restart_required` or `reload_required` diagnostic
+for these edits.
 Without a project, `/config` and `/runtime` carry a `no_project` diagnostic and
 project-scoped overrides are rejected as referencing an inactive project.
 
@@ -267,9 +269,10 @@ fallback, debate, review scheduling, landing or multi-project dispatch. Review s
 configuration is `capacity.reviewers`; no separate review-policy schema is defined.
 Runtime profile overrides, pauses and priorities belong in `runtime.json`, never
 these files; see [runtime overrides](runtime.md) for M1 persistence and resolution.
-Nothing here performs a live reload: changed settings other than project
-registration and removal require a new load/service start. Root and listen
-changes will still require a service restart when live reload arrives.
+`osmia reload` applies edited files to a running service after validating
+all of them ([reload](service.md#reload)). The root, `listen.socket` and
+`active_projects` keep their loaded values until the service restarts; project
+registration and removal change the active project without one.
 
 The optional `[budget]` table accepts `per_session`, `per_unit` and `per_day` as
 positive decimal USD strings. `per_session` caps known spend on each new turn.
@@ -283,7 +286,7 @@ Missing values impose no cap. Unknown cost does not establish that a cap was rea
 
 The full design's `listen.tailnet`, `listen.web`, `notify`, `hearsay` and
 project `hearsay_scope` settings are rejected as unsupported
-in M1, even if supplied empty. Live reload is M4 work, tailnet/web and notifications belong to M5, multi-project operation to M7, and
+in M1, even if supplied empty. Tailnet/web and notifications belong to M5, multi-project operation to M7, and
 Hearsay to M8. Unsupported keys do not silently enable later behavior.
 
 Representative errors include the file and offending field:
@@ -295,5 +298,6 @@ Representative errors include the file and offending field:
 <root>/projects/<id>/config.toml: clone: clone and Osmia root must be separate, non-nested directories
 ```
 
-Malformed TOML errors include the parser's location. Filesystem errors identify the
-path. On any error `Load` returns `nil`, never a usable partial configuration.
+Malformed TOML and values of the wrong type name the last key read and the line
+(`<path>: capacity.masons: invalid TOML syntax or value type at line 3`), never
+the file's text; an unreadable file is `<path>: cannot be read`. On any error `Load` returns `nil`, never a usable partial configuration.
