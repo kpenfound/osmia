@@ -10,6 +10,8 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -86,26 +88,41 @@ func cancelAbandoned(ctx context.Context, repository *trace.Repository, at func(
 	return nil
 }
 
-// runningTurns holds the cancel functions of the turn operations this service
-// is applying, by workstream.
+// runningTurns holds the turn operations this service is applying, by
+// workstream: the function that cancels each when its workstream is
+// abandoned and, for a thread turn a hard pause stops, the function that
+// stops it.
 type runningTurns struct {
 	mu      sync.Mutex
 	next    int
-	streams map[config.WorkstreamID]map[int]context.CancelFunc
+	streams map[config.WorkstreamID]map[int]runningTurn
+}
+
+// runningTurn is one turn operation in flight. Stop is nil for a turn no
+// pause stops.
+type runningTurn struct {
+	project config.ProjectID
+	cancel  context.CancelFunc
+	stop    func(*thread.Stop)
 }
 
 func (r *runningTurns) add(stream config.WorkstreamID, cancel context.CancelFunc) func() {
+	return r.track(stream, runningTurn{cancel: cancel})
+}
+
+// track holds the turn until the returned function is called.
+func (r *runningTurns) track(stream config.WorkstreamID, turn runningTurn) func() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.streams == nil {
-		r.streams = map[config.WorkstreamID]map[int]context.CancelFunc{}
+		r.streams = map[config.WorkstreamID]map[int]runningTurn{}
 	}
 	if r.streams[stream] == nil {
-		r.streams[stream] = map[int]context.CancelFunc{}
+		r.streams[stream] = map[int]runningTurn{}
 	}
 	r.next++
 	id := r.next
-	r.streams[stream][id] = cancel
+	r.streams[stream][id] = turn
 	return func() {
 		r.mu.Lock()
 		defer r.mu.Unlock()
@@ -116,16 +133,38 @@ func (r *runningTurns) add(stream config.WorkstreamID, cancel context.CancelFunc
 func (r *runningTurns) cancel(stream config.WorkstreamID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, cancel := range r.streams[stream] {
-		cancel()
+	for _, turn := range r.streams[stream] {
+		turn.cancel()
 	}
+}
+
+// stop stops every held thread turn that a hard pause among pauses covers,
+// and returns how many it stopped.
+func (r *runningTurns) stop(pauses []runtime.Pause) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stopped := 0
+	for stream, turns := range r.streams {
+		for _, turn := range turns {
+			if turn.stop == nil {
+				continue
+			}
+			if p, ok := scheduler.Stopping(pauses, turn.project, stream); ok {
+				turn.stop(pauseStop(p))
+				stopped++
+			}
+		}
+	}
+	return stopped
 }
 
 // abandonable runs turn operations through the bound thread reconciler under
 // a context that abandoning their workstream cancels. A turn of an abandoned
 // workstream is completed as cancelled instead of being run, and a turn that
 // finishes after its workstream was abandoned completes the thread's later
-// turns as cancelled.
+// turns as cancelled. A turn of any thread but the chief of staff's can also
+// be stopped by a hard pause covering its workstream, whether the pause is set
+// while it runs or was set before it started.
 type abandonable struct {
 	coreadapter.Reconciler
 	s          *Service
@@ -139,7 +178,19 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	defer a.s.turns.add(in.Workstream, cancel)()
+	running := runningTurn{project: a.repository.Project(), cancel: cancel}
+	th, err := a.repository.Thread(in.Workstream, in.Agent)
+	if err == nil && th.Identity.Role != trace.ChiefOfStaff {
+		ctx, running.stop = thread.Stoppable(ctx)
+	}
+	defer a.s.turns.track(in.Workstream, running)()
+	// Held before the pause is read, the turn is stopped here or by the pause.
+	if running.stop != nil && a.s.store != nil {
+		state, _ := a.s.store.Effective()
+		if p, ok := scheduler.Stopping(state.Pauses, running.project, in.Workstream); ok {
+			running.stop(pauseStop(p))
+		}
+	}
 	gone, err := abandoned(a.repository, in.Workstream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err

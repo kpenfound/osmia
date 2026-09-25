@@ -44,8 +44,9 @@ type Options struct {
 	// With Threads set, the service also dispatches every queued workstream turn
 	// on its own, never more than one turn per thread in flight and within the
 	// configured capacity, replacing Reconciliation.Schedule. A runtime pause
-	// holds new turns on the threads it covers, except chief-of-staff turns;
-	// clearing it lets them run. Outbox events are delivered to each
+	// holds new turns on the threads it covers, except chief-of-staff turns,
+	// and a hard pause also stops the turns running on them; clearing it lets
+	// them run. Outbox events are delivered to each
 	// workstream's chief of staff as queued turns, one per event window, and
 	// each recorded answer to a question is queued on its asker's thread.
 	// The mason controller starts ready units of building workstreams and

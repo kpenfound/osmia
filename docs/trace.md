@@ -85,7 +85,7 @@ does not infer authority, readiness or workflow transitions from them.
 | `Document` | `questions/<question-id>/charter.json` | The chief of staff's proposal to make the owner's ruling on the question a charter rule, the owner's decision and, once ratified, the number and charter revision that record it; see [charter proposals](#charter-proposals) |
 | `Agent` | `agents/<id>/identity.jsonl` | Stable role/thread identity and backend session at that revision |
 | `TurnRequest` | `agents/<agent-id>/log.jsonl` | Thread/turn identity, accepted profile, system prompt, request and caller-supplied context |
-| `TurnResponse` | `agents/<agent-id>/log.jsonl` | Exact request revision, thread/turn identity, adapter result (including the accepted `done` report and card) and any execution failure |
+| `TurnResponse` | `agents/<agent-id>/log.jsonl` | Exact request revision, thread/turn identity, adapter result (including the accepted `done` report and card), any execution failure, and the `stop` of a turn the service stopped |
 | `Cost` | `ledger.jsonl` | Adapter ledger entry with attempt, full scope, time and explicit cost knowledge |
 | `Status` | `status.jsonl` | The chief of staff's goal, attention, note and agent lines; see [workstream status](#workstream-status) |
 | `PriorityChange` | `priority.jsonl` | The chief of staff's agent and turn and the project's priority order it set at the owner's request; see [priority changes](#priority-changes) |
@@ -461,6 +461,9 @@ under an existing turn are rejected. `CompleteTurn` requires a captured result
 and atomically releases the reservation, making the oldest successor eligible.
 It retains a status of `idle`, `waiting`, `failed` or `interrupted` based on the
 result. These are thread execution states, not feature or unit transitions.
+A turn the service stopped on purpose is `interrupted` with a `stop` record
+(cause `hard_pause`, and the pause's scope, source and reason) and no failure;
+a stop before the agent session started records no attempt and no session.
 For a mason turn that completes without an outcome or failure, the owned
 `TurnResponse.classification` records one of `asked_in_prose`, `claims_done`,
 `gave_up` or `unclear`. Its evidence includes the matching phrase (or the
@@ -510,7 +513,12 @@ workers, callers must join turn execution before closing the repository handle.
 caller-prepared execution resources and outcome policy, fills the immutable
 scope/profile/messages from the claimed request, selects continuation, captures the result,
 and completes the turn. Its clock is injected. Cancellation still records the
-partial result with a non-cancelled persistence context. After a successful claim,
+partial result with a non-cancelled persistence context. A context from
+`thread.Stoppable` carries a separate context for the agent session and a
+function that cancels it with a `thread.Stop`: the claim, capture and
+completion still run, and the turn completes with that stop instead of a
+failure, without running when the stop came first. A session that ended
+cleanly before the stop keeps its result. After a successful claim,
 a persistence error leaves the turn reserved and returns the available claim and
 response or attempt evidence so the caller can reconcile the same identity.
 Per-turn leases belong to the caller until the adapter is invoked, and competing
@@ -565,7 +573,9 @@ session availability. Profile name changes alone do not force replay; the checke
 must explicitly accept model and effort changes. An absent checker, unsupported
 backend, malformed reference, missing/corrupt state or incompatible profile
 selects replay. Other inspection errors leave the turn reserved for reconciliation.
-A failed or interrupted predecessor cannot authorize resume.
+A failed or interrupted predecessor cannot authorize resume, except one the
+service stopped: its session resumes. A predecessor stopped before its session
+started is skipped, and the turn before it is the source.
 
 Fresh attempts receive deterministic JSON built exclusively from successful,
 completed owned request/final-response pairs in queue sequence order. Each pair

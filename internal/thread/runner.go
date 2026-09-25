@@ -58,7 +58,10 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	h := req.Header
 	h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", trace.EventID(req.ID, "response"), r.Now(), trace.Actor{Kind: "service", ID: "thread-runner"}
 	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: req.ThreadID, TurnID: req.TurnID, RequestID: req.ID, RequestRevision: req.Revision, Result: result}
-	if runErr != nil {
+	var stop *Stop
+	if errors.As(runErr, &stop) {
+		response.Stop = &stop.TurnStop
+	} else if runErr != nil {
 		response.Failure = runErr.Error()
 		if errors.Is(runErr, coreadapter.ErrSessionCostCap) {
 			response.FailureClass = coreadapter.Infrastructure

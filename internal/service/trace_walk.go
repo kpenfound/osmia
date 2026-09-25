@@ -141,16 +141,18 @@ type TraceRebase struct {
 
 // TraceTurn is one agent turn: its request, its response once recorded, and
 // the cost of its attempts. Status is running until a response is recorded.
+// Stop says why the service stopped an interrupted turn on purpose.
 type TraceTurn struct {
-	Agent        string    `json:"agent"`
-	Role         string    `json:"role"`
-	Turn         string    `json:"turn"`
-	Status       string    `json:"status"`
-	Request      TraceRef  `json:"request"`
-	Response     *TraceRef `json:"response,omitempty"`
-	Failure      string    `json:"failure,omitempty"`
-	CostUSD      float64   `json:"cost_usd"`
-	UnknownCosts int       `json:"unknown_costs"`
+	Agent        string          `json:"agent"`
+	Role         string          `json:"role"`
+	Turn         string          `json:"turn"`
+	Status       string          `json:"status"`
+	Request      TraceRef        `json:"request"`
+	Response     *TraceRef       `json:"response,omitempty"`
+	Failure      string          `json:"failure,omitempty"`
+	Stop         *trace.TurnStop `json:"stop,omitempty"`
+	CostUSD      float64         `json:"cost_usd"`
+	UnknownCosts int             `json:"unknown_costs"`
 }
 
 // TraceEvent is one record in a unit's history.
@@ -760,7 +762,7 @@ func (w *traceWalk) unitTurns(t *UnitTrace) {
 				continue
 			}
 			ref := refOf(v)
-			t.Turns[i].Response, t.Turns[i].Failure, t.Turns[i].Status = &ref, v.Failure, trace.QueuedTurn{Response: &v, CompletedAt: v.At}.Status()
+			t.Turns[i].Response, t.Turns[i].Failure, t.Turns[i].Stop, t.Turns[i].Status = &ref, v.Failure, v.Stop, trace.QueuedTurn{Response: &v, CompletedAt: v.At}.Status()
 		case trace.Cost:
 			i, ok := index[v.Entry.Scope.Thread+"/"+v.Entry.Scope.Turn]
 			if !ok {

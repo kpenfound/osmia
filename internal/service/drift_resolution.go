@@ -490,7 +490,7 @@ func (d drifter) masonDone(ctx context.Context, stream config.WorkstreamID, w wo
 	last := th.Turns[len(th.Turns)-1]
 	switch last.Status() {
 	case "interrupted":
-		return false, d.follow(ctx, stream, last, "recover", last.Request.Prompt+"\n\nThe service stopped during your last turn. Your view holds the files that turn left. Go on from them, and call done once the resolution is complete.")
+		return false, d.follow(ctx, stream, last, "recover", last.Request.Prompt+"\n\n"+interruption(last)+" Your view holds the files that turn left. Go on from them, and call done once the resolution is complete.")
 	case "idle":
 	default:
 		return false, nil

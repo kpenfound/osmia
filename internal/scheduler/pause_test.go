@@ -52,6 +52,40 @@ func TestHeldCoversPausedScopes(t *testing.T) {
 	}
 }
 
+func TestStoppingCoversHardPausesOnly(t *testing.T) {
+	const other config.ProjectID = "p_00000000000000000000000000000002"
+	const sibling config.WorkstreamID = "w_00000000000000000000000000000002"
+	pause := func(mode, scope string, p config.ProjectID, w config.WorkstreamID) runtime.Pause {
+		return runtime.Pause{Target: runtime.Target{Scope: scope, Project: p, Workstream: w}, Mode: mode, Source: "owner", Reason: mode + " " + scope}
+	}
+	for _, tc := range []struct {
+		name   string
+		pauses []runtime.Pause
+		want   int
+	}{
+		{"none", nil, -1},
+		{"soft factory", []runtime.Pause{pause("soft", "factory", "", "")}, -1},
+		{"hard factory", []runtime.Pause{pause("hard", "factory", "", "")}, 0},
+		{"hard project", []runtime.Pause{pause("hard", "project", project, "")}, 0},
+		{"hard other project", []runtime.Pause{pause("hard", "project", other, "")}, -1},
+		{"hard workstream", []runtime.Pause{pause("hard", "workstream", project, stream)}, 0},
+		{"hard sibling workstream", []runtime.Pause{pause("hard", "workstream", project, sibling)}, -1},
+		{"hard same workstream in other project", []runtime.Pause{pause("hard", "workstream", other, stream)}, -1},
+		{"hard workstream under soft factory", []runtime.Pause{pause("soft", "factory", "", ""), pause("hard", "workstream", project, stream)}, 1},
+		{"soft workstream under hard project", []runtime.Pause{pause("hard", "project", project, ""), pause("soft", "workstream", project, stream)}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := Stopping(tc.pauses, project, stream)
+			if ok != (tc.want >= 0) || ok && got != tc.pauses[tc.want] {
+				t.Fatalf("stopping %+v %v, want pause %d", got, ok, tc.want)
+			}
+			if ok && !Paused(tc.pauses, project, stream) {
+				t.Fatal("a stopping pause does not hold new turns")
+			}
+		})
+	}
+}
+
 func TestPauseHoldsWorkerTurnsWhileChiefOfStaffRuns(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t, "alpha")
