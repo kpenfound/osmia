@@ -254,21 +254,36 @@ const (
 
 // turnStates classifies the chief-of-staff turns. A turn is pending until it
 // completes, except a reservation an earlier service session left without a
-// result, which never completes and counts as failed. A completed turn failed
-// when it failed or was cancelled, and is done otherwise.
+// result, which never completes and counts as failed. A recovery continuation
+// supplies the original event turn's current state, so event delivery waits
+// for the chief's continuation. A completed turn failed when it failed or was
+// cancelled, and is done otherwise.
 func turnStates(t trace.Thread) map[string]turnState {
 	states := map[string]turnState{}
+	ancestors := map[string][]string{}
 	for _, q := range t.Turns {
 		id := q.Request.TurnID
+		if parent := ancestors[q.Request.Cause]; q.Request.Actor == (trace.Actor{Kind: "service", ID: "thread-recovery"}) && len(parent) != 0 {
+			ancestors[id] = append([]string(nil), parent...)
+		} else {
+			ancestors[id] = []string{id}
+		}
+		state := turnNone
 		switch status := q.Status(); {
 		case q.CompletedAt.IsZero() && t.Status == "interrupted" && t.Active == id:
-			states[id] = turnFailed
+			state = turnFailed
 		case q.CompletedAt.IsZero():
-			states[id] = turnPending
+			state = turnPending
 		case status == "failed" || status == "interrupted":
-			states[id] = turnFailed
+			state = turnFailed
 		default:
-			states[id] = turnDone
+			state = turnDone
+		}
+		for _, ancestor := range ancestors[id] {
+			states[ancestor] = state
+		}
+		if q.Response != nil {
+			ancestors[q.Response.ID] = ancestors[id]
 		}
 	}
 	return states
