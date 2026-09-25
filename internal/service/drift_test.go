@@ -260,11 +260,13 @@ func TestPausedWorkstreamIsSkippedByDriftRebases(t *testing.T) {
 	}
 }
 
-// A drift rebase interrupted after its replay is recorded, after the branch
-// moved, or after its outcome is recorded recovers to one outcome and one
-// seal revision without replaying again, onto the upstream commit it
-// recorded even when upstream moved again. A restarted service completes an
-// interrupted drift rebase from its record.
+// A drift rebase interrupted before its replay replays once on retry. One
+// interrupted after its replay is recorded, after the branch moved, or after
+// its outcome is recorded recovers to one outcome and one seal revision
+// without replaying again, onto the upstream commit it recorded even when
+// upstream moved again. Each retry's inspection observes how far the
+// interrupted attempt got. A restarted service completes an interrupted
+// drift rebase from its record.
 func TestInterruptedDriftRebaseRecoversWithoutReplayingAgain(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, _ := newFinalFixture(t, "interrupted-drift")
@@ -314,12 +316,12 @@ func TestInterruptedDriftRebaseRecoversWithoutReplayingAgain(t *testing.T) {
 		op = requestDrift(t, d, stream)
 		stop := true
 		f.s.boundary = func(name string) error {
-			if name == "drift-replaying" {
-				replays++
-			}
 			if name == point && stop {
 				stop = false
 				return errors.New("the service stopped")
+			}
+			if name == "drift-replaying" {
+				replays++
 			}
 			return nil
 		}
@@ -329,29 +331,47 @@ func TestInterruptedDriftRebaseRecoversWithoutReplayingAgain(t *testing.T) {
 		return before, upstream, op
 	}
 
-	before, upstream, op := interrupt(1, "drift-replayed")
+	// observes checks what inspecting the interrupted drift rebase observes.
+	observes := func(op coreadapter.Operation, point, evidence string) {
+		t.Helper()
+		observed, err := d.Inspect(ctx, op)
+		if err != nil || observed.State != coreadapter.EffectAbsent || !strings.Contains(observed.Evidence, evidence) {
+			t.Fatalf("inspection after an interruption at %s: %+v %v", point, observed, err)
+		}
+	}
+
+	before, upstream, op := interrupt(1, "drift-replaying")
+	if tip, _, err := g.Branch(ctx, featureBranch(stream)); err != nil || tip != before || len(driftRecords(t, repository, stream)) != 0 {
+		t.Fatalf("a drift rebase interrupted before its replay moved the branch to %s or recorded %+v: %v", tip, driftRecords(t, repository, stream), err)
+	}
+	observes(op, "drift-replaying", "the drift rebase has not replayed it")
+	check(repository, 1, "drift-replaying", before, upstream, settleOperation(t, f.s, repository, stream, op, d))
+
+	before, upstream, op = interrupt(2, "drift-replayed")
 	if tip, _, err := g.Branch(ctx, featureBranch(stream)); err != nil || tip != before {
 		t.Fatalf("the branch moved to %s before the recorded replay was applied: %v", tip, err)
 	}
+	observes(op, "drift-replayed", "the branch moves to it")
 	advanceUpstream(t, f, map[string]string{"LATER.md": "later\n"})
-	check(repository, 1, "drift-replayed", before, upstream, settleOperation(t, f.s, repository, stream, op, d))
+	check(repository, 2, "drift-replayed", before, upstream, settleOperation(t, f.s, repository, stream, op, d))
 
-	before, upstream, op = interrupt(2, "drift-moved")
-	check(repository, 2, "drift-moved", before, upstream, settleOperation(t, f.s, repository, stream, op, d))
+	before, upstream, op = interrupt(3, "drift-moved")
+	observes(op, "drift-moved", "the seal and outcome are recorded without replaying again")
+	check(repository, 3, "drift-moved", before, upstream, settleOperation(t, f.s, repository, stream, op, d))
 
-	before, upstream, _ = interrupt(3, "drift-recorded")
+	before, upstream, _ = interrupt(4, "drift-recorded")
 	f.s.boundary = nil
 	must(t, repository.Close())
 	f.start(t)
 	ops := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return driftOperations(t, f.repository(), stream) })
 	f.stop(t)
-	if len(ops) != 3 || ops[2].Result == nil {
+	if len(ops) != 4 || ops[3].Result == nil {
 		t.Fatalf("drift operations after a restart %+v", ops)
 	}
 	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	defer repository.Close()
-	check(repository, 3, "drift-recorded", before, upstream, *ops[2].Result)
+	check(repository, 4, "drift-recorded", before, upstream, *ops[3].Result)
 }
 
 // Drift rebases share the project's one lander with landings: none is asked
@@ -482,6 +502,9 @@ func TestDriftQueuesUnitConflictOnce(t *testing.T) {
 	op := requestDrift(t, d, stream)
 	if _, err := d.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "awaits unit carryover") {
 		t.Fatalf("drift did not wait for conflicted unit: %v", err)
+	}
+	if observed, err := d.Inspect(ctx, op); err != nil || observed.State != coreadapter.EffectAbsent || !strings.Contains(observed.Evidence, "carries the unfinished units onto it") {
+		t.Fatalf("inspection of a drift rebase carrying its units %+v %v", observed, err)
 	}
 	rebases := rebaseOperations(t, repository, stream, "dedupe")
 	if len(rebases) != 1 {

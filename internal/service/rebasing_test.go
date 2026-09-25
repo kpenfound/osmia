@@ -261,13 +261,20 @@ func TestRebaseWaitsForAnInterruptedWriterAndKeepsItsWork(t *testing.T) {
 	}
 }
 
-// A rebase interrupted after its snapshot, after the workspace moved or after
-// its record is reconciled on retry: the unit branch holds one rebased commit
-// on the new tip with the workspace's work, the workspace is clean and the
-// rebase is recorded once.
+// A rebase interrupted before its snapshot, after its snapshot, after the
+// workspace moved or after its record is reconciled on retry: inspection
+// observes what the unit branch holds, the unit branch holds one rebased
+// commit on the new tip with the workspace's work, the workspace is clean and
+// the rebase is recorded once.
 func TestInterruptedRebaseIsReconciled(t *testing.T) {
 	t.Parallel()
-	for _, step := range []string{"rebase-snapshotted", "rebase-moved", "rebase-recorded"} {
+	evidence := map[string]string{
+		"rebase-snapshotting": "holds no rebase of this operation",
+		"rebase-snapshotted":  "holds no rebase of this operation",
+		"rebase-moved":        "this operation's rebase of snapshot",
+		"rebase-recorded":     "rebase succeeded",
+	}
+	for _, step := range []string{"rebase-snapshotting", "rebase-snapshotted", "rebase-moved", "rebase-recorded"} {
 		t.Run(step, func(t *testing.T) {
 			t.Parallel()
 			f, stream, repository := newRebaseFixture(t, "interrupted-rebase")
@@ -295,7 +302,7 @@ func TestInterruptedRebaseIsReconciled(t *testing.T) {
 			if _, err := r.Apply(ctx, ops[0].Operation); err == nil || !strings.Contains(err.Error(), "crash") {
 				t.Fatalf("the rebase never reached %s: %v", step, err)
 			}
-			if observed, err := r.Inspect(ctx, ops[0].Operation); err != nil || (step == "rebase-recorded") != (observed.State == coreadapter.EffectCompleted) {
+			if observed, err := r.Inspect(ctx, ops[0].Operation); err != nil || (step == "rebase-recorded") != (observed.State == coreadapter.EffectCompleted) || !strings.Contains(observed.Evidence, evidence[step]) {
 				t.Fatalf("inspection after the crash %+v %v", observed, err)
 			}
 			result, err := r.Apply(ctx, ops[0].Operation)

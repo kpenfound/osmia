@@ -177,12 +177,19 @@ func TestApprovedUnitLandsAndReadiesItsDependent(t *testing.T) {
 	f.awaitEventTurns(t, stream, fmt.Sprintf("Unit resume merged: it landed as %s on %s.", commit, featureBranch(stream)))
 }
 
-// A landing interrupted after its commit, after the feature branch moved or
-// after its record is reconciled on retry: the feature branch holds exactly
-// one landing commit, and the unit merged once.
+// A landing interrupted before its commit, after its commit, after the
+// feature branch moved or after its record is reconciled on retry: the
+// retry's inspection observes what the branch holds, the feature branch
+// holds exactly one landing commit, and the unit merged once.
 func TestInterruptedLandingIsReconciled(t *testing.T) {
 	t.Parallel()
-	for _, step := range []string{"land-committed", "land-advanced", "land-recorded"} {
+	observed := map[string]string{
+		"land-committing": "holds no commit of this landing",
+		"land-committed":  "holds no commit of this landing",
+		"land-advanced":   "this operation's landing commit on",
+		"land-recorded":   "landing succeeded",
+	}
+	for _, step := range []string{"land-committing", "land-committed", "land-advanced", "land-recorded"} {
 		t.Run(step, func(t *testing.T) {
 			t.Parallel()
 			f, masons := newLandingFixture(t, independentPlan)
@@ -214,7 +221,11 @@ func TestInterruptedLandingIsReconciled(t *testing.T) {
 				time.Sleep(50 * time.Millisecond)
 			}
 			retries := 0
+			var observations []coreadapter.Observation
 			for _, a := range ops[0].History {
+				if a.Kind == "observe" && a.Observation != nil {
+					observations = append(observations, *a.Observation)
+				}
 				if a.Kind == "retry" {
 					retries++
 					if !strings.Contains(a.Failure, "crash") {
@@ -224,6 +235,9 @@ func TestInterruptedLandingIsReconciled(t *testing.T) {
 			}
 			if retries != 1 || ops[0].Result.Outcome != "succeeded" {
 				t.Fatalf("%d retries, result %+v", retries, ops[0].Result)
+			}
+			if len(observations) != 2 || (observations[1].State == coreadapter.EffectCompleted) != (step == "land-recorded") || !strings.Contains(observations[1].Evidence, observed[step]) {
+				t.Fatalf("the retry observed %+v", observations)
 			}
 			_, result := approvedReview(t, f.repository(), stream, "resume")
 			commits := f.landedCommits(t, stream, result.Identity.Candidate.BaseRevision)
