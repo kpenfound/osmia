@@ -258,7 +258,29 @@ func (g *Git) Squash(ctx context.Context, base, candidate, message string, at ti
 // markers, or the side that kept it when the other deleted it. The same
 // arguments make the same commit, and no branch moves.
 func (g *Git) Rebase(ctx context.Context, onto, head, message string, at time.Time) (string, []string, error) {
-	out, err := g.runInRaw(ctx, g.Clone, nil, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", onto, head)
+	return g.RebaseFrom(ctx, "", onto, head, message, at)
+}
+
+// RebaseFrom rebases head onto onto using base as the three-way merge base.
+// An empty base uses Git's ordinary merge base. For an explicit base, a
+// temporary commit with onto's tree and base as parent gives merge-tree the
+// requested ancestry without moving a branch.
+func (g *Git) RebaseFrom(ctx context.Context, base, onto, head, message string, at time.Time) (string, []string, error) {
+	date := fmt.Sprintf("@%d +0000", at.Unix())
+	env := append(slices.Clone(identity), "GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE="+date)
+	mergeOnto := onto
+	if base != "" {
+		tree, err := g.run(ctx, "rev-parse", "--verify", onto+"^{tree}")
+		if err != nil {
+			return "", nil, err
+		}
+		mergeOnto, err = g.runEnv(ctx, env, "commit-tree", "--no-gpg-sign", "-p", base, "-m", "Temporary rebase base for "+onto, tree)
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	args := []string{"merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", mergeOnto, head}
+	out, err := g.runInRaw(ctx, g.Clone, nil, args...)
 	if err != nil && !exitCode(err, 1) {
 		return "", nil, err
 	}
@@ -277,8 +299,6 @@ func (g *Git) Rebase(ctx context.Context, onto, head, message string, at time.Ti
 		return "", nil, err
 	}
 	slices.Sort(conflicts)
-	date := fmt.Sprintf("@%d +0000", at.Unix())
-	env := append(slices.Clone(identity), "GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE="+date)
 	commit, err := g.runEnv(ctx, env, "commit-tree", "--no-gpg-sign", "-p", onto, "-m", message, tree)
 	if err != nil {
 		return "", nil, err
