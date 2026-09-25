@@ -207,7 +207,9 @@ type SessionResult struct {
 	Outcome                         *Outcome
 	Usage                           Usage
 	ToolCounts                      map[string]int `json:"tool_counts,omitempty"`
-	Limit                           *ProviderLimit
+	// Records counts the session's calls to service tools that record state.
+	Records int `json:"records,omitempty"`
+	Limit   *ProviderLimit
 }
 type ProviderLimit struct {
 	Status, Kind string
@@ -277,7 +279,9 @@ type RetryDecision struct {
 // Attempt is one-based and counts the attempts on the current profile. A
 // retryable infrastructure failure retries on the same profile while Attempt
 // is at most MaxRetries, and then on FallbackProfile when the caller names
-// one. It neither sleeps, launches retries nor changes profile bindings.
+// one. A session that recorded state through a service tool is not retried,
+// because a retry could record it again. It neither sleeps, launches retries
+// nor changes profile bindings.
 type Retries interface {
 	Decide(context.Context, RetryRequest) (RetryDecision, error)
 }

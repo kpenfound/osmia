@@ -774,7 +774,9 @@ func TestArchitectRedraftsAfterAFailedTurn(t *testing.T) {
 		})
 	stream := f.handIn(t, "design", handedDesign)
 	f.await(t, stream, sketched)
-	if runs := f.runs(); !slices.Equal(runs, []string{"draft-1-1", "draft-2-1"}) {
+	// The crash is an infrastructure failure: the runner retries it on the
+	// same profile before the draft fails.
+	if runs := f.runs(); !slices.Equal(runs, []string{"draft-1-1", "draft-1-1", "draft-1-1", "draft-2-1"}) {
 		t.Fatalf("backend runs %v", runs)
 	}
 	ops := f.acknowledgedDraftOperations(t, stream)

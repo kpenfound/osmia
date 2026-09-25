@@ -30,6 +30,7 @@ func TestRetryAdvice(t *testing.T) {
 		{"transport", SessionResult{}, errors.New("transport"), Infrastructure, true},
 		{"cancel", SessionResult{}, context.Canceled, Infrastructure, false},
 		{"unsupported", SessionResult{}, unsupported("backend", "missing"), Infrastructure, false},
+		{"recorded state", SessionResult{ExitCode: 1, Records: 1}, nil, Infrastructure, false},
 		{"invalid outcome", SessionResult{IsError: true, ErrorSubtype: invalidOutcome}, errors.New("status \"x\" is not valid"), Behavioural, false},
 	}
 	for _, tt := range tests {

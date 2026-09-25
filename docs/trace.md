@@ -628,7 +628,11 @@ An infrastructure failure is retried on the same profile up to
 fallback from `Runner.Fallbacks` with the same bound, and so on down the
 chain. A fallback never returns to a profile the turn already ran on, and it
 always replays the owned log. A cancelled attempt, one the service stopped and
-one whose execution is unsupported are not retried. Each retry's attempt
+one whose execution is unsupported are not retried. Neither is an attempt
+whose session called a service tool that records state (a `memory` tool such
+as `ask`, `done`, `verdict`, `object` or `answer`; the result's `records`
+counts those calls), because a retry could record it again: the turn ends
+with that infrastructure failure. Each retry's attempt
 `reason` names the retry or fallback and the failure that caused it. The
 service sets `MaxRetries` to 2 and derives `Fallbacks` from each profile's
 configured `fallback`, for every role. A turn that still ends with an

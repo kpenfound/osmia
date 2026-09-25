@@ -173,8 +173,9 @@ one-based attempt counts on the current profile, limits and delay to
 `RetryPolicy.Decide`. Any nonempty reported outcome takes precedence over
 infrastructure flags, and an outcome the role may not report is behavioural
 too. Clean exits without an outcome are behavioural; transport errors,
-signals and provider limits are infrastructure. Cancellation and unsupported
-capabilities do not receive retry advice. An eligible infrastructure failure
+signals and provider limits are infrastructure. Cancellation, unsupported
+capabilities and a session that recorded state through a service tool do not
+receive retry advice. An eligible infrastructure failure
 is retried on the same profile while the attempt count is within
 `MaxRetries`, then once on the supplied fallback profile, whose own attempts
 the caller counts afresh.

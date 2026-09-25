@@ -39,8 +39,9 @@ func (RetryAdapter) Decide(ctx context.Context, req RetryRequest) (RetryDecision
 		decision.Kind = Infrastructure
 		decision.Reason = ops.InfraReason(raw)
 	}
-	// Cancellation and unsupported execution need caller intervention, not retries.
-	retryable := kind == ops.FailureInfra && !r.Cancelled && !errors.Is(req.Err, context.Canceled) && !errors.Is(req.Err, ErrUnsupported)
+	// Cancellation and unsupported execution need caller intervention, and a
+	// retry of a session that recorded state could record it again.
+	retryable := kind == ops.FailureInfra && !r.Cancelled && !errors.Is(req.Err, context.Canceled) && !errors.Is(req.Err, ErrUnsupported) && r.Records == 0
 	if next := (ops.RetryPolicy{Retries: req.MaxRetries, Delay: req.Delay}).Decide(req.Attempt, retryable); next.Retry {
 		decision.Retry, decision.Delay = true, next.Delay
 	} else if retryable && req.FallbackProfile != "" {

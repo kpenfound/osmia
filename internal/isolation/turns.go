@@ -195,7 +195,7 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	var approved []coreadapter.Tool
 	var names []string
 	var countMu sync.Mutex
-	counts := map[string]int{}
+	counts, records := map[string]int{}, 0
 	for _, name := range capabilities.Tools {
 		tool, exists := registry[name]
 		if !exists {
@@ -206,6 +206,9 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 			tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 				countMu.Lock()
 				counts[name]++
+				if tool.Effect == coreadapter.ToolMemory {
+					records++
+				}
 				countMu.Unlock()
 				return original(ctx, raw)
 			}
@@ -245,6 +248,7 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	if len(counts) != 0 {
 		result.ToolCounts = maps.Clone(counts)
 	}
+	result.Records = records
 	countMu.Unlock()
 	if r.Capture != nil {
 		err = errors.Join(err, r.Capture(context.WithoutCancel(ctx), input.Scope, view, result))
