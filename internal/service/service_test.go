@@ -292,7 +292,7 @@ func TestInvalidDiskRetainsView(t *testing.T) {
 	must(t, os.WriteFile(path, append(original, []byte("\n[capacity]\nmasons = 7\n")...), 0600))
 	now, err = c.Configuration(ctx)
 	must(t, err)
-	if now.Diagnostics[0].Code != RestartRequired || now.Digest != cfg.Digest {
+	if now.Diagnostics[0].Code != ReloadRequired || now.Digest != cfg.Digest {
 		t.Fatal(now)
 	}
 	path = filepath.Join(opts.Config.Root, "runtime.json")
@@ -340,7 +340,7 @@ func TestErrors(t *testing.T) {
 		}
 	}
 	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{"missing", "secret"}, nil), Validation)
-	assertCode(t, c.Do(ctx, "POST", Prefix+"/reload", nil, nil), Unsupported)
+	assertCode(t, c.Do(ctx, "GET", Prefix+"/reload", nil, nil), Unsupported)
 	assertCode(t, c.Do(ctx, "PUT", Prefix+"/config/listen", nil, nil), RestartRequired)
 	// A non-regular runtime file is a storage failure, not a validation failure.
 	must(t, os.Mkdir(filepath.Join(opts.Config.Root, "runtime.json"), 0700))

@@ -99,16 +99,18 @@ type Options struct {
 type activeProject struct {
 	repository *trace.Repository
 	controller *reconcile.Controller
+	pipeline   *pipeline
 	cancel     context.CancelFunc
 	done       chan error
 }
 
 type Service struct {
-	mu         sync.Mutex // guards cfg, active and pending
+	mu         sync.Mutex // guards cfg, active, pending and reloadErr
 	cfg        *config.Config
 	active     *activeProject
 	pending    error
-	projectMu  sync.Mutex // serializes project registration and removal
+	reloadErr  *ReloadError
+	projectMu  sync.Mutex // serializes project registration, removal and reload
 	handInMu   sync.Mutex // serializes hand-ins
 	turns      runningTurns
 	options    Options
@@ -363,7 +365,7 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	if !cfg.HasProject() {
 		return nil, nil
 	}
-	repository, controller, err := s.openReconciliation(cfg)
+	repository, controller, p, err := s.openReconciliation(cfg)
 	if err != nil || repository == nil {
 		return nil, err
 	}
@@ -375,7 +377,7 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 		repository.Close()
 		return nil, err
 	}
-	return &activeProject{repository: repository, controller: controller, done: make(chan error, 1)}, nil
+	return &activeProject{repository: repository, controller: controller, pipeline: p, done: make(chan error, 1)}, nil
 }
 
 // admit is the scheduler's gate. It declines every turn of the librarian's
@@ -499,32 +501,59 @@ func (s *Service) stop(active *activeProject) error {
 // Options.Threads, outbox events are then delivered to each workstream's
 // chief of staff, recorded answers are queued on their askers' threads, the
 // mason controller parks, resumes and starts units, and the scheduler runs, whose gate holds turns that a runtime pause covers and mason turns of units behind their feature branch;
-// without it, the configured Schedule hook runs instead.
-func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, error) {
-	options, threads := s.options.Reconciliation, s.options.Threads
+// without it, the configured Schedule hook runs instead. The hooks and
+// adapters come from the pipeline, which a reload may restage for the next pass.
+func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, *pipeline, error) {
+	options := s.options.Reconciliation
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	_, manifestErr := os.Lstat(filepath.Join(directory, "project.json"))
 	_, gitErr := os.Lstat(filepath.Join(directory, ".git"))
 	if os.IsNotExist(manifestErr) && os.IsNotExist(gitErr) {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	repository, err := trace.Open(cfg.Root, cfg.Project)
 	if err != nil {
 		if repository != nil {
 			repository.Close()
 		}
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if options.Worker == "" {
 		options.Worker = "local-operations"
 	}
+	first, err := s.stages(cfg, repository)
+	if err != nil {
+		repository.Close()
+		return nil, nil, nil, err
+	}
+	p := &pipeline{}
+	p.current.Store(first)
+	options.Schedule = p.schedule
 	adapters := maps.Clone(options.Adapters)
 	if adapters == nil {
 		adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{}
 	}
+	adapters[coreadapter.RunnerBoundary] = stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.runner }}
+	adapters[coreadapter.RepositoryBoundary] = stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.repository }}
+	options.Adapters = adapters
+	if options.Priority == nil {
+		options.Priority = stagePriority
+	}
+	controller, err := reconcile.New(repository, options)
+	if err != nil {
+		repository.Close()
+		return nil, nil, nil, err
+	}
+	return repository, controller, p, nil
+}
+
+// stages builds the schedule hooks and operation adapters of cfg over
+// repository. Building them runs no hook and applies no operation.
+func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*stages, error) {
+	options, threads := s.options.Reconciliation, s.options.Threads
 	draft := &drafter{s: s, repository: repository}
 	rounds := &debate{s: s, repository: repository}
 	seals := &sealer{s: s, repository: repository}
@@ -539,11 +568,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	amendRounds := amendmentDebate{rounds}
 	budget := budgetSignals{s: s, repository: repository}
 	daily := dailyBudget{s: s, repository: repository}
-	runner := runnerAdapter{turns: adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals}
-	type scheduleHook struct {
-		name string
-		pass func(context.Context) error
-	}
+	runner := runnerAdapter{turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals}
 	hooks := []scheduleHook{{"daily-budget", daily.Pass}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})
@@ -551,47 +576,26 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if threads != nil {
 		bound, err := threads(repository, cfg)
 		if err != nil {
-			repository.Close()
-			return nil, nil, err
+			return nil, err
 		}
 		runner.turns = abandonable{Reconciler: bound, s: s, repository: repository}
 		limits := cfg.Capacity
 		limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
 		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg, repository), Capacity: &limits, Priorities: s.priorities})
 		if err != nil {
-			repository.Close()
-			return nil, nil, err
+			return nil, err
 		}
 		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), Profile: s.chiefProfile(cfg), System: s.chiefEventsPrompt(cfg.Project.ID, repository),
 			Skip: func(stream config.WorkstreamID) (bool, error) { return abandoned(repository, stream) }})
 		if err != nil {
-			repository.Close()
-			return nil, nil, err
+			return nil, err
 		}
 		units := &masons{s: s, cfg: cfg, repository: repository}
 		reviews := &reviewers{masons: units}
 		hooks = append(hooks, scheduleHook{"events", deliver.Pass}, scheduleHook{"answers", s.answers(cfg, repository).Pass}, scheduleHook{"reviews", reviews.Pass}, scheduleHook{"masons", units.Pass}, scheduleHook{"dispatch", dispatch.Pass})
 	}
-	options.Schedule = func(ctx context.Context) error {
-		for _, hook := range hooks {
-			if err := hook.pass(ctx); err != nil {
-				return fmt.Errorf("%s pass: %w", hook.name, err)
-			}
-		}
-		return nil
-	}
-	adapters[coreadapter.RunnerBoundary] = runner
-	adapters[coreadapter.RepositoryBoundary] = repositoryAdapter{other: adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish}
-	options.Adapters = adapters
-	if options.Priority == nil {
-		options.Priority = stagePriority
-	}
-	controller, err := reconcile.New(repository, options)
-	if err != nil {
-		repository.Close()
-		return nil, nil, err
-	}
-	return repository, controller, nil
+	return &stages{cfg: cfg, hooks: hooks, runner: runner,
+		repository: repositoryAdapter{other: options.Adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish}}, nil
 }
 
 // stagePriority orders the operations of a pass so that the factory finishes

@@ -114,6 +114,11 @@ func (c *Client) Configuration(ctx context.Context) (ConfigResponse, error) {
 	err := c.Do(ctx, "GET", Prefix+"/config", nil, &v)
 	return v, err
 }
+func (c *Client) Reload(ctx context.Context) (ReloadResponse, error) {
+	var v ReloadResponse
+	err := c.Do(ctx, "POST", Prefix+"/reload", nil, &v)
+	return v, err
+}
 func (c *Client) Runtime(ctx context.Context) (RuntimeResponse, error) {
 	var v RuntimeResponse
 	err := c.Do(ctx, "GET", Prefix+"/runtime", nil, &v)

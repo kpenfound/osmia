@@ -53,6 +53,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   resume <all|project-id|workstream-id> [--json]
   priority set <workstream-id>... | priority clear [--json]
   profiles [set <role> <profile>|clear <role>|clear-limit <backend>] [--json]
+  reload [--json]
 Client commands also accept --socket PATH (relative to root).
 Only these commands are available; serve runs in the foreground.
 `
@@ -173,7 +174,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 1 || len(a) == 2
 	case "conversation":
 		valid = len(a) == 1
-	case "inbox":
+	case "inbox", "reload":
 		valid = len(a) == 0
 	case "answer":
 		valid = len(a) == 2
@@ -223,7 +224,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "trace" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "trace" || cmd == "reload" || cmd == "status" && len(a) == 1)
 	}
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
@@ -242,6 +243,20 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Extraction %d of project %s (%s) started\nFollow it with osmia status\n", result.Extraction.Extraction, result.Project.ID, result.Project.Name)
+		return 0
+	}
+	if cmd == "reload" {
+		result, err := c.Reload(ctx)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Configuration reloaded: %s\n", result.Digest)
+		if len(result.RestartRequired) > 0 {
+			fmt.Fprintf(stdout, "Restart required to apply: %s\n", strings.Join(result.RestartRequired, ", "))
+		}
 		return 0
 	}
 	if cmd == "project" && a[0] == "rebase" {
@@ -700,6 +715,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			fmt.Fprintf(stdout, "Context: %s context_mode=%s\n", p.Project, p.ContextMode)
 		}
 		diagnostics(stdout, cfg.Diagnostics)
+		if e := cfg.LastError; e != nil {
+			fmt.Fprintf(stdout, "Last reload failed at %s: %s\n", e.At.UTC().Format(time.RFC3339), e.Message)
+		}
 		showRuntime(stdout, rt)
 		showDailyBudget(stdout, all.DailyBudget)
 		showFailureStreaks(stdout, all.FailureStreaks)
