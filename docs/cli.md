@@ -418,7 +418,7 @@ existing owner, and ensure the socket path is unused or stale. Do not delete a
 live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
-Detached management, install/upgrade commands, completion and web/tailnet
-are unavailable. The command examples in
+Detached management, install/upgrade commands, completion and the web
+interface are unavailable. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.

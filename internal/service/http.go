@@ -38,7 +38,7 @@ func fail(w http.ResponseWriter, code Code) {
 	case Unavailable:
 		status, message = 503, "service is unavailable"
 	case Forbidden:
-		status, message = 403, "web requests need a loopback Host and, except reads, Content-Type application/json"
+		status, message = 403, "web and tailnet requests need a Host naming the listener and, except reads, Content-Type application/json"
 	}
 	respond(w, status, ErrorResponse{APIError{code, message}})
 }
