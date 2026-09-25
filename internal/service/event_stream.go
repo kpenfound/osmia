@@ -216,7 +216,7 @@ func (s *Service) streamEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		return control.Flush() == nil
 	}
-	heartbeat := time.NewTicker(eventHeartbeat)
+	heartbeat := time.NewTimer(eventHeartbeat)
 	defer heartbeat.Stop()
 	for {
 		for _, e := range sub.take() {
@@ -225,6 +225,7 @@ func (s *Service) streamEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		heartbeat.Reset(eventHeartbeat)
 		select {
 		case <-sub.wake:
 		case <-heartbeat.C:

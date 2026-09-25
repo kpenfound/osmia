@@ -83,6 +83,22 @@ func TestEventStreamStartsEveryConnectionWithAResync(t *testing.T) {
 	}
 }
 
+// Adding and removing a project each ask open streams to read everything.
+func TestEventStreamResyncsWhenTheProjectChanges(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	opts, clone := projectFixture(t)
+	_, c := start(t, opts)
+	events, _ := eventStream(t, c)
+	nextEvent(t, events)
+	added, err := c.AddProject(ctx, request(clone))
+	must(t, err)
+	awaitEvents(t, events, Event{Kind: EventResync})
+	_, err = c.RemoveProject(ctx, added.Project.ID)
+	must(t, err)
+	awaitEvents(t, events, Event{Kind: EventResync})
+}
+
 // Every runtime override announces a runtime change; a reload announces the
 // configuration and the views that follow it, and a failed reload the
 // configuration's last error.

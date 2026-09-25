@@ -92,7 +92,7 @@ path; it never reads configuration or runtime files. `Do` supports all operation
 reads the [event stream](#event-stream). Close the
 client to release idle connections. API version 1 uses snake_case JSON fields.
 Client calls have a 15-second response budget, including connection and response
-reading. `AddProject` uses a 60-second budget for clone traversal and trace
+reading; for `Events` it covers connecting and the response header only. `AddProject` uses a 60-second budget for clone traversal and trace
 seeding. A caller's shorter context deadline takes precedence. The service's
 read-header, read and write timeouts default to 5, 10 and 10 seconds and can be
 set through `Options` by embedders.
