@@ -213,9 +213,8 @@ func TestReadyUnitDecisionsFollowPauseAndPriority(t *testing.T) {
 	f, masons := newParallelMasonFixture(t, 1, 3, disjointPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
-	a, _ := f.builtAs(t, "first")
-	b, _ := f.builtAs(t, "second")
+	built := f.builtPaused(t, factory, "first", "second")
+	a, b := built[0], built[1]
 	// The priority order goes against the workstream ID order, which would
 	// otherwise break the tie.
 	lo, hi := lowHigh(a, b)

@@ -472,3 +472,36 @@ func TestPriorityOrdersAPassAcrossWorkstreams(t *testing.T) {
 		}
 	}
 }
+
+// A held operation is neither inspected, applied nor recorded in the pass,
+// and the first pass that no longer holds it reconciles it.
+func TestHoldLeavesAnOperationUntouchedUntilReleased(t *testing.T) {
+	ctx := context.Background()
+	f := setup(t, coreadapter.RunnerBoundary)
+	c := f.controller(t)
+	held := true
+	var asked []config.WorkstreamID
+	c.options.Hold = func(stream config.WorkstreamID, op coreadapter.Operation) bool {
+		asked = append(asked, stream)
+		if op.ID != f.event.Operation.ID {
+			t.Errorf("held %s", op.ID)
+		}
+		return held
+	}
+	for range 3 {
+		must(t, c.Pass(ctx))
+		f.clock.Advance(time.Hour)
+	}
+	if inspections, applications := f.system.counts(); inspections != 0 || applications != 0 {
+		t.Fatalf("held operation touched: %d inspections, %d applications", inspections, applications)
+	}
+	if record := f.record(t); len(record.History) != 0 || record.Acknowledged || record.Result != nil {
+		t.Fatalf("held operation recorded: %+v", record)
+	}
+	if !slices.Equal(asked, []config.WorkstreamID{streamID, streamID, streamID}) {
+		t.Fatalf("hold asked for %v", asked)
+	}
+	held = false
+	must(t, c.Pass(ctx))
+	f.completed(t)
+}

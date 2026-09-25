@@ -220,6 +220,10 @@ func (d *drafter) ensureThread(ctx context.Context, stream config.WorkstreamID) 
 
 // request publishes the draft the input numbers as a durable operation.
 func (d *drafter) request(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, in draftInput, cause, reason string) error {
+	// A paused workstream is asked for nothing until the pause is lifted.
+	if _, paused := d.s.pausing(d.repository.Project(), stream); paused {
+		return nil
+	}
 	transition, event := in.runIDs()
 	input, err := json.Marshal(in)
 	if err != nil {
@@ -394,7 +398,9 @@ var errNoArchitect = errors.New("this service has no agent runner for the archit
 // to waiting-<n>, the operation ends waiting, and the controller requests the
 // draft again once the answer is queued. Abandoning the workstream cancels
 // the running turn, and the draft of an abandoned workstream fails without
-// starting another.
+// starting another. A pause covering the workstream leaves the operation
+// pending instead of starting a turn, and a turn a hard pause stopped is
+// continued within its attempt once the pause is lifted.
 // A failed turn and an invalid draft are terminal failures recorded as draft
 // transitions; storage errors and a missing architect runner leave the
 // operation pending for another attempt.
@@ -473,6 +479,8 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 				turnCtx = ctx
 			} else if d.s.options.Architect == nil {
 				return coreadapter.OperationResult{}, errNoArchitect
+			} else if err := d.s.held(d.repository, stream); err != nil {
+				return coreadapter.OperationResult{}, err
 			}
 			if _, err := d.dispatch(turnCtx, stream, pending.Request.TurnID); err != nil {
 				return coreadapter.OperationResult{}, err
@@ -496,11 +504,21 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 				}
 				return d.terminal(ctx, op.ID, stream, n, "failed", fmt.Sprintf("draft %d failed: the workstream was abandoned, so the architect runs no turn for it", n))
 			}
-			if len(tries) >= maxDraftAttempts {
+			// A turn a hard pause stopped is continued within its attempt.
+			if !stoppedTurn(last) && len(tries) >= maxDraftAttempts {
 				return d.terminal(ctx, op.ID, stream, n, "failed", fmt.Sprintf("draft %d failed: the architect turn was interrupted %d times by service stops", n, len(tries)))
 			}
 			if d.s.options.Architect == nil {
 				return coreadapter.OperationResult{}, errNoArchitect
+			}
+			if err := d.s.held(d.repository, stream); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			if stoppedTurn(last) {
+				if _, err := d.s.continueStopped(ctx, d.repository, cfg, architectRole, *last); err != nil {
+					return coreadapter.OperationResult{}, err
+				}
+				continue
 			}
 			if err := d.enqueue(ctx, cfg, stream, n, len(tries)+1, op.ID, received(t, origins, asked)); err != nil {
 				return coreadapter.OperationResult{}, err
@@ -631,8 +649,11 @@ func (d *drafter) turnDirectory(stream config.WorkstreamID, turn string) string 
 	return filepath.Join(d.s.current().Root.String(), "architect", string(d.repository.Project()), string(stream), turn)
 }
 
-// dispatch runs the turn through the thread dispatcher and runner.
+// dispatch runs the turn through the thread dispatcher and runner, stopped by
+// a hard pause covering the workstream.
 func (d *drafter) dispatch(ctx context.Context, stream config.WorkstreamID, turn string) (coreadapter.OperationResult, error) {
+	ctx, release := d.s.stoppable(ctx, d.repository.Project(), stream)
+	defer release()
 	dispatcher := thread.Dispatcher{Runner: d.s.threadRunner(d.s.current(), d.repository, &questions.Turns{Turns: d.turns(stream), Repository: d.repository}, d.s.now), Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(d.turnDirectory(in.Workstream, in.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
@@ -683,13 +704,15 @@ func (d *drafter) turns(stream config.WorkstreamID) *isolation.Turns {
 
 // continued returns the architect's turn the given turn continues: the turn
 // itself, or, for the turn that delivers the answer to a question, the turn
-// that asked it, followed back to a turn that answers none.
+// that asked it, and for the turn that continues one a hard pause stopped,
+// that turn, followed back to a turn that continues none.
 func (d *drafter) continued(stream config.WorkstreamID, turn string) (string, error) {
 	asked, err := d.repository.Questions(stream)
 	if err != nil {
 		return "", err
 	}
 	for {
+		turn = continuedTurn(turn)
 		i := slices.IndexFunc(asked, func(q trace.QuestionState) bool {
 			return q.Asked.Thread == architectThread && questions.TurnID(q.Asked.ID) == turn
 		})
@@ -785,7 +808,7 @@ func (d *drafter) stage(ctx context.Context, stream config.WorkstreamID, turn, w
 	}
 	files := map[string]string{handed.Path: handed.Content, "charter.md": charter.Content, "context.md": b.Render()}
 	paths := []string{"handed", "charter.md", "context.md"}
-	if id, ok := amendmentTurnID(turn); ok {
+	if id, ok := amendmentTurnID(continuedTurn(turn)); ok {
 		requests, err := trace.Read[trace.Amendment](d.repository, stream)
 		if err != nil {
 			return nil, err

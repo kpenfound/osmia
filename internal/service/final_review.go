@@ -463,8 +463,10 @@ func (a *finalReviewer) Inspect(ctx context.Context, op coreadapter.Operation) (
 // One commit records final/report.json with the review's move to reviewed or
 // failed and a notice for the chief of staff. A review whose inputs changed,
 // whose replay conflicted, or whose reader recorded no report fails with the
-// reason in its report. Storage, fetch and Git errors, and a missing
-// committee runner, leave the operation pending for another attempt.
+// reason in its report. Storage, fetch and Git errors, a missing committee
+// runner and a pause covering the workstream leave the operation pending for
+// another attempt; a reader's turn a hard pause stopped is continued within
+// its attempt once the pause is lifted.
 func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	in, err := decodeFinalReview(op)
 	if err != nil {
@@ -644,10 +646,16 @@ func (a *finalReviewer) read(ctx context.Context, cfg *config.Config, stream con
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
+		// A turn a hard pause stopped is continued within its attempt, so
+		// only the attempts' own turns count.
 		var turns []trace.QueuedTurn
+		tries := 0
 		for _, q := range t.Turns {
 			if strings.HasPrefix(q.Request.TurnID, finalTurnPrefix(in.Review, member)) {
 				turns = append(turns, q)
+				if !isContinuation(q.Request.TurnID) {
+					tries++
+				}
 			}
 		}
 		var last, pending *trace.QueuedTurn
@@ -681,6 +689,8 @@ func (a *finalReviewer) read(ctx context.Context, cfg *config.Config, stream con
 				turnCtx = ctx
 			} else if a.s.options.Committee == nil {
 				return coreadapter.OperationResult{}, errNoCommittee
+			} else if err := a.s.held(a.repository, stream); err != nil {
+				return coreadapter.OperationResult{}, err
 			}
 			if _, err := a.dispatch(turnCtx, stream, in, report, member, pending.Request.TurnID); err != nil {
 				return coreadapter.OperationResult{}, err
@@ -696,14 +706,23 @@ func (a *finalReviewer) read(ctx context.Context, cfg *config.Config, stream con
 				report.Failure = "the owner abandoned the workstream, so the committee member ran no turn"
 				return a.record(ctx, stream, report)
 			}
-			if len(turns) >= maxRoundAttempts {
-				report.Failure = fmt.Sprintf("the committee member's turn was interrupted %d times by service stops", len(turns))
+			if !stoppedTurn(last) && tries >= maxRoundAttempts {
+				report.Failure = fmt.Sprintf("the committee member's turn was interrupted %d times by service stops", tries)
 				return a.record(ctx, stream, report)
 			}
 			if a.s.options.Committee == nil {
 				return coreadapter.OperationResult{}, errNoCommittee
 			}
-			if err := a.enqueue(ctx, cfg, stream, in, report, member, len(turns)+1); err != nil {
+			if err := a.s.held(a.repository, stream); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			if stoppedTurn(last) {
+				if _, err := a.s.continueStopped(ctx, a.repository, cfg, committeeRole, *last); err != nil {
+					return coreadapter.OperationResult{}, err
+				}
+				continue
+			}
+			if err := a.enqueue(ctx, cfg, stream, in, report, member, tries+1); err != nil {
 				return coreadapter.OperationResult{}, err
 			}
 		default:
@@ -715,7 +734,7 @@ func (a *finalReviewer) read(ctx context.Context, cfg *config.Config, stream con
 				}
 				return a.record(ctx, stream, report)
 			}
-			recorded, found, err := a.recorded(stream, last.Request.TurnID)
+			recorded, found, err := a.recorded(stream, continuedTurn(last.Request.TurnID))
 			if err != nil {
 				return coreadapter.OperationResult{}, err
 			}
@@ -774,8 +793,11 @@ func (a *finalReviewer) enqueue(ctx context.Context, cfg *config.Config, stream 
 	return err
 }
 
-// dispatch runs the turn through the thread dispatcher and runner.
+// dispatch runs the turn through the thread dispatcher and runner, stopped by
+// a hard pause covering the workstream.
 func (a *finalReviewer) dispatch(ctx context.Context, stream config.WorkstreamID, in finalReviewInput, report FinalReport, member, turn string) (coreadapter.OperationResult, error) {
+	ctx, release := a.s.stoppable(ctx, a.repository.Project(), stream)
+	defer release()
 	dispatcher := thread.Dispatcher{Runner: a.s.threadRunner(a.s.current(), a.repository, a.turns(stream, in, report), a.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(a.turnDirectory(input.Workstream, input.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
@@ -808,7 +830,9 @@ func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, r
 			if scope.Role != committeeRole || scope.Workstream != string(stream) || scope.Project != string(a.repository.Project()) || !strings.HasPrefix(scope.Turn, finalTurnPrefix(in.Review, report.Reader)) {
 				return nil, errors.New("turn scope denied")
 			}
-			tool, err := a.tool(stream, scope.Turn, report)
+			// The turn that continues one a hard pause stopped replaces the
+			// report that turn recorded.
+			tool, err := a.tool(stream, continuedTurn(scope.Turn), report)
 			return []coreadapter.Tool{tool}, err
 		},
 		Hosts:  hosts,

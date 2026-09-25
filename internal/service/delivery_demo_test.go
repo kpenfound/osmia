@@ -29,7 +29,6 @@ func TestM3DeliveryDemonstration(t *testing.T) {
 			f, masons := newMasonFixture(t, 1, validPlan)
 			defer f.stop(t)
 			factory := runtime.Target{Scope: "factory"}
-			mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
 			masons.play[masonTurnID("resume")] = reportDone("Resume uploads")
 			masons.play[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 				if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n// Skip acknowledged chunks.\n"), 0600); err != nil {
@@ -94,7 +93,7 @@ func TestM3DeliveryDemonstration(t *testing.T) {
 			}
 			f.engine.mu.Unlock()
 
-			stream, _ := f.builtAs(t, "delivery-"+style)
+			stream := f.builtPaused(t, factory, "delivery-"+style)[0]
 			// Move upstream after the seal. The final reviewer must inspect the
 			// rebased assembly, not the original feature tip.
 			advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream moved\n"})

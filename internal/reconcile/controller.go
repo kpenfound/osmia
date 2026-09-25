@@ -28,6 +28,10 @@ type Options struct {
 	// operation of a lower value is reconciled before any of a higher one.
 	// Without it a pass goes workstream by workstream.
 	Priority func(coreadapter.Operation) int
+	// Hold reports whether a due operation of the workstream waits: a held
+	// operation is neither claimed nor recorded in the pass, and is reconciled
+	// by the first pass that no longer holds it.
+	Hold func(config.WorkstreamID, coreadapter.Operation) bool
 }
 
 type Controller struct {
@@ -111,7 +115,7 @@ func (c *Controller) Pass(ctx context.Context) error {
 			return err
 		}
 		for _, record := range records {
-			if !record.Acknowledged && !c.options.Now().Before(record.RetryAt) {
+			if !record.Acknowledged && !c.options.Now().Before(record.RetryAt) && (c.options.Hold == nil || !c.options.Hold(stream, record.Operation)) {
 				due = append(due, pending{stream, record})
 			}
 		}

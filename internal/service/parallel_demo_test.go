@@ -64,9 +64,8 @@ func TestM4ParallelUnitsDemonstration(t *testing.T) {
 	// paused: nothing starts, every ready unit says why, and paused
 	// workstreams are not compared for overlap.
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
-	a, _ := f.builtAs(t, "uploads")
-	b, _ := f.builtAs(t, "audits")
+	built := f.builtPaused(t, factory, "uploads", "audits")
+	a, b := built[0], built[1]
 	// The owner's priority order goes against the workstream ID order, which
 	// would otherwise break the tie.
 	lo, hi := lowHigh(a, b)

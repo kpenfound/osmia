@@ -17,6 +17,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -104,9 +105,41 @@ func (f *shedFixture) built(t *testing.T) (config.WorkstreamID, trace.OperationR
 // builtAs is built with the design handed in under key.
 func (f *shedFixture) builtAs(t *testing.T, key string) (config.WorkstreamID, trace.OperationRecord) {
 	t.Helper()
+	stream := f.shedAs(t, key)
+	return stream, f.ratifiedBuild(t, stream)
+}
+
+// builtPaused builds one workstream for each key, as builtAs does, and sets a
+// soft pause of the target once their packets wait for ratification, so no
+// unit of them starts until the test clears it. A pause also holds the
+// architect's drafts, so it is set after the hand-ins, when no unit exists.
+func (f *shedFixture) builtPaused(t *testing.T, target runtime.Target, keys ...string) []config.WorkstreamID {
+	t.Helper()
+	var streams []config.WorkstreamID
+	for _, key := range keys {
+		streams = append(streams, f.shedAs(t, key))
+	}
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
+	for _, stream := range streams {
+		f.ratifiedBuild(t, stream)
+	}
+	return streams
+}
+
+// shedAs hands in a workstream whose debate is skipped and waits in the
+// shed for the owner's ratification of its packet.
+func (f *shedFixture) shedAs(t *testing.T, key string) config.WorkstreamID {
+	t.Helper()
 	stream := f.handInSkipping(t, key)
 	f.awaitPacket(t, stream, "ratify: no objection stands")
 	f.awaitFeature(t, stream, InShedState)
+	return stream
+}
+
+// ratifiedBuild ratifies the workstream's packet and returns its build
+// operation once the workstream is building.
+func (f *shedFixture) ratifiedBuild(t *testing.T, stream config.WorkstreamID) trace.OperationRecord {
+	t.Helper()
 	if _, err := f.c.Ratify(context.Background(), stream, 1, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +151,7 @@ func (f *shedFixture) builtAs(t *testing.T, key string) (config.WorkstreamID, tr
 	if in, err := decodeBuild(ops[0].Operation); err != nil || in != (buildInput{Seal: 1}) {
 		t.Fatalf("build operation %+v: %v", ops[0].Operation, err)
 	}
-	return stream, ops[0]
+	return ops[0]
 }
 
 // buildOperation returns the build operation of seal k of the workstream.

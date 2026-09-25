@@ -47,8 +47,8 @@ workstream ID, so it would win a tie on ID.
 
 ### 1. A paused factory
 
-The owner pauses the factory (`osmia pause all`) before both workstreams
-reach `building`. No unit starts. `osmia status <workstream-id>` shows every
+The owner pauses the factory (`osmia pause all`) once both workstreams wait
+in the shed for ratification, before they reach `building`. No unit starts. `osmia status <workstream-id>` shows every
 ready unit with `Waiting: Waits while a factory pause is in force, set by
 operator.`. Paused workstreams are not compared for overlap, so neither has
 an advisory yet.

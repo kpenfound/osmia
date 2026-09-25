@@ -200,6 +200,10 @@ func (a amendmentDebate) one(ctx context.Context, stream config.WorkstreamID, re
 }
 
 func (a amendmentDebate) start(ctx context.Context, stream config.WorkstreamID, id string, round int, state trace.WorkflowState, from, action, to string) error {
+	// A paused workstream is asked for nothing until the pause is lifted.
+	if _, paused := a.s.pausing(a.repository.Project(), stream); paused {
+		return nil
+	}
 	in := amendmentOperation{ID: id}
 	if round > 1 {
 		in.Round = round
@@ -386,10 +390,14 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 	}
 	prefix := amendmentReplyPrefix(id, n)
 	var queued *trace.QueuedTurn
+	// A turn a hard pause stopped is continued within its attempt, so only
+	// the attempts' own turns count.
 	attempts := 0
 	for i := range t.Turns {
 		if strings.HasPrefix(t.Turns[i].Request.TurnID, prefix) {
-			attempts++
+			if !isContinuation(t.Turns[i].Request.TurnID) {
+				attempts++
+			}
 			queued = &t.Turns[i]
 		}
 	}
@@ -408,15 +416,32 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 			}
 		}
 	}
-	hasReply := false
-	if queued != nil {
-		_, err := os.Stat(filepath.Join(a.drafter().turnDirectory(stream, queued.Request.TurnID), "output", "reply.json"))
-		hasReply = err == nil
-		if err != nil && !os.IsNotExist(err) {
+	if stoppedTurn(queued) {
+		if err := a.s.held(a.repository, stream); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
+		next, err := a.s.continueStopped(ctx, a.repository, a.s.current(), architectRole, *queued)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if t, err = a.repository.Thread(stream, architectAgent); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		for i := range t.Turns {
+			if t.Turns[i].Request.TurnID == next {
+				queued = &t.Turns[i]
+			}
+		}
 	}
+	answered, err := a.replied(stream, t, queued)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	hasReply := answered != nil
 	if queued == nil || queued.Status() == "interrupted" && !hasReply && attempts < maxDraftAttempts {
+		if err := a.s.held(a.repository, stream); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
 		turn := fmt.Sprintf("%s%d", prefix, attempts+1)
 		profile, _, err := a.s.roleExecution(a.s.current(), architectRole)
 		if err != nil {
@@ -447,6 +472,11 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 	}
 	turn := queued.Request.TurnID
 	if queued.CompletedAt.IsZero() {
+		if queued.Response == nil {
+			if err := a.s.held(a.repository, stream); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+		}
 		path := a.replyTurns(stream, id, n, open)
 		dispatcher := thread.Dispatcher{Runner: a.s.threadRunner(a.s.current(), a.repository, &questions.Turns{Turns: path, Repository: a.repository}, a.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 			dir := filepath.Join(a.drafter().turnDirectory(input.Workstream, input.Turn), "session")
@@ -456,7 +486,10 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		if _, err := dispatcher.Apply(ctx, run); err != nil {
+		running, release := a.s.stoppable(ctx, a.repository.Project(), stream)
+		_, err = dispatcher.Apply(running, run)
+		release()
+		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 		t, err = a.repository.Thread(stream, architectAgent)
@@ -469,16 +502,17 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 				break
 			}
 		}
-	}
-	reply := shed.Reply{Version: shed.Version, Round: n, Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: turn}
-	data, err := os.ReadFile(filepath.Join(a.drafter().turnDirectory(stream, turn), "output", "reply.json"))
-	if err == nil {
-		reply, err = shed.ParseReply(data)
-		if err != nil {
+		// The next run continues the turn once the pause is lifted.
+		if stoppedTurn(queued) {
+			return coreadapter.OperationResult{}, fmt.Errorf("%w: a hard pause stopped architect turn %s", errPaused, turn)
+		}
+		if answered, err = a.replied(stream, t, queued); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-	} else if !os.IsNotExist(err) {
-		return coreadapter.OperationResult{}, err
+	}
+	reply := shed.Reply{Version: shed.Version, Round: n, Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: turn}
+	if answered != nil {
+		reply = *answered
 	}
 	if queued.Status() != "idle" {
 		reply.Failure = "architect turn ended with status " + queued.Status()
@@ -498,6 +532,45 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 	}
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: tx.Transition.Reason}, nil
 }
+
+// replied returns what the attempt of the architect's reply that turn q
+// belongs to answered, or nil when it answered nothing: the answers every
+// turn of the attempt kept, a later answer to an objection replacing an
+// earlier one, as the reply of q.
+func (a amendmentDebate) replied(stream config.WorkstreamID, t trace.Thread, q *trace.QueuedTurn) (*shed.Reply, error) {
+	if q == nil {
+		return nil, nil
+	}
+	var reply *shed.Reply
+	for _, turn := range t.Turns {
+		if continuedTurn(turn.Request.TurnID) != continuedTurn(q.Request.TurnID) {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(a.drafter().turnDirectory(stream, turn.Request.TurnID), "output", "reply.json"))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		kept, err := shed.ParseReply(data)
+		if err != nil {
+			return nil, err
+		}
+		if reply == nil {
+			reply = &kept
+			continue
+		}
+		for _, answer := range kept.Answers {
+			reply.Answers = append(slices.DeleteFunc(reply.Answers, func(old shed.Answer) bool { return old.Objection == answer.Objection }), answer)
+		}
+	}
+	if reply != nil {
+		reply.Turn = q.Request.TurnID
+	}
+	return reply, nil
+}
+
 func (a amendmentDebate) replyTurns(stream config.WorkstreamID, id string, n int, open []shed.Entry) *isolation.Turns {
 	cfg := a.s.current()
 	var engine coreadapter.Engine

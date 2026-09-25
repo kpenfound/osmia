@@ -370,9 +370,8 @@ func TestMasonSlotsFollowPriorityAndPause(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
-	first, _ := f.builtAs(t, "first")
-	second, _ := f.builtAs(t, "second")
+	built := f.builtPaused(t, factory, "first", "second")
+	first, second := built[0], built[1]
 	settle()
 	for _, stream := range []config.WorkstreamID{first, second} {
 		if got := masonTransitions(t, f, stream); len(got) != 0 {
@@ -418,8 +417,7 @@ func TestImplementingUnitGetsItsMasonTurnAfterARestart(t *testing.T) {
 	f, masons := newMasonFixture(t, 4, validPlan)
 	defer func() { f.stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
-	stream, _ := f.builtAs(t, "design")
+	stream := f.builtPaused(t, factory, "design")[0]
 	f.stop(t)
 
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
@@ -492,8 +490,7 @@ func TestStaleSpecLeavesTheUnitReady(t *testing.T) {
 	f, masons := newMasonFixture(t, 4, validPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
-	stream, _ := f.builtAs(t, "design")
+	stream := f.builtPaused(t, factory, "design")[0]
 	f.editSpec(t, stream, staleSpec)
 	mutation(t, f.c, "DELETE", "pause", factory)
 	f.awaitMasonTransition(t, stream)
@@ -539,9 +536,8 @@ func TestUnitWorkspaceFailureBlocksItsWorkstreamAlone(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
-	a, _ := f.builtAs(t, "first")
-	b, _ := f.builtAs(t, "second")
+	built := f.builtPaused(t, factory, "first", "second")
+	a, b := built[0], built[1]
 	broken, other := lowHigh(a, b)
 	squatter := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(broken), "resume")
 	must(t, os.MkdirAll(squatter, 0700))
@@ -590,9 +586,8 @@ func TestBlockedImplementingUnitHoldsNoSlot(t *testing.T) {
 			f, masons := newMasonFixture(t, 1, validPlan)
 			defer func() { f.stop(t) }()
 			factory := runtime.Target{Scope: "factory"}
-			mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner"})
-			a, _ := f.builtAs(t, "first")
-			b, _ := f.builtAs(t, "second")
+			built := f.builtPaused(t, factory, "first", "second")
+			a, b := built[0], built[1]
 			blocked, other := lowHigh(a, b)
 			f.stop(t)
 
