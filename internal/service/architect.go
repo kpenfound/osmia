@@ -633,7 +633,7 @@ func (d *drafter) turnDirectory(stream config.WorkstreamID, turn string) string 
 
 // dispatch runs the turn through the thread dispatcher and runner.
 func (d *drafter) dispatch(ctx context.Context, stream config.WorkstreamID, turn string) (coreadapter.OperationResult, error) {
-	dispatcher := thread.Dispatcher{Runner: thread.Runner{Store: d.repository, Turns: &questions.Turns{Turns: d.turns(stream), Repository: d.repository}, Now: d.s.now}, Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	dispatcher := thread.Dispatcher{Runner: threadRunner(d.s.current(), d.repository, &questions.Turns{Turns: d.turns(stream), Repository: d.repository}, d.s.now), Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(d.turnDirectory(in.Workstream, in.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 	}}

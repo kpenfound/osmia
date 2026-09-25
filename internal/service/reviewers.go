@@ -316,6 +316,9 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 			if last.CompletedAt.IsZero() {
 				return nil
 			}
+			if contested, err := contestFailure(ctx, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, last, r.s.now()); err != nil || contested {
+				return err
+			}
 			transitions, err := trace.Read[trace.Transition](r.repository, stream)
 			if err != nil {
 				return err
@@ -349,6 +352,9 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 			}
 			if last.CompletedAt.IsZero() {
 				return nil
+			}
+			if contested, err := contestFailure(ctx, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, last, r.s.now()); err != nil || contested {
+				return err
 			}
 			if last.Status() != "idle" || last.Response.Result.Outcome == nil || last.Response.Result.Outcome.Status != verdictOutcome {
 				return nil

@@ -2,9 +2,13 @@ package service
 
 import (
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -74,16 +78,73 @@ func (s *Service) statusList() StatusResponse {
 	if unread != nil {
 		diagnostics = append(diagnostics, *unread)
 	}
+	streaks, err := s.failureStreaks()
+	if err != nil {
+		diagnostics = append(diagnostics, Diagnostic{"failure_streaks", Internal, "cannot read the turn attempts of the active project; check the trace repository"})
+	}
 	list, unreadable, api := s.statuses()
 	if api != nil {
-		return StatusResponse{Workstreams: []WorkstreamStatus{}, Profiles: profiles, DailyBudget: budget, Diagnostics: append(diagnostics, Diagnostic{"workstreams", api.Code, api.Message})}
+		return StatusResponse{Workstreams: []WorkstreamStatus{}, Profiles: profiles, DailyBudget: budget, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{"workstreams", api.Code, api.Message})}
 	}
 	for _, w := range list {
 		if d, ok := unreadable[w.Workstream]; ok {
 			diagnostics = append(diagnostics, d)
 		}
 	}
-	return StatusResponse{Workstreams: list, Profiles: profiles, DailyBudget: budget, Diagnostics: diagnostics}
+	return StatusResponse{Workstreams: list, Profiles: profiles, DailyBudget: budget, FailureStreaks: streaks, Diagnostics: diagnostics}
+}
+
+// failureStreaks returns the active project's nonzero infrastructure failure
+// streaks, ordered by role and profile, or none when no project is active.
+func (s *Service) failureStreaks() ([]FailureStreak, error) {
+	s.mu.Lock()
+	active, cfg := s.active, s.cfg
+	s.mu.Unlock()
+	if !cfg.HasProject() || active == nil {
+		return nil, nil
+	}
+	streams, err := active.repository.Workstreams()
+	if err != nil {
+		return nil, err
+	}
+	type attempt struct {
+		role string
+		trace.TurnAttempt
+	}
+	var attempts []attempt
+	for _, stream := range streams {
+		threads, err := active.repository.Threads(stream)
+		if err != nil {
+			return nil, err
+		}
+		for _, th := range threads {
+			for _, q := range th.Turns {
+				for _, a := range q.Attempts {
+					// An attempt still running, or one a stop or restart
+					// cancelled, says nothing about the plumbing.
+					if a.Result != nil && !a.Result.Cancelled {
+						attempts = append(attempts, attempt{th.Identity.Role, a})
+					}
+				}
+			}
+		}
+	}
+	slices.SortStableFunc(attempts, func(a, b attempt) int { return a.At.Compare(b.At) })
+	streaks := map[[2]string]FailureStreak{}
+	for _, a := range attempts {
+		key := [2]string{a.role, a.Profile.Name}
+		if a.FailureClass != coreadapter.Infrastructure {
+			delete(streaks, key)
+			continue
+		}
+		streak := streaks[key]
+		streaks[key] = FailureStreak{Role: a.role, Profile: a.Profile.Name, Consecutive: streak.Consecutive + 1, LastFailure: a.Failure, LastAt: a.At}
+	}
+	var out []FailureStreak
+	for _, key := range slices.SortedFunc(maps.Keys(streaks), func(a, b [2]string) int { return strings.Compare(a[0]+"\x00"+a[1], b[0]+"\x00"+b[1]) }) {
+		out = append(out, streaks[key])
+	}
+	return out, nil
 }
 
 // workstreamStatus reports one workstream of the active project.

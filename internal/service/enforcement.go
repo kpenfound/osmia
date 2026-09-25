@@ -162,7 +162,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				return units.capture(ctx, scope, view, result)
 			},
 		}
-		runner := thread.Runner{Store: r, Turns: &questions.Turns{Turns: &verdictTurns{Turns: &reportingTurns{Turns: turns, reports: reports}, reports: verdicts}, Repository: r}, Now: now}
+		runner := threadRunner(cfg, r, &questions.Turns{Turns: &verdictTurns{Turns: &reportingTurns{Turns: turns, reports: reports}, reports: verdicts}, Repository: r}, now)
 		if cfg.Project.Classifier != "" {
 			profile, err := cfg.NamedProfile(cfg.Project.Classifier)
 			if err != nil {
