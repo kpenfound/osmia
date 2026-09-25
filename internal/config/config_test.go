@@ -230,6 +230,18 @@ func TestInvalid(t *testing.T) {
 		{"unused image", topConfig + "[roles.mason]\nimage = 'image'\n", "", "roles.mason.image"},
 		{"fallback sandbox", topConfig + "fallback = 'other'\n[profiles.other]\nagent = 'codex'\nmodel = 'test'\n[roles.mason]\nsandbox = 'claude'\n", "", "entire fallback chain"},
 		{"tailnet", topConfig + "[listen]\ntailnet = ''\n", "", "unsupported in M1"},
+		{"web empty host", topConfig + "[listen]\nweb = ':8080'\n", "", "listen.web"},
+		{"web any address", topConfig + "[listen]\nweb = '0.0.0.0:8080'\n", "", "listen.web"},
+		{"web any ipv6", topConfig + "[listen]\nweb = '[::]:8080'\n", "", "listen.web"},
+		{"web lan address", topConfig + "[listen]\nweb = '192.168.1.10:8080'\n", "", "listen.web"},
+		{"web hostname", topConfig + "[listen]\nweb = 'osmia.example:8080'\n", "", "listen.web"},
+		{"web localhost suffix", topConfig + "[listen]\nweb = 'localhost.example:8080'\n", "", "listen.web"},
+		{"web zoned", topConfig + "[listen]\nweb = '[fe80::1%lo0]:8080'\n", "", "listen.web"},
+		{"web no port", topConfig + "[listen]\nweb = '127.0.0.1'\n", "", "listen.web"},
+		{"web named port", topConfig + "[listen]\nweb = '127.0.0.1:http'\n", "", "listen.web"},
+		{"web large port", topConfig + "[listen]\nweb = '127.0.0.1:65536'\n", "", "listen.web"},
+		{"web signed port", topConfig + "[listen]\nweb = '127.0.0.1:+80'\n", "", "listen.web"},
+		{"web wrong type", topConfig + "[listen]\nweb = 8080\n", "", "config.toml:"},
 		{"hearsay", topConfig + "[hearsay]\n", "", "unsupported in M1"},
 		{"notify", topConfig + "[notify]\nwebhook = 'https://example.com'\n", "", "unsupported in M1"},
 		{"empty socket", topConfig + "[listen]\nsocket = ''\n", "", "listen.socket"},
@@ -266,6 +278,22 @@ func TestInvalid(t *testing.T) {
 			c, err := Load(fixture(t, top, project))
 			if c != nil || err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got config=%+v err=%v; want nil and %q", c, err, tc.want)
+			}
+		})
+	}
+}
+
+// listen.web accepts localhost and loopback addresses with a numeric port;
+// empty disables it.
+func TestListenWeb(t *testing.T) {
+	for _, value := range []string{"", "localhost:8080", "LocalHost:0", "127.0.0.1:8080", "127.1.2.3:65535", "[::1]:8080", "[::ffff:127.0.0.1]:80"} {
+		t.Run(value, func(t *testing.T) {
+			c, err := Load(fixture(t, topConfig+"[listen]\nweb = '"+value+"'\n", projectConfig))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Listen.Web != value {
+				t.Fatalf("listen.web %q loaded as %q", value, c.Listen.Web)
 			}
 		})
 	}

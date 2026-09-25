@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,6 +36,9 @@ type Config struct {
 }
 type Listen struct {
 	Socket string `toml:"socket" json:"socket"`
+	// Web is an optional loopback host:port that serves the same API as the
+	// socket; empty disables it.
+	Web string `toml:"web" json:"web,omitempty"`
 }
 type Capacity struct {
 	Masons        int `toml:"masons" json:"masons"`
@@ -187,6 +191,11 @@ func Load(options Options) (*Config, error) {
 	}
 	if err := validateSocket(c.Listen.Socket); err != nil {
 		return nil, fieldError(path, "listen.socket", err.Error())
+	}
+	if c.Listen.Web != "" {
+		if err := validateWeb(c.Listen.Web); err != nil {
+			return nil, fieldError(path, "listen.web", err.Error())
+		}
 	}
 	for _, value := range []struct {
 		field string
@@ -393,7 +402,7 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "sandbox", "image"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window"}, path)
+	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "listen.web", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {
@@ -401,8 +410,8 @@ func unsupportedKey(key toml.Key) string {
 	case "hearsay", "notify", "hearsay_scope", "pause", "priority":
 		return "unsupported in M1; requires a later milestone"
 	}
-	if key.String() == "listen.tailnet" || key.String() == "listen.web" {
-		return "unsupported in M1; only a local Unix socket is supported"
+	if key.String() == "listen.tailnet" {
+		return "unsupported in M1; only a local Unix socket and loopback web listener are supported"
 	}
 	return "unknown configuration key"
 }
@@ -545,6 +554,35 @@ func validateSocket(path string) error {
 		return err
 	}
 	return nil
+}
+
+// validateWeb accepts host:port where the host is localhost or a loopback
+// IP address and the port is a number from 0 to 65535; 0 binds a free port.
+func validateWeb(addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("expected host:port, such as 127.0.0.1:8080")
+	}
+	if host == "" {
+		return fmt.Errorf("host is required; use localhost, 127.0.0.1 or [::1]")
+	}
+	if n, err := strconv.ParseUint(port, 10, 16); err != nil || strconv.FormatUint(n, 10) != port {
+		return fmt.Errorf("port must be a number from 0 to 65535")
+	}
+	if LoopbackHost(host) {
+		return nil
+	}
+	return fmt.Errorf("host must be localhost or a loopback address; other interfaces are not supported")
+}
+
+// LoopbackHost reports whether host, without a port or brackets, is
+// localhost or a loopback IP address.
+func LoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // ValidBranch applies Git branch-name constraints.

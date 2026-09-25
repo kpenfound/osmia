@@ -1,11 +1,12 @@
 # M1 local service API
 
 `internal/service.Run` loads the M1 configuration and runtime store, then serves
-HTTP/JSON over the configured Unix socket until its context is cancelled.
+HTTP/JSON over the configured Unix socket, and over the optional loopback
+[web listener](#web-listener), until its context is cancelled.
 `RunSignals` also handles SIGINT and SIGTERM. Both run in the foreground and wait
-for cleanup. Embedders can use `Start`, `Socket`, `Wait` and `Close`; a successful
-`Start` means the stores are loaded and the listener is bound. No models,
-TCP listeners or authentication service are started. Agent turns run only when
+for cleanup. Embedders can use `Start`, `Socket`, `WebAddr`, `Wait` and `Close`; a successful
+`Start` means the stores are loaded and the socket and any web listener are
+bound. No models, non-loopback listeners or authentication service are started. Agent turns run only when
 an embedder supplies a turn reconciler (see below).
 
 The root and its top-level configuration must already exist; a project is not
@@ -29,6 +30,22 @@ Shutdown stops accepting work and gives accepted requests five seconds to finish
 closes the store and releases the lock. Cleanup removes only the socket inode it
 created. An acknowledged mutation is durable; an interrupted client must read the
 runtime view to reconcile whether its request committed.
+
+## Web listener
+
+When `listen.web` is set, the service also binds that loopback TCP address and
+serves the same handlers on it as on the socket; `WebAddr` reports the bound
+address. A bind failure, such as an address in use, is a startup error that
+names `listen.web`, and startup then removes the socket it bound. Shutdown
+closes both listeners and joins both servers before cleanup continues.
+
+The loopback interface is the boundary: there is no authentication, and any
+local user or process that can connect may use the API. Two checks keep a
+browser from reaching it on another site's behalf. The `Host` header must name
+`localhost` or a loopback address, which refuses DNS rebinding, and requests
+other than `GET` and `HEAD` must send `Content-Type: application/json`, which a
+cross-site form cannot send without a CORS preflight the service never grants.
+A refused request gets `forbidden`. The socket applies neither check.
 
 ## Contract
 
@@ -120,6 +137,7 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 | `project_active` | 409 | A project is active and single-project operation refuses another |
 | `not_found` | 404 | The project ID is not the active project, or the workstream is not in it |
 | `charter_empty` | 409 | Hand-in refused: the project's charter has no rules |
+| `forbidden` | 403 | A web listener request with a non-loopback `Host`, or a write without a JSON content type |
 
 Project operations compose their messages from the request's fields and
 identities: a validation failure names the field at fault, `project_active`
@@ -208,7 +226,8 @@ was queued with.
 
 Some settings keep their loaded values until the service restarts; the
 response lists each one the files change in `restart_required`, and `/config`
-reports them in a `restart_required` diagnostic: `listen.socket`, and
+reports them in a `restart_required` diagnostic: `listen.socket`,
+`listen.web`, which keeps the bound listener, and
 `active_projects`, which in a running service only `project add` and
 `project remove` change. The root is an option of the service, not a setting
 of the files.

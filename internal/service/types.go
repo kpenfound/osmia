@@ -29,6 +29,7 @@ const (
 	ProjectActive   Code = "project_active"
 	NotFound        Code = "not_found"
 	CharterEmpty    Code = "charter_empty"
+	Forbidden       Code = "forbidden"
 )
 
 type APIError struct {
