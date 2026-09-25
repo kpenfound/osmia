@@ -71,7 +71,7 @@ func (s *Service) recoverSessions(ctx context.Context, cfg *config.Config, repos
 					}
 				}
 			}
-			if th.Identity.Role == trace.ChiefOfStaff {
+			if th.Identity.Role == trace.ChiefOfStaff && s.options.Threads != nil {
 				settled, err := repository.Thread(stream, th.Identity.ID)
 				if err != nil {
 					return err

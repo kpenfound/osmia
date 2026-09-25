@@ -61,6 +61,7 @@ func TestStartupRecoversClaimedAndUnclaimedSessionsForEveryRole(t *testing.T) {
 	must(t, err)
 	defer store.Close()
 	s := &Service{cfg: cfg, store: store, options: opts}
+	s.options.Threads = func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error) { return nil, nil }
 	must(t, s.recoverSessions(ctx, cfg, repo))
 	for _, item := range roles {
 		agent, role := item.agent, item.role
