@@ -218,6 +218,7 @@ func TestTraceCommitsAnnounceTheirViews(t *testing.T) {
 		{"workflow read from disk", trace.Commit{Paths: []string{prefix + "workflow.json"}}, []Event{ws, chat}},
 		{"chief log", trace.Commit{Paths: []string{prefix + "agents/" + trace.ChiefOfStaff + "/log.jsonl", prefix + "agents/agent_mason/log.jsonl"}}, []Event{ws, chat}},
 		{"feature transition", trace.Commit{Paths: []string{prefix + "events.jsonl"}}, []Event{ws, inbox}},
+		{"packet", trace.Commit{Paths: []string{prefix + "documents.jsonl"}}, []Event{ws, inbox}},
 		{"cost", trace.Commit{Paths: []string{prefix + "ledger.jsonl"}}, []Event{spend, ws}},
 		{"librarian", trace.Commit{Paths: []string{librarian + "ledger.jsonl", librarian + "workflow.json", librarian + "questions/1/question.jsonl"}}, []Event{spend}},
 		{"project files", trace.Commit{Paths: []string{"charter.md", "documents.jsonl", "kb/entities.json"}}, nil},

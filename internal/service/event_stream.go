@@ -155,10 +155,12 @@ func (h *hub) traceEvents(project config.ProjectID) func(trace.Commit) {
 			}
 			add(EventWorkstream, stream)
 			switch {
-			case parts[2] == "questions" || parts[2] == "events.jsonl":
-				// Questions carry the inbox's escalations and rulings, and
-				// feature transitions abandon workstreams, whose entries the
-				// inbox leaves out.
+			case parts[2] == "questions" || parts[2] == "events.jsonl" || parts[2] == "documents.jsonl":
+				// Questions carry the inbox's escalations and rulings,
+				// transitions open and close the other decisions and abandon
+				// workstreams, whose entries the inbox leaves out, and
+				// documents carry packets, final reports and the owner's
+				// decisions.
 				add(EventInbox, stream)
 			case parts[2] == "agents" && len(parts) > 3 && parts[3] == trace.ChiefOfStaff:
 				add(EventConversation, stream)

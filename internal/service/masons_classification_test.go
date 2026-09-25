@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,9 @@ func TestMasonContestedRuling(t *testing.T) {
 			}
 			if len(status.Units) == 0 || !strings.Contains(status.Units[0].Reason, tc.reason) {
 				t.Fatalf("mason contest status: %+v", status.Units)
+			}
+			if entries := f.inboxEntries(t, stream, InboxContested); len(entries) != 1 || !slices.Equal(entries[0].Options, []string{"revise"}) || !strings.Contains(entries[0].Question, tc.reason) {
+				t.Fatalf("inbox entries of the mason contest %+v", entries)
 			}
 			if _, err := f.c.RuleContested(context.Background(), stream, "resume", "review", "Try a reviewer"); err == nil || !strings.Contains(err.Error(), "no candidate under review; use revise") {
 				t.Fatalf("review refusal: %v", err)

@@ -130,7 +130,7 @@ set through `Options` by embedders.
 | GET | `/trace/<workstream-id>/commit/<sha>` | `CommitTrace`: records naming the full commit ID, linked landings and their reviewed evidence, delivery and gaps |
 | POST | `/conversation/<workstream-id>` | `SendRequest`: text; returns the accepted `ConversationEntry` |
 | GET | `/conversation/<workstream-id>` | `ConversationResponse`: the workstream's conversation with its chief of staff |
-| GET | `/inbox` | `InboxResponse`: the escalations of the active project that wait for the owner's ruling |
+| GET | `/inbox` | `InboxResponse`: every open owner decision of the active project, with the endpoint and identity that answer it |
 | POST | `/inbox/<number>` | `AnswerRequest`: text; records the owner's ruling and returns `AnswerResponse` |
 | GET | `/amendment/<workstream-id>/<n>` | `AmendmentResponse`: amendment `n`'s state, debate round, latest packet and its revision, and the owner's latest decision; see [amendment decisions](#amendment-decisions) |
 | POST | `/amendment/<workstream-id>/<n>` | `AmendmentDecisionRequest`: decision (`approve`, `reject`, `round` or `overrule`), optional note and the packet revision decided; returns `AmendmentResponse` |
@@ -229,7 +229,7 @@ views an event names.
 | `resync` | none | Anything may have changed | Every view |
 | `workstream` | `project`, `workstream` | A change in the workstream's trace: its state, status, units, agents, gates or questions | `/status`, `/status/<id>` |
 | `conversation` | `project`, `workstream` | A message to or a turn of the workstream's chief of staff | `/conversation/<id>` |
-| `inbox` | `project`, `workstream` | A question of the workstream asked, escalated, ruled or answered, or another workflow transition, which can abandon the workstream | `/inbox` |
+| `inbox` | `project`, `workstream` | A question of the workstream asked, escalated, ruled or answered, a workflow transition, which can open or close a decision or abandon the workstream, or a recorded document, such as a packet, a final report or the owner's decision | `/inbox` |
 | `runtime` | none | A pause, priority, profile override or provider limit set or cleared, by the owner or by the service | `/runtime`, `/status` |
 | `config` | none | A reload, successful or failed | `/config` |
 | `spend` | `project` when one is configured | A recorded cost, or a reload, which can change the daily limit | `/status` |
@@ -2447,24 +2447,43 @@ workstream or project.
 
 ## Inbox and rulings
 
-`GET /v1/inbox` returns an `InboxResponse`: `entries`, every escalation of the
-active project whose questions are still `escalated`, ordered by inbox number.
-Questions the chief of staff escalated as one batch are one entry. An
-escalation of an abandoned workstream is left out. Without a configured
-project, or without a trace, `entries` is empty. A trace that cannot be read
-returns `internal`.
+`GET /v1/inbox` returns an `InboxResponse`: `entries`, every owner decision
+of the active project that waits for the owner, oldest first by `opened_at`.
+Every entry names the existing endpoint that answers it; answering records
+what that endpoint records, and the entry leaves the list once the decision is
+taken or the record it was presented on is superseded. Decisions of an
+abandoned workstream are left out. Without a configured project, or without a
+trace, `entries` is empty. A trace that cannot be read, or a delivery
+presentation that fails with `internal`, returns `internal`.
+
+| `kind` | Listed while | Answered with |
+| --- | --- | --- |
+| `escalation` | Questions the chief of staff escalated as one batch are still `escalated` | `POST /v1/inbox/<number>`, described below |
+| `ratification` | The workstream is `in-shed` or `sketched`, its latest [packet](#the-packet) is for the round whose debate concluded or was skipped, and no ratification of that round records the packet's revisions | [`POST /v1/ratify/<workstream-id>`](#ratifying) |
+| `contested` | A unit is `contested` and has no [ruling](#reviewing-a-unit) for its contest yet | `POST /v1/contested/<workstream-id>/<unit-id>` |
+| `amendment` | The workstream is `building` or `assembled` and the amendment is `presented` | [`POST /v1/amendment/<workstream-id>/<n>`](#amendment-decisions) |
+| `delivery` | The workstream is `assembled`, its [final report](#owner-delivery-approval) is current and has no gap, and no approval of it stands or the publication of the latest was refused | [`POST /v1/delivery/<workstream-id>`](#owner-delivery-approval) |
+
+A packet or amendment revision is listed only while it is the latest, so a
+superseded revision never appears; an amendment the owner sends back to
+debate leaves the list until its next packet is presented.
 
 | Field | Meaning |
 | --- | --- |
-| `number` | The inbox number `POST /v1/inbox/<number>` accepts. The trace assigns it when the questions are escalated, counting the project's escalations from 1, and never reuses it |
-| `workstream`, `batch` | The workstream and the escalation's batch ID in it |
-| `question` | The chief of staff's rephrasing for the owner |
-| `blocked` | What waits on the ruling |
-| `options` | The choices, possibly none |
-| `recommendation` | What the chief of staff would decide |
+| `kind` | One of the kinds above |
+| `workstream` | The workstream the decision is about |
+| `number`, `batch` | An escalation's inbox number, which `POST /v1/inbox/<number>` accepts, and its batch ID. The trace assigns the number when the questions are escalated, counting the project's escalations from 1, and never reuses it. `0` and empty for other kinds |
+| `unit` | The contested unit, or the unit an amendment was filed from; empty otherwise |
+| `amendment` | The amendment number; empty for other kinds |
+| `revision` | The revision the decision is taken on: the ratification or amendment packet's revision, or the final report's revision; `0` for escalations and contested units |
+| `question` | The chief of staff's rephrasing of an escalation; for the other kinds, the service's statement of the decision from its record: the revisions to ratify and why debate ended, the contest's recorded reason, the amendment's change and reason, or the final review and commit to deliver |
+| `blocked` | What waits on the decision |
+| `options` | An escalation's choices, possibly none; for the other kinds, the `decision` values the answering endpoint accepts now, possibly none: `ratify` while no objection blocks the packet, and none while one does; `review` and `revise`, or only `review` after a failed review turn and only `revise` after a mason contest; `approve` while nothing blocks and the seal is unchanged, `overrule` while an objection stands and the seal is unchanged, `reject`, and `round` below `shed.max_rounds`; or `approve` for delivery |
+| `recommendation` | What the chief of staff would decide on an escalation, or the packet's recommendation; empty for contested units and deliveries, which record none |
 | `quick_reply` | The exact recommendation when this is an escalated question eligible for one-tap acceptance; otherwise an empty string |
-| `escalated_at` | When the questions were escalated |
-| `asked` | Each question of the batch in the order it was escalated: `id`, `asked_by` (the asking agent), `unit` when the asking turn had one, and `question` as asked |
+| `opened_at` | When the questions were escalated, the listed packet revision or final report was recorded, or the unit became contested |
+| `asked` | Each question of an escalation in the order it was escalated: `id`, `asked_by` (the asking agent), `unit` when the asking turn had one, and `question` as asked; empty for other kinds |
+| `answer` | `method` and `path` of the answering endpoint, and `body`, the request fields that pin what the owner read: nothing for an escalation or a contested unit, `spec` and `plan` for a ratification, `packet` for an amendment, and `review`, `review_revision`, `commit` and `draft_hash` for a delivery. The client adds the endpoint's decision fields |
 
 `POST /v1/inbox/<number>` takes an `AnswerRequest`, `text`, and records it as
 the owner's ruling on that entry. One commit holds revision 1 of the ruling of

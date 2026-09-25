@@ -612,8 +612,16 @@ func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
 	if err != nil || !slices.Contains(status.Gates, trace.OwnerGate{Kind: UnitContested, Reference: "resume"}) {
 		t.Fatalf("contested gate: %+v %v", status.Gates, err)
 	}
+	if entries := f.inboxEntries(t, stream, InboxContested); len(entries) != 1 || entries[0].Unit != "resume" || !slices.Equal(entries[0].Options, []string{"review", "revise"}) ||
+		entries[0].Answer.Path != "/v1/contested/"+string(stream)+"/resume" {
+		t.Fatalf("inbox entries of the contested unit %+v", entries)
+	}
 	if _, err := f.c.RuleContested(context.Background(), stream, "resume", "review", "Check the candidate once more"); err != nil {
 		t.Fatal(err)
+	}
+	// The ruled unit leaves the inbox, whether or not it has resumed yet.
+	if entries := f.inboxEntries(t, stream, InboxContested); len(entries) != 0 {
+		t.Fatalf("inbox entries after the ruling %+v", entries)
 	}
 	if _, err := f.c.RuleContested(context.Background(), stream, "resume", "review", "Decide twice"); err == nil {
 		t.Fatal("accepted duplicate ruling")

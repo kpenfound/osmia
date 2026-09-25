@@ -399,7 +399,7 @@ func (c *Client) Conversation(ctx context.Context, id config.WorkstreamID) (Conv
 	return v, err
 }
 
-// Inbox lists the escalations waiting for the owner's ruling.
+// Inbox lists every owner decision waiting for the owner.
 func (c *Client) Inbox(ctx context.Context) (InboxResponse, error) {
 	var v InboxResponse
 	err := c.Do(ctx, "GET", Prefix+"/inbox", nil, &v)

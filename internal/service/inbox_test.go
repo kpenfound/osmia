@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -16,10 +19,13 @@ import (
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/envelope"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -220,8 +226,8 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	if batch.Workstream != stream {
 		batch, single = single, batch
 	}
-	wantBatch := InboxEntry{Number: batch.Number, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format part of the contract?", Blocked: "The upload unit and its review.",
-		Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", EscalatedAt: f.clock.Now(),
+	wantBatch := InboxEntry{Kind: InboxEscalation, Number: batch.Number, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format part of the contract?", Blocked: "The upload unit and its review.",
+		Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", OpenedAt: f.clock.Now(), Answer: InboxAnswer{Method: "POST", Path: "/v1/inbox/" + strconv.Itoa(batch.Number), Body: map[string]any{}},
 		Asked: []InboxQuestion{{ID: "1", AskedBy: demoAgent, Question: "Where does state live?"}, {ID: "2", AskedBy: "agent_reviewer", Question: "Is the log format fixed?"}}}
 	// The two askers run in one pass, in either order.
 	if batch.Asked[0].Question != "Where does state live?" {
@@ -451,7 +457,7 @@ func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
 	must(t, err)
 
 	s := &Service{cfg: cfg, active: &activeProject{repository: repo}, options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}}
-	inbox, api := s.inbox()
+	inbox, api := s.inbox(ctx)
 	if api != nil || len(inbox.Entries) != 1 || inbox.Entries[0].Number != 2 || inbox.Entries[0].Workstream != quiet {
 		t.Fatalf("inbox: %+v %v", inbox, api)
 	}
@@ -467,7 +473,7 @@ func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
 	}
 
 	idle := &Service{cfg: cfg}
-	if inbox, api := idle.inbox(); api != nil || inbox.Entries == nil || len(inbox.Entries) != 0 {
+	if inbox, api := idle.inbox(ctx); api != nil || inbox.Entries == nil || len(inbox.Entries) != 0 {
 		t.Fatalf("inbox without a trace: %+v %v", inbox, api)
 	}
 	if _, api := idle.answer(ctx, "1", AnswerRequest{Text: "In files."}); api == nil || api.Code != Validation || api.Message != "there is no inbox entry 1; list the entries with osmia inbox" {
@@ -481,4 +487,221 @@ func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
 	}
 	_, err = c.Answer(ctx, 1, "In files.")
 	apiError(t, err, NoProject, "no project is configured; add one with osmia project add")
+}
+
+// One trace holds an open decision of every kind. The inbox lists each once,
+// oldest first, with the endpoint and identity that answer it; answering
+// through those endpoints, superseding what was presented and abandoning a
+// workstream each take the entry out.
+func TestInboxListsEveryOpenDecision(t *testing.T) {
+	t.Parallel()
+	f, assembled, repository, report := deliveryFixture(t)
+	defer repository.Close()
+	ctx := context.Background()
+	p := repository.Project()
+	at := time.Now().UTC().Add(time.Minute)
+	tick := func(n int) time.Time { return at.Add(time.Duration(n) * time.Second) }
+	if state, err := repository.Workflow(assembled, trace.FeatureSubject); err != nil || state.Value != AssembledState {
+		t.Fatalf("fixture workstream: %+v %v", state, err)
+	}
+	escalating, shedding, contesting := config.WorkstreamID("w_"+strings.Repeat("1", 32)), config.WorkstreamID("w_"+strings.Repeat("2", 32)), config.WorkstreamID("w_"+strings.Repeat("3", 32))
+	skipping := config.WorkstreamID("w_" + strings.Repeat("4", 32))
+	for _, ws := range []config.WorkstreamID{escalating, shedding, contesting, skipping} {
+		must(t, repository.CreateWorkstream(ctx, ws, at, ownerActor))
+	}
+	header := func(ws config.WorkstreamID, schema, id string, when time.Time, actor trace.Actor) trace.Header {
+		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1, Project: p, Workstream: ws, At: when, Actor: actor, Cause: "test"}
+	}
+	move := func(ws config.WorkstreamID, subject, id, to string, when time.Time, actor trace.Actor, docs ...trace.Document) {
+		t.Helper()
+		state, err := repository.Workflow(ws, subject)
+		must(t, err)
+		h := header(ws, "osmia.trace.transition", id, when, actor)
+		tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: to, Reason: "moved to " + to}}
+		if len(docs) > 0 {
+			_, err = repository.RecordDocumentsWith(ctx, docs, tx)
+		} else {
+			_, err = repository.Transact(ctx, tx)
+		}
+		must(t, err)
+	}
+	claim := func(ws config.WorkstreamID, agent, thread, turn string) coreadapter.Scope {
+		t.Helper()
+		h := header(ws, "osmia.trace.turn-request", "request_"+turn, at, ownerActor)
+		_, err := repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: agent, ThreadID: thread, TurnID: turn, Profile: coreadapter.Profile{Name: "other", Backend: "codex", Model: "other"}, Prompt: "Work"})
+		must(t, err)
+		_, err = repository.ClaimTurn(ctx, ws, agent, "token_"+turn, filepath.Join(t.TempDir(), turn), at)
+		must(t, err)
+		th, err := repository.Thread(ws, agent)
+		must(t, err)
+		return coreadapter.Scope{Project: string(p), Workstream: string(ws), Thread: thread, Turn: turn, Role: th.Identity.Role}
+	}
+
+	// An escalated question.
+	must(t, repository.CreateThread(ctx, trace.Agent{Header: header(escalating, "osmia.trace.agent", demoAgent, at, ownerActor), Role: demoRole, ThreadID: demoThread}))
+	_, err := repository.Ask(ctx, demoAgent, claim(escalating, demoAgent, demoThread, "build"), "Where does state live?", tick(1))
+	must(t, err)
+	_, err = repository.EscalateQuestions(ctx, trace.ChiefOfStaff, claim(escalating, trace.ChiefOfStaff, trace.ChiefOfStaff, "events"),
+		trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Where should state live?", Blocked: "The unit.", Options: []string{"Files", "A database"}, Recommendation: "In files."}, tick(1))
+	must(t, err)
+
+	// A ratification packet whose first revision a second supersedes.
+	_, err = repository.SetFeatureState(ctx, header(shedding, "osmia.trace.transition", "in-shed", tick(2), ownerActor), InShedState, "handed in")
+	must(t, err)
+	move(shedding, shedSubject, "shed-concluded-1", "concluded-1", tick(2), shedActor)
+	packetOf := func(ws config.WorkstreamID, skipped bool, round, revision int, recommendation string, when time.Time) trace.Document {
+		content, err := shed.EncodePacket(shed.Packet{Version: shed.Version, Round: round, Revision: shed.Pin{Spec: 1, Plan: round}, Skipped: skipped, Conclusion: "no objection stands", Dissent: []shed.Entry{}, Recommendation: recommendation})
+		must(t, err)
+		h := header(ws, "osmia.trace.document", shed.PacketDocumentID(round), when, shedActor)
+		h.Revision, h.Cause = revision, "ratification-packet"
+		return trace.Document{Header: h, Path: shed.PacketPath(round), Content: string(content)}
+	}
+	packet := func(round, revision int, recommendation string, when time.Time) trace.Document {
+		return packetOf(shedding, false, round, revision, recommendation, when)
+	}
+	must(t, repository.RecordDocuments(ctx, []trace.Document{packet(1, 1, "ratify: no objection stands", tick(2))}))
+	must(t, repository.RecordDocuments(ctx, []trace.Document{packet(1, 2, "ratify: nothing blocks, and 1 objection stands as advice on the record", tick(2))}))
+
+	// The packet of a sketched workstream whose debate the owner skipped,
+	// with no round concluded.
+	skippedAt := at.Add(2500 * time.Millisecond)
+	_, err = repository.SetFeatureState(ctx, header(skipping, "osmia.trace.transition", "sketched", skippedAt, ownerActor), SketchedState, "handed in")
+	must(t, err)
+	must(t, repository.RecordDocuments(ctx, []trace.Document{packetOf(skipping, true, 1, 1, "ratify: no objection stands", skippedAt)}))
+
+	// Two contested units: one after a failed review turn, one a mason gave
+	// up on.
+	_, err = repository.SetFeatureState(ctx, header(contesting, "osmia.trace.transition", "building", tick(3), ownerActor), BuildingState, "sealed")
+	must(t, err)
+	move(contesting, trace.UnitSubject("resume"), "resume-reviewing", UnitReviewing, tick(3), foremanActor)
+	move(contesting, trace.UnitSubject("resume"), "resume-contested", UnitContested, tick(3), reviewerActor)
+	move(contesting, trace.UnitSubject("index"), "index-implementing", UnitImplementing, tick(4), foremanActor)
+	move(contesting, trace.UnitSubject("index"), "index-contested", UnitContested, tick(4), masonActor)
+
+	// A presented amendment in the assembled workstream.
+	sealed, sealDoc, _, err := seal.Latest(repository, assembled)
+	must(t, err)
+	_, err = repository.FileBudgetAmendment(ctx, assembled, trace.AmendmentRequest{Citations: []string{"spec#1"}, Change: "Raise the per-unit budget.", Reason: "The upload unit needs more turns.", Seal: sealed.Seal, SealRevision: sealDoc.Revision, SpecHash: sealed.SpecHash}, tick(5))
+	must(t, err)
+	amendmentPacket := trace.Document{Header: header(assembled, "osmia.trace.document", "amendment-1-presented-packet", tick(5), shedActor), Path: amendmentPacketPath("1"), Content: `{"round":1,"recommendation":"approve: no objection stands"}` + "\n"}
+	move(assembled, amendmentSubject("1"), "amendment-1-presented", amendmentPresented, tick(5), shedActor, amendmentPacket)
+
+	presented, api := f.s.deliveryPresentation(ctx, string(assembled))
+	if api != nil {
+		t.Fatal(api)
+	}
+	body := func(kv ...any) map[string]any {
+		out := map[string]any{}
+		for i := 0; i < len(kv); i += 2 {
+			out[kv[i].(string)] = kv[i+1]
+		}
+		return out
+	}
+	answer := func(path string, kv ...any) InboxAnswer {
+		return InboxAnswer{Method: "POST", Path: "/v1/" + path, Body: body(kv...)}
+	}
+	reviewed := streamDocuments(t, repository, assembled, finalReportDocument)[0]
+	delivery := InboxEntry{Kind: InboxDelivery, Workstream: assembled, Revision: 1, OpenedAt: reviewed.At, Options: []string{"approve"}, Asked: []InboxQuestion{},
+		Question: fmt.Sprintf("Deliver Resumable uploads? Final review 1 of commit %s shows evidence for every criterion.", report.Commit), Blocked: "Publishing the pull request.",
+		Answer: answer("delivery/"+string(assembled), "review", 1, "review_revision", 1, "commit", report.Commit, "draft_hash", presented.DraftHash)}
+	escalation := InboxEntry{Kind: InboxEscalation, Workstream: escalating, Number: 1, Batch: "escalation_1", Question: "Where should state live?", Blocked: "The unit.", Options: []string{"Files", "A database"},
+		Recommendation: "In files.", QuickReply: "In files.", OpenedAt: tick(1), Asked: []InboxQuestion{{ID: "1", AskedBy: demoAgent, Question: "Where does state live?"}}, Answer: answer("inbox/1")}
+	ratification := InboxEntry{Kind: InboxRatification, Workstream: shedding, Revision: 2, OpenedAt: tick(2), Options: []string{"ratify"}, Asked: []InboxQuestion{},
+		Question: "Ratify spec.md revision 1 and plan.json revision 1? Debate ended after round 1: no objection stands", Blocked: "Sealing the spec and plan, and building the workstream.",
+		Recommendation: "ratify: nothing blocks, and 1 objection stands as advice on the record", Answer: answer("ratify/"+string(shedding), "spec", 1, "plan", 1)}
+	skipped := InboxEntry{Kind: InboxRatification, Workstream: skipping, Revision: 1, OpenedAt: skippedAt, Options: []string{"ratify"}, Asked: []InboxQuestion{},
+		Question: "Ratify spec.md revision 1 and plan.json revision 1? Debate was skipped: no objection stands", Blocked: "Sealing the spec and plan, and building the workstream.",
+		Recommendation: "ratify: no objection stands", Answer: answer("ratify/"+string(skipping), "spec", 1, "plan", 1)}
+	failedTurn := InboxEntry{Kind: InboxContested, Workstream: contesting, Unit: "resume", OpenedAt: tick(3), Options: []string{"review"}, Asked: []InboxQuestion{},
+		Question: "Unit resume is contested: moved to contested", Blocked: "Unit resume.", Answer: answer("contested/" + string(contesting) + "/resume")}
+	gaveUp := InboxEntry{Kind: InboxContested, Workstream: contesting, Unit: "index", OpenedAt: tick(4), Options: []string{"revise"}, Asked: []InboxQuestion{},
+		Question: "Unit index is contested: moved to contested", Blocked: "Unit index.", Answer: answer("contested/" + string(contesting) + "/index")}
+	amendment := InboxEntry{Kind: InboxAmendment, Workstream: assembled, Amendment: "1", Revision: 1, OpenedAt: tick(5), Options: []string{AmendmentApprove, AmendmentReject}, Asked: []InboxQuestion{},
+		Question: "Amend the sealed spec and plan after debate round 1? Change: Raise the per-unit budget. Reason: The upload unit needs more turns.", Blocked: "The sealed spec and plan stay in force until the amendment is decided.",
+		Recommendation: "approve: no objection stands", Answer: answer("amendment/"+string(assembled)+"/1", "packet", 1)}
+	expect := func(step string, want ...InboxEntry) {
+		t.Helper()
+		got, api := f.s.inbox(ctx)
+		if api != nil {
+			t.Fatalf("%s: %v", step, api)
+		}
+		if want == nil {
+			want = []InboxEntry{}
+		}
+		if !reflect.DeepEqual(got.Entries, want) {
+			t.Fatalf("%s: inbox\n%+v\nwant\n%+v", step, got.Entries, want)
+		}
+	}
+	expect("every kind open", delivery, escalation, ratification, skipped, failedTurn, gaveUp, amendment)
+
+	// Answering through each kind's own endpoint takes its entry out.
+	if _, api := f.s.answer(ctx, "1", AnswerRequest{Text: "In files."}); api != nil {
+		t.Fatal(api)
+	}
+	expect("escalation answered", delivery, ratification, skipped, failedTurn, gaveUp, amendment)
+	if _, api := f.s.ruleContested(ctx, string(contesting), "resume", ContestedRulingRequest{Decision: "review", Note: "Review it again."}); api != nil {
+		t.Fatal(api)
+	}
+	expect("contest ruled", delivery, ratification, skipped, gaveUp, amendment)
+	if _, api := f.s.decideAmendment(ctx, string(assembled), "1", AmendmentDecisionRequest{Decision: AmendmentReject, Packet: 1}); api != nil {
+		t.Fatal(api)
+	}
+	expect("amendment rejected", delivery, ratification, skipped, gaveUp)
+	if _, api := f.s.approveDelivery(ctx, string(assembled), DeliveryDecision{Review: 1, ReviewRevision: 1, Commit: report.Commit, DraftHash: presented.DraftHash}); api != nil {
+		t.Fatal(api)
+	}
+	expect("delivery approved", ratification, skipped, gaveUp)
+	// A refused publication asks for the owner's approval again.
+	if _, err := (&publisher{s: f.s, repository: repository}).refuse(ctx, assembled, publishInput{Approval: 1}, "the fork is gone"); err != nil {
+		t.Fatal(err)
+	}
+	expect("publication refused", delivery, ratification, skipped, gaveUp)
+	if _, api := f.s.approveDelivery(ctx, string(assembled), DeliveryDecision{Review: 1, ReviewRevision: 1, Commit: report.Commit, DraftHash: presented.DraftHash}); api != nil {
+		t.Fatal(api)
+	}
+	expect("delivery approved again", ratification, skipped, gaveUp)
+	// A new revision of the final report leaves the approval stale, and the
+	// owner approves the revision it names.
+	recordReport := func(revision int, when time.Time) {
+		t.Helper()
+		content, err := json.Marshal(report)
+		must(t, err)
+		h := header(assembled, "osmia.trace.document", finalReportDocument, when, finalReviewActor)
+		h.Revision, h.Cause = revision, "final-review"
+		must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: finalReportPath, Content: string(content)}}))
+	}
+	recordReport(2, tick(6))
+	delivery.Revision, delivery.OpenedAt = 2, tick(6)
+	delivery.Answer = answer("delivery/"+string(assembled), "review", 1, "review_revision", 2, "commit", report.Commit, "draft_hash", presented.DraftHash)
+	expect("final report revised", ratification, skipped, gaveUp, delivery)
+	// A final report with a gap cannot be approved.
+	report.Criteria[1].Evidence, report.Criteria[1].Gap = "", "No duplicate test"
+	recordReport(3, tick(6))
+	expect("final report with a gap", ratification, skipped, gaveUp)
+
+	// Debate that resumes leaves the packet behind; the packet of the round
+	// it concludes is open until the owner ratifies it.
+	move(shedding, shedSubject, "shed-round-2", "round-2", tick(7), shedActor)
+	expect("debate resumed", skipped, gaveUp)
+	move(shedding, shedSubject, "shed-concluded-2", "concluded-2", tick(8), shedActor)
+	must(t, repository.RecordDocuments(ctx, []trace.Document{packet(2, 1, "ratify: no objection stands", tick(8))}))
+	ratification.Revision, ratification.OpenedAt, ratification.Recommendation = 1, tick(8), "ratify: no objection stands"
+	ratification.Question = "Ratify spec.md revision 1 and plan.json revision 2? Debate ended after round 2: no objection stands"
+	ratification.Answer = answer("ratify/"+string(shedding), "spec", 1, "plan", 2)
+	expect("second round concluded", skipped, gaveUp, ratification)
+	record, err := shed.EncodeRatification(shed.Ratify(2, shed.Pin{Spec: 1, Plan: 2}, []shed.Entry{}))
+	must(t, err)
+	ratified := header(shedding, "osmia.trace.document", shed.RatificationDocumentID(2), tick(9), ownerActor)
+	must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: ratified, Path: shed.RatificationPath(2), Content: string(record)}}))
+	expect("packet ratified", skipped, gaveUp)
+	record, err = shed.EncodeRatification(shed.Ratify(1, shed.Pin{Spec: 1, Plan: 1}, []shed.Entry{}))
+	must(t, err)
+	ratified = header(skipping, "osmia.trace.document", shed.RatificationDocumentID(1), tick(9), ownerActor)
+	must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: ratified, Path: shed.RatificationPath(1), Content: string(record)}}))
+	expect("skipped packet ratified", gaveUp)
+
+	// An abandoned workstream's decisions take no answer.
+	_, err = repository.SetFeatureState(ctx, header(contesting, "osmia.trace.transition", abandonTransition, tick(10), ownerActor), AbandonedState, "gone")
+	must(t, err)
+	expect("workstream abandoned")
 }

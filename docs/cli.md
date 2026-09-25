@@ -113,13 +113,23 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   entry shows when it was sent or answered, who wrote it, its turn ID and the
   turn's state (`queued`, `running`, `done` or `failed`), then its text
   indented. It fails like `send`.
-- `inbox` lists every question the chief of staff escalated to you that has
-  no ruling, across the workstreams of the active project, oldest escalation
-  first. Questions escalated together are one entry. Each entry shows its
-  inbox number, when it was escalated, its workstream and batch, then the
-  chief of staff's rephrasing, what is blocked, the options, its
-  recommendation and each question as its asker put it. An entry of an
-  abandoned workstream is left out. Without a project or a trace the inbox is
+- `inbox` lists every owner decision waiting for you across the workstreams
+  of the active project, oldest first: escalated questions, ratification
+  packets, contested units, presented amendments and delivery approvals.
+  Questions escalated together are one entry, headed by its inbox number, when
+  it was escalated, its workstream and batch; any other entry is headed by its
+  kind, when it opened, its workstream and its unit or amendment. Each shows
+  the question (the chief of staff's rephrasing of an escalation, the
+  service's statement of any other decision), what is blocked, the options
+  (`none until what blocks it is resolved` for a ratification packet an
+  objection blocks), the recommendation when there is one and each escalated question as its asker
+  put it. Then it shows the revision the decision is taken on (the packet
+  revision and the spec and plan revisions it names, the amendment packet
+  revision, or the final review, report revision and commit) and the command
+  that answers it: `answer`, with `answer <number> --accept` when there is a
+  quick reply, `ratify`, `contested`, `amendment`, or `delivery` then
+  `approve`. Decided entries, superseded packet revisions and entries of an
+  abandoned workstream are left out. Without a project or a trace the inbox is
   empty. See [inbox and rulings](service.md#inbox-and-rulings).
 - `answer <inbox-number> <ruling>` records your ruling on an inbox entry. The
   ruling is one argument; quote it. The service records it before answering;
@@ -133,8 +143,9 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   (exit 5) and records nothing.
 - `answer <inbox-number> --accept` records the entry's eligible `quick_reply`
   as your ruling through the same path. When the entry has no eligible quick
-  reply, or the inbox does not list it because it is already ruled, belongs to
-  an abandoned workstream or does not exist, it fails with `validation`
+  reply, or the inbox lists no escalation with that number because it is
+  already ruled, belongs to an abandoned workstream or does not exist, it
+  fails with `validation`
   (exit 4), explains that you must give a ruling explicitly, and records
   nothing. A number that is not a positive integer, or a ruling given as well,
   is a usage error (exit 2). The inbox JSON response includes
