@@ -2758,8 +2758,9 @@ relayed ruling on each asker's original thread.
 
 Questions, choices and deliveries are derived from the trace on every pass. A
 restart with an open question delivers its event once the window closes and
-asks nothing again. An open question whose event turn failed, or was
-interrupted by a stop, reaches the chief of staff again in a new event turn.
+asks nothing again. An open question whose event turn failed reaches the
+chief of staff in a new event turn; a restart-interrupted turn receives a
+continuation on the same thread.
 A restart between a recorded answer and its delivery
 queues the answer turn once. An escalated question stays escalated and its
 asker stays parked until the owner rules. A restart after the owner's ruling
