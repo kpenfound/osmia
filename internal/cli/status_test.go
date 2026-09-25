@@ -356,3 +356,32 @@ func TestProjectRebaseAndDriftStatus(t *testing.T) {
 		t.Fatalf("project rebase of another project: %d %s %s", code, out, diag)
 	}
 }
+
+func TestStatusShowsTheTailnetListener(t *testing.T) {
+	var out bytes.Buffer
+	showTailnet(&out, nil)
+	showTailnet(&out, &service.TailnetStatus{State: service.TailnetUp})
+	showTailnet(&out, &service.TailnetStatus{State: service.TailnetNeedsLogin, LoginURL: "https://login.example/a/1"})
+	showTailnet(&out, &service.TailnetStatus{State: service.TailnetDown, Reason: "control unreachable"})
+	if want := "Tailnet: up\nTailnet: needs_login login=https://login.example/a/1\nTailnet: down (control unreachable)\n"; out.String() != want {
+		t.Fatalf("tailnet lines:\n%s", out.String())
+	}
+
+	// A tailnet that cannot be joined leaves the service and its status
+	// working over the socket.
+	opts := fixture(t)
+	path := opts.Config.Root + "/config.toml"
+	top, err := os.ReadFile(path)
+	must(t, err)
+	must(t, os.WriteFile(path, append(top, []byte("[listen]\ntailnet=\"osmia\"\n")...), 0600))
+	opts.JoinTailnet = func(string, string) (service.TailnetListener, error) {
+		return nil, os.ErrPermission
+	}
+	s, err := service.Start(context.Background(), opts)
+	must(t, err)
+	t.Cleanup(func() { s.Close() })
+	overview := successful(t, opts.Config.Root, "status")
+	if !strings.Contains(overview, "ready=true") || !strings.Contains(overview, "Tailnet: down (permission denied)\n") {
+		t.Fatalf("status:\n%s", overview)
+	}
+}

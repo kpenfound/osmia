@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/runtime"
 )
@@ -31,6 +32,29 @@ type fakeTailnet struct {
 	closed, left  atomic.Bool
 	mu            sync.Mutex
 	conns         []net.Conn
+	state         TailnetStatus
+}
+
+func (f *fakeTailnet) State(context.Context) TailnetStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.state.State == "" {
+		return TailnetStatus{State: TailnetUp}
+	}
+	return f.state
+}
+
+func (f *fakeTailnet) setState(state TailnetStatus) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.state = state
+}
+
+// drop takes the tailnet away under the service: accepting fails and the
+// connections it accepted end.
+func (f *fakeTailnet) drop() {
+	f.Close()
+	f.Leave()
 }
 
 func (f *fakeTailnet) Names(context.Context) []string { return f.names }
@@ -233,36 +257,187 @@ func TestReloadKeepsTheTailnetListener(t *testing.T) {
 	reloadFails(t, c, files.top, "listen.tailnet")
 }
 
-// A tailnet that cannot be joined fails startup and leaves neither the
-// socket, the web listener nor the root lock behind.
-func TestTailnetJoinFailureFailsStartup(t *testing.T) {
+// A tailnet that cannot be joined at startup leaves the service running with
+// its socket and web listener, reports the tailnet down with the reason, and
+// joins once the tailnet is reachable.
+func TestTailnetJoinFailureDoesNotFailStartup(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
 	opts := fixture(t)
-	reserved, err := net.Listen("tcp", "127.0.0.1:0")
+	opts.TailnetRetry = 10 * time.Millisecond
+	withListen(t, opts, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
+	var unreachable atomic.Bool
+	unreachable.Store(true)
+	var joined atomic.Pointer[fakeTailnet]
+	opts.JoinTailnet = func(hostname, dir string) (TailnetListener, error) {
+		if unreachable.Load() {
+			return nil, errors.New("control server unreachable")
+		}
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return nil, err
+		}
+		node := &fakeTailnet{Listener: l, hostname: hostname, dir: dir}
+		joined.Store(node)
+		return node, nil
+	}
+	s, c := start(t, opts)
+	if s.TailnetAddr() != "" {
+		t.Fatalf("tailnet address while down: %s", s.TailnetAddr())
+	}
+	want := TailnetStatus{State: TailnetDown, Reason: "control server unreachable"}
+	h, err := c.Health(ctx)
 	must(t, err)
-	web := reserved.Addr().String()
-	must(t, reserved.Close())
-	withListen(t, opts, "web = \""+web+"\"\ntailnet = \"osmia\"\n")
-	opts.JoinTailnet = func(string, string) (TailnetListener, error) {
-		return nil, errors.New("control server unreachable")
+	if !h.Ready || !reflect.DeepEqual(h.Tailnet, &want) {
+		t.Fatalf("health: %+v", h)
 	}
-	s, err := Start(context.Background(), opts)
-	if err == nil {
-		s.Close()
-		t.Fatal("started without joining the tailnet")
+	st, err := c.Statuses(ctx)
+	must(t, err)
+	cfg, err := c.Configuration(ctx)
+	must(t, err)
+	if !reflect.DeepEqual(st.Tailnet, &want) || !reflect.DeepEqual(cfg.Tailnet, &want) {
+		t.Fatalf("status %+v, config %+v", st.Tailnet, cfg.Tailnet)
 	}
-	if !strings.Contains(err.Error(), "listen.tailnet") || !strings.Contains(err.Error(), "control server unreachable") {
-		t.Fatalf("join error: %v", err)
+	if code, body := exchange(t, webHTTP(), "GET", "http://"+s.WebAddr()+Prefix+"/health", "", "", ""); code != 200 {
+		t.Fatalf("web while the tailnet is down: %d %s", code, body)
 	}
-	if _, err := os.Lstat(filepath.Join(opts.Config.Root, "osmia.sock")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("socket left after failed startup: %v", err)
+
+	unreachable.Store(false)
+	eventually(t, "tailnet never joined", func() bool { return joined.Load() != nil && s.TailnetAddr() != "" })
+	if code, body := exchange(t, webHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", "osmia"); code != 200 {
+		t.Fatalf("tailnet after joining: %d %s", code, body)
 	}
-	// Starting again on the same web address fails if the first attempt
-	// left its listener bound.
-	withTailnet(t, &opts)
-	s, _ = start(t, opts)
-	if s.WebAddr() != web {
-		t.Fatalf("web listener bound %s, configured %s", s.WebAddr(), web)
+	h, err = c.Health(ctx)
+	must(t, err)
+	if h.Tailnet == nil || h.Tailnet.State != TailnetUp {
+		t.Fatalf("health after joining: %+v", h.Tailnet)
+	}
+}
+
+// A tailnet that drops while the service runs leaves the socket, the web
+// listener and requests in flight alone, is reported down, and returns when
+// the tailnet does.
+func TestTailnetDropKeepsServingAndRejoins(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	opts := fixture(t)
+	opts.TailnetRetry = 10 * time.Millisecond
+	withListen(t, opts, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
+	var mu sync.Mutex
+	var nodes []*fakeTailnet
+	var unreachable atomic.Bool
+	opts.JoinTailnet = func(hostname, dir string) (TailnetListener, error) {
+		if unreachable.Load() {
+			return nil, errors.New("no route to control")
+		}
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return nil, err
+		}
+		node := &fakeTailnet{Listener: l, hostname: hostname, dir: dir}
+		mu.Lock()
+		nodes = append(nodes, node)
+		mu.Unlock()
+		return node, nil
+	}
+	s, c := start(t, opts)
+	first := nodes[0]
+
+	// A request already accepted over the web listener survives the drop.
+	conn, err := net.Dial("tcp", s.WebAddr())
+	must(t, err)
+	defer conn.Close()
+	body := `{"role":"mason","profile":"other"}`
+	_, err = fmt.Fprintf(conn, "PUT /v1/runtime/profile HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nExpect: 100-continue\r\nContent-Length: %d\r\n\r\n", len(body))
+	must(t, err)
+	reader := bufio.NewReader(conn)
+	interim, err := http.ReadResponse(reader, nil)
+	must(t, err)
+	if interim.StatusCode != 100 {
+		t.Fatal(interim.StatusCode)
+	}
+
+	unreachable.Store(true)
+	first.drop()
+	eventually(t, "tailnet never reported down", func() bool {
+		h, err := c.Health(ctx)
+		return err == nil && h.Tailnet != nil && h.Tailnet.State == TailnetDown
+	})
+	h, err := c.Health(ctx)
+	must(t, err)
+	if !h.Ready || !strings.Contains(h.Tailnet.Reason, "no route to control") && !strings.Contains(h.Tailnet.Reason, "tailnet listener stopped") {
+		t.Fatalf("health during the outage: %+v", h)
+	}
+	if s.TailnetAddr() != "" {
+		t.Fatalf("tailnet address during the outage: %s", s.TailnetAddr())
+	}
+	if code, body := exchange(t, webHTTP(), "GET", "http://"+s.WebAddr()+Prefix+"/health", "", "", ""); code != 200 {
+		t.Fatalf("web during the outage: %d %s", code, body)
+	}
+	_, err = io.WriteString(conn, body)
+	must(t, err)
+	resp, err := http.ReadResponse(reader, nil)
+	must(t, err)
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("in-flight request during the outage: %d", resp.StatusCode)
+	}
+
+	unreachable.Store(false)
+	eventually(t, "tailnet never rejoined", func() bool { return s.TailnetAddr() != "" })
+	if code, body := exchange(t, webHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", "osmia"); code != 200 {
+		t.Fatalf("tailnet after the outage: %d %s", code, body)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(nodes) != 2 || !first.left.Load() {
+		t.Fatalf("nodes %d, dropped node left %v", len(nodes), first.left.Load())
+	}
+}
+
+// The listener reports the node's own state: connecting, waiting for login
+// with the login URL, and up.
+func TestTailnetReportsTheNodeState(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	opts := fixture(t)
+	withListen(t, opts, "tailnet = \"osmia\"\n")
+	joined := withTailnet(t, &opts)
+	_, c := start(t, opts)
+	node := *joined
+	for _, want := range []TailnetStatus{
+		{State: TailnetConnecting},
+		{State: TailnetNeedsLogin, LoginURL: "https://login.tailscale.com/a/abc"},
+		{State: TailnetNeedsLogin},
+		{State: TailnetUp},
+	} {
+		node.setState(want)
+		h, err := c.Health(ctx)
+		must(t, err)
+		st, err := c.Statuses(ctx)
+		must(t, err)
+		cfg, err := c.Configuration(ctx)
+		must(t, err)
+		for _, got := range []*TailnetStatus{h.Tailnet, st.Tailnet, cfg.Tailnet} {
+			if !reflect.DeepEqual(got, &want) {
+				t.Fatalf("reported %+v, want %+v", got, want)
+			}
+		}
+	}
+}
+
+// Without listen.tailnet no response mentions the tailnet.
+func TestTailnetStatusOmittedWithoutTailnet(t *testing.T) {
+	t.Parallel()
+	_, c := start(t, fixture(t))
+	h, err := c.Health(context.Background())
+	must(t, err)
+	st, err := c.Statuses(context.Background())
+	must(t, err)
+	cfg, err := c.Configuration(context.Background())
+	must(t, err)
+	if h.Tailnet != nil || st.Tailnet != nil || cfg.Tailnet != nil {
+		t.Fatalf("tailnet reported without listen.tailnet: %+v %+v %+v", h.Tailnet, st.Tailnet, cfg.Tailnet)
 	}
 }
 

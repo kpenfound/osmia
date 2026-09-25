@@ -7,7 +7,7 @@ its context is cancelled.
 `RunSignals` also handles SIGINT and SIGTERM. Both run in the foreground and wait
 for cleanup. Embedders can use `Start`, `Socket`, `WebAddr`, `TailnetAddr`, `Wait` and
 `Close`; a successful `Start` means the stores are loaded, the socket and any
-web listener are bound, and any tailnet listener is listening. No models or
+web listener are bound, and a tailnet listener is listening when the tailnet was reachable (see [tailnet state](#tailnet-state)). No models or
 authentication service are started. Agent turns run only when
 an embedder supplies a turn reconciler (see below).
 
@@ -76,12 +76,30 @@ such as its MagicDNS name, which refuses DNS rebinding; requests other than
 `GET` and `HEAD` must send `Content-Type: application/json`. A refused request
 gets `forbidden`.
 
-Joining is part of startup: an error from the node, such as an unusable state
-directory, is a startup error that names `listen.tailnet`, and startup then
-removes the socket and closes the web listener. A node waiting for login does
-not fail startup. Shutdown stops accepting on the tailnet listener like the
-others and leaves the tailnet only after accepted requests have drained, so a
-request in flight over the tailnet finishes within the shutdown grace period.
+The tailnet never takes the service down. A node that cannot join at startup,
+whether for a missing auth key, a pending login, an unreachable control server
+or an unusable state directory, leaves `osmia serve` running: the socket, any
+web listener and the scheduler serve as usual, and the service tries to join
+again every `Options.TailnetRetry` (5 seconds by default). A tailnet that drops
+while the service runs, so that its listener stops accepting, is left and
+joined again the same way; requests in flight on the other listeners carry on.
+The local CLI keeps working over the socket throughout. Shutdown stops
+accepting on the tailnet listener like the others and leaves the tailnet only
+after accepted requests have drained, so a request in flight over the tailnet
+finishes within the shutdown grace period.
+
+### Tailnet state
+
+`GET /v1/health`, `GET /v1/status` and `GET /v1/config` carry a `tailnet`
+object when `listen.tailnet` is set, and omit it otherwise. `osmia status`
+prints it as a `Tailnet:` line, and `osmia status --json` includes it.
+
+| `state` | Meaning |
+|---|---|
+| `up` | The node is on the tailnet and the listener serves. |
+| `connecting` | The node is starting or reaching the control server. |
+| `needs_login` | The node must be approved. `login_url` holds the address to open when Tailscale gives one; `reason` says so when the node awaits approval by a tailnet admin instead. |
+| `down` | There is no working node. `reason` says why, such as the error from the last join or that the listener stopped. |
 
 ## Contract
 

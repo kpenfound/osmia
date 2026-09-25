@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"net"
 	"net/http"
@@ -89,6 +90,10 @@ type Options struct {
 	// JoinTailnet joins the owner's tailnet when listen.tailnet is set. It
 	// defaults to embedded Tailscale.
 	JoinTailnet JoinTailnet
+	// TailnetRetry is how long the service waits before it joins the tailnet
+	// again after a failed join or a dropped listener. It defaults to 5
+	// seconds.
+	TailnetRetry time.Duration
 	// Location is the service host's time zone, whose calendar days the daily
 	// budget counts. It defaults to the host's local time zone.
 	Location *time.Location
@@ -108,30 +113,32 @@ type activeProject struct {
 }
 
 type Service struct {
-	mu         sync.Mutex // guards cfg, active, pending and reloadErr
-	cfg        *config.Config
-	active     *activeProject
-	pending    error
-	reloadErr  *ReloadError
-	projectMu  sync.Mutex // serializes project registration, removal and reload
-	handInMu   sync.Mutex // serializes hand-ins
-	turns      runningTurns
-	options    Options
-	store      *runtime.Store
-	lock       *os.File
-	listener   *net.UnixListener
-	web        net.Listener    // nil unless listen.web is configured
-	tailnet    TailnetListener // nil unless listen.tailnet is configured
-	socketInfo os.FileInfo
-	server     *http.Server
-	lifetime   context.Context
-	cancel     context.CancelFunc
-	failures   chan error
-	done       chan struct{}
-	err        error
-	ready      atomic.Bool
-	requests   sync.WaitGroup
-	boundary   func(string) error
+	mu        sync.Mutex // guards cfg, active, pending and reloadErr
+	cfg       *config.Config
+	active    *activeProject
+	pending   error
+	reloadErr *ReloadError
+	projectMu sync.Mutex // serializes project registration, removal and reload
+	handInMu  sync.Mutex // serializes hand-ins
+	turns     runningTurns
+	options   Options
+	store     *runtime.Store
+	lock      *os.File
+	listener  *net.UnixListener
+	web       net.Listener // nil unless listen.web is configured
+	tailnet   *tailnetLink // nil unless listen.tailnet is configured
+	// tailnetDone closes when the tailnet supervisor has stopped.
+	tailnetDone chan struct{}
+	socketInfo  os.FileInfo
+	server      *http.Server
+	lifetime    context.Context
+	cancel      context.CancelFunc
+	failures    chan error
+	done        chan struct{}
+	err         error
+	ready       atomic.Bool
+	requests    sync.WaitGroup
+	boundary    func(string) error
 	// hub carries change notifications to the client event stream.
 	hub *hub
 	// driftAsked is set once an owner's drift rebase request is recorded,
@@ -240,13 +247,13 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 	}
 	if cfg.Listen.Tailnet != "" {
-		if s.tailnet, err = s.joinTailnet(root, cfg.Listen.Tailnet); err != nil {
-			s.cleanupSocket()
-			return nil, fmt.Errorf("join listen.tailnet %s: %w", cfg.Listen.Tailnet, err)
-		}
+		s.tailnet, s.tailnetDone = &tailnetLink{}, make(chan struct{})
 	}
 	if opts.ShutdownTimeout <= 0 {
 		opts.ShutdownTimeout = 5 * time.Second
+	}
+	if opts.TailnetRetry <= 0 {
+		opts.TailnetRetry = 5 * time.Second
 	}
 	if opts.ReadHeaderTimeout <= 0 {
 		opts.ReadHeaderTimeout = 5 * time.Second
@@ -258,6 +265,16 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		opts.WriteTimeout = 10 * time.Second
 	}
 	s.options = opts
+	if s.tailnet != nil {
+		// A first join that fails leaves the tailnet down for the supervisor
+		// to retry; it never fails startup.
+		if node, err := s.joinTailnet(root, cfg.Listen.Tailnet); err != nil {
+			s.tailnet.set(nil, err.Error())
+			log.Printf("osmia tailnet: join %s: %v; retrying in %s", cfg.Listen.Tailnet, err, opts.TailnetRetry)
+		} else {
+			s.tailnet.set(node, "")
+		}
+	}
 	if active != nil {
 		if err = s.recoverSessions(ctx, cfg, active.repository); err != nil {
 			s.cleanupSocket()
@@ -277,7 +294,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 				return
 			}
 		case tailnetListener:
-			if !tailnetAllowed(r, hostname, s.tailnet.Names) {
+			if !tailnetAllowed(r, hostname, s.tailnetNames) {
 				fail(w, Forbidden)
 				return
 			}
@@ -297,7 +314,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			listeners = append(listeners, tagged{Listener: s.web, kind: webListener})
 		}
 		if s.tailnet != nil {
-			listeners = append(listeners, tagged{Listener: s.tailnet, kind: tailnetListener})
+			go s.superviseTailnet(root, hostname)
 		}
 		served := make(chan error, len(listeners))
 		for _, l := range listeners {
@@ -323,6 +340,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 		stop()
 		s.cancel()
+		if s.tailnet != nil {
+			<-s.tailnetDone
+		}
 		for ; serving > 0; serving-- {
 			if e := <-served; !errors.Is(e, http.ErrServerClosed) {
 				s.err = errors.Join(s.err, e)
@@ -358,7 +378,10 @@ func (s *Service) TailnetAddr() string {
 	if s.tailnet == nil {
 		return ""
 	}
-	return s.tailnet.Addr().String()
+	if node := s.tailnet.current(); node != nil {
+		return node.Addr().String()
+	}
+	return ""
 }
 
 // joinTailnet joins the tailnet as hostname with the node's state in the
@@ -436,8 +459,10 @@ func (s *Service) cleanupSocket() {
 		s.web.Close()
 	}
 	if s.tailnet != nil {
-		s.tailnet.Close()
-		s.tailnet.Leave()
+		if node := s.tailnet.current(); node != nil {
+			node.Close()
+			node.Leave()
+		}
 	}
 	if info, err := os.Lstat(s.cfg.Listen.Socket); err == nil && os.SameFile(info, s.socketInfo) {
 		os.Remove(s.cfg.Listen.Socket)
