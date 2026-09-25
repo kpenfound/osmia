@@ -120,8 +120,9 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   it was escalated, its workstream and batch; any other entry is headed by its
   kind, when it opened, its workstream and its unit or amendment. Each shows
   the question (the chief of staff's rephrasing of an escalation, the
-  service's statement of any other decision), what is blocked, the options, the
-  recommendation when there is one and each escalated question as its asker
+  service's statement of any other decision), what is blocked, the options
+  (`none until what blocks it is resolved` for a ratification packet an
+  objection blocks), the recommendation when there is one and each escalated question as its asker
   put it. Then it shows the revision the decision is taken on (the packet
   revision and the spec and plan revisions it names, the amendment packet
   revision, or the final review, report revision and commit) and the command

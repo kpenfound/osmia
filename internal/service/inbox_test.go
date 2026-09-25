@@ -505,7 +505,8 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 		t.Fatalf("fixture workstream: %+v %v", state, err)
 	}
 	escalating, shedding, contesting := config.WorkstreamID("w_"+strings.Repeat("1", 32)), config.WorkstreamID("w_"+strings.Repeat("2", 32)), config.WorkstreamID("w_"+strings.Repeat("3", 32))
-	for _, ws := range []config.WorkstreamID{escalating, shedding, contesting} {
+	skipping := config.WorkstreamID("w_" + strings.Repeat("4", 32))
+	for _, ws := range []config.WorkstreamID{escalating, shedding, contesting, skipping} {
 		must(t, repository.CreateWorkstream(ctx, ws, at, ownerActor))
 	}
 	header := func(ws config.WorkstreamID, schema, id string, when time.Time, actor trace.Actor) trace.Header {
@@ -548,15 +549,25 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 	_, err = repository.SetFeatureState(ctx, header(shedding, "osmia.trace.transition", "in-shed", tick(2), ownerActor), InShedState, "handed in")
 	must(t, err)
 	move(shedding, shedSubject, "shed-concluded-1", "concluded-1", tick(2), shedActor)
-	packet := func(round, revision int, recommendation string, when time.Time) trace.Document {
-		content, err := shed.EncodePacket(shed.Packet{Version: shed.Version, Round: round, Revision: shed.Pin{Spec: 1, Plan: round}, Conclusion: "no objection stands", Dissent: []shed.Entry{}, Recommendation: recommendation})
+	packetOf := func(ws config.WorkstreamID, skipped bool, round, revision int, recommendation string, when time.Time) trace.Document {
+		content, err := shed.EncodePacket(shed.Packet{Version: shed.Version, Round: round, Revision: shed.Pin{Spec: 1, Plan: round}, Skipped: skipped, Conclusion: "no objection stands", Dissent: []shed.Entry{}, Recommendation: recommendation})
 		must(t, err)
-		h := header(shedding, "osmia.trace.document", shed.PacketDocumentID(round), when, shedActor)
+		h := header(ws, "osmia.trace.document", shed.PacketDocumentID(round), when, shedActor)
 		h.Revision, h.Cause = revision, "ratification-packet"
 		return trace.Document{Header: h, Path: shed.PacketPath(round), Content: string(content)}
 	}
+	packet := func(round, revision int, recommendation string, when time.Time) trace.Document {
+		return packetOf(shedding, false, round, revision, recommendation, when)
+	}
 	must(t, repository.RecordDocuments(ctx, []trace.Document{packet(1, 1, "ratify: no objection stands", tick(2))}))
 	must(t, repository.RecordDocuments(ctx, []trace.Document{packet(1, 2, "ratify: nothing blocks, and 1 objection stands as advice on the record", tick(2))}))
+
+	// The packet of a sketched workstream whose debate the owner skipped,
+	// with no round concluded.
+	skippedAt := at.Add(2500 * time.Millisecond)
+	_, err = repository.SetFeatureState(ctx, header(skipping, "osmia.trace.transition", "sketched", skippedAt, ownerActor), SketchedState, "handed in")
+	must(t, err)
+	must(t, repository.RecordDocuments(ctx, []trace.Document{packetOf(skipping, true, 1, 1, "ratify: no objection stands", skippedAt)}))
 
 	// Two contested units: one after a failed review turn, one a mason gave
 	// up on.
@@ -598,6 +609,9 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 	ratification := InboxEntry{Kind: InboxRatification, Workstream: shedding, Revision: 2, OpenedAt: tick(2), Options: []string{"ratify"}, Asked: []InboxQuestion{},
 		Question: "Ratify spec.md revision 1 and plan.json revision 1? Debate ended after round 1: no objection stands", Blocked: "Sealing the spec and plan, and building the workstream.",
 		Recommendation: "ratify: nothing blocks, and 1 objection stands as advice on the record", Answer: answer("ratify/"+string(shedding), "spec", 1, "plan", 1)}
+	skipped := InboxEntry{Kind: InboxRatification, Workstream: skipping, Revision: 1, OpenedAt: skippedAt, Options: []string{"ratify"}, Asked: []InboxQuestion{},
+		Question: "Ratify spec.md revision 1 and plan.json revision 1? Debate was skipped: no objection stands", Blocked: "Sealing the spec and plan, and building the workstream.",
+		Recommendation: "ratify: no objection stands", Answer: answer("ratify/"+string(skipping), "spec", 1, "plan", 1)}
 	failedTurn := InboxEntry{Kind: InboxContested, Workstream: contesting, Unit: "resume", OpenedAt: tick(3), Options: []string{"review"}, Asked: []InboxQuestion{},
 		Question: "Unit resume is contested: moved to contested", Blocked: "Unit resume.", Answer: answer("contested/" + string(contesting) + "/resume")}
 	gaveUp := InboxEntry{Kind: InboxContested, Workstream: contesting, Unit: "index", OpenedAt: tick(4), Options: []string{"revise"}, Asked: []InboxQuestion{},
@@ -618,54 +632,73 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 			t.Fatalf("%s: inbox\n%+v\nwant\n%+v", step, got.Entries, want)
 		}
 	}
-	expect("every kind open", delivery, escalation, ratification, failedTurn, gaveUp, amendment)
+	expect("every kind open", delivery, escalation, ratification, skipped, failedTurn, gaveUp, amendment)
 
 	// Answering through each kind's own endpoint takes its entry out.
 	if _, api := f.s.answer(ctx, "1", AnswerRequest{Text: "In files."}); api != nil {
 		t.Fatal(api)
 	}
-	expect("escalation answered", delivery, ratification, failedTurn, gaveUp, amendment)
+	expect("escalation answered", delivery, ratification, skipped, failedTurn, gaveUp, amendment)
 	if _, api := f.s.ruleContested(ctx, string(contesting), "resume", ContestedRulingRequest{Decision: "review", Note: "Review it again."}); api != nil {
 		t.Fatal(api)
 	}
-	expect("contest ruled", delivery, ratification, gaveUp, amendment)
+	expect("contest ruled", delivery, ratification, skipped, gaveUp, amendment)
 	if _, api := f.s.decideAmendment(ctx, string(assembled), "1", AmendmentDecisionRequest{Decision: AmendmentReject, Packet: 1}); api != nil {
 		t.Fatal(api)
 	}
-	expect("amendment rejected", delivery, ratification, gaveUp)
+	expect("amendment rejected", delivery, ratification, skipped, gaveUp)
 	if _, api := f.s.approveDelivery(ctx, string(assembled), DeliveryDecision{Review: 1, ReviewRevision: 1, Commit: report.Commit, DraftHash: presented.DraftHash}); api != nil {
 		t.Fatal(api)
 	}
-	expect("delivery approved", ratification, gaveUp)
+	expect("delivery approved", ratification, skipped, gaveUp)
 	// A refused publication asks for the owner's approval again.
 	if _, err := (&publisher{s: f.s, repository: repository}).refuse(ctx, assembled, publishInput{Approval: 1}, "the fork is gone"); err != nil {
 		t.Fatal(err)
 	}
-	expect("publication refused", delivery, ratification, gaveUp)
+	expect("publication refused", delivery, ratification, skipped, gaveUp)
+	if _, api := f.s.approveDelivery(ctx, string(assembled), DeliveryDecision{Review: 1, ReviewRevision: 1, Commit: report.Commit, DraftHash: presented.DraftHash}); api != nil {
+		t.Fatal(api)
+	}
+	expect("delivery approved again", ratification, skipped, gaveUp)
+	// A new revision of the final report leaves the approval stale, and the
+	// owner approves the revision it names.
+	recordReport := func(revision int, when time.Time) {
+		t.Helper()
+		content, err := json.Marshal(report)
+		must(t, err)
+		h := header(assembled, "osmia.trace.document", finalReportDocument, when, finalReviewActor)
+		h.Revision, h.Cause = revision, "final-review"
+		must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: finalReportPath, Content: string(content)}}))
+	}
+	recordReport(2, tick(6))
+	delivery.Revision, delivery.OpenedAt = 2, tick(6)
+	delivery.Answer = answer("delivery/"+string(assembled), "review", 1, "review_revision", 2, "commit", report.Commit, "draft_hash", presented.DraftHash)
+	expect("final report revised", ratification, skipped, gaveUp, delivery)
 	// A final report with a gap cannot be approved.
 	report.Criteria[1].Evidence, report.Criteria[1].Gap = "", "No duplicate test"
-	content, err := json.Marshal(report)
-	must(t, err)
-	gap := header(assembled, "osmia.trace.document", finalReportDocument, tick(6), finalReviewActor)
-	gap.Revision, gap.Cause = 2, "final-review"
-	must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: gap, Path: finalReportPath, Content: string(content)}}))
-	expect("final report with a gap", ratification, gaveUp)
+	recordReport(3, tick(6))
+	expect("final report with a gap", ratification, skipped, gaveUp)
 
 	// Debate that resumes leaves the packet behind; the packet of the round
 	// it concludes is open until the owner ratifies it.
 	move(shedding, shedSubject, "shed-round-2", "round-2", tick(7), shedActor)
-	expect("debate resumed", gaveUp)
+	expect("debate resumed", skipped, gaveUp)
 	move(shedding, shedSubject, "shed-concluded-2", "concluded-2", tick(8), shedActor)
 	must(t, repository.RecordDocuments(ctx, []trace.Document{packet(2, 1, "ratify: no objection stands", tick(8))}))
 	ratification.Revision, ratification.OpenedAt, ratification.Recommendation = 1, tick(8), "ratify: no objection stands"
 	ratification.Question = "Ratify spec.md revision 1 and plan.json revision 2? Debate ended after round 2: no objection stands"
 	ratification.Answer = answer("ratify/"+string(shedding), "spec", 1, "plan", 2)
-	expect("second round concluded", gaveUp, ratification)
+	expect("second round concluded", skipped, gaveUp, ratification)
 	record, err := shed.EncodeRatification(shed.Ratify(2, shed.Pin{Spec: 1, Plan: 2}, []shed.Entry{}))
 	must(t, err)
 	ratified := header(shedding, "osmia.trace.document", shed.RatificationDocumentID(2), tick(9), ownerActor)
 	must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: ratified, Path: shed.RatificationPath(2), Content: string(record)}}))
-	expect("packet ratified", gaveUp)
+	expect("packet ratified", skipped, gaveUp)
+	record, err = shed.EncodeRatification(shed.Ratify(1, shed.Pin{Spec: 1, Plan: 1}, []shed.Entry{}))
+	must(t, err)
+	ratified = header(skipping, "osmia.trace.document", shed.RatificationDocumentID(1), tick(9), ownerActor)
+	must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: ratified, Path: shed.RatificationPath(1), Content: string(record)}}))
+	expect("skipped packet ratified", gaveUp)
 
 	// An abandoned workstream's decisions take no answer.
 	_, err = repository.SetFeatureState(ctx, header(contesting, "osmia.trace.transition", abandonTransition, tick(10), ownerActor), AbandonedState, "gone")

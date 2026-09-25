@@ -99,8 +99,9 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 	if len(docs) != 1 || docs[0].Path != shed.PacketPath(1) || docs[0].Actor != shedActor || docs[0].Cause != "ratification-packet" {
 		t.Fatalf("packet documents %+v", docs)
 	}
-	// The inbox lists the packet with the revisions ratifying it pins.
-	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 1 || entries[0].Revision != 1 || entries[0].Recommendation != blocked ||
+	// The inbox lists the packet with the revisions ratifying it pins, and
+	// offers no ratification while the veto blocks it.
+	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 1 || entries[0].Revision != 1 || entries[0].Recommendation != blocked || entries[0].Options == nil || len(entries[0].Options) != 0 ||
 		!reflect.DeepEqual(entries[0].Answer, InboxAnswer{Method: "POST", Path: "/v1/ratify/" + string(stream), Body: map[string]any{"spec": 1.0, "plan": 1.0}}) {
 		t.Fatalf("inbox entries of the packet %+v", entries)
 	}
@@ -135,8 +136,8 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 	if docs := f.documents(t, stream, shed.PacketDocumentID(1)); len(docs) != 2 || docs[1].Revision != 2 {
 		t.Fatalf("packet documents after the overrule %+v", docs)
 	}
-	// The inbox lists the latest revision alone.
-	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 1 || entries[0].Revision != 2 || entries[0].Recommendation != ratifiable {
+	// The inbox lists the latest revision alone, which may be ratified.
+	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 1 || entries[0].Revision != 2 || entries[0].Recommendation != ratifiable || !slices.Equal(entries[0].Options, []string{"ratify"}) {
 		t.Fatalf("inbox entries after the overrule %+v", entries)
 	}
 	// A disposition the owner takes back, and then takes again, leaves the

@@ -129,7 +129,8 @@ func (s *Service) openDecisions(ctx context.Context, repository *trace.Repositor
 }
 
 // ratificationEntry is the workstream's ratification packet while debate
-// rests at the decision it presents and the owner has not ratified it.
+// rests at the decision it presents and the owner has not ratified it. It
+// offers ratify only while no objection blocks it.
 func ratificationEntry(repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
 	packet, doc, found, err := shed.LatestPacket(repository, stream)
 	if err != nil || !found {
@@ -149,6 +150,10 @@ func ratificationEntry(repository *trace.Repository, stream config.WorkstreamID)
 	if recorded && ratified.Round == packet.Round && ratified.Revision == packet.Revision {
 		return InboxEntry{}, false, nil
 	}
+	entries, err := Dissent(repository, stream)
+	if err != nil {
+		return InboxEntry{}, false, err
+	}
 	e := decision(InboxRatification, stream, doc.At, "/ratify/"+string(stream), map[string]any{"spec": packet.Revision.Spec, "plan": packet.Revision.Plan})
 	e.Revision = doc.Revision
 	e.Question = fmt.Sprintf("Ratify %s? Debate ended after round %d: %s", packet.Revision, packet.Round, packet.Conclusion)
@@ -156,7 +161,9 @@ func ratificationEntry(repository *trace.Repository, stream config.WorkstreamID)
 		e.Question = fmt.Sprintf("Ratify %s? Debate was skipped: %s", packet.Revision, packet.Conclusion)
 	}
 	e.Blocked = "Sealing the spec and plan, and building the workstream."
-	e.Options = []string{"ratify"}
+	if len(shed.Blocked(entries)) == 0 {
+		e.Options = []string{"ratify"}
+	}
 	e.Recommendation = packet.Recommendation
 	return e, true, nil
 }

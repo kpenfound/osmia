@@ -1145,8 +1145,10 @@ func showInbox(w io.Writer, list service.InboxResponse) {
 			for i, option := range e.Options {
 				block(fmt.Sprintf("Option %d", i+1), option)
 			}
-		} else {
+		} else if len(e.Options) > 0 {
 			block("Options", strings.Join(e.Options, ", "))
+		} else {
+			block("Options", "none until what blocks it is resolved")
 		}
 		if e.Recommendation != "" {
 			block("Recommendation", e.Recommendation)
