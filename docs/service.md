@@ -2440,7 +2440,8 @@ put back as it was and the tool call fails.
 The chief of staff has `pause` and `resume` tools for factory, project, and
 workstream scopes. Both require a turn answering an owner message. A pause
 requires a reason, accepts `soft` or `hard` mode (default `soft`), and is stored
-with source `owner` and its set time. Resume clears the requested scope's pause,
+with source `owner` and its set time. A hard pause stops the turns it covers
+([hard pause](#hard-pause)); the chief of staff's own turn keeps running. Resume clears the requested scope's pause,
 including one set by a budget or provider mechanism. A refused request returns
 `{"recorded":false,"reason":"…"}` and leaves runtime state untouched.
 
@@ -2574,12 +2575,43 @@ The gate holds a turn that a pause in `runtime.Effective` covers:
 a `factory` pause, a `project` pause on the active project, or a `workstream`
 pause on the turn's workstream. Chief-of-staff turns are never held, so the
 chief of staff stays reachable while everything is paused. A held turn gets no
-operation and stays queued; a turn already in flight is not interrupted, in
-either pause mode. The gate reads the runtime store on every pass, so after a
+operation and stays queued. A turn already in flight finishes under a soft
+pause and is stopped by a [hard pause](#hard-pause). The gate reads the runtime store on every pass, so after a
 pause is cleared the loop's next periodic pass runs the held turns with no new
 message or operation. The gate also holds every mason turn of a unit whose
 workspace does not descend from the tip of its workstream's feature branch,
 until the foreman [rebases](#rebasing-units-in-flight) the workspace onto it.
+
+### Hard pause
+
+A hard pause stops the turns it covers that are already running, as well as
+holding new ones. Setting a `hard` pause, through `PUT /runtime/pause` or the
+chief of staff's `pause` tool, stops every running thread turn of a workstream
+the pause covers: mason, reviewer, drift mason and drift reviewer turns. A turn
+operation that was dispatched before the pause and starts while it is in force
+is stopped the same way before its agent session starts. Chief-of-staff turns
+are never stopped, and turns of workstreams outside the pause keep running.
+The architect's drafts, shed and amendment rounds and final reviews run through
+their own reconcilers and are not stopped.
+
+Stopping cancels the agent session only. A mason's view is copied back into
+its workspace as after any turn, and the turn is captured and completed with
+`result.cancelled` set, status `interrupted`, no failure, and a `stop` record
+with cause `hard_pause` and the pause's scope, source and reason
+([trace](trace.md#continuation-and-bounded-replay)). The turn operation
+completes like any other turn, so nothing is retried, and a mason turn a stop
+ended gets no classification. The thread keeps its identity, its queued turns
+and the stopped session.
+
+The controllers continue a stopped turn as they continue one a service stop
+interrupted, on the same thread: the mason controller queues its
+`-recover-<sequence>` turn with the stopped turn's prompt and a note that a
+hard pause stopped it, the reviewer controller its review's
+`-recover-<sequence>` turn once the workstream is not paused, and the drift
+controller its mason's or reviewer's continuation once the drift resumes. The
+gate holds each continuation until the pause is cleared, and it then resumes
+the stopped session. A pause cleared while a stop is settling does not undo
+it: the turn still completes as stopped and its continuation runs.
 
 The scheduler also dispatches within the configured `[capacity]`. Mason
 turns use `capacity.masons`, reviewer turns use `capacity.reviewers`, and both

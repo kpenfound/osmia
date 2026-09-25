@@ -52,8 +52,9 @@ or provider mechanism may clear only a pause it set; neither can clear an owner
 pause. A pause of
 either mode holds new worker turns and unit starts in its scope, and the units
 a paused workstream has in flight take no mason slot
-([service](service.md#starting-units)). Neither mode cancels a turn that is
-already running.
+([service](service.md#starting-units)). A soft pause lets a turn that is already
+running finish; a hard pause also stops it
+([service](service.md#hard-pause)).
 
 When opening a runtime file with an `operator` pause, the store attributes it to
 the owner, supplies a reason if absent, uses the file's modification time as its

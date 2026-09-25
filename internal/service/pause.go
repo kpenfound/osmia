@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -74,7 +75,7 @@ func (c *runtimeControls) pauseControl(repository *trace.Repository, scope corea
 			if input.Mode == "" {
 				input.Mode = "soft"
 			}
-			err = s.store.SetPause(runtime.Pause{Target: target, Mode: input.Mode, Reason: input.Reason, Source: runtime.PauseOwner, SetAt: now()})
+			err = s.setPause(runtime.Pause{Target: target, Mode: input.Mode, Reason: input.Reason, Source: runtime.PauseOwner, SetAt: now()})
 		}
 		if err != nil {
 			if errors.Is(err, runtime.ErrValidation) {
@@ -87,4 +88,20 @@ func (c *runtimeControls) pauseControl(repository *trace.Repository, scope corea
 		}{true})
 	}
 	return tool
+}
+
+// setPause records the pause, then stops the running turns a hard pause in
+// force covers.
+func (s *Service) setPause(p runtime.Pause) error {
+	if err := s.store.SetPause(p); err != nil {
+		return err
+	}
+	st, _ := s.store.Effective()
+	s.turns.stop(st.Pauses)
+	return nil
+}
+
+// pauseStop is the cause with which the hard pause p stops a turn.
+func pauseStop(p runtime.Pause) *thread.Stop {
+	return &thread.Stop{TurnStop: trace.TurnStop{Cause: trace.TurnStopHardPause, Scope: p.Target.Scope, Source: p.Source, Reason: p.Reason}}
 }

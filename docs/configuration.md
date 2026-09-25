@@ -281,7 +281,7 @@ Missing values impose no cap. Unknown cost does not establish that a cap was rea
 
 The full design's `listen.tailnet`, `listen.web`, `notify`, `hearsay` and
 project `hearsay_scope` settings are rejected as unsupported
-in M1, even if supplied empty. Daily budget actions, hard pauses that stop turns in flight,
+in M1, even if supplied empty. Daily budget actions
 and live reload are M4 work, tailnet/web and notifications belong to M5, multi-project operation to M7, and
 Hearsay to M8. Unsupported keys do not silently enable later behavior.
 

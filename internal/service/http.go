@@ -493,7 +493,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(v.Reason) == "" {
 			v.Reason = "Owner requested pause"
 		}
-		err = s.store.SetPause(v)
+		err = s.setPause(v)
 	case r.Method == http.MethodDelete && r.URL.Path == Prefix+"/runtime/pause":
 		var v ClearPauseRequest
 		if !decode(w, r, &v) {
