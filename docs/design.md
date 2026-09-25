@@ -363,6 +363,8 @@ A profile names an agent binary, model, effort, optional fallback profile, timeo
 
 When the service sees a provider's usage limit, the role falls to its profile's fallback automatically and the status says so. A manual override wins either way.
 
+Provider limits persist in `runtime.json` by agent backend. New turns of roles bound to a limited backend use the first profile in their fallback chain with an available backend. A role with no available fallback is paused with provider attribution. A reported reset time releases the limit when it passes; the owner can also clear a limit with `osmia profiles clear-limit <backend>`. A limit without a reset time remains until cleared. An owner profile override takes precedence while a limit is active.
+
 ### 9.4 What a session sees
 
 A session starts in the unit's workspace, or a read-only clone for a committee member, with the Osmia MCP server and a bundle. It additionally receives a Hearsay MCP server when that integration is enabled and available.

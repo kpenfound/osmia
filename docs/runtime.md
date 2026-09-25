@@ -45,8 +45,8 @@ The version 1 JSON representation is:
 }
 ```
 
-A pause target is `factory` (no IDs), `project` (project ID only), or `workstream`
-(both IDs). One record per target is allowed. Modes are `soft` and `hard`. Every
+A pause target is `factory` (no IDs), `project` (project ID only), `workstream`
+(both IDs), or `role` (role name only). One record per target is allowed. Modes are `soft` and `hard`. Every
 pause records a non-empty reason, its set time, and one of `owner`, `daily-budget`,
 or `provider-usage-limit` as its source. The owner can clear any pause. A budget
 or provider mechanism may clear only a pause it set; neither can clear an owner
@@ -56,6 +56,13 @@ a paused workstream has in flight take no mason slot
 ([service](service.md#starting-units)). A soft pause lets a turn that is already
 running finish; a hard pause also stops it
 ([service](service.md#hard-pause)).
+
+Provider usage limits are stored in `provider_limits` with the backend, status,
+limit kind, set time, and optional reset time. The effective runtime view also
+shows a soft `role` pause attributed to `provider-usage-limit` when a role has
+no available fallback. A role pause holds its new turns across workstreams.
+The owner can clear a provider limit with `osmia profiles clear-limit <backend>`;
+a limit with a reset time stops affecting selection when that time passes.
 
 When opening a runtime file with an `operator` pause, the store attributes it to
 the owner, supplies a reason if absent, uses the file's modification time as its

@@ -115,7 +115,7 @@ func (f *foreman) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	state, _ := f.s.store.Effective()
+	state, _ := f.s.effective()
 	librarian := librarianWorkstream(f.repository.Project())
 	requested := map[config.WorkstreamID][]landInput{}
 	rebasing := map[config.WorkstreamID]map[string]bool{}

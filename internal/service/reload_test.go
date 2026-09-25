@@ -203,7 +203,7 @@ func TestReloadPreservesRuntimeState(t *testing.T) {
 	if !reflect.DeepEqual(now.Effective.Pauses, before.Effective.Pauses) || !reflect.DeepEqual(now.Effective.Priorities, before.Effective.Priorities) {
 		t.Fatalf("runtime controls changed: %+v", now.Effective)
 	}
-	if now.Profiles["mason"] != (EffectiveProfile{"other", "owner_override"}) || now.Profiles["reviewer"] != (EffectiveProfile{"other", "configuration"}) {
+	if now.Profiles["mason"] != (EffectiveProfile{Name: "other", Source: "owner_override"}) || now.Profiles["reviewer"] != (EffectiveProfile{Name: "other", Source: "configuration"}) {
 		t.Fatalf("profiles: %+v", now.Profiles)
 	}
 
@@ -215,7 +215,7 @@ func TestReloadPreservesRuntimeState(t *testing.T) {
 	unchanged(t)
 	now, err = c.Runtime(ctx)
 	must(t, err)
-	if now.Profiles["mason"] != (EffectiveProfile{"default", "configuration"}) || !hasCode(now.Diagnostics, "profiles", Validation) {
+	if now.Profiles["mason"] != (EffectiveProfile{Name: "default", Source: "configuration"}) || !hasCode(now.Diagnostics, "profiles", Validation) {
 		t.Fatalf("stale override: %+v %+v", now.Profiles, now.Diagnostics)
 	}
 	files.write(t, files.topText, files.projectText)

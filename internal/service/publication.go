@@ -105,7 +105,7 @@ func (p *publisher) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	state, _ := p.s.store.Effective()
+	state, _ := p.s.effective()
 	librarian := librarianWorkstream(p.repository.Project())
 	for _, stream := range streams {
 		if stream == librarian || scheduler.Paused(state.Pauses, p.repository.Project(), stream) {

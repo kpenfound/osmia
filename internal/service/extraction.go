@@ -537,7 +537,7 @@ func (e *extractor) Apply(ctx context.Context, op coreadapter.Operation) (coread
 // roleExecution resolves a role's effective profile: the runtime override
 // when one is set, otherwise the configured role binding.
 func (s *Service) roleExecution(cfg *config.Config, role string) (coreadapter.Profile, coreadapter.ExecutionSettings, error) {
-	state, _ := s.store.Effective()
+	state, _ := s.effective()
 	name := state.Profiles[role]
 	if name == "" {
 		name = cfg.Roles[role].Profile
@@ -577,7 +577,7 @@ func (e *extractor) turnDirectory(turn string) string {
 
 // dispatch runs the turn through the thread dispatcher and runner.
 func (e *extractor) dispatch(ctx context.Context, stream config.WorkstreamID, turn string) (coreadapter.OperationResult, error) {
-	d := thread.Dispatcher{Runner: threadRunner(e.s.current(), e.repository, e.turns(), e.s.now), Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	d := thread.Dispatcher{Runner: e.s.threadRunner(e.s.current(), e.repository, e.turns(), e.s.now), Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(e.turnDirectory(in.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 	}}

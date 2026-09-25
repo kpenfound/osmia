@@ -264,8 +264,7 @@ the code classification.
 ## Milestone and restart behavior
 
 Loading accepts profiles, bindings, capacity, budgets, shed limits, repository identity
-and landing preferences as declarative inputs. It does not implement automatic
-fallback, debate, review scheduling, landing or multi-project dispatch. Review slot
+and landing preferences as declarative inputs. Review slot
 configuration is `capacity.reviewers`; no separate review-policy schema is defined.
 Runtime profile overrides, pauses and priorities belong in `runtime.json`, never
 these files; see [runtime overrides](runtime.md) for M1 persistence and resolution.

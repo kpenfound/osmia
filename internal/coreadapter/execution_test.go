@@ -80,6 +80,17 @@ func TestTurnTranslationAndProvenance(t *testing.T) {
 	}
 }
 
+func TestTurnSessionLimitFromResultText(t *testing.T) {
+	turn := prepared(t)
+	fake := &fakeExecutor{run: func(context.Context) (*agent.Result, error) {
+		return &agent.Result{IsError: true, ResultText: "You've hit your session limit"}, nil
+	}}
+	result, _ := (&TurnRunner{Executor: fake}).Run(context.Background(), turn)
+	if result.Limit == nil || !result.Limit.Blocking() || !result.Limit.ResetsAt.IsZero() {
+		t.Fatalf("session limit metadata: %+v", result.Limit)
+	}
+}
+
 func TestSessionCostCap(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

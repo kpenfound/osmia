@@ -99,6 +99,9 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 		if raw.RateLimit != nil {
 			result.Limit = &ProviderLimit{raw.RateLimit.Status, raw.RateLimit.Type, raw.RateLimit.ResetsAt}
 		}
+		if reset, limited := raw.SessionLimited(); limited && (result.Limit == nil || !result.Limit.Blocking()) {
+			result.Limit = &ProviderLimit{Status: "blocked", Kind: "session", ResetsAt: reset}
+		}
 		if raw.HasOutcome {
 			if validationErr := agent.ValidateOutcome(turn.Scope.Role, raw.Outcome.Status, req.ValidOutcomes); validationErr != nil {
 				runErr = errors.Join(runErr, validationErr)

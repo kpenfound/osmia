@@ -107,7 +107,7 @@ func (s *Service) configuration() ConfigResponse {
 	return out
 }
 func (s *Service) runtimeView() RuntimeResponse {
-	state, ds := s.store.Effective()
+	state, ds := s.effective()
 	cfg := s.current()
 	out := RuntimeResponse{Effective: state, Profiles: s.effectiveProfiles(state), Projects: []ProjectRuntime{}, Diagnostics: []Diagnostic{}}
 	if cfg.HasProject() {
@@ -140,8 +140,24 @@ func (s *Service) effectiveProfiles(state runtime.State) map[string]EffectivePro
 		name, source := binding.Profile, "configuration"
 		if override := stored.Profiles[role]; override != "" && state.Profiles[role] == override {
 			name, source = override, "owner_override"
+		} else if state.Profiles[role] != binding.Profile {
+			name, source = state.Profiles[role], "provider_fallback"
 		}
-		profiles[role] = EffectiveProfile{Name: name, Source: source}
+		reason := ""
+		if source == "provider_fallback" {
+			for _, limit := range state.ProviderLimits {
+				if limit.Backend == cfg.Profiles[binding.Profile].Agent {
+					reason = "Provider " + limit.Backend + " usage limit (" + limit.Status + ")"
+					break
+				}
+			}
+		}
+		for _, p := range state.Pauses {
+			if p.Target.Scope == "role" && p.Target.Role == role {
+				name, source, reason = "", "provider_pause", p.Reason
+			}
+		}
+		profiles[role] = EffectiveProfile{Name: name, Source: source, Reason: reason}
 	}
 	return profiles
 }
@@ -541,6 +557,12 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		err = s.store.ClearProfile(v.Role)
+	case r.Method == http.MethodDelete && r.URL.Path == Prefix+"/runtime/provider-limit":
+		var v ClearProviderLimitRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		err = s.store.ClearProviderLimit(v.Backend)
 	default:
 		fail(w, Unsupported)
 		return

@@ -91,7 +91,7 @@ func (m *masons) Pass(ctx context.Context) error {
 		return err
 	}
 	librarian := librarianWorkstream(m.repository.Project())
-	state, _ := m.s.store.Effective()
+	state, _ := m.s.effective()
 	paused := func(stream config.WorkstreamID) bool { return scheduler.Paused(state.Pauses, m.cfg.Project.ID, stream) }
 	implementing := 0
 	var read, candidates []building

@@ -143,7 +143,7 @@ func TestRoundTrip(t *testing.T) {
 	if len(before.Effective.Pauses) != 1 || len(before.Effective.Priorities) != 1 || before.Effective.Profiles["mason"] != "other" {
 		t.Fatal(before)
 	}
-	if len(before.Profiles) != len(s.cfg.Roles) || before.Profiles["mason"] != (EffectiveProfile{"other", "owner_override"}) || before.Profiles["reviewer"] != (EffectiveProfile{"default", "configuration"}) {
+	if len(before.Profiles) != len(s.cfg.Roles) || before.Profiles["mason"] != (EffectiveProfile{Name: "other", Source: "owner_override"}) || before.Profiles["reviewer"] != (EffectiveProfile{Name: "default", Source: "configuration"}) {
 		t.Fatalf("effective role profiles: %+v", before.Profiles)
 	}
 	status, err := c.Statuses(ctx)
@@ -169,7 +169,7 @@ func TestRoundTrip(t *testing.T) {
 	if len(after.Effective.Pauses) != 0 || len(after.Effective.Priorities) != 0 || after.Effective.Profiles["mason"] != "default" {
 		t.Fatal(after)
 	}
-	if after.Profiles["mason"] != (EffectiveProfile{"default", "configuration"}) {
+	if after.Profiles["mason"] != (EffectiveProfile{Name: "default", Source: "configuration"}) {
 		t.Fatalf("cleared role profile: %+v", after.Profiles)
 	}
 	must(t, s2.Close())

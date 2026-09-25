@@ -300,6 +300,7 @@ type RuntimeResponse struct {
 type EffectiveProfile struct {
 	Name   string `json:"name"`
 	Source string `json:"source"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // ProjectRuntime reports where a project's turn context comes from. "file"
@@ -321,6 +322,9 @@ type ProfileRequest struct {
 type ClearProfileRequest struct {
 	Role string `json:"role"`
 }
+type ClearProviderLimitRequest struct {
+	Backend string `json:"backend"`
+}
 type MutationResponse struct {
 	Applied bool `json:"applied"`
 }
@@ -331,9 +335,10 @@ type MutationResponse struct {
 // null without budget.per_day or when today's spend cannot be read, which a
 // diagnostic reports.
 type StatusResponse struct {
-	Workstreams []WorkstreamStatus          `json:"workstreams"`
-	Profiles    map[string]EffectiveProfile `json:"profiles"`
-	DailyBudget *DailyBudgetStatus          `json:"daily_budget"`
+	Workstreams    []WorkstreamStatus          `json:"workstreams"`
+	Profiles       map[string]EffectiveProfile `json:"profiles"`
+	ProviderLimits []runtime.ProviderLimit     `json:"provider_limits,omitempty"`
+	DailyBudget    *DailyBudgetStatus          `json:"daily_budget"`
 	// FailureStreaks lists the roles and profiles whose latest turn attempts
 	// failed with infrastructure failures; it is omitted when there are none.
 	FailureStreaks []FailureStreak `json:"failure_streaks,omitempty"`
