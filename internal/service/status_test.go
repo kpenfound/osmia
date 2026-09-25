@@ -148,7 +148,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	list, err := c.Statuses(ctx)
 	must(t, err)
 	empty := func(w config.WorkstreamID) WorkstreamStatus {
-		return WorkstreamStatus{Workstream: w, Project: project, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, Gates: []trace.OwnerGate{}, ContextMode: "file"}
+		return WorkstreamStatus{Workstream: w, Project: project, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []AgentStatus{}, ContextMode: "file"}
 	}
 	if want := []WorkstreamStatus{empty(stream), empty(quiet)}; !sameStatuses(list.Workstreams, want) || len(list.Diagnostics) != 0 {
 		t.Fatalf("before the chief of staff wrote: %+v", list)

@@ -377,7 +377,8 @@ type DailyBudgetStatus struct {
 // unit carries its latest reported card when present; Advisories holds the
 // active overlap advisories about other workstreams of the project; Gates is
 // empty while no owner decision waits; Drift is null before the first drift
-// rebase; Status is null until the chief of staff writes one.
+// rebase; Status is null until the chief of staff writes one. Agents holds
+// service-owned facts about claimed and parked turns.
 type WorkstreamStatus struct {
 	Workstream    config.WorkstreamID `json:"workstream"`
 	Project       config.ProjectID    `json:"project"`
@@ -389,6 +390,20 @@ type WorkstreamStatus struct {
 	ContextMode   bundle.Mode         `json:"context_mode"`
 	Drift         *DriftStatus        `json:"drift"`
 	Status        *StatusView         `json:"status"`
+	Agents        []AgentStatus       `json:"agents"`
+}
+
+// AgentStatus is one claimed or parked turn from the durable thread snapshot.
+type AgentStatus struct {
+	Role       string    `json:"role"`
+	Unit       string    `json:"unit"`
+	State      string    `json:"state"`
+	StartedAt  time.Time `json:"started_at"`
+	Elapsed    int64     `json:"elapsed"`
+	Profile    string    `json:"profile"`
+	Attempt    int       `json:"attempt,omitempty"`
+	Path       string    `json:"path,omitempty"`
+	QuestionID string    `json:"question_id,omitempty"`
 }
 
 // DriftStatus is a workstream's latest drift rebase: its number, its

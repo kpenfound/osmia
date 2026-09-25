@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -17,6 +18,25 @@ import (
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/trace"
 )
+
+func TestStatusShowsLiveAgentFactsBelowNarrative(t *testing.T) {
+	started := time.Date(2026, 9, 16, 10, 0, 0, 123000000, time.UTC)
+	st := service.WorkstreamStatus{Workstream: stream, Project: project,
+		Status: &service.StatusView{Goal: "Ship uploads.", Agents: []string{"The mason is building uploads."}, UpdatedAt: started, Revision: 1},
+		Agents: []service.AgentStatus{{Role: "mason", Unit: "resume", State: "waiting", StartedAt: started, Elapsed: 7, Profile: "mason-default", Attempt: 2, Path: "replay", QuestionID: "3"}}}
+	var out bytes.Buffer
+	showStatus(&out, st)
+	want := "Agents:\n  The mason is building uploads.\nLive agents:\n  mason unit=resume state=waiting started_at=2026-09-16T10:00:00.123Z elapsed=7s profile=mason-default attempt=2 path=replay question_id=3\nUpdated:"
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("status output:\n%s", out.String())
+	}
+	st.Status = nil
+	out.Reset()
+	showStatus(&out, st)
+	if !strings.Contains(out.String(), "Status: none yet; the chief of staff has not written one\nLive agents:\n  mason") {
+		t.Fatalf("live turn without narrative:\n%s", out.String())
+	}
+}
 
 const quiet = "w_fedcba9876543210fedcba9876543210"
 
@@ -95,10 +115,10 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
 	handed := "handed"
-	full := service.WorkstreamStatus{Workstream: stream, Project: project, State: &handed, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, ContextMode: "file", Status: &service.StatusView{
+	full := service.WorkstreamStatus{Workstream: stream, Project: project, State: &handed, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file", Status: &service.StatusView{
 		Goal: "Ship resumable uploads.", Note: "The plan is drafted. Review is underway.",
 		Agents: []string{"The architect is preparing the packet.", "A reviewer is idle."}, Revision: 1, UpdatedAt: written}}
-	none := service.WorkstreamStatus{Workstream: quiet, Project: project, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, ContextMode: "file"}
+	none := service.WorkstreamStatus{Workstream: quiet, Project: project, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file"}
 	if !all.Health.Ready || all.Configuration.Project == nil || !reflect.DeepEqual(all.Status, service.StatusResponse{Workstreams: []service.WorkstreamStatus{full, none}, Profiles: all.Runtime.Profiles, Diagnostics: []service.Diagnostic{}}) {
 		t.Fatalf("status --json: %+v", all.Status)
 	}

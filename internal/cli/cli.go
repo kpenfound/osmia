@@ -993,6 +993,7 @@ func showStatus(w io.Writer, st service.WorkstreamStatus) {
 	}
 	if st.Status == nil {
 		fmt.Fprintln(w, "Status: none yet; the chief of staff has not written one")
+		showAgentStatus(w, st.Agents)
 		return
 	}
 	s := st.Status
@@ -1003,7 +1004,29 @@ func showStatus(w io.Writer, st service.WorkstreamStatus) {
 	for _, a := range s.Agents {
 		fmt.Fprintf(w, "  %s\n", a)
 	}
+	showAgentStatus(w, st.Agents)
 	fmt.Fprintf(w, "Updated: %s (revision %d)\n", s.UpdatedAt.Format(time.RFC3339), s.Revision)
+}
+
+func showAgentStatus(w io.Writer, agents []service.AgentStatus) {
+	if len(agents) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Live agents:")
+	for _, a := range agents {
+		fmt.Fprintf(w, "  %s", a.Role)
+		if a.Unit != "" {
+			fmt.Fprintf(w, " unit=%s", a.Unit)
+		}
+		fmt.Fprintf(w, " state=%s started_at=%s elapsed=%ds profile=%s", a.State, a.StartedAt.Format(time.RFC3339Nano), a.Elapsed, a.Profile)
+		if a.Attempt != 0 {
+			fmt.Fprintf(w, " attempt=%d path=%s", a.Attempt, a.Path)
+		}
+		if a.QuestionID != "" {
+			fmt.Fprintf(w, " question_id=%s", a.QuestionID)
+		}
+		fmt.Fprintln(w)
+	}
 }
 
 // showConversation prints each entry's time, author, turn and state, then its
