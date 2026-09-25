@@ -607,3 +607,80 @@ func TestInterruptedFinalReviewKeepsItsRecordedRebase(t *testing.T) {
 		t.Fatalf("a failed review authorises: %q %v", reason, err)
 	}
 }
+
+// A final review interrupted before its replay, after its rebase is
+// recorded, or after the branch moved to the rebased commit is reconciled on
+// retry: the retry's inspection observes how far the interrupted attempt
+// got, the branch is replayed once, final/rebase.json records one rebase,
+// the branch holds the landed commits once on upstream, and the review reads
+// and reports the rebased commit.
+func TestInterruptedFinalRebaseIsReconciled(t *testing.T) {
+	t.Parallel()
+	evidence := map[string]string{
+		"final-rebase-replaying": "has recorded no rebase",
+		"final-rebase-recorded":  "the branch moves to it without replaying again",
+		"final-rebase-moved":     "the review reads it without replaying again",
+	}
+	for _, point := range []string{"final-rebase-replaying", "final-rebase-recorded", "final-rebase-moved"} {
+		t.Run(point, func(t *testing.T) {
+			t.Parallel()
+			f, stream, repository, a := newFinalFixture(t, point)
+			ctx := context.Background()
+			head, op := assembleBoth(t, f, repository, a, stream,
+				map[string]string{"internal/trace/resume.go": "package trace\n"},
+				map[string]string{"internal/trace/dedupe.go": "package trace\n"})
+			upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
+			replays, stop := 0, true
+			f.s.boundary = func(name string) error {
+				if name == point && stop {
+					stop = false
+					return errors.New("the service stopped")
+				}
+				if name == "final-rebase-replaying" {
+					replays++
+				}
+				return nil
+			}
+			if _, err := a.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "the service stopped") {
+				t.Fatalf("the review never reached %s: %v", point, err)
+			}
+			if observed, err := a.Inspect(ctx, op); err != nil || observed.State != coreadapter.EffectAbsent || !strings.Contains(observed.Evidence, evidence[point]) {
+				t.Fatalf("inspection after an interruption at %s: %+v %v", point, observed, err)
+			}
+			var problems []error
+			f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+				got, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Both criteria are shown.", "criteria": []any{
+					map[string]any{"criterion": "spec#1", "evidence": "internal/trace/resume.go"},
+					map[string]any{"criterion": "spec#2", "evidence": "internal/trace/dedupe.go"}}})
+				if err != nil || !strings.Contains(got, `"recorded":true`) {
+					problems = append(problems, fmt.Errorf("the report was not recorded: %s %v", got, err))
+				}
+				return nil
+			})
+			result := settleOperation(t, f.s, repository, stream, op, a)
+			if err := errors.Join(problems...); err != nil {
+				t.Fatal(err)
+			}
+			tip, _, err := featureWorkspaces(f.s.cfg).Branch(ctx, featureBranch(stream))
+			must(t, err)
+			var rebase FinalRebase
+			rebases := streamDocuments(t, repository, stream, finalRebaseDocument)
+			if replays != 1 || len(rebases) != 1 || json.Unmarshal([]byte(rebases[0].Content), &rebase) != nil || rebase.Before != head || rebase.Upstream.Commit != upstream || rebase.Commit != tip {
+				t.Fatalf("%d replays; the recorded rebases %+v; the branch is at %s", replays, rebases, tip)
+			}
+			home := filepath.Dir(f.clone)
+			landed := strings.TrimSpace(demoGit(t, home, "-C", f.clone, "rev-list", "--count", strings.TrimSpace(demoGit(t, home, "-C", f.clone, "merge-base", head, upstream))+".."+head))
+			if count := strings.TrimSpace(demoGit(t, home, "-C", f.clone, "rev-list", "--count", upstream+".."+tip)); count != landed {
+				t.Fatalf("the rebased branch holds %s commits on upstream, %s landed", count, landed)
+			}
+			report, _, err := latestFinalReport(repository, stream)
+			must(t, err)
+			if result.Outcome != "succeeded" || report.Outcome != finalReviewed || report.Commit != tip {
+				t.Fatalf("result %+v, report %+v", result, report)
+			}
+			if ops := finalOperations(t, repository, stream); len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
+				t.Fatalf("final review operations %+v", ops)
+			}
+		})
+	}
+}
