@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -95,16 +96,119 @@ func New(repository *trace.Repository, options Options) (*Scheduler, error) {
 func (s *Scheduler) Pass(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	r, err := s.read()
+	if err != nil {
+		return err
+	}
+	candidates, used, order := r.candidates, r.used, s.order(r.served)
+	for len(candidates) > 0 {
+		slices.SortStableFunc(candidates, order)
+		c := candidates[0]
+		candidates = candidates[1:]
+		role := c.Thread.Identity.Role
+		if s.refusal(used, c) != "" {
+			continue
+		}
+		if s.options.Admit != nil {
+			admitted, err := s.options.Admit(ctx, c)
+			if err != nil {
+				return err
+			}
+			if !admitted {
+				continue
+			}
+		}
+		at := s.options.Now()
+		if err := s.dispatch(ctx, c, at); err != nil {
+			return fmt.Errorf("workstream %s: %w", c.Workstream, err)
+		}
+		used.add(c.Project, c.Workstream, role)
+		r.served[rotationKey(c.Project, c.Workstream, role)] = at
+	}
+	return nil
+}
+
+// The reasons a queued turn finds no free slot.
+const (
+	// WaitCapacity: every slot of the turn's role kind is taken, or, for a
+	// role without shared slots, its workstream already runs a turn of it.
+	WaitCapacity = "capacity"
+	// WaitWorkstreamCap: the workstream runs capacity.per_workstream turns.
+	WaitWorkstreamCap = "workstream-cap"
+)
+
+// Wait is a queued turn that finds no free slot, and why.
+type Wait struct {
+	Candidate
+	Reason string
+}
+
+// Slots is the scheduler's slot accounting at one read of the trace.
+type Slots struct {
+	// Used counts the turns in flight by role, chief-of-staff turns aside.
+	Used map[string]int
+	// Waiting lists, in the order a pass offers them, the queued turns that
+	// hold would admit and that a pass would find no free slot for.
+	Waiting []Wait
+}
+
+// Slots reads the trace as Pass does and reports the slots in use and the
+// queued turns waiting for one, without dispatching anything. It offers the
+// candidates to the free slots in Pass's order and takes a slot for each one
+// that fits and that holds does not hold, as Pass would if Admit let it
+// through. holds is the part of the dispatch gate that declines a candidate
+// whatever the capacity, such as a pause; a candidate it holds is not waiting
+// for a slot.
+func (s *Scheduler) Slots(holds func(Candidate) (bool, error)) (Slots, error) {
+	r, err := s.read()
+	if err != nil {
+		return Slots{}, err
+	}
+	out := Slots{Used: maps.Clone(r.used.roles)}
+	candidates, used, order := r.candidates, r.used, s.order(r.served)
+	at := s.options.Now()
+	for len(candidates) > 0 {
+		slices.SortStableFunc(candidates, order)
+		c := candidates[0]
+		candidates = candidates[1:]
+		held, err := holds(c)
+		if err != nil {
+			return Slots{}, err
+		}
+		if held {
+			continue
+		}
+		role := c.Thread.Identity.Role
+		if reason := s.refusal(used, c); reason != "" {
+			out.Waiting = append(out.Waiting, Wait{c, reason})
+			continue
+		}
+		used.add(c.Project, c.Workstream, role)
+		r.served[rotationKey(c.Project, c.Workstream, role)] = at
+	}
+	return out, nil
+}
+
+// reading is what a pass reads from the trace before it offers slots: the
+// turns in flight, the queued turns and each stage's last dispatch.
+type reading struct {
+	used       usage
+	candidates []Candidate
+	served     map[rotation]time.Time
+}
+
+// read reads every workstream's threads, then its turn operations.
+func (s *Scheduler) read() (reading, error) {
 	project := s.repository.Project()
 	streams, err := s.repository.Workstreams()
 	if err != nil {
-		return err
+		return reading{}, err
 	}
 	threads := map[config.WorkstreamID][]trace.Thread{}
 	roles := map[localKey]string{}
 	for _, stream := range streams {
 		if threads[stream], err = s.repository.Threads(stream); err != nil {
-			return fmt.Errorf("workstream %s: %w", stream, err)
+			return reading{}, fmt.Errorf("workstream %s: %w", stream, err)
 		}
 		for _, t := range threads[stream] {
 			roles[localKey{project, stream, t.Identity.ID}] = t.Identity.Role
@@ -115,7 +219,7 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 	for _, stream := range streams {
 		records, err := s.repository.Operations(stream)
 		if err != nil {
-			return fmt.Errorf("workstream %s: %w", stream, err)
+			return reading{}, fmt.Errorf("workstream %s: %w", stream, err)
 		}
 		for _, record := range records {
 			// The dispatcher refuses input it cannot decode, and the controller
@@ -151,12 +255,18 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 			candidates = append(candidates, Candidate{Project: project, Workstream: stream, Thread: t, Turn: q})
 		}
 	}
+	return reading{used: used, candidates: candidates, served: served}, nil
+}
+
+// order is the order candidates are offered in, given each stage's last
+// dispatch. Ties keep trace order, for stable admission across passes.
+func (s *Scheduler) order(served map[rotation]time.Time) func(a, b Candidate) int {
+	project := s.repository.Project()
 	rank := Rank(nil, project)
 	if s.options.Priorities != nil {
 		rank = Rank(s.options.Priorities(), project)
 	}
-	// Ties keep trace order, for stable admission across passes.
-	order := func(a, b Candidate) int {
+	return func(a, b Candidate) int {
 		ra, rb := a.Thread.Identity.Role, b.Thread.Identity.Role
 		return cmp.Or(cmp.Compare(stage(ra), stage(rb)),
 			cmp.Compare(rank(a.Workstream), rank(b.Workstream)),
@@ -164,31 +274,6 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 			strings.Compare(string(a.Project), string(b.Project)),
 			strings.Compare(string(a.Workstream), string(b.Workstream)))
 	}
-	for len(candidates) > 0 {
-		slices.SortStableFunc(candidates, order)
-		c := candidates[0]
-		candidates = candidates[1:]
-		role := c.Thread.Identity.Role
-		if !s.fits(used, c) {
-			continue
-		}
-		if s.options.Admit != nil {
-			admitted, err := s.options.Admit(ctx, c)
-			if err != nil {
-				return err
-			}
-			if !admitted {
-				continue
-			}
-		}
-		at := s.options.Now()
-		if err := s.dispatch(ctx, c, at); err != nil {
-			return fmt.Errorf("workstream %s: %w", c.Workstream, err)
-		}
-		used.add(c.Project, c.Workstream, role)
-		served[rotationKey(c.Project, c.Workstream, role)] = at
-	}
-	return nil
 }
 
 // stage orders the roles whose turns compete for a freed slot, so the factory
@@ -247,24 +332,29 @@ func (u usage) add(project config.ProjectID, stream config.WorkstreamID, role st
 	u.local[localKey{project, stream, role}]++
 }
 
-// fits reports whether the candidate's turn has a free slot.
-func (s *Scheduler) fits(used usage, c Candidate) bool {
+// refusal returns why the candidate's turn has no free slot, or "" when it
+// has one.
+func (s *Scheduler) refusal(used usage, c Candidate) string {
 	limits, role := s.options.Capacity, c.Thread.Identity.Role
 	if limits == nil || role == trace.ChiefOfStaff {
-		return true
+		return ""
 	}
 	if used.streams[streamKey{c.Project, c.Workstream}] >= limits.PerWorkstream {
-		return false
+		return WaitWorkstreamCap
 	}
+	fits := used.local[localKey{c.Project, c.Workstream, role}] < 1
 	switch role {
 	case "mason":
-		return used.roles[role] < limits.Masons
+		fits = used.roles[role] < limits.Masons
 	case "reviewer":
-		return used.roles[role] < limits.Reviewers
+		fits = used.roles[role] < limits.Reviewers
 	case "committee":
-		return used.roles[role] < limits.Committee
+		fits = used.roles[role] < limits.Committee
 	}
-	return used.local[localKey{c.Project, c.Workstream, role}] < 1
+	if !fits {
+		return WaitCapacity
+	}
+	return ""
 }
 
 // inFlight reports whether the thread's oldest unfinished turn is claimed or

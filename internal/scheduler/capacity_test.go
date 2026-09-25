@@ -245,3 +245,75 @@ func TestChiefOfStaffTakesNoSlot(t *testing.T) {
 		t.Fatalf("dispatched %v", got)
 	}
 }
+
+// wait names each waiting turn by the last digit of its workstream, its agent
+// and why it waits.
+func wait(slots Slots) []string {
+	var out []string
+	for _, w := range slots.Waiting {
+		out = append(out, string(w.Workstream[len(w.Workstream)-1:])+"/"+w.Thread.Identity.ID+"/"+w.Reason)
+	}
+	return out
+}
+
+func TestSlotsReportsTurnsInFlightAndTurnsWaitingForASlot(t *testing.T) {
+	ctx := context.Background()
+	f, repo := crowd(t)
+	defer repo.Close()
+	limits := &config.Capacity{Masons: 2, Reviewers: 1, Committee: 5, PerWorkstream: 2}
+	// Like the service's gate, committee and architect turns are never
+	// dispatched here.
+	declined := func(c Candidate) bool {
+		return c.Thread.Identity.Role == "committee" || c.Thread.Identity.Role == "architect"
+	}
+	admit := func(_ context.Context, c Candidate) (bool, error) { return !declined(c), nil }
+	s, err := New(repo, Options{Now: f.clock.Now, Capacity: limits, Admit: admit})
+	must(t, err)
+	must(t, s.Pass(ctx))
+	if got, want := dispatched(t, repo, stream, other), []string{"mason1/one", "mason1/one", "reviewer1/one"}; !slices.Equal(got, want) {
+		t.Fatalf("dispatched %v, want %v", got, want)
+	}
+
+	slots, err := s.Slots(func(c Candidate) (bool, error) { return declined(c), nil })
+	must(t, err)
+	if want := map[string]int{"mason": 2, "reviewer": 1}; !maps.Equal(slots.Used, want) {
+		t.Fatalf("used %v, want %v", slots.Used, want)
+	}
+	if got, want := wait(slots), []string{"2/reviewer1/capacity", "1/mason2/workstream-cap", "1/mason3/workstream-cap", "2/mason2/capacity", "2/mason3/capacity"}; !slices.Equal(got, want) {
+		t.Fatalf("waiting %v, want %v", got, want)
+	}
+
+	// A held candidate, such as a paused workstream's, waits for no slot.
+	slots, err = s.Slots(func(c Candidate) (bool, error) { return declined(c) || c.Workstream == other, nil })
+	must(t, err)
+	if got, want := wait(slots), []string{"1/mason2/workstream-cap", "1/mason3/workstream-cap"}; !slices.Equal(got, want) {
+		t.Fatalf("waiting with the other workstream held %v, want %v", got, want)
+	}
+	if _, err := s.Slots(func(Candidate) (bool, error) { return false, errors.New("gate") }); err == nil {
+		t.Fatal("a gate failure was not returned")
+	}
+
+	// Reading the slots dispatched nothing: every waiting turn is still
+	// queued, and a pass finds no free slot for any of them.
+	must(t, s.Pass(ctx))
+	if got := dispatched(t, repo, stream, other); len(got) != 3 {
+		t.Fatalf("dispatched %v after reading the slots", got)
+	}
+}
+
+func TestSlotsTakesTheSlotsAPassWouldGive(t *testing.T) {
+	f, repo := crowd(t)
+	defer repo.Close()
+	// Nothing is in flight: the first candidates take the free slots and
+	// only the rest wait, as a pass would leave them.
+	s, err := New(repo, Options{Now: f.clock.Now, Capacity: &config.Capacity{Masons: 1, Reviewers: 2, Committee: 5, PerWorkstream: 5}})
+	must(t, err)
+	slots, err := s.Slots(func(c Candidate) (bool, error) { return c.Thread.Identity.Role != "mason", nil })
+	must(t, err)
+	if len(slots.Used) != 0 {
+		t.Fatalf("used %v with nothing in flight", slots.Used)
+	}
+	if got, want := wait(slots), []string{"2/mason1/capacity", "2/mason2/capacity", "2/mason3/capacity", "1/mason2/capacity", "1/mason3/capacity"}; !slices.Equal(got, want) {
+		t.Fatalf("waiting %v, want %v", got, want)
+	}
+}
