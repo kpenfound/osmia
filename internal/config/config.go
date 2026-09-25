@@ -341,11 +341,7 @@ func decode(path string, dest any, project bool) (toml.MetaData, error) {
 	}
 	md, err := toml.Decode(string(data), dest)
 	if err != nil {
-		var parse toml.ParseError
-		if errors.As(err, &parse) {
-			return md, &FieldError{Path: path, Field: parse.LastKey, Reason: fmt.Sprintf("invalid TOML syntax or value type at line %d", parse.Position.Line), Err: err}
-		}
-		return md, &FieldError{Path: path, Reason: "invalid TOML", Err: err}
+		return md, decodeError(path, err)
 	}
 	for _, key := range md.Keys() {
 		if !knownKey(key, project) {
@@ -357,6 +353,29 @@ func decode(path string, dest any, project bool) (toml.MetaData, error) {
 	}
 	return md, nil
 }
+
+// typeMismatch matches the TOML decoder's message for a value of the wrong
+// type, which carries the key and line but no parse position.
+var typeMismatch = regexp.MustCompile(`^toml: (?:line ([0-9]+) )?\(last key ("(?:[^"\\]|\\.)*")\): incompatible types`)
+
+// decodeError names the key and line of a file the TOML decoder rejected,
+// leaving out the decoder's text, which may quote the file.
+func decodeError(path string, err error) error {
+	var parse toml.ParseError
+	if errors.As(err, &parse) {
+		return &FieldError{Path: path, Field: parse.LastKey, Reason: fmt.Sprintf("invalid TOML at line %d", parse.Position.Line), Err: err}
+	}
+	if m := typeMismatch.FindStringSubmatch(err.Error()); m != nil {
+		key, _ := strconv.Unquote(m[2])
+		reason := "value has the wrong type"
+		if m[1] != "" {
+			reason += " at line " + m[1]
+		}
+		return &FieldError{Path: path, Field: key, Reason: reason, Err: err}
+	}
+	return &FieldError{Path: path, Reason: "invalid TOML", Err: err}
+}
+
 func knownKey(key toml.Key, project bool) bool {
 	path := key.String()
 	if project {

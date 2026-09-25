@@ -299,5 +299,5 @@ Representative errors include the file and offending field:
 ```
 
 Malformed TOML and values of the wrong type name the last key read and the line
-(`<path>: capacity.masons: invalid TOML syntax or value type at line 3`), never
+(`<path>: capacity.masons: value has the wrong type at line 3`), never
 the file's text; an unreadable file is `<path>: cannot be read`. On any error `Load` returns `nil`, never a usable partial configuration.
