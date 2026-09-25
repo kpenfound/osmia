@@ -267,10 +267,12 @@ func (d drifter) latest(stream config.WorkstreamID, k int) (DriftRebase, bool, e
 	return records[len(records)-1], true, nil
 }
 
-// Inspect reads the recorded transitions and documents. A recorded outcome
-// completes the operation; otherwise it is absent, with the recorded replay
-// or the feature branch's tip as evidence, and Apply reconciles the branch
-// before replaying.
+// Inspect reads the recorded transitions, documents and the clone. A
+// recorded outcome completes the operation; otherwise it is absent, with
+// evidence of how far the recorded drift rebase got: a replay the branch has
+// or has not moved to yet, a carry of unfinished units, a conflict
+// resolution, or no replay at all. Apply continues from there without
+// replaying again.
 func (d drifter) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	in, err := decodeDrift(op)
 	if err != nil {
@@ -287,17 +289,25 @@ func (d drifter) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 	if result != nil {
 		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "drift rebase " + result.Outcome, Result: result}, nil
 	}
-	if r, found, err := d.latest(stream, in.Drift); err != nil {
+	r, found, err := d.latest(stream, in.Drift)
+	if err != nil {
 		return coreadapter.Observation{}, err
-	} else if found && r.Outcome == driftReplayed {
-		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("drift rebase %d replayed %s onto %s as %s; the branch moves to it and the seal follows", in.Drift, r.Before, r.Upstream.Commit, r.Commit)}, nil
-	} else if found && resolving(r.Outcome) {
+	}
+	if found && resolving(r.Outcome) {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("drift rebase %d of %s onto %s is %s in its conflict resolution; the branch stays at %s until a reviewer approves the resolution", in.Drift, r.Before, r.Upstream.Commit, r.Outcome, r.Before)}, nil
 	}
 	branch := featureBranch(stream)
 	tip, exists, err := featureWorkspaces(d.cfg).Branch(ctx, branch)
 	if err != nil {
 		return coreadapter.Observation{}, err
+	}
+	switch {
+	case found && r.Outcome == driftCarrying:
+		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("drift rebase %d moved feature branch %s from %s to %s and carries the unfinished units onto it; the outcome is recorded once they are current", in.Drift, branch, r.Before, r.Commit)}, nil
+	case found && r.Outcome == driftReplayed && exists && tip == r.Commit && r.Commit != r.Before:
+		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("feature branch %s is at %s, drift rebase %d's recorded replay of %s onto %s; the seal and outcome are recorded without replaying again", branch, tip, in.Drift, r.Before, r.Upstream.Commit)}, nil
+	case found && r.Outcome == driftReplayed:
+		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("drift rebase %d replayed %s onto %s as %s; the branch moves to it and the seal follows", in.Drift, r.Before, r.Upstream.Commit, r.Commit)}, nil
 	}
 	if !exists {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("the clone has no feature branch %s", branch)}, nil

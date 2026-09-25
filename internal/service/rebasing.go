@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/workspace"
 )
 
 // RebaseAction is the repository-boundary operation action that rebases one
@@ -387,8 +388,9 @@ func (r rebaser) outcome(stream config.WorkstreamID, in rebaseInput) (*coreadapt
 }
 
 // Inspect reads the recorded transitions and the clone. A recorded outcome
-// completes the operation; otherwise it is absent, with the unit branch's tip
-// as evidence, and Apply reconciles the workspace before rebasing.
+// completes the operation; otherwise it is absent, with evidence of whether
+// the unit branch already holds this operation's rebased commit, which Apply
+// then records without snapshotting or rebasing again.
 func (r rebaser) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	in, err := decodeRebase(op)
 	if err != nil {
@@ -413,7 +415,36 @@ func (r rebaser) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 	if !exists {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("the clone has no unit branch %s", branch)}, nil
 	}
-	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("unit branch %s is at %s; the rebase reconciles it before rebasing", branch, tip)}, nil
+	if snapshot, err := rebasedSnapshot(ctx, newUnitWorkspaces(r.cfg).git, tip, in, op.ID); err != nil {
+		return coreadapter.Observation{}, err
+	} else if snapshot != "" {
+		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("unit branch %s is at %s, this operation's rebase of snapshot %s onto %s; the rebase records it without rebasing again", branch, tip, snapshot, in.Onto)}, nil
+	}
+	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("unit branch %s is at %s and holds no rebase of this operation; the rebase checks the feature branch before snapshotting", branch, tip)}, nil
+}
+
+// rebasedSnapshot returns the snapshot the rebase operation replayed when
+// head is the commit it made: its only parent is the commit the operation
+// rebases onto and its message names the operation. It returns "" for any
+// other commit.
+func rebasedSnapshot(ctx context.Context, g *workspace.Git, head string, in rebaseInput, operation string) (string, error) {
+	if head == in.Onto {
+		return "", nil
+	}
+	c, err := g.Commit(ctx, head)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(c.Message, "\n")
+	if !slices.Equal(c.Parents, []string{in.Onto}) || !slices.Contains(lines, landingTrailer+": "+operation) {
+		return "", nil
+	}
+	for _, line := range lines {
+		if value, ok := strings.CutPrefix(line, rebaseSnapshotTrailer+": "); ok {
+			return value, nil
+		}
+	}
+	return "", nil
 }
 
 // Apply rebases the unit's workspace onto the feature branch commit the
@@ -458,20 +489,9 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	snapshot := ""
-	if head != in.Onto {
-		c, err := g.Commit(ctx, head)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		lines := strings.Split(c.Message, "\n")
-		if slices.Equal(c.Parents, []string{in.Onto}) && slices.Contains(lines, landingTrailer+": "+op.ID) {
-			for _, line := range lines {
-				if value, ok := strings.CutPrefix(line, rebaseSnapshotTrailer+": "); ok {
-					snapshot = value
-				}
-			}
-		}
+	snapshot, err := rebasedSnapshot(ctx, g, head, in, op.ID)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
 	}
 	if snapshot == "" {
 		tip, _, err := g.Branch(ctx, featureBranch(stream))
@@ -488,6 +508,9 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		}
 		base, err := g.MergeBase(ctx, in.Onto, head)
 		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if err := r.s.step("rebase-snapshotting"); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 		if snapshot, err = g.Snapshot(ctx, w, base); err != nil {

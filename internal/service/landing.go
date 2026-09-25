@@ -308,8 +308,9 @@ func (f *foreman) outcome(stream config.WorkstreamID, in landInput) (*coreadapte
 }
 
 // Inspect reads the recorded transitions and the clone. A recorded outcome
-// completes the operation; otherwise it is absent, with the feature branch's
-// tip as evidence, and Apply reconciles the branch before committing.
+// completes the operation; otherwise it is absent, with evidence of whether
+// the feature branch already holds this operation's landing commit, which
+// Apply then records without committing again.
 func (f *foreman) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	in, err := decodeLand(op)
 	if err != nil {
@@ -334,7 +335,26 @@ func (f *foreman) Inspect(ctx context.Context, op coreadapter.Operation) (coread
 	if !exists {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("the clone has no feature branch %s", branch)}, nil
 	}
-	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("feature branch %s is at %s; the landing reconciles it before committing", branch, tip)}, nil
+	if landed, err := landingCommit(ctx, featureWorkspaces(f.cfg), tip, in, op.ID); err != nil {
+		return coreadapter.Observation{}, err
+	} else if landed {
+		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("feature branch %s is at %s, this operation's landing commit on %s; the landing records it without committing again", branch, tip, in.Base)}, nil
+	}
+	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("feature branch %s is at %s and holds no commit of this landing; the landing checks its approval before committing", branch, tip)}, nil
+}
+
+// landingCommit reports whether tip is the commit the landing operation
+// made: its only parent is the approved base and its message names the
+// operation.
+func landingCommit(ctx context.Context, g *workspace.Git, tip string, in landInput, operation string) (bool, error) {
+	if tip == in.Base {
+		return false, nil
+	}
+	c, err := g.Commit(ctx, tip)
+	if err != nil {
+		return false, err
+	}
+	return slices.Equal(c.Parents, []string{in.Base}) && slices.Contains(strings.Split(c.Message, "\n"), landingTrailer+": "+operation), nil
 }
 
 // Apply lands the approved unit. A feature branch whose tip is this
@@ -386,14 +406,10 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 		return coreadapter.OperationResult{}, err
 	}
 	commit := ""
-	if tip != in.Base {
-		landed, err := g.Commit(ctx, tip)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		if slices.Equal(landed.Parents, []string{in.Base}) && slices.Contains(strings.Split(landed.Message, "\n"), landingTrailer+": "+op.ID) {
-			commit = tip
-		}
+	if landed, err := landingCommit(ctx, g, tip, in, op.ID); err != nil {
+		return coreadapter.OperationResult{}, err
+	} else if landed {
+		commit = tip
 	}
 	if commit == "" {
 		if reason, err := f.current(ctx, stream, in, result); err != nil {
@@ -403,6 +419,9 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 		}
 		message, err := f.message(stream, in, review, result, op.ID)
 		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if err := f.s.step("land-committing"); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 		if commit, err = g.Squash(ctx, in.Base, in.Candidate, message, requested); err != nil {

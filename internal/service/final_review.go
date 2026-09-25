@@ -402,10 +402,12 @@ func (a *finalReviewer) outcome(stream config.WorkstreamID, k int) (*coreadapter
 	return nil, nil
 }
 
-// Inspect reads the recorded transitions and the reader's thread: a recorded
-// outcome completes the operation, a reader turn still running leaves it
-// unknown, and otherwise it is absent.
-func (a *finalReviewer) Inspect(_ context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
+// Inspect reads the recorded transitions, the reader's thread and the clone:
+// a recorded outcome completes the operation, a reader turn still running
+// leaves it unknown, and otherwise it is absent, with evidence of whether
+// the review's rebase is recorded and the feature branch has moved to it.
+// Apply continues from a recorded rebase without replaying again.
+func (a *finalReviewer) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	in, err := decodeFinalReview(op)
 	if err != nil {
 		return coreadapter.Observation{}, err
@@ -432,7 +434,21 @@ func (a *finalReviewer) Inspect(_ context.Context, op coreadapter.Operation) (co
 			}
 		}
 	}
-	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("final review %d is not recorded", in.Review)}, nil
+	rebase, rebased, err := a.rebase(stream, in.Review)
+	if err != nil {
+		return coreadapter.Observation{}, err
+	}
+	if !rebased {
+		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("final review %d is not recorded and has recorded no rebase", in.Review)}, nil
+	}
+	tip, exists, err := featureWorkspaces(a.s.current()).Branch(ctx, rebase.Branch)
+	if err != nil {
+		return coreadapter.Observation{}, err
+	}
+	if exists && tip == rebase.Commit {
+		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("final review %d is not recorded; feature branch %s is at %s, its recorded rebase of %s onto %s, and the review reads it without replaying again", in.Review, rebase.Branch, tip, rebase.Before, rebase.Upstream.Commit)}, nil
+	}
+	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("final review %d is not recorded; it recorded the rebase of %s onto %s as %s, and the branch moves to it without replaying again", in.Review, rebase.Before, rebase.Upstream.Commit, rebase.Commit)}, nil
 }
 
 // Apply runs final review k to a recorded report. The workstream must still
@@ -519,6 +535,9 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 			return coreadapter.OperationResult{}, fmt.Errorf("fetch %s of %s: %w", cfg.Project.BaseBranch, remote, err)
 		}
 		upstream := seal.Base{Remote: remote, Branch: cfg.Project.BaseBranch, Commit: fetched}
+		if err := a.s.step("final-rebase-replaying"); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
 		commit, conflicts, err := g.Replay(ctx, in.Commit, fetched, requested)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
