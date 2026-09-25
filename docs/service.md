@@ -331,7 +331,7 @@ draft, its revisions and their criteria and unit counts. Its notice tells the
 chief of staff the draft exists. An invalid draft records `draft-<n>-invalid`
 instead and the workstream stays `handed`.
 
-Recovery keys on the trace: a restart during the turn finds it interrupted;
+Recovery reads session directories and trace claims: a restart during the turn finds it interrupted;
 one between recording and the transition finds the revisions by their cause
 and records nothing again; one after the transition finds it and repeats
 nothing. A recorded outcome completes the operation without running the
@@ -770,7 +770,7 @@ Consensus is a dissent record with no entry the owner has not disposed of,
 advice included. It is never a vote,
 and no member reports a confidence.
 
-Recovery keys on the trace: a restart during the round finds the turns that
+Recovery reads session directories and trace claims: a restart during the round finds the turns that
 ended in their threads and runs only the members that had not finished, each
 up to three attempts; one between the record and the transition finds the
 round's files and records nothing again; a recorded outcome, the park of a
@@ -855,7 +855,7 @@ round's reply all the same: it is recorded with the failure, its redraft is
 dropped, and the debate goes on. Answers are merged over the operation's
 turns; an interrupted turn contributes none.
 
-Recovery keys on the trace: a restart during the turn finds it interrupted and
+Recovery reads session directories and trace claims: a restart during the turn finds it interrupted and
 starts the next one; one between the record and the transition finds
 `reply.json` and records nothing again; a recorded outcome completes the
 operation without running the architect. [Abandoning](#abandoning) the
@@ -2615,6 +2615,24 @@ gate holds each continuation until the pause is cleared, and it then resumes
 the stopped session. A pause cleared while a stop is settling does not undo
 it: the turn still completes as stopped and its continuation runs.
 
+At startup, the service settles earlier sessions before dispatch. It reads
+claimed turns and the durable session directories under `threads`, `architect`,
+`shed`, `final` and `librarian`, including a directory whose trace claim was
+never written. A
+captured response is completed by the turn reconciler; a queued turn without
+a session directory has not started. Recovery of a mason claim waits for its
+role pass to copy the surviving view into the workspace before release.
+
+| Thread | Work after an interrupted turn |
+|---|---|
+| Chief of staff | A continuation turn on the same thread names the interruption and continues the original message. Event delivery waits for that continuation before acknowledging or delivering its events again. |
+| Unit and drift masons, unit and drift reviewers | Their role passes preserve the workspace or exact candidate and queue a continuation on the same thread. |
+| Architect, committee and librarian | Draft, debate, final review, amendment, extraction and refresh passes rederive their pending operation from the trace and queue its next attempt. These operations already own the work and its attempt limit, so a separate recovery turn would duplicate it. |
+
+A hard-paused turn already has a completed `stop` result. Startup leaves that
+result in place; the relevant mason or reviewer pass continues it after the
+pause clears, without recording a crash or failure.
+
 The scheduler also dispatches within the configured `[capacity]`. Mason
 turns use `capacity.masons`, reviewer turns use `capacity.reviewers`, and both
 limits apply across workstreams. Committee turns are not dispatched by the scheduler: a
@@ -2697,11 +2715,11 @@ event's claims name:
 |---|---|
 | `done` (see the conversation `state` column) | Acknowledges the event, without another turn |
 | Queued or running | Leaves the event alone, even when its claim's lease ran out |
-| `failed`, including a turn a restart interrupted, or no turn | Releases a claim of this service session that still holds the event, then delivers the event again in a new turn with a new token, together with any other pending event |
+| `failed`, or no turn | Releases a claim of this service session that still holds the event, then delivers the event again in a new turn with a new token, together with any other pending event |
 
 So an event reaches the chief of staff until a turn carrying it succeeds: a
-turn that fails or that a stop interrupts is not retried, but its events go
-out once more in one new turn, and a restart at any point neither loses an
+turn that fails sends its events again in a new turn, while a restart-interrupted
+turn receives a continuation. A restart at any point neither loses an
 event nor delivers it twice alongside a turn still in flight. An event
 claimed by this session with no turn yet, left by a pass that stopped before
 queueing it, is released and delivered in the next turn. An abandoned
@@ -2742,8 +2760,9 @@ relayed ruling on each asker's original thread.
 
 Questions, choices and deliveries are derived from the trace on every pass. A
 restart with an open question delivers its event once the window closes and
-asks nothing again. An open question whose event turn failed, or was
-interrupted by a stop, reaches the chief of staff again in a new event turn.
+asks nothing again. An open question whose event turn failed reaches the
+chief of staff in a new event turn; a restart-interrupted turn receives a
+continuation on the same thread.
 A restart between a recorded answer and its delivery
 queues the answer turn once. An escalated question stays escalated and its
 asker stays parked until the owner rules. A restart after the owner's ruling

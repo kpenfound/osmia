@@ -233,6 +233,14 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		opts.WriteTimeout = 10 * time.Second
 	}
 	s.options = opts
+	if active != nil {
+		if err = s.recoverSessions(ctx, cfg, active.repository); err != nil {
+			listener.Close()
+			s.cleanupSocket()
+			st.Close()
+			return nil, fmt.Errorf("recover thread sessions: %w", err)
+		}
+	}
 	s.lifetime, s.cancel = context.WithCancel(ctx)
 	s.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.requests.Add(1)
