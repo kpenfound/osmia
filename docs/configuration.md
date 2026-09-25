@@ -78,6 +78,8 @@ The following optional settings show their defaults:
 # Default: <resolved-root>/osmia.sock, including when the root is overridden.
 # A relative value resolves against the root; ~/ is also supported.
 socket = "osmia.sock"
+# Optional loopback host:port serving the same API over TCP; empty disables.
+web = ""
 
 [capacity]
 masons = 4
@@ -103,7 +105,13 @@ sandbox = "none"
 The socket must be a direct child of the resolved root with a `.sock` suffix,
 separate from managed state. Its absolute path may contain at most 103 bytes
 for portability across Unix socket implementations. An existing path must be a
-Unix socket; the loader neither binds nor removes it. All capacity and shed values
+Unix socket; the loader neither binds nor removes it. `listen.web` is
+`host:port`, where the host is `localhost` or a loopback address such as
+`127.0.0.1` or `[::1]`, and the port is a number from 0 to 65535 (0 binds a
+free port). An empty host, any other address or hostname, and a missing or
+named port are errors that name `listen.web`. The listener has no
+authentication: anyone who can connect to the host's loopback interface can
+use the API ([web listener](service.md#web-listener)). All capacity and shed values
 must be positive integers. `events.window` is a positive Go duration: how long
 the oldest undelivered event of a workstream waits before the service delivers
 it, with every other ready event, as one
@@ -269,9 +277,10 @@ configuration is `capacity.reviewers`; no separate review-policy schema is defin
 Runtime profile overrides, pauses and priorities belong in `runtime.json`, never
 these files; see [runtime overrides](runtime.md) for M1 persistence and resolution.
 `osmia reload` applies edited files to a running service after validating
-all of them ([reload](service.md#reload)). The root, `listen.socket` and
-`active_projects` keep their loaded values until the service restarts; project
-registration and removal change the active project without one.
+all of them ([reload](service.md#reload)). The root, `listen.socket`,
+`listen.web` and `active_projects` keep their loaded values until the service
+restarts; project registration and removal change the active project without
+one.
 
 The optional `[budget]` table accepts `per_session`, `per_unit` and `per_day` as
 positive decimal USD strings. `per_session` caps known spend on each new turn.
@@ -283,9 +292,9 @@ calendar day reaches `per_day`, the service pauses factory dispatch until the
 next local day ([daily budget](service.md#daily-budget)).
 Missing values impose no cap. Unknown cost does not establish that a cap was reached.
 
-The full design's `listen.tailnet`, `listen.web`, `notify`, `hearsay` and
+The full design's `listen.tailnet`, `notify`, `hearsay` and
 project `hearsay_scope` settings are rejected as unsupported
-in M1, even if supplied empty. Tailnet/web and notifications belong to M5, multi-project operation to M7, and
+in M1, even if supplied empty. Tailnet access and notifications belong to M5, multi-project operation to M7, and
 Hearsay to M8. Unsupported keys do not silently enable later behavior.
 
 Representative errors include the file and offending field:

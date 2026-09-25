@@ -117,6 +117,7 @@ type Service struct {
 	store      *runtime.Store
 	lock       *os.File
 	listener   *net.UnixListener
+	web        net.Listener // nil unless listen.web is configured
 	socketInfo os.FileInfo
 	server     *http.Server
 	lifetime   context.Context
@@ -225,6 +226,12 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.cleanupSocket()
 		return nil, err
 	}
+	if cfg.Listen.Web != "" {
+		if s.web, err = net.Listen("tcp", cfg.Listen.Web); err != nil {
+			s.cleanupSocket()
+			return nil, fmt.Errorf("bind listen.web %s: %w", cfg.Listen.Web, err)
+		}
+	}
 	if opts.ShutdownTimeout <= 0 {
 		opts.ShutdownTimeout = 5 * time.Second
 	}
@@ -240,7 +247,6 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	s.options = opts
 	if active != nil {
 		if err = s.recoverSessions(ctx, cfg, active.repository); err != nil {
-			listener.Close()
 			s.cleanupSocket()
 			st.Close()
 			return nil, fmt.Errorf("recover thread sessions: %w", err)
@@ -250,6 +256,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	s.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.requests.Add(1)
 		defer s.requests.Done()
+		if overWeb(r) && !webAllowed(r) {
+			fail(w, Forbidden)
+			return
+		}
 		if !s.ready.Load() {
 			fail(w, Unavailable)
 			return
@@ -260,8 +270,15 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	s.ready.Store(true)
 	s.launch(active)
 	go func() {
-		served := make(chan error, 1)
-		go func() { served <- s.server.Serve(listener) }()
+		listeners := []net.Listener{listener}
+		if s.web != nil {
+			listeners = append(listeners, s.web)
+		}
+		served := make(chan error, len(listeners))
+		for _, l := range listeners {
+			go func() { served <- s.server.Serve(l) }()
+		}
+		serving := len(listeners)
 		select {
 		case <-s.lifetime.Done():
 		case e := <-s.failures:
@@ -270,7 +287,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			if !errors.Is(e, http.ErrServerClosed) {
 				s.err = e
 			}
-			served = nil
+			serving--
 		}
 		s.ready.Store(false)
 		drain, stop := context.WithTimeout(context.Background(), opts.ShutdownTimeout)
@@ -279,9 +296,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 		stop()
 		s.cancel()
-		if served != nil {
+		for ; serving > 0; serving-- {
 			if e := <-served; !errors.Is(e, http.ErrServerClosed) {
-				s.err = e
+				s.err = errors.Join(s.err, e)
 			}
 		}
 		s.requests.Wait()
@@ -298,8 +315,17 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	return s, nil
 }
 func (s *Service) Socket() string { return s.cfg.Listen.Socket }
-func (s *Service) Wait() error    { <-s.done; return s.err }
-func (s *Service) Close() error   { s.cancel(); return s.Wait() }
+
+// WebAddr is the bound address of the web listener, or empty when listen.web
+// is not configured.
+func (s *Service) WebAddr() string {
+	if s.web == nil {
+		return ""
+	}
+	return s.web.Addr().String()
+}
+func (s *Service) Wait() error  { <-s.done; return s.err }
+func (s *Service) Close() error { s.cancel(); return s.Wait() }
 
 // current returns the loaded configuration; project registration replaces it.
 func (s *Service) current() *config.Config {
@@ -353,6 +379,9 @@ func removeStaleSocket(path string) error {
 }
 func (s *Service) cleanupSocket() {
 	s.listener.Close()
+	if s.web != nil {
+		s.web.Close()
+	}
 	if info, err := os.Lstat(s.cfg.Listen.Socket); err == nil && os.SameFile(info, s.socketInfo) {
 		os.Remove(s.cfg.Listen.Socket)
 	}

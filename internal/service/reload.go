@@ -108,9 +108,9 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 
 // candidate loads the configuration on disk as a reload applies it over cfg.
 // Changed settings that need a restart keep cfg's values and are named: the
-// listen socket, and the active project list, which only project add and
-// remove change in a running service. The loaded project's file is validated
-// even when the disk lists another project.
+// listen socket, the web listener, and the active project list, which only
+// project add and remove change in a running service. The loaded project's
+// file is validated even when the disk lists another project.
 func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error) {
 	next, err := config.Load(s.options.Config)
 	if err != nil {
@@ -127,8 +127,13 @@ func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error
 			next = next.WithoutProject()
 		}
 	}
-	if next.Listen != cfg.Listen {
+	if next.Listen.Socket != cfg.Listen.Socket {
 		restart = append(restart, "listen.socket")
+	}
+	if next.Listen.Web != cfg.Listen.Web {
+		restart = append(restart, "listen.web")
+	}
+	if next.Listen != cfg.Listen {
 		pinned := *next
 		pinned.Listen = cfg.Listen
 		next = &pinned
