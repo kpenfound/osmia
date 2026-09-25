@@ -51,6 +51,27 @@ type HealthResponse struct {
 	Service    string   `json:"service"`
 	APIVersion int      `json:"api_version"`
 	Build      Identity `json:"build"`
+	// Tailnet is the tailnet listener's state; it is omitted unless
+	// listen.tailnet is configured.
+	Tailnet *TailnetStatus `json:"tailnet,omitempty"`
+}
+
+// Tailnet listener states.
+const (
+	TailnetUp         = "up"
+	TailnetConnecting = "connecting"
+	TailnetNeedsLogin = "needs_login"
+	TailnetDown       = "down"
+)
+
+// TailnetStatus is the state of the tailnet listener: one of the Tailnet
+// constants. LoginURL is the address that approves the node, given with
+// needs_login when Tailscale supplies one. Reason says why the listener is
+// down.
+type TailnetStatus struct {
+	State    string `json:"state"`
+	LoginURL string `json:"login_url,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 type Diagnostic struct {
 	Field   string `json:"field"`
@@ -68,6 +89,9 @@ type ConfigResponse struct {
 	Project     *ProjectView   `json:"project"`
 	Diagnostics []Diagnostic   `json:"diagnostics"`
 	LastError   *ReloadError   `json:"last_error,omitempty"`
+	// Tailnet is the tailnet listener's state; it is omitted unless
+	// listen.tailnet is configured.
+	Tailnet *TailnetStatus `json:"tailnet,omitempty"`
 }
 
 // ReloadResponse reports an applied reload: the digest of the configuration
@@ -344,6 +368,9 @@ type StatusResponse struct {
 	// failed with infrastructure failures; it is omitted when there are none.
 	FailureStreaks []FailureStreak `json:"failure_streaks,omitempty"`
 	Diagnostics    []Diagnostic    `json:"diagnostics"`
+	// Tailnet is the tailnet listener's state; it is omitted unless
+	// listen.tailnet is configured.
+	Tailnet *TailnetStatus `json:"tailnet,omitempty"`
 }
 
 // FailureStreak counts the consecutive infrastructure failures of one role's

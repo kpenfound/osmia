@@ -758,6 +758,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			}{h, cfg, rt, all})
 		}
 		fmt.Fprintf(stdout, "Service: %s ready=%t API=%d\nConfiguration: %s (%s)\n", h.Service, h.Ready, h.APIVersion, cfg.Digest, cfg.Root)
+		showTailnet(stdout, h.Tailnet)
 		showProject(stdout, cfg.Project)
 		for _, p := range rt.Projects {
 			fmt.Fprintf(stdout, "Context: %s context_mode=%s\n", p.Project, p.ContextMode)
@@ -920,6 +921,19 @@ func diagnostics(w io.Writer, ds []service.Diagnostic) {
 	for _, d := range ds {
 		fmt.Fprintf(w, "Diagnostic: %s: %s: %s\n", d.Field, d.Code, d.Message)
 	}
+}
+func showTailnet(w io.Writer, t *service.TailnetStatus) {
+	if t == nil {
+		return
+	}
+	line := "Tailnet: " + t.State
+	if t.LoginURL != "" {
+		line += " login=" + t.LoginURL
+	}
+	if t.Reason != "" {
+		line += " (" + t.Reason + ")"
+	}
+	fmt.Fprintln(w, line)
 }
 func showRuntime(w io.Writer, rt service.RuntimeResponse) {
 	fmt.Fprintln(w, "Pauses (absent scopes are unpaused):")

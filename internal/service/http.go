@@ -167,16 +167,20 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		switch r.URL.Path {
 		case Prefix + "/health":
-			respond(w, 200, HealthResponse{true, "osmia", 1, s.options.Build})
+			respond(w, 200, HealthResponse{true, "osmia", 1, s.options.Build, s.tailnetStatus(r.Context())})
 			return
 		case Prefix + "/config":
-			respond(w, 200, s.configuration())
+			out := s.configuration()
+			out.Tailnet = s.tailnetStatus(r.Context())
+			respond(w, 200, out)
 			return
 		case Prefix + "/runtime":
 			respond(w, 200, s.runtimeView())
 			return
 		case Prefix + "/status":
-			respond(w, 200, s.statusList())
+			out := s.statusList()
+			out.Tailnet = s.tailnetStatus(r.Context())
+			respond(w, 200, out)
 			return
 		case Prefix + "/events":
 			s.streamEvents(w, r)
