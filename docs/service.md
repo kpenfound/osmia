@@ -2444,6 +2444,7 @@ returns `internal`.
 | `blocked` | What waits on the ruling |
 | `options` | The choices, possibly none |
 | `recommendation` | What the chief of staff would decide |
+| `quick_reply` | The exact recommendation when this is an escalated question eligible for one-tap acceptance; otherwise an empty string |
 | `escalated_at` | When the questions were escalated |
 | `asked` | Each question of the batch in the order it was escalated: `id`, `asked_by` (the asking agent), `unit` when the asking turn had one, and `question` as asked |
 
@@ -2455,6 +2456,16 @@ durable before anything acts on it and a failed write leaves neither a ruling
 nor an event; see [the trace reference](trace.md#the-owners-ruling). It
 returns an `AnswerResponse`: `number`, `workstream`, `batch`, the `questions`
 the ruling covers, the `ruling` as given and `at`.
+
+Clients can accept an eligible recommendation by sending `quick_reply` as
+`text` through the same endpoint. The field is empty for an empty
+recommendation, for any decision other than an escalated question, or when the
+recommendation contains a prohibited whole word. Matching ignores case and
+splits words at every non-letter character. The prohibited words are `push`,
+`merge`, `deliver`, `abandon`, `force`, `delete`, `rebase`, `overrule`, `deploy`,
+`ratify`, `veto`, `revert`, `reset` and `discard`, including their common
+explicit inflections such as `merged` and `ratified`. Other text remains
+eligible, including near matches such as `merger`.
 
 | Case | Error |
 | --- | --- |

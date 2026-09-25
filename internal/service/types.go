@@ -447,6 +447,7 @@ type InboxEntry struct {
 	Blocked        string              `json:"blocked"`
 	Options        []string            `json:"options"`
 	Recommendation string              `json:"recommendation"`
+	QuickReply     string              `json:"quick_reply"`
 	EscalatedAt    time.Time           `json:"escalated_at"`
 	Asked          []InboxQuestion     `json:"asked"`
 }

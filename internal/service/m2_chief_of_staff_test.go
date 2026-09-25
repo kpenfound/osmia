@@ -397,7 +397,7 @@ func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	inbox, err := c.Inbox(ctx)
 	must(t, err)
 	want := InboxEntry{Number: 1, Workstream: stream, Batch: "escalation_2", Question: "May the upload API's response change?", Blocked: "The reviewer's review of the upload unit.",
-		Options: []string{"Change it", "Keep it and add an endpoint"}, Recommendation: "Keep it and add an endpoint.", EscalatedAt: clock.Now(),
+		Options: []string{"Change it", "Keep it and add an endpoint"}, Recommendation: "Keep it and add an endpoint.", QuickReply: "Keep it and add an endpoint.", EscalatedAt: clock.Now(),
 		Asked: []InboxQuestion{{ID: "2", AskedBy: "agent_reviewer", Question: chiefDemoQuestion}}}
 	if len(inbox.Entries) != 1 || !reflect.DeepEqual(inbox.Entries[0], want) {
 		t.Fatalf("inbox:\n%+v\nwant\n%+v", inbox.Entries, want)
