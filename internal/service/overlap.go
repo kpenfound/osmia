@@ -209,7 +209,7 @@ func (o *overlaps) Pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	state, _ := o.s.store.Effective()
+	state, _ := o.s.effective()
 	librarian := librarianWorkstream(o.repository.Project())
 	var active []sealedStream
 	for _, stream := range streams {

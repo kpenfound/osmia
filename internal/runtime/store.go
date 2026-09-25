@@ -23,6 +23,7 @@ type Target struct {
 	Scope      string              `json:"scope"`
 	Project    config.ProjectID    `json:"project,omitempty"`
 	Workstream config.WorkstreamID `json:"workstream,omitempty"`
+	Role       string              `json:"role,omitempty"`
 }
 type Pause struct {
 	Target Target    `json:"target"`
@@ -42,11 +43,21 @@ type Priority struct {
 	Project     config.ProjectID      `json:"project"`
 	Workstreams []config.WorkstreamID `json:"workstreams"`
 }
+
+// ProviderLimit records a provider's blocked capacity independently of role bindings.
+type ProviderLimit struct {
+	Backend  string    `json:"backend"`
+	Status   string    `json:"status"`
+	Kind     string    `json:"kind,omitempty"`
+	SetAt    time.Time `json:"set_at"`
+	ResetsAt time.Time `json:"resets_at,omitempty"`
+}
 type State struct {
-	Version    int               `json:"version"`
-	Pauses     []Pause           `json:"pauses,omitempty"`
-	Priorities []Priority        `json:"priorities,omitempty"`
-	Profiles   map[string]string `json:"profiles,omitempty"`
+	Version        int               `json:"version"`
+	Pauses         []Pause           `json:"pauses,omitempty"`
+	Priorities     []Priority        `json:"priorities,omitempty"`
+	Profiles       map[string]string `json:"profiles,omitempty"`
+	ProviderLimits []ProviderLimit   `json:"provider_limits,omitempty"`
 	// BudgetPausedOn is the local calendar day, as YYYY-MM-DD, on which the
 	// daily budget last paused the factory.
 	BudgetPausedOn string `json:"budget_paused_on,omitempty"`
@@ -205,6 +216,7 @@ func (s *Store) Resolve(in Inputs) error {
 }
 func clone(st State) State {
 	st.Pauses = slices.Clone(st.Pauses)
+	st.ProviderLimits = slices.Clone(st.ProviderLimits)
 	st.Profiles = maps.Clone(st.Profiles)
 	st.Priorities = slices.Clone(st.Priorities)
 	for i := range st.Priorities {
@@ -223,11 +235,17 @@ func (s *Store) Snapshot() (State, []Diagnostic) {
 // active project's explicit ordering. An absent pause means unpaused; an absent
 // priority means no ordering preference. The store performs no scheduling.
 func (s *Store) Effective() (State, []Diagnostic) {
+	return s.EffectiveAt(time.Now().UTC())
+}
+func (s *Store) EffectiveAt(at time.Time) (State, []Diagnostic) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return resolve(s.state, s.input)
+	return resolveAt(s.state, s.input, at)
 }
 func resolve(st State, in Inputs) (State, []Diagnostic) {
+	return resolveAt(st, in, time.Now().UTC())
+}
+func resolveAt(st State, in Inputs, at time.Time) (State, []Diagnostic) {
 	out := State{Version: Version, Profiles: map[string]string{}}
 	var ds []Diagnostic
 	for r, b := range in.Config.Roles {
@@ -262,10 +280,54 @@ func resolve(st State, in Inputs) (State, []Diagnostic) {
 			out.Profiles[r] = st.Profiles[r]
 		}
 	}
+	for _, limit := range st.ProviderLimits {
+		if !limit.ResetsAt.IsZero() && !at.Before(limit.ResetsAt) {
+			continue
+		}
+		out.ProviderLimits = append(out.ProviderLimits, limit)
+	}
+	for role, binding := range in.Config.Roles {
+		if _, overridden := st.Profiles[role]; overridden && out.Profiles[role] == st.Profiles[role] {
+			continue
+		}
+		name := binding.Profile
+		if !limitedBackend(out.ProviderLimits, in.Config.Profiles[name].Agent) {
+			continue
+		}
+		for name != "" && limitedBackend(out.ProviderLimits, in.Config.Profiles[name].Agent) {
+			name = in.Config.Profiles[name].Fallback
+		}
+		if name != "" {
+			out.Profiles[role] = name
+			continue
+		}
+		limit := out.ProviderLimits[0]
+		for _, candidate := range out.ProviderLimits {
+			if candidate.Backend == in.Config.Profiles[binding.Profile].Agent {
+				limit = candidate
+				break
+			}
+		}
+		out.Pauses = append(out.Pauses, Pause{Target: Target{Scope: "role", Role: role}, Mode: "soft", Source: PauseProviderUsageLimit, Reason: "Provider " + limit.Backend + " usage limit (" + limit.Status + ")", SetAt: limit.SetAt})
+	}
 	return out, ds
+}
+func limitedBackend(limits []ProviderLimit, backend string) bool {
+	for _, limit := range limits {
+		if limit.Backend == backend {
+			return true
+		}
+	}
+	return false
 }
 func targetReference(t Target, in Inputs) error {
 	if t.Scope == "factory" {
+		return nil
+	}
+	if t.Scope == "role" {
+		if _, ok := in.Config.Roles[t.Role]; !ok {
+			return fmt.Errorf("unknown role %s", t.Role)
+		}
 		return nil
 	}
 	if t.Project != in.Config.Project.ID {
@@ -300,10 +362,17 @@ func profileReference(role, profile string, in Inputs) error {
 func validateTarget(t Target) error {
 	switch t.Scope {
 	case "factory":
-		if t.Project != "" || t.Workstream != "" {
+		if t.Project != "" || t.Workstream != "" || t.Role != "" {
 			return fmt.Errorf("factory target has identity")
 		}
+	case "role":
+		if strings.TrimSpace(t.Role) == "" || t.Project != "" || t.Workstream != "" {
+			return fmt.Errorf("invalid role target")
+		}
 	case "project", "workstream":
+		if t.Role != "" {
+			return fmt.Errorf("project or workstream target has role")
+		}
 		if err := config.CheckProjectIDs(t.Project); err != nil {
 			return err
 		}
@@ -365,6 +434,13 @@ func validate(st State) error {
 			return fmt.Errorf("empty role or profile")
 		}
 	}
+	seenLimits := map[string]bool{}
+	for _, limit := range st.ProviderLimits {
+		if strings.TrimSpace(limit.Backend) == "" || strings.TrimSpace(limit.Status) == "" || limit.SetAt.IsZero() || seenLimits[limit.Backend] {
+			return fmt.Errorf("invalid provider limit")
+		}
+		seenLimits[limit.Backend] = true
+	}
 	if st.BudgetPausedOn != "" {
 		if _, err := time.Parse(DayLayout, st.BudgetPausedOn); err != nil {
 			return fmt.Errorf("budget pause day must be YYYY-MM-DD")
@@ -403,6 +479,26 @@ func (s *Store) SetPause(p Pause) error {
 		p.SetAt = time.Now().UTC()
 	}
 	return s.mutate(func(st *State, in Inputs) error { return setPause(st, in, p) })
+}
+
+// SetProviderLimit records the latest blocked report for a provider.
+func (s *Store) SetProviderLimit(limit ProviderLimit) error {
+	return s.mutate(func(st *State, _ Inputs) error {
+		st.ProviderLimits = slices.DeleteFunc(st.ProviderLimits, func(v ProviderLimit) bool { return v.Backend == limit.Backend })
+		st.ProviderLimits = append(st.ProviderLimits, limit)
+		return nil
+	})
+}
+
+// ClearProviderLimit removes one provider's limit, including a limit without a reset time.
+func (s *Store) ClearProviderLimit(backend string) error {
+	return s.mutate(func(st *State, _ Inputs) error {
+		if strings.TrimSpace(backend) == "" {
+			return fmt.Errorf("provider required")
+		}
+		st.ProviderLimits = slices.DeleteFunc(st.ProviderLimits, func(v ProviderLimit) bool { return v.Backend == backend })
+		return nil
+	})
 }
 
 // SetBudgetPause records the daily budget's pause p and day, the local

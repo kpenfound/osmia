@@ -121,7 +121,7 @@ func (f *foreman) requestDrifts(ctx context.Context, due func(config.WorkstreamI
 			}
 		}
 	}
-	state, _ := f.s.store.Effective()
+	state, _ := f.s.effective()
 	var requested []config.WorkstreamID
 	for _, stream := range streams {
 		if stream == librarian || reviewing[stream] || scheduler.Paused(state.Pauses, f.cfg.Project.ID, stream) {
@@ -586,7 +586,7 @@ func (d drifter) eligible(stream config.WorkstreamID) (string, error) {
 	if reason, err := d.building(stream); err != nil || reason != "" {
 		return reason, err
 	}
-	state, _ := d.s.store.Effective()
+	state, _ := d.s.effective()
 	if scheduler.Paused(state.Pauses, d.cfg.Project.ID, stream) {
 		return "the workstream is paused", nil
 	}

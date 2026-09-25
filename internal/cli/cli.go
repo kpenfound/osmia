@@ -52,7 +52,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   pause <all|project-id|workstream-id> [--hard] [--reason TEXT] [--json]
   resume <all|project-id|workstream-id> [--json]
   priority set <workstream-id>... | priority clear [--json]
-  profiles [set <role> <profile>|clear <role>] [--json]
+  profiles [set <role> <profile>|clear <role>|clear-limit <backend>] [--json]
 Client commands also accept --socket PATH (relative to root).
 Only these commands are available; serve runs in the foreground.
 `
@@ -188,7 +188,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "priority":
 		valid = len(a) >= 2 && a[0] == "set" || len(a) == 1 && a[0] == "clear"
 	case "profiles":
-		valid = len(a) == 0 || len(a) == 3 && a[0] == "set" || len(a) == 2 && a[0] == "clear"
+		valid = len(a) == 0 || len(a) == 3 && a[0] == "set" || len(a) == 2 && (a[0] == "clear" || a[0] == "clear-limit")
 	case "shed":
 		valid = len(a) >= 2 && (a[0] == "object" && len(a) == 3 || a[0] == "rule" && (len(a) == 4 || len(a) == 5) ||
 			a[0] == "overrule" && (len(a) == 3 || len(a) == 4) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3 ||
@@ -789,7 +789,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "profiles":
 		kind = "profile"
 		scope = a[1]
-		if a[0] == "clear" {
+		if a[0] == "clear-limit" {
+			kind, method = "provider-limit", "DELETE"
+			input = service.ClearProviderLimitRequest{Backend: a[1]}
+		} else if a[0] == "clear" {
 			method = "DELETE"
 			input = service.ClearProfileRequest{Role: a[1]}
 		} else {
@@ -855,7 +858,10 @@ func diagnostics(w io.Writer, ds []service.Diagnostic) {
 func showRuntime(w io.Writer, rt service.RuntimeResponse) {
 	fmt.Fprintln(w, "Pauses (absent scopes are unpaused):")
 	for _, p := range rt.Effective.Pauses {
-		fmt.Fprintf(w, "  %s %s %s: %s source=%s reason=%q set_at=%s\n", p.Target.Scope, p.Target.Project, p.Target.Workstream, p.Mode, p.Source, p.Reason, p.SetAt.UTC().Format(time.RFC3339))
+		fmt.Fprintf(w, "  %s %s %s %s: %s source=%s reason=%q set_at=%s\n", p.Target.Scope, p.Target.Project, p.Target.Workstream, p.Target.Role, p.Mode, p.Source, p.Reason, p.SetAt.UTC().Format(time.RFC3339))
+	}
+	for _, limit := range rt.Effective.ProviderLimits {
+		fmt.Fprintf(w, "Provider limit: %s status=%s kind=%s reset=%s\n", limit.Backend, limit.Status, limit.Kind, limit.ResetsAt.UTC().Format(time.RFC3339))
 	}
 	fmt.Fprintln(w, "Priority (absent projects have no preference):")
 	for _, p := range rt.Effective.Priorities {
@@ -864,7 +870,11 @@ func showRuntime(w io.Writer, rt service.RuntimeResponse) {
 	fmt.Fprintln(w, "Profiles:")
 	for _, r := range slices.Sorted(maps.Keys(rt.Profiles)) {
 		p := rt.Profiles[r]
-		fmt.Fprintf(w, "  %s: %s source=%s\n", r, p.Name, p.Source)
+		fmt.Fprintf(w, "  %s: %s source=%s", r, p.Name, p.Source)
+		if p.Reason != "" {
+			fmt.Fprintf(w, " reason=%q", p.Reason)
+		}
+		fmt.Fprintln(w)
 	}
 	diagnostics(w, rt.Diagnostics)
 }

@@ -82,6 +82,29 @@ func TestInfrastructureFailuresRetryThenFollowFallbacks(t *testing.T) {
 	}
 }
 
+func TestProviderLimitSkipsSameBackendWithoutRetry(t *testing.T) {
+	repo, _, _ := setup(t)
+	queue(t, repo, "first")
+	var ran, recorded []string
+	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, MaxRetries: 2, Fallbacks: chain,
+		OnProviderLimit: func(p coreadapter.Profile, limit coreadapter.ProviderLimit) error {
+			recorded = append(recorded, p.Name+":"+limit.Status)
+			return nil
+		},
+		Turns: fakeTurns(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+			ran = append(ran, p.Profile.Name)
+			if p.Profile.Name == "last" {
+				return healthy(p)
+			}
+			return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: p.Profile.Backend, ID: "limited"}, Limit: &coreadapter.ProviderLimit{Status: "blocked"}}, nil
+		}),
+	}
+	q, err := runner.RunNext(context.Background(), stream, "agent", coreadapter.PreparedTurn{SessionDirectory: "/owned"})
+	if err != nil || !reflect.DeepEqual(ran, []string{"default", "last"}) || !reflect.DeepEqual(recorded, []string{"default:blocked"}) || q.Response.Failure != "" {
+		t.Fatalf("runs %v, recorded %v, response %+v: %v", ran, recorded, q.Response, err)
+	}
+}
+
 func TestExhaustedFallbackChainFailsTheTurnOnce(t *testing.T) {
 	ctx := context.Background()
 	repo, root, p := setup(t)

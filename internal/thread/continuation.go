@@ -138,14 +138,24 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		captured := result
 		a.Result = &captured
 		var decision coreadapter.RetryDecision
-		if stop == nil && failed(result, runErr) {
+		limited := result.Limit != nil && result.Limit.Blocking()
+		if stop == nil && (failed(result, runErr) || limited) {
 			fallback := r.Fallbacks[prepared.Profile.Name]
+			if limited {
+				for fallback.Name != "" && fallback.Backend == prepared.Profile.Backend {
+					fallback = r.Fallbacks[fallback.Name]
+				}
+			}
 			if tried[fallback.Name] {
 				fallback = coreadapter.Profile{}
 			}
 			decision, err = coreadapter.RetryAdapter{}.Decide(context.WithoutCancel(ctx), coreadapter.RetryRequest{Result: result, Err: runErr, Attempt: attempts, MaxRetries: r.MaxRetries, FallbackProfile: fallback.Name})
 			if err != nil {
 				return result, runErr, err
+			}
+			if limited {
+				decision.Kind, decision.Retry, decision.FallbackProfile = coreadapter.Infrastructure, fallback.Name != "", fallback.Name
+				decision.Reason = "provider usage limit"
 			}
 			a.FailureClass, a.Failure = decision.Kind, "the session failed: "+decision.Reason
 			if runErr != nil {
@@ -155,6 +165,11 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		q.Attempts[len(q.Attempts)-1] = a
 		if err := r.Store.RecordAttempt(context.WithoutCancel(ctx), q.Request.Workstream, q.Request.AgentID, q.Request.TurnID, q.Claim.Token, a); err != nil {
 			return result, runErr, err
+		}
+		if result.Limit != nil && result.Limit.Blocking() && r.OnProviderLimit != nil {
+			if err := r.OnProviderLimit(prepared.Profile, *result.Limit); err != nil {
+				return result, runErr, err
+			}
 		}
 		if run.Err() != nil {
 			break
@@ -174,6 +189,11 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 			continue
 		}
 		fallback := r.Fallbacks[prepared.Profile.Name]
+		if limited {
+			for fallback.Name != "" && fallback.Backend == prepared.Profile.Backend {
+				fallback = r.Fallbacks[fallback.Name]
+			}
+		}
 		if fallback.Name == "" || fallback.Backend == "" {
 			return result, runErr, fmt.Errorf("invalid fallback profile")
 		}

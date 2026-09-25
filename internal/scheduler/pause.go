@@ -11,7 +11,17 @@ import (
 // are never held, so the owner can still reach the chief of staff.
 func Held(pauses []runtime.Pause, project config.ProjectID, c Candidate) bool {
 	if c.Thread.Identity.Role == trace.ChiefOfStaff {
+		for _, p := range pauses {
+			if p.Target.Scope == "role" && p.Target.Role == trace.ChiefOfStaff {
+				return true
+			}
+		}
 		return false
+	}
+	for _, p := range pauses {
+		if p.Target.Scope == "role" && p.Target.Role == c.Thread.Identity.Role {
+			return true
+		}
 	}
 	return Paused(pauses, project, c.Workstream)
 }
