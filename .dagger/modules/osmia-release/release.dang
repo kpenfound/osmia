@@ -1,0 +1,130 @@
+"""
+Release builds of the osmia binary.
+"""
+type Release {
+  """
+  Base image used to build and package releases.
+  """
+  pub base: Container!
+
+  new(
+    """
+    Base image used to build and package releases.
+    """
+    base: Container = null,
+  ) {
+    self.base = base ?? container.from("golang:1.26-bookworm")
+    self
+  }
+
+  """
+  Platforms a release is built for.
+  """
+  let platforms = [
+    {{os: "linux", arch: "amd64"}},
+    {{os: "linux", arch: "arm64"}},
+    {{os: "darwin", arch: "amd64"}},
+    {{os: "darwin", arch: "arm64"}},
+  ]
+
+  """
+  Build release archives for every platform.
+
+  The result holds one osmia_<version>_<os>_<arch>.tar.gz per platform, each
+  containing the stamped osmia binary, LICENSE and README.md, and a
+  checksums.txt with their SHA-256 sums. Attach its files to a GitHub release.
+  """
+  pub build(
+    ws: Workspace!,
+    """
+    Release version stamped into the binary, for example v0.1.0.
+    """
+    version: String!,
+    """
+    Commit stamped into the binary. Defaults to the workspace's checked-out HEAD.
+    """
+    commit: String = null,
+  ): Directory! {
+    if (version == "" or version.contains("/") or version.contains(" ")) {
+      raise "version must be a non-empty name without slashes or spaces"
+    } else {
+      let rev = commit ?? headCommit(ws)
+      platforms
+        .reduce(builder(ws)) { ctr, platform =>
+          let name = "osmia_" + version + "_" + platform.os + "_" + platform.arch
+          ctr
+            .withEnvVariable("GOOS", platform.os)
+            .withEnvVariable("GOARCH", platform.arch)
+            .withExec(goBuild(version, rev, "/dist/" + name + "/osmia"))
+            .withExec(["cp", "LICENSE", "README.md", "/dist/" + name + "/"])
+            .withExec([
+              "tar", "--sort=name", "--owner=0", "--group=0", "--numeric-owner",
+              "--mtime=@0", "--use-compress-program=gzip -n",
+              "-C", "/dist", "-cf", "/out/" + name + ".tar.gz", name,
+            ])
+        }
+        .withWorkdir("/out")
+        .withExec(["sh", "-c", "sha256sum *.tar.gz > checksums.txt"])
+        .directory("/out")
+    }
+  }
+
+  """
+  Build osmia with a stamped version and check that osmia --version reports it.
+  """
+  pub versionRoundTrip(ws: Workspace!): Void @check {
+    let version = "v0.0.0-check"
+    let rev = "0123456789abcdef"
+    let out = builder(ws)
+      .withExec(goBuild(version, rev, "/usr/local/bin/osmia"))
+      .withExec(["osmia", "--version"])
+      .stdout
+    let want = "osmia " + version + " (" + rev + ")\n"
+    if (out != want) {
+      raise "osmia --version printed " + out + ", want " + want
+    }
+    null
+  }
+
+  """
+  The workspace's checked-out commit, or empty when it has none.
+  """
+  let headCommit(ws: Workspace!): String! {
+    try { ws.git.head.commit } catch { err => "" }
+  }
+
+  """
+  Container holding the osmia source, ready to build.
+  """
+  let builder(ws: Workspace!): Container! {
+    base
+      .withoutEntrypoint
+      .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
+      .withEnvVariable("GOMODCACHE", "/go/pkg/mod")
+      .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
+      .withEnvVariable("GOCACHE", "/root/.cache/go-build")
+      .withEnvVariable("CGO_ENABLED", "0")
+      .withDirectory(
+        "/src",
+        ws.directory(
+          "/",
+          include: ["go.mod", "go.sum", "**/*.go", "LICENSE", "README.md"],
+          exclude: [".bees/**", ".dagger/**"],
+        ),
+      )
+      .withWorkdir("/src")
+      .withExec(["mkdir", "-p", "/dist", "/out"])
+  }
+
+  """
+  go build command for a binary stamped with version and commit.
+  """
+  let goBuild(version: String!, commit: String!, output: String!): [String!]! {
+    let pkg = "github.com/kpenfound/osmia/internal/buildinfo"
+    [
+      "go", "build", "-trimpath", "-buildvcs=false",
+      "-ldflags", "-s -w -X " + pkg + ".Version=" + version + " -X " + pkg + ".Commit=" + commit,
+      "-o", output, "./cmd/osmia",
+    ]
+  }
+}
