@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 )
 
@@ -137,8 +138,11 @@ func (r *Repository) commitContent(ctx context.Context, paths []string, content 
 	if old == "" {
 		old = strings.Repeat("0", 40)
 	}
-	_, err = r.git(ctx, nil, "update-ref", "refs/heads/main", oid, old)
-	return err
+	if _, err = r.git(ctx, nil, "update-ref", "refs/heads/main", oid, old); err != nil {
+		return err
+	}
+	r.observed(Commit{Paths: slices.Clone(paths), Content: content})
+	return nil
 }
 
 // checkHistory finishes journaled workflow publication and reports other

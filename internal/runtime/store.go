@@ -90,6 +90,18 @@ type Store struct {
 	state State
 	disk  []byte
 	ops   fileOps
+	// changed is called after a mutation changes the persisted state.
+	changed func()
+}
+
+// Observe calls f after each mutation that changes the persisted state,
+// replacing any earlier observer. Set it before the store is shared. f runs
+// while the store's lock is held, so it must return promptly and must not call
+// the store.
+func (s *Store) Observe(f func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.changed = f
 }
 
 // Open rejects malformed state. Well-formed stale references remain in Snapshot
@@ -470,8 +482,12 @@ func (s *Store) mutate(f func(*State, Inputs) error) error {
 	if err = s.persist(data); err != nil {
 		return err
 	}
+	unchanged := bytes.Equal(data, s.disk)
 	s.state = next
 	s.disk = data
+	if !unchanged && s.changed != nil {
+		s.changed()
+	}
 	return nil
 }
 func (s *Store) SetPause(p Pause) error {

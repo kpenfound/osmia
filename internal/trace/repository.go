@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -36,6 +37,7 @@ type Repository struct {
 	session         string
 	wake            *coreadapter.WakeAdapter
 	failPublication func(string) error
+	observer        atomic.Pointer[func(Commit)]
 	// gitMu guards what the handle remembers about the Git store: the tree
 	// listing of the commit treeHead and the object files already flushed.
 	gitMu    sync.Mutex
@@ -96,6 +98,29 @@ func (r *Repository) acquire() error {
 	r.lock = f
 	return nil
 }
+
+// Commit names the paths one published trace commit wrote or removed, and
+// holds the content it wrote for those paths whose bytes the commit was given
+// rather than read from the work tree. Observers must not modify it.
+type Commit struct {
+	Paths   []string
+	Content map[string][]byte
+}
+
+// Observe calls f after each commit this handle publishes, replacing any
+// earlier observer. f runs while the handle's lock is held, so it must return
+// promptly and must not call the repository.
+func (r *Repository) Observe(f func(Commit)) {
+	r.observer.Store(&f)
+}
+
+// observed passes a published commit to the observer, if any.
+func (r *Repository) observed(c Commit) {
+	if f := r.observer.Load(); f != nil && *f != nil {
+		(*f)(c)
+	}
+}
+
 func (r *Repository) Close() error {
 	r.operationMu.Lock()
 	defer r.operationMu.Unlock()
