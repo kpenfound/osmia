@@ -3,6 +3,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -117,8 +118,24 @@ var roleNames = []string{"architect", "chief_of_staff", "committee", "foreman", 
 var profileName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 var repositoryName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
+// FieldError is a configuration file that failed to load: the file, the
+// field at fault (empty when the whole file is at fault) and why. Its text
+// never contains values read from the file.
+type FieldError struct {
+	Path, Field, Reason string
+	Err                 error
+}
+
+func (e *FieldError) Error() string {
+	if e.Field == "" {
+		return e.Path + ": " + e.Reason
+	}
+	return e.Path + ": " + e.Field + ": " + e.Reason
+}
+func (e *FieldError) Unwrap() error { return e.Err }
+
 func fieldError(path, field, reason string) error {
-	return fmt.Errorf("%s: %s: %s", path, field, reason)
+	return &FieldError{Path: path, Field: field, Reason: reason}
 }
 
 // Load returns nil on every failure. The top-level file is required, and only
@@ -320,11 +337,15 @@ func (r Root) Overlaps(path string) bool {
 func decode(path string, dest any, project bool) (toml.MetaData, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return toml.MetaData{}, fmt.Errorf("%s: %w", path, err)
+		return toml.MetaData{}, &FieldError{Path: path, Reason: "cannot be read", Err: err}
 	}
 	md, err := toml.Decode(string(data), dest)
 	if err != nil {
-		return md, fmt.Errorf("%s: %w", path, err)
+		var parse toml.ParseError
+		if errors.As(err, &parse) {
+			return md, &FieldError{Path: path, Field: parse.LastKey, Reason: fmt.Sprintf("invalid TOML syntax or value type at line %d", parse.Position.Line), Err: err}
+		}
+		return md, &FieldError{Path: path, Reason: "invalid TOML", Err: err}
 	}
 	for _, key := range md.Keys() {
 		if !knownKey(key, project) {
