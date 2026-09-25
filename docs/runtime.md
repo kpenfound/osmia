@@ -45,8 +45,8 @@ The version 1 JSON representation is:
 }
 ```
 
-A pause target is `factory` (no IDs), `project` (project ID only), or `workstream`
-(both IDs). One record per target is allowed. Modes are `soft` and `hard`. Every
+A pause target is `factory` (no IDs), `project` (project ID only), `workstream`
+(both IDs), or `role` (role name only). One record per target is allowed. Modes are `soft` and `hard`. Every
 pause records a non-empty reason, its set time, and one of `owner`, `daily-budget`,
 or `provider-usage-limit` as its source. The owner can clear any pause. A budget
 or provider mechanism may clear only a pause it set; neither can clear an owner
