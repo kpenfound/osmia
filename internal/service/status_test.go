@@ -189,8 +189,13 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	after, err := c.Status(ctx, stream)
 	must(t, err)
 	check(after)
+	if len(after.Agents) != 0 {
+		t.Fatalf("completed turn still appears after restart: %+v", after.Agents)
+	}
+	stored.Agents = nil
+	after.Agents = nil
 	if !reflect.DeepEqual(after, stored) {
-		t.Fatalf("status changed across restart: %+v, want %+v", after, stored)
+		t.Fatalf("stored status changed across restart: %+v, want %+v", after, stored)
 	}
 	none, err := c.Status(ctx, quiet)
 	must(t, err)
