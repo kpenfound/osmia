@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
@@ -14,9 +15,9 @@ import (
 
 // statuses reports every workstream of the active project, or none when no
 // project or trace is active. The librarian's workstream carries no feature
-// and is left out. A workstream whose unit states or overlap advisories cannot
-// be read is reported without them and its first such failure in unreadable,
-// by workstream.
+// and is left out. A workstream whose agent turns, unit states, overlap
+// advisories or drift rebases cannot be read is reported without them and its
+// first such failure in unreadable, by workstream.
 func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagnostic, *APIError) {
 	s.mu.Lock()
 	active, cfg := s.active, s.cfg
@@ -37,9 +38,24 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 			continue
 		}
 		view := statusView(cfg.Project.ID, mode, w)
-		units, err := unitStates(active.repository, w.Workstream, w.Subjects)
+		agents, err := agentStatuses(active.repository, w.Workstream, time.Now())
+		if err == nil {
+			err = s.step("status-agents")
+		}
 		if err != nil {
-			unreadable[w.Workstream] = Diagnostic{"units", Internal, fmt.Sprintf("cannot read the unit states of workstream %s; check the trace repository", w.Workstream)}
+			unreadable[w.Workstream] = Diagnostic{"agents", Internal, fmt.Sprintf("cannot read the agent turns of workstream %s; check the trace repository", w.Workstream)}
+		} else {
+			view.Agents = agents
+		}
+		units, err := unitStates(active.repository, w.Workstream, w.Subjects)
+		if err == nil {
+			err = s.step("status-units")
+		}
+		if err != nil {
+			if _, ok := unreadable[w.Workstream]; !ok {
+				unreadable[w.Workstream] = Diagnostic{"units", Internal, fmt.Sprintf("cannot read the unit states of workstream %s; check the trace repository", w.Workstream)}
+			}
+			units = nil
 		}
 		view.Units = append(view.Units, units...)
 		advisories, err := overlapAdvisories(active.repository, w.Workstream, w.Subjects)
@@ -68,6 +84,57 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 		out = append(out, view)
 	}
 	return out, unreadable, nil
+}
+
+func agentStatuses(repository *trace.Repository, stream config.WorkstreamID, now time.Time) ([]AgentStatus, error) {
+	threads, err := repository.Threads(stream)
+	if err != nil {
+		return nil, err
+	}
+	agents := []AgentStatus{}
+	questionIDs := map[[3]string]string{}
+	for _, thread := range threads {
+		if thread.Parked() {
+			questions, err := repository.Questions(stream)
+			if err != nil {
+				return nil, err
+			}
+			for _, q := range questions {
+				a := q.Asked
+				questionIDs[[3]string{a.AskedBy.ID, a.Thread, a.Turn}] = a.ID
+			}
+			break
+		}
+	}
+	for _, thread := range threads {
+		if thread.Active == "" && !thread.Parked() {
+			continue
+		}
+		for _, turn := range thread.Turns {
+			if turn.Request.TurnID != thread.Active && (!thread.Parked() || turn.Sequence != uint64(len(thread.Turns))) {
+				continue
+			}
+			if turn.Claim == nil {
+				continue
+			}
+			end := now
+			if turn.Response != nil {
+				end = turn.Response.At
+			}
+			entry := AgentStatus{Role: thread.Identity.Role, Unit: string(turn.Request.Unit), State: thread.Status, StartedAt: turn.Claim.At,
+				Elapsed: max(0, int64(end.Sub(turn.Claim.At)/time.Second)), Profile: turn.Request.Profile.Name}
+			if thread.Parked() {
+				entry.State = "waiting"
+				entry.QuestionID = questionIDs[[3]string{thread.Identity.ID, turn.Request.ThreadID, turn.Request.TurnID}]
+			}
+			if n := len(turn.Attempts); n > 0 {
+				a := turn.Attempts[n-1]
+				entry.Profile, entry.Attempt, entry.Path = a.Profile.Name, a.Number, a.Path
+			}
+			agents = append(agents, entry)
+		}
+	}
+	return agents, nil
 }
 
 func (s *Service) statusList() StatusResponse {

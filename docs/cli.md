@@ -86,7 +86,10 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   feature branch, the reviewed candidate and base with the approval that
   landed it, and the criteria it meets, then the full status (goal, attention, note, one line per active
   agent, and when it was written), or `Status: none yet` before the chief of
-  staff writes one. A workstream the project does not hold fails with
+  staff writes one. `Live agents:` below the narrative lines shows each active
+  or parked turn's role, optional unit, state, RFC 3339 start time, elapsed
+  seconds, effective profile, optional attempt number and `resume` or `replay`
+  path, and a parked question's trace number. A workstream the project does not hold fails with
   `not_found` (exit 4); with no project configured it fails with `no_project`
   (exit 4). See [workstream status](service.md#workstream-status).
 - `trace <workstream-id> [unit <id>|criterion <spec#n>|commit <full-sha>]`

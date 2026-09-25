@@ -148,7 +148,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	list, err := c.Statuses(ctx)
 	must(t, err)
 	empty := func(w config.WorkstreamID) WorkstreamStatus {
-		return WorkstreamStatus{Workstream: w, Project: project, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, Gates: []trace.OwnerGate{}, ContextMode: "file"}
+		return WorkstreamStatus{Workstream: w, Project: project, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []AgentStatus{}, ContextMode: "file"}
 	}
 	if want := []WorkstreamStatus{empty(stream), empty(quiet)}; !sameStatuses(list.Workstreams, want) || len(list.Diagnostics) != 0 {
 		t.Fatalf("before the chief of staff wrote: %+v", list)
@@ -189,8 +189,13 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	after, err := c.Status(ctx, stream)
 	must(t, err)
 	check(after)
+	if len(after.Agents) != 0 {
+		t.Fatalf("completed turn still appears after restart: %+v", after.Agents)
+	}
+	stored.Agents = nil
+	after.Agents = nil
 	if !reflect.DeepEqual(after, stored) {
-		t.Fatalf("status changed across restart: %+v, want %+v", after, stored)
+		t.Fatalf("stored status changed across restart: %+v, want %+v", after, stored)
 	}
 	none, err := c.Status(ctx, quiet)
 	must(t, err)
