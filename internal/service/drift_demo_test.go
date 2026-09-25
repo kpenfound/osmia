@@ -31,10 +31,10 @@ const driftPlan = `{"version": 1, "units": [
 
 // upstreamWrote is what upstream commits as masonWrote: a placeholder that
 // conflicts with the file resume's landing adds. The drift mason resolves the
-// conflict with the feature's file, resolvedWrote, which supersedes it.
+// conflict with the feature's file. resolvedWrote combines their intent.
 const (
 	upstreamWrote = "package trace\n\n// upstream reserves this file for resume\n"
-	resolvedWrote = "package trace\n"
+	resolvedWrote = "package trace\n\n// resume uses the upstream reservation\n"
 )
 
 // cloneGit runs git in the fixture's home, as demoGit does, from a fake
@@ -290,7 +290,7 @@ func (d *driftDemo) recover(ctx context.Context, req agent.Request, _ *agent.Tur
 	d.mu.Lock()
 	d.recovered = string(data)
 	d.mu.Unlock()
-	body, err := callTool(ctx, tools, doneTool, map[string]any{"outcome": "Kept the feature's file, which supersedes upstream's placeholder"})
+	body, err := callTool(ctx, tools, doneTool, map[string]any{"outcome": "Combined the feature's file with the upstream reservation"})
 	if err != nil || !strings.Contains(body, `"recorded":true`) {
 		return nil, fmt.Errorf("drift done %s: %v", body, err)
 	}
@@ -310,7 +310,7 @@ func (d *driftDemo) reviewDrift(ctx context.Context, req agent.Request, _ *agent
 	d.mu.Lock()
 	d.reviewedTip, d.reviewPrompt = tip, req.Prompt
 	d.mu.Unlock()
-	evidence := []ReviewEvidence{{Criterion: "spec#1", Evidence: "The feature's file supersedes upstream's placeholder"}, {Criterion: "spec#2", Evidence: "Nothing of the feature branch's change was lost"}}
+	evidence := []ReviewEvidence{{Criterion: "spec#1", Evidence: "The resolution combines the feature's file and upstream reservation"}, {Criterion: "spec#2", Evidence: "Nothing of the feature branch's change was lost"}}
 	body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": evidence, "findings": []ReviewFinding{}})
 	if err != nil || !strings.Contains(body, `"recorded":true`) {
 		return nil, fmt.Errorf("drift verdict %s: %v", body, err)
@@ -473,8 +473,14 @@ func TestM4DriftConflictDemonstration(t *testing.T) {
 	// rebase carried its workspace onto the resolved branch and returned it
 	// to review; the rebased candidate was reviewed again and landed.
 	rebases := unitRebases(t, repository, stream, "audit")
-	if len(rebases) != 1 || rebases[0].State != UnitApproved || rebases[0].Onto != resolved || len(rebases[0].Conflicts) != 0 {
+	if len(rebases) != 1 || rebases[0].State != UnitApproved || rebases[0].Base != resume.Commit || rebases[0].Onto != resolved || len(rebases[0].Conflicts) != 0 {
 		t.Fatalf("audit's rebases %+v", rebases)
+	}
+	if got := fileAt(t, f, rebases[0].Commit, masonWrote); got != resolvedWrote {
+		t.Fatalf("audit's carried candidate replaced the reviewed drift resolution with %q", got)
+	}
+	if got := fileAt(t, f, rebases[0].Commit, "internal/trace/audit.go"); got != "package trace\n// audit\n" {
+		t.Fatalf("audit's carried candidate lost its own change: %q", got)
 	}
 	back := transitionByID(t, repository, stream, trace.UnitSubject("audit")+"-reviewing-rebase-1")
 	if back.From != UnitApproved || !strings.HasPrefix(back.Reason, "the approval no longer holds: ") {

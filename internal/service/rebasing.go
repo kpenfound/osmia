@@ -501,8 +501,19 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	driftBase := ""
+	if drift, found, err := carryDrift(r.repository, stream, in.Onto); err != nil {
+		return coreadapter.OperationResult{}, err
+	} else if found {
+		if descends, err := g.Ancestor(ctx, drift.Before, snapshot); err != nil {
+			return coreadapter.OperationResult{}, err
+		} else if descends {
+			base = drift.Before
+			driftBase = base
+		}
+	}
 	message := fmt.Sprintf("Rebase unit %s onto %s\n\nOsmia-Workstream: %s\nOsmia-Unit: %s\n%s: %s\nOsmia-Base: %s\nOsmia-Onto: %s\n%s: %s\n", in.Unit, in.Onto, stream, in.Unit, rebaseSnapshotTrailer, snapshot, base, in.Onto, landingTrailer, op.ID)
-	commit, conflicts, err := g.Rebase(ctx, in.Onto, snapshot, message, requested)
+	commit, conflicts, err := g.RebaseFrom(ctx, driftBase, in.Onto, snapshot, message, requested)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}

@@ -1902,7 +1902,10 @@ workspaces are behind the new tip, `drift/rebase.json` records `carrying` and
 the operation remains pending. The foreman uses the durable
 [unit rebase path](#rebasing-units-in-flight): it waits for active mason
 writers, rebases idle workspaces, returns changed approved candidates to
-review, and queues one sealed-spec mason turn for each conflict. Once every
+review, and queues one sealed-spec mason turn for each conflict. A unit
+workspace based on the feature tip before drift carries only its own
+changes across the new tip; the reviewed drift resolution is retained in
+files that unit did not edit. Once every
 unfinished workspace descends from the new tip and every conflict turn is
 queued, `drift/rebase.json` records `rebased` and `drift-<k>-rebased` moves the
 workflow to `rebased-<k>`. A workstream with no unit workspace to carry moves
