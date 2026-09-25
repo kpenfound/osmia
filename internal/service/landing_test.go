@@ -76,8 +76,10 @@ func (f *shedFixture) landedCommits(t *testing.T, stream config.WorkstreamID, ba
 	return strings.Split(out, "\n")
 }
 
-// awaitMerged waits until the unit merged, reporting the landing operations'
-// history when it never does.
+// awaitMerged waits until the unit merged and the workstream's landing
+// operations are acknowledged, so their results and history are settled when it
+// returns. It reports the landing operations' history when the unit never
+// merges.
 func (f *shedFixture) awaitMerged(t *testing.T, stream config.WorkstreamID, unit string) {
 	t.Helper()
 	deadline := time.Now().Add(demoTimeout)
@@ -85,6 +87,7 @@ func (f *shedFixture) awaitMerged(t *testing.T, stream config.WorkstreamID, unit
 		got, err := f.repository().Workflow(stream, trace.UnitSubject(unit))
 		must(t, err)
 		if got.Value == UnitMerged {
+			awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return landOperations(t, f.repository(), stream) })
 			return
 		}
 		if time.Now().After(deadline) {
