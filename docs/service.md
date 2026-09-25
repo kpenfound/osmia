@@ -4,7 +4,7 @@
 HTTP/JSON over the configured Unix socket, and over the optional loopback
 [web listener](#web-listener), until its context is cancelled.
 `RunSignals` also handles SIGINT and SIGTERM. Both run in the foreground and wait
-for cleanup. Embedders can use `Start`, `Socket`, `Wait` and `Close`; a successful
+for cleanup. Embedders can use `Start`, `Socket`, `WebAddr`, `Wait` and `Close`; a successful
 `Start` means the stores are loaded and the socket and any web listener are
 bound. No models, non-loopback listeners or authentication service are started. Agent turns run only when
 an embedder supplies a turn reconciler (see below).
