@@ -131,6 +131,14 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   configured it fails with `no_project` (exit 4). An entry that already has a
   ruling, or belongs to an abandoned workstream, fails with `conflict`
   (exit 5) and records nothing.
+- `answer <inbox-number> --accept` records the entry's eligible `quick_reply`
+  as your ruling through the same path. When the entry has no eligible quick
+  reply, or the inbox does not list it because it is already ruled, belongs to
+  an abandoned workstream or does not exist, it fails with `validation`
+  (exit 4), explains that you must give a ruling explicitly, and records
+  nothing. A number that is not a positive integer, or a ruling given as well,
+  is a usage error (exit 2). The inbox JSON response includes
+  `quick_reply` for clients to inspect before offering acceptance.
 - `charter` lists the charter rules the chief of staff proposed from your
   rulings that wait for your decision, oldest first: the workstream and
   question, the rule and the number it would take, the ruling it comes from

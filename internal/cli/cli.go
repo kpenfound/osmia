@@ -48,7 +48,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
   inbox [--json]
-  answer <inbox-number> <ruling> [--json]
+  answer <inbox-number> <ruling>|--accept [--json]
   charter [<workstream-id> <question> [ratify|decline [note]]] [--json]
   contested <workstream> <unit> <review|revise> <note> [--json]
   pause <all|project-id|workstream-id> [--hard] [--reason TEXT] [--json]
@@ -61,11 +61,11 @@ Only these commands are available; serve runs in the foreground.
 `
 
 type options struct {
-	root, socket, reason                string
-	upstream, fork, clone, baseBranch   string
-	json, hard, reasonSet, help, target bool
-	skipDebate, version                 bool
-	args                                []string
+	root, socket, reason                        string
+	upstream, fork, clone, baseBranch           string
+	json, hard, reasonSet, help, target, accept bool
+	skipDebate, version                         bool
+	args                                        []string
 }
 
 func parse(args []string) (o options, err error) {
@@ -114,7 +114,7 @@ func parse(args []string) (o options, err error) {
 				o.baseBranch = value
 				o.target = true
 			}
-		case "--json", "--hard", "--skip-debate", "--version", "--help", "-h":
+		case "--json", "--hard", "--skip-debate", "--accept", "--version", "--help", "-h":
 			if has {
 				return o, errors.New("boolean flags take no value")
 			}
@@ -125,6 +125,8 @@ func parse(args []string) (o options, err error) {
 				o.hard = true
 			case "--skip-debate":
 				o.skipDebate = true
+			case "--accept":
+				o.accept = true
 			case "--version":
 				o.version = true
 			default:
@@ -204,7 +206,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "inbox", "reload":
 		valid = len(a) == 0
 	case "answer":
-		valid = len(a) == 2
+		valid = o.accept && len(a) == 1 || !o.accept && len(a) == 2
 	case "charter":
 		valid = len(a) == 0 || len(a) == 2 || (len(a) == 3 || len(a) == 4) && (a[2] == trace.CharterRatify || a[2] == trace.CharterDecline)
 	case "contested":
@@ -225,7 +227,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase")
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
-	if !valid || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && o.skipDebate || cmd == "serve" && (o.json || o.socket != "") {
+	if !valid || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && o.skipDebate || cmd != "answer" && o.accept || cmd == "serve" && (o.json || o.socket != "") {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -671,7 +673,26 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err != nil || number < 1 {
 			return invalid()
 		}
-		result, err := c.Answer(ctx, number, a[1])
+		ruling := ""
+		if o.accept {
+			list, err := c.Inbox(ctx)
+			if err != nil {
+				return fail(err)
+			}
+			for _, entry := range list.Entries {
+				if entry.Number == number {
+					ruling = entry.QuickReply
+					break
+				}
+			}
+			if ruling == "" {
+				fmt.Fprintf(stderr, "validation: inbox entry %d has no eligible quick reply; give a ruling explicitly\n", number)
+				return 4
+			}
+		} else {
+			ruling = a[1]
+		}
+		result, err := c.Answer(ctx, number, ruling)
 		if err != nil {
 			return fail(err)
 		}
