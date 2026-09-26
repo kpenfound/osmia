@@ -54,6 +54,10 @@ commit: the same author, message, tree, parent count and paths. Only the
 workstream ID and the commit and operation IDs in the `Osmia-` trailers
 differ, and those differ between any two runs.
 
+How Jujutsu workspaces recover from a stopped mason turn, a restart in the
+middle of a landing and conflicting upstream drift is the
+[M6 Jujutsu recovery demonstration](m6-jujutsu-recovery.md).
+
 ## Running it
 
 The demonstration needs `jj`. `dagger check` installs the pinned release in
