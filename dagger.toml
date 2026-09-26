@@ -17,3 +17,6 @@ generate = ["**", "!.bees/**", "!.dagger"]
 
 [modules.release]
 source = ".dagger/modules/osmia-release"
+
+[modules.browser]
+source = ".dagger/modules/osmia-browser"

@@ -1,0 +1,45 @@
+"""
+Browser tests of the page the osmia service serves.
+"""
+type Browser {
+  """
+  Base image the browser tests run in.
+  """
+  pub base: Container!
+
+  new(
+    """
+    Base image the browser tests run in. Chromium is installed into it.
+    """
+    base: Container = null,
+  ) {
+    self.base = base ?? container.from("golang:1.26-bookworm")
+    self
+  }
+
+  """
+  Run the service's browser tests: headless Chromium opens the page through
+  the web listener of a service whose state comes from fake agents.
+  """
+  pub test(ws: Workspace!): Void @check {
+    base
+      .withoutEntrypoint
+      .withExec([
+        "sh", "-c",
+        "apt-get update && apt-get install -y --no-install-recommends chromium fonts-dejavu-core && rm -rf /var/lib/apt/lists/*",
+      ])
+      .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
+      .withEnvVariable("GOMODCACHE", "/go/pkg/mod")
+      .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
+      .withEnvVariable("GOCACHE", "/root/.cache/go-build")
+      .withEnvVariable("OSMIA_BROWSER", "/usr/bin/chromium")
+      .withDirectory(
+        "/src",
+        ws.directory("/", exclude: [".git/**", ".bees/**", ".dagger/**"]),
+      )
+      .withWorkdir("/src")
+      .withExec(["go", "test", "-count=1", "-timeout=10m", "-run", "^TestBrowser", "-v", "./internal/service"])
+      .sync
+    null
+  }
+}
