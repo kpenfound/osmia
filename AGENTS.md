@@ -38,11 +38,13 @@
   dagger core container from --address golang:1.26-bookworm \
     with-directory --path /src --source . --exclude .git,.bees \
     with-workdir --path /src \
+    with-exec --args=sh,-c,'curl -fsSL https://github.com/jj-vcs/jj/releases/download/v0.45.1/jj-v0.45.1-$(uname -m)-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin ./jj' \
+    with-env-variable --name=OSMIA_REQUIRE_JJ --value=1 \
     with-exec --args=go,test,-count=1,-run,'TestA|TestB',-v,./internal/service \
     combined-output
   ```
 
-  The arguments after `--args=` are the `go test` command line, separated by commas. Add `-count=5` there to reproduce a flake and `-race` to match the race detector.
+  The first `with-exec` installs the pinned `jj` that the Jujutsu tests need (the `go:test` check installs the same release); omit it, and `OSMIA_REQUIRE_JJ`, for packages that do not use `jj`, and those tests skip. The arguments after the last `--args=` are the `go test` command line, separated by commas. Add `-count=5` there to reproduce a flake and `-race` to match the race detector.
 - Browser tests of the web page run in the `browser:test` check (`dagger check browser:test`), which installs Chromium and names it in `OSMIA_BROWSER`; without it they skip.
 - Add meaningful tests for changed behavior and regressions, especially state transitions, recovery, owner gates and execution boundaries. Use temporary directories and local repositories for filesystem and VCS tests.
 - Tests must use fake agents, GitHub clients, providers and container engines. Never launch real model sessions, the live factory, remote pushes or pull requests from tests.
