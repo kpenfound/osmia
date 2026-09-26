@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -59,11 +60,17 @@ func dispatch(t *testing.T, r *trace.Repository, turns map[string]string) {
 // each beside the pass.
 func controller(t *testing.T, r *trace.Repository, clock *testClock, turns coreadapter.Turns) *reconcile.Controller {
 	t.Helper()
+	return controllerWith(t, r, clock, turns, nil)
+}
+
+// controllerWith is controller whose passes start with schedule.
+func controllerWith(t *testing.T, r *trace.Repository, clock *testClock, turns coreadapter.Turns, schedule func(context.Context) error) *reconcile.Controller {
+	t.Helper()
 	sessions := t.TempDir()
 	d := Dispatcher{Runner: Runner{Store: r, Turns: turns, Now: clock.Now}, Prepare: func(_ context.Context, in TurnInput) (coreadapter.PreparedTurn, error) {
 		return coreadapter.PreparedTurn{SessionDirectory: sessions + "/" + in.Agent + "/" + in.Turn}, nil
 	}}
-	c, err := reconcile.New(r, reconcile.Options{Worker: "test", Now: clock.Now, RetryDelay: time.Minute, Ticks: make(chan time.Time),
+	c, err := reconcile.New(r, reconcile.Options{Worker: "test", Now: clock.Now, RetryDelay: time.Minute, Ticks: make(chan time.Time), Schedule: schedule,
 		Adapters:   map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: d},
 		Concurrent: func(op coreadapter.Operation) bool { _, err := DecodeTurn(op); return err == nil }})
 	if err != nil {
@@ -229,5 +236,58 @@ func TestInterruptedConcurrentTurnsCompleteOnce(t *testing.T) {
 				t.Fatalf("costs %+v %v, want %d", costs, err, wantCosts)
 			}
 		})
+	}
+}
+
+// A turn's result is captured and completed serialized with reconciliation:
+// a schedule hook that runs as the session ends sees the turn unfinished
+// throughout, and the turn completes once the hook returns.
+func TestTurnCompletesBetweenSchedules(t *testing.T) {
+	repo, _, _ := setup(t)
+	queue(t, repo, "first")
+	dispatch(t, repo, map[string]string{"agent": "first"})
+	finish := make(chan struct{})
+	turns := fakeTurns(func(ctx context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+		select {
+		case <-finish:
+		case <-ctx.Done():
+			return coreadapter.SessionResult{}, ctx.Err()
+		}
+		return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "s"}, FinalResponse: "done"}, nil
+	})
+	completed := func() bool {
+		th, err := repo.Thread(stream, "agent")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return !th.Turns[0].CompletedAt.IsZero()
+	}
+	var armed atomic.Bool
+	c := controllerWith(t, repo, &testClock{at: timestamp.Add(time.Second)}, turns, func(context.Context) error {
+		if !armed.Load() {
+			return nil
+		}
+		close(finish)
+		for deadline := time.Now().Add(500 * time.Millisecond); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if completed() {
+				return errors.New("the turn completed while a schedule hook ran")
+			}
+		}
+		return nil
+	})
+	ctx := context.Background()
+	if err := c.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	armed.Store(true)
+	if err := c.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	armed.Store(false)
+	if err := c.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if !completed() {
+		t.Fatal("the turn never completed")
 	}
 }

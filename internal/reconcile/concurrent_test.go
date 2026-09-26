@@ -152,15 +152,19 @@ func TestConcurrentOperationsApplyAtOnce(t *testing.T) {
 	}
 }
 
-// A serial operation completes in a pass while a concurrent operation's
-// effect is still running, and that pass leaves the running one alone.
+// A concurrent operation is claimed and inspected in the pass's priority
+// order, and a serial operation after it completes while its effect is still
+// running. A later pass leaves the running one alone.
 func TestSerialOperationCompletesWhileAConcurrentEffectRuns(t *testing.T) {
 	ctx := context.Background()
 	f := setup(t, coreadapter.RepositoryBoundary)
-	f.publish(t, "session")
+	f.publish(t, "session", "landing")
 	s := newSessions()
 	c := f.concurrent(t, s, "session")
 	c.options.Adapters[coreadapter.RepositoryBoundary] = f.system
+	c.options.Priority = func(op coreadapter.Operation) int {
+		return map[string]int{"session": 0, "prepare": 1, "landing": 2}[op.Action]
+	}
 	var mu sync.Mutex
 	offered := 0
 	c.boundary = func(step string) error {
@@ -172,15 +176,13 @@ func TestSerialOperationCompletesWhileAConcurrentEffectRuns(t *testing.T) {
 		return nil
 	}
 	must(t, c.Pass(ctx))
-	f.awaitStarted(t, s, "session")
-	f.publish(t, "landing")
-	must(t, c.Pass(ctx))
 	if got := f.done(t); got["session"] || !got["landing"] || !got["prepare"] {
 		t.Fatalf("while the session runs: %v", got)
 	}
+	must(t, c.Pass(ctx))
 	mu.Lock()
 	if offered != 3 {
-		t.Errorf("passes offered %d operations, want the first pass's two and the landing", offered)
+		t.Errorf("passes offered %d operations, want the first pass's three", offered)
 	}
 	mu.Unlock()
 	if inspections, started, _ := s.snapshot(); !slices.Equal(started, []string{"session", "landing"}) || !slices.Equal(inspections, []string{"session", "landing"}) {
@@ -298,12 +300,11 @@ func TestRestartAtEveryBoundaryOfAConcurrentOperation(t *testing.T) {
 				return nil
 			}
 			err := c.Pass(context.Background())
-			if step == "before-claim" {
-				if !errors.Is(err, injected) {
-					t.Fatalf("boundary %s: %v", step, err)
-				}
-			} else if must(t, err); !errors.Is(c.Wait(), injected) {
-				t.Fatalf("boundary %s: %v", step, c.Wait())
+			if waited := c.Wait(); err == nil {
+				err = waited
+			}
+			if !errors.Is(err, injected) {
+				t.Fatalf("boundary %s: %v", step, err)
 			}
 			before, _ := f.system.counts()
 			f.reopen(t)

@@ -3134,11 +3134,14 @@ A pass reconciles its pending operations in stage order, across workstreams,
 so the factory finishes work before it widens it: the turns the scheduler
 dispatched and every other operation first, then the shed's `shed-round` and
 `shed-reply` operations, then `architect-draft` operations. Within a stage
-they keep workstream order. The pass starts each dispatched `thread-turn`
-operation and goes on without waiting for its session: every turn the
+they keep workstream order. The pass claims each dispatched `thread-turn`
+operation in that order and goes on once its session has started, without
+waiting for it to end: every turn the
 scheduler dispatched within capacity runs at the same time, and landings,
-rebases, reviews and later passes proceed while sessions are in flight.
-Shutdown cancels the sessions in flight and waits for them before the trace
+rebases, reviews and later passes proceed while sessions are in flight. A
+turn's result, its costs and its completion land together between the
+controllers' runs, so every controller of one pass sees the turn either still
+running or finished. Shutdown cancels the sessions in flight and waits for them before the trace
 closes; the next startup settles each interrupted turn before dispatch, as
 described below.
 

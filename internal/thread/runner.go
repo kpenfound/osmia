@@ -95,18 +95,19 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	if persistErr != nil {
 		return q, errors.Join(runErr, persistErr)
 	}
-	// Cancellation stops execution, not durable recording of its partial result.
+	// Cancellation stops execution, not durable recording of its partial
+	// result, which lands serialized with reconciliation as one step.
 	cleanup := context.WithoutCancel(ctx)
-	if err := r.Store.CaptureTurn(cleanup, q.Claim.Token, response); err != nil {
-		return q, errors.Join(runErr, err)
-	}
-	if err := r.costs(cleanup, t.Identity.Role, q); err != nil {
-		return q, errors.Join(runErr, err)
-	}
-	completed := r.Now()
-	q.CompletedAt = completed
-	if err := r.Store.CompleteTurn(cleanup, stream, agent, req.TurnID, q.Claim.Token, completed); err != nil {
-		return q, errors.Join(runErr, err)
-	}
-	return q, runErr
+	err = trace.Relock(cleanup, func() error {
+		if err := r.Store.CaptureTurn(cleanup, q.Claim.Token, response); err != nil {
+			return err
+		}
+		if err := r.costs(cleanup, t.Identity.Role, q); err != nil {
+			return err
+		}
+		completed := r.Now()
+		q.CompletedAt = completed
+		return r.Store.CompleteTurn(cleanup, stream, agent, req.TurnID, q.Claim.Token, completed)
+	})
+	return q, errors.Join(runErr, err)
 }

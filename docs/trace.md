@@ -386,8 +386,10 @@ the current callback before releasing the repository lock. A callback may run
 work through `OperationAttempt.Unlocked`, which releases that serialization
 while the work runs and takes it back before the callback goes on: other
 operations are reconciled meanwhile, and `Close` does not wait for the work, so
-the caller joins it before closing. Every trace write still goes through the
-repository's single writer. Operation claims use
+the caller joins it before closing. `trace.Relock`, given the context
+`Unlocked` passed to the work, serializes one step of it with reconciliation
+again, and `Repository.Serialize` runs other work serialized with it. Every
+trace write still goes through the repository's single writer. Operation claims use
 execution ownership rather than expiring notification leases: a slow external
 call cannot overlap a replacement worker, and `WithOperation` leaves an
 operation alone while an open attempt of the same handle holds it. A callback
@@ -409,10 +411,11 @@ needs only acknowledgement after restart. Store/protocol errors stop the loop
 and are returned to its owner.
 
 `reconcile.Options.Concurrent` names the operations a pass reconciles beside
-itself: the pass claims each in a goroutine of its own and goes on, the claim,
-inspection and result are recorded under the repository's operation
-serialization, and the effect runs through `Unlocked`, so the pass's other
-operations and later passes proceed while it is in flight. A later pass leaves
+itself: the pass reconciles each in a goroutine of its own, claimed and
+inspected in the pass's priority order, and goes on once its effect has
+started. The claim, inspection and result are recorded under the repository's
+operation serialization, and the effect runs through `Unlocked`, so the pass's
+other operations and later passes proceed while it is in flight. A later pass leaves
 an operation in flight alone. A store/protocol error of one stops the loop;
 `Run` cancels those still in flight and joins them before it returns, and a
 caller of `Pass` joins them with `Wait`. An operation cut short by cancellation
@@ -430,7 +433,8 @@ Production capability enforcement remains the execution adapter's responsibility
 
 `reconcile.Options.Schedule` is an optional hook that runs at the start of every
 pass, before operations are read, so the intent it publishes is reconciled in the
-same pass. An error from it stops the loop. The service installs event delivery and its
+same pass. It runs through `Serialize`, so a step a concurrent operation
+relocks lands wholly before or after it. An error from it stops the loop. The service installs event delivery and its
 queued-turn scheduler as this hook (see [the service](service.md)). The controller makes no
 capacity or owner-authorization decisions.
 
@@ -585,7 +589,10 @@ A captured backend or isolation failure is a terminal result with outcome
 does not run it again. A turn that is still not
 complete after Apply returns an error and stays pending. A restarted controller
 finds this work by scanning operations, so no wakeup from before shutdown is
-needed.
+needed. When the controller runs a turn beside its passes, the runner captures,
+costs and completes the turn as one step through `trace.Relock`, so a pass's
+schedule hooks see the turn either unfinished or finished; its claim and
+session run without the lock.
 
 ## Continuation and bounded replay
 

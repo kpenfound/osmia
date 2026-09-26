@@ -228,14 +228,39 @@ func (r *Repository) WithOperation(ctx context.Context, stream config.Workstream
 	return fn(a, *o)
 }
 
+// unlockedKey marks the context Unlocked passes to its work.
+type unlockedKey struct{}
+
 // Unlocked runs fn without the lock WithOperation holds, so other operations
 // are reconciled, and Close may run, while fn is in flight; it takes the lock
-// again before it returns. The attempt keeps its claim throughout, and fn must
-// not use the attempt. A caller that closes the repository joins fn first.
-func (a *OperationAttempt) Unlocked(fn func()) {
-	a.repository.operationMu.Unlock()
-	defer a.repository.operationMu.Lock()
-	fn()
+// again before it returns. fn receives ctx, with which Relock serializes a
+// step of fn's work with reconciliation again. The attempt keeps its claim
+// throughout, and fn must not use the attempt. A caller that closes the
+// repository joins fn first.
+func (a *OperationAttempt) Unlocked(ctx context.Context, fn func(context.Context)) {
+	r := a.repository
+	r.operationMu.Unlock()
+	defer r.operationMu.Lock()
+	fn(context.WithValue(ctx, unlockedKey{}, r))
+}
+
+// Relock runs fn serialized with reconciliation when ctx comes from Unlocked,
+// and runs it as it is otherwise: in a callback that already holds the lock,
+// or outside any operation. fn must not call Relock with ctx.
+func Relock(ctx context.Context, fn func() error) error {
+	if r, ok := ctx.Value(unlockedKey{}).(*Repository); ok {
+		r.operationMu.Lock()
+		defer r.operationMu.Unlock()
+	}
+	return fn()
+}
+
+// Serialize runs fn serialized with reconciliation and Close. fn must not call
+// WithOperation, Serialize or Close.
+func (r *Repository) Serialize(fn func() error) error {
+	r.operationMu.Lock()
+	defer r.operationMu.Unlock()
+	return fn()
 }
 
 // Action supplies the immutable provenance of this attempt for a boundary write.
