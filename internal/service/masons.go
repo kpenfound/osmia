@@ -422,7 +422,7 @@ func (m *masons) recoverView(ctx context.Context, stream config.WorkstreamID, ag
 	if pending == nil {
 		return fmt.Errorf("interrupted mason thread has no active turn")
 	}
-	dir := filepath.Join(m.cfg.Root.String(), "views", string(m.repository.Project()), string(stream), agent, pending.Request.TurnID)
+	dir := turnViews(m.cfg, m.repository.Project(), stream, agent, pending.Request.TurnID)
 	entries, err := os.ReadDir(dir)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -431,7 +431,9 @@ func (m *masons) recoverView(ctx context.Context, stream config.WorkstreamID, ag
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	views := slices.DeleteFunc(entries, func(entry os.DirEntry) bool { return entry.Name() == "ready" })
+	views := slices.DeleteFunc(entries, func(entry os.DirEntry) bool {
+		return entry.Name() == "ready" || entry.Name() == recordedName || entry.Name() == recordedName+".tmp"
+	})
 	if len(views) > 1 {
 		return fmt.Errorf("mason turn %s has multiple surviving views", pending.Request.TurnID)
 	}
@@ -500,7 +502,11 @@ func (m *masons) recoverTurn(ctx context.Context, stream config.WorkstreamID, un
 	req.TurnID = masonAgent(unit) + "-recover-" + fmt.Sprint(last.Sequence)
 	req.At = m.s.now()
 	req.Cause = last.Response.ID
-	req.Prompt = last.Request.Prompt + "\n\n" + interruption(last) + " Your workspace includes the files left by that turn. Continue from those files, check the unit's criteria and proofs, and report done when they hold."
+	paths, recorded, err := newUnitWorkspaces(m.cfg, m.repository).changed(ctx, stream, unit, last.Request.TurnID)
+	if err != nil {
+		return false, err
+	}
+	req.Prompt = last.Request.Prompt + "\n\n" + interruption(last) + " " + kept("that turn", paths, recorded) + " Continue from those files, check the unit's criteria and proofs, and report done when they hold."
 	_, err = m.repository.EnqueueTurn(ctx, req)
 	return err == nil, err
 }
