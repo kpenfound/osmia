@@ -512,6 +512,7 @@ in [M1 configuration](configuration.md). The examples below describe the full de
 ```toml
 # ~/.osmia/config.toml
 version = 1
+workspaces = "auto"                  # new workstreams: jujutsu when jj is supported, else git
 
 [listen]
 socket = "~/.osmia/osmia.sock"

@@ -88,8 +88,13 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   waiting for a slot), each
   role and profile whose latest turn attempts failed with infrastructure
   failures (`Infrastructure failures: <role> on profile <profile> failed <n>
-  time(s) in a row; last at <time>: <failure>`), then each
-  workstream with its state, open question count and context mode, its latest
+  time(s) in a row; last at <time>: <failure>`), the
+  [workspace backend](service.md#workspace-backends) new workstreams get
+  (`Workspaces: setting=<setting> new_workstreams=<backend> jj=<version>`,
+  `none` when `workspaces = "jujutsu"` finds no supported `jj`, which a
+  diagnostic explains), then each
+  workstream with its state, open question count, context mode and workspace
+  backend (`workspaces=git` or `workspaces=jujutsu`), its latest
   drift rebase (`Drift: rebase <n> <outcome> at <time>`) once it has one, and the
   chief of staff's goal and attention (`Attention: none` when nothing needs
   you), or `no status yet`. Open owner gates appear under the workstream even

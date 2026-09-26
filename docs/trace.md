@@ -50,7 +50,10 @@ and cost. Each API result is compared with `osmia trace --json` for the same
 selector, and the text output is checked for key links.
 
 `CreateWorkstream` reserves a supplied `config.WorkstreamID`. Project and
-workstream manifests retain their identity and creation provenance. `Workstreams`
+workstream manifests retain their identity and creation provenance.
+`CreateWorkstreamOn` also records in the workstream manifest's `workspaces` the
+workspace backend the workstream was created on, `git` or `jujutsu`, and
+`Workspaces` reads it back, `git` for a manifest that records none. `Workstreams`
 returns identities validated against those manifests, including terminal streams.
 The package supplies storage APIs; the service's project registration calls
 `CreateSeeded`, and lifecycle commands are separate.
@@ -681,7 +684,7 @@ returned as `*StatusRejected` and stores nothing. The actor is the agent, the
 cause is the turn request's ID and the depth is one more than the request's.
 
 `Repository.Statuses()` lists every workstream in manifest order with its
-latest status (nil before the first), its feature state, the state of every
+latest status (nil before the first), its workspace backend, its feature state, the state of every
 workflow subject read in the same pass (`Subjects`), its owner gates and open question
 count. The feature state is the current value of the `feature` workflow
 subject (`FeatureSubject`), empty until a transition records one. A question

@@ -39,7 +39,7 @@ configuration list; they belong to persisted workstream manifests.
 <root>/projects/<project-id>/config.toml
 <root>/projects/<project-id>/                  dedicated project trace repository
 <root>/projects/<project-id>/workstreams/<workstream-id>/
-<root>/branches/<project-id>/<workstream-id>  the workstream's feature branch, a worktree of the clone
+<root>/branches/<project-id>/<workstream-id>  the workstream's feature branch, a workspace of the clone
 ```
 
 `Root` provides checked helpers for these paths. Managed state paths reject
@@ -76,6 +76,9 @@ types are errors.
 The following optional settings show their defaults:
 
 ```toml
+# The workspace backend of new workstreams: "auto", "git" or "jujutsu".
+workspaces = "auto"
+
 [listen]
 # Default: <resolved-root>/osmia.sock, including when the root is overridden.
 # A relative value resolves against the root; ~/ is also supported.
@@ -136,6 +139,17 @@ the oldest undelivered event of a workstream waits before the service delivers
 it, with every other ready event, as one
 [chief-of-staff turn](service.md#event-delivery). A workstream cap may exceed global mason capacity:
 the global pool still limits concurrent execution.
+
+`workspaces` picks the backend of the workspaces the agents work in for each
+new workstream: its feature branch, units and drift resolution. The project's
+repository stays Git either way. `auto` uses Jujutsu workspaces on the clone's
+Git store when a `jj` of the supported release or later is on the service's
+`PATH`, and Git worktrees otherwise; `git` always uses Git worktrees; and
+`jujutsu` always uses Jujutsu, so without a supported `jj` a new workstream
+does not start and status says why. Any other value is an error that names
+`workspaces`. A workstream keeps the backend it was created on until it is
+delivered or abandoned, so a changed value, reloaded or not, applies to new
+workstreams alone ([workspace backends](service.md#workspace-backends)).
 
 `shed.max_rounds` caps the rounds the service debates a workstream's spec and
 plan for on its own. Debate that reaches it
@@ -222,7 +236,7 @@ or has no `.git` entry, and a clone nested with the root either way.
 Registration never writes to the clone; seeding only reads it. The service
 writes to the clone once a workstream is ratified, when its
 [sealing](service.md#sealing) fetches upstream, creates the feature branch and
-its worktree, and forgets that worktree alone when its directory is gone.
+its workspace, and forgets that workspace alone when its directory is gone.
 
 Registration is recoverable. If the service stops at any step, the journal makes
 the next start finish the registration with the same ID, or `osmia project add`

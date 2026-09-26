@@ -218,7 +218,7 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 | `conflict` | 409 | Runtime file changed outside the store, an extraction requested while one is pending or running, or a hand-in key reused for other input |
 | `unsupported` | 501 | Unknown path/method or later-milestone operation |
 | `restart_required` | 409 | PUT `/config/root` or `/config/listen` |
-| `unavailable` | 503 | Service shutting down; also the client's code for transport failure |
+| `unavailable` | 503 | Service shutting down, or a hand-in under `workspaces = "jujutsu"` without a supported `jj`; also the client's code for transport failure |
 | `internal` | 500 | Storage or other internal failure, including an interrupted project registration |
 | `no_project` | 409 | The operation needs an active project and none is configured |
 | `project_active` | 409 | A project is active and single-project operation refuses another |
@@ -321,7 +321,7 @@ widths:
 - the [capacity](#capacity): each role kind's slots used against its limit,
   the work waiting for a slot and why, and the per-workstream limit;
 - each workstream of `/status`: the chief of staff's goal, attention and
-  note, its state, its units grouped by state in lifecycle order, its
+  note, its state, its workspace backend, its units grouped by state in lifecycle order, its
   agents with role, unit, profile, state and elapsed time as of the last read,
   and its [conversation](#conversation), each message and response with its
   turn's state;
@@ -517,6 +517,9 @@ and optionally `skip_debate`. Checks run in this order, and a refused request wr
 4. The input is read. A missing or unreadable file, a file that is not regular,
    and input that is empty, not UTF-8 or larger than 512 KiB return
    `validation`. An issue the service cannot fetch returns `internal`.
+5. A new workstream gets its [workspace backend](#workspace-backends). With
+   `workspaces = "jujutsu"` and no supported `jj`, the hand-in returns
+   `unavailable` with a message naming the problem and the version found.
 
 The service fetches issues itself, with the GitHub REST API and the
 `GITHUB_TOKEN` of its own environment when set. The token never reaches a
@@ -524,7 +527,8 @@ session or the trace. An issue is stored as Markdown: its title as a heading,
 then its body.
 
 The workstream ID is derived from the project and the key. The service creates
-the workstream with its chief-of-staff thread, copies the input byte for byte
+the workstream, its manifest recording its workspace backend, with its
+chief-of-staff thread, copies the input byte for byte
 to `workstreams/<id>/handed/<name>` with its source (see
 [trace](trace.md#files-and-records)), and records the feature transition `-> handed` in
 `events.jsonl` with the owner as actor and a reason naming the copy and its
@@ -1515,8 +1519,10 @@ Each attempt, in order:
    its commit is the seal, and it must be on the fetched branch. Otherwise the
    branch is created from the fetched commit.
 5. Checks the branch out in the workstream's workspace,
-   `<root>/branches/<project-id>/<workstream-id>`, a Git worktree of the
-   clone, unless the clone has that worktree already. That worktree alone is
+   `<root>/branches/<project-id>/<workstream-id>`, a Git worktree or a
+   Jujutsu workspace of the clone as the workstream's
+   [backend](#workspace-backends) says, unless the clone has that workspace
+   already. That worktree alone is
    forgotten and made again when its directory is gone; the owner's other
    worktrees are never pruned. A directory in the way that is no worktree of
    the clone is reported and left alone.
@@ -2178,8 +2184,8 @@ is approved by a reviewer`, and raises an
 project's lander, until the resolution is approved: no landing, unit rebase or
 other drift rebase of the project is asked for meanwhile.
 
-The conflicts are resolved in a resolution workspace of the workstream's own:
-a Git worktree of the clone at `<root>/drifts/<project-id>/<workstream-id>`,
+The conflicts are resolved in a resolution workspace of the workstream's own,
+on its [backend](#workspace-backends), at `<root>/drifts/<project-id>/<workstream-id>`,
 on the branch `osmia-drift/<workstream-id>/<k>`, created from the feature
 branch's tip. The foreman replays the feature branch onto the recorded
 upstream commit there, one commit at a time. At each commit that conflicts
@@ -2290,16 +2296,45 @@ its thread gets no ruling turn. A second request from the same agent and
 thread about the same drift rebase, such as one from a turn that recovers an
 interrupted one, returns the request already filed.
 
+### Workspace backends
+
+A workstream's workspaces, its feature branch's, its units' and its drift
+resolution's, are all Git worktrees of the clone or all Jujutsu workspaces on
+the clone's Git store. Either way the branches and commits are the clone's,
+and the feature branch and the pull request are the same. The top-level
+[`workspaces`](configuration.md#top-level-configtoml) setting picks the backend
+of each new workstream when it is handed in: `auto`, the default, picks
+Jujutsu when a supported `jj` is on the service's `PATH` and Git otherwise;
+`git` and `jujutsu` pick that backend. The workstream's trace manifest records
+the backend, and the workstream keeps it through restarts, reloads and
+configuration changes until it is delivered or abandoned: a changed setting
+applies to new workstreams alone. A workstream whose manifest records no
+backend is on Git.
+
+With `workspaces = "jujutsu"` and a `jj` that is missing or older than the
+supported release, a hand-in that would create a workstream is refused with
+`unavailable` and nothing is recorded: `workstream <id> cannot start:
+workspaces is "jujutsu" but no supported jj is installed (<reason>)`, where the
+reason names the version found. It never falls back to Git.
+
+`GET /v1/status` reports each workstream's backend as `workspaces` and, in its
+own `workspaces` object, what a new workstream gets: `setting`, the configured
+value; `backend`, `git` or `jujutsu`, or empty when none can start; `jj`, the
+version found, omitted under `git`, which looks for none; and `problem` when
+`jujutsu` finds no supported `jj`, which a `workspaces` diagnostic with code
+`unavailable` also reports. `osmia status` prints it on a `Workspaces:` line
+before the workstreams, and each workstream's `workspaces=` beside its state.
+
 ### Unit workspaces
 
-The service gives each unit of a workstream a workspace of its own: a Git
-worktree of the clone at `<root>/units/<project-id>/<workstream-id>/<unit-id>`,
+The service gives each unit of a workstream a workspace of its own on the
+workstream's [backend](#workspace-backends) at `<root>/units/<project-id>/<workstream-id>/<unit-id>`,
 on the branch `osmia-unit/<workstream-id>/<unit-id>`, created from the tip of
 the workstream's feature branch. Its name follows from the workstream and the
-unit alone, so a service started again finds the same worktree, and the feature
+unit alone, so a service started again finds the same workspace, and the feature
 branch commit it descends from is its base. Opening a unit's workspace again
 returns it as it is. Nothing in the service removes a unit's workspace, and
-pruning forgets only worktrees whose directories are gone. A unit of a
+pruning forgets only workspaces whose directories are gone. A unit of a
 workstream without a feature branch has no workspace: `the clone has no
 feature branch <branch>`.
 
@@ -2556,6 +2591,7 @@ order, except the librarian's, which carries no feature (see
 | `open_questions` | Questions in the workstream without a ruling |
 | `gates` | Open owner decisions as `{"kind","reference"}`: an `escalation` with its inbox number, `ratification` with the workstream ID, `contested` with the unit ID, or a `charter` proposal with its question number; a mason contest, and a contest raised by a failed reviewer turn, also has `reason`; empty when none wait |
 | `context_mode` | The project's context mode, as in `/runtime`: `file` for [file-based context](context.md) |
+| `workspaces` | The workstream's [workspace backend](#workspace-backends), `git` or `jujutsu` |
 | `agents` | Service-owned execution facts from durable thread snapshots, ordered by agent ID. One entry per active or parked waiting turn; empty for idle and completed threads. Each has `role`, `unit` (empty without a unit), `state` (`running`, `captured`, `waiting`, or `interrupted`), `started_at` (RFC 3339 timestamp of the turn claim), `elapsed` (whole wall-clock seconds since the claim, measured at the read for active or interrupted turns and through the response time for captured or waiting turns), and `profile` (the effective profile name). `attempt` (number) and `path` (`resume` or `replay`) appear when an attempt is recorded. A parked waiting turn also has `question_id`, the durable trace question number it asked. These facts do not alter the chief of staff's `status.agents` prose. |
 | `status` | `null` until the chief of staff writes one; otherwise `goal`, `attention` (empty when nothing needs the owner), `note`, `agents`, `revision` and `updated_at` |
 
