@@ -264,7 +264,9 @@ func budgetPauseBody(project config.ProjectID, status *DailyBudgetStatus, clears
 }
 
 // send posts every due pending notification that is still open, oldest first, recording each
-// result before the next post.
+// result before the next post. A post interrupted by the service stopping is
+// not recorded, so a notification the webhook already accepted stays pending
+// and is posted again after a restart: delivery is at least once.
 func (n *notifier) send(ctx context.Context, path, webhook string, open map[string]bool) time.Time {
 	n.mu.Lock()
 	var keys []string

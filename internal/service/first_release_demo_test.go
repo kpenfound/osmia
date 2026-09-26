@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -179,7 +180,15 @@ func TestM5FirstReleaseDemonstration(t *testing.T) {
 	})
 	names(notified(InboxEscalation), InboxEscalation)
 	// The service restarts while the escalation is open and already sent; it
-	// is not posted again.
+	// is not posted again. The webhook accepting a post does not settle it: a
+	// stop before the notifier has recorded the response leaves the entry
+	// pending, and delivery is at-least-once, so the restart waits for the
+	// ledger to hold the escalation as sent.
+	eventually(t, "the escalation notification was never recorded as sent", func() bool {
+		return slices.ContainsFunc(slices.Collect(maps.Values(readLedger(t, f.opts).Notifications)), func(rec *notification) bool {
+			return rec.Kind == InboxEscalation && rec.State == notificationSent
+		})
+	})
 	f.stop(t)
 	sent := len(hook.received())
 	f.start(t)
