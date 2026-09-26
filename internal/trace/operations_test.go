@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -145,6 +146,76 @@ func TestOperationPublicationRecovery(t *testing.T) {
 					t.Fatal("acknowledgement not atomic")
 				}
 			})
+		}
+	}
+}
+
+// Work an attempt runs through Unlocked leaves the other operations free to
+// be claimed, while the attempt keeps its own: its operation is left alone
+// until the attempt returns, and the attempt still records afterwards.
+func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
+	r, _, _ := create(t)
+	ctx := context.Background()
+	tx := transaction("operations", 0, "", "pending", 2)
+	for i := range tx.Events {
+		e := &tx.Events[i]
+		e.Operation = &coreadapter.Operation{ID: OperationID(projectID, streamID, e.ID), Boundary: coreadapter.RunnerBoundary, Action: "run", Input: json.RawMessage(`{}`)}
+	}
+	transact(t, r, tx)
+	first, second := tx.Events[0].ID, tx.Events[1].ID
+	actor := Actor{Kind: "service", ID: "test"}
+	now := func() time.Time { return at }
+	claim := func(event string) (bool, error) {
+		claimed := false
+		err := r.WithOperation(ctx, streamID, event, actor, now, func(*OperationAttempt, OperationRecord) error {
+			claimed = true
+			return nil
+		})
+		return claimed, err
+	}
+	err := r.WithOperation(ctx, streamID, first, actor, now, func(a *OperationAttempt, _ OperationRecord) error {
+		a.Unlocked(func() {
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				if claimed, err := claim(first); err != nil || claimed {
+					t.Errorf("the open attempt's operation was claimed again: %v %v", claimed, err)
+				}
+				if claimed, err := claim(second); err != nil || !claimed {
+					t.Errorf("another operation was not claimed: %v %v", claimed, err)
+				}
+			}()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Error("Unlocked kept the operation lock")
+			}
+		})
+		action := a.Action("observe", at)
+		action.Observation = &coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "nothing ran"}
+		return a.Record(ctx, action)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := claim(first); err != nil || !claimed {
+		t.Fatalf("a closed attempt's operation was not claimed: %v %v", claimed, err)
+	}
+	records, err := r.Operations(streamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		var kinds []string
+		for _, a := range record.History {
+			kinds = append(kinds, a.Kind)
+		}
+		want := "[claim]"
+		if record.EventID == first {
+			want = "[claim observe claim]"
+		}
+		if fmt.Sprint(kinds) != want {
+			t.Fatalf("operation %s history %v, want %s", record.EventID, kinds, want)
 		}
 	}
 }

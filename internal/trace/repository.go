@@ -27,8 +27,11 @@ var ErrLocked = errors.New("trace repository already open")
 // One process holds its exclusive lock until Close; calls on that handle serialize.
 // External writers must not modify or move the repository while it is open.
 type Repository struct {
-	mu              sync.Mutex
-	operationMu     sync.Mutex
+	mu          sync.Mutex
+	operationMu sync.Mutex
+	// attempts holds the operations an open WithOperation attempt claimed,
+	// by workstream and event.
+	attempts        map[string]bool
 	root            config.Root
 	project         config.ProjectID
 	directory       string

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http/httptrace"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -216,4 +218,75 @@ func TestWaitingUnitLeavesItsSlotToADisjointUnit(t *testing.T) {
 		t.Fatalf("mason transitions %+v", transitions)
 	}
 	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitWaiting}, {Unit: "upload", State: UnitImplementing}, f.deferred(t, stream, "dedupe", overlapping("resume")), {Unit: "audit", State: UnitImplementing}})
+}
+
+// Mason turns dispatched within capacity.masons run at the same time: each
+// unit's session waits until the other's has started. While the upload
+// mason's session is still running, resume's candidate is reviewed and
+// landed.
+func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
+	t.Parallel()
+	f, masons := newParallelMasonFixture(t, 2, 3, disjointPlan)
+	defer f.stop(t)
+	masons.play[masonTurnID("resume")] = reportDone("Built")
+	var mu sync.Mutex
+	started := map[string]bool{}
+	both, release := make(chan struct{}), make(chan struct{})
+	overlap := func(ctx context.Context, req agent.Request) error {
+		mu.Lock()
+		started[req.Name] = true
+		if len(started) == 2 {
+			close(both)
+		}
+		mu.Unlock()
+		select {
+		case <-both:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Minute):
+			t.Errorf("the session of %s never overlapped the other mason's", req.Name)
+			return fmt.Errorf("the session of %s never overlapped the other mason's", req.Name)
+		}
+	}
+	chief := &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
+	f.engine.mu.Lock()
+	f.engine.turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		if err := overlap(ctx, req); err != nil {
+			return nil, err
+		}
+		return masons.turn(ctx, req, verified, tools)
+	}
+	f.engine.turns[masonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		if err := overlap(ctx, req); err != nil {
+			return nil, err
+		}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return masons.turn(ctx, req, verified, tools)
+	}
+	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
+			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": reviewEvidence(), "findings": []ReviewFinding{}})
+			if err != nil || !strings.Contains(body, `"recorded":true`) {
+				return nil, fmt.Errorf("verdict %s: %v", body, err)
+			}
+			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
+		}
+		return chief.turn(ctx, req, verified, tools)
+	}
+	f.engine.mu.Unlock()
+	stream, _ := f.builtAs(t, "overlap")
+	f.awaitMerged(t, stream, "resume")
+	th, err := f.repository().Thread(stream, masonAgent("upload"))
+	must(t, err)
+	if len(th.Turns) != 1 || th.Turns[0].Claim == nil || !th.Turns[0].CompletedAt.IsZero() {
+		t.Fatalf("the upload mason's turn is not in flight while resume lands: %+v", th.Turns)
+	}
+	close(release)
+	f.awaitMasonRan(t, stream, "upload")
+	masons.check(t)
 }

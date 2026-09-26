@@ -382,11 +382,17 @@ pending; it does not imply that no effect occurred.
 
 `WithOperation` owns one synchronous reconciliation callback. Reconciliation is
 serialized per trace repository, including across controllers, and `Close` joins
-the current callback before releasing the repository lock. Operation claims use
+the current callback before releasing the repository lock. A callback may run
+work through `OperationAttempt.Unlocked`, which releases that serialization
+while the work runs and takes it back before the callback goes on: other
+operations are reconciled meanwhile, and `Close` does not wait for the work, so
+the caller joins it before closing. Every trace write still goes through the
+repository's single writer. Operation claims use
 execution ownership rather than expiring notification leases: a slow external
-call cannot overlap a replacement worker. A callback must join all its external
-calls before returning; cancellation alone is not proof that a remote process
-stopped. Restart acquires the exclusive repository lock and discovers abandoned
+call cannot overlap a replacement worker, and `WithOperation` leaves an
+operation alone while an open attempt of the same handle holds it. A callback
+must join all its external calls before returning; cancellation alone is not
+proof that a remote process stopped. Restart acquires the exclusive repository lock and discovers abandoned
 claims by scanning. Callback handles cannot write after return. Results and
 acknowledgements are immutable; publication errors are resolved by rereading the
 same durable identity.
@@ -400,7 +406,17 @@ Running, unreachable or unidentifiable effects are unknown and stay pending.
 Adapter errors and unknown observations record a retry time (one second by
 default). Retries inspect again, using the same operation ID. A persisted result
 needs only acknowledgement after restart. Store/protocol errors stop the loop
-and are returned to its owner. Inspection, effect and result writes all use the
+and are returned to its owner.
+
+`reconcile.Options.Concurrent` names the operations a pass reconciles beside
+itself: the pass claims each in a goroutine of its own and goes on, the claim,
+inspection and result are recorded under the repository's operation
+serialization, and the effect runs through `Unlocked`, so the pass's other
+operations and later passes proceed while it is in flight. A later pass leaves
+an operation in flight alone. A store/protocol error of one stops the loop;
+`Run` cancels those still in flight and joins them before it returns, and a
+caller of `Pass` joins them with `Wait`. An operation cut short by cancellation
+keeps its claim and is reconciled after restart like any interrupted one. Inspection, effect and result writes all use the
 same journaled publication boundary as workflow transactions.
 
 The local service opens the active project's existing trace before reporting
