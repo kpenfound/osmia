@@ -237,6 +237,12 @@ type Go {
 # See dagger/dagger#13476.
 
 """
+Shell script installing the pinned Jujutsu release that provider tests run
+against. Raise the version here and in the browser module together.
+"""
+let jjInstall: String! = "set -e; v=0.45.1; a=$(uname -m); curl -fsSL https://github.com/jj-vcs/jj/releases/download/v$v/jj-v$v-$a-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin ./jj; jj --version"
+
+"""
 A Go module rooted at a workspace-relative path.
 """
 type GoModule {
@@ -522,6 +528,8 @@ type GoModule {
       .withEnvVariable("GOMODCACHE", "/go/pkg/mod")
       .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
       .withEnvVariable("GOCACHE", "/root/.cache/go-build")
+      .withExec(["sh", "-c", jjInstall])
+      .withEnvVariable("OSMIA_REQUIRE_JJ", "1")
   }
 
   """
@@ -702,6 +710,8 @@ type GoDirectory {
       .withEnvVariable("GOMODCACHE", "/go/pkg/mod")
       .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
       .withEnvVariable("GOCACHE", "/root/.cache/go-build")
+      .withExec(["sh", "-c", jjInstall])
+      .withEnvVariable("OSMIA_REQUIRE_JJ", "1")
   }
 
   """
