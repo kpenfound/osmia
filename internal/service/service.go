@@ -291,6 +291,11 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 	}
 	if active != nil {
+		if err = s.recoverWorkspaces(ctx, cfg); err != nil {
+			s.cleanupSocket()
+			st.Close()
+			return nil, fmt.Errorf("recover interrupted workspace operations: %w", err)
+		}
 		if err = s.recoverSessions(ctx, cfg, active.repository); err != nil {
 			s.cleanupSocket()
 			st.Close()

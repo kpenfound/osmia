@@ -370,7 +370,9 @@ func landingCommit(ctx context.Context, g workspace.Provider, tip string, in lan
 // One commit then records units/<unit>/landing.json, the unit's move to
 // merged and every dependent unit whose dependencies have all merged moving
 // to ready. A stale approval is refused with the reason as its result, and
-// nothing is committed.
+// nothing is committed. Each attempt runs between checkpoints of the feature
+// branch workspaces' state, which a service restarted after the attempt was
+// cut short restores before the landing is retried.
 func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	in, err := decodeLand(op)
 	if err != nil {
@@ -386,13 +388,6 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 		}
 		return *result, nil
 	}
-	review, result, satisfactory, err := f.approval(stream, in.Unit, in.Review)
-	if err != nil {
-		return coreadapter.OperationResult{}, err
-	}
-	if !satisfactory || result.Identity.Candidate.Revision != in.Candidate || result.Identity.Candidate.BaseRevision != in.Base {
-		return coreadapter.OperationResult{}, fmt.Errorf("%s revision %d does not record the approval of candidate %s from %s", reviewDocument(in.Unit), in.Review, in.Candidate, in.Base)
-	}
 	requested, err := f.requestedAt(stream, op.ID)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -400,6 +395,21 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	g, err := featureWorkspaces(f.cfg, f.repository).of(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
+	}
+	return checkpointed(ctx, op.ID, requested, []workspace.Provider{g}, func() (coreadapter.OperationResult, error) {
+		return f.land(ctx, op.ID, stream, in, g, requested)
+	})
+}
+
+// land is one attempt of the landing Apply describes, on the feature branch
+// workspaces g.
+func (f *foreman) land(ctx context.Context, operation string, stream config.WorkstreamID, in landInput, g workspace.Provider, requested time.Time) (coreadapter.OperationResult, error) {
+	review, result, satisfactory, err := f.approval(stream, in.Unit, in.Review)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if !satisfactory || result.Identity.Candidate.Revision != in.Candidate || result.Identity.Candidate.BaseRevision != in.Base {
+		return coreadapter.OperationResult{}, fmt.Errorf("%s revision %d does not record the approval of candidate %s from %s", reviewDocument(in.Unit), in.Review, in.Candidate, in.Base)
 	}
 	branch := featureBranch(stream)
 	acquired, err := g.Acquire(ctx, vcs.Request{Name: string(stream), Branch: branch})
@@ -412,7 +422,7 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 		return coreadapter.OperationResult{}, err
 	}
 	commit := ""
-	if landed, err := landingCommit(ctx, g, tip, in, op.ID); err != nil {
+	if landed, err := landingCommit(ctx, g, tip, in, operation); err != nil {
 		return coreadapter.OperationResult{}, err
 	} else if landed {
 		commit = tip
@@ -423,7 +433,7 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 		} else if reason != "" {
 			return f.refuse(ctx, stream, in, reason)
 		}
-		message, err := f.message(stream, in, review, result, op.ID)
+		message, err := f.message(stream, in, review, result, operation)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
@@ -443,7 +453,7 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 			return coreadapter.OperationResult{}, err
 		}
 	}
-	return f.record(ctx, stream, in, op.ID, review, result, commit)
+	return f.record(ctx, stream, in, operation, review, result, commit)
 }
 
 // requestedAt returns when the operation was asked for, the time the commit

@@ -65,6 +65,11 @@ type Provider interface {
 	Fetch(ctx context.Context, remote, branch string) (string, error)
 	RemoteBranch(ctx context.Context, remote, branch string) (string, bool, error)
 	Push(ctx context.Context, remote, commit, branch, expected string) error
+
+	// Restoring the backend's own state after an interrupted operation.
+	Checkpoint(ctx context.Context, operation string, at time.Time) error
+	Settle(ctx context.Context, operation string) error
+	Recover(ctx context.Context) ([]string, error)
 }
 
 var _ Provider = (*Git)(nil)
