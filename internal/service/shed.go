@@ -798,7 +798,10 @@ func (d *debate) Inspect(_ context.Context, op coreadapter.Operation) (coreadapt
 var errNoCommittee = errors.New("this service has no agent runner for the committee")
 
 // Apply drives the round to a terminal result. Every member's turn runs at
-// the same time against the pinned revision; once all have ended, each
+// the same time against the pinned revision, without the trace's operation
+// lock when the reconciler runs the round beside its other operations, so
+// rounds of different workstreams overlap; once all have ended, the lock is
+// taken back and each
 // member's contributions are recorded as one file of the round, in one
 // commit, and the shed moves to heard-<n>. A member whose turn failed is
 // recorded with the failure and what it contributed before it. A member
@@ -847,13 +850,25 @@ func (d *debate) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			records[i], waiting[i], failures[i] = d.member(ctx, running, cfg, stream, op.ID, in, member)
+			records[i], waiting[i], failures[i] = d.member(trace.Beside(ctx), trace.Beside(running), cfg, stream, op.ID, in, member)
 		}()
 	}
 	wg.Wait()
 	if err := errors.Join(failures...); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	var result coreadapter.OperationResult
+	err = trace.Relock(ctx, func() error {
+		result, err = d.hear(ctx, op, stream, in, members, records, waiting)
+		return err
+	})
+	return result, err
+}
+
+// hear ends the round once every member's turn has ended: it fails the round
+// of an abandoned workstream, parks it on the members' questions or records
+// what the members contributed.
+func (d *debate) hear(ctx context.Context, op coreadapter.Operation, stream config.WorkstreamID, in roundInput, members []string, records []shed.Record, waiting []string) (coreadapter.OperationResult, error) {
 	recorded, err := shed.Records(d.repository, stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
