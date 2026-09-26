@@ -9,7 +9,6 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/workspace"
 )
 
 // TraceSummary identifies the sealed revisions, criteria and units of a
@@ -94,7 +93,7 @@ func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (an
 		// A recorded commit may no longer be present in the clone, so the
 		// trace walk still searches its durable records in that case.
 		message := ""
-		if commit, readErr := (&workspace.Git{Clone: s.current().Project.Clone}).Commit(ctx, selector); readErr == nil {
+		if commit, readErr := featureWorkspaces(s.current()).Commit(ctx, selector); readErr == nil {
 			message = commit.Message
 		}
 		out, err = traceCommit(repository, stream, selector, message)
