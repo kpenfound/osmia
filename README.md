@@ -111,6 +111,11 @@ The [M6 Jujutsu workspaces demonstration](docs/m6-jujutsu-workspaces.md)
 delivers the same feature on Git worktrees and on Jujutsu workspaces, and the
 fork receives the same plain Git commits from both.
 
+The [M6 Jujutsu recovery demonstration](docs/m6-jujutsu-recovery.md) takes
+one workstream on Jujutsu workspaces through a stopped mason turn, a restart
+in the middle of a landing and upstream drift that conflicts with the units in
+flight, to an owner-approved pull request.
+
 The [charter reference](docs/charter.md) documents the charter template, the
 numbered-rule format and how owner edits are recorded.
 
