@@ -92,6 +92,7 @@ func (s *Service) configuration() ConfigResponse {
 	} else {
 		out.Diagnostics = append(out.Diagnostics, noProject("active_projects"))
 	}
+	out.Diagnostics = append(out.Diagnostics, s.notifier.diagnostics()...)
 	if pending != nil {
 		out.Diagnostics = append(out.Diagnostics, Diagnostic{"projects", Internal, "an interrupted project registration is incomplete; run osmia project add again to finish it, or inspect project-add.json under the root"})
 	}

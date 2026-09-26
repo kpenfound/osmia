@@ -35,6 +35,7 @@ configuration list; they belong to persisted workstream manifests.
 <root>/osmia.sock
 <root>/tailnet/                                embedded Tailscale node state, when listen.tailnet is set
 <root>/project-add.json                       journal of one interrupted project registration
+<root>/notifications.json                     ledger of owner notifications, once notify.webhook has been set
 <root>/projects/<project-id>/config.toml
 <root>/projects/<project-id>/                  dedicated project trace repository
 <root>/projects/<project-id>/workstreams/<workstream-id>/
@@ -101,6 +102,11 @@ max_clean_turns = 3
 [events]
 window = "5s"
 
+[notify]
+# Optional absolute http or https URL that each new owner decision is posted
+# to as plain text; empty sends nothing.
+webhook = ""
+
 [roles.mason]
 profile = "default"
 sandbox = "none"
@@ -146,6 +152,13 @@ members, and all of them run at the same time in every round, whatever other
 workstreams run and outside `capacity.per_workstream`. Two workstreams in the
 shed run two committees at once. The committee is fixed when the workstream
 enters the shed, so a later change applies to workstreams that enter after it.
+
+`notify.webhook` is an absolute `http` or `https` URL with a host, such as an
+[ntfy](https://ntfy.sh) topic; a relative URL, one without a host and any other
+scheme are errors that name `notify.webhook` without quoting the URL. With it
+set, every entry that opens in the inbox is posted to it once
+([notifications](service.md#notifications)). The URL is shown in
+`/v1/config`, so treat a URL that embeds a token like any other value there.
 
 Profiles use lowercase names starting with a letter and containing letters,
 digits, `_` or `-`, at most 64 characters. Each profile requires `agent` (`claude`,
@@ -305,9 +318,9 @@ calendar day reaches `per_day`, the service pauses factory dispatch until the
 next local day ([daily budget](service.md#daily-budget)).
 Missing values impose no cap. Unknown cost does not establish that a cap was reached.
 
-The full design's `notify`, `hearsay` and
+The full design's `hearsay` and
 project `hearsay_scope` settings are rejected as unsupported
-in M1, even if supplied empty. Notifications belong to M5, multi-project operation to M7, and
+in M1, even if supplied empty. Multi-project operation belongs to M7, and
 Hearsay to M8. Unsupported keys do not silently enable later behavior.
 
 Representative errors include the file and offending field:
