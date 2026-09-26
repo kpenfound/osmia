@@ -210,7 +210,7 @@ func (n *notifier) pass(ctx context.Context) time.Time {
 		return time.Time{}
 	}
 	n.fail(fault)
-	return n.send(ctx, path, webhook)
+	return n.send(ctx, path, webhook, open)
 }
 
 // occurrence is one thing to notify the owner of: an open inbox entry or the
@@ -263,13 +263,13 @@ func budgetPauseBody(project config.ProjectID, status *DailyBudgetStatus, clears
 	return b.String()
 }
 
-// send posts every due pending notification, oldest first, recording each
+// send posts every due pending notification that is still open, oldest first, recording each
 // result before the next post.
-func (n *notifier) send(ctx context.Context, path, webhook string) time.Time {
+func (n *notifier) send(ctx context.Context, path, webhook string, open map[string]bool) time.Time {
 	n.mu.Lock()
 	var keys []string
 	for key, rec := range n.ledger.Notifications {
-		if rec.State == notificationPending {
+		if rec.State == notificationPending && open[key] {
 			keys = append(keys, key)
 		}
 	}

@@ -2664,7 +2664,8 @@ refused, is not posted again.
   sets the webhook or by the first start with it set, are recorded as skipped
   and never posted.
 - A pending entry that is decided or superseded before it is posted is
-  dropped.
+  dropped. While today's spend cannot be read, pending records are kept but
+  none that is no longer open is posted.
 - A failed post (a transport error or a non-`2xx` response) is retried after
   `Options.NotifyRetry` (30 seconds by default), doubling each time, and given
   up after 5 attempts.
