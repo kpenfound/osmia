@@ -101,6 +101,33 @@ prints it as a `Tailnet:` line, and `osmia status --json` includes it.
 | `needs_login` | The node must be approved. `login_url` holds the address to open when Tailscale gives one; `reason` says so when the node awaits approval by a tailnet admin instead. |
 | `down` | There is no working node. `reason` says why, such as the error from the last join or that the listener stopped. |
 
+### Reach Osmia from your phone
+
+1. Set the hostname the node takes on your tailnet in the top-level
+   configuration file, and restart `osmia serve` (a reload keeps the node
+   already joined and reports `listen.tailnet` in `restart_required`):
+
+   ```toml
+   [listen]
+   tailnet = "osmia"
+   ```
+
+2. Log the node in. Start the service with `TS_AUTHKEY` set to a Tailscale
+   auth key, or start it without one and open the login URL it prints to
+   stderr and that `osmia status` shows as `Tailnet:`. The node's state is kept
+   in `<root>/tailnet`, so later starts need neither.
+3. On a phone or laptop signed in to the same tailnet, open
+   `http://osmia/` (or the node's MagicDNS name). The page and every API
+   route answer as they do on the socket and on `listen.web`.
+
+The security boundary is the tailnet: any device your tailnet's access rules
+let reach the node can read everything and make owner decisions, with no
+login of Osmia's own. Restrict who reaches the node with tailnet access
+rules. The connection is plain HTTP on port 80 inside the tailnet's encrypted
+transport, and the `Host` and `Content-Type` checks above keep a browser from
+being used against it from another site. An outage of the tailnet never stops
+the service or the local CLI; `osmia status` reports it as `Tailnet: down`.
+
 ## Contract
 
 All API paths start with `/v1`; the [web page](#web-page) is served outside it. Shared request, response and error types and a Unix-only
