@@ -107,6 +107,10 @@ The [M5 web page demonstration](docs/m5-web-page.md) takes one workstream
 from hand-in to a delivered pull request with every owner decision, a pause
 and its resume made on the embedded page, which follows it through events.
 
+The [M6 Jujutsu workspaces demonstration](docs/m6-jujutsu-workspaces.md)
+delivers the same feature on Git worktrees and on Jujutsu workspaces, and the
+fork receives the same plain Git commits from both.
+
 The [charter reference](docs/charter.md) documents the charter template, the
 numbered-rule format and how owner edits are recorded.
 

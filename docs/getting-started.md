@@ -6,13 +6,14 @@ approved. Follow the steps in order.
 ## What the first release supports
 
 - One project at a time.
-- Git worktrees: the service creates each workstream's feature branch in a
-  worktree of your clone and pushes it to your fork itself.
+- Git worktrees, or Jujutsu workspaces on your clone's Git store: the service
+  builds each workstream's feature branch in them and pushes it to your fork
+  itself.
 - File-based context: the charter, the knowledge base and your rulings reach
   agents as files.
 - The web page on your tailnet, beside the command line on the local socket.
 
-Jujutsu, several projects and the optional Hearsay context source come later
+Several projects and the optional Hearsay context source come later
 (see the [design](design.md#18-implementation-milestones)). Nothing in this guide
 depends on them.
 
@@ -20,6 +21,11 @@ You need `git`, a clone of the project you contribute to whose remotes include
 the upstream repository, a fork of it that you can push to, and the agent CLI
 your profile names (`claude`, `codex` or `opencode`), signed in. For the
 phone page you also need a [Tailscale](https://tailscale.com) tailnet.
+
+Installing `jj` 0.45.0 or later is optional. With it on the service's `PATH`,
+new workstreams work in Jujutsu workspaces; without it, in Git worktrees.
+Your repository, feature branch and pull request are plain Git either way (see
+[`workspaces`](configuration.md#top-level-configtoml)).
 
 ## 1. Install a release
 
@@ -171,8 +177,8 @@ The decisions, in the order a workstream meets them:
 | Approve delivery | delivery card | `osmia delivery <workstream-id>`, then `osmia approve <workstream-id>` |
 
 Ratifying seals the spec and plan: the service fetches upstream, creates the
-feature branch in a worktree of your clone, and masons build the units, each
-reviewed and landed in order. You can talk to the workstream's chief of staff
+feature branch in a worktree or Jujutsu workspace of your clone, and masons
+build the units, each reviewed and landed in order. You can talk to the workstream's chief of staff
 meanwhile with `osmia send <workstream-id> "…"` or on the page, and hold work
 with `osmia pause`.
 
