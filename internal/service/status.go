@@ -149,6 +149,7 @@ func (s *Service) statusList() StatusResponse {
 	if err != nil {
 		diagnostics = append(diagnostics, Diagnostic{"failure_streaks", Internal, "cannot read the turn attempts of the active project; check the trace repository"})
 	}
+	diagnostics = append(diagnostics, s.notifier.diagnostics()...)
 	list, unreadable, api := s.statuses()
 	if api != nil {
 		return StatusResponse{Workstreams: []WorkstreamStatus{}, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{"workstreams", api.Code, api.Message})}

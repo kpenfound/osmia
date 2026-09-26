@@ -314,8 +314,8 @@ with the line, never its text), and `/config` reports the failure as
 When every file passes, the candidate replaces the loaded configuration in one
 step and the response carries its digest, which `/config` then reports.
 Profiles, role bindings and sandboxes, capacity, budgets, shed and mason
-limits, the event window and the project's settings apply to what the service
-decides next: requests served after the reload, and the reconciliation pass
+limits, the event window, [`notify.webhook`](#notifications) and the
+project's settings apply to what the service decides next: requests served after the reload, and the reconciliation pass
 that starts after it, whose dispatch, controllers and turns are rebuilt from
 the new configuration. An operation already running, such as a turn, finishes
 on the configuration it started with, and a queued turn keeps the profile it
@@ -2520,6 +2520,69 @@ first always refuses the ruling. Rulings are accepted without a turn
 reconciler, but only a service with `Options.Threads` delivers the event to
 the chief of staff and the relayed ruling to the askers, as described under
 [questions](#questions).
+
+## Notifications
+
+With `notify.webhook` set, the service posts every entry that opens in the
+[inbox](#inbox-and-rulings), of every kind, to the webhook once. The post is a
+`POST` with a `text/plain; charset=utf-8` body the owner can act on without
+the page open:
+
+```text
+Osmia needs your decision.
+Project: <project-id>
+Workstream: <workstream-id>
+Kind: <escalation, ratification, contested, amendment or delivery>
+Question: <the entry's question on one line>
+Recommendation: <the entry's recommendation on one line, when it has one>
+Open: http://<tailnet-name>/
+```
+
+The `Open` line appears only with `listen.tailnet` set: it names the node's
+tailnet DNS name, or the configured hostname while the node has none. Any
+`2xx` response counts as delivered; the response body is ignored.
+
+Sending runs beside the scheduler, never on its path: it reads the inbox when
+the [event stream](#event-stream) announces an inbox or configuration change,
+when a retry is due and at least once a minute. A slow or failing webhook
+delays nothing else.
+
+**Once per occurrence.** An entry is identified by its project, kind,
+workstream, number, unit, amendment, revision and `opened_at`, so a new
+revision of a packet or final report, or a unit contested again, is a new
+occurrence. The service records each new occurrence as pending in
+`<root>/notifications.json` before posting it, and as sent after a `2xx`
+response. A restart posts what is pending and never posts what is recorded as
+sent; the only duplicate possible is a post whose result the service stopped
+before recording. The ledger keeps every occurrence it has seen, so one that
+leaves the inbox and returns, such as a delivery whose publication was
+refused, is not posted again.
+
+- Entries already open when notifications turn on, whether by a reload that
+  sets the webhook or by the first start with it set, are recorded as skipped
+  and never posted.
+- A pending entry that is decided or superseded before it is posted is
+  dropped.
+- A failed post (a transport error or a non-`2xx` response) is retried after
+  `Options.NotifyRetry` (30 seconds by default), doubling each time, and given
+  up after 5 attempts.
+- [Reload](#reload) applies a set, changed or removed webhook. A changed URL
+  receives the posts still pending. Removing it drops what is pending and
+  sends nothing until it is set again.
+
+`GET /v1/status` and `GET /v1/config` carry a `notify` diagnostic while a
+problem stands. They never quote the webhook's URL.
+
+| Code | Message | Until |
+| --- | --- | --- |
+| `unavailable` | `notifying the owner of the <kind> decision in workstream <id> failed at <time> (attempt <n> of 5): <reason>; retrying` | A later post succeeds, or the webhook is removed |
+| `unavailable` | `gave up notifying the owner of the <kind> decision in workstream <id> at <time> after 5 attempts: <reason>` | A later post succeeds, or the webhook is removed |
+| `internal` | `cannot read <path>; nothing is sent until it can be read` | The ledger can be read |
+| `internal` | `cannot record notifications in <path>; nothing is sent until it can be written` | The ledger can be written |
+| `internal` | `cannot read the inbox; notifications wait until it can be read` | The inbox can be read |
+
+`<reason>` is `the webhook responded <status>` or `the request failed:
+<error>`.
 
 ## Charter proposals
 

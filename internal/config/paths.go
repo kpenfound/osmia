@@ -108,6 +108,9 @@ func (r Root) Socket() (string, error)  { return r.managed("osmia.sock") }
 // Tailnet is the embedded Tailscale node's state directory.
 func (r Root) Tailnet() (string, error) { return r.managed("tailnet") }
 
+// Notifications is the ledger of owner notifications sent to notify.webhook.
+func (r Root) Notifications() (string, error) { return r.managed("notifications.json") }
+
 // PendingProject is the journal of one interrupted project registration.
 func (r Root) PendingProject() (string, error) { return r.managed("project-add.json") }
 

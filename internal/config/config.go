@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,6 +33,7 @@ type Config struct {
 	Shed           Shed               `toml:"shed" json:"shed"`
 	Mason          Mason              `toml:"mason" json:"mason"`
 	Events         Events             `toml:"events" json:"events"`
+	Notify         Notify             `toml:"notify" json:"notify"`
 	Project        Project            `toml:"-" json:"project"`
 }
 type Listen struct {
@@ -68,6 +70,12 @@ type Shed struct {
 }
 type Mason struct {
 	MaxCleanTurns int `toml:"max_clean_turns" json:"max_clean_turns"`
+}
+
+// Notify configures owner notifications. Webhook is the absolute http or
+// https URL each new inbox entry is posted to; empty sends nothing.
+type Notify struct {
+	Webhook string `toml:"webhook" json:"webhook,omitempty"`
 }
 type Events struct {
 	Window string `toml:"window" json:"window"`
@@ -220,6 +228,11 @@ func Load(options Options) (*Config, error) {
 	}
 	if d, err := time.ParseDuration(c.Events.Window); err != nil || d <= 0 {
 		return nil, fieldError(path, "events.window", "must be a positive Go duration")
+	}
+	if c.Notify.Webhook != "" {
+		if err := validateWebhook(c.Notify.Webhook); err != nil {
+			return nil, fieldError(path, "notify.webhook", err.Error())
+		}
 	}
 	for _, value := range []struct{ field, amount string }{{"per_session", c.Budget.PerSession}, {"per_unit", c.Budget.PerUnit}, {"per_day", c.Budget.PerDay}} {
 		if !md.IsDefined("budget", value.field) {
@@ -410,12 +423,12 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "sandbox", "image"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window"}, path)
+	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window", "notify", "notify.webhook"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {
 	switch key[0] {
-	case "hearsay", "notify", "hearsay_scope", "pause", "priority":
+	case "hearsay", "hearsay_scope", "pause", "priority":
 		return "unsupported in M1; requires a later milestone"
 	}
 	return "unknown configuration key"
@@ -593,6 +606,19 @@ func validateTailnet(hostname string) error {
 	}
 	if strings.HasPrefix(hostname, "-") || strings.HasSuffix(hostname, "-") {
 		return fmt.Errorf("hostname must not start or end with a hyphen")
+	}
+	return nil
+}
+
+// validateWebhook accepts an absolute http or https URL with a host. The
+// reason never quotes the URL, which may carry a secret.
+func validateWebhook(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || !u.IsAbs() || u.Host == "" || u.Opaque != "" {
+		return fmt.Errorf("must be an absolute http or https URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("scheme must be http or https")
 	}
 	return nil
 }

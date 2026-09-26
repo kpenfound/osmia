@@ -250,7 +250,13 @@ func TestInvalid(t *testing.T) {
 		{"web signed port", topConfig + "[listen]\nweb = '127.0.0.1:+80'\n", "", "listen.web"},
 		{"web wrong type", topConfig + "[listen]\nweb = 8080\n", "", "config.toml:"},
 		{"hearsay", topConfig + "[hearsay]\n", "", "unsupported in M1"},
-		{"notify", topConfig + "[notify]\nwebhook = 'https://example.com'\n", "", "unsupported in M1"},
+		{"notify unknown key", topConfig + "[notify]\nemail = 'owner@example.com'\n", "", "notify.email: unknown configuration key"},
+		{"webhook relative", topConfig + "[notify]\nwebhook = '/hooks/osmia'\n", "", "notify.webhook: must be an absolute http or https URL"},
+		{"webhook no host", topConfig + "[notify]\nwebhook = 'https:///hooks'\n", "", "notify.webhook: must be an absolute http or https URL"},
+		{"webhook opaque", topConfig + "[notify]\nwebhook = 'https:ntfy.sh'\n", "", "notify.webhook: must be an absolute http or https URL"},
+		{"webhook scheme", topConfig + "[notify]\nwebhook = 'ftp://example.com/hook'\n", "", "notify.webhook: scheme must be http or https"},
+		{"webhook malformed", topConfig + "[notify]\nwebhook = 'https://exa mple.com/%zz'\n", "", "notify.webhook: must be an absolute http or https URL"},
+		{"webhook wrong type", topConfig + "[notify]\nwebhook = 1\n", "", "config.toml:"},
 		{"empty socket", topConfig + "[listen]\nsocket = ''\n", "", "listen.socket"},
 		{"socket escape", topConfig + "[listen]\nsocket = '../outside.sock'\n", "", "listen.socket"},
 		{"socket directory", topConfig + "[listen]\nsocket = '.'\n", "", "direct child"},
@@ -501,5 +507,25 @@ func TestFilesystemErrors(t *testing.T) {
 				t.Fatalf("accepted: %+v %v", c, err)
 			}
 		})
+	}
+}
+
+// notify.webhook accepts absolute http and https URLs; empty sends nothing.
+func TestNotifyWebhook(t *testing.T) {
+	for _, value := range []string{"", "https://ntfy.sh/osmia-topic", "http://127.0.0.1:8080/hook?token=x", "HTTPS://hooks.example.com"} {
+		t.Run(value, func(t *testing.T) {
+			c, err := Load(fixture(t, topConfig+"[notify]\nwebhook = '"+value+"'\n", projectConfig))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Notify.Webhook != value {
+				t.Fatalf("notify.webhook %q loaded as %q", value, c.Notify.Webhook)
+			}
+		})
+	}
+	secret := "https://hooks.example.com/services/SECRET"
+	_, err := Load(fixture(t, topConfig+"[notify]\nwebhook = 'gopher://hooks.example.com/services/SECRET'\n", projectConfig))
+	if err == nil || strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("rejected webhook error %v must not quote %s", err, secret)
 	}
 }
