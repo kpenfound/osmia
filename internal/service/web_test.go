@@ -242,3 +242,39 @@ func TestShutdownClosesBothListeners(t *testing.T) {
 		t.Fatalf("socket after shutdown: %v", err)
 	}
 }
+
+// The page is served at / on the socket and on the web listener alike, and
+// the web listener's Host check covers it like the API.
+func TestPageIsServedOnTheSocketAndTheWebListener(t *testing.T) {
+	t.Parallel()
+	opts := fixture(t)
+	withWeb(t, opts, "127.0.0.1:0")
+	s, _ := start(t, opts)
+	socket, web, base := socketHTTP(s.Socket()), webHTTP(), "http://"+s.WebAddr()
+	for _, path := range []string{"/", "/app.js", "/style.css"} {
+		sc, sb := exchange(t, socket, "GET", "http://osmia"+path, "", "", "")
+		wc, wb := exchange(t, web, "GET", base+path, "", "", "")
+		if sc != 200 || wc != 200 || len(sb) == 0 || !bytes.Equal(sb, wb) {
+			t.Fatalf("%s: socket %d (%d bytes), web %d (%d bytes)", path, sc, len(sb), wc, len(wb))
+		}
+	}
+	req, err := http.NewRequest("GET", base+"/", nil)
+	must(t, err)
+	resp, err := web.Do(req)
+	must(t, err)
+	page, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	must(t, err)
+	if resp.Header.Get("Content-Type") != "text/html; charset=utf-8" || !strings.Contains(string(page), `<script src="/app.js" defer></script>`) {
+		t.Fatalf("page: %v %s", resp.Header, page)
+	}
+	code, body := exchange(t, web, "GET", base+"/", "", "", "attacker.example")
+	if code != 403 || errorCode(t, body) != Forbidden {
+		t.Fatalf("page for a foreign host: %d %s", code, body)
+	}
+	// A path the page does not hold falls through to the API's answer.
+	code, body = exchange(t, socket, "GET", "http://osmia/index.html", "", "", "")
+	if code != 501 || errorCode(t, body) != Unsupported {
+		t.Fatalf("unknown page path: %d %s", code, body)
+	}
+}
