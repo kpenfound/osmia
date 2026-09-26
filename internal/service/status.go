@@ -155,7 +155,10 @@ func (s *Service) statusList() StatusResponse {
 	if unread != nil {
 		diagnostics = append(diagnostics, *unread)
 	}
-	workspaces, err := s.newWorkspaces(context.Background(), s.current())
+	// A jj that hangs must not hold up status.
+	checking, cancel := context.WithTimeout(context.Background(), jjCheckTimeout)
+	workspaces, err := s.newWorkspaces(checking, s.current())
+	cancel()
 	if err != nil {
 		diagnostics = append(diagnostics, Diagnostic{"workspaces", Unavailable, workspaces.Problem})
 	}

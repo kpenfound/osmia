@@ -1522,10 +1522,10 @@ Each attempt, in order:
    `<root>/branches/<project-id>/<workstream-id>`, a Git worktree or a
    Jujutsu workspace of the clone as the workstream's
    [backend](#workspace-backends) says, unless the clone has that workspace
-   already. That worktree alone is
-   forgotten and made again when its directory is gone; the owner's other
-   worktrees are never pruned. A directory in the way that is no worktree of
-   the clone is reported and left alone.
+   already. That workspace alone is forgotten and made again when its
+   directory is gone; the owner's other worktrees are never pruned. A
+   directory in the way that is no workspace of the clone is reported and
+   left alone.
 6. Records `seal.json` as the workstream document `seal` (actor
    `service`/`sealing`, cause the operation ID), unless this sealing recorded
    it before the attempt was interrupted, and moves the feature state to
@@ -2314,8 +2314,9 @@ backend is on Git.
 With `workspaces = "jujutsu"` and a `jj` that is missing or older than the
 supported release, a hand-in that would create a workstream is refused with
 `unavailable` and nothing is recorded: `workstream <id> cannot start:
-workspaces is "jujutsu" but no supported jj is installed (<reason>)`, where the
-reason names the version found. It never falls back to Git.
+workspaces is "jujutsu" but no supported jj is installed (<reason>); install
+jj <version> or later, or set workspaces to "auto" or "git"`, where the reason
+names the version found and `<version>` is the oldest supported release. It never falls back to Git.
 
 `GET /v1/status` reports each workstream's backend as `workspaces` and, in its
 own `workspaces` object, what a new workstream gets: `setting`, the configured

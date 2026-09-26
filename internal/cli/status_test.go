@@ -93,6 +93,8 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	for _, want := range []string{
 		"ready=true",
 		"Profiles:\n",
+		// The service's jj decides what auto gives new workstreams.
+		"Workspaces: setting=auto new_workstreams=",
 		"Workstreams:\n" +
 			"  " + stream + " state=handed open_questions=0 context_mode=file workspaces=git\n" +
 			"    Goal: Ship resumable uploads.\n" +
@@ -194,6 +196,25 @@ func TestStatusWithoutWorkstreams(t *testing.T) {
 	}
 	if out := successful(t, empty.Config.Root, "status"); !strings.Contains(out, "Workstreams:\n  none\n") {
 		t.Fatalf("no project:\n%s", out)
+	}
+}
+
+// The Workspaces line names the setting, what new workstreams get (none when
+// jujutsu finds no supported jj) and the jj found.
+func TestStatusTextShowsWorkspaces(t *testing.T) {
+	for _, c := range []struct {
+		ws   service.WorkspacesStatus
+		want string
+	}{
+		{service.WorkspacesStatus{Setting: "jujutsu", JJ: "0.44.0", Problem: "jj is too old"}, "Workspaces: setting=jujutsu new_workstreams=none jj=0.44.0\n"},
+		{service.WorkspacesStatus{Setting: "git", Backend: "git"}, "Workspaces: setting=git new_workstreams=git\n"},
+		{service.WorkspacesStatus{Setting: "auto", Backend: "jujutsu", JJ: "0.45.1"}, "Workspaces: setting=auto new_workstreams=jujutsu jj=0.45.1\n"},
+	} {
+		var out strings.Builder
+		showWorkspaces(&out, c.ws)
+		if out.String() != c.want {
+			t.Fatalf("%+v: got %q, want %q", c.ws, out.String(), c.want)
+		}
 	}
 }
 

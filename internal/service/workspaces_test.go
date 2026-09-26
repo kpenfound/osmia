@@ -31,6 +31,7 @@ type fakeJJ struct {
 	mu      sync.Mutex
 	version string
 	err     error
+	bounded bool
 }
 
 func (j *fakeJJ) set(version string, err error) {
@@ -39,10 +40,20 @@ func (j *fakeJJ) set(version string, err error) {
 	j.version, j.err = version, err
 }
 
-func (j *fakeJJ) check(context.Context) (string, error) {
+func (j *fakeJJ) check(ctx context.Context) (string, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	deadline, ok := ctx.Deadline()
+	j.bounded = ok && time.Until(deadline) <= jjCheckTimeout
 	return j.version, j.err
+}
+
+// lastBounded reports whether the latest check had a deadline no later than
+// jjCheckTimeout from when it ran.
+func (j *fakeJJ) lastBounded() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.bounded
 }
 
 var (
@@ -243,5 +254,17 @@ func TestWorkstreamWithoutARecordedBackendIsOnGit(t *testing.T) {
 	must(t, f.repository().CreateWorkstream(context.Background(), stream, time.Now().UTC(), ownerActor))
 	if got := f.backend(t, stream); got != config.WorkspacesGit {
 		t.Fatalf("a workstream without a recorded backend is on %q", got)
+	}
+}
+
+// Service status checks jj with a deadline, so a jj that hangs cannot hold
+// up a status read.
+func TestStatusChecksJJWithADeadline(t *testing.T) {
+	t.Parallel()
+	f := newWorkspacesFixture(t, config.WorkspacesAuto)
+	_, err := f.c.Statuses(context.Background())
+	must(t, err)
+	if !f.jj.lastBounded() {
+		t.Fatal("status checked jj without a deadline")
 	}
 }

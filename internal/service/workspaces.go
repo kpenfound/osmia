@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -44,6 +45,9 @@ func (w streamWorkspaces) of(stream config.WorkstreamID) (workspace.Provider, er
 // jjCheck is a check of the installed jj: the version found, and an error
 // when it is missing or unsupported.
 type jjCheck func(context.Context) (string, error)
+
+// jjCheckTimeout bounds the check of jj that a status read runs.
+const jjCheckTimeout = 5 * time.Second
 
 // checkJJ checks the jj on the service's PATH.
 func checkJJ(ctx context.Context) (string, error) { return workspace.CheckJJ(ctx, "") }
