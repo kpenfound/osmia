@@ -116,7 +116,9 @@ func TestJujutsuRecoverRestoresTheCheckpointAnInterruptedAttemptLeft(t *testing.
 
 // A replay the attempt went on with goes back to where the checkpoint found
 // it, holding the resolution the workspace held then, and going on with it
-// again makes the same branch the interrupted attempt moved to.
+// again makes the same branch the interrupted attempt moved to. The
+// checkpoint's snapshot of the resolved files leaves the replay reporting
+// the stop and the paths it stopped with.
 func TestJujutsuRecoverTakesAReplayBackToItsCheckpoint(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -143,6 +145,9 @@ func TestJujutsuRecoverTakesAReplayBackToItsCheckpoint(t *testing.T) {
 	if err := j.Checkpoint(ctx, "operation-2", at); err != nil {
 		t.Fatal(err)
 	}
+	if stop, unmerged, replaying, err := j.Replaying(ctx, resolution); err != nil || !replaying || stop != first || !slices.Equal(unmerged, []string{"README"}) {
+		t.Fatalf("the checkpointed replay stops at %s with %v (%t): %v", stop, unmerged, replaying, err)
+	}
 	tip, conflicts, err := j.ContinueReplay(ctx, resolution, at)
 	if err != nil || len(conflicts) != 0 || tip == "" {
 		t.Fatalf("the replay went on to %s with %v: %v", tip, conflicts, err)
@@ -154,7 +159,7 @@ func TestJujutsuRecoverTakesAReplayBackToItsCheckpoint(t *testing.T) {
 	if operations, err := j.Recover(ctx); err != nil || !slices.Equal(operations, []string{"operation-2"}) {
 		t.Fatalf("recovered %v: %v", operations, err)
 	}
-	if stop, unmerged, replaying, err := j.Replaying(ctx, resolution); err != nil || !replaying || stop != "" || len(unmerged) != 0 {
+	if stop, unmerged, replaying, err := j.Replaying(ctx, resolution); err != nil || !replaying || stop != first || !slices.Equal(unmerged, []string{"README"}) {
 		t.Fatalf("the restored replay stops at %s with %v (%t): %v", stop, unmerged, replaying, err)
 	}
 	if got := readFile(t, filepath.Join(resolution.Path, "README")); got != "upstream and feature\n" {

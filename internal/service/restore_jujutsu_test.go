@@ -43,12 +43,20 @@ func jujutsuRepository(f *shedFixture, directory string) string {
 	return filepath.Join(f.s.cfg.Root.String(), directory, string(f.s.cfg.Project.ID), ".jujutsu")
 }
 
+// checkpoints returns the checkpoint files the workspaces under directory
+// hold.
+func checkpoints(t *testing.T, f *shedFixture, directory string) []string {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(jujutsuRepository(f, directory), ".jj", "osmia-checkpoints", "*.json"))
+	must(t, err)
+	return paths
+}
+
 // checkpointEntry returns the operation-log entry of the one checkpoint an
 // interrupted attempt left in the workspaces under directory.
 func checkpointEntry(t *testing.T, f *shedFixture, directory string) string {
 	t.Helper()
-	paths, err := filepath.Glob(filepath.Join(jujutsuRepository(f, directory), ".jj", "osmia-checkpoints", "*.json"))
-	must(t, err)
+	paths := checkpoints(t, f, directory)
 	if len(paths) != 1 {
 		t.Fatalf("the %s workspaces hold checkpoints %v", directory, paths)
 	}
@@ -97,8 +105,8 @@ func restoredTo(t *testing.T, f *shedFixture, directory, entry string, changed b
 	if changed != restored {
 		t.Fatalf("the %s workspaces were restored to %s: %t, want %t:\n%s", directory, entry, restored, changed, strings.Join(log, "\n"))
 	}
-	if paths, err := filepath.Glob(filepath.Join(jujutsuRepository(f, directory), ".jj", "osmia-checkpoints", "*.json")); err != nil || len(paths) != 0 {
-		t.Fatalf("checkpoints left after the restore: %v %v", paths, err)
+	if paths := checkpoints(t, f, directory); len(paths) != 0 {
+		t.Fatalf("checkpoints left after the restore: %v", paths)
 	}
 }
 
@@ -354,5 +362,163 @@ func TestJujutsuDriftRebaseCutShortIsRestoredAndRebasesOnce(t *testing.T) {
 		if all := seals(t, repository, stream); len(all) != k+1 || all[k].Base.Commit != upstream {
 			t.Fatalf("seals after drift rebase %d: %+v", k, all)
 		}
+	}
+}
+
+// A landing attempt on Jujutsu workspaces that fails while the service keeps
+// running settles its checkpoint: a start finds nothing to restore, and the
+// retry goes on from what the attempt left, landing once.
+func TestJujutsuLandingThatFailsWithoutAStopKeepsNoCheckpoint(t *testing.T) {
+	requireJJ(t)
+	t.Parallel()
+	ctx := context.Background()
+	f, stream, repository := newApprovedFixtureOn(t, "failed-landing", config.WorkspacesJujutsu)
+	lands := &foreman{masons: newMasonController(f.s, repository)}
+	must(t, lands.Pass(ctx))
+	ops := landOperations(t, repository, stream)
+	if len(ops) != 1 {
+		t.Fatalf("landing operations %+v", ops)
+	}
+	op := ops[0].Operation
+	in, err := decodeLand(op)
+	must(t, err)
+	failed := false
+	f.s.boundary = func(name string) error {
+		if name == "land-advanced" && !failed {
+			failed = true
+			return errors.New("the landing failed")
+		}
+		return nil
+	}
+	t.Cleanup(func() { f.s.boundary = nil })
+	if _, err := lands.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "the landing failed") {
+		t.Fatalf("the landing did not fail at land-advanced: %v", err)
+	}
+	if left := checkpoints(t, f, branchesDirectory); len(left) != 0 {
+		t.Fatalf("a failed attempt left checkpoints %v", left)
+	}
+	landed := featureTip(t, f, stream)
+	log := operationLog(t, f, branchesDirectory)
+	must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
+	if after := operationLog(t, f, branchesDirectory); !slices.Equal(after, log) {
+		t.Fatalf("a start after a failed attempt changed the operation log:\n%s", strings.Join(after, "\n"))
+	}
+	if result := settleOperation(t, f.s, repository, stream, op, lands); result.Outcome != "succeeded" {
+		t.Fatalf("the retried landing %+v", result)
+	}
+	if commits := f.landedCommits(t, stream, in.Base); !slices.Equal(commits, []string{landed}) {
+		t.Fatalf("the feature branch gained %v, want the failed attempt's %s", commits, landed)
+	}
+	var merged []string
+	for _, tr := range allTransitions(t, f.trace, stream) {
+		if tr.Subject == trace.UnitSubject(in.Unit) && tr.To == UnitMerged {
+			merged = append(merged, tr.ID)
+		}
+	}
+	if len(merged) != 1 {
+		t.Fatalf("merged %v", merged)
+	}
+}
+
+// A conflicted drift rebase on Jujutsu workspaces cut short while its
+// resolution is staged, and again after its approved resolution moved the
+// feature branch, leaves checkpoints of the drift resolution workspaces as
+// well as of the feature branch's, and a start restores both. The
+// resolution goes on from the mason's files to one candidate, reviewed once,
+// and the approved drift rebase ends where an uninterrupted one does: the
+// feature branch and its workspace at the approved candidate, the
+// resolution workspace removed, and the rebase and the seal's move recorded
+// once.
+func TestJujutsuDriftResolutionCutShortIsRestoredAndResolvesOnce(t *testing.T) {
+	requireJJ(t)
+	t.Parallel()
+	ctx := context.Background()
+	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) { onWorkspaces(t, *opts, config.WorkspacesJujutsu) })
+	f.upstream(t)
+	stream, _ := f.builtAs(t, "restored-resolution")
+	f.stop(t)
+	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	t.Cleanup(func() { repository.Close() })
+	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
+	before, upstream, op := conflictedDrift(t, f, d, stream)
+	awaitResolution(t, f.s, d, stream, op, "its mason's resolution of CODEOWNERS")
+	resolved := "/internal/ @upstream @feature\n"
+	must(t, os.WriteFile(filepath.Join(resolutionWorkspace(t, f, stream).Path, "CODEOWNERS"), []byte(resolved), 0600))
+	completeDriftTurn(t, f, repository, stream, driftMasonAgent, resolvedDone("Kept both owners"))
+
+	// cutShort cuts the drift rebase's next attempt short at step and has a
+	// start restore what it left, and returns whether the attempt changed
+	// the resolution workspaces' Jujutsu state.
+	cutShort := func(step string) (feature, resolution bool) {
+		t.Helper()
+		if _, err := d.Apply(stopAt(t, f.s, step), op); err == nil || !strings.Contains(err.Error(), "the service stopped") {
+			t.Fatalf("the drift rebase was not cut short at %s: %v", step, err)
+		}
+		features, feature := interrupted(t, f, branchesDirectory)
+		resolutions, resolution := interrupted(t, f, driftsDirectory)
+		must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
+		restoredTo(t, f, branchesDirectory, features, feature)
+		restoredTo(t, f, driftsDirectory, resolutions, resolution)
+		return feature, resolution
+	}
+
+	cutShort("drift-staging")
+	awaitResolution(t, f.s, d, stream, op, "review 1 of candidate")
+	var candidates []string
+	for _, r := range driftRecords(t, repository, stream) {
+		if r.Outcome == driftResolved {
+			candidates = append(candidates, r.Candidate)
+		}
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("the resolution was staged into candidates %v", candidates)
+	}
+	candidate := candidates[0]
+	g := providerOf(t, driftWorkspaces(f.s.cfg, repository), stream)
+	if stored, err := g.StoredConflicts(ctx, candidate); err != nil || len(stored) != 0 || parentOf(t, f, candidate) != upstream || fileAt(t, f, candidate, "CODEOWNERS") != resolved {
+		t.Fatalf("the resolved candidate %s stores %v: %v", candidate, stored, err)
+	}
+	if ids := turnIDs(t, repository, stream, driftMasonAgent); !slices.Equal(ids, []string{driftResolveTurnID(1, 1)}) {
+		t.Fatalf("drift mason turns %v", ids)
+	}
+	if ids := turnIDs(t, repository, stream, driftReviewerAgent); len(ids) != 1 {
+		t.Fatalf("drift reviewer turns %v", ids)
+	}
+	if tip := featureTip(t, f, stream); tip != before {
+		t.Fatalf("the feature branch moved to %s before review", tip)
+	}
+
+	completeDriftTurn(t, f, repository, stream, driftReviewerAgent, driftVerdict(t, approvedResolution))
+	if feature, resolution := cutShort("drift-moved"); !feature || !resolution {
+		t.Fatalf("the attempt cut short after the branch moved changed the feature workspaces: %t, the resolution workspaces: %t", feature, resolution)
+	}
+	if result := settleOperation(t, f.s, repository, stream, op, d); result.Outcome != "succeeded" {
+		t.Fatalf("the retried drift rebase %+v", result)
+	}
+	if tip := featureTip(t, f, stream); tip != candidate {
+		t.Fatalf("the feature branch is at %s, not the approved candidate %s", tip, candidate)
+	}
+	features := providerOf(t, featureWorkspaces(f.s.cfg, repository), stream)
+	w, found, err := features.Workspace(ctx, string(stream))
+	must(t, err)
+	if !found {
+		t.Fatal("the feature branch has no workspace")
+	}
+	onCommit(t, features, w, candidate)
+	if _, found, err := g.Workspace(ctx, string(stream)); err != nil || found {
+		t.Fatalf("the resolution workspace is still there: %t %v", found, err)
+	}
+	records := driftRecords(t, repository, stream)
+	if last := records[len(records)-1]; last.Outcome != driftRebased || last.Commit != candidate {
+		t.Fatalf("the drift rebase's last record %+v", last)
+	}
+	transitions, err := trace.Read[trace.Transition](repository, stream)
+	must(t, err)
+	if n := len(slices.DeleteFunc(transitions, func(tr trace.Transition) bool { return tr.ID != "drift-1-rebased" })); n != 1 {
+		t.Fatalf("the drift rebase recorded its outcome %d times", n)
+	}
+	if all := seals(t, repository, stream); len(all) != 2 || all[1].Base.Commit != upstream {
+		t.Fatalf("seals %+v", all)
 	}
 }
