@@ -320,7 +320,11 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	ws := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, ws, "concluded-1")
 	faults.check(t)
-	entries := f.inboxEntries(t, ws, InboxRatification)
+	var entries []InboxEntry
+	soon(t, "the ratification entry", func() bool {
+		entries = f.inboxEntries(t, ws, InboxRatification)
+		return len(entries) > 0
+	})
 	if len(entries) != 1 {
 		t.Fatalf("ratification entries %+v", entries)
 	}
