@@ -275,11 +275,15 @@ func TestNotifyPostsEveryNewInboxEntryOnce(t *testing.T) {
 			t.Fatalf("no post\n%s\nin %q", want, bodies)
 		}
 	}
-	for key, rec := range readLedger(t, opts).Notifications {
-		if want := notificationSent; key != notificationKey(project, old) && rec.State != want {
-			t.Fatalf("%s: %+v", key, rec)
+	// The ledger settles a post after the webhook has answered it.
+	soon(t, "every post recorded as sent", func() bool {
+		for key, rec := range readLedger(t, opts).Notifications {
+			if key != notificationKey(project, old) && rec.State != notificationSent {
+				return false
+			}
 		}
-	}
+		return true
+	})
 	must(t, s.Close())
 
 	// After a restart only the entry that opens since is posted.
@@ -355,6 +359,12 @@ func TestNotifyReloadTurnsNotificationsOnAndOff(t *testing.T) {
 	if cfg.Effective.Notify.Webhook != first.hook() {
 		t.Fatalf("effective notify %+v", cfg.Effective.Notify)
 	}
+	// The pass the reload triggers records what is open as skipped; an entry
+	// that opens before that pass reads the inbox would be skipped too.
+	soon(t, "the open entry recorded as skipped", func() bool {
+		l := readLedger(t, opts)
+		return l.Enabled && l.Notifications[notificationKey(project, e1)] != nil
+	})
 	e2 := entryOf(InboxAmendment, 2)
 	inbox.set(e1, e2)
 	if got := first.await(t, 1); len(got) != 1 || !strings.Contains(got[0], "Kind: amendment") {
