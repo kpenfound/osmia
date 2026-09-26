@@ -150,10 +150,14 @@ type metadata struct {
 // from Head back to where it meets Onto, each copied onto the copy of the one
 // before it, the first onto Onto. A copy is named by its change ID, which
 // stays the same while the copy is resolved and its descendants rebased.
+// Stop is the original whose copy the replay stopped at, and Conflicts the
+// paths that copy held conflicted then.
 type replay struct {
-	Onto  string `json:"onto"`
-	Head  string `json:"head"`
-	Steps []step `json:"steps"`
+	Onto      string   `json:"onto"`
+	Head      string   `json:"head"`
+	Steps     []step   `json:"steps"`
+	Stop      string   `json:"stop,omitempty"`
+	Conflicts []string `json:"conflicts,omitempty"`
 }
 
 type step struct {
@@ -710,8 +714,9 @@ func (j *Jujutsu) conflicts(ctx context.Context, rev string) ([]string, error) {
 
 // proceed takes the replay in the workspace as far as it goes: a copy that
 // is empty though its original was not is dropped, the first copy that
-// conflicts is where it stops, with the workspace on it, and with none left
-// the branch moves to the last copy and the workspace onto it.
+// conflicts is where it stops, with the workspace on it and the stop and its
+// conflicted paths recorded, and with none left the recorded stop is dropped,
+// then the branch moves to the last copy and the workspace onto it.
 func (j *Jujutsu) proceed(ctx context.Context, w Worktree, meta metadata, at time.Time) (string, []string, error) {
 	r := meta.Replay
 	states, err := j.steps(ctx, r)
@@ -734,7 +739,11 @@ func (j *Jujutsu) proceed(ctx context.Context, w Worktree, meta metadata, at tim
 				}
 			}
 			conflicts, err := j.conflicts(ctx, s.Change)
-			return "", conflicts, err
+			if err != nil {
+				return "", nil, err
+			}
+			r.Stop, r.Conflicts = s.Original, conflicts
+			return "", conflicts, writeMetadata(w.Path, meta)
 		}
 		if state.empty && !s.Empty {
 			if _, err := j.run(ctx, w.Path, stamp(at), "abandon", s.Change); err != nil {
@@ -749,6 +758,12 @@ func (j *Jujutsu) proceed(ctx context.Context, w Worktree, meta metadata, at tim
 	for _, s := range r.Steps {
 		if state, ok := states[s.Change]; ok {
 			tip = state.commit
+		}
+	}
+	if r.Stop != "" {
+		r.Stop, r.Conflicts = "", nil
+		if err := writeMetadata(w.Path, meta); err != nil {
+			return "", nil, err
 		}
 	}
 	head, err := j.head(ctx, w)
@@ -788,14 +803,18 @@ func (j *Jujutsu) ContinueReplay(ctx context.Context, w Worktree, at time.Time) 
 }
 
 // Replaying returns the commit of the workspace's branch whose copy the
-// replay in the workspace stopped at, with the paths that copy holds
-// conflicted as it was stopped, whatever the workspace's files hold since,
-// and whether a replay is in progress there. A replay in progress with no
-// copy in conflict returns "".
+// replay in the workspace stopped at, with the paths that copy held
+// conflicted as it was stopped, whatever the workspace's files hold since and
+// even once a snapshot of the workspace recorded them in the copy, and
+// whether a replay is in progress there. A replay in progress that recorded
+// no stop returns the first copy in conflict, or "" when none is.
 func (j *Jujutsu) Replaying(ctx context.Context, w Worktree) (string, []string, bool, error) {
 	meta, err := readMetadata(w.Path)
 	if err != nil || meta.Replay == nil {
 		return "", nil, false, err
+	}
+	if meta.Replay.Stop != "" {
+		return meta.Replay.Stop, slices.Clone(meta.Replay.Conflicts), true, nil
 	}
 	states, err := j.steps(ctx, meta.Replay)
 	if err != nil {

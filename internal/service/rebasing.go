@@ -486,7 +486,10 @@ func rebasedSnapshot(ctx context.Context, g workspace.Provider, head string, in 
 // change ID the trace records for the unit. The workspace's branch, index and files then
 // move to the rebased commit, and the rebase is recorded. A workspace that
 // is missing, already current or behind a feature branch that moved again
-// is refused with the reason as its result, and nothing changes.
+// is refused with the reason as its result, and nothing changes. Each
+// attempt runs between checkpoints of the unit workspaces' state, which a
+// service restarted after the attempt was cut short restores before the
+// rebase is retried.
 func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	in, err := decodeRebase(op)
 	if err != nil {
@@ -506,6 +509,18 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	requested, err := r.requestedAt(stream, op.ID)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	return checkpointed(ctx, op.ID, requested, []workspace.Provider{g}, func() (coreadapter.OperationResult, error) {
+		return r.rebase(ctx, op.ID, stream, in, g, requested)
+	})
+}
+
+// rebase is one attempt of the rebase Apply describes, on the unit
+// workspaces g.
+func (r rebaser) rebase(ctx context.Context, operation string, stream config.WorkstreamID, in rebaseInput, g workspace.Provider, requested time.Time) (coreadapter.OperationResult, error) {
 	w, found, err := g.Workspace(ctx, unitName(stream, in.Unit))
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -517,11 +532,7 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	requested, err := r.requestedAt(stream, op.ID)
-	if err != nil {
-		return coreadapter.OperationResult{}, err
-	}
-	snapshot, err := rebasedSnapshot(ctx, g, head, in, op.ID)
+	snapshot, err := rebasedSnapshot(ctx, g, head, in, operation)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -570,7 +581,7 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 			driftBase = base
 		}
 	}
-	message := fmt.Sprintf("Rebase unit %s onto %s\n\nOsmia-Workstream: %s\nOsmia-Unit: %s\n%s: %s\nOsmia-Base: %s\nOsmia-Onto: %s\n%s: %s\n", in.Unit, in.Onto, stream, in.Unit, rebaseSnapshotTrailer, snapshot, base, in.Onto, landingTrailer, op.ID)
+	message := fmt.Sprintf("Rebase unit %s onto %s\n\nOsmia-Workstream: %s\nOsmia-Unit: %s\n%s: %s\nOsmia-Base: %s\nOsmia-Onto: %s\n%s: %s\n", in.Unit, in.Onto, stream, in.Unit, rebaseSnapshotTrailer, snapshot, base, in.Onto, landingTrailer, operation)
 	change, err := unitChange(r.repository, stream, in.Unit)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -592,7 +603,7 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err := r.s.step("rebase-moved"); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	return r.record(ctx, stream, in, op.ID, UnitRebase{Unit: in.Unit, Rebase: in.Rebase, Operation: op.ID, Branch: w.Branch, Base: base, Onto: in.Onto, Snapshot: snapshot, Commit: commit, Conflicts: conflicts})
+	return r.record(ctx, stream, in, operation, UnitRebase{Unit: in.Unit, Rebase: in.Rebase, Operation: operation, Branch: w.Branch, Base: base, Onto: in.Onto, Snapshot: snapshot, Commit: commit, Conflicts: conflicts})
 }
 
 // rebaseCarrying rebases snapshot as RebaseFrom does and returns the rebased

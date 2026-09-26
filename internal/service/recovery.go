@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -84,6 +85,24 @@ func (s *Service) recoverSessions(ctx context.Context, cfg *config.Config, repos
 					}
 				}
 			}
+		}
+	}
+	return nil
+}
+
+// recoverWorkspaces restores the Jujutsu workspaces of the configured
+// project that an earlier service stopped in the middle of a multi-step
+// operation on, before any controller runs: each kind of workspace goes back
+// to the operation-log entry recorded before the interrupted attempt, and
+// the operation's retry reconciles what that attempt did to the clone.
+func (s *Service) recoverWorkspaces(ctx context.Context, cfg *config.Config) error {
+	for _, directory := range []string{branchesDirectory, unitsDirectory, driftsDirectory} {
+		operations, err := workspaces(cfg, directory, config.WorkspacesJujutsu).Recover(ctx)
+		if err != nil {
+			return err
+		}
+		for _, operation := range operations {
+			log.Printf("osmia: restored the %s workspaces of project %s to their state before operation %s was interrupted", directory, cfg.Project.ID, operation)
 		}
 	}
 	return nil

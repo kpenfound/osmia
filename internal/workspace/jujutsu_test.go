@@ -727,7 +727,9 @@ func TestJujutsuReplayInStopsAtEachConflictAndContinuesFromTheResolvedFiles(t *t
 		t.Fatalf("the last continue %q %v: %v", commit, conflicts, err)
 	}
 	// A replay interrupted after its branch moved, before it was recorded
-	// as finished, finishes on the same commit.
+	// as finished, finishes on the same commit. By then it no longer records
+	// the stop it went on from.
+	interrupted.Replay.Stop, interrupted.Replay.Conflicts = "", nil
 	if err := writeMetadata(w.Path, interrupted); err != nil {
 		t.Fatal(err)
 	}

@@ -2346,6 +2346,28 @@ configuration changes until it is delivered or abandoned: a changed setting
 applies to new workstreams alone. A workstream whose manifest records no
 backend is on Git.
 
+On Jujutsu workspaces, each attempt of a [landing](#landing-a-unit), a
+[unit rebase](#rebasing-units-in-flight) or a [drift rebase](#drift-rebases)
+runs between checkpoints of the Jujutsu state of the workspaces it changes:
+the feature branches' for a landing, the units' for a unit rebase, and the
+feature branches' and drift resolutions' for a drift rebase. Before the
+attempt changes anything, the service snapshots each such workspace, so its
+working-copy commit holds the files it has, and durably records the
+operation-log entry the Jujutsu repository is at, with each workspace's
+branch and replay in progress. The checkpoint is dropped once the attempt
+returns. A service stopped part way through an attempt leaves it, and the
+next service restores it as it starts, before any controller runs. It
+snapshots every workspace again, so what their files held stays in the
+operation log, restores the repository to the recorded entry, and gives each
+workspace the files, branch and replay it had then. The restore moves no
+branch of the clone or the fork: the repository takes in the clone's
+branches as they are, and a workspace whose branch the attempt moved is put
+on the branch when it holds nothing of its own, or exactly that commit's
+files. The retried operation then reconciles what the attempt left on its
+branches by the `Osmia-Operation` trailer, as on Git, so no unit lands or is
+rebased twice. No command shows the operation log. Git worktrees keep no
+state of their own beside the clone's and take no checkpoints.
+
 With `workspaces = "jujutsu"` and a `jj` that is missing or older than the
 supported release, a hand-in that would create a workstream is refused with
 `unavailable` and nothing is recorded: `workstream <id> cannot start:

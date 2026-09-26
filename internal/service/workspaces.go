@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -40,6 +41,35 @@ func (w streamWorkspaces) of(stream config.WorkstreamID) (workspace.Provider, er
 		return nil, fmt.Errorf("cannot read the workspace backend of workstream %s: %w", stream, err)
 	}
 	return workspaces(w.cfg, w.directory, backend), nil
+}
+
+// checkpointed runs one attempt of a multi-step version control operation
+// between a checkpoint of each provider's state, taken before the attempt
+// changes anything and stamped at, and its settling once the attempt
+// returns. An attempt cut short by the service stopping, whose context is
+// done, leaves its checkpoints: the next service restores each as it starts,
+// and the operation's retry reconciles what the attempt did to the clone.
+func checkpointed(ctx context.Context, operation string, at time.Time, providers []workspace.Provider, attempt func() (coreadapter.OperationResult, error)) (coreadapter.OperationResult, error) {
+	settle := func(providers []workspace.Provider) error {
+		var err error
+		for _, g := range providers {
+			err = errors.Join(err, g.Settle(ctx, operation))
+		}
+		return err
+	}
+	for i, g := range providers {
+		if err := g.Checkpoint(ctx, operation, at); err != nil {
+			return coreadapter.OperationResult{}, errors.Join(err, settle(providers[:i]))
+		}
+	}
+	result, err := attempt()
+	if ctx.Err() != nil {
+		return result, err
+	}
+	if settleErr := settle(providers); settleErr != nil {
+		return coreadapter.OperationResult{}, errors.Join(err, settleErr)
+	}
+	return result, err
 }
 
 // jjCheck is a check of the installed jj: the version found, and an error

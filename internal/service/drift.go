@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kpenfound/busybees/core/vcs"
 
@@ -337,7 +338,10 @@ func (d drifter) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 // as its base when the base changed, and the rebase's outcome. A workstream
 // that no longer qualifies, or whose branch moved during the rebase, is
 // skipped with the reason as its result. Storage, fetch and Git errors leave
-// the operation pending for another attempt.
+// the operation pending for another attempt. Each attempt runs between
+// checkpoints of the state of the feature branch and resolution workspaces,
+// which a service restarted after the attempt was cut short restores before
+// the drift rebase is retried.
 func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	in, err := decodeDrift(op)
 	if err != nil {
@@ -353,6 +357,25 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		}
 		return *result, nil
 	}
+	requested, err := d.requestedAt(stream, op.ID)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	var providers []workspace.Provider
+	for _, kind := range []streamWorkspaces{featureWorkspaces(d.cfg, d.repository), driftWorkspaces(d.cfg, d.repository)} {
+		g, err := kind.of(stream)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		providers = append(providers, g)
+	}
+	return checkpointed(ctx, op.ID, requested, providers, func() (coreadapter.OperationResult, error) {
+		return d.drift(ctx, op.ID, stream, in, requested)
+	})
+}
+
+// drift is one attempt of the drift rebase Apply describes.
+func (d drifter) drift(ctx context.Context, operation string, stream config.WorkstreamID, in driftInput, requested time.Time) (coreadapter.OperationResult, error) {
 	rebase, found, err := d.latest(stream, in.Drift)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -367,7 +390,7 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 			if err := d.release(ctx, stream); err != nil {
 				return coreadapter.OperationResult{}, err
 			}
-			return d.skip(ctx, stream, in.Drift, op.ID, reason+"; its conflict resolution is dropped")
+			return d.skip(ctx, stream, in.Drift, operation, reason+"; its conflict resolution is dropped")
 		}
 		if rebase, err = d.resolve(ctx, stream, rebase); err != nil {
 			return coreadapter.OperationResult{}, err
@@ -387,14 +410,10 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		if reason, err := d.eligible(stream); err != nil {
 			return coreadapter.OperationResult{}, err
 		} else if reason != "" {
-			return d.skip(ctx, stream, in.Drift, op.ID, reason)
+			return d.skip(ctx, stream, in.Drift, operation, reason)
 		}
 		if !exists {
-			return d.skip(ctx, stream, in.Drift, op.ID, fmt.Sprintf("the clone has no feature branch %s", branch))
-		}
-		requested, err := d.requestedAt(stream, op.ID)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
+			return d.skip(ctx, stream, in.Drift, operation, fmt.Sprintf("the clone has no feature branch %s", branch))
 		}
 		sealed, _, found, err := seal.Latest(d.repository, stream)
 		if err != nil {
@@ -411,7 +430,7 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		if err != nil {
 			return coreadapter.OperationResult{}, fmt.Errorf("fetch %s of %s: %w", d.cfg.Project.BaseBranch, remote, err)
 		}
-		rebase = DriftRebase{Drift: in.Drift, Operation: op.ID, Branch: branch, Upstream: seal.Base{Remote: remote, Branch: d.cfg.Project.BaseBranch, Commit: fetched}, From: sealed.Base.Commit, Before: tip}
+		rebase = DriftRebase{Drift: in.Drift, Operation: operation, Branch: branch, Upstream: seal.Base{Remote: remote, Branch: d.cfg.Project.BaseBranch, Commit: fetched}, From: sealed.Base.Commit, Before: tip}
 		if err := d.s.step("drift-replaying"); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
@@ -441,7 +460,7 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		if !exists {
 			tip = "nothing"
 		}
-		return d.skip(ctx, stream, in.Drift, op.ID, fmt.Sprintf("feature branch %s moved to %s during the drift rebase, which replayed %s", branch, tip, rebase.Before))
+		return d.skip(ctx, stream, in.Drift, operation, fmt.Sprintf("feature branch %s moved to %s during the drift rebase, which replayed %s", branch, tip, rebase.Before))
 	}
 	if rebase.Candidate != "" {
 		if err := d.release(ctx, stream); err != nil {
@@ -478,7 +497,7 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 			return coreadapter.OperationResult{}, err
 		}
 		rebase.SealRevision = sealDoc.Revision + 1
-		moved = &trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: seal.DocumentID, Revision: rebase.SealRevision, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: foremanActor, Cause: op.ID},
+		moved = &trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: seal.DocumentID, Revision: rebase.SealRevision, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: foremanActor, Cause: operation},
 			Path: seal.Path, Content: string(content)}
 		resealed = fmt.Sprintf("seal %d moves from base %s to %s in %s revision %d", current.Seal, current.Base.Commit, rebase.Upstream.Commit, seal.Path, rebase.SealRevision)
 	}

@@ -353,6 +353,23 @@ func (g *Git) ChangeOf(context.Context, string) (string, error) { return "", nil
 // change. Git has no change IDs and returns commit itself.
 func (g *Git) Carry(_ context.Context, commit, _ string) (string, error) { return commit, nil }
 
+// Checkpoint durably records the backend's state before one attempt of a
+// multi-step operation, named by operation, changes anything, so that
+// Recover can restore it should the attempt be cut short; Settle drops the
+// record once the attempt is over. Branches are not part of that state: a
+// branch the attempt moved stays where it is, for the retry to reconcile.
+// Git keeps no state of its own beside the clone's and records nothing.
+func (g *Git) Checkpoint(context.Context, string, time.Time) error { return nil }
+
+// Settle drops what Checkpoint recorded for the operation. Git recorded
+// nothing.
+func (g *Git) Settle(context.Context, string) error { return nil }
+
+// Recover restores the state every checkpoint still recorded names, drops
+// those checkpoints and returns the operations they were taken for. Git
+// records none and returns none.
+func (g *Git) Recover(context.Context) ([]string, error) { return nil, nil }
+
 // StoredConflicts returns the paths commit holds as stored conflicts, which
 // no Git commit does: a path Git's merge left conflicted holds its conflict
 // markers as file content, which Markers finds.
