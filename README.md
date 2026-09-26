@@ -98,6 +98,10 @@ The [M5 first-release demonstration](docs/m5-first-release.md) takes one
 workstream from hand-in to a delivered pull request, notifying a fake webhook
 once for every owner decision and the daily budget pause, across restarts.
 
+The [M5 web page demonstration](docs/m5-web-page.md) takes one workstream
+from hand-in to a delivered pull request with every owner decision, a pause
+and its resume made on the embedded page, which follows it through events.
+
 The [charter reference](docs/charter.md) documents the charter template, the
 numbered-rule format and how owner edits are recorded.
 

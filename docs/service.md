@@ -393,8 +393,10 @@ everything again.
 
 `dagger check` runs browser tests of the page (the `browser:test` check):
 headless Chromium opens it through the web listener of a service whose
-state is planted in its trace, with no agent running. They need a Chromium
-binary named by `OSMIA_BROWSER` and skip under `go test` without one.
+state is planted in its trace or made by fake agents. The
+[M5 web page demonstration](m5-web-page.md) drives one workstream from
+hand-in to delivery on the page. They need a Chromium binary named by
+`OSMIA_BROWSER` and skip under `go test` without one.
 
 ## Projects
 
