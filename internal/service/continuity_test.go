@@ -456,8 +456,10 @@ func demonstrate(t *testing.T, mode string) {
 		switch {
 		case in.Turn == "first" && (op.Claim == nil || op.Result != nil || op.Acknowledged):
 			t.Fatalf("first operation was not left mid-reconciliation: %+v", op)
-		case in.Turn == "second" && len(op.History) != 0:
-			t.Fatalf("second operation was touched before the restart: %+v", op)
+		// The second intent may be inspected while the first turn runs, but
+		// waits for it: nothing applies it before the restart.
+		case in.Turn == "second" && (op.EffectStarted || op.Result != nil || op.Acknowledged):
+			t.Fatalf("second operation was applied before the restart: %+v", op)
 		}
 	}
 	if notes, err := os.ReadFile(filepath.Join(traceDir, "notes", demoRole+".md")); err != nil || string(notes) != "first turn: owner prefers small commits" {
@@ -522,19 +524,17 @@ func demonstrate(t *testing.T, mode string) {
 	}
 	s, err = Start(ctx, opts)
 	must(t, err)
-	// The loop reads its first tick only after the startup pass finishes.
-	select {
-	case ticks <- clock.Now():
-	case <-time.After(demoTimeout):
-		s.Close()
-		t.Fatal("restarted controller did not finish its startup pass")
-	}
 	select {
 	case <-finished:
-	default:
+	case <-time.After(demoTimeout):
 		s.Close()
 		t.Fatal("second turn did not run from durable state")
 	}
+	awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
+		ops, err := current().Operations(stream)
+		must(t, err)
+		return ops
+	})
 	must(t, s.Close())
 
 	// Inspect the history through the typed read API and ordinary files.
@@ -627,8 +627,9 @@ func demonstrate(t *testing.T, mode string) {
 		if in.Turn == "first" && (kinds["claim"] != 2 || len(sessions) != 2 || op.Observation.State != coreadapter.EffectCompleted) {
 			t.Fatalf("first operation after restart: %v %+v", kinds, op.Observation)
 		}
-		if in.Turn == "second" && (kinds["claim"] != 1 || len(sessions) != 1) {
-			t.Fatalf("second operation: %v", kinds)
+		// The second intent was applied once, by the restarted service.
+		if in.Turn == "second" && (kinds["claim"] < 1 || op.Claim != nil || effectSession(op) != th.Turns[1].Claim.ServiceSession) {
+			t.Fatalf("second operation: %v %+v", kinds, op.History)
 		}
 	}
 
@@ -665,4 +666,15 @@ func demonstrate(t *testing.T, mode string) {
 	if workspaces.acquired != 2 || workspaces.released != 2 {
 		t.Fatalf("workspace leases: %d acquired, %d released", workspaces.acquired, workspaces.released)
 	}
+}
+
+// effectSession returns the repository session that recorded the operation's
+// effect.
+func effectSession(op trace.OperationRecord) string {
+	for _, action := range op.History {
+		if action.Kind == "effect" {
+			return action.Session
+		}
+	}
+	return ""
 }

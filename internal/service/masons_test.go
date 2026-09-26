@@ -559,7 +559,17 @@ func TestUnitWorkspaceFailureBlocksItsWorkstreamAlone(t *testing.T) {
 	if len(reasons) != 1 || !strings.HasPrefix(reasons[0], "unit resume stays ready: its workspace cannot be opened: ") {
 		t.Fatalf("blocked %q", reasons)
 	}
-	f.checkUnits(t, broken, []UnitStatus{f.deferred(t, broken, "resume", blockedOnItself("resume")), {Unit: "dedupe", State: UnitPlanned}})
+	// The failed start records the unit blocked. A pass that runs while the
+	// other workstream's mason holds the only slot records it waiting for
+	// that slot instead.
+	if !slices.Contains(f.dispatches(t, broken, "resume"), "deferred "+DeferBlocked) {
+		t.Fatalf("resume of %s was never recorded blocked: %v", broken, f.dispatches(t, broken, "resume"))
+	}
+	current := blockedOnItself("resume")
+	if d := unitStatus(t, f, broken, "resume").Deferral; d != nil && d.Reason == DeferCapacity {
+		current = slotless(1)
+	}
+	f.checkUnits(t, broken, []UnitStatus{f.deferred(t, broken, "resume", current), {Unit: "dedupe", State: UnitPlanned}})
 	f.checkUnits(t, other, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
 	if data, err := os.ReadFile(filepath.Join(squatter, "notes")); err != nil || string(data) != "mine\n" {
 		t.Fatalf("the directory in the workspace's place changed: %q %v", data, err)

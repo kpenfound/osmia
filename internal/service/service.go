@@ -24,6 +24,7 @@ import (
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
+	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -640,7 +641,8 @@ func (s *Service) stop(active *activeProject) error {
 // without it, the configured Schedule hook runs instead. The hooks and
 // adapters come from the pipeline, which a reload may restage for the next pass.
 // The loop holds the pending operations of the architect and committee
-// reconcilers while a pause covers their workstream.
+// reconcilers while a pause covers their workstream, and runs thread turns
+// beside its other operations.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, *pipeline, error) {
 	options := s.options.Reconciliation
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
@@ -683,6 +685,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	}
 	if options.Hold == nil {
 		options.Hold = s.holding(repository)
+	}
+	if options.Concurrent == nil {
+		options.Concurrent = turnOperation
 	}
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
@@ -738,6 +743,13 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	}
 	return &stages{cfg: cfg, hooks: hooks, runner: runner,
 		repository: repositoryAdapter{other: options.Adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish}}, nil
+}
+
+// turnOperation reports whether op delivers a thread turn. The reconciler
+// runs thread turns beside its other operations, so every turn the scheduler
+// dispatched within capacity is in flight at once.
+func turnOperation(op coreadapter.Operation) bool {
+	return op.Boundary == coreadapter.RunnerBoundary && op.Action == thread.TurnAction
 }
 
 // stagePriority orders the operations of a pass so that the factory finishes

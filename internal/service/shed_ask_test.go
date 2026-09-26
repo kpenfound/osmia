@@ -620,6 +620,13 @@ func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 	case <-time.After(demoTimeout):
 		t.Fatal("the member never asked")
 	}
+	// The chief of staff's turns run beside the round; each has been claimed
+	// before the service stops.
+	eventually(t, "the chief of staff's turns were never claimed", func() bool {
+		th, err := f.repository().Thread(stream, trace.ChiefOfStaff)
+		must(t, err)
+		return !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Claim == nil && q.CompletedAt.IsZero() })
+	})
 	f.stop(t)
 	// Between lifetimes a second attempt is reserved on the member's thread
 	// as a crash would leave it, the chief of staff answers, and the answer

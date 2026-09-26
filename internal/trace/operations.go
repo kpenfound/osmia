@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -180,12 +181,14 @@ type OperationAttempt struct {
 	closed     bool
 }
 
-// WithOperation serializes reconciliation and Close for this repository. The
-// exclusive repository process lock rules out other owners. Claims do not expire
-// while an external call is in flight; a returned callback or process exit ends
+// WithOperation serializes reconciliation and Close for this repository,
+// except for the work a callback runs through Unlocked. The exclusive
+// repository process lock rules out other owners. Claims do not expire while
+// an external call is in flight; a returned callback or process exit ends
 // execution ownership. New attempts always inspect before applying an effect.
 // The callback must join its work before returning and must not close the store
-// or recursively call WithOperation. Acknowledged/not-yet-due work is a no-op.
+// or recursively call WithOperation. Acknowledged/not-yet-due work, and work an
+// open attempt of this handle holds, is a no-op.
 func (r *Repository) WithOperation(ctx context.Context, stream config.WorkstreamID, event string, actor Actor, now func() time.Time, fn func(*OperationAttempt, OperationRecord) error) error {
 	r.operationMu.Lock()
 	defer r.operationMu.Unlock()
@@ -208,17 +211,64 @@ func (r *Repository) WithOperation(ctx context.Context, stream config.Workstream
 		return ErrClaim
 	}
 	at := now()
-	if o.Acknowledged || at.Before(o.RetryAt) {
+	key := string(stream) + "/" + event
+	if o.Acknowledged || at.Before(o.RetryAt) || r.attempts[key] {
 		r.mu.Unlock()
 		return nil
 	}
+	if r.attempts == nil {
+		r.attempts = map[string]bool{}
+	}
+	r.attempts[key] = true
 	r.mu.Unlock()
 	a := &OperationAttempt{repository: r, stream: stream, claim: OperationAction{EventID: event, Token: rand.Text(), Session: r.session, Kind: "claim", At: at, Actor: actor, Cause: o.Operation.ID, Depth: o.Transition.Depth}}
-	defer func() { r.mu.Lock(); a.closed = true; r.mu.Unlock() }()
+	defer func() { r.mu.Lock(); a.closed = true; delete(r.attempts, key); r.mu.Unlock() }()
 	if err := a.Record(ctx, a.claim); err != nil {
 		return err
 	}
 	return fn(a, *o)
+}
+
+// unlockedKey marks the context Unlocked passes to its work.
+type unlockedKey struct{}
+
+// unlocked is the lock work run through Unlocked takes back once.
+type unlocked struct {
+	r    *Repository
+	back sync.Once
+}
+
+func (u *unlocked) relock() { u.back.Do(u.r.operationMu.Lock) }
+
+// Unlocked runs fn without the lock WithOperation holds, so other operations
+// are reconciled, and Close may run, while fn is in flight; the lock is taken
+// back before it returns. fn receives ctx, with which Relock takes the lock
+// back early. The attempt keeps its claim throughout, and fn must not use the
+// attempt. A caller that closes the repository joins fn first.
+func (a *OperationAttempt) Unlocked(ctx context.Context, fn func(context.Context)) {
+	u := &unlocked{r: a.repository}
+	u.r.operationMu.Unlock()
+	defer u.relock()
+	fn(context.WithValue(ctx, unlockedKey{}, u))
+}
+
+// Relock runs fn after taking back the lock Unlocked released, when ctx comes
+// from Unlocked: the rest of that work, and the callback after it, run
+// serialized with reconciliation. Otherwise, in a callback that holds the
+// lock or outside any operation, it runs fn as it is.
+func Relock(ctx context.Context, fn func() error) error {
+	if u, ok := ctx.Value(unlockedKey{}).(*unlocked); ok {
+		u.relock()
+	}
+	return fn()
+}
+
+// Serialize runs fn serialized with reconciliation and Close. fn must not call
+// WithOperation, Serialize or Close.
+func (r *Repository) Serialize(fn func() error) error {
+	r.operationMu.Lock()
+	defer r.operationMu.Unlock()
+	return fn()
 }
 
 // Action supplies the immutable provenance of this attempt for a boundary write.

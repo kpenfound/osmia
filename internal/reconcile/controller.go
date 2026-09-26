@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -21,8 +22,10 @@ type Options struct {
 	Interval   time.Duration
 	RetryDelay time.Duration
 	// Schedule runs at the start of every pass, before operations are read, so
-	// the intent it publishes is reconciled in the same pass. Its failure stops
-	// the loop.
+	// the intent it publishes is reconciled in the same pass. It runs
+	// serialized with reconciliation, so it sees the work a concurrent
+	// operation relocks for either wholly or not at all. Its failure stops the
+	// loop.
 	Schedule func(context.Context) error
 	// Priority orders the pending operations of a pass across workstreams: every
 	// operation of a lower value is reconciled before any of a higher one.
@@ -32,12 +35,30 @@ type Options struct {
 	// operation is neither claimed nor recorded in the pass, and is reconciled
 	// by the first pass that no longer holds it.
 	Hold func(config.WorkstreamID, coreadapter.Operation) bool
+	// Concurrent reports whether a due operation is reconciled beside the
+	// pass: the pass claims and inspects it in its priority order, and goes on
+	// once its effect has started, which runs through
+	// trace.OperationAttempt.Unlocked, so the pass's other operations and
+	// later passes proceed while it is in flight. A later pass leaves an operation in flight alone.
+	// Its failure stops the loop, as a store failure of the pass does. Without
+	// it every operation is reconciled in the pass.
+	Concurrent func(coreadapter.Operation) bool
 }
 
 type Controller struct {
 	repository *trace.Repository
 	options    Options
 	boundary   func(string) error
+
+	mu sync.Mutex
+	// running holds the concurrent operations in flight, by workstream and
+	// event; group joins them.
+	running map[string]bool
+	group   sync.WaitGroup
+	// failure is the first error a concurrent operation returned, and abort
+	// cancels the context Run passes to them.
+	failure error
+	abort   context.CancelCauseFunc
 }
 
 func New(repository *trace.Repository, options Options) (*Controller, error) {
@@ -58,11 +79,13 @@ func New(repository *trace.Repository, options Options) (*Controller, error) {
 		adapters[k] = v
 	}
 	options.Adapters = adapters
-	return &Controller{repository: repository, options: options}, nil
+	return &Controller{repository: repository, options: options, running: map[string]bool{}}, nil
 }
 
 // Run scans before waiting, then after every coalesced hint or periodic tick.
 // Store failures stop the loop; adapter failures are durably scheduled for retry.
+// Run cancels the concurrent operations in flight and joins them before it
+// returns.
 func (c *Controller) Run(ctx context.Context) error {
 	ticks := c.options.Ticks
 	if ticks == nil {
@@ -70,6 +93,19 @@ func (c *Controller) Run(ctx context.Context) error {
 		defer ticker.Stop()
 		ticks = ticker.C
 	}
+	ctx, cancel := context.WithCancelCause(ctx)
+	c.mu.Lock()
+	c.abort = cancel
+	c.mu.Unlock()
+	err := c.loop(ctx, ticks)
+	cancel(err)
+	if failure := c.Wait(); failure != nil {
+		return failure
+	}
+	return err
+}
+
+func (c *Controller) loop(ctx context.Context, ticks <-chan time.Time) error {
 	for {
 		if err := c.Pass(ctx); err != nil {
 			return err
@@ -78,6 +114,58 @@ func (c *Controller) Run(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// Wait joins the concurrent operations in flight and returns the first error
+// one of them returned while its context was live.
+func (c *Controller) Wait() error {
+	c.group.Wait()
+	return c.failed()
+}
+
+func (c *Controller) failed() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.failure
+}
+
+func (c *Controller) inFlight(stream config.WorkstreamID, event string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.running[string(stream)+"/"+event]
+}
+
+// start reconciles the operation in a goroutine of its own, its effect
+// outside the repository's operation lock. It returns once the effect has
+// started or the attempt has ended, with the failure that stops the loop, if
+// any.
+func (c *Controller) start(ctx context.Context, stream config.WorkstreamID, event string) error {
+	key := string(stream) + "/" + event
+	c.mu.Lock()
+	c.running[key] = true
+	c.mu.Unlock()
+	c.group.Add(1)
+	launched := make(chan struct{})
+	launch := sync.OnceFunc(func() { close(launched) })
+	go func() {
+		defer c.group.Done()
+		err := c.repository.WithOperation(ctx, stream, event, trace.Actor{Kind: "service", ID: c.options.Worker}, c.options.Now, func(attempt *trace.OperationAttempt, current trace.OperationRecord) error {
+			return c.reconcile(ctx, attempt, current, launch)
+		})
+		c.mu.Lock()
+		delete(c.running, key)
+		// An operation cut short by cancellation is reconciled after restart.
+		if err != nil && ctx.Err() == nil && c.failure == nil {
+			c.failure = err
+			if c.abort != nil {
+				c.abort(err)
+			}
+		}
+		c.mu.Unlock()
+		launch()
+	}()
+	<-launched
+	return c.failed()
 }
 
 func (c *Controller) step(ctx context.Context, name string) error {
@@ -95,8 +183,11 @@ func (c *Controller) Pass(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := c.failed(); err != nil {
+		return err
+	}
 	if c.options.Schedule != nil {
-		if err := c.options.Schedule(ctx); err != nil {
+		if err := c.repository.Serialize(func() error { return c.options.Schedule(ctx) }); err != nil {
 			return err
 		}
 	}
@@ -115,7 +206,7 @@ func (c *Controller) Pass(ctx context.Context) error {
 			return err
 		}
 		for _, record := range records {
-			if !record.Acknowledged && !c.options.Now().Before(record.RetryAt) && (c.options.Hold == nil || !c.options.Hold(stream, record.Operation)) {
+			if !record.Acknowledged && !c.options.Now().Before(record.RetryAt) && !c.inFlight(stream, record.EventID) && (c.options.Hold == nil || !c.options.Hold(stream, record.Operation)) {
 				due = append(due, pending{stream, record})
 			}
 		}
@@ -129,8 +220,14 @@ func (c *Controller) Pass(ctx context.Context) error {
 		if err := c.step(ctx, "before-claim"); err != nil {
 			return err
 		}
+		if c.options.Concurrent != nil && c.options.Concurrent(p.record.Operation) {
+			if err := c.start(ctx, p.stream, p.record.EventID); err != nil {
+				return err
+			}
+			continue
+		}
 		err := c.repository.WithOperation(ctx, p.stream, p.record.EventID, trace.Actor{Kind: "service", ID: c.options.Worker}, c.options.Now, func(attempt *trace.OperationAttempt, current trace.OperationRecord) error {
-			return c.reconcile(ctx, attempt, current)
+			return c.reconcile(ctx, attempt, current, nil)
 		})
 		if err != nil {
 			return err
@@ -139,7 +236,10 @@ func (c *Controller) Pass(ctx context.Context) error {
 	return nil
 }
 
-func (c *Controller) reconcile(ctx context.Context, attempt *trace.OperationAttempt, record trace.OperationRecord) error {
+// reconcile claims, inspects and completes one operation. A concurrent
+// operation, one with launch, applies its effect outside the repository's
+// operation lock and calls launch once the lock is released.
+func (c *Controller) reconcile(ctx context.Context, attempt *trace.OperationAttempt, record trace.OperationRecord, launch func()) error {
 	if err := c.step(ctx, "after-claim"); err != nil {
 		return err
 	}
@@ -187,7 +287,14 @@ func (c *Controller) reconcile(ctx context.Context, attempt *trace.OperationAtte
 			if err := c.step(ctx, "before-effect"); err != nil {
 				return err
 			}
-			result, err = adapter.Apply(ctx, record.Operation)
+			if launch != nil {
+				attempt.Unlocked(ctx, func(ctx context.Context) {
+					launch()
+					result, err = adapter.Apply(ctx, record.Operation)
+				})
+			} else {
+				result, err = adapter.Apply(ctx, record.Operation)
+			}
 			if e := c.step(ctx, "after-effect"); e != nil {
 				return e
 			}
