@@ -259,6 +259,43 @@ caller that connects again reads everything on the new stream's `resync`. On
 the [web](#web-listener) and [tailnet](#tailnet-listener) listeners the stream is a `GET`
 like the other reads.
 
+## Web page
+
+The service serves one page at `/`, with its script at `/app.js` and its
+style at `/style.css`, embedded in the binary, on the socket and on the
+[web](#web-listener) and [tailnet](#tailnet-listener) listeners, which apply
+their usual checks to it. `GET` and `HEAD` return the files; any other method
+or path gets the API's answer. The responses allow the page to load only its
+own files and to connect only to its own origin, and forbid framing it.
+
+The page is a client of the API and nothing else: it reads `GET /v1/status`
+and `GET /v1/runtime` and follows `GET /v1/events`. It shows, for phone and
+laptop widths:
+
+- every pause in force from `/runtime`, with its scope, mode, reason, who set
+  it (the owner, the daily budget or a provider usage limit) and when;
+- the [capacity](#capacity): each role kind's slots used against its limit,
+  the work waiting for a slot and why, and the per-workstream limit;
+- each workstream of `/status`: the chief of staff's goal, attention and
+  note, its state, its units grouped by state in lifecycle order, and its
+  agents with role, unit, profile, state and elapsed time as of the last read;
+- the diagnostics of both views and any read that failed.
+
+It reads the views an event names, as the [event stream](#event-stream)
+table says: `/status` and `/runtime` for `resync` and `runtime`, `/status`
+for `workstream` and `spend`; it ignores the kinds it does not show. Events
+that arrive during a read are read after it, once each. When the stream ends
+or cannot be opened, the page shows that it is reconnecting and opens a new
+stream after 1 second, doubling the delay after each failure up to 10
+seconds; while it waits, it reconnects at once when the browser comes back
+online or the page becomes visible again. The new stream's `resync` reads
+everything again.
+
+`dagger check` runs browser tests of the page (the `browser:test` check):
+headless Chromium opens it through the web listener of a service whose
+state is planted in its trace, with no agent running. They need a Chromium
+binary named by `OSMIA_BROWSER` and skip under `go test` without one.
+
 ## Projects
 
 `POST /v1/projects` registers a project and activates it in the running
