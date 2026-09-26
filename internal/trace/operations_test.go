@@ -252,3 +252,69 @@ func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
 		}
 	}
 }
+
+// Relock given a context from Beside runs its work without taking the lock
+// back, so other operations are still claimed while the rest of the Unlocked
+// work runs; Relock with the context Unlocked passed takes it back.
+func TestBesideWorkLeavesTheLockReleased(t *testing.T) {
+	r, _, _ := create(t)
+	ctx := context.Background()
+	tx := transaction("operations", 0, "", "pending", 3)
+	for i := range tx.Events {
+		e := &tx.Events[i]
+		e.Operation = &coreadapter.Operation{ID: OperationID(projectID, streamID, e.ID), Boundary: coreadapter.RunnerBoundary, Action: "run", Input: json.RawMessage(`{}`)}
+	}
+	transact(t, r, tx)
+	first, second, third := tx.Events[0].ID, tx.Events[1].ID, tx.Events[2].ID
+	actor := Actor{Kind: "service", ID: "test"}
+	now := func() time.Time { return at }
+	claim := func(event string) <-chan bool {
+		out := make(chan bool, 1)
+		go func() {
+			claimed := false
+			err := r.WithOperation(ctx, streamID, event, actor, now, func(*OperationAttempt, OperationRecord) error {
+				claimed = true
+				return nil
+			})
+			if err != nil {
+				t.Error(err)
+			}
+			out <- claimed
+		}()
+		return out
+	}
+	err := r.WithOperation(ctx, streamID, first, actor, now, func(a *OperationAttempt, _ OperationRecord) error {
+		a.Unlocked(ctx, func(ctx context.Context) {
+			if err := Relock(Beside(ctx), func() error { return nil }); err != nil {
+				t.Error(err)
+			}
+			select {
+			case claimed := <-claim(second):
+				if !claimed {
+					t.Error("another operation was not claimed")
+				}
+			case <-time.After(10 * time.Second):
+				t.Error("Relock with a context from Beside took the lock back")
+				return
+			}
+			if err := Relock(ctx, func() error { return nil }); err != nil {
+				t.Error(err)
+			}
+			held := claim(third)
+			select {
+			case <-held:
+				t.Error("an operation was claimed while Relock held the lock")
+			case <-time.After(200 * time.Millisecond):
+			}
+			t.Cleanup(func() {
+				if !<-held {
+					t.Error("an operation was not claimed after the attempt")
+				}
+			})
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
