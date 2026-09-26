@@ -296,12 +296,23 @@ or path gets the API's answer. The responses allow the page to load only its
 own files and to connect only to its own origin, and forbid framing it.
 
 The page is a client of the API and nothing else: it reads `GET /v1/status`,
-`GET /v1/runtime`, `GET /v1/config` and `GET /v1/conversation/<id>` of each
-workstream `/status` lists, follows `GET /v1/events`, and acts through the
+`GET /v1/runtime`, `GET /v1/config`, `GET /v1/inbox`,
+`GET /v1/conversation/<id>` of each workstream `/status` lists, and
+`GET /v1/packet/<id>` and `GET /v1/delivery/<id>` of each ratification and
+delivery the inbox lists, follows `GET /v1/events`, and acts through the
 same endpoints the command line uses, so an action is validated, recorded and
 announced as the matching command's is. It shows, for phone and laptop
 widths:
 
+- every entry of the [inbox](#inbox-and-rulings), oldest first: its kind,
+  when it opened, its workstream's goal, the question (the chief of staff's
+  rephrasing of an escalation) and each escalated question as its asker put
+  it, what waits on it, its options, its recommendation, and what its answer
+  pins: the inbox number, unit or amendment its endpoint names and the
+  revisions and identity the request carries. A ratification also shows the
+  packet's dissent record, each objection with its kind, member, round, part,
+  argument, whether it blocks and the owner's disposition and note; a
+  delivery shows the final report's criteria with their evidence or gap;
 - every pause in force from `/runtime`, with its scope, mode, reason, who set
   it (the owner, the daily budget or a provider usage limit) and when;
 - the [capacity](#capacity): each role kind's slots used against its limit,
@@ -323,6 +334,15 @@ Its controls are:
 
 | Control | Request | Checked on the page first |
 | --- | --- | --- |
+| Answer, on an escalation | the entry's `answer`: `POST /v1/inbox/<number>` with the written text | The answer is not empty |
+| Accept, on an escalation with a `quick_reply` | the entry's `answer` with `quick_reply` as the text | |
+| An option, on an escalation | nothing: it fills the answer with the option | |
+| Decide, on a ratification: ratify | the entry's `answer`: `POST /v1/ratify/<id>` with the packet's spec and plan revisions | A decision is chosen |
+| Decide, on a ratification: sustain or overrule an objection of the dissent record | `POST /v1/shed/rule/<id>` with `sustain` and the note, or `POST /v1/shed/overrule/<id>` with the note as the reason | A decision is chosen |
+| Decide, on a ratification: ask for a redraft | `POST /v1/shed/redraft/<id>` with the note | The note is not empty |
+| Decide, on a contested unit | the entry's `answer`: `POST /v1/contested/<id>/<unit>` with the chosen decision and the note | A decision is chosen and the note is not empty |
+| Decide, on an amendment | the entry's `answer`: `POST /v1/amendment/<id>/<n>` with the packet revision, the chosen decision and the note when there is one | A decision is chosen |
+| Approve, on a delivery | the entry's `answer`: `POST /v1/delivery/<id>` with the final review, report revision, commit and draft hash, and the description when the owner edited the draft | The page shows the final report and draft the entry pins; until it does, Approve is disabled |
 | Send, on a workstream's conversation | `POST /v1/conversation/<id>` | The message is not empty |
 | Pause the factory, the project or a workstream, soft or hard | `PUT /v1/runtime/pause` | A scope is chosen and the reason is not empty |
 | Resume, on a factory, project or workstream pause | `DELETE /v1/runtime/pause` with the pause's target | |
@@ -335,21 +355,36 @@ Its controls are:
 A control the page refuses sends nothing. Each shows what the API answered:
 its refusal's message, or what it did; a reload also names the loaded digest
 and the settings only a restart applies. A role pause, which follows a
-provider's usage limit, has no resume control. The reload control is lit
+provider's usage limit, has no resume control.
+
+An inbox entry is answered as the page last showed it: the answer carries the
+identity the entry pins, so a decision on a packet, report or entry that
+moved on since is refused rather than applied to what the owner did not read.
+The page offers ratify, and each decision of a contested unit or an
+amendment, only when the entry's `options` name it, and the accept control
+only when the entry has a `quick_reply`. The delivery description starts as
+the draft; an unedited draft is approved as drafted. An answered entry leaves
+the page when the event stream announces the change, not when the answer
+returns. A refused answer shows the API's refusal, and the page reads the
+inbox again so the entry shows what it now pins; it never sends an answer
+again on its own. The reload control is lit
 while a reload has something to do: `/config` reports a `reload_required`
 diagnostic or an `invalid` file. A change only a restart applies does not
 light it.
 
 It reads the views an event names, as the [event stream](#event-stream)
 table says: every view for `resync`, `/status` and `/runtime` for `runtime`,
-`/status` for `workstream` and `spend`, `/config` for `config`, and the
-event's workstream's conversation for `conversation`; it ignores `inbox`.
-A workstream's conversation is read when `/status` first lists it. Since an
+`/status` for `workstream` and `spend`, `/config` for `config`, `/inbox`
+for `inbox`, and the event's workstream's conversation for `conversation`.
+A workstream's conversation is read when `/status` first lists it, and a
+ratification's packet or a delivery's presentation when `/inbox` first lists
+the entry, again whenever its revision or pinned identity changes, and again
+with the next read of `/inbox` after a read of it failed. Since an
 edit of a configuration file is not announced, the page also reads `/config`
 every 10 seconds while it is visible and its stream is live, and when it
 becomes visible again. Events that arrive during a read are read after it,
-once each. A message being written and a profile being chosen survive the
-reads. When the stream ends
+once each. A message being written, a profile being chosen and an inbox
+answer being written or chosen survive the reads. When the stream ends
 or cannot be opened, the page shows that it is reconnecting and opens a new
 stream after 1 second, doubling the delay after each failure up to 10
 seconds; while it waits, it reconnects at once when the browser comes back

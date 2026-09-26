@@ -51,7 +51,13 @@ func TestDeliveryRejectsFinalReportOnPreviousUpstreamBase(t *testing.T) {
 
 func deliveryFixture(t *testing.T) (*shedFixture, config.WorkstreamID, *trace.Repository, FinalReport) {
 	t.Helper()
-	f, stream, repository, a := newFinalFixture(t, "delivery")
+	return deliveryFixtureWith(t, "")
+}
+
+// deliveryFixtureWith is deliveryFixture with extra configuration appended.
+func deliveryFixtureWith(t *testing.T, extra string) (*shedFixture, config.WorkstreamID, *trace.Repository, FinalReport) {
+	t.Helper()
+	f, stream, repository, a := newFinalFixtureWith(t, "delivery", extra)
 	ctx := context.Background()
 	mergeDirectly(t, f, repository, stream, "resume", map[string]string{"resume.go": "package demo\n"})
 	mergeDirectly(t, f, repository, stream, "dedupe", map[string]string{"dedupe.go": "package demo\n"})

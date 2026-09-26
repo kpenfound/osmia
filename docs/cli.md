@@ -458,9 +458,9 @@ existing owner, and ensure the socket path is unused or stale. Do not delete a
 live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
-Detached management, install/upgrade commands, completion and the web
-interface's inbox are unavailable; the service serves the
-[page](service.md#web-page) with the active work, each workstream's
-conversation and the controls. The command examples in
+Detached management, install/upgrade commands and completion are
+unavailable; the service serves the [page](service.md#web-page) with the
+inbox, answered inline, the active work, each workstream's conversation and
+the controls. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.

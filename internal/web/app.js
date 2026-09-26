@@ -8,9 +8,10 @@
   // page shows. Kinds the page does not show are ignored; every stream starts
   // with a resync.
   const reads = {
-    resync: ['status', 'runtime', 'config', 'conversations'],
+    resync: ['status', 'runtime', 'config', 'inbox', 'conversations'],
     workstream: ['status'],
     conversation: ['conversation'],
+    inbox: ['inbox'],
     runtime: ['runtime', 'status'],
     config: ['config'],
     spend: ['status'],
@@ -41,9 +42,11 @@
     provider_pause: 'paused by a provider limit',
   };
 
-  // views holds each view by its path after /v1: status, runtime, config
-  // and conversation/<workstream-id>.
-  const views = { status: null, runtime: null, config: null };
+  // views holds each view by its path after /v1: status, runtime, config,
+  // inbox, conversation/<workstream-id>, and packet/<workstream-id> and
+  // delivery/<workstream-id> for the ratifications and deliveries the inbox
+  // lists.
+  const views = { status: null, runtime: null, config: null, inbox: null };
   const failures = {};
   const dirty = new Set();
   let reading = false;
@@ -100,10 +103,41 @@
     return views.status ? views.status.workstreams.map((w) => 'conversation/' + w.workstream) : [];
   }
 
+  // details holds, for each packet and delivery view, the entry it was read
+  // for: its revision and the identity its answer pins.
+  const details = new Map();
+
+  function detailOf(entry) {
+    switch (entry.kind) {
+      case 'ratification':
+        return 'packet/' + entry.workstream;
+      case 'delivery':
+        return 'delivery/' + entry.workstream;
+      default:
+        return null;
+    }
+  }
+
+  // listedDetails returns the packet and delivery views of the entries the
+  // inbox lists, each with the entry it is read for.
+  function listedDetails() {
+    const out = new Map();
+    for (const entry of views.inbox ? views.inbox.entries : []) {
+      const name = detailOf(entry);
+      if (name) {
+        out.set(name, JSON.stringify([entry.revision, entry.answer.body]));
+      }
+    }
+    return out;
+  }
+
   // refresh reads every view marked since the last read, once each, and
   // renders; views marked while it reads are read again after. A
   // workstream the status lists gets its conversation read, and one it no
-  // longer lists loses it.
+  // longer lists loses it. A ratification or delivery the inbox lists gets
+  // its packet or delivery read, again whenever the entry's revision or
+  // identity changes, and again with the next read of the inbox after a read
+  // of it failed.
   async function refresh() {
     if (reading) {
       return;
@@ -112,6 +146,7 @@
     try {
       while (dirty.size > 0) {
         const names = [...dirty];
+        const inboxRead = names.includes('inbox');
         dirty.clear();
         await Promise.all(names.map(async (name) => {
           try {
@@ -131,6 +166,22 @@
           }
           for (const name of listed) {
             if (!(name in views) && !(name in failures)) {
+              dirty.add(name);
+            }
+          }
+        }
+        if (views.inbox) {
+          const listed = listedDetails();
+          for (const name of [...details.keys()]) {
+            if (!listed.has(name)) {
+              details.delete(name);
+              delete views[name];
+              delete failures[name];
+            }
+          }
+          for (const [name, entry] of listed) {
+            if (details.get(name) !== entry || (inboxRead && name in failures)) {
+              details.set(name, entry);
               dirty.add(name);
             }
           }
@@ -207,10 +258,10 @@
   }
 
   // act runs one owner action with its button disabled and shows what the
-  // API answered in result: done's text on success, the refusal otherwise.
-  // Once the action ends, the button is enabled again unless a render has
-  // blocked it meanwhile.
-  async function act(result, button, call, done) {
+  // API answered in result: done's text on success, the refusal otherwise,
+  // after which refused runs, when given. Once the action ends, the button
+  // is enabled again unless a render has blocked it meanwhile.
+  async function act(result, button, call, done, refused) {
     button.dataset.busy = 'true';
     button.disabled = true;
     show(result, 'pending', 'Sending…');
@@ -218,6 +269,9 @@
       show(result, 'ok', done(await call()));
     } catch (err) {
       show(result, 'error', err.message);
+      if (refused) {
+        refused();
+      }
     } finally {
       delete button.dataset.busy;
       button.disabled = button.dataset.blocked === 'true';
@@ -555,6 +609,327 @@
     place(box, list.map(renderWorkstream));
   }
 
+  const kinds = {
+    escalation: 'Question',
+    ratification: 'Ratification',
+    contested: 'Contested unit',
+    amendment: 'Amendment',
+    delivery: 'Delivery',
+  };
+
+  // pinNames name the request fields an entry's answer carries to pin what
+  // the owner read.
+  const pinNames = {
+    spec: 'spec revision',
+    plan: 'plan revision',
+    packet: 'packet revision',
+    review: 'final review',
+    review_revision: 'report revision',
+    commit: 'commit',
+    draft_hash: 'draft',
+  };
+
+  const decisionNames = {
+    review: 'Review the unit again',
+    revise: 'Revise the unit',
+    approve: 'Approve',
+    reject: 'Reject',
+    round: 'Debate another round',
+    overrule: 'Overrule the objections',
+  };
+
+  function workstreamName(id) {
+    const w = views.status ? views.status.workstreams.find((x) => x.workstream === id) : undefined;
+    return w ? goal(w) : id;
+  }
+
+  // pins states what an entry's answer is pinned to: the entry, unit or
+  // amendment its endpoint names, and the revisions and identity its
+  // request carries.
+  function pins(entry) {
+    const out = [];
+    if (entry.kind === 'escalation') {
+      out.push('inbox entry ' + entry.number);
+    } else if (entry.kind === 'contested') {
+      out.push('unit ' + entry.unit);
+    } else if (entry.kind === 'amendment') {
+      out.push('amendment ' + entry.amendment);
+    }
+    const body = entry.answer.body;
+    const fields = Object.keys(pinNames).filter((field) => field in body);
+    for (const field of [...fields, ...Object.keys(body).filter((field) => !(field in pinNames))]) {
+      out.push((pinNames[field] || field) + ' ' + String(body[field]).slice(0, 12));
+    }
+    return out.join(' · ');
+  }
+
+  function decisionKey(entry) {
+    return [entry.kind, entry.workstream, entry.number, entry.unit, entry.amendment].join(':');
+  }
+
+  // decisions keeps each inbox entry's card between renders, so an answer
+  // being written and a decision being chosen survive the events that
+  // arrive meanwhile. A card answers the entry as it last rendered it.
+  const decisions = new Map();
+
+  // submit sends an answer. A refusal reads the inbox again, so the entry
+  // shows what the refusal was about; the page never sends it again itself.
+  function submit(button, method, path, body, done) {
+    act(byId('inbox-result'), button, () => request(method, path, body), done, () => mark(['inbox']));
+  }
+
+  function endpoint(entry) {
+    return entry.answer.path.slice(api.length);
+  }
+
+  function accept(d) {
+    const entry = d.entry;
+    submit(d.accept, entry.answer.method, endpoint(entry), { ...entry.answer.body, text: entry.quick_reply },
+      (out) => 'Accepted the recommendation on inbox entry ' + out.number + '.');
+  }
+
+  function decide(d) {
+    const entry = d.entry;
+    const result = byId('inbox-result');
+    const body = { ...entry.answer.body };
+    if (entry.kind === 'escalation') {
+      const text = d.text.value.trim();
+      if (text === '') {
+        show(result, 'error', 'Write an answer first.');
+        return;
+      }
+      submit(d.submit, entry.answer.method, endpoint(entry), { ...body, text }, (out) => {
+        d.text.value = '';
+        return 'Answered inbox entry ' + out.number + '.';
+      });
+      return;
+    }
+    if (entry.kind === 'delivery') {
+      if (d.text.value !== d.draft) {
+        body.description = d.text.value;
+      }
+      submit(d.submit, entry.answer.method, endpoint(entry), body, (out) => 'Approved the delivery of final review ' + out.review + ' of ' + workstreamName(entry.workstream) + '.');
+      return;
+    }
+    const [decision, objection] = d.decision.value.split(' ');
+    const note = d.note.value.trim();
+    // decided clears the choice once the API recorded it, so a card that
+    // stays listed is not answered twice by accident.
+    const decided = (text) => (out) => {
+      d.decision.value = '';
+      d.note.value = '';
+      return text(out);
+    };
+    if (!decision) {
+      show(result, 'error', 'Choose a decision.');
+      return;
+    }
+    switch (entry.kind) {
+      case 'contested':
+        if (note === '') {
+          show(result, 'error', 'Give a note for the ruling.');
+          return;
+        }
+        submit(d.submit, entry.answer.method, endpoint(entry), { ...body, decision, note }, decided(() => 'Ruled ' + decision + ' on unit ' + entry.unit + '.'));
+        return;
+      case 'amendment':
+        if (note !== '') {
+          body.note = note;
+        }
+        submit(d.submit, entry.answer.method, endpoint(entry), { ...body, decision }, decided(() => 'Decided ' + decision + ' on amendment ' + entry.amendment + '.'));
+        return;
+    }
+    // A ratification is decided with ratify, or through the shed: a
+    // disposition of an objection or a request for a redraft.
+    const detail = decided((out) => out.detail);
+    switch (decision) {
+      case 'ratify':
+        submit(d.submit, entry.answer.method, endpoint(entry), body, detail);
+        return;
+      case 'sustain':
+        submit(d.submit, 'POST', '/shed/rule/' + entry.workstream, { objection, disposition: 'sustain', note }, detail);
+        return;
+      case 'overrule':
+        submit(d.submit, 'POST', '/shed/overrule/' + entry.workstream, { objection, reason: note }, detail);
+        return;
+      case 'redraft':
+        if (note === '') {
+          show(result, 'error', 'Say what the redraft should change.');
+          return;
+        }
+        submit(d.submit, 'POST', '/shed/redraft/' + entry.workstream, { note }, detail);
+        return;
+    }
+  }
+
+  function decisionCard(entry) {
+    const key = decisionKey(entry);
+    let d = decisions.get(key);
+    if (d) {
+      return d;
+    }
+    d = {
+      entry,
+      head: el('div', { class: 'summary' }),
+      detail: el('div', { 'data-field': 'detail' }),
+      actions: el('div', { class: 'actions' }),
+      submit: el('button', { type: 'submit' }, { escalation: 'Answer', delivery: 'Approve' }[entry.kind] || 'Decide'),
+      shown: null,
+    };
+    const fields = [];
+    if (entry.kind === 'escalation') {
+      d.text = el('textarea', { name: 'text', rows: '2', 'aria-label': 'Your answer' });
+      d.accept = el('button', { type: 'button', 'data-field': 'accept' });
+      d.accept.addEventListener('click', () => accept(d));
+      fields.push(d.text);
+    } else if (entry.kind === 'delivery') {
+      d.text = el('textarea', { name: 'description', rows: '8' });
+      d.draft = '';
+      fields.push(el('label', {}, 'Pull request description', d.text));
+    } else {
+      d.decision = el('select', { name: 'decision' });
+      d.note = el('input', { name: 'note', type: 'text', autocomplete: 'off' });
+      fields.push(el('label', {}, 'Decision', d.decision), el('label', {}, 'Note', d.note));
+    }
+    const form = el('form', { class: 'send', 'data-field': 'answer' }, ...fields, d.actions);
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      decide(d);
+    });
+    d.node = el('article', { class: 'decision', 'data-decision': key, 'data-kind': entry.kind, 'data-workstream': entry.workstream }, d.head, d.detail, form);
+    decisions.set(key, d);
+    return d;
+  }
+
+  function renderDissent(d, name) {
+    const view = views[name];
+    if (!view) {
+      d.detail.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The packet is unavailable.' : 'Reading the packet…'));
+      return [];
+    }
+    const dissent = view.packet.dissent || [];
+    d.detail.replaceChildren(dissent.length === 0 ? el('p', { class: 'meta' }, 'No objection stands.') : el('ul', { class: 'dissent' }, ...dissent.map((o) => el('li', { 'data-objection': o.id },
+      el('div', { class: 'line' },
+        el('strong', {}, o.id),
+        el('span', { class: 'tag', 'data-field': 'standing' }, [o.blocking ? 'blocking' : 'advice', o.disposition].filter(Boolean).join(', '))),
+      el('div', { class: 'meta' }, o.kind + ' by ' + o.member + ' in round ' + o.round + ' on ' + o.part),
+      el('div', { 'data-field': 'argument' }, o.argument),
+      o.note ? el('div', { class: 'meta', 'data-field': 'note' }, 'Your note: ' + o.note) : null))));
+    return dissent;
+  }
+
+  // presented returns the delivery view when it presents the final report
+  // and draft the entry pins, and null otherwise: before its first read, and
+  // while a read for the entry's newer pins is pending or failed.
+  function presented(entry, name) {
+    const view = views[name];
+    const pin = entry.answer.body;
+    return view && view.report.review === pin.review && view.review_revision === pin.review_revision &&
+      view.report.commit === pin.commit && view.draft_hash === pin.draft_hash ? view : null;
+  }
+
+  // renderDelivery shows the final report and the draft the entry pins.
+  // Approve waits until they are shown, so an approval never pins a draft
+  // the page does not show.
+  function renderDelivery(d, name) {
+    const view = presented(d.entry, name);
+    block(d.submit, !view);
+    if (!view) {
+      d.detail.replaceChildren(el('p', { class: 'meta', 'data-field': 'reading' }, failures[name] ? 'The final report is unavailable.' : 'Reading the final report…'));
+      return;
+    }
+    d.detail.replaceChildren(el('ul', { class: 'criteria', 'data-field': 'criteria' }, ...view.report.criteria.map((c) => el('li', { 'data-criterion': c.criterion },
+      el('strong', {}, c.criterion), ' ', c.text,
+      el('div', { class: 'meta' }, c.evidence ? c.evidence : 'Gap: ' + c.gap)))));
+    // The draft replaces the description until the owner edits it.
+    if (view.draft !== d.draft) {
+      if (d.text.value === d.draft) {
+        d.text.value = view.draft;
+      }
+      d.draft = view.draft;
+    }
+  }
+
+  function renderDecision(entry) {
+    const d = decisionCard(entry);
+    d.entry = entry;
+    const name = detailOf(entry);
+    const key = JSON.stringify([entry, name && views[name], name && !!failures[name], workstreamName(entry.workstream)]);
+    if (d.shown === key) {
+      return d.node;
+    }
+    d.shown = key;
+    let options = null;
+    if (entry.kind === 'escalation') {
+      options = entry.options.length === 0 ? null : el('div', { class: 'actions', 'data-field': 'options' }, 'Options:', ...entry.options.map((o) => {
+        const button = el('button', { type: 'button', 'data-field': 'option' }, o);
+        button.addEventListener('click', () => {
+          d.text.value = o;
+        });
+        return button;
+      }));
+    } else {
+      const none = entry.kind === 'ratification' ? 'none until what blocks it is resolved' : 'none';
+      options = el('p', { 'data-field': 'options' }, 'Options: ' + (entry.options.length === 0 ? none : entry.options.join(', ')));
+    }
+    d.head.replaceChildren(...[
+      el('div', { class: 'line' },
+        el('span', { class: 'tag', 'data-field': 'kind' }, kinds[entry.kind] || entry.kind),
+        el('span', { class: 'meta' }, when(entry.opened_at))),
+      el('div', {}, el('strong', { 'data-field': 'workstream' }, workstreamName(entry.workstream)), ' ', el('span', { class: 'id' }, entry.workstream)),
+      el('p', { class: 'question', 'data-field': 'question' }, entry.question),
+      entry.asked.length === 0 ? null : el('ul', { class: 'asked', 'data-field': 'asked' }, ...entry.asked.map((q) => el('li', {},
+        el('span', { class: 'meta' }, q.asked_by + (q.unit ? ' on ' + q.unit : '') + ': '), q.question))),
+      entry.blocked ? el('p', { class: 'meta', 'data-field': 'blocked' }, 'Waiting on it: ' + entry.blocked) : null,
+      options,
+      entry.recommendation ? el('p', { class: 'attention', 'data-field': 'recommendation' }, 'Recommendation: ' + entry.recommendation) : null,
+      el('p', { class: 'meta', 'data-field': 'pins' }, 'Answers ' + pins(entry)),
+    ].filter((node) => node !== null));
+    switch (entry.kind) {
+      case 'escalation':
+        d.accept.textContent = 'Accept: ' + entry.quick_reply;
+        place(d.actions, entry.quick_reply ? [d.submit, d.accept] : [d.submit]);
+        break;
+      case 'delivery':
+        renderDelivery(d, name);
+        place(d.actions, [d.submit]);
+        break;
+      case 'ratification': {
+        const dissent = renderDissent(d, name);
+        setOptions(d.decision, [['', 'Choose a decision'],
+          ...(entry.options.includes('ratify') ? [['ratify', 'Ratify']] : []),
+          ...dissent.flatMap((o) => [['sustain ' + o.id, 'Sustain ' + o.id], ['overrule ' + o.id, 'Overrule ' + o.id]]),
+          ['redraft', 'Ask for a redraft']]);
+        place(d.actions, [d.submit]);
+        break;
+      }
+      default:
+        setOptions(d.decision, [['', 'Choose a decision'], ...entry.options.map((o) => [o, decisionNames[o] || o])]);
+        place(d.actions, [d.submit]);
+    }
+    return d.node;
+  }
+
+  function renderInbox() {
+    const box = byId('inbox');
+    if (!views.inbox) {
+      place(box, []);
+      return;
+    }
+    const entries = views.inbox.entries;
+    const keys = new Set(entries.map(decisionKey));
+    for (const key of decisions.keys()) {
+      if (!keys.has(key)) {
+        decisions.delete(key);
+      }
+    }
+    if (entries.length === 0) {
+      box.replaceChildren(el('p', { class: 'empty' }, 'Nothing waits for you.'));
+      return;
+    }
+    place(box, entries.map(renderDecision));
+  }
+
   // priority is the order being edited: the workstreams in the order shown
   // and those chosen to go first. It starts again from the order in force
   // whenever that changes.
@@ -790,6 +1165,7 @@
 
   function render() {
     renderProblems();
+    renderInbox();
     renderPauses();
     renderPauseForm();
     renderCapacity();
