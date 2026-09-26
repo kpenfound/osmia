@@ -89,34 +89,38 @@ func plainCommit(t *testing.T, clone, commit string) {
 	}
 }
 
+// The fake executables are all written before any runs, and the test is not
+// parallel, so no process forked meanwhile holds one open for writing while
+// it is executed.
 func TestCheckJJReportsAMissingOrTooOldJJWithTheVersionFound(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
-	fake := func(name, script string) string {
-		t.Helper()
-		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0700); err != nil {
+	scripts := map[string]string{"broken": "exit 1", "old": "echo 'jj 0.44.2-0123abcd'", "other": "echo 'hg 6.8'"}
+	supported := map[string]string{"jj 0.45.0": "0.45.0", "jj 0.45.1-7c41cdeb16b6b321c64e789a966b6adf723816a5": "0.45.1-7c41cdeb16b6b321c64e789a966b6adf723816a5", "jj 0.46.0": "0.46.0", "jj 1.0.0": "1.0.0"}
+	for output := range supported {
+		scripts[output] = "echo '" + output + "'"
+	}
+	for name, script := range scripts {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+script+"\n"), 0700); err != nil {
 			t.Fatal(err)
 		}
-		return path
 	}
 	if _, err := CheckJJ(ctx, filepath.Join(dir, "absent")); !errors.Is(err, ErrJJMissing) {
 		t.Fatalf("an absent jj: %v", err)
 	}
-	if _, err := CheckJJ(ctx, fake("broken", "exit 1")); !errors.Is(err, ErrJJMissing) {
+	if _, err := CheckJJ(ctx, filepath.Join(dir, "broken")); !errors.Is(err, ErrJJMissing) {
 		t.Fatalf("a jj that does not run: %v", err)
 	}
-	version, err := CheckJJ(ctx, fake("old", "echo 'jj 0.44.2-0123abcd'"))
+	version, err := CheckJJ(ctx, filepath.Join(dir, "old"))
 	if !errors.Is(err, ErrJJTooOld) || errors.Is(err, ErrJJMissing) || version != "0.44.2-0123abcd" || !strings.Contains(err.Error(), "found jj 0.44.2-0123abcd, Osmia needs "+MinimumJJ+" or later") {
 		t.Fatalf("an old jj: %q %v", version, err)
 	}
-	for output, want := range map[string]string{"jj 0.45.0": "0.45.0", "jj 0.45.1-7c41cdeb16b6b321c64e789a966b6adf723816a5": "0.45.1-7c41cdeb16b6b321c64e789a966b6adf723816a5", "jj 0.46.0": "0.46.0", "jj 1.0.0": "1.0.0"} {
-		if version, err := CheckJJ(ctx, fake("supported", "echo '"+output+"'")); err != nil || version != want {
+	for output, want := range supported {
+		if version, err := CheckJJ(ctx, filepath.Join(dir, output)); err != nil || version != want {
 			t.Fatalf("%q: %q %v", output, version, err)
 		}
 	}
-	if _, err := CheckJJ(ctx, fake("other", "echo 'hg 6.8'")); err == nil || errors.Is(err, ErrJJMissing) || errors.Is(err, ErrJJTooOld) || !strings.Contains(err.Error(), `reports version "hg 6.8"`) {
+	if _, err := CheckJJ(ctx, filepath.Join(dir, "other")); err == nil || errors.Is(err, ErrJJMissing) || errors.Is(err, ErrJJTooOld) || !strings.Contains(err.Error(), `reports version "hg 6.8"`) {
 		t.Fatalf("a binary that is no jj: %v", err)
 	}
 	if _, err := exec.LookPath("jj"); err == nil {
@@ -284,6 +288,26 @@ func TestJujutsuAcquireRecoversWhatAnInterruptionLeft(t *testing.T) {
 	if tip, found, err := j.Branch(ctx, "osmia/w3"); err != nil || !found || tip != base {
 		t.Fatalf("a released workspace's branch: %s %v %v", tip, found, err)
 	}
+	// A workspace whose making stopped before the repository registered it
+	// is made again.
+	w = acquireJJ(t, j, vcs.Request{Name: "w4", Ref: base, Branch: "osmia/w4"})
+	if _, err := j.run(ctx, j.repository(), nil, "--ignore-working-copy", "workspace", "forget", "w4"); err != nil {
+		t.Fatal(err)
+	}
+	writeFiles(t, w.Path, map[string]string{"half": "left by the interruption\n"})
+	if _, found, err := j.Workspace(ctx, "w4"); err != nil || found {
+		t.Fatalf("an unregistered workspace: %v %v", found, err)
+	}
+	w = acquireJJ(t, j, vcs.Request{Name: "w4", Ref: base, Branch: "osmia/w4"})
+	if names, err := j.registered(ctx); err != nil || !slices.Contains(names, "w4") {
+		t.Fatalf("the workspace made again is not registered: %v %v", names, err)
+	}
+	if _, err := os.Stat(filepath.Join(w.Path, "half")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("what the interruption left: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(w.Path, "README")); err != nil || string(data) != "widgets\n" {
+		t.Fatalf("the workspace made again: %q %v", data, err)
+	}
 }
 
 // A snapshot commits the workspace's whole tree on top of its branch's
@@ -369,6 +393,18 @@ func TestJujutsuSnapshotCommitsExactlyTheWorkspaceOnTopOfItsBase(t *testing.T) {
 	if again, err := j.Snapshot(ctx, ws, base); err != nil || again != third {
 		t.Fatalf("a snapshot after the completed one: %s %v; want %s", again, err, third)
 	}
+	// A commit in the workspace that is no snapshot of its branch is not
+	// taken for one.
+	writeFiles(t, ws.Path, map[string]string{"other": "committed by someone else\n"})
+	if _, err := j.run(ctx, ws.Path, nil, "commit", "--message", "Something else"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.Snapshot(ctx, ws, base); err == nil || !strings.Contains(err.Error(), "is not on its branch osmia-unit/w1/u1 at "+third) {
+		t.Fatalf("a snapshot of a workspace off its branch: %v", err)
+	}
+	if tip, _, err := j.Branch(ctx, "osmia-unit/w1/u1"); err != nil || tip != third {
+		t.Fatalf("a refused snapshot moved the unit branch to %s, %v", tip, err)
+	}
 }
 
 // A workspace that does not descend from the base it is snapshotted against
@@ -441,6 +477,7 @@ func TestJujutsuLandsAndPushesTheCommitGitWould(t *testing.T) {
 	if err := j.Advance(ctx, feature, candidate, commit); err == nil || !strings.Contains(err.Error(), "is at "+base+", not "+candidate) {
 		t.Fatalf("an advance from another commit: %v", err)
 	}
+	writeFiles(t, feature.Path, map[string]string{"pending": "mine\n"})
 	for range 2 {
 		if err := j.Advance(ctx, feature, base, commit); err != nil {
 			t.Fatal(err)
@@ -452,8 +489,11 @@ func TestJujutsuLandsAndPushesTheCommitGitWould(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(feature.Path, "second.go")); err != nil || string(data) != "second.go\n" {
 		t.Fatalf("the feature workspace's files: %q %v", data, err)
 	}
-	if current, err := j.describe(ctx, feature.Path, true, "@"); err != nil || !slices.Equal(current.parents, []string{commit}) || !current.empty {
-		t.Fatalf("the feature workspace stands on %+v: %v", current, err)
+	if data, err := os.ReadFile(filepath.Join(feature.Path, "pending")); err != nil || string(data) != "mine\n" {
+		t.Fatalf("the feature workspace's own file after the advance: %q %v", data, err)
+	}
+	if current, err := j.describe(ctx, feature.Path, true, "@"); err != nil || !slices.Equal(current.parents, []string{commit}) || current.empty {
+		t.Fatalf("the feature workspace's own change stands on %+v: %v", current, err)
 	}
 	if err := j.Push(ctx, "fork", commit, "osmia/w1", ""); err != nil {
 		t.Fatal(err)
@@ -615,9 +655,24 @@ func TestJujutsuReplayInStopsAtEachConflictAndContinuesFromTheResolvedFiles(t *t
 		t.Fatalf("the third stop %s, want %s: %v", stop, third, err)
 	}
 	writeFiles(t, w.Path, map[string]string{"LICENSE": "upstream and feature license\n"})
+	interrupted, err := readMetadata(w.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	commit, conflicts, err = j.ContinueReplay(ctx, w, at)
 	if err != nil || commit == "" || len(conflicts) != 0 {
 		t.Fatalf("the last continue %q %v: %v", commit, conflicts, err)
+	}
+	// A replay interrupted after its branch moved, before it was recorded
+	// as finished, finishes on the same commit.
+	if err := writeMetadata(w.Path, interrupted); err != nil {
+		t.Fatal(err)
+	}
+	if stop, unmerged, replaying, err := j.Replaying(ctx, w); err != nil || !replaying || stop != "" || len(unmerged) != 0 {
+		t.Fatalf("the interrupted replay %s %v %t: %v", stop, unmerged, replaying, err)
+	}
+	if again, conflicts, err := j.ContinueReplay(ctx, w, at); err != nil || again != commit || len(conflicts) != 0 {
+		t.Fatalf("finishing the interrupted replay %q %v: %v; want %s", again, conflicts, err, commit)
 	}
 	if _, _, replaying, err := j.Replaying(ctx, w); err != nil || replaying {
 		t.Fatalf("a finished replay is replaying: %t %v", replaying, err)

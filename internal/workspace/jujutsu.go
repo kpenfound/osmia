@@ -269,8 +269,9 @@ func (j *Jujutsu) Workspace(ctx context.Context, name string) (Worktree, bool, e
 // clone has no such branch, and the workspace on the branch's commit when the
 // repository has no such workspace. A workspace already there is returned as
 // it is when it is on the branch, so a repeated request creates nothing
-// twice. The request needs a branch; a directory in the way that is no
-// workspace of the repository is left alone and reported.
+// twice, and one whose making stopped before the repository registered it is
+// removed and made again. The request needs a branch; a directory in the way
+// that is no workspace of the repository is left alone and reported.
 func (j *Jujutsu) Acquire(ctx context.Context, req vcs.Request) (vcs.Workspace, error) {
 	if req.Name == "" || req.Branch == "" {
 		return nil, errors.New("a workspace request needs a name and a branch")
@@ -289,6 +290,11 @@ func (j *Jujutsu) Acquire(ctx context.Context, req vcs.Request) (vcs.Workspace, 
 		return existing, nil
 	}
 	path := j.path(req.Name)
+	if j.unregistered(path) {
+		if err := os.RemoveAll(path); err != nil {
+			return nil, err
+		}
+	}
 	if _, err := os.Lstat(path); err == nil {
 		return nil, fmt.Errorf("%s exists and is no workspace of the clone; move it away", path)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -325,6 +331,32 @@ func (j *Jujutsu) Acquire(ctx context.Context, req vcs.Request) (vcs.Workspace, 
 		return nil, err
 	}
 	return j.worktree(req.Name, req.Branch), nil
+}
+
+// unregistered reports whether the directory at path is a workspace of the
+// repository that the repository has no record of: what a workspace's
+// making left when it stopped before registering the workspace.
+func (j *Jujutsu) unregistered(path string) bool {
+	target, err := os.ReadFile(filepath.Join(path, ".jj", "repo"))
+	if err != nil {
+		return false
+	}
+	repo := strings.TrimSpace(string(target))
+	if !filepath.IsAbs(repo) {
+		repo = filepath.Join(path, ".jj", repo)
+	}
+	return sameFile(repo, filepath.Join(j.repository(), ".jj", "repo"))
+}
+
+// sameFile reports whether two paths name the same file once their symbolic
+// links are resolved.
+func sameFile(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	return err == nil && os.SameFile(ai, bi)
 }
 
 // Release removes the workspace, whatever it holds; the branch stays.
@@ -515,8 +547,9 @@ func (j *Jujutsu) Move(ctx context.Context, w Worktree, from, to string) error {
 
 // Advance fast-forwards the workspace's branch, with its files, from commit
 // from to commit to, which must descend from it; what the workspace holds of
-// its own stays on top. A workspace already at to is left as it is; one at
-// any other commit is refused.
+// its own stays on top. A workspace whose branch is already at to has its
+// files brought onto to, which completes an advance interrupted between the
+// two; one at any other commit is refused.
 func (j *Jujutsu) Advance(ctx context.Context, w Worktree, from, to string) error {
 	head, err := j.head(ctx, w)
 	if err != nil {
