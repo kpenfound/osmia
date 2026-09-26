@@ -94,6 +94,10 @@ workstream going through the daily budget, a hard pause, a live profile
 switch, a configuration reload, a provider usage limit and a crash while a
 unit lands, then a restart.
 
+The [M5 first-release demonstration](docs/m5-first-release.md) takes one
+workstream from hand-in to a delivered pull request, notifying a fake webhook
+once for every owner decision and the daily budget pause, across restarts.
+
 The [charter reference](docs/charter.md) documents the charter template, the
 numbered-rule format and how owner edits are recorded.
 
