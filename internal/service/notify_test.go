@@ -26,7 +26,9 @@ type fakeWebhook struct {
 	*httptest.Server
 	mu     sync.Mutex
 	bodies []string
-	status int
+	// answers holds the status each post in bodies was answered with.
+	answers []int
+	status  int
 	// ledger, when set, is the notification ledger that must hold each
 	// posted body as pending before the post arrives.
 	ledger string
@@ -46,6 +48,7 @@ func newFakeWebhook(t *testing.T) *fakeWebhook {
 			t.Errorf("posted before the ledger recorded it as pending: %q", body)
 		}
 		w.bodies = append(w.bodies, string(body))
+		w.answers = append(w.answers, w.status)
 		rw.WriteHeader(w.status)
 	}))
 	t.Cleanup(w.Close)
@@ -92,6 +95,19 @@ func (w *fakeWebhook) received() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return slices.Clone(w.bodies)
+}
+
+// accepted returns the posts the webhook answered with a success status.
+func (w *fakeWebhook) accepted() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var out []string
+	for i, body := range w.bodies {
+		if w.answers[i] < 300 {
+			out = append(out, body)
+		}
+	}
+	return out
 }
 
 // await waits until the webhook has received n posts and returns them.
