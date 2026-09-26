@@ -1,7 +1,8 @@
 # M2 onboarding demonstration
 
 Onboarding takes a project from a local clone to a ready charter and a local
-knowledge base. `TestM2ProjectOnboarding` in `internal/cli/onboarding_test.go`
+knowledge base. The [getting-started guide](getting-started.md) is the way to do
+it for real; this document explains what the test checks at each step. `TestM2ProjectOnboarding` in `internal/cli/onboarding_test.go`
 runs every step through the CLI entry point and the API client against a real
 service on its Unix socket. The librarian is a scripted fake execution engine
 and MCP transport. The test makes no provider or GitHub calls and pushes
@@ -22,6 +23,9 @@ The commands below are the ones the test runs. `p_…` stands for the project ID
 that `project add` prints.
 
 ### 1. Start with no project
+
+See [getting started](getting-started.md#3-run-the-service) for running the
+service.
 
 ```sh
 osmia serve --root ~/.osmia

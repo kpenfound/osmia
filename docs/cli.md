@@ -1,8 +1,10 @@
 # Command line
 
-Build with `go build -o osmia ./cmd/osmia`, or install with
-`go install ./cmd/osmia`. Prepare the [configuration](configuration.md) first;
-a top-level `config.toml` with profiles and no project is enough to start.
+[Getting started](getting-started.md) walks through installing, configuring and
+running `osmia` for the first time. To build from source instead, use
+`go build -o osmia ./cmd/osmia` or `go install ./cmd/osmia`. A top-level
+`config.toml` with profiles and no project is enough to start; see the
+[configuration](configuration.md).
 
 ```sh
 osmia serve --root ~/.osmia

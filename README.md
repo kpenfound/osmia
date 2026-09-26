@@ -13,6 +13,11 @@ Osmia handles the work between them and stops at delivery.
 **Under construction.** See the [design](docs/design.md) for the intended product
 and the [milestones](https://github.com/kpenfound/osmia/milestones) for the build order.
 
+**Start with the [getting-started guide](docs/getting-started.md).** It takes you
+from installing a release to a pull request you approved, with one project, git
+worktrees, file-based context and the web page on your tailnet. The documents
+below are reference material and demonstrations, linked from it.
+
 [Releases](docs/release.md) documents `osmia --version`, building release
 archives with Dagger and installing from an archive.
 
