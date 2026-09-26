@@ -993,3 +993,60 @@ func TestJujutsuCarriesAWorkspacesChangeThroughItsRebases(t *testing.T) {
 		t.Fatalf("a workspace that recorded no change has %q: %v", got, err)
 	}
 }
+
+// Record keeps a workspace's files in its working-copy commit and moves no
+// branch; recording files it already kept makes no other commit. Changed
+// names, sorted, every path whose file differs from a commit Record returned,
+// once a later record hides that commit too, and refuses a since that is not
+// a full commit ID. Git records nothing and names nothing.
+func TestJujutsuRecordsAWorkspacesFilesAndNamesWhatChangedSince(t *testing.T) {
+	t.Parallel()
+	f, j := newJujutsuFixture(t)
+	ctx := context.Background()
+	base := git(t, "-C", f.scratch, "rev-parse", "HEAD")
+	git(t, "-C", f.clone, "branch", "osmia/w1", base)
+	unit := acquireJJ(t, j, vcs.Request{Name: "w1/u1", Ref: "osmia/w1", Branch: "osmia-unit/w1/u1"})
+	head := snapshotJJ(t, j, unit, base, map[string]string{"edited.go": "before\n", "gone.go": "gone\n", "moved.go": "moved\n", "kept.go": "kept\n"})
+	writeFiles(t, unit.Path, map[string]string{"pending.go": "pending\n"})
+	recorded, err := j.Record(ctx, unit)
+	if err != nil || !commitIDPattern.MatchString(recorded) || recorded == head {
+		t.Fatalf("recorded %q on %s: %v", recorded, head, err)
+	}
+	if tip, _, err := j.Branch(ctx, unit.Branch); err != nil || tip != head {
+		t.Fatalf("recording moved the branch to %s: %v", tip, err)
+	}
+	if got, err := j.run(ctx, j.repository(), nil, "--ignore-working-copy", "file", "show", "--revision", recorded, `root:"pending.go"`); err != nil || got != "pending" {
+		t.Fatalf("the recorded commit holds pending.go as %q: %v", got, err)
+	}
+	if again, err := j.Record(ctx, unit); err != nil || again != recorded {
+		t.Fatalf("recording the same files again made %s, not %s: %v", again, recorded, err)
+	}
+	if paths, err := j.Changed(ctx, unit, recorded); err != nil || len(paths) != 0 {
+		t.Fatalf("changed since the record at once: %q %v", paths, err)
+	}
+	writeFiles(t, unit.Path, map[string]string{"edited.go": "after\n", "gone.go": "", "moved.go": "", "sub/moved.go": "moved\n", "new file.go": "new\n"})
+	want := []string{"edited.go", "gone.go", "moved.go", "new file.go", "sub/moved.go"}
+	if paths, err := j.Changed(ctx, unit, recorded); err != nil || !slices.Equal(paths, want) {
+		t.Fatalf("changed %q, want %q: %v", paths, want, err)
+	}
+	if later, err := j.Record(ctx, unit); err != nil || later == recorded {
+		t.Fatalf("recording the changed files made %s: %v", later, err)
+	}
+	if paths, err := j.Changed(ctx, unit, recorded); err != nil || !slices.Equal(paths, want) {
+		t.Fatalf("changed since a hidden record %q, want %q: %v", paths, want, err)
+	}
+	if paths, err := j.Changed(ctx, unit, head); err != nil || !slices.Equal(paths, []string{"edited.go", "gone.go", "moved.go", "new file.go", "pending.go", "sub/moved.go"}) {
+		t.Fatalf("changed since the branch %q: %v", paths, err)
+	}
+	for _, since := range []string{"@", recorded[:12], "all()", recorded + " | all()"} {
+		if paths, err := j.Changed(ctx, unit, since); err == nil {
+			t.Fatalf("Changed(%q) named %q", since, paths)
+		}
+	}
+	if revision, err := f.provider.Record(ctx, Worktree{Path: f.clone}); err != nil || revision != "" {
+		t.Fatalf("Git recorded %q: %v", revision, err)
+	}
+	if paths, err := f.provider.Changed(ctx, Worktree{Path: f.clone}, recorded); err != nil || paths != nil {
+		t.Fatalf("Git named %q: %v", paths, err)
+	}
+}

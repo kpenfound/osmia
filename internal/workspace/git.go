@@ -335,6 +335,16 @@ func (g *Git) Move(ctx context.Context, w Worktree, from, to string) error {
 // commits carry no change ID, so Git returns "".
 func (g *Git) Change(context.Context, Worktree) (string, error) { return "", nil }
 
+// Record keeps the worktree's files, untracked files included, in a revision
+// that moves no branch, and returns it for Changed to compare the worktree
+// with later. Git keeps no such revision: it records nothing and returns "".
+func (g *Git) Record(context.Context, Worktree) (string, error) { return "", nil }
+
+// Changed records the worktree's files as Record does and returns the paths,
+// sorted, whose files differ between the revision since, one Record returned,
+// and the worktree. Git's Record returns no revision, so Git returns no paths.
+func (g *Git) Changed(context.Context, Worktree, string) ([]string, error) { return nil, nil }
+
 // ChangeOf returns the change ID commit carries, or "" when it carries none,
 // which no Git commit does.
 func (g *Git) ChangeOf(context.Context, string) (string, error) { return "", nil }

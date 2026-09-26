@@ -162,7 +162,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				return units.capture(ctx, scope, view, result)
 			},
 		}
-		runner := threadRunner(cfg, r, &questions.Turns{Turns: &verdictTurns{Turns: &reportingTurns{Turns: turns, reports: reports}, reports: verdicts}, Repository: r}, now)
+		runner := threadRunner(cfg, r, &questions.Turns{Turns: &verdictTurns{Turns: &reportingTurns{Turns: &retriedTurns{Turns: turns, units: units, repository: r}, reports: reports}, reports: verdicts}, Repository: r}, now)
 		if service := controls.service.Load(); service != nil {
 			runner.OnProviderLimit = service.recordProviderLimit
 			runner.AdmitRole = service.admitRole
