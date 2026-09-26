@@ -465,7 +465,7 @@ func TestM4DriftConflictDemonstration(t *testing.T) {
 	if all := seals(t, repository, stream); len(all) != 2 || all[0].Base.Commit != from || all[1].Base.Commit != upstream {
 		t.Fatalf("seals %+v", all)
 	}
-	if _, found, err := driftWorkspaces(f.s.cfg).Workspace(ctx, string(stream)); err != nil || found {
+	if _, found, err := workspaces(f.s.cfg, driftsDirectory, config.WorkspacesGit).Workspace(ctx, string(stream)); err != nil || found {
 		t.Fatalf("the resolution workspace outlived the drift rebase: %t %v", found, err)
 	}
 

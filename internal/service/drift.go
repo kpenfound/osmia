@@ -297,7 +297,11 @@ func (d drifter) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("drift rebase %d of %s onto %s is %s in its conflict resolution; the branch stays at %s until a reviewer approves the resolution", in.Drift, r.Before, r.Upstream.Commit, r.Outcome, r.Before)}, nil
 	}
 	branch := featureBranch(stream)
-	tip, exists, err := featureWorkspaces(d.cfg).Branch(ctx, branch)
+	g, err := featureWorkspaces(d.cfg, d.repository).of(stream)
+	if err != nil {
+		return coreadapter.Observation{}, err
+	}
+	tip, exists, err := g.Branch(ctx, branch)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -370,7 +374,10 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		}
 	}
 	replayed := found && rebase.Outcome == driftReplayed
-	g := featureWorkspaces(d.cfg)
+	g, err := featureWorkspaces(d.cfg, d.repository).of(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	branch := featureBranch(stream)
 	tip, exists, err := g.Branch(ctx, branch)
 	if err != nil {
@@ -492,7 +499,7 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	}
 	needsCarry := false
 	if found {
-		units := newUnitWorkspaces(d.cfg)
+		units := newUnitWorkspaces(d.cfg, d.repository)
 		for _, unit := range b.plan.Units {
 			state := b.states[trace.UnitSubject(unit.ID)].Value
 			if state == "" || state == UnitPlanned || state == UnitMerged {
@@ -571,7 +578,7 @@ func (d drifter) finishCarry(ctx context.Context, stream config.WorkstreamID, re
 	if !current {
 		return coreadapter.OperationResult{}, fmt.Errorf("drift rebase %d awaits unit carryover", rebase.Drift)
 	}
-	units := newUnitWorkspaces(d.cfg)
+	units := newUnitWorkspaces(d.cfg, d.repository)
 	for _, unit := range b.plan.Units {
 		state := b.states[trace.UnitSubject(unit.ID)].Value
 		if state == "" || state == UnitPlanned || state == UnitMerged {

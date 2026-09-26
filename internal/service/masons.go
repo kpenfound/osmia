@@ -390,7 +390,7 @@ func (m *masons) nextStart(streams []building, entities kb.Map) (int, string, er
 // copy, so another turn cannot overwrite work that has not been recovered.
 func (m *masons) recoverInterrupted(ctx context.Context, stream config.WorkstreamID, unit string) error {
 	return m.recoverView(ctx, stream, masonAgent(unit), func() (string, error) {
-		w, _, found, err := newUnitWorkspaces(m.cfg).find(ctx, stream, unit)
+		w, _, found, err := newUnitWorkspaces(m.cfg, m.repository).find(ctx, stream, unit)
 		if err != nil {
 			return "", err
 		}
@@ -687,7 +687,7 @@ func (m *masons) start(ctx context.Context, b building, unit string) (started, b
 	if err != nil {
 		return false, false, err
 	}
-	w, base, err := newUnitWorkspaces(m.cfg).open(ctx, b.stream, unit)
+	w, base, err := newUnitWorkspaces(m.cfg, m.repository).open(ctx, b.stream, unit)
 	if err != nil && ctx.Err() == nil {
 		return false, true, m.block(ctx, b.stream, unit, subject+"-"+UnitReady, fmt.Sprintf("%s: its workspace cannot be opened: %v", stays, err))
 	}
@@ -733,7 +733,7 @@ func (m *masons) resume(ctx context.Context, stream config.WorkstreamID, unit st
 	}
 	moved := masonTransitionID(unit)
 	waits := fmt.Sprintf("unit %s is implementing and its mason's first turn is not queued", unit)
-	if _, _, err := newUnitWorkspaces(m.cfg).open(ctx, stream, unit); err != nil {
+	if _, _, err := newUnitWorkspaces(m.cfg, m.repository).open(ctx, stream, unit); err != nil {
 		if ctx.Err() != nil {
 			return false, err
 		}

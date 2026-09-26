@@ -579,7 +579,7 @@
       el('div', { class: 'line' },
         el('h3', { 'data-field': 'goal' }, status ? status.goal : 'No status yet'),
         w.state ? el('span', { class: 'tag', 'data-field': 'state' }, w.state) : null),
-      el('div', { class: 'id' }, w.workstream),
+      el('div', { class: 'id' }, w.workstream, ' · ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
       status && status.attention ? el('p', { class: 'attention', 'data-field': 'attention' }, status.attention) : null,
       status ? el('p', { 'data-field': 'note' }, status.note) : el('p', { class: 'meta' }, 'The chief of staff has not written a status.'),
       el('h4', {}, 'Units'),

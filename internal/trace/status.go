@@ -143,11 +143,13 @@ func latestStatus(records []Record, stream config.WorkstreamID) *Status {
 // owns. Status is nil until the chief of staff first writes one. State is the
 // FeatureSubject workflow state, empty until one is recorded, and Subjects
 // the state of every workflow subject that has one, read with it.
+// Workspaces is the workspace backend the workstream was created on.
 // OpenQuestions counts questions without a ruling that have not been routed
 // to an amendment. Gates lists open owner
 // decisions.
 type WorkstreamStatus struct {
 	Workstream    config.WorkstreamID
+	Workspaces    string
 	State         string
 	Subjects      map[string]WorkflowState
 	OpenQuestions int
@@ -188,7 +190,11 @@ func (r *Repository) Statuses() ([]WorkstreamStatus, error) {
 				open++
 			}
 		}
-		out = append(out, WorkstreamStatus{Workstream: stream, State: view.states[FeatureSubject].Value, Subjects: view.states, OpenQuestions: open, Gates: ownerGates(records, stream, view), Status: latestStatus(records, stream)})
+		workspaces, err := r.workspaces(stream)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, WorkstreamStatus{Workstream: stream, Workspaces: workspaces, State: view.states[FeatureSubject].Value, Subjects: view.states, OpenQuestions: open, Gates: ownerGates(records, stream, view), Status: latestStatus(records, stream)})
 	}
 	return out, nil
 }

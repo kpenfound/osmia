@@ -94,10 +94,10 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		"ready=true",
 		"Profiles:\n",
 		"Workstreams:\n" +
-			"  " + stream + " state=handed open_questions=0 context_mode=file\n" +
+			"  " + stream + " state=handed open_questions=0 context_mode=file workspaces=git\n" +
 			"    Goal: Ship resumable uploads.\n" +
 			"    Attention: none\n" +
-			"  " + quiet + " state=not recorded open_questions=0 context_mode=file\n" +
+			"  " + quiet + " state=not recorded open_questions=0 context_mode=file workspaces=git\n" +
 			"    no status yet\n",
 	} {
 		if !strings.Contains(overview, want) {
@@ -116,20 +116,23 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
 	handed := "handed"
-	full := service.WorkstreamStatus{Workstream: stream, Project: project, State: &handed, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file", Status: &service.StatusView{
+	full := service.WorkstreamStatus{Workstream: stream, Project: project, State: &handed, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file", Workspaces: "git", Status: &service.StatusView{
 		Goal: "Ship resumable uploads.", Note: "The plan is drafted. Review is underway.",
 		Agents: []string{"The architect is preparing the packet.", "A reviewer is idle."}, Revision: 1, UpdatedAt: written}}
-	none := service.WorkstreamStatus{Workstream: quiet, Project: project, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file"}
+	none := service.WorkstreamStatus{Workstream: quiet, Project: project, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file", Workspaces: "git"}
 	capacity := &service.CapacityStatus{PerWorkstream: 2, Roles: []service.RoleCapacity{{Role: "mason", Limit: 4, Waiting: []service.SlotWait{}}, {Role: "reviewer", Limit: 2, Waiting: []service.SlotWait{}}, {Role: "committee", Limit: 3, Waiting: []service.SlotWait{}}}}
 	if all.Status.ProviderUsage == nil || all.Status.ProviderUsage.Unattributed != nil {
 		t.Fatalf("status --json provider usage: %+v", all.Status.ProviderUsage)
 	}
-	if !all.Health.Ready || all.Configuration.Project == nil || !reflect.DeepEqual(all.Status, service.StatusResponse{Workstreams: []service.WorkstreamStatus{full, none}, Profiles: all.Runtime.Profiles, Capacity: capacity, ProviderUsage: all.Status.ProviderUsage, Diagnostics: []service.Diagnostic{}}) {
+	if !all.Health.Ready || all.Configuration.Project == nil || !reflect.DeepEqual(all.Status, service.StatusResponse{Workstreams: []service.WorkstreamStatus{full, none}, Profiles: all.Runtime.Profiles, Capacity: capacity, ProviderUsage: all.Status.ProviderUsage, Diagnostics: []service.Diagnostic{}, Workspaces: all.Status.Workspaces}) {
 		t.Fatalf("status --json: %+v", all.Status)
+	}
+	if ws := all.Status.Workspaces; ws.Setting != "auto" || ws.Backend != "git" && ws.Backend != "jujutsu" || ws.Problem != "" {
+		t.Fatalf("status --json workspaces: %+v", ws)
 	}
 
 	one := successful(t, root, "status", stream)
-	if want := "Workstream: " + stream + " state=handed open_questions=0 context_mode=file\n" +
+	if want := "Workstream: " + stream + " state=handed open_questions=0 context_mode=file workspaces=git\n" +
 		"Goal: Ship resumable uploads.\n" +
 		"Attention: none\n" +
 		"Note: The plan is drafted. Review is underway.\n" +
@@ -145,7 +148,7 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		t.Fatalf("status <workstream> --json: %+v", got)
 	}
 
-	if out := successful(t, root, "status", quiet); out != "Workstream: "+quiet+" state=not recorded open_questions=0 context_mode=file\nStatus: none yet; the chief of staff has not written one\n" {
+	if out := successful(t, root, "status", quiet); out != "Workstream: "+quiet+" state=not recorded open_questions=0 context_mode=file workspaces=git\nStatus: none yet; the chief of staff has not written one\n" {
 		t.Fatalf("no status:\n%s", out)
 	}
 	raw := map[string]json.RawMessage{}
@@ -195,11 +198,11 @@ func TestStatusWithoutWorkstreams(t *testing.T) {
 }
 
 func TestStatusTextWithoutAttentionOrAgents(t *testing.T) {
-	st := service.WorkstreamStatus{Workstream: stream, Project: project, OpenQuestions: 2, ContextMode: "file", Status: &service.StatusView{
+	st := service.WorkstreamStatus{Workstream: stream, Project: project, OpenQuestions: 2, ContextMode: "file", Workspaces: "git", Status: &service.StatusView{
 		Goal: "Ship resumable uploads.", Note: "Work is starting.", Agents: []string{}, Revision: 3, UpdatedAt: written}}
 	var one strings.Builder
 	showStatus(&one, st)
-	if want := "Workstream: " + stream + " state=not recorded open_questions=2 context_mode=file\n" +
+	if want := "Workstream: " + stream + " state=not recorded open_questions=2 context_mode=file workspaces=git\n" +
 		"Goal: Ship resumable uploads.\nAttention: none\nNote: Work is starting.\nAgents:\n  none active\n" +
 		"Updated: 2026-09-16T10:00:00Z (revision 3)\n"; one.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", one.String(), want)
@@ -208,7 +211,7 @@ func TestStatusTextWithoutAttentionOrAgents(t *testing.T) {
 	st.State, st.Units = &building, []service.UnitStatus{{Unit: "parser", State: "ready"}, {Unit: "validator", State: "planned"}}
 	one.Reset()
 	showStatus(&one, st)
-	if want := "Workstream: " + stream + " state=building open_questions=2 context_mode=file\n" +
+	if want := "Workstream: " + stream + " state=building open_questions=2 context_mode=file workspaces=git\n" +
 		"Units:\n  parser ready\n  validator planned\n" +
 		"Goal: Ship resumable uploads.\nAttention: none\nNote: Work is starting.\nAgents:\n  none active\n" +
 		"Updated: 2026-09-16T10:00:00Z (revision 3)\n"; one.String() != want {
@@ -217,7 +220,7 @@ func TestStatusTextWithoutAttentionOrAgents(t *testing.T) {
 	st.State, st.Units = nil, nil
 	var all strings.Builder
 	showWorkstreams(&all, service.StatusResponse{Workstreams: []service.WorkstreamStatus{st}, Diagnostics: []service.Diagnostic{{Field: "workstreams", Code: service.Internal, Message: "cannot read"}}})
-	if want := "Workstreams:\n  " + stream + " state=not recorded open_questions=2 context_mode=file\n" +
+	if want := "Workstreams:\n  " + stream + " state=not recorded open_questions=2 context_mode=file workspaces=git\n" +
 		"    Goal: Ship resumable uploads.\n    Attention: none\nDiagnostic: workstreams: internal: cannot read\n"; all.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", all.String(), want)
 	}
@@ -335,7 +338,7 @@ func TestProjectRebaseAndDriftStatus(t *testing.T) {
 	t.Cleanup(func() { s.Close() })
 	root := opts.Config.Root
 
-	if out := successful(t, root, "status"); !strings.Contains(out, "  "+stream+" state=handed open_questions=0 context_mode=file\n    Drift: rebase 1 skipped at 2026-09-16T10:00:00Z\n    Goal: ") {
+	if out := successful(t, root, "status"); !strings.Contains(out, "  "+stream+" state=handed open_questions=0 context_mode=file workspaces=git\n    Drift: rebase 1 skipped at 2026-09-16T10:00:00Z\n    Goal: ") {
 		t.Fatalf("overview lacks the drift rebase:\n%s", out)
 	}
 	if out := successful(t, root, "status", stream); !strings.Contains(out, "\nDrift: rebase 1 skipped at 2026-09-16T10:00:00Z\n  Reason: "+reason+"\n") {

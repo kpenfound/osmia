@@ -174,7 +174,13 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		if exists {
 			_, err = repository.EnsureChiefOfStaff(ctx, stream, now, ownerActor)
 		} else {
-			err = repository.CreateWorkstream(ctx, stream, now, ownerActor)
+			// A new workstream records the backend its workspaces use; it
+			// keeps it until it is delivered or abandoned.
+			backend, checkErr := h.s.newWorkspaces(ctx, h.s.current())
+			if checkErr != nil {
+				return HandInResponse{}, false, &APIError{Unavailable, fmt.Sprintf("workstream %s cannot start: %v", stream, checkErr)}
+			}
+			err = repository.CreateWorkstreamOn(ctx, stream, backend.Backend, now, ownerActor)
 		}
 		if err != nil {
 			return h.failed("creating")

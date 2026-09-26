@@ -291,8 +291,10 @@ func (z *sealer) outcome(stream config.WorkstreamID, k int, operation string) (*
 	return nil, nil
 }
 
-// git returns the workspace provider of the project's clone.
-func (z *sealer) git() workspace.Provider { return featureWorkspaces(z.s.current()) }
+// git returns the provider of the workstream's feature branch workspace.
+func (z *sealer) git(stream config.WorkstreamID) (workspace.Provider, error) {
+	return featureWorkspaces(z.s.current(), z.repository).of(stream)
+}
 
 // Inspect reads the recorded transitions and the clone. A recorded outcome
 // completes the operation; otherwise it is absent, with what the clone holds
@@ -314,7 +316,11 @@ func (z *sealer) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "sealing " + result.Outcome, Result: result}, nil
 	}
 	branch := featureBranch(stream)
-	_, exists, err := z.git().Branch(ctx, branch)
+	g, err := z.git(stream)
+	if err != nil {
+		return coreadapter.Observation{}, err
+	}
+	_, exists, err := g.Branch(ctx, branch)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -379,7 +385,10 @@ func (z *sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		return fail("the plan's footprints name what the entity map does not resolve: " + strings.Join(unresolved, ", "))
 	}
 	cfg := z.s.current()
-	g := z.git()
+	g, err := z.git(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	remote, err := g.Remote(ctx, cfg.Project.Upstream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err

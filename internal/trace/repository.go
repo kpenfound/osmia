@@ -382,32 +382,94 @@ func Open(root config.Root, project config.Project) (*Repository, error) {
 	_, streams, err := r.scan()
 	return r, errors.Join(err, r.checkHistory(context.Background()), r.checkWorkflows(streams))
 }
+
+// manifestRecord is a project or workstream manifest. Workspaces is the
+// workspace backend a workstream was created on; it is empty in the project
+// manifest and in a workstream manifest that records none.
+type manifestRecord struct {
+	Header
+	Workspaces string `json:"workspaces,omitempty"`
+}
+
 func (r *Repository) manifest(name, schema string, stream config.WorkstreamID) error {
+	_, err := r.readManifest(name, schema, stream)
+	return err
+}
+
+func (r *Repository) readManifest(name, schema string, stream config.WorkstreamID) (manifestRecord, error) {
 	data, err := r.readFile(name)
 	if err != nil {
-		return err
+		return manifestRecord{}, err
 	}
-	var h Header
-	if err := decode(data, &h); err != nil {
-		return fmt.Errorf("%s: %w", name, err)
+	var m manifestRecord
+	if err := decode(data, &m); err != nil {
+		return manifestRecord{}, fmt.Errorf("%s: %w", name, err)
 	}
+	h := m.Header
 	id := string(r.project)
 	if stream != "" {
 		id = string(stream)
 	}
 	if h.Schema != schema || h.Version != Version || h.Project != r.project || h.Workstream != stream || h.ID != id || h.Revision != 1 || h.At.IsZero() || !validActor(h.Actor) || !present(h.Cause) || h.Depth < 0 {
-		return fmt.Errorf("%s: invalid manifest schema, identity or provenance", name)
+		return manifestRecord{}, fmt.Errorf("%s: invalid manifest schema, identity or provenance", name)
 	}
-	return nil
+	if !validWorkspaces(m.Workspaces) || stream == "" && m.Workspaces != "" {
+		return manifestRecord{}, fmt.Errorf("%s: invalid workspace backend %q", name, m.Workspaces)
+	}
+	return m, nil
 }
 
-// CreateWorkstream commits a new workstream and then creates its
-// chief-of-staff thread. An error from the thread write leaves the workstream
-// committed; EnsureChiefOfStaff creates the missing thread. An existing
-// workstream is refused with ErrConflict.
+// validWorkspaces reports whether a workstream manifest may record the
+// backend: Git, Jujutsu or none.
+func validWorkspaces(backend string) bool {
+	return backend == "" || backend == config.WorkspacesGit || backend == config.WorkspacesJujutsu
+}
+
+// Workspaces returns the workspace backend the workstream was created on,
+// config.WorkspacesGit or config.WorkspacesJujutsu. A workstream whose
+// manifest records none is on Git.
+func (r *Repository) Workspaces(stream config.WorkstreamID) (string, error) {
+	if err := config.CheckWorkstreamIDs(stream); err != nil {
+		return "", err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.workspaces(stream)
+}
+
+func (r *Repository) workspaces(stream config.WorkstreamID) (string, error) {
+	name := "workstreams/" + string(stream) + "/workstream.json"
+	if err := r.checked(name); err != nil {
+		return "", err
+	}
+	m, err := r.readManifest(name, "osmia.trace.workstream", stream)
+	if err != nil {
+		return "", err
+	}
+	if m.Workspaces == "" {
+		return config.WorkspacesGit, nil
+	}
+	return m.Workspaces, nil
+}
+
+// CreateWorkstream commits a new workstream that records no workspace
+// backend, as CreateWorkstreamOn does.
 func (r *Repository) CreateWorkstream(ctx context.Context, id config.WorkstreamID, at time.Time, actor Actor) error {
+	return r.CreateWorkstreamOn(ctx, id, "", at, actor)
+}
+
+// CreateWorkstreamOn commits a new workstream whose manifest records the
+// workspace backend it is created on, config.WorkspacesGit,
+// config.WorkspacesJujutsu or none, and then creates its chief-of-staff
+// thread. An error from the thread write leaves the workstream committed;
+// EnsureChiefOfStaff creates the missing thread. An existing workstream is
+// refused with ErrConflict.
+func (r *Repository) CreateWorkstreamOn(ctx context.Context, id config.WorkstreamID, workspaces string, at time.Time, actor Actor) error {
 	if err := config.CheckWorkstreamIDs(id); err != nil {
 		return err
+	}
+	if !validWorkspaces(workspaces) {
+		return fmt.Errorf("unknown workspace backend %q", workspaces)
 	}
 	if at.IsZero() || !validActor(actor) {
 		return fmt.Errorf("timestamp and actor required")
@@ -437,7 +499,7 @@ func (r *Repository) CreateWorkstream(ctx context.Context, id config.WorkstreamI
 		}
 	}
 	h := Header{Schema: "osmia.trace.workstream", Version: Version, ID: string(id), Revision: 1, Project: r.project, Workstream: id, At: at, Actor: actor, Cause: "workstream-create"}
-	data, err := json.MarshalIndent(h, "", "  ")
+	data, err := json.MarshalIndent(manifestRecord{Header: h, Workspaces: workspaces}, "", "  ")
 	if err != nil {
 		return err
 	}

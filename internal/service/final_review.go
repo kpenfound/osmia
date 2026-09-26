@@ -244,7 +244,11 @@ func (a *finalReviewer) governing(ctx context.Context, stream config.WorkstreamI
 	if !found {
 		return finalReviewInput{}, seal.Seal{}, fmt.Errorf("workstream %s has no seal", stream)
 	}
-	tip, exists, err := featureWorkspaces(a.s.current()).Branch(ctx, featureBranch(stream))
+	g, err := featureWorkspaces(a.s.current(), a.repository).of(stream)
+	if err != nil {
+		return finalReviewInput{}, seal.Seal{}, err
+	}
+	tip, exists, err := g.Branch(ctx, featureBranch(stream))
 	if err != nil {
 		return finalReviewInput{}, seal.Seal{}, err
 	}
@@ -441,7 +445,11 @@ func (a *finalReviewer) Inspect(ctx context.Context, op coreadapter.Operation) (
 	if !rebased {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("final review %d is not recorded and has recorded no rebase", in.Review)}, nil
 	}
-	tip, exists, err := featureWorkspaces(a.s.current()).Branch(ctx, rebase.Branch)
+	g, err := featureWorkspaces(a.s.current(), a.repository).of(stream)
+	if err != nil {
+		return coreadapter.Observation{}, err
+	}
+	tip, exists, err := g.Branch(ctx, rebase.Branch)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -519,7 +527,10 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if now.Seal != in.Seal || now.Spec != in.Spec || now.Plan != in.Plan || now.Charter != in.Charter {
 		return fail(fmt.Sprintf("the governing documents changed since the review was asked for: seal %d, spec revision %d, plan revision %d and charter revision %d are current", now.Seal, now.Spec, now.Plan, now.Charter))
 	}
-	g := featureWorkspaces(cfg)
+	g, err := featureWorkspaces(cfg, a.repository).of(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	if !rebased {
 		if now.Commit != in.Commit {
 			return fail(fmt.Sprintf("feature branch %s moved to %s since the review was asked for", report.Branch, now.Commit))
@@ -982,7 +993,10 @@ func (a *finalReviewer) stage(ctx context.Context, cfg *config.Config, stream co
 	if err := os.RemoveAll(workspace); err != nil {
 		return nil, err
 	}
-	g := featureWorkspaces(cfg)
+	g, err := featureWorkspaces(cfg, a.repository).of(stream)
+	if err != nil {
+		return nil, err
+	}
 	if err := g.Export(ctx, report.Commit, filepath.Join(workspace, "branch")); err != nil {
 		return nil, err
 	}

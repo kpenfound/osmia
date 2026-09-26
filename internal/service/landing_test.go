@@ -120,7 +120,7 @@ func TestApprovedUnitLandsAndReadiesItsDependent(t *testing.T) {
 		t.Fatalf("the feature branch gained %d commits: %v", len(commits), commits)
 	}
 	commit := commits[0]
-	git := featureWorkspaces(f.s.cfg)
+	git := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit)
 	landed, err := git.Commit(context.Background(), commit)
 	must(t, err)
 	tree, err := git.Commit(context.Background(), candidate)

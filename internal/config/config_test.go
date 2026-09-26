@@ -529,3 +529,37 @@ func TestNotifyWebhook(t *testing.T) {
 		t.Fatalf("rejected webhook error %v must not quote %s", err, secret)
 	}
 }
+
+// workspaces defaults to auto, accepts auto, git and jujutsu, and rejects
+// anything else with an error that names the values it accepts.
+func TestWorkspaces(t *testing.T) {
+	c, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Workspaces != WorkspacesAuto {
+		t.Fatalf("default workspaces %q", c.Workspaces)
+	}
+	with := func(value string) string {
+		return strings.Replace(topConfig, "[profiles.default]", "workspaces = "+value+"\n[profiles.default]", 1)
+	}
+	for _, value := range []string{WorkspacesAuto, WorkspacesGit, WorkspacesJujutsu} {
+		c, err := Load(fixture(t, with("'"+value+"'"), projectConfig))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Workspaces != value {
+			t.Fatalf("workspaces %q loaded as %q", value, c.Workspaces)
+		}
+	}
+	for _, value := range []string{"'jj'", "'Git'", "''"} {
+		_, err := Load(fixture(t, with(value), projectConfig))
+		var field *FieldError
+		if !errors.As(err, &field) || field.Field != "workspaces" || field.Reason != `must be "auto", "git" or "jujutsu"` {
+			t.Fatalf("workspaces = %s: %v", value, err)
+		}
+	}
+	if _, err := Load(fixture(t, with("1"), projectConfig)); err == nil {
+		t.Fatal("workspaces = 1 loaded")
+	}
+}

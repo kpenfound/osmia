@@ -234,7 +234,7 @@ func TestPublicationSquashDeliversOneCommitWithTheReviewedTree(t *testing.T) {
 		t.Fatalf("publication %+v: %v", result, err)
 	}
 	tip, _ := p.forkBranch(t)
-	g := featureWorkspaces(p.s.cfg)
+	g := workspaces(p.s.cfg, branchesDirectory, config.WorkspacesGit)
 	delivered, err := g.Commit(ctx, tip)
 	must(t, err)
 	reviewed, err := g.Commit(ctx, p.report.Commit)

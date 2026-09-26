@@ -674,7 +674,7 @@ func TestSealingIsAskedForAfterARestartAndSealsFromSketched(t *testing.T) {
 	if state, err := f.repository().Workflow(gone, trace.FeatureSubject); err != nil || state.Value != AbandonedState {
 		t.Fatalf("feature %+v %v", state, err)
 	}
-	if _, found, err := (&sealer{s: f.s, repository: f.repository()}).git().Branch(ctx, "osmia/"+string(gone)); err != nil || found {
+	if _, found, err := providerOf(t, featureWorkspaces(f.s.current(), f.repository()), gone).Branch(ctx, "osmia/"+string(gone)); err != nil || found {
 		t.Fatalf("branch of the abandoned workstream: %v %v", found, err)
 	}
 	if moves := f.sealMoves(t, stream); !slices.Equal(moves, []string{"sealing-1"}) {

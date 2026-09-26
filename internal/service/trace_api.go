@@ -93,8 +93,10 @@ func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (an
 		// A recorded commit may no longer be present in the clone, so the
 		// trace walk still searches its durable records in that case.
 		message := ""
-		if commit, readErr := featureWorkspaces(s.current()).Commit(ctx, selector); readErr == nil {
-			message = commit.Message
+		if g, readErr := featureWorkspaces(s.current(), repository).of(stream); readErr == nil {
+			if commit, readErr := g.Commit(ctx, selector); readErr == nil {
+				message = commit.Message
+			}
 		}
 		out, err = traceCommit(repository, stream, selector, message)
 	default:
