@@ -43,7 +43,7 @@ The [runtime override reference](docs/runtime.md) documents persisted operator
 choices and their resolution against configuration.
 
 The [local service API](docs/service.md) documents Unix-socket ownership, the
-versioned M1 endpoints, the in-process client and the embedded web page.
+versioned M1 endpoints, the in-process client and the embedded web page. [Reach Osmia from your phone](docs/service.md#reach-osmia-from-your-phone) explains serving it on your tailnet.
 
 The [M1 demonstration](docs/m1-demonstration.md) runs a durable role thread
 across a service restart with fake engines and explains how to inspect its trace.
