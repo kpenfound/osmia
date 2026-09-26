@@ -1011,6 +1011,38 @@ func (j *Jujutsu) Carry(ctx context.Context, commit, change string) (string, err
 	return strings.TrimSpace(carried), err
 }
 
+// Record snapshots the workspace's files into its working-copy commit, as
+// every jj command run in the workspace does, and returns that commit. Its
+// branch and the commits before it stay as they are.
+func (j *Jujutsu) Record(ctx context.Context, w Worktree) (string, error) {
+	if w.Path == "" {
+		return "", errors.New("no workspace to record")
+	}
+	current, err := j.describe(ctx, w.Path, true, "@")
+	return current.commit, err
+}
+
+// Changed snapshots the workspace's files as Record does and returns the
+// paths, sorted, whose files differ between the commit since and the
+// workspace, the old path of a moved file included. A later snapshot of the
+// workspace hides since, which the repository still reads. A since that is
+// not a full commit ID is refused.
+func (j *Jujutsu) Changed(ctx context.Context, w Worktree, since string) ([]string, error) {
+	if w.Path == "" {
+		return nil, errors.New("no workspace to compare")
+	}
+	if !commitIDPattern.MatchString(since) {
+		return nil, fmt.Errorf("%q is not a full commit ID", since)
+	}
+	out, _, err := j.runOutput(ctx, w.Path, nil, "diff", "--from", since, "--to", "@", "--template", `source.path() ++ "\0" ++ target.path() ++ "\0"`)
+	if err != nil {
+		return nil, err
+	}
+	paths := splitNull(out)
+	slices.Sort(paths)
+	return slices.Compact(paths), nil
+}
+
 // Replay makes the commit Git's Replay makes from the same arguments, and
 // reports the same conflicted paths, in a temporary detached worktree under
 // Directory that it removes.
