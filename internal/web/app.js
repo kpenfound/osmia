@@ -208,7 +208,10 @@
 
   // act runs one owner action with its button disabled and shows what the
   // API answered in result: done's text on success, the refusal otherwise.
+  // Once the action ends, the button is enabled again unless a render has
+  // blocked it meanwhile.
   async function act(result, button, call, done) {
+    button.dataset.busy = 'true';
     button.disabled = true;
     show(result, 'pending', 'Sending…');
     try {
@@ -216,8 +219,16 @@
     } catch (err) {
       show(result, 'error', err.message);
     } finally {
-      button.disabled = false;
+      delete button.dataset.busy;
+      button.disabled = button.dataset.blocked === 'true';
     }
+  }
+
+  // block disables a button while blocked is true, or while its action
+  // runs.
+  function block(button, blocked) {
+    button.dataset.blocked = String(blocked);
+    button.disabled = blocked || button.dataset.busy === 'true';
   }
 
   // setOptions replaces a select's options when they changed, keeping the
@@ -348,7 +359,7 @@
   }
 
   function renderPauseForm() {
-    setOptions(byId('pause-form').elements.target, pauseTargets());
+    setOptions(byId('pause-form').elements.target, [['', 'Choose what to pause'], ...pauseTargets()]);
   }
 
   function pause(event) {
@@ -713,8 +724,8 @@
       r.usage.textContent = usage
         ? provider + ': ' + money(usage) + ' today' + (usage.limit ? ', ' + limitText(usage.limit) : '')
         : '';
-      setOptions(r.select, options);
-      r.clear.disabled = effective.source !== 'owner_override';
+      setOptions(r.select, [['', 'Choose a profile'], ...options]);
+      block(r.clear, effective.source !== 'owner_override');
       return r.node;
     }));
   }

@@ -112,8 +112,10 @@ func pauseOf(rt RuntimeResponse, target runtime.Target) (runtime.Pause, bool) {
 // The page pauses the factory, the project and a workstream, soft or hard,
 // with a reason, and resumes each, through /v1/runtime/pause; it sets and
 // clears the priority order and a role's profile override, with the
-// provider's usage beside the profile; it refuses a pause without a reason
-// and shows the API's refusal.
+// provider's usage beside the profile. It refuses a pause without a scope or
+// a reason and a profile override without a profile, offers no resume for a
+// provider limit's role pause, shows the API's refusal, and keeps a message
+// and a profile being chosen through the reads events cause.
 func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	p := openBrowser(t)
 	f := newPageFixture(t)
@@ -130,9 +132,42 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.awaitText(`[data-pause="workstream:`+string(quiet)+`"] [data-field=reason]`, "The owner is travelling")
 	p.eval(`window.notReloaded = true`, nil)
+	row := `[data-profile-role="mason"] `
+	draft := `[data-workstream="` + string(quiet) + `"] [data-field=send] textarea`
 
-	// A pause needs a reason; the page refuses one without and sends nothing.
+	// A profile being chosen and a message being written, still focused,
+	// survive the reads a runtime change causes.
+	p.awaitText(row+"[data-field=source]", "configured")
+	p.choose(row+"select", "other")
+	p.typeInto(draft, "Half a thought")
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Lunch", Source: runtime.PauseOwner})
+	p.awaitText(`[data-pause="factory:"] [data-field=reason]`, "Lunch")
+	var kept struct {
+		Draft, Profile string
+		Focused        bool
+	}
+	p.eval(`({draft: document.querySelector(`+quote(draft)+`).value, profile: document.querySelector(`+quote(row+"select")+`).value, focused: document.activeElement === document.querySelector(`+quote(draft)+`)})`, &kept)
+	if kept.Draft != "Half a thought" || kept.Profile != "other" || !kept.Focused {
+		t.Fatalf("after a runtime change the page holds %+v", kept)
+	}
+	mutation(t, f.c, "DELETE", "pause", ClearPauseRequest{Scope: "factory"})
+	p.await("the factory resumed", `document.querySelector('[data-pause="factory:"]') === null`)
+
+	// A pause needs a scope and a reason; the page refuses one without and
+	// sends nothing.
 	p.await("the workstream as a pause target", `[...document.querySelectorAll('#pause-form select[name=target] option')].some((o) => o.value === `+quote("workstream:"+string(stream))+`)`)
+	var chosen string
+	p.eval(`document.querySelector('#pause-form select[name=target]').value`, &chosen)
+	if chosen != "" {
+		t.Fatalf("the pause form starts with %q chosen", chosen)
+	}
+	p.typeInto(form+"input[name=reason]", "Overnight")
+	p.click(form + "button[type=submit]")
+	p.awaitText("#pause-result", "Choose what to pause.")
+	if pauses := runtimeView().Effective.Pauses; len(pauses) != 1 {
+		t.Fatalf("a pause without a scope reached the service: %+v", pauses)
+	}
+	p.choose(form+"input[name=reason]", "")
 	p.choose(form+"select[name=target]", "workstream:"+string(stream))
 	p.choose(form+"select[name=mode]", "hard")
 	p.click(form + "button[type=submit]")
@@ -206,10 +241,15 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	}
 
 	// The mason's profile is overridden and cleared, with the usage of the
-	// profile's provider beside it.
-	row := `[data-profile-role="mason"] `
-	p.awaitText(row+"[data-field=source]", "configured")
+	// profile's provider beside it; an override needs a profile.
 	p.awaitText(row+"[data-field=usage]", "claude: USD")
+	p.await("clear disabled without an override", `document.querySelector(`+quote(row+"[data-field=clear]")+`).disabled`)
+	p.choose(row+"select", "")
+	p.click(row + "[data-field=set]")
+	p.awaitText("#profile-result", "Choose a profile for mason.")
+	if got := runtimeView().Profiles["mason"]; got.Source != "configuration" {
+		t.Fatalf("an override without a profile reached the service: %+v", got)
+	}
 	p.choose(row+"select", "other")
 	p.click(row + "[data-field=set]")
 	p.awaitText("#profile-result", "mason runs other")
@@ -222,9 +262,18 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	}
 	p.click(row + "[data-field=clear]")
 	p.awaitText(row+"[data-field=source]", "configured")
+	p.awaitText("#profile-result", "mason runs its configured profile")
+	p.await("clear disabled once the override is gone", `document.querySelector(`+quote(row+"[data-field=clear]")+`).disabled`)
 	if got := runtimeView().Profiles["mason"]; got.Source != "configuration" {
 		t.Fatalf("mason's profile after clearing the override: %+v", got)
 	}
+
+	// A provider limit pauses the roles its provider serves without a
+	// fallback; that pause has no resume, an owner pause keeps its own.
+	must(t, f.s.store.SetProviderLimit(runtime.ProviderLimit{Backend: "claude", Status: "blocked", SetAt: time.Now().UTC()}))
+	p.awaitText(`[data-pause="role:mason"] [data-field=source]`, "a provider usage limit")
+	p.await("no resume on the role pause", `document.querySelector('[data-pause="role:mason"] [data-field=resume]') === null`)
+	p.await("resume on the owner's pause", `document.querySelector(`+quote(`[data-pause="workstream:`+string(quiet)+`"] [data-field=resume]`)+`) !== null`)
 	p.await("the same document", `window.notReloaded === true`)
 
 	// A refusal of the API is shown as it came.
