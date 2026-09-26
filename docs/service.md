@@ -351,7 +351,8 @@ setting only a restart applies, such as `listen.web`, makes it `changed`. The
 project file is validated with the loaded top-level settings. When the files
 pass on their own but a reload of them together fails, the file the reload
 names is `invalid`; when that is the file of another project `active_projects`
-lists, it is added to `files`. `differs` is true when any file is not
+lists, it is added to `files`, and when the failure names no file, the
+top-level file is `invalid` with the reload's message. `differs` is true when any file is not
 `unchanged`. Reading the view writes nothing and changes neither the loaded
 configuration nor `last_error`.
 
@@ -2490,7 +2491,7 @@ waits for a committee slot.
 - Then each `ready` unit whose current
   [deferral](#why-a-ready-unit-waits) waits for a mason slot, with
   `workstream` and `unit`, in workstream and plan order, unless a pause now
-  covers its workstream.
+  covers its workstream or the workstream is abandoned.
 
 `reason` is `capacity` when every slot of the role kind is taken (for a
 unit, as the mason controller counts implementing units), `priority` when

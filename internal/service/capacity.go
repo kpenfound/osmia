@@ -15,7 +15,7 @@ import (
 // kinds as the scheduler counts them, with the queued turns its gate would
 // admit but that find no free slot, and, for masons, the ready units of list
 // whose latest mason controller decision is to wait for a slot. Work a pause
-// in force holds is not waiting. Without an active project no slot is used.
+// in force holds, and work of an abandoned workstream, is not waiting. Without an active project no slot is used.
 func (s *Service) capacityStatus(list []WorkstreamStatus) (*CapacityStatus, *Diagnostic) {
 	s.mu.Lock()
 	active, cfg := s.active, s.cfg
@@ -59,7 +59,7 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) (*CapacityStatus, *Dia
 			continue
 		}
 		for _, w := range list {
-			if scheduler.Paused(state.Pauses, project, w.Workstream) {
+			if scheduler.Paused(state.Pauses, project, w.Workstream) || w.State != nil && *w.State == AbandonedState {
 				continue
 			}
 			for _, u := range w.Units {

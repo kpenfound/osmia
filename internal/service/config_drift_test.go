@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 )
@@ -26,6 +29,13 @@ func TestConfigReportsDriftOfEveryFile(t *testing.T) {
 	top := filepath.Join(before.Root, "config.toml")
 	proj := filepath.Join(before.Root, "projects", string(project), "config.toml")
 	other := "p_00000000000000000000000000000009"
+	otherProfile := "[profiles.other]\nagent = \"codex\"\nmodel = \"other\"\n"
+	if !strings.Contains(files.topText, otherProfile) {
+		t.Fatalf("the fixture has no other profile:\n%s", files.topText)
+	}
+	activating := func(id string) string {
+		return "version = 1\nactive_projects = [\"" + id + "\"]\n" + files.topText[len("version = 1\nactive_projects = [\""+string(project)+"\"]\n"):]
+	}
 
 	for _, step := range []struct {
 		name, top, project string
@@ -38,7 +48,12 @@ func TestConfigReportsDriftOfEveryFile(t *testing.T) {
 		{"project edit", files.topText, files.projectText + "landing = \"squash\"\n", []ConfigFile{{Path: top, State: ConfigUnchanged}, {Path: proj, Project: project, State: ConfigChanged}}},
 		{"invalid project", files.topText + "[capacity]\nmasons = 7\n", files.projectText + "landing = \"sideways\"\n", []ConfigFile{{Path: top, State: ConfigChanged}, {Path: proj, Project: project, State: ConfigInvalid, Reason: "landing: expected commit-per-unit or squash"}}},
 		{"invalid top level", files.topText + "[capacity]\nmasons = 0\n", files.projectText + "landing = \"squash\"\n", []ConfigFile{{Path: top, State: ConfigInvalid, Reason: "capacity.masons: must be positive"}, {Path: proj, Project: project, State: ConfigChanged}}},
-		{"another active project", "version = 1\nactive_projects = [\"" + other + "\"]\n" + files.topText[len("version = 1\nactive_projects = [\""+string(project)+"\"]\n"):], files.projectText,
+		// Each file passes on its own, but the project's classifier names a
+		// profile the edited top level no longer has, so a reload fails on
+		// the project file.
+		{"valid alone, invalid together", strings.Replace(files.topText, otherProfile, "", 1), files.projectText + "classifier = \"other\"\n",
+			[]ConfigFile{{Path: top, State: ConfigChanged}, {Path: proj, Project: project, State: ConfigInvalid, Reason: "classifier: unknown profile other"}}},
+		{"another active project", activating(other), files.projectText,
 			[]ConfigFile{{Path: top, State: ConfigChanged}, {Path: proj, Project: project, State: ConfigUnchanged}, {Path: filepath.Join(before.Root, "projects", other, "config.toml"), State: ConfigInvalid, Reason: "cannot be read"}}},
 	} {
 		files.write(t, step.top, step.project)
@@ -63,11 +78,26 @@ func TestConfigReportsDriftOfEveryFile(t *testing.T) {
 		t.Fatalf("reading the configuration created another project's directory: %v", err)
 	}
 
+	// A reload failure that names no file, here another active project's
+	// directory resolving outside the root, marks the top-level file invalid.
+	alias := "p_00000000000000000000000000000008"
+	must(t, os.Symlink(t.TempDir(), filepath.Join(before.Root, "projects", alias)))
+	files.write(t, activating(alias), files.projectText)
+	got, err := c.Configuration(ctx)
+	must(t, err)
+	if want := (ConfigDrift{Differs: true, Files: []ConfigFile{{Path: top, State: ConfigInvalid, Reason: reloadError(errors.New("unnamed"), time.Time{}).Message}, {Path: proj, Project: project, State: ConfigUnchanged}}}); !reflect.DeepEqual(got.Drift, want) {
+		t.Fatalf("a reload failure naming no file: drift\n%+v\nwant\n%+v", got.Drift, want)
+	}
+	if got.Digest != before.Digest || got.LastError != nil {
+		t.Fatalf("a reload failure naming no file applied it: %+v", got)
+	}
+	must(t, os.Remove(filepath.Join(before.Root, "projects", alias)))
+
 	// A file that cannot be read is invalid.
 	must(t, os.WriteFile(files.top, []byte(files.topText), 0600))
 	must(t, os.Remove(files.project))
 	must(t, os.Mkdir(files.project, 0700))
-	got, err := c.Configuration(ctx)
+	got, err = c.Configuration(ctx)
 	must(t, err)
 	if want := (ConfigFile{Path: proj, Project: project, State: ConfigInvalid, Reason: "cannot be read"}); !got.Drift.Differs || got.Drift.Files[0].State != ConfigUnchanged || got.Drift.Files[1] != want {
 		t.Fatalf("unreadable project file: %+v", got.Drift)

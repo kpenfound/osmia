@@ -95,14 +95,18 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 	}
 
 	// A ready unit the mason controller deferred for a slot waits too,
-	// unless a pause now covers its workstream; other deferrals do not wait
-	// for a slot.
+	// unless a pause now covers its workstream or the workstream is
+	// abandoned; other deferrals do not wait for a slot.
 	deferred := func(unit, reason string) UnitStatus {
 		return UnitStatus{Unit: unit, State: UnitReady, Deferral: &UnitDispatch{Unit: unit, Decision: DispatchDeferred, Reason: reason}}
 	}
+	gone := AbandonedState
 	list := []WorkstreamStatus{
 		{Workstream: sibling, Units: []UnitStatus{deferred("a", DeferCapacity), deferred("b", DeferEntangled), deferred("c", DeferPriority), deferred("d", DeferWorkstreamCap), deferred("e", DeferPaused)}},
 		{Workstream: stream, Units: []UnitStatus{deferred("f", DeferCapacity)}},
+		// An abandoned workstream keeps its units' last deferral but never
+		// starts them.
+		{Workstream: "w_00000000000000000000000000000abc", State: &gone, Units: []UnitStatus{deferred("g", DeferCapacity)}},
 	}
 	capacity, unread := s.capacityStatus(list)
 	if unread != nil {
