@@ -516,7 +516,10 @@ func TestJujutsuLandsAndPushesTheCommitGitWould(t *testing.T) {
 // A rebase of a unit's snapshot onto a new feature branch tip makes the
 // commit Git's does; Move puts the unit's branch and files on it, completes a
 // move interrupted after the branch moved, and refuses a workspace at any
-// other commit. A conflicted rebase leaves the markers in the workspace.
+// other commit. A rebase that conflicts is Jujutsu's commit on the new tip
+// holding the conflict stored, which a workspace on it materializes with
+// markers: a snapshot that leaves them keeps the conflict, and one of the
+// resolved files holds none.
 func TestJujutsuRebaseAndMoveTheUnitsWorkspace(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -562,6 +565,24 @@ func TestJujutsuRebaseAndMoveTheUnitsWorkspace(t *testing.T) {
 	if err != nil || !slices.Equal(conflicts, []string{"README"}) {
 		t.Fatalf("a conflicted rebase %s %v: %v", conflicted, conflicts, err)
 	}
+	if stored, err := j.StoredConflicts(ctx, conflicted); err != nil || !slices.Equal(stored, []string{"README"}) {
+		t.Fatalf("the conflicted rebase stores %v: %v", stored, err)
+	}
+	if c, err := j.Commit(ctx, conflicted); err != nil || !slices.Equal(c.Parents, []string{conflicting}) || c.Message != "Rebase unit u1 again" {
+		t.Fatalf("the conflicted rebase %+v: %v", c, err)
+	}
+	byGit, byGitConflicts, err := f.provider.Rebase(ctx, conflicting, commit, "Rebase unit u1 again", at)
+	if err != nil || !slices.Equal(byGitConflicts, []string{"README"}) {
+		t.Fatalf("Git's conflicted rebase %s %v: %v", byGit, byGitConflicts, err)
+	}
+	if stored, err := f.provider.StoredConflicts(ctx, byGit); err != nil || len(stored) != 0 {
+		t.Fatalf("Git's conflicted rebase stores %v: %v", stored, err)
+	}
+	for _, clean := range []string{commit, byGit} {
+		if stored, err := j.StoredConflicts(ctx, clean); err != nil || len(stored) != 0 {
+			t.Fatalf("commit %s stores %v: %v", clean, stored, err)
+		}
+	}
 	git(t, "-C", f.clone, "update-ref", "refs/heads/osmia-unit/w1/u1", conflicted, commit)
 	if err := j.Move(ctx, unit, commit, conflicted); err != nil {
 		t.Fatal(err)
@@ -569,8 +590,50 @@ func TestJujutsuRebaseAndMoveTheUnitsWorkspace(t *testing.T) {
 	if marked, err := j.MarkedFiles(unit, []string{"README", "unit.go", "missing"}); err != nil || !slices.Equal(marked, []string{"README"}) {
 		t.Fatalf("marked files %v: %v", marked, err)
 	}
-	if marked, err := j.Markers(ctx, conflicted, []string{"README", "unit.go"}); err != nil || !slices.Equal(marked, []string{"README"}) {
-		t.Fatalf("markers %v: %v", marked, err)
+	data, err := os.ReadFile(filepath.Join(unit.Path, "README"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sides []string
+	for _, line := range strings.Split(string(data), "\n") {
+		for _, marker := range []string{"<<<<<<< ", "||||||| ", "=======", ">>>>>>> "} {
+			if strings.HasPrefix(line, marker) {
+				sides = append(sides, strings.TrimSpace(marker))
+			}
+		}
+		if strings.HasPrefix(line, "widgets") {
+			sides = append(sides, line)
+		}
+	}
+	if want := []string{"<<<<<<<", "widgets by the feature", "|||||||", "widgets", "=======", "widgets by the unit", ">>>>>>>"}; !slices.Equal(sides, want) {
+		t.Fatalf("the conflicted README reads %v, want %v:\n%s", sides, want, data)
+	}
+	kept := snapshotJJ(t, j, unit, conflicting, map[string]string{"unit.go": "unit, kept\n"})
+	if stored, err := j.StoredConflicts(ctx, kept); err != nil || !slices.Equal(stored, []string{"README"}) {
+		t.Fatalf("a snapshot with the markers left stores %v: %v", stored, err)
+	}
+	// A rebase of a commit that holds the conflict keeps it stored.
+	moved := snapshotJJ(t, j, feature, conflicting, map[string]string{"landed2.go": "landed again\n"})
+	again, conflicts, err := j.Rebase(ctx, moved, kept, "Rebase unit u1 onto the moved tip", at)
+	if err != nil || !slices.Equal(conflicts, []string{"README"}) {
+		t.Fatalf("a rebase of the conflicted snapshot %s %v: %v", again, conflicts, err)
+	}
+	if stored, err := j.StoredConflicts(ctx, again); err != nil || !slices.Equal(stored, []string{"README"}) {
+		t.Fatalf("the rebased conflicted snapshot stores %v: %v", stored, err)
+	}
+	listed, err := j.run(ctx, j.repository(), nil, "--ignore-working-copy", "file", "list", "--revision", again, "--template", `path ++ "\n"`)
+	if err != nil || !slices.Equal(strings.Fields(listed), []string{"README", "landed.go", "landed2.go", "unit.go"}) {
+		t.Fatalf("the rebased conflicted snapshot holds %q: %v", listed, err)
+	}
+	resolved := snapshotJJ(t, j, unit, conflicting, map[string]string{"README": "widgets by the feature and the unit\n"})
+	if stored, err := j.StoredConflicts(ctx, resolved); err != nil || len(stored) != 0 {
+		t.Fatalf("the resolved snapshot stores %v: %v", stored, err)
+	}
+	if marked, err := j.Markers(ctx, resolved, []string{"README", "unit.go"}); err != nil || len(marked) != 0 {
+		t.Fatalf("the resolved snapshot's markers %v: %v", marked, err)
+	}
+	if diff, err := j.Diff(ctx, conflicting, resolved); err != nil || strings.Contains(diff, "jjconflict") || !strings.Contains(diff, "+widgets by the feature and the unit") {
+		t.Fatalf("the resolved candidate's diff, %v:\n%s", err, diff)
 	}
 }
 

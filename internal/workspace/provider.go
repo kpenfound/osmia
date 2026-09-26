@@ -14,9 +14,10 @@ import (
 // Worktree is one checked-out workspace: its Path is the directory an agent's
 // files come from and its Branch the branch the workspace works on.
 //
-// Every operation that makes a commit is deterministic for its arguments and
-// moves no branch unless its documentation says so; conflicted paths come
-// back sorted. The methods are documented on Git.
+// Every operation that makes a commit moves no branch unless its
+// documentation says so, and is deterministic for its arguments but for a
+// Jujutsu rebase that conflicts; conflicted paths come back sorted. The
+// methods are documented on Git, and where Jujutsu differs, on Jujutsu.
 type Provider interface {
 	vcs.Provider
 
@@ -32,6 +33,7 @@ type Provider interface {
 	Diff(ctx context.Context, base, candidate string) (string, error)
 	ChangedPaths(ctx context.Context, base, candidate string) ([]string, error)
 	Markers(ctx context.Context, commit string, paths []string) ([]string, error)
+	StoredConflicts(ctx context.Context, commit string) ([]string, error)
 	Export(ctx context.Context, commit, dir string) error
 
 	// Making commits.

@@ -329,6 +329,11 @@ func (g *Git) Move(ctx context.Context, w Worktree, from, to string) error {
 	return err
 }
 
+// StoredConflicts returns the paths commit holds as stored conflicts, which
+// no Git commit does: a path Git's merge left conflicted holds its conflict
+// markers as file content, which Markers finds.
+func (g *Git) StoredConflicts(context.Context, string) ([]string, error) { return nil, nil }
+
 // Markers returns the paths, of those given, whose file in commit still
 // holds a conflict marker line: one that starts with seven < or seven >
 // followed by a space or the line's end. A path commit does not hold as a

@@ -30,7 +30,9 @@ import (
 // commits rather than on a workspace, which are reading history, Squash,
 // Rebase, RebaseFrom, Replay, Export and the remotes, run on the same Git
 // store exactly as Git runs them, so both providers make the same commits
-// from the same arguments.
+// from the same arguments. The exception is a Rebase or RebaseFrom that
+// conflicts: Jujutsu makes that commit, holding its conflicts stored rather
+// than as markers, and a workspace on it materializes them.
 type Jujutsu struct {
 	Clone     string
 	Directory string
@@ -854,16 +856,91 @@ func (j *Jujutsu) Squash(ctx context.Context, base, candidate, message string, a
 	return j.git().Squash(ctx, base, candidate, message, at)
 }
 
-// Rebase makes the commit Git's Rebase makes from the same arguments, and
-// reports the same conflicted paths.
+// Rebase rebases head onto onto from their merge base, as RebaseFrom does.
 func (j *Jujutsu) Rebase(ctx context.Context, onto, head, message string, at time.Time) (string, []string, error) {
-	return j.git().Rebase(ctx, onto, head, message, at)
+	return j.RebaseFrom(ctx, "", onto, head, message, at)
 }
 
-// RebaseFrom makes the commit Git's RebaseFrom makes from the same
-// arguments, and reports the same conflicted paths.
+// RebaseFrom makes the commit Git's RebaseFrom makes from the same arguments
+// when head holds no stored conflict and Git's merge is clean. Otherwise
+// Jujutsu makes the commit: the change head holds since base, or since
+// head's merge base with onto when base is empty, rebased onto onto with
+// message, committed by Osmia at the given time. It holds each path the rebase conflicts in as a
+// stored conflict, which StoredConflicts reads and a workspace on the commit
+// materializes with Git-style markers: the lines between "<<<<<<<" and
+// "|||||||" are onto's, those between "|||||||" and "=======" base's, and
+// those between "=======" and ">>>>>>>" head's, and a side that deleted the
+// file holds no lines. It returns the paths Jujutsu holds conflicted, sorted.
+// Each such rebase makes a commit of its own, even from the same arguments.
 func (j *Jujutsu) RebaseFrom(ctx context.Context, base, onto, head, message string, at time.Time) (string, []string, error) {
-	return j.git().RebaseFrom(ctx, base, onto, head, message, at)
+	g := j.git()
+	stored, err := j.StoredConflicts(ctx, head)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(stored) == 0 {
+		commit, conflicts, err := g.RebaseFrom(ctx, base, onto, head, message, at)
+		if err != nil || len(conflicts) == 0 {
+			return commit, conflicts, err
+		}
+	}
+	if base == "" {
+		if base, err = g.MergeBase(ctx, onto, head); err != nil {
+			return "", nil, err
+		}
+	}
+	if err := j.initialize(ctx); err != nil {
+		return "", nil, err
+	}
+	if err := j.importBranches(ctx); err != nil {
+		return "", nil, err
+	}
+	change, err := j.create(ctx, base, message, at)
+	if err != nil {
+		return "", nil, err
+	}
+	if _, err := j.run(ctx, j.repository(), stamp(at), "--ignore-working-copy", "restore", "--from", head, "--into", change); err != nil {
+		return "", nil, err
+	}
+	if _, err := j.run(ctx, j.repository(), stamp(at), "--ignore-working-copy", "rebase", "--revisions", change, "--onto", onto); err != nil {
+		return "", nil, err
+	}
+	rebased, err := j.describe(ctx, j.repository(), false, change)
+	if err != nil {
+		return "", nil, err
+	}
+	conflicts, err := j.conflicts(ctx, change)
+	return rebased.commit, conflicts, err
+}
+
+// create makes an empty commit on parent with message and returns its change
+// ID. Nothing else moves.
+func (j *Jujutsu) create(ctx context.Context, parent, message string, at time.Time) (string, error) {
+	settings := append(stamp(at), "templates.commit_summary=change_id")
+	_, stderr, err := j.runOutput(ctx, j.repository(), settings, "--ignore-working-copy", "new", "--no-edit", parent, "--message", message)
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(stderr, "\n") {
+		if change, ok := strings.CutPrefix(line, "Created new commit "); ok && len(strings.Fields(change)) == 1 {
+			return change, nil
+		}
+	}
+	return "", fmt.Errorf("jj new on %s named no commit: %s", parent, strings.TrimSpace(stderr))
+}
+
+// StoredConflicts returns the paths commit holds as stored conflicts,
+// sorted. The repository reads the commits it made and those on the branches
+// it imported; any other commit reads as holding none.
+func (j *Jujutsu) StoredConflicts(ctx context.Context, commit string) ([]string, error) {
+	if exists, err := j.initialized(); err != nil || !exists {
+		return nil, err
+	}
+	out, err := j.run(ctx, j.repository(), nil, "--ignore-working-copy", "log", "--no-graph", "--revisions", "present("+commit+")", "--template", `if(conflict, "conflict")`)
+	if err != nil || out != "conflict" {
+		return nil, err
+	}
+	return j.conflicts(ctx, commit)
 }
 
 // Replay makes the commit Git's Replay makes from the same arguments, and
