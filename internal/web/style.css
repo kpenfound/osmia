@@ -176,3 +176,172 @@ body[data-connection="lost"] #connection {
 .waiting li {
   padding: 0.15rem 0;
 }
+
+.control,
+.conversation {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.control {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+}
+
+label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+input,
+select,
+textarea,
+button {
+  max-width: 100%;
+  font: inherit;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+input[type="text"],
+select,
+textarea {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+}
+
+textarea {
+  resize: vertical;
+}
+
+button {
+  padding: 0.4rem 0.9rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.actions select {
+  flex: 1 1 10rem;
+  width: auto;
+}
+
+.pause button {
+  margin-top: 0.5rem;
+}
+
+.result:empty {
+  display: none;
+}
+
+.result[data-outcome="ok"] {
+  color: var(--live);
+}
+
+.result[data-outcome="error"] {
+  color: var(--lost);
+}
+
+#reload[data-lit="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--card);
+  font-weight: 600;
+}
+
+.conversation {
+  max-height: 20rem;
+  overflow-y: auto;
+}
+
+.conversation ol {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.entry {
+  padding: 0.4rem 0.6rem;
+  border-left: 3px solid var(--line);
+}
+
+.entry[data-kind="response"] {
+  border-left-color: var(--accent);
+}
+
+.entry .text {
+  white-space: pre-wrap;
+}
+
+.send {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.priority {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.priority li,
+.role-profile,
+.providers li {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.priority li {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.priority label {
+  display: block;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.moves {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.profiles {
+  display: grid;
+}
+
+.files li,
+.notes li {
+  padding: 0.15rem 0;
+}

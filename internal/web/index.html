@@ -21,6 +21,16 @@
   <section aria-labelledby="pauses-title">
     <h2 id="pauses-title">Pauses</h2>
     <ul id="pause-list" class="pauses"></ul>
+    <form id="pause-form" class="control">
+      <label>Pause <select name="target"></select></label>
+      <label>Mode <select name="mode">
+        <option value="soft">Soft: running turns finish</option>
+        <option value="hard">Hard: running turns stop</option>
+      </select></label>
+      <label>Reason <input name="reason" type="text" autocomplete="off"></label>
+      <div class="actions"><button type="submit">Pause</button></div>
+      <p id="pause-result" class="result" role="status"></p>
+    </form>
   </section>
   <section aria-labelledby="capacity-title">
     <h2 id="capacity-title">Capacity</h2>
@@ -29,6 +39,41 @@
   <section aria-labelledby="work-title">
     <h2 id="work-title">Active work</h2>
     <div id="workstreams" class="workstreams"></div>
+  </section>
+  <section aria-labelledby="priority-title">
+    <h2 id="priority-title">Priority</h2>
+    <form id="priority-form" class="control">
+      <p id="priority-current" class="meta"></p>
+      <ol id="priority-list" class="priority"></ol>
+      <div class="actions">
+        <button type="submit">Set order</button>
+        <button type="button" id="priority-clear">Clear order</button>
+      </div>
+      <p id="priority-result" class="result" role="status"></p>
+    </form>
+  </section>
+  <section aria-labelledby="profiles-title">
+    <h2 id="profiles-title">Profiles</h2>
+    <div class="control">
+      <div id="profiles" class="profiles"></div>
+      <h4>Provider usage</h4>
+      <ul id="providers" class="providers"></ul>
+      <p id="profile-result" class="result" role="status"></p>
+    </div>
+  </section>
+  <section aria-labelledby="config-title">
+    <h2 id="config-title">Configuration</h2>
+    <div id="config" class="control">
+      <div class="line">
+        <span>Loaded <code id="digest"></code></span>
+        <button type="button" id="reload" data-lit="false">Reload</button>
+      </div>
+      <p id="drift"></p>
+      <ul id="drift-files" class="files"></ul>
+      <p id="last-error" class="attention" hidden></p>
+      <ul id="config-diagnostics" class="notes"></ul>
+      <p id="reload-result" class="result" role="status"></p>
+    </div>
   </section>
 </main>
 </body>

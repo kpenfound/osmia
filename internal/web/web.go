@@ -1,6 +1,7 @@
 // Package web holds the page the service serves beside its API. The page is
 // a client of the /v1 API like the command line: it reads the views and the
-// event stream and needs no handler of its own.
+// event stream, acts through the same endpoints, and needs no handler of its
+// own.
 package web
 
 import (

@@ -116,6 +116,24 @@ func (p *page) awaitText(selector, want string) {
 	p.await(fmt.Sprintf("%q in %s", want, selector), textOf(selector)+".includes("+quote(want)+")")
 }
 
+// click clicks the first element selector matches.
+func (p *page) click(selector string) {
+	p.t.Helper()
+	p.run(chromedp.Click(selector, chromedp.ByQuery))
+}
+
+// typeInto types text into the first field selector matches.
+func (p *page) typeInto(selector, text string) {
+	p.t.Helper()
+	p.run(chromedp.SendKeys(selector, text, chromedp.ByQuery))
+}
+
+// choose selects value in the first select selector matches.
+func (p *page) choose(selector, value string) {
+	p.t.Helper()
+	p.run(chromedp.SetValue(selector, value, chromedp.ByQuery))
+}
+
 // paths returns the paths of every URL the page requested.
 func (p *page) paths() []string {
 	p.t.Helper()

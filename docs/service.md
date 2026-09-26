@@ -295,23 +295,61 @@ their usual checks to it. `GET` and `HEAD` return the files; any other method
 or path gets the API's answer. The responses allow the page to load only its
 own files and to connect only to its own origin, and forbid framing it.
 
-The page is a client of the API and nothing else: it reads `GET /v1/status`
-and `GET /v1/runtime` and follows `GET /v1/events`. It shows, for phone and
-laptop widths:
+The page is a client of the API and nothing else: it reads `GET /v1/status`,
+`GET /v1/runtime`, `GET /v1/config` and `GET /v1/conversation/<id>` of each
+workstream `/status` lists, follows `GET /v1/events`, and acts through the
+same endpoints the command line uses, so an action is validated, recorded and
+announced as the matching command's is. It shows, for phone and laptop
+widths:
 
 - every pause in force from `/runtime`, with its scope, mode, reason, who set
   it (the owner, the daily budget or a provider usage limit) and when;
 - the [capacity](#capacity): each role kind's slots used against its limit,
   the work waiting for a slot and why, and the per-workstream limit;
 - each workstream of `/status`: the chief of staff's goal, attention and
-  note, its state, its units grouped by state in lifecycle order, and its
-  agents with role, unit, profile, state and elapsed time as of the last read;
-- the diagnostics of both views and any read that failed.
+  note, its state, its units grouped by state in lifecycle order, its
+  agents with role, unit, profile, state and elapsed time as of the last read,
+  and its [conversation](#conversation), each message and response with its
+  turn's state;
+- the priority order in force, each role's next-turn profile and its source
+  with the day's usage of that profile's provider beside it, and every
+  provider's [usage](#provider-usage);
+- the loaded configuration's digest, each configuration file's
+  [disk drift](#disk-drift), the last failed reload and the `/config`
+  diagnostics, among them the settings only a restart applies;
+- the diagnostics of `/status` and `/runtime` and any read that failed.
+
+Its controls are:
+
+| Control | Request | Checked on the page first |
+| --- | --- | --- |
+| Send, on a workstream's conversation | `POST /v1/conversation/<id>` | The message is not empty |
+| Pause the factory, the project or a workstream, soft or hard | `PUT /v1/runtime/pause` | A scope is chosen and the reason is not empty |
+| Resume, on a factory, project or workstream pause | `DELETE /v1/runtime/pause` with the pause's target | |
+| Set order, of the chosen workstreams in the order shown | `PUT /v1/runtime/priority` | At least one workstream is chosen |
+| Clear order | `DELETE /v1/runtime/priority` | |
+| Set, on a role's profile | `PUT /v1/runtime/profile` | A profile is chosen |
+| Clear, on a role with an owner override | `DELETE /v1/runtime/profile` | |
+| Reload | `POST /v1/reload` | |
+
+A control the page refuses sends nothing. Each shows what the API answered:
+its refusal's message, or what it did; a reload also names the loaded digest
+and the settings only a restart applies. A role pause, which follows a
+provider's usage limit, has no resume control. The reload control is lit
+while a reload has something to do: `/config` reports a `reload_required`
+diagnostic or an `invalid` file. A change only a restart applies does not
+light it.
 
 It reads the views an event names, as the [event stream](#event-stream)
-table says: `/status` and `/runtime` for `resync` and `runtime`, `/status`
-for `workstream` and `spend`; it ignores the kinds it does not show. Events
-that arrive during a read are read after it, once each. When the stream ends
+table says: every view for `resync`, `/status` and `/runtime` for `runtime`,
+`/status` for `workstream` and `spend`, `/config` for `config`, and the
+event's workstream's conversation for `conversation`; it ignores `inbox`.
+A workstream's conversation is read when `/status` first lists it. Since an
+edit of a configuration file is not announced, the page also reads `/config`
+every 10 seconds while it is visible and its stream is live, and when it
+becomes visible again. Events that arrive during a read are read after it,
+once each. A message being written and a profile being chosen survive the
+reads. When the stream ends
 or cannot be opened, the page shows that it is reconnecting and opens a new
 stream after 1 second, doubling the delay after each failure up to 10
 seconds; while it waits, it reconnects at once when the browser comes back
