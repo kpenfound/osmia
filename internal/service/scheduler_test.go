@@ -331,7 +331,8 @@ func TestServiceParksWaitingThreadAcrossRestart(t *testing.T) {
 	repo = <-lives
 	tick()
 	tick()
-	if got := ran(); !slices.Equal(got, []string{"ask"}) || !parked(repo) {
+	soon(t, "the first lifetime to park the thread", func() bool { return parked(repo) })
+	if got := ran(); !slices.Equal(got, []string{"ask"}) {
 		t.Fatalf("first lifetime ran %v, parked %v", got, parked(repo))
 	}
 	must(t, s.Close())
@@ -351,6 +352,9 @@ func TestServiceParksWaitingThreadAcrossRestart(t *testing.T) {
 	}
 	tick()
 	tick()
+	soon(t, "the answer turn to run and unpark the thread", func() bool {
+		return slices.Equal(ran(), []string{"ask", "answer"}) && !parked(repo)
+	})
 	if got := ran(); !slices.Equal(got, []string{"ask", "answer"}) || parked(repo) {
 		t.Fatalf("unparked runs %v, parked %v", got, parked(repo))
 	}
