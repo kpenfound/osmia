@@ -3,13 +3,17 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -236,5 +240,110 @@ func TestAmendmentRoundResumesCompletedMember(t *testing.T) {
 	packet := readDocs(t, repo, stream, "amendment-1-presented-packet")
 	if len(packet) != 1 || !strings.Contains(packet[0].Content, "Keep the checkpoint proof visible.") {
 		t.Fatalf("restart lost the first member's objection: %+v", packet)
+	}
+}
+
+// The amendment rounds of two workstreams run at the same time under the
+// service's reconciliation options: each round's held member is in flight
+// while the other's is, and a member that ended leaves the operation lock
+// free while its round's other member runs. Released, each amendment is heard
+// once with a record of every member.
+func TestAmendmentRoundsOfTwoWorkstreamsRunAtTheSameTime(t *testing.T) {
+	t.Parallel()
+	var committee *Committee
+	// Without a committee runner the workstreams stay sketched, with no shed
+	// round, until the amendments are seeded.
+	f := newDebateFixtureWith(t, 2, 1, "", func(o *Options) { committee, o.Committee = o.Committee, nil })
+	var mu sync.Mutex
+	// Each member's session directory lies under its workstream's.
+	var held []string
+	release := make(chan struct{})
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	defer releaseOnce()
+	f.script("amend-1-round-1-"+committeeAgent(1)+"-1", nil, nil)
+	f.script("amend-1-round-1-"+committeeAgent(2)+"-1", nil, func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
+		mu.Lock()
+		held = append(held, req.SessionDir)
+		mu.Unlock()
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	running := func(stream config.WorkstreamID) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.ContainsFunc(held, func(dir string) bool { return strings.Contains(dir, string(stream)) })
+	}
+	first := f.handIn(t, "amend-first", handedDesign)
+	second := f.handIn(t, "amend-second", handedDesign)
+	f.await(t, first, sketched)
+	f.await(t, second, sketched)
+	f.stop(t)
+	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	defer repo.Close()
+	f.s.active = &activeProject{repository: repo}
+	f.s.options.Committee = committee
+	streams := []config.WorkstreamID{first, second}
+	for _, stream := range streams {
+		proposedAmendment(t, f, repo, stream)
+	}
+	a := amendmentDebate{&debate{s: f.s, repository: repo}}
+	must(t, a.Pass(context.Background()))
+	c, err := reconcile.New(repo, reconcile.Options{Worker: "test", Now: f.clock.Now, RetryDelay: time.Minute,
+		Adapters:   map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: runnerAdapter{amendRounds: a}},
+		Hold:       func(_ config.WorkstreamID, op coreadapter.Operation) bool { return op.Action != AmendmentRoundAction },
+		Concurrent: concurrentOperation})
+	must(t, err)
+	passed := make(chan error, 1)
+	go func() { passed <- c.Pass(context.Background()) }()
+	stop := func(format string, args ...any) {
+		t.Helper()
+		releaseOnce()
+		<-passed
+		c.Wait()
+		t.Fatalf(format, args...)
+	}
+	ended := func(stream config.WorkstreamID) bool {
+		th, err := repo.Thread(stream, committeeAgent(1))
+		return err == nil && len(th.Turns) == 1 && !th.Turns[0].CompletedAt.IsZero()
+	}
+	deadline := time.Now().Add(overlapWait)
+	for !running(first) || !running(second) || !ended(first) || !ended(second) {
+		if time.Now().After(deadline) {
+			stop("held members in flight: first %v, second %v; first members ended: %v, %v; want both rounds at once", running(first), running(second), ended(first), ended(second))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	free := make(chan struct{})
+	go func() { repo.Serialize(func() error { close(free); return nil }) }()
+	select {
+	case <-free:
+	case <-time.After(10 * time.Second):
+		stop("a round's ended member took the operation lock back while its other member runs")
+	}
+	releaseOnce()
+	must(t, <-passed)
+	must(t, c.Wait())
+	for _, stream := range streams {
+		state, err := repo.Workflow(stream, amendmentSubject("1"))
+		must(t, err)
+		if state.Value != "heard" {
+			t.Errorf("workstream %s amendment %q, want heard", stream, state.Value)
+		}
+		ops, err := repo.Operations(stream)
+		must(t, err)
+		ops = slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != AmendmentRoundAction })
+		if len(ops) != 1 || !ops[0].Acknowledged || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
+			t.Errorf("workstream %s amendment rounds: %+v", stream, ops)
+		}
+		records, err := amendmentRecords(repo, stream, "1")
+		must(t, err)
+		if len(records) != 2 || records[0].Failure != "" || records[1].Failure != "" {
+			t.Errorf("workstream %s records: %+v", stream, records)
+		}
 	}
 }
