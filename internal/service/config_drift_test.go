@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/config"
 )
 
 // The configuration view compares each configuration file on disk with the
@@ -80,5 +82,18 @@ func TestConfigReportsDriftOfEveryFile(t *testing.T) {
 	must(t, err)
 	if got.Drift.Differs || got.Digest == before.Digest || s.current().Capacity.Masons != 7 {
 		t.Fatalf("after a reload: %+v", got)
+	}
+}
+
+// A top-level file without active_projects lists the same projects as the
+// empty list project remove leaves loaded.
+func TestTopLevelDigestTreatsNoActiveProjectsAsEmpty(t *testing.T) {
+	t.Parallel()
+	loaded := &config.Config{Version: 1, ActiveProjects: []string{}}
+	if topLevelDigest(loaded) != topLevelDigest(&config.Config{Version: 1}) {
+		t.Fatal("an absent active_projects differs from an empty one")
+	}
+	if topLevelDigest(loaded) == topLevelDigest(&config.Config{Version: 1, ActiveProjects: []string{string(project)}}) {
+		t.Fatal("a listed project does not differ")
 	}
 }
