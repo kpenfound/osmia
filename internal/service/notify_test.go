@@ -26,6 +26,9 @@ type fakeWebhook struct {
 	mu     sync.Mutex
 	bodies []string
 	status int
+	// ledger, when set, is the notification ledger that must hold each
+	// posted body as pending before the post arrives.
+	ledger string
 }
 
 func newFakeWebhook(t *testing.T) *fakeWebhook {
@@ -38,10 +41,41 @@ func newFakeWebhook(t *testing.T) *fakeWebhook {
 		if r.Method != http.MethodPost || r.URL.Path != "/hook/secret" || r.Header.Get("Content-Type") != "text/plain; charset=utf-8" {
 			t.Errorf("request %s %s %s", r.Method, r.URL.Path, r.Header.Get("Content-Type"))
 		}
+		if w.ledger != "" && !pendingIn(w.ledger, string(body)) {
+			t.Errorf("posted before the ledger recorded it as pending: %q", body)
+		}
 		w.bodies = append(w.bodies, string(body))
 		rw.WriteHeader(w.status)
 	}))
 	t.Cleanup(w.Close)
+	return w
+}
+
+// pendingIn reports whether the ledger at path holds body as a pending
+// notification.
+func pendingIn(path, body string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var l notifyLedger
+	if json.Unmarshal(data, &l) != nil {
+		return false
+	}
+	for _, rec := range l.Notifications {
+		if rec.State == notificationPending && rec.Body == body {
+			return true
+		}
+	}
+	return false
+}
+
+// records makes the webhook check that each post is recorded as pending in
+// the ledger of opts' root first.
+func (w *fakeWebhook) records(opts Options) *fakeWebhook {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.ledger = filepath.Join(opts.Config.Root, "notifications.json")
 	return w
 }
 
@@ -71,11 +105,15 @@ type fakeInbox struct {
 	mu      sync.Mutex
 	entries []InboxEntry
 	s       *Service
+	broken  bool
 }
 
 func (f *fakeInbox) read(context.Context) (InboxResponse, *APIError) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.broken {
+		return InboxResponse{}, &APIError{Internal, "cannot read the inbox"}
+	}
 	return InboxResponse{Entries: slices.Clone(f.entries)}, nil
 }
 
@@ -100,6 +138,20 @@ func soon(t *testing.T, what string, ok func() bool) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// breakInbox makes the inbox unreadable, or readable again, and announces it.
+func (f *fakeInbox) breakInbox(broken bool) {
+	f.mu.Lock()
+	f.broken = broken
+	f.mu.Unlock()
+	f.set(f.current()...)
+}
+
+func (f *fakeInbox) current() []InboxEntry {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.entries)
 }
 
 func notifyFixture(t *testing.T, webhook string) (Options, *fakeInbox) {
@@ -192,6 +244,7 @@ func TestNotifyPostsEveryNewInboxEntryOnce(t *testing.T) {
 	t.Parallel()
 	hook := newFakeWebhook(t)
 	opts, inbox := notifyFixture(t, "")
+	hook.records(opts)
 	withTailnet(t, &opts, "osmia.example.ts.net", "osmia")
 	withListen(t, opts, "tailnet = \"osmia\"\n")
 	setWebhook(t, opts, hook.hook())
@@ -249,6 +302,7 @@ func TestNotifyRestartSendsPendingAndNeverResendsSent(t *testing.T) {
 	t.Parallel()
 	hook := newFakeWebhook(t)
 	opts, inbox := notifyFixture(t, hook.hook())
+	hook.records(opts)
 	pending, sent := entryOf(InboxRatification, 1), entryOf(InboxDelivery, 2)
 	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	ledger := notifyLedger{Enabled: true, Notifications: map[string]*notification{
@@ -282,6 +336,8 @@ func TestNotifyReloadTurnsNotificationsOnAndOff(t *testing.T) {
 	t.Parallel()
 	first, second := newFakeWebhook(t), newFakeWebhook(t)
 	opts, inbox := notifyFixture(t, "")
+	first.records(opts)
+	second.records(opts)
 	opts.NotifyRetry = time.Minute
 	e1 := entryOf(InboxEscalation, 1)
 	inbox.set(e1)
@@ -359,6 +415,7 @@ func TestNotifyFailingWebhookRetriesThenGivesUp(t *testing.T) {
 	hook := newFakeWebhook(t)
 	hook.respond(http.StatusServiceUnavailable)
 	opts, inbox := notifyFixture(t, hook.hook())
+	hook.records(opts)
 	opts.NotifyRetry = 100 * time.Millisecond
 	_, c := startNotifying(t, opts, inbox)
 	soon(t, "notifications on", func() bool { return readLedger(t, opts).Enabled })
@@ -422,6 +479,7 @@ func TestNotifyReadsTheServiceInbox(t *testing.T) {
 	f, _, repository, _ := deliveryFixture(t)
 	ctx := context.Background()
 	hook := newFakeWebhook(t)
+	hook.records(Options{Config: config.Options{Root: f.s.cfg.Root.String()}})
 	f.s.mu.Lock()
 	cfg := *f.s.cfg
 	cfg.Notify.Webhook = hook.hook()
@@ -464,4 +522,93 @@ func TestNotifyReadsTheServiceInbox(t *testing.T) {
 	if got := hook.received(); len(got) != 1 {
 		t.Fatalf("posted again: %q", got)
 	}
+}
+
+// Without a tailnet DNS name the Open line names the configured
+// listen.tailnet hostname.
+func TestNotifyLinksTheConfiguredTailnetHostname(t *testing.T) {
+	t.Parallel()
+	hook := newFakeWebhook(t)
+	opts, inbox := notifyFixture(t, "")
+	hook.records(opts)
+	withTailnet(t, &opts)
+	withListen(t, opts, "tailnet = \"osmia\"\n")
+	setWebhook(t, opts, hook.hook())
+	startNotifying(t, opts, inbox)
+	soon(t, "notifications on", func() bool { return readLedger(t, opts).Enabled })
+	inbox.set(entryOf(InboxDelivery, 1))
+	if got := hook.await(t, 1); !strings.HasSuffix(got[0], "\nOpen: http://osmia/\n") {
+		t.Fatalf("post %q", got[0])
+	}
+}
+
+// A ledger that cannot be read or written, or an inbox that cannot be read,
+// sends nothing and shows an internal notify diagnostic in /v1/status and
+// /v1/config. Once the fault is gone the entry is posted and the diagnostic
+// clears.
+func TestNotifyFaultsSendNothingUntilCleared(t *testing.T) {
+	t.Parallel()
+	hook := newFakeWebhook(t)
+	opts, inbox := notifyFixture(t, hook.hook())
+	hook.records(opts)
+	ledger := filepath.Join(opts.Config.Root, "notifications.json")
+	// An unreadable ledger at start.
+	must(t, os.WriteFile(ledger, []byte("{not json"), 0600))
+	_, c := startNotifying(t, opts, inbox)
+	fault := func(message string) {
+		t.Helper()
+		soon(t, message, func() bool {
+			st, cf := notifyDiagnostics(t, c)
+			want := Diagnostic{"notify", Internal, message}
+			return len(st) == 1 && len(cf) == 1 && st[0] == want && cf[0] == want
+		})
+	}
+	cleared := func(step string) {
+		t.Helper()
+		soon(t, step, func() bool {
+			st, cf := notifyDiagnostics(t, c)
+			return len(st) == 0 && len(cf) == 0
+		})
+	}
+	fault("cannot read " + ledger + "; nothing is sent until it can be read")
+	e1 := entryOf(InboxEscalation, 1)
+	inbox.set(e1)
+	must(t, os.Remove(ledger))
+	inbox.set(e1)
+	cleared("the ledger readable again")
+	if rec := readLedger(t, opts).Notifications[notificationKey(project, e1)]; rec == nil || rec.State != notificationSkipped {
+		t.Fatalf("entry open while the ledger was unreadable: %+v", rec)
+	}
+
+	// A ledger that cannot be written: a directory takes its place.
+	must(t, os.Remove(ledger))
+	must(t, os.MkdirAll(filepath.Join(ledger, "blocked"), 0700))
+	e2 := entryOf(InboxAmendment, 2)
+	inbox.set(e1, e2)
+	fault("cannot record notifications in " + ledger + "; nothing is sent until it can be written")
+	time.Sleep(50 * time.Millisecond)
+	if got := hook.received(); len(got) != 0 {
+		t.Fatalf("posted without a record: %q", got)
+	}
+	must(t, os.RemoveAll(ledger))
+	inbox.set(e1, e2)
+	if got := hook.await(t, 1); !strings.Contains(got[0], "Kind: amendment") {
+		t.Fatalf("post after the ledger was writable again: %q", got)
+	}
+	cleared("the ledger writable again")
+
+	// An unreadable inbox.
+	inbox.breakInbox(true)
+	fault("cannot read the inbox; notifications wait until it can be read")
+	e3 := entryOf(InboxContested, 3)
+	inbox.set(e1, e2, e3)
+	time.Sleep(50 * time.Millisecond)
+	if got := hook.received(); len(got) != 1 {
+		t.Fatalf("posted while the inbox was unreadable: %q", got)
+	}
+	inbox.breakInbox(false)
+	if got := hook.await(t, 2); !strings.Contains(got[1], "Kind: contested") {
+		t.Fatalf("post after the inbox was readable again: %q", got)
+	}
+	cleared("the inbox readable again")
 }

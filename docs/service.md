@@ -2577,6 +2577,7 @@ problem stands. They never quote the webhook's URL.
 | --- | --- | --- |
 | `unavailable` | `notifying the owner of the <kind> decision in workstream <id> failed at <time> (attempt <n> of 5): <reason>; retrying` | A later post succeeds, or the webhook is removed |
 | `unavailable` | `gave up notifying the owner of the <kind> decision in workstream <id> at <time> after 5 attempts: <reason>` | A later post succeeds, or the webhook is removed |
+| `internal` | `cannot resolve the notification ledger under the root; nothing is sent` | The root's ledger path can be resolved |
 | `internal` | `cannot read <path>; nothing is sent until it can be read` | The ledger can be read |
 | `internal` | `cannot record notifications in <path>; nothing is sent until it can be written` | The ledger can be written |
 | `internal` | `cannot read the inbox; notifications wait until it can be read` | The inbox can be read |

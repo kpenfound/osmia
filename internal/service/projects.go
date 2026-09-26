@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -190,20 +189,7 @@ func (s *Service) writePending(p pendingProject) error {
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(filepath.Dir(path), ".project-add-"+rand.Text()+".tmp")
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp)
-	if _, err := f.Write(append(data, '\n')); err != nil {
-		f.Close()
-		return err
-	}
-	if err := errors.Join(f.Sync(), f.Close()); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return writeFileSynced(path, append(data, '\n'))
 }
 func (s *Service) readPending() (*pendingProject, error) {
 	path, err := s.current().Root.PendingProject()

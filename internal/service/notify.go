@@ -373,6 +373,8 @@ func (n *notifier) save(path string) bool {
 	return true
 }
 
+// writeFileSynced replaces path with data through a synced temporary file
+// beside it, so a reader sees the old contents or the new ones.
 func writeFileSynced(path string, data []byte) error {
 	tmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+"-"+rand.Text()+".tmp")
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
