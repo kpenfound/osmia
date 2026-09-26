@@ -103,6 +103,9 @@ prints it as a `Tailnet:` line, and `osmia status --json` includes it.
 
 ### Reach Osmia from your phone
 
+[Getting started](getting-started.md#2-write-osmiaconfigtoml) puts this setup in
+the order of a first run.
+
 1. Set the hostname the node takes on your tailnet in the top-level
    configuration file, and restart `osmia serve` (a reload keeps the node
    already joined and reports `listen.tailnet` in `restart_required`):

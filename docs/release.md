@@ -48,6 +48,9 @@ commit. The release build itself is not a check.
 
 ## Installing from an archive
 
+[Getting started](getting-started.md#1-install-a-release) uses these steps as
+its first step.
+
 Download the archive for your platform and `checksums.txt` from the release,
 then verify, unpack and install:
 
