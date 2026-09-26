@@ -142,6 +142,13 @@ func TestEventStreamAnnouncesRuntimeAndConfigurationChanges(t *testing.T) {
 // quiet's question escalated to the owner as inbox entry 1.
 func eventTraceFixture(t *testing.T) (*Service, *Client) {
 	t.Helper()
+	return start(t, eventTraceOptions(t))
+}
+
+// eventTraceOptions plants a workstream with one escalated question in the
+// trace and returns the options of a service that has not started.
+func eventTraceOptions(t *testing.T) Options {
+	t.Helper()
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "evs-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
@@ -157,7 +164,7 @@ func eventTraceFixture(t *testing.T) (*Service, *Client) {
 		trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Where should state live?", Blocked: "The unit.", Recommendation: "In files."}, demoStart)
 	must(t, err)
 	must(t, repo.Close())
-	return start(t, opts)
+	return opts
 }
 
 // The workstream, conversation, inbox and spend views each announce their
