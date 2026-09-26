@@ -276,11 +276,15 @@ func TestNotifyPostsEveryNewInboxEntryOnce(t *testing.T) {
 			t.Fatalf("no post\n%s\nin %q", want, bodies)
 		}
 	}
-	for key, rec := range readLedger(t, opts).Notifications {
-		if want := notificationSent; key != notificationKey(project, old) && rec.State != want {
-			t.Fatalf("%s: %+v", key, rec)
+	// The last post is recorded as sent after its response arrives.
+	soon(t, "every post recorded as sent", func() bool {
+		for key, rec := range readLedger(t, opts).Notifications {
+			if key != notificationKey(project, old) && rec.State != notificationSent {
+				return false
+			}
 		}
-	}
+		return true
+	})
 	must(t, s.Close())
 
 	// After a restart only the entry that opens since is posted.
