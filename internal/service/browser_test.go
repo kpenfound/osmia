@@ -349,6 +349,17 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	if shown {
 		t.Fatal("the page shows an attention or a problem the views do not hold")
 	}
+	// A card without an attention item, and one without a status, show no
+	// "null" text.
+	p.awaitText(quietCard+"[data-field=goal]", "No status yet")
+	p.awaitText(quietCard, "The chief of staff has not written a status.")
+	for _, c := range []string{card, quietCard} {
+		var text string
+		p.eval(textOf(c), &text)
+		if strings.Contains(text, "null") {
+			t.Fatalf("the card %s shows null: %q", c, text)
+		}
+	}
 
 	// A status change appears without a reload.
 	p.eval(`window.notReloaded = true`, nil)
