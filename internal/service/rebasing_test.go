@@ -52,7 +52,7 @@ func newRebaseFixture(t *testing.T, key string) (*shedFixture, config.Workstream
 func moveFeature(t *testing.T, f *shedFixture, stream config.WorkstreamID, files map[string]string) string {
 	t.Helper()
 	ctx := context.Background()
-	g := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit)
+	g := workspaces(f.s.cfg, branchesDirectory, backendOf(t, f, stream))
 	acquired, err := g.Acquire(ctx, vcs.Request{Name: string(stream), Branch: featureBranch(stream)})
 	must(t, err)
 	w := acquired.(workspace.Worktree)

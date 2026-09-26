@@ -1910,7 +1910,9 @@ A unit whose workspace does not descend from the tip of the feature branch,
 as after another unit landed, is not finished until the foreman has
 [rebased](#rebasing-units-in-flight) the workspace; the snapshot then holds
 the mason's work on the new tip. A unit whose rebases left conflicts is not
-finished while a conflicted file of its candidate still carries a conflict
+finished while its candidate holds a stored conflict, which a rebase on
+[Jujutsu workspaces](#rebasing-units-in-flight) leaves until the files are
+resolved, or a conflicted file of its candidate still carries a conflict
 marker line, one starting with `<<<<<<<` or `>>>>>>>`: it stays
 `implementing`, and its mason gets the turn `mason-<id>-markers-<n>`, after
 its done turn `n`, naming those files. A unit whose candidate cannot be made
@@ -1926,7 +1928,10 @@ reads the diff between the report's base and candidate commits directly, even
 if either branch has moved. The request carries the sealed spec and plan, the
 mason's criterion report, the resolved seal footprint, and charter and local
 context scoped to the unit's entities. Missing report fields, commits, seals,
-or resolved entities stop preparation with a recorded block reason. The
+or resolved entities stop preparation with a recorded block reason, and so
+does a candidate that holds a stored conflict: `unit <id> stays reviewing: its
+reviewer bundle cannot be assembled: candidate <commit> holds unresolved
+conflicts in <paths>`. The
 prepared identity in `units/<id>/review.json` records the subject, candidate, base, spec
 and plan revisions, the diff digest, report revision and seal number. Repeated
 preparation of the same evidence leaves that revision unchanged.
@@ -2002,9 +2007,10 @@ The operation first checks the feature branch. A tip whose only parent is the
 approved base and whose message carries this operation's `Osmia-Operation`
 trailer is an interrupted landing: the commit is recorded and not made again.
 Otherwise the approval must still be current: the workstream `building` or `assembled`, the
-unit `approved` by review revision `<k>`, and the recorded report, seal,
-candidate diff, unit branch tip, feature branch tip and latest spec and plan
-revisions those the approval names. The service then commits the
+unit `approved` by review revision `<k>`, the candidate holding no stored
+conflict (`candidate <commit> holds unresolved conflicts in <paths>`), and
+the recorded report, seal, candidate diff, unit branch tip, feature branch tip
+and latest spec and plan revisions those the approval names. The service then commits the
 candidate's tree once on the approved base, by `Osmia <osmia@localhost>` and
 stamped with the time the landing was asked for, and fast-forwards the
 feature branch and its workspace to it. No agent takes part. The message's
@@ -2073,6 +2079,17 @@ The unit branch, its index and its files then move to the rebased commit. No
 agent takes part. The merge runs `git merge-tree --write-tree`, which needs
 Git 2.38 or later.
 
+On [Jujutsu workspaces](#workspace-backends) a clean rebase makes the same
+commit. A rebase that conflicts, or whose snapshot still holds a conflict,
+is made by Jujutsu instead: the same change on the new tip, with the same
+message and author, holding each conflicted path as a stored conflict rather
+than as markers, so every unit in flight is rebased, conflicted or not. The
+unit's workspace materializes the conflicts with markers: `<<<<<<<` above the
+feature branch's lines, `|||||||` above the lines both sides started from,
+`=======` above the unit's lines and `>>>>>>>` below them, and a side that
+deleted the file holds no lines. Resolving the markers in the workspace
+resolves the conflict in the unit's next snapshot; markers left keep it.
+
 One trace commit then records `units/<id>/rebase.json` (the unit, rebase
 number, operation, the unit's state, branch, base, new tip, snapshot, rebased
 commit, conflicted paths and the report revision current after the rebase)
@@ -2106,13 +2123,16 @@ them. The landing controller moves a `reviewing` or `approved` unit with
 unresolved conflicts to `implementing` through
 `unit-<id>-implementing-rebase-<k>`, with a notice, and queues its mason the
 turn `mason-<id>-rebase-<k>`, whose prompt lists the conflicted files,
-explains the markers and carries the unit's bundle with the sealed spec to
-resolve them against. A `waiting` or `contested` unit keeps its state until
+explains the markers of the workstream's backend and carries the unit's
+bundle with the sealed spec to resolve them against. Each conflicted unit's
+mason works in its own workspace, so several resolve at once within mason
+capacity. A `waiting` or `contested` unit keeps its state until
 its answer or the owner's ruling moves it on; the same rules then apply. The
 mason reports `done` as usual, and the mason controller
-[finishes](#finishing-units) the unit only once no conflicted file of its
-candidate still carries a marker, so a candidate the reviewer receives never
-does.
+[finishes](#finishing-units) the unit only once its candidate holds no stored
+conflict and no conflicted file of it still carries a marker, so a candidate
+the reviewer receives never does. Review preparation and landing refuse a
+candidate that holds a stored conflict all the same.
 
 A rebase whose outcome is recorded completes on inspection without touching
 the workspace.
@@ -2189,7 +2209,10 @@ on its [backend](#workspace-backends), at `<root>/drifts/<project-id>/<workstrea
 on the branch `osmia-drift/<workstream-id>/<k>`, created from the feature
 branch's tip. The foreman replays the feature branch onto the recorded
 upstream commit there, one commit at a time. At each commit that conflicts
-the replay stops with the conflict markers in the workspace, and
+the replay stops with the conflict markers in the workspace; on Jujutsu
+workspaces every commit is replayed first, each conflict stored in its copy,
+and the markers carry a `|||||||` section with the lines both sides started
+from. Either way,
 `drift/rebase.json` records outcome `conflicted` with the stop's number
 (`round`), the commit it stopped at (`stop`) and its conflicted paths. The
 workstream's drift mason (thread `drift-mason`, role `mason`) gets one turn,

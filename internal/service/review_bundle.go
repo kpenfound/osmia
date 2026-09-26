@@ -121,7 +121,8 @@ func (m *masons) unitReviewEvidence(ctx context.Context, stream config.Workstrea
 }
 
 // candidateEvidence assembles the review request and identity of the unit's
-// recorded report, whatever the unit's state.
+// recorded report, whatever the unit's state. A candidate that holds a
+// stored conflict has none.
 func (m *masons) candidateEvidence(ctx context.Context, stream config.WorkstreamID, unit string) (coreadapter.ReviewRequest, UnitReviewIdentity, error) {
 	docs, err := trace.Read[trace.Document](m.repository, stream)
 	if err != nil {
@@ -189,6 +190,11 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	g, err := newUnitWorkspaces(m.cfg, m.repository).of(stream)
 	if err != nil {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	if stored, err := g.StoredConflicts(ctx, report.Candidate); err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	} else if len(stored) != 0 {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("candidate %s holds unresolved conflicts in %s", report.Candidate, strings.Join(stored, ", "))
 	}
 	diff, err := g.Diff(ctx, report.Base, report.Candidate)
 	if err != nil {

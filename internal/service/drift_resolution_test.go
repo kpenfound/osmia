@@ -148,7 +148,7 @@ func turnIDs(t *testing.T, repository *trace.Repository, stream config.Workstrea
 // resolutionWorkspace returns the workstream's drift resolution workspace.
 func resolutionWorkspace(t *testing.T, f *shedFixture, stream config.WorkstreamID) workspace.Worktree {
 	t.Helper()
-	w, found, err := workspaces(f.s.cfg, driftsDirectory, config.WorkspacesGit).Workspace(context.Background(), string(stream))
+	w, found, err := workspaces(f.s.cfg, driftsDirectory, backendOf(t, f, stream)).Workspace(context.Background(), string(stream))
 	must(t, err)
 	if !found {
 		t.Fatal("the workstream has no drift resolution workspace")
@@ -159,7 +159,7 @@ func resolutionWorkspace(t *testing.T, f *shedFixture, stream config.WorkstreamI
 // featureTip returns the tip of the workstream's feature branch.
 func featureTip(t *testing.T, f *shedFixture, stream config.WorkstreamID) string {
 	t.Helper()
-	tip, _, err := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit).Branch(context.Background(), featureBranch(stream))
+	tip, _, err := workspaces(f.s.cfg, branchesDirectory, backendOf(t, f, stream)).Branch(context.Background(), featureBranch(stream))
 	must(t, err)
 	return tip
 }

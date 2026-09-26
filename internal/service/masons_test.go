@@ -134,7 +134,15 @@ func newCappedMasonFixture(t *testing.T, capacity, drafted string) (*shedFixture
 
 func newConfiguredMasonFixture(t *testing.T, capacity, drafted, classifier string) (*shedFixture, *fakeMasons) {
 	t.Helper()
+	return newMasonFixtureOn(t, config.WorkspacesGit, capacity, drafted, classifier)
+}
+
+// newMasonFixtureOn is newConfiguredMasonFixture whose workstreams are
+// handed in on the workspace backend given.
+func newMasonFixtureOn(t *testing.T, backend, capacity, drafted, classifier string) (*shedFixture, *fakeMasons) {
+	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, masonRoles, func(opts *Options) {
+		onWorkspaces(t, *opts, backend)
 		// Leave time for status snapshots when instrumented tests run many
 		// service fixtures concurrently.
 		opts.WriteTimeout = time.Minute
