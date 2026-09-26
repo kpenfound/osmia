@@ -138,6 +138,11 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	// A profile being chosen and a message being written, still focused,
 	// survive the reads a runtime change causes.
 	p.awaitText(row+"[data-field=source]", "configured")
+	var profile string
+	p.eval(`document.querySelector(`+quote(row+"select")+`).value`, &profile)
+	if profile != "" {
+		t.Fatalf("the mason's profile select starts with %q chosen", profile)
+	}
 	p.choose(row+"select", "other")
 	p.typeInto(draft, "Half a thought")
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Lunch", Source: runtime.PauseOwner})
@@ -167,7 +172,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	if pauses := runtimeView().Effective.Pauses; len(pauses) != 1 {
 		t.Fatalf("a pause without a scope reached the service: %+v", pauses)
 	}
-	p.choose(form+"input[name=reason]", "")
+	p.eval(`document.querySelector('#pause-form input[name=reason]').value = ''`, nil)
 	p.choose(form+"select[name=target]", "workstream:"+string(stream))
 	p.choose(form+"select[name=mode]", "hard")
 	p.click(form + "button[type=submit]")
@@ -244,7 +249,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	// profile's provider beside it; an override needs a profile.
 	p.awaitText(row+"[data-field=usage]", "claude: USD")
 	p.await("clear disabled without an override", `document.querySelector(`+quote(row+"[data-field=clear]")+`).disabled`)
-	p.choose(row+"select", "")
+	p.eval(`document.querySelector(`+quote(row+"select")+`).value = ''`, nil)
 	p.click(row + "[data-field=set]")
 	p.awaitText("#profile-result", "Choose a profile for mason.")
 	if got := runtimeView().Profiles["mason"]; got.Source != "configuration" {
