@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -51,10 +50,10 @@ func resolving(outcome string) bool {
 }
 
 // driftWorkspaces returns the provider of the resolution workspaces of the
-// configured project's drift rebases: one Git worktree per workstream,
+// configured project's drift rebases: one workspace per workstream,
 // <root>/drifts/<project>/<workstream>, on driftBranch.
-func driftWorkspaces(cfg *config.Config) *workspace.Git {
-	return &workspace.Git{Clone: cfg.Project.Clone, Directory: filepath.Join(cfg.Root.String(), driftsDirectory, string(cfg.Project.ID))}
+func driftWorkspaces(cfg *config.Config) workspace.Provider {
+	return workspaces(cfg, driftsDirectory)
 }
 
 // driftBranch names the branch drift rebase k of the workstream is
@@ -78,7 +77,7 @@ func driftReviewTurnID(k, review int) string {
 // resolutions are the resolution workspaces of a project's drift rebases.
 // They are also the workspaces a drift mason turn is lent: the turn works
 // on a copy without VCS metadata, which capture copies back.
-type resolutions struct{ git *workspace.Git }
+type resolutions struct{ git workspace.Provider }
 
 // find returns the workstream's resolution workspace when the clone has one.
 func (r resolutions) find(ctx context.Context, stream config.WorkstreamID) (workspace.Worktree, error) {

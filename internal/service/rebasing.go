@@ -427,7 +427,7 @@ func (r rebaser) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 // head is the commit it made: its only parent is the commit the operation
 // rebases onto and its message names the operation. It returns "" for any
 // other commit.
-func rebasedSnapshot(ctx context.Context, g *workspace.Git, head string, in rebaseInput, operation string) (string, error) {
+func rebasedSnapshot(ctx context.Context, g workspace.Provider, head string, in rebaseInput, operation string) (string, error) {
 	if head == in.Onto {
 		return "", nil
 	}

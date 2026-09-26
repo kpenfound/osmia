@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -80,8 +79,8 @@ func landIDs(unit string, review int) (transition, event string) {
 
 // featureWorkspaces returns the workspace provider of the feature branches of
 // the configured project.
-func featureWorkspaces(cfg *config.Config) *workspace.Git {
-	return &workspace.Git{Clone: cfg.Project.Clone, Directory: filepath.Join(cfg.Root.String(), branchesDirectory, string(cfg.Project.ID))}
+func featureWorkspaces(cfg *config.Config) workspace.Provider {
+	return workspaces(cfg, branchesDirectory)
 }
 
 // foreman is the landing controller. Its pass asks to land one approved unit
@@ -346,7 +345,7 @@ func (f *foreman) Inspect(ctx context.Context, op coreadapter.Operation) (coread
 // landingCommit reports whether tip is the commit the landing operation
 // made: its only parent is the approved base and its message names the
 // operation.
-func landingCommit(ctx context.Context, g *workspace.Git, tip string, in landInput, operation string) (bool, error) {
+func landingCommit(ctx context.Context, g workspace.Provider, tip string, in landInput, operation string) (bool, error) {
 	if tip == in.Base {
 		return false, nil
 	}

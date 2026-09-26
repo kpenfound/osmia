@@ -1,6 +1,7 @@
 // Package workspace creates and inspects the service's workspaces on a
-// project's clone. The implementation is Git worktrees behind core's workspace
-// provider interface; the service alone runs it, and no agent holds it.
+// project's clone behind the Provider interface, which also satisfies core's
+// workspace provider interface. Git implements it with worktrees; the service
+// alone runs it, and no agent holds it.
 package workspace
 
 import (
@@ -26,10 +27,8 @@ type Git struct {
 	Directory string
 }
 
-var _ vcs.Provider = (*Git)(nil)
-
-// Worktree is one workspace: a linked worktree whose repository metadata is
-// the clone's.
+// Worktree is one workspace. Git's is a linked worktree whose repository
+// metadata is the clone's.
 type Worktree struct {
 	Path   string
 	Branch string

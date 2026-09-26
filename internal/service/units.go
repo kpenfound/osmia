@@ -29,13 +29,13 @@ func unitBranch(stream config.WorkstreamID, unit string) string {
 	return "osmia-unit/" + string(stream) + "/" + unit
 }
 
-// unitWorkspaces are the workspaces of a project's units: one Git worktree per
+// unitWorkspaces are the workspaces of a project's units: one workspace per
 // workstream and unit, <root>/units/<project>/<workstream>/<unit> on
 // unitBranch, created from the workstream's feature branch. Nothing here
 // removes one, so a unit's work stays in its workspace between turns and
 // across restarts. They are also the workspaces a mason turn is lent: the
 // turn works on a copy without VCS metadata, which capture copies back.
-type unitWorkspaces struct{ git *workspace.Git }
+type unitWorkspaces struct{ git workspace.Provider }
 
 var _ coreadapter.Workspaces = unitWorkspaces{}
 
@@ -43,7 +43,7 @@ func (s *Service) unitWorkspaces() unitWorkspaces { return newUnitWorkspaces(s.c
 
 // newUnitWorkspaces returns the unit workspaces of the configured project.
 func newUnitWorkspaces(cfg *config.Config) unitWorkspaces {
-	return unitWorkspaces{git: &workspace.Git{Clone: cfg.Project.Clone, Directory: filepath.Join(cfg.Root.String(), unitsDirectory, string(cfg.Project.ID))}}
+	return unitWorkspaces{git: workspaces(cfg, unitsDirectory)}
 }
 
 func unitName(stream config.WorkstreamID, unit string) string {
