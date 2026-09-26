@@ -871,3 +871,120 @@ func TestJujutsuReadsItsCommitsAsGitDoes(t *testing.T) {
 		t.Fatalf("the replay moved the feature branch to %s, %v", tip, err)
 	}
 }
+
+// A workspace records the change ID of its first working-copy commit, which
+// its first snapshot commits. Carry gives a rebased commit, clean or holding
+// a stored conflict, that change ID and changes nothing else it records: the
+// same arguments carry the same commit, and once the unit's branch moves
+// there the repository reads the change and the stored conflict. Git has no
+// change IDs.
+func TestJujutsuCarriesAWorkspacesChangeThroughItsRebases(t *testing.T) {
+	t.Parallel()
+	f, j := newJujutsuFixture(t)
+	ctx := context.Background()
+	base := git(t, "-C", f.scratch, "rev-parse", "HEAD")
+	git(t, "-C", f.clone, "branch", "osmia/w1", base)
+	feature := acquireJJ(t, j, vcs.Request{Name: "w1", Branch: "osmia/w1"})
+	unit := acquireJJ(t, j, vcs.Request{Name: "w1/u1", Ref: "osmia/w1", Branch: "osmia-unit/w1/u1"})
+	change, err := j.Change(ctx, unit)
+	if err != nil || !changePattern.MatchString(change) {
+		t.Fatalf("the unit workspace's change %q: %v", change, err)
+	}
+	if other, err := j.Change(ctx, feature); err != nil || other == change || !changePattern.MatchString(other) {
+		t.Fatalf("the feature workspace's change %q: %v", other, err)
+	}
+	if again := acquireJJ(t, j, vcs.Request{Name: "w1/u1", Ref: "osmia/w1", Branch: "osmia-unit/w1/u1"}); again.Path != unit.Path {
+		t.Fatalf("the workspace acquired again is %s", again.Path)
+	} else if kept, err := j.Change(ctx, again); err != nil || kept != change {
+		t.Fatalf("the workspace acquired again has change %q: %v", kept, err)
+	}
+	snapshot := snapshotJJ(t, j, unit, base, map[string]string{"unit.go": "unit\n", "README": "widgets by the unit\n"})
+	if got, err := j.ChangeOf(ctx, snapshot); err != nil || got != change {
+		t.Fatalf("the first snapshot is change %q, %v; want %s", got, err, change)
+	}
+	tip := snapshotJJ(t, j, feature, base, map[string]string{"landed.go": "landed\n"})
+	at := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	rebased, conflicts, err := j.Rebase(ctx, tip, snapshot, "Rebase unit u1", at)
+	if err != nil || len(conflicts) != 0 {
+		t.Fatalf("rebase %s %v: %v", rebased, conflicts, err)
+	}
+	carried, err := j.Carry(ctx, rebased, change)
+	if err != nil || carried == rebased {
+		t.Fatalf("carried %s from %s: %v", carried, rebased, err)
+	}
+	header := func(commit string) []string {
+		h, _, _ := strings.Cut(git(t, "-C", f.clone, "cat-file", "commit", commit), "\n\n")
+		return strings.Split(h, "\n")
+	}
+	if got, want := header(carried), append(header(rebased), "change-id "+change); !slices.Equal(got, want) {
+		t.Fatalf("the carried commit's header %q, want %q", got, want)
+	}
+	if got, want := git(t, "-C", f.clone, "log", "-1", "--format=%B", carried), git(t, "-C", f.clone, "log", "-1", "--format=%B", rebased); got != want {
+		t.Fatalf("the carried commit's message %q, want %q", got, want)
+	}
+	for _, from := range []string{rebased, carried} {
+		if again, err := j.Carry(ctx, from, change); err != nil || again != carried {
+			t.Fatalf("carrying %s again made %s, %v; want %s", from, again, err, carried)
+		}
+	}
+	if _, err := j.Carry(ctx, rebased, "u1\nparent "+base); err == nil {
+		t.Fatal("a change ID that is not one was carried")
+	}
+	if err := j.Move(ctx, unit, snapshot, carried); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := j.ChangeOf(ctx, carried); err != nil || got != change {
+		t.Fatalf("the rebased commit is change %q, %v; want %s", got, err, change)
+	}
+
+	conflicting := snapshotJJ(t, j, feature, tip, map[string]string{"README": "widgets by the feature\n"})
+	conflicted, conflicts, err := j.Rebase(ctx, conflicting, carried, "Rebase unit u1 again", at)
+	if err != nil || !slices.Equal(conflicts, []string{"README"}) {
+		t.Fatalf("a conflicted rebase %s %v: %v", conflicted, conflicts, err)
+	}
+	if got, err := j.ChangeOf(ctx, conflicted); err != nil || got == change {
+		t.Fatalf("the conflicted rebase Jujutsu made is change %q already: %v", got, err)
+	}
+	stored, err := j.Carry(ctx, conflicted, change)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Move(ctx, unit, carried, stored); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := j.ChangeOf(ctx, stored); err != nil || got != change {
+		t.Fatalf("the conflicted rebased commit is change %q, %v; want %s", got, err, change)
+	}
+	if paths, err := j.StoredConflicts(ctx, stored); err != nil || !slices.Equal(paths, []string{"README"}) {
+		t.Fatalf("the carried conflicted commit stores %v: %v", paths, err)
+	}
+	if marked, err := j.MarkedFiles(unit, []string{"README", "unit.go"}); err != nil || !slices.Equal(marked, []string{"README"}) {
+		t.Fatalf("marked files %v: %v", marked, err)
+	}
+	if c, err := j.Commit(ctx, stored); err != nil || !slices.Equal(c.Parents, []string{conflicting}) || c.Message != "Rebase unit u1 again" {
+		t.Fatalf("the carried conflicted commit %+v: %v", c, err)
+	}
+
+	if got, err := f.provider.Change(ctx, unit); err != nil || got != "" {
+		t.Fatalf("Git's change of a workspace %q: %v", got, err)
+	}
+	if got, err := f.provider.ChangeOf(ctx, carried); err != nil || got != "" {
+		t.Fatalf("Git's change of a commit %q: %v", got, err)
+	}
+	if got, err := f.provider.Carry(ctx, rebased, change); err != nil || got != rebased {
+		t.Fatalf("Git carried %s as %s: %v", rebased, got, err)
+	}
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	meta, err := readMetadata(unit.Path)
+	must(err)
+	meta.Change = ""
+	must(writeMetadata(unit.Path, meta))
+	if got, err := j.Change(ctx, unit); err != nil || got != "" {
+		t.Fatalf("a workspace that recorded no change has %q: %v", got, err)
+	}
+}

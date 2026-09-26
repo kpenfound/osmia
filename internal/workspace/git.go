@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -328,6 +329,19 @@ func (g *Git) Move(ctx context.Context, w Worktree, from, to string) error {
 	_, err = g.runIn(ctx, w.Path, identity, "reset", "--hard", "--quiet", to)
 	return err
 }
+
+// Change returns the change ID the workspace was created with, which a
+// backend with change IDs gives every commit Carry makes of its work. Git
+// commits carry no change ID, so Git returns "".
+func (g *Git) Change(context.Context, Worktree) (string, error) { return "", nil }
+
+// ChangeOf returns the change ID commit carries, or "" when it carries none,
+// which no Git commit does.
+func (g *Git) ChangeOf(context.Context, string) (string, error) { return "", nil }
+
+// Carry returns a commit holding what commit holds that carries change ID
+// change. Git has no change IDs and returns commit itself.
+func (g *Git) Carry(_ context.Context, commit, _ string) (string, error) { return commit, nil }
 
 // StoredConflicts returns the paths commit holds as stored conflicts, which
 // no Git commit does: a path Git's merge left conflicted holds its conflict
@@ -842,7 +856,13 @@ func (g *Git) runIn(ctx context.Context, dir string, extra []string, args ...str
 }
 
 func (g *Git) runInRaw(ctx context.Context, dir string, extra []string, args ...string) (string, error) {
+	return g.runInput(ctx, dir, extra, nil, args...)
+}
+
+// runInput runs Git the way runInRaw does, with input as its standard input.
+func (g *Git) runInput(ctx context.Context, dir string, extra []string, input io.Reader, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "gc.auto=0"}, args...)...)
+	cmd.Stdin = input
 	cmd.Env = []string{"GIT_TERMINAL_PROMPT=0", "LC_ALL=C"}
 	for _, name := range []string{"PATH", "HOME", "SSH_AUTH_SOCK", "GIT_SSH_COMMAND", "GIT_SSH", "XDG_CONFIG_HOME", "TMPDIR"} {
 		if value, ok := os.LookupEnv(name); ok {

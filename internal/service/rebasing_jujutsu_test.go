@@ -504,7 +504,8 @@ func TestJujutsuDriftConflictIsResolvedInItsWorkspaceBeforeReview(t *testing.T) 
 // from the commit the branch moved to: the operation reads as this
 // operation's rebase, nothing is rebased again, and the rebase is recorded
 // once, on onto, with conflicts, which that commit stores, conflicted or
-// else rebased. It records the operation's result and returns the commit.
+// else rebased. The commit carries the change the trace records for the
+// unit. It records the operation's result and returns the commit.
 func crashedRebase(t *testing.T, f *shedFixture, repository *trace.Repository, r rebaser, stream config.WorkstreamID, unit string, op coreadapter.Operation, onto string, conflicts []string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -537,6 +538,11 @@ func crashedRebase(t *testing.T, f *shedFixture, repository *trace.Repository, r
 	}
 	if stored, err := g.StoredConflicts(ctx, moved); err != nil || !slices.Equal(stored, conflicts) {
 		t.Fatalf("unit %s's rebased commit stores %v: %v", unit, stored, err)
+	}
+	change, err := unitChange(repository, stream, unit)
+	must(t, err)
+	if got, err := g.ChangeOf(ctx, moved); err != nil || change == "" || got != change {
+		t.Fatalf("unit %s's rebased commit is change %q, %v; want %q", unit, got, err, change)
 	}
 	rebases := unitRebases(t, repository, stream, unit)
 	last := rebases[len(rebases)-1]
@@ -578,17 +584,17 @@ func rebaseNumber(t *testing.T, repository *trace.Repository, stream config.Work
 // though a conflicted rebase makes a new commit each time it runs. So does
 // the next rebase of the unit while its conflict is unresolved, and the one
 // after, onto a landing that makes the unit's change itself, which resolves
-// the conflict.
+// the conflict. A clean rebase cut off there completes too, and every
+// rebased commit keeps the unit's change.
 func TestInterruptedJujutsuConflictedRebaseCompletesOnRetry(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, lands, landed, ops := newJujutsuLandedFixture(t, "jj-interrupted")
 	ctx := context.Background()
 	r := rebaser{lands}
-	for _, unit := range []string{"resume", "upload"} {
-		if result := settleOperation(t, f.s, repository, stream, ops[unit], r); result.Outcome != "succeeded" {
-			t.Fatalf("rebase of unit %s: %+v", unit, result)
-		}
+	if result := settleOperation(t, f.s, repository, stream, ops["resume"], r); result.Outcome != "succeeded" {
+		t.Fatalf("rebase of unit resume: %+v", result)
 	}
+	crashedRebase(t, f, repository, r, stream, "upload", ops["upload"], landed, nil)
 	commits := []string{crashedRebase(t, f, repository, r, stream, "audit", ops["audit"], landed, jujutsuConflicted["audit"])}
 	for k, landing := range []struct {
 		files     map[string]string
@@ -721,5 +727,121 @@ func TestJujutsuConflictedUnitsAreResolvedInParallel(t *testing.T) {
 	defer mu.Unlock()
 	if len(problems) != 0 {
 		t.Fatal(strings.Join(problems, "\n"))
+	}
+}
+
+// On Jujutsu workspaces a unit keeps one change through the rebase a landing
+// forces, and the change never carries its approval. Starting each unit
+// records the change of its workspace, which its approved candidate carries.
+// Landing the first unit rebases the second: the rebased candidate carries
+// the same change, is a new candidate on the landed commit, and the second
+// unit returns to review. A walk of either candidate finds the unit by its
+// change, and the rebased commit keeps its Osmia-Operation trailer.
+func TestJujutsuRebasedUnitKeepsItsChangeAndReturnsToReview(t *testing.T) {
+	t.Parallel()
+	f, stream, repository := newApprovedFixtureOn(t, "jj-change", config.WorkspacesJujutsu)
+	ctx := context.Background()
+	if backend, err := repository.Workspaces(stream); err != nil || backend != config.WorkspacesJujutsu {
+		t.Fatalf("workstream %s is on %q: %v", stream, backend, err)
+	}
+	change, err := unitChange(repository, stream, "dedupe")
+	must(t, err)
+	other, err := unitChange(repository, stream, "resume")
+	must(t, err)
+	if change == "" || other == "" || other == change {
+		t.Fatalf("the units' recorded changes are %q and %q", change, other)
+	}
+	docs, err := trace.Read[trace.Document](repository, stream)
+	must(t, err)
+	i := slices.IndexFunc(docs, func(d trace.Document) bool { return d.ID == changeDocument("dedupe") })
+	if i < 0 || docs[i].Path != "units/dedupe/change.json" || docs[i].Revision != 1 || docs[i].Actor != masonActor || docs[i].Cause != trace.UnitSubject("dedupe")+"-"+UnitReady {
+		t.Fatalf("dedupe's change record %+v", docs)
+	}
+	var recorded UnitChange
+	must(t, json.Unmarshal([]byte(docs[i].Content), &recorded))
+	if recorded != (UnitChange{Unit: "dedupe", Branch: unitBranch(stream, "dedupe"), Change: change}) {
+		t.Fatalf("dedupe's change record %+v", recorded)
+	}
+	g := providerOf(t, newUnitWorkspaces(f.s.cfg, repository).streamWorkspaces, stream)
+	_, approved := approvedReview(t, repository, stream, "dedupe")
+	candidate := approved.Identity.Candidate.Revision
+	if got, err := g.ChangeOf(ctx, candidate); err != nil || got != change {
+		t.Fatalf("dedupe's approved candidate %s is change %q, %v; want %s", candidate, got, err, change)
+	}
+	must(t, repository.Close())
+	f.start(t)
+	defer f.stop(t)
+
+	f.awaitMerged(t, stream, "resume")
+	f.awaitUnit(t, stream, "dedupe", UnitReviewing)
+	deadline := time.Now().Add(demoTimeout)
+	var rebases []trace.OperationRecord
+	for {
+		rebases = rebaseOperations(t, f.repository(), stream, "dedupe")
+		if len(rebases) == 1 && rebases[0].Result != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("dedupe's rebases %+v", rebases)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_, landing := approvedReview(t, f.repository(), stream, "resume")
+	landed := f.landedCommits(t, stream, landing.Identity.Candidate.BaseRevision)
+	if len(landed) != 1 {
+		t.Fatalf("the feature branch holds %v", landed)
+	}
+	recordedRebases := unitRebases(t, f.repository(), stream, "dedupe")
+	if len(recordedRebases) != 1 {
+		t.Fatalf("rebase records %+v", recordedRebases)
+	}
+	rebase := recordedRebases[0]
+	if rebase.State != UnitApproved || rebase.Snapshot != candidate || rebase.Onto != landed[0] || len(rebase.Conflicts) != 0 || rebase.Commit == candidate {
+		t.Fatalf("rebase.json %+v", rebase)
+	}
+	if got, err := g.ChangeOf(ctx, rebase.Commit); err != nil || got != change {
+		t.Fatalf("dedupe's rebased commit %s is change %q, %v; want %s", rebase.Commit, got, err, change)
+	}
+	if tip, _, err := g.Branch(ctx, unitBranch(stream, "dedupe")); err != nil || tip != rebase.Commit {
+		t.Fatalf("dedupe's branch is at %s, %v; want %s", tip, err, rebase.Commit)
+	}
+	c, err := g.Commit(ctx, rebase.Commit)
+	must(t, err)
+	if operationTrailer(c.Message) != rebases[0].Operation.ID || !slices.Equal(c.Parents, landed) {
+		t.Fatalf("dedupe's rebased commit %+v", c)
+	}
+	_, report := latestReport(t, f.repository(), stream, "dedupe")
+	if report.Candidate != rebase.Commit || report.Base != landed[0] {
+		t.Fatalf("dedupe's report after its rebase %+v", report)
+	}
+	back := slices.IndexFunc(allTransitions(t, f.trace, stream), func(tr trace.Transition) bool {
+		return tr.ID == trace.UnitSubject("dedupe")+"-reviewing-rebase-1" && tr.From == UnitApproved && tr.To == UnitReviewing && strings.HasPrefix(tr.Reason, "the approval no longer holds: ")
+	})
+	if back < 0 {
+		t.Fatal("dedupe's return to review is not recorded")
+	}
+	if kept, err := unitChange(f.repository(), stream, "dedupe"); err != nil || kept != change {
+		t.Fatalf("dedupe's recorded change is %q after its rebase: %v", kept, err)
+	}
+	if ops := landOperations(t, f.repository(), stream); len(ops) != 1 {
+		t.Fatalf("the rebased approval was asked to land: %+v", ops)
+	}
+
+	for _, commit := range []string{candidate, rebase.Commit} {
+		result, api := f.s.traceView(ctx, string(stream), "commit", commit)
+		if api != nil {
+			t.Fatalf("the walk of %s: %+v", commit, api)
+		}
+		walk := result.(CommitTrace)
+		if !slices.ContainsFunc(walk.Records, func(r CommitRecord) bool {
+			return r.Role == commitChange && r.Unit == "dedupe" && r.Ref.Path == "units/dedupe/change.json"
+		}) || slices.ContainsFunc(walk.Records, func(r CommitRecord) bool { return r.Role == commitChange && r.Unit != "dedupe" }) {
+			t.Fatalf("the walk of %s records %+v", commit, walk.Records)
+		}
+		data, err := json.Marshal(walk)
+		must(t, err)
+		if strings.Contains(string(data), change) {
+			t.Fatalf("the walk of %s shows the change ID: %s", commit, data)
+		}
 	}
 }

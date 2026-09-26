@@ -247,6 +247,7 @@ const (
 	commitCandidate    = "candidate"
 	commitBase         = "base"
 	commitRebase       = "unit-rebase"
+	commitChange       = "unit-change"
 	commitSealBase     = "seal-base"
 	commitFinalRebase  = "final-rebase"
 	commitFinalReview  = "final-review"
@@ -1043,8 +1044,10 @@ var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 // traceCommit walks one commit back to the records that name it. message
 // is the commit's message, or empty when it is not known: its
 // Osmia-Operation trailer finds the landing or publication of a commit that
-// was rebased or squashed after it was recorded.
-func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commit, message string) (CommitTrace, error) {
+// was rebased or squashed after it was recorded. change is the change ID the
+// commit carries on Jujutsu, or empty: it finds the unit whose change the
+// commit holds, whichever rebase or snapshot of the unit it is.
+func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commit, message, change string) (CommitTrace, error) {
 	if !commitPattern.MatchString(commit) {
 		return CommitTrace{}, fmt.Errorf("commit %q is not a full commit ID", commit)
 	}
@@ -1119,6 +1122,11 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 			var r UnitRebase
 			if json.Unmarshal([]byte(d.Content), &r) == nil && (r.Commit == commit || t.Operation != "" && r.Operation == t.Operation) {
 				record(commitRebase, d.Unit, d)
+			}
+		case changeDocument(d.Unit):
+			var c UnitChange
+			if change != "" && json.Unmarshal([]byte(d.Content), &c) == nil && c.Change == change {
+				record(commitChange, d.Unit, d)
 			}
 		case landingDocument(d.Unit):
 			l, err := landingOf(d)

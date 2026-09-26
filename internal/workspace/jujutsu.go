@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -115,8 +116,9 @@ const repositoryName = ".jujutsu"
 const metadataName = "osmia.json"
 
 // jjSettings are the settings every jj command runs with; the owner's own jj
-// configuration does not apply. Commits carry no change-id header, so a
-// commit holds what the same commit made by Git holds; conflicts are written
+// configuration does not apply. Commits carry no change-id header but those
+// Carry makes, so any other commit holds what the same commit made by Git
+// holds; conflicts are written
 // into files with Git's markers; every file is tracked whatever its size; and
 // importing a branch that moved abandons nothing a workspace may stand on.
 var jjSettings = []string{
@@ -135,9 +137,12 @@ func stamp(at time.Time) []string {
 	return []string{"debug.commit-timestamp=" + strconv.Quote(at.UTC().Format(time.RFC3339))}
 }
 
-// metadata is what the provider records about one of its workspaces.
+// metadata is what the provider records about one of its workspaces: its
+// branch, the change ID of its first working-copy commit, and the replay in
+// progress there.
 type metadata struct {
 	Branch string  `json:"branch"`
+	Change string  `json:"change,omitempty"`
 	Replay *replay `json:"replay,omitempty"`
 }
 
@@ -329,7 +334,11 @@ func (j *Jujutsu) Acquire(ctx context.Context, req vcs.Request) (vcs.Workspace, 
 	if _, err := j.run(ctx, j.repository(), nil, "workspace", "add", "--name", req.Name, "--revision", tip, path); err != nil {
 		return nil, err
 	}
-	if err := writeMetadata(path, metadata{Branch: req.Branch}); err != nil {
+	change, err := j.run(ctx, path, nil, "--ignore-working-copy", "log", "--no-graph", "--revisions", "@", "--template", "change_id")
+	if err != nil {
+		return nil, err
+	}
+	if err := writeMetadata(path, metadata{Branch: req.Branch, Change: change}); err != nil {
 		return nil, err
 	}
 	return j.worktree(req.Name, req.Branch), nil
@@ -941,6 +950,58 @@ func (j *Jujutsu) StoredConflicts(ctx context.Context, commit string) ([]string,
 		return nil, err
 	}
 	return j.conflicts(ctx, commit)
+}
+
+// changePattern is a full Jujutsu change ID.
+var changePattern = regexp.MustCompile(`^[k-z]{32}$`)
+
+// Change returns the change ID of the workspace's first working-copy commit,
+// which the first snapshot of the workspace commits. A workspace made before
+// the provider recorded it returns "".
+func (j *Jujutsu) Change(_ context.Context, w Worktree) (string, error) {
+	meta, err := readMetadata(w.Path)
+	return meta.Change, err
+}
+
+// ChangeOf returns the change ID the repository gives commit: one it made,
+// or one on a branch it imported. A commit it does not know returns "".
+func (j *Jujutsu) ChangeOf(ctx context.Context, commit string) (string, error) {
+	if exists, err := j.initialized(); err != nil || !exists {
+		return "", err
+	}
+	return j.run(ctx, j.repository(), nil, "--ignore-working-copy", "log", "--no-graph", "--revisions", "present("+commit+")", "--template", "change_id")
+}
+
+// Carry returns commit with a change-id header naming change in place of any
+// it had, so that the repository gives it that change ID once it imports a
+// branch at it, as ChangeOf reads it then. Everything else commit records
+// stays, stored conflicts included, and the same arguments make the same
+// commit. A commit that already names change is returned as it is.
+func (j *Jujutsu) Carry(ctx context.Context, commit, change string) (string, error) {
+	if !changePattern.MatchString(change) {
+		return "", fmt.Errorf("%q is not a change ID", change)
+	}
+	g := j.git()
+	raw, err := g.runInRaw(ctx, j.Clone, nil, "cat-file", "commit", commit)
+	if err != nil {
+		return "", err
+	}
+	header, message, found := strings.Cut(raw, "\n\n")
+	if !found {
+		return "", fmt.Errorf("commit %s has no message", commit)
+	}
+	var lines []string
+	for _, line := range strings.Split(header, "\n") {
+		if line == "change-id "+change {
+			return commit, nil
+		}
+		if !strings.HasPrefix(line, "change-id ") {
+			lines = append(lines, line)
+		}
+	}
+	lines = append(lines, "change-id "+change)
+	carried, err := g.runInput(ctx, j.Clone, nil, strings.NewReader(strings.Join(lines, "\n")+"\n\n"+message), "hash-object", "-t", "commit", "-w", "--stdin")
+	return strings.TrimSpace(carried), err
 }
 
 // Replay makes the commit Git's Replay makes from the same arguments, and
