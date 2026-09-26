@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
@@ -296,21 +297,38 @@ func (m *masons) enqueueResolve(ctx context.Context, stream config.WorkstreamID,
 	if err != nil {
 		return err
 	}
+	backend, err := m.repository.Workspaces(stream)
+	if err != nil {
+		return err
+	}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: foremanActor, Cause: cause, Depth: 1},
-		AgentID: agent, ThreadID: agent, TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(m.cfg.Project), Prompt: resolvePrompt(unit, paths, rebase, mason)}
+		AgentID: agent, ThreadID: agent, TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(m.cfg.Project), Prompt: resolvePrompt(unit, paths, rebase, mason, backend)}
 	_, err = m.repository.EnqueueTurn(ctx, req)
 	return err
 }
 
-func resolvePrompt(unit string, paths []string, rebase UnitRebase, m bundle.Mason) string {
+// resolvePrompt is the prompt of the mason turn that resolves the conflicts
+// a rebase of the unit's workspace, on the given backend, left in paths.
+func resolvePrompt(unit string, paths []string, rebase UnitRebase, m bundle.Mason, backend string) string {
+	markers := fmt.Sprintf(`A conflicted file carries conflict markers: the lines between "<<<<<<< %s" and "=======" are the feature branch's, and those between "=======" and ">>>>>>> %s" are your unit's. A file one side deleted and the other changed is kept as the side that changed it.`, rebase.Onto, rebase.Snapshot)
+	if backend == config.WorkspacesJujutsu {
+		markers = jujutsuMarkers("the feature branch's", "your unit's")
+	}
 	return fmt.Sprintf(`Resolve the conflicts of unit %s.
 
 The workstream's feature branch moved to %s, and the service rebased your unit's workspace onto it. These files of your view are conflicted:
 %s
 
-A conflicted file carries conflict markers: the lines between "<<<<<<< %s" and "=======" are the feature branch's, and those between "=======" and ">>>>>>> %s" are your unit's. A file one side deleted and the other changed is kept as the side that changed it. Resolve every conflict against the sealed spec below, so that what the feature branch holds and what your unit builds both stand, and remove every marker. Then check that each of the unit's criteria holds and its proof is in place and passing, and call done with a report on every criterion of the unit. The service sends the unit to review only once no conflicted file carries a marker.
+%s Resolve every conflict against the sealed spec below, so that what the feature branch holds and what your unit builds both stand, and remove every marker. Then check that each of the unit's criteria holds and its proof is in place and passing, and call done with a report on every criterion of the unit. The service sends the unit to review only once no conflicted file carries a marker.
 
-%s`, unit, rebase.Onto, "- "+strings.Join(paths, "\n- "), rebase.Onto, rebase.Snapshot, m.Render())
+%s`, unit, rebase.Onto, "- "+strings.Join(paths, "\n- "), markers, m.Render())
+}
+
+// jujutsuMarkers explains the conflict markers of a file a Jujutsu rebase
+// left conflicted, whose sides are onto, the side rebased onto, and change,
+// the side rebased.
+func jujutsuMarkers(onto, change string) string {
+	return fmt.Sprintf(`A conflicted file carries conflict markers: the lines between "<<<<<<<" and "|||||||" are %s, those between "|||||||" and "=======" are what both sides started from, and those between "=======" and ">>>>>>>" are %s. A side that deleted the file holds no lines.`, onto, change)
 }
 
 // remind queues one turn of the unit's mason, after its done turn, that
@@ -458,11 +476,13 @@ func rebasedSnapshot(ctx context.Context, g workspace.Provider, head string, in 
 // Apply rebases the unit's workspace onto the feature branch commit the
 // operation names. A unit branch whose tip is this operation's commit on that
 // commit is an interrupted rebase: its snapshot is read from the commit's
-// trailer, and nothing is snapshotted or committed again. Otherwise the
+// trailer, the tip is the rebased commit, and nothing is snapshotted or
+// committed again. Otherwise the
 // feature branch must still be at that commit and the workspace must not
 // descend from it; the workspace is snapshotted, and the change the snapshot
 // holds since its base is merged onto the commit as one rebased commit,
-// conflict markers included. The workspace's branch, index and files then
+// conflicts included: as markers on Git, stored on Jujutsu, whose workspace
+// materializes them as markers. The workspace's branch, index and files then
 // move to the rebased commit, and the rebase is recorded. A workspace that
 // is missing, already current or behind a feature branch that moved again
 // is refused with the reason as its result, and nothing changes.
@@ -504,7 +524,10 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	if snapshot == "" {
+	rebased := ""
+	if snapshot != "" {
+		rebased = head
+	} else {
 		tip, _, err := g.Branch(ctx, featureBranch(stream))
 		if err != nil {
 			return coreadapter.OperationResult{}, err
@@ -547,7 +570,14 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		}
 	}
 	message := fmt.Sprintf("Rebase unit %s onto %s\n\nOsmia-Workstream: %s\nOsmia-Unit: %s\n%s: %s\nOsmia-Base: %s\nOsmia-Onto: %s\n%s: %s\n", in.Unit, in.Onto, stream, in.Unit, rebaseSnapshotTrailer, snapshot, base, in.Onto, landingTrailer, op.ID)
-	commit, conflicts, err := g.RebaseFrom(ctx, driftBase, in.Onto, snapshot, message, requested)
+	var commit string
+	var conflicts []string
+	if rebased != "" {
+		commit = rebased
+		conflicts, err = rebasedConflicts(ctx, g, driftBase, in.Onto, snapshot, rebased, message, requested)
+	} else {
+		commit, conflicts, err = g.RebaseFrom(ctx, driftBase, in.Onto, snapshot, message, requested)
+	}
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -558,6 +588,29 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		return coreadapter.OperationResult{}, err
 	}
 	return r.record(ctx, stream, in, op.ID, UnitRebase{Unit: in.Unit, Rebase: in.Rebase, Operation: op.ID, Branch: w.Branch, Base: base, Onto: in.Onto, Snapshot: snapshot, Commit: commit, Conflicts: conflicts})
+}
+
+// rebasedConflicts returns the paths the rebase of snapshot that made commit
+// rebased left conflicted. A commit that holds stored conflicts holds those
+// paths, and one Jujutsu made from a snapshot that held stored conflicts
+// holds no other. Any other commit is the one Git's merge makes from the
+// rebase's arguments, which is made again to read its conflicted paths.
+func rebasedConflicts(ctx context.Context, g workspace.Provider, base, onto, snapshot, rebased, message string, at time.Time) ([]string, error) {
+	stored, err := g.StoredConflicts(ctx, rebased)
+	if err != nil || len(stored) != 0 {
+		return stored, err
+	}
+	if held, err := g.StoredConflicts(ctx, snapshot); err != nil || len(held) != 0 {
+		return nil, err
+	}
+	commit, conflicts, err := g.RebaseFrom(ctx, base, onto, snapshot, message, at)
+	if err != nil {
+		return nil, err
+	}
+	if commit != rebased {
+		return nil, fmt.Errorf("the rebase of snapshot %s onto %s makes %s, not the unit branch's %s", snapshot, onto, commit, rebased)
+	}
+	return conflicts, nil
 }
 
 // record records, in one commit, units/<unit>/rebase.json and the rebase's

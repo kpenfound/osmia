@@ -461,8 +461,9 @@ func (f *foreman) requestedAt(stream config.WorkstreamID, operation string) (tim
 }
 
 // current returns why the approval can no longer land, or "" when the
-// workstream is building or assembled, the unit is approved by this review revision and
-// every reviewed input is current.
+// workstream is building or assembled, the unit is approved by this review
+// revision, its candidate holds no stored conflict and every reviewed input
+// is current.
 func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in landInput, result UnitReviewResult) (string, error) {
 	feature, err := f.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -484,6 +485,15 @@ func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in la
 	}
 	if latest.Revision != in.Review {
 		return fmt.Sprintf("%s revision %d replaced the approval", latest.Path, latest.Revision), nil
+	}
+	g, err := newUnitWorkspaces(f.cfg, f.repository).of(stream)
+	if err != nil {
+		return "", err
+	}
+	if stored, err := g.StoredConflicts(ctx, in.Candidate); err != nil {
+		return "", err
+	} else if len(stored) != 0 {
+		return fmt.Sprintf("candidate %s holds unresolved conflicts in %s", in.Candidate, strings.Join(stored, ", ")), nil
 	}
 	reason, err := f.staleInputs(ctx, stream, in.Unit, result.Identity)
 	if err != nil || reason == "" {

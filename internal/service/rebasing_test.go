@@ -48,17 +48,22 @@ func newRebaseFixture(t *testing.T, key string) (*shedFixture, config.Workstream
 }
 
 // moveFeature commits files onto the workstream's feature branch, as a
-// landing does, and returns the new tip.
+// landing does, removing those whose content is empty, and returns the new
+// tip.
 func moveFeature(t *testing.T, f *shedFixture, stream config.WorkstreamID, files map[string]string) string {
 	t.Helper()
 	ctx := context.Background()
-	g := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit)
+	g := workspaces(f.s.cfg, branchesDirectory, backendOf(t, f, stream))
 	acquired, err := g.Acquire(ctx, vcs.Request{Name: string(stream), Branch: featureBranch(stream)})
 	must(t, err)
 	w := acquired.(workspace.Worktree)
 	tip, _, err := g.Branch(ctx, featureBranch(stream))
 	must(t, err)
 	for name, content := range files {
+		if content == "" {
+			must(t, os.Remove(filepath.Join(w.Path, name)))
+			continue
+		}
 		must(t, os.MkdirAll(filepath.Dir(filepath.Join(w.Path, name)), 0700))
 		must(t, os.WriteFile(filepath.Join(w.Path, name), []byte(content), 0600))
 	}

@@ -42,7 +42,14 @@ const disjointPlan = `{"version": 1, "units": [
 // masons.
 func newParallelMasonFixture(t *testing.T, masons, perWorkstream int, drafted string) (*shedFixture, *fakeMasons) {
 	t.Helper()
-	f, fake := newCappedMasonFixture(t, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted)
+	return newParallelMasonFixtureOn(t, config.WorkspacesGit, masons, perWorkstream, drafted)
+}
+
+// newParallelMasonFixtureOn is newParallelMasonFixture whose workstreams are
+// handed in on the workspace backend given.
+func newParallelMasonFixtureOn(t *testing.T, backend string, masons, perWorkstream int, drafted string) (*shedFixture, *fakeMasons) {
+	t.Helper()
+	f, fake := newMasonFixtureOn(t, backend, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted, "")
 	mapping, err := kb.Load(f.repository())
 	must(t, err)
 	for _, name := range []string{"upload", "audit"} {

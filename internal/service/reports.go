@@ -347,9 +347,9 @@ func (m *masons) reported(stream config.WorkstreamID, unit string) (MasonReport,
 // move in one commit. It reports whether the unit moved. A unit whose
 // candidate cannot be made stays implementing, and finish records why it is
 // blocked. A unit whose workspace is behind its feature branch waits for the
-// foreman to rebase it. A candidate whose files a rebase left conflicted
-// still carry conflict markers stays implementing, and its mason gets a turn
-// that names them. A unit whose state moved since it was read is left to the
+// foreman to rebase it. A candidate that holds a stored conflict, or whose
+// files a rebase left conflicted still carry conflict markers, stays
+// implementing, and its mason gets a turn that names those files. A unit whose state moved since it was read is left to the
 // next pass.
 func (m *masons) finish(ctx context.Context, b building, unit string) (moved, blocked bool, err error) {
 	report, turn, found, err := m.reported(b.stream, unit)
@@ -375,11 +375,22 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 	if err != nil {
 		return false, false, err
 	}
-	if marked, err := g.Markers(ctx, candidate, conflicted); err != nil || len(marked) != 0 {
-		if err != nil {
-			return false, false, err
+	stored, err := g.StoredConflicts(ctx, candidate)
+	if err != nil {
+		return false, false, err
+	}
+	marked, err := g.Markers(ctx, candidate, conflicted)
+	if err != nil {
+		return false, false, err
+	}
+	for _, p := range marked {
+		if !slices.Contains(stored, p) {
+			stored = append(stored, p)
 		}
-		return false, false, m.remind(ctx, b.stream, unit, turn, marked)
+	}
+	if len(stored) != 0 {
+		slices.Sort(stored)
+		return false, false, m.remind(ctx, b.stream, unit, turn, stored)
 	}
 	latest, _, _, err := seal.Latest(m.repository, b.stream)
 	if err != nil {

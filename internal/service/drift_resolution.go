@@ -680,16 +680,24 @@ func (d drifter) resolvePrompt(ctx context.Context, stream config.WorkstreamID, 
 		return "", err
 	}
 	subject, _, _ := strings.Cut(c.Message, "\n")
+	backend, err := d.repository.Workspaces(stream)
+	if err != nil {
+		return "", err
+	}
+	markers := `A conflicted file carries conflict markers: the lines between "<<<<<<<" and "=======" are the branch as rebased onto upstream so far, and those between "=======" and ">>>>>>>" are the commit being replayed.`
+	if backend == config.WorkspacesJujutsu {
+		markers = jujutsuMarkers("the branch as rebased onto upstream so far", "the commit being replayed")
+	}
 	return fmt.Sprintf(`Resolve the conflicts of feature branch %s with upstream.
 
 The service is rebasing the workstream's feature branch %s from %s onto %s/%s at %s, one commit at a time, in a workspace of its own whose files are your view. Replaying commit %s (%q) conflicted, and these files of your view are conflicted:
 - %s
 
-A conflicted file carries conflict markers: the lines between "<<<<<<<" and "=======" are the branch as rebased onto upstream so far, and those between "=======" and ">>>>>>>" are the commit being replayed. Resolve every conflict against the sealed spec below, so that what upstream now holds and what the feature branch built both stand, and remove every marker. Change nothing the conflicts do not need. Then call done with the outcome of your resolution and end your turn. The service goes on with the rebase once no conflicted file carries a marker, and a reviewer reads the resolved branch against the sealed spec before the feature branch moves.
+%s Resolve every conflict against the sealed spec below, so that what upstream now holds and what the feature branch built both stand, and remove every marker. Change nothing the conflicts do not need. Then call done with the outcome of your resolution and end your turn. The service goes on with the rebase once no conflicted file carries a marker, and a reviewer reads the resolved branch against the sealed spec before the feature branch moves.
 
 %s
 
-%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, rebase.Stop, subject, strings.Join(rebase.Conflicts, "\n- "), driftAmendGuidance(rebase), spec), nil
+%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, rebase.Stop, subject, strings.Join(rebase.Conflicts, "\n- "), markers, driftAmendGuidance(rebase), spec), nil
 }
 
 func (d drifter) fixPrompt(stream config.WorkstreamID, rebase DriftRebase) (string, error) {
