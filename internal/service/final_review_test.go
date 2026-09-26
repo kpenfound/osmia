@@ -30,7 +30,13 @@ import (
 // assembly controller over it.
 func newFinalFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *finalReviewer) {
 	t.Helper()
-	f := newDebateFixture(t, 1, 1)
+	return newFinalFixtureWith(t, key, "")
+}
+
+// newFinalFixtureWith is newFinalFixture with extra configuration appended.
+func newFinalFixtureWith(t *testing.T, key, extra string) (*shedFixture, config.WorkstreamID, *trace.Repository, *finalReviewer) {
+	t.Helper()
+	f := newDebateFixtureWith(t, 1, 1, extra, nil)
 	f.upstream(t)
 	stream, _ := f.builtAs(t, key)
 	f.stop(t)

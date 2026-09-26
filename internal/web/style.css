@@ -111,6 +111,7 @@ body[data-connection="lost"] #connection {
   color: var(--lost);
 }
 
+.inbox,
 .pauses,
 .capacity,
 .workstreams {
@@ -119,6 +120,7 @@ body[data-connection="lost"] #connection {
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
 }
 
+.decision,
 .pause,
 .role,
 .workstream,
@@ -149,6 +151,7 @@ body[data-connection="lost"] #connection {
 }
 
 .id,
+.decision,
 .workstream,
 .pause,
 .role {
@@ -344,4 +347,19 @@ button:disabled {
 .files li,
 .notes li {
   padding: 0.15rem 0;
+}
+
+.question {
+  white-space: pre-wrap;
+}
+
+.asked li,
+.dissent li,
+.criteria li {
+  padding: 0.25rem 0;
+}
+
+.dissent li + li,
+.criteria li + li {
+  border-top: 1px solid var(--line);
 }
