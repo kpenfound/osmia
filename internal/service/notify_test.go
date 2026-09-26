@@ -17,6 +17,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -611,4 +612,110 @@ func TestNotifyFaultsSendNothingUntilCleared(t *testing.T) {
 		t.Fatalf("post after the inbox was readable again: %q", got)
 	}
 	cleared("the inbox readable again")
+}
+
+// budgetNotifier is a notifier over a daily budget service whose webhook is
+// hook, and the ledger path it writes.
+func budgetNotifier(t *testing.T, s *Service, hook string) (*notifier, *fakeInbox) {
+	t.Helper()
+	cfg := *s.cfg
+	cfg.Notify.Webhook = hook
+	s.cfg = &cfg
+	inbox := &fakeInbox{}
+	return newNotifier(s, 10*time.Millisecond, inbox.read), inbox
+}
+
+// A daily budget pause is posted once with the spend, the limit and when it
+// clears; further passes and a restart post nothing for it, a pause cleared
+// before its post is dropped, and a pause on a later day is a new occurrence.
+func TestNotifyDailyBudgetPauseOncePerPause(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	hook := newFakeWebhook(t)
+	s, _, repo, clock := dailyBudgetService(t, 0, nil)
+	daily := dailyBudget{s: s, repository: repo}
+	n, _ := budgetNotifier(t, s, hook.hook())
+	n.pass(ctx)
+	if got := hook.received(); len(got) != 0 {
+		t.Fatalf("posts without a pause: %q", got)
+	}
+
+	appendDayCost(t, repo, stream, "spent", clock.Now(), 1.25, true)
+	must(t, daily.Pass(ctx))
+	n.pass(ctx)
+	n.pass(ctx)
+	want := fmt.Sprintf("Osmia paused dispatch: the daily budget is reached.\nProject: %s\nSpend: USD 1.25\nLimit: USD 1.00\nClears: 2026-09-17T00:00:00-07:00\n", project)
+	if got := hook.received(); len(got) != 1 || got[0] != want {
+		t.Fatalf("posts for the pause\n%q\nwant\n%q", got, want)
+	}
+
+	// A restart reads the ledger again and posts nothing.
+	restarted, _ := budgetNotifier(t, s, hook.hook())
+	restarted.pass(ctx)
+	if got := hook.received(); len(got) != 1 {
+		t.Fatalf("posts after a restart: %q", got)
+	}
+
+	// The next day's pause is a new occurrence.
+	jump(clock, time.Date(2026, 9, 17, 7, 0, 0, 0, time.UTC))
+	must(t, daily.Pass(ctx))
+	n.pass(ctx)
+	appendDayCost(t, repo, sibling, "next-day", clock.Now(), 1, true)
+	must(t, daily.Pass(ctx))
+	hook.respond(http.StatusBadGateway)
+	n.pass(ctx)
+	if got := hook.received(); len(got) != 2 || !strings.Contains(got[1], "Spend: USD 1\n") || !strings.Contains(got[1], "Clears: 2026-09-18T00:00:00-07:00") {
+		t.Fatalf("posts for the next day's pause: %q", got)
+	}
+
+	// The owner clears the pause before the failed post is retried.
+	must(t, s.store.ClearPause(factoryTarget, runtime.PauseDailyBudget))
+	hook.respond(http.StatusOK)
+	time.Sleep(20 * time.Millisecond)
+	n.pass(ctx)
+	if got := hook.received(); len(got) != 2 {
+		t.Fatalf("posts for a cleared pause: %q", got)
+	}
+	states := map[string]int{}
+	for _, rec := range n.ledger.Notifications {
+		states[rec.State]++
+	}
+	if states[notificationSent] != 1 || states[notificationDropped] != 1 || len(n.ledger.Notifications) != 2 {
+		t.Fatalf("ledger %+v", n.ledger.Notifications)
+	}
+}
+
+// A pause already in force when notifications turn on is not posted, and one
+// whose spend cannot be read waits and is reported.
+func TestNotifyDailyBudgetPauseBeforeTheWebhookAndUnreadableSpend(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	hook := newFakeWebhook(t)
+	s, _, repo, clock := dailyBudgetService(t, 0, nil)
+	appendDayCost(t, repo, stream, "spent", clock.Now(), 1.25, true)
+	must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
+	n, _ := budgetNotifier(t, s, hook.hook())
+	n.pass(ctx)
+	if got := hook.received(); len(got) != 0 {
+		t.Fatalf("posts for a pause open before the webhook: %q", got)
+	}
+	for _, rec := range n.ledger.Notifications {
+		if rec.State != notificationSkipped {
+			t.Fatalf("pause open before the webhook: %+v", rec)
+		}
+	}
+
+	// A later pause cannot be described while today's spend is unreadable.
+	jump(clock, time.Date(2026, 9, 17, 7, 0, 0, 0, time.UTC))
+	must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
+	appendDayCost(t, repo, sibling, "next-day", clock.Now(), 1, true)
+	must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
+	must(t, repo.Close())
+	n.pass(ctx)
+	if got := hook.received(); len(got) != 0 {
+		t.Fatalf("posts with unreadable spend: %q", got)
+	}
+	if d := n.diagnostics(); len(d) != 1 || d[0].Message != "cannot read today's spend; the budget pause notification waits until it can be read" {
+		t.Fatalf("diagnostics %+v", d)
+	}
 }
