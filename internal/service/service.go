@@ -94,12 +94,18 @@ type Options struct {
 	// again after a failed join or a dropped listener. It defaults to 5
 	// seconds.
 	TailnetRetry time.Duration
+	// NotifyRetry is how long the service waits before it posts a
+	// notification the webhook refused again, doubled after each further
+	// failure. It defaults to 30 seconds.
+	NotifyRetry time.Duration
 	// Location is the service host's time zone, whose calendar days the daily
 	// budget counts. It defaults to the host's local time zone.
 	Location *time.Location
 	// controls is set by Enforce so the chief-of-staff tools it binds reach
 	// the runtime state of the service started with these options.
 	controls *runtimeControls
+	// notifyInbox replaces the inbox the notifier reads, for tests.
+	notifyInbox func(context.Context) (InboxResponse, *APIError)
 }
 
 // activeProject is the runtime state of the configured project: its open trace
@@ -141,6 +147,8 @@ type Service struct {
 	boundary    func(string) error
 	// hub carries change notifications to the client event stream.
 	hub *hub
+	// notifier posts new inbox entries to notify.webhook.
+	notifier *notifier
 	// driftAsked is set once an owner's drift rebase request is recorded,
 	// so the next pass reads the drift schedule.
 	driftAsked atomic.Bool
@@ -252,6 +260,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if opts.ShutdownTimeout <= 0 {
 		opts.ShutdownTimeout = 5 * time.Second
 	}
+	if opts.NotifyRetry <= 0 {
+		opts.NotifyRetry = 30 * time.Second
+	}
 	if opts.TailnetRetry <= 0 {
 		opts.TailnetRetry = 5 * time.Second
 	}
@@ -308,6 +319,8 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		BaseContext: func(net.Listener) context.Context { return s.lifetime }, ConnContext: connContext}
 	s.ready.Store(true)
 	s.launch(active)
+	s.notifier = newNotifier(s, opts.NotifyRetry, opts.notifyInbox)
+	go s.notifier.run(s.lifetime)
 	go func() {
 		listeners := []net.Listener{listener}
 		if s.web != nil {
@@ -340,6 +353,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 		stop()
 		s.cancel()
+		<-s.notifier.done
 		if s.tailnet != nil {
 			<-s.tailnetDone
 		}

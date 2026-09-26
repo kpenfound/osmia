@@ -149,6 +149,7 @@ func (s *Service) statusList() StatusResponse {
 	if err != nil {
 		diagnostics = append(diagnostics, Diagnostic{"failure_streaks", Internal, "cannot read the turn attempts of the active project; check the trace repository"})
 	}
+	diagnostics = append(diagnostics, s.notifier.diagnostics()...)
 	usage, unread := s.providerUsage(state, profiles)
 	if unread != nil {
 		diagnostics = append(diagnostics, *unread)
