@@ -43,6 +43,11 @@ type Provider interface {
 	RebaseFrom(ctx context.Context, base, onto, head, message string, at time.Time) (string, []string, error)
 	Replay(ctx context.Context, head, onto string, at time.Time) (string, []string, error)
 
+	// Change identity.
+	Change(ctx context.Context, w Worktree) (string, error)
+	ChangeOf(ctx context.Context, commit string) (string, error)
+	Carry(ctx context.Context, commit, change string) (string, error)
+
 	// Moving a workspace, and replaying in it with conflicts to resolve.
 	Move(ctx context.Context, w Worktree, from, to string) error
 	Advance(ctx context.Context, w Worktree, from, to string) error

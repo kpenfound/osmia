@@ -113,7 +113,9 @@ criterion evidence, findings and bounce count, `units/<unit>/landing.json`,
 the [landing](service.md#landing-a-unit) of the unit's approval as one feature
 branch commit, `units/<unit>/rebase.json`, the
 [rebase](service.md#rebasing-units-in-flight) of the unit's workspace onto a
-moved feature branch, `units/<unit>/dispatch.json`, the mason controller's
+moved feature branch, `units/<unit>/change.json`, the Jujutsu change ID of
+the unit's workspace, which its rebases keep, `units/<unit>/dispatch.json`,
+the mason controller's
 latest [decision](service.md#why-a-ready-unit-waits) to start or defer a
 ready unit, `units/<unit-subject>/ruling-<n>.json`,
 the owner's direction after bounce `n`, `units/<unit-subject>/mason-ruling-<n>.json`,
@@ -1128,7 +1130,10 @@ answer.
   delivery commit leads to every unit's latest landing. The `Osmia-Operation`
   trailer of the commit's message, when the caller supplies it, finds the
   landing or publication of a commit rebased or squashed after it was
-  recorded.
+  recorded. On Jujutsu workspaces, the change ID the commit carries, when the
+  caller supplies it, finds the unit whose `units/<unit>/change.json` records
+  that change, with the role `unit-change`: every rebase of the unit and its
+  first snapshot resolve to the same unit, even one no other record names.
 
 A walk follows the revision a record names, never a newer one: a landing's
 criteria read from the spec revision the landing records, a publication's

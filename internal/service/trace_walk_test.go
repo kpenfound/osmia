@@ -330,7 +330,7 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 
 	// The landing commit leads back to its approval, the report that
 	// approval read, and the criteria of the spec revision it landed on.
-	landing, err := traceCommit(f.repo, stream, sha('a'), "")
+	landing, err := traceCommit(f.repo, stream, sha('a'), "", "")
 	must(t, err)
 	if !landing.Complete || len(landing.Landings) != 1 {
 		t.Fatalf("landing commit %+v", landing)
@@ -341,7 +341,7 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 	}
 
 	// The published commit leads to the delivery and every landing.
-	published, err := traceCommit(f.repo, stream, sha('d'), "")
+	published, err := traceCommit(f.repo, stream, sha('d'), "", "")
 	must(t, err)
 	var units []string
 	for _, l := range published.Landings {
@@ -352,14 +352,14 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 	}
 
 	// A commit rebased after landing is found through its trailer.
-	rebased, err := traceCommit(f.repo, stream, sha('e'), "Land a\n\nOsmia-Operation: op-land-a\n")
+	rebased, err := traceCommit(f.repo, stream, sha('e'), "Land a\n\nOsmia-Operation: op-land-a\n", "")
 	must(t, err)
 	if rebased.Operation != "op-land-a" || len(rebased.Landings) != 1 || rebased.Landings[0].Unit != "a" {
 		t.Fatalf("rebased commit %+v", rebased)
 	}
 
 	// The approved candidate leads to the commit it landed as.
-	approved, err := traceCommit(f.repo, stream, sha('2'), "")
+	approved, err := traceCommit(f.repo, stream, sha('2'), "", "")
 	must(t, err)
 	if !approved.Complete || len(approved.Landings) != 1 || approved.Landings[0].Landing.Commit != sha('a') {
 		t.Fatalf("approved candidate %+v", approved)
@@ -367,7 +367,7 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 
 	// A candidate that was sent back names the unit and leads to no
 	// landing; the unit landed another candidate, so nothing is missing.
-	sentBack, err := traceCommit(f.repo, stream, sha('1'), "")
+	sentBack, err := traceCommit(f.repo, stream, sha('1'), "", "")
 	must(t, err)
 	if !sentBack.Complete || len(sentBack.Landings) != 0 || len(sentBack.Records) != 2 || sentBack.Records[0].Role != commitCandidate || sentBack.Records[0].Unit != "a" {
 		t.Fatalf("sent-back candidate %+v", sentBack)
@@ -442,7 +442,7 @@ func TestTraceWalkIncompleteChain(t *testing.T) {
 		t.Fatalf("approved gaps %+v", u.Gaps)
 	}
 	// The approved candidate has not landed yet.
-	candidate, err := traceCommit(f.repo, stream, sha('3'), "")
+	candidate, err := traceCommit(f.repo, stream, sha('3'), "", "")
 	must(t, err)
 	if candidate.Complete || len(candidate.Landings) != 0 || gapStates(candidate.Gaps)["landing of candidate "+sha('3')] != LinkUnfinished {
 		t.Fatalf("candidate %+v", candidate)
@@ -457,7 +457,7 @@ func TestTraceWalkIncompleteChain(t *testing.T) {
 	if got := gapStates(u.Gaps); got["units/b/review.json revision 9"] != LinkUnavailable || got["landing of units/b/review.json revision 2"] != LinkUnavailable {
 		t.Fatalf("merged gaps %v", got)
 	}
-	landed, err := traceCommit(f.repo, stream, sha('b'), "")
+	landed, err := traceCommit(f.repo, stream, sha('b'), "", "")
 	must(t, err)
 	if landed.Complete || landed.Landings[0].Review != nil || gapStates(landed.Gaps)["units/b/review.json revision 9"] != LinkUnavailable {
 		t.Fatalf("landed commit %+v", landed)
@@ -465,7 +465,7 @@ func TestTraceWalkIncompleteChain(t *testing.T) {
 
 	// Unknown commits, criteria and units are not in the trace.
 	for _, err := range []error{
-		func() error { _, err := traceCommit(f.repo, stream, sha('7'), ""); return err }(),
+		func() error { _, err := traceCommit(f.repo, stream, sha('7'), "", ""); return err }(),
 		func() error { _, err := traceCriterion(f.repo, stream, "spec#4"); return err }(),
 		func() error { _, err := traceUnit(f.repo, stream, "z"); return err }(),
 	} {
@@ -508,7 +508,7 @@ func TestTraceWalkKeepsRevisions(t *testing.T) {
 	if a.Reports[1].Seal != 1 || a.Reviews[1].Candidate.SpecRevision != "1" || a.Landings[0].Spec != "1" {
 		t.Fatalf("unit evidence lost its recorded revisions %+v", a)
 	}
-	landing, err := traceCommit(f.repo, stream, sha('a'), "")
+	landing, err := traceCommit(f.repo, stream, sha('a'), "", "")
 	must(t, err)
 	l := landing.Landings[0]
 	if l.Spec.Revision != 1 || l.Seal.Seal != 1 || l.Criteria[0].Text != "Specs parse." {
@@ -545,7 +545,7 @@ func TestTraceWalkAbandoned(t *testing.T) {
 	if !a.Complete || a.State != UnitMerged {
 		t.Fatalf("merged unit of an abandoned workstream %+v", a)
 	}
-	if _, err := traceCommit(f.repo, stream, sha('a'), ""); err != nil {
+	if _, err := traceCommit(f.repo, stream, sha('a'), "", ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -569,5 +569,26 @@ func TestTraceWalkBeforeSeal(t *testing.T) {
 	}
 	if _, err := traceCriterion(f.repo, stream, "1"); err == nil || errors.Is(err, errTraceNotFound) {
 		t.Fatalf("uncited criterion: %v", err)
+	}
+}
+
+// A commit no other record names is found by the change ID it carries: the
+// unit whose change.json records that change. Another change, or none, finds
+// nothing.
+func TestTraceWalkFindsAUnitsCommitByItsChange(t *testing.T) {
+	t.Parallel()
+	f := newWalkFixture(t)
+	change := strings.Repeat("k", 32)
+	f.doc(changeDocument("a"), "units/a/change.json", "a", UnitChange{Unit: "a", Branch: unitBranch(stream, "a"), Change: change})
+	f.doc(changeDocument("b"), "units/b/change.json", "b", UnitChange{Unit: "b", Branch: unitBranch(stream, "b"), Change: strings.Repeat("z", 32)})
+	walk, err := traceCommit(f.repo, stream, sha('9'), "", change)
+	must(t, err)
+	if len(walk.Records) != 1 || walk.Records[0].Role != commitChange || walk.Records[0].Unit != "a" || walk.Records[0].Ref.Path != "units/a/change.json" || walk.Records[0].Ref.Revision != 1 {
+		t.Fatalf("the walk by change %+v", walk.Records)
+	}
+	for _, other := range []string{"", strings.Repeat("l", 32)} {
+		if _, err := traceCommit(f.repo, stream, sha('9'), "", other); !errors.Is(err, errTraceNotFound) {
+			t.Fatalf("a commit carrying change %q: %v", other, err)
+		}
 	}
 }

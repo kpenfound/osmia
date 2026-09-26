@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -74,6 +75,64 @@ func (u unitWorkspaces) open(ctx context.Context, stream config.WorkstreamID, un
 		return workspace.Worktree{}, "", err
 	}
 	return w, base, nil
+}
+
+// UnitChange is the document units/<unit>/change.json: the change ID of the
+// unit's workspace on Jujutsu, recorded when its mason starts. Every rebase
+// of the workspace makes a commit carrying it, so the unit keeps one change
+// through its rebases.
+type UnitChange struct {
+	Unit   string `json:"unit"`
+	Branch string `json:"branch"`
+	Change string `json:"change"`
+}
+
+const changePath = "units/%s/change.json"
+
+func changeDocument(unit string) string { return trace.UnitSubject(unit) + "-change" }
+
+// unitChange returns the change ID the trace records for the unit, or "" when it
+// records none, as for a unit on git worktrees.
+func unitChange(repository *trace.Repository, stream config.WorkstreamID, unit string) (string, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return "", err
+	}
+	change := ""
+	for _, d := range docs {
+		if d.ID != changeDocument(unit) {
+			continue
+		}
+		var c UnitChange
+		if err := json.Unmarshal([]byte(d.Content), &c); err != nil {
+			return "", fmt.Errorf("%s: %w", d.Path, err)
+		}
+		change = c.Change
+	}
+	return change, nil
+}
+
+// changeRecord returns units/<unit>/change.json naming the change ID of the
+// unit's workspace, and whether there is one to record: a workspace on git
+// worktrees has none, and a change the trace records already stays.
+func (m *masons) changeRecord(ctx context.Context, stream config.WorkstreamID, unit string, w workspace.Worktree) (trace.Document, bool, error) {
+	g, err := newUnitWorkspaces(m.cfg, m.repository).of(stream)
+	if err != nil {
+		return trace.Document{}, false, err
+	}
+	change, err := g.Change(ctx, w)
+	if err != nil || change == "" {
+		return trace.Document{}, false, err
+	}
+	if recorded, err := unitChange(m.repository, stream, unit); err != nil || recorded != "" {
+		return trace.Document{}, false, err
+	}
+	data, err := json.MarshalIndent(UnitChange{Unit: unit, Branch: w.Branch, Change: change}, "", "  ")
+	if err != nil {
+		return trace.Document{}, false, err
+	}
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: changeDocument(unit), Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: trace.UnitSubject(unit) + "-" + UnitReady}
+	return trace.Document{Header: h, Path: fmt.Sprintf(changePath, unit), Content: string(data) + "\n"}, true, nil
 }
 
 // find returns the unit's workspace and the feature branch commit it

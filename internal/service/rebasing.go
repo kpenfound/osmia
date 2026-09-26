@@ -482,7 +482,8 @@ func rebasedSnapshot(ctx context.Context, g workspace.Provider, head string, in 
 // descend from it; the workspace is snapshotted, and the change the snapshot
 // holds since its base is merged onto the commit as one rebased commit,
 // conflicts included: as markers on Git, stored on Jujutsu, whose workspace
-// materializes them as markers. The workspace's branch, index and files then
+// materializes them as markers. On Jujutsu the rebased commit carries the
+// change ID the trace records for the unit. The workspace's branch, index and files then
 // move to the rebased commit, and the rebase is recorded. A workspace that
 // is missing, already current or behind a feature branch that moved again
 // is refused with the reason as its result, and nothing changes.
@@ -570,13 +571,17 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		}
 	}
 	message := fmt.Sprintf("Rebase unit %s onto %s\n\nOsmia-Workstream: %s\nOsmia-Unit: %s\n%s: %s\nOsmia-Base: %s\nOsmia-Onto: %s\n%s: %s\n", in.Unit, in.Onto, stream, in.Unit, rebaseSnapshotTrailer, snapshot, base, in.Onto, landingTrailer, op.ID)
+	change, err := unitChange(r.repository, stream, in.Unit)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	var commit string
 	var conflicts []string
 	if rebased != "" {
 		commit = rebased
-		conflicts, err = rebasedConflicts(ctx, g, driftBase, in.Onto, snapshot, rebased, message, requested)
+		conflicts, err = rebasedConflicts(ctx, g, driftBase, in.Onto, snapshot, rebased, message, change, requested)
 	} else {
-		commit, conflicts, err = g.RebaseFrom(ctx, driftBase, in.Onto, snapshot, message, requested)
+		commit, conflicts, err = rebaseCarrying(ctx, g, driftBase, in.Onto, snapshot, message, change, requested)
 	}
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -590,12 +595,25 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	return r.record(ctx, stream, in, op.ID, UnitRebase{Unit: in.Unit, Rebase: in.Rebase, Operation: op.ID, Branch: w.Branch, Base: base, Onto: in.Onto, Snapshot: snapshot, Commit: commit, Conflicts: conflicts})
 }
 
+// rebaseCarrying rebases snapshot as RebaseFrom does and returns the rebased
+// commit carrying the unit's change ID, when the unit has one, with the
+// paths the rebase left conflicted.
+func rebaseCarrying(ctx context.Context, g workspace.Provider, base, onto, snapshot, message, change string, at time.Time) (string, []string, error) {
+	commit, conflicts, err := g.RebaseFrom(ctx, base, onto, snapshot, message, at)
+	if err != nil || change == "" {
+		return commit, conflicts, err
+	}
+	commit, err = g.Carry(ctx, commit, change)
+	return commit, conflicts, err
+}
+
 // rebasedConflicts returns the paths the rebase of snapshot that made commit
 // rebased left conflicted. A commit that holds stored conflicts holds those
 // paths, and one Jujutsu made from a snapshot that held stored conflicts
 // holds no other. Any other commit is the one Git's merge makes from the
-// rebase's arguments, which is made again to read its conflicted paths.
-func rebasedConflicts(ctx context.Context, g workspace.Provider, base, onto, snapshot, rebased, message string, at time.Time) ([]string, error) {
+// rebase's arguments, carrying the unit's change ID when it has one, which
+// is made again to read its conflicted paths.
+func rebasedConflicts(ctx context.Context, g workspace.Provider, base, onto, snapshot, rebased, message, change string, at time.Time) ([]string, error) {
 	stored, err := g.StoredConflicts(ctx, rebased)
 	if err != nil || len(stored) != 0 {
 		return stored, err
@@ -603,7 +621,7 @@ func rebasedConflicts(ctx context.Context, g workspace.Provider, base, onto, sna
 	if held, err := g.StoredConflicts(ctx, snapshot); err != nil || len(held) != 0 {
 		return nil, err
 	}
-	commit, conflicts, err := g.RebaseFrom(ctx, base, onto, snapshot, message, at)
+	commit, conflicts, err := rebaseCarrying(ctx, g, base, onto, snapshot, message, change, at)
 	if err != nil {
 		return nil, err
 	}
