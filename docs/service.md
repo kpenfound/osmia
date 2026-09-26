@@ -2661,12 +2661,32 @@ The `Open` line appears only with `listen.tailnet` set: it names the node's
 tailnet DNS name, or the configured hostname while the node has none. Any
 `2xx` response counts as delivered; the response body is ignored.
 
+The webhook also receives one post when the [daily budget](#daily-budget)
+pause takes effect. It names the spend, the limit and when the pause clears:
+
+```text
+Osmia paused dispatch: the daily budget is reached.
+Project: <project-id>
+Spend: USD <known spend>[ or more]
+Limit: USD <budget.per_day>
+Clears: <next local midnight, RFC 3339>
+Open: http://<tailnet-name>/
+```
+
+`or more` follows the spend while some attempts have unknown cost, and `Open`
+appears under the same condition as above. A per-unit budget crossing has no
+post of its own: it files an amendment request, which is an inbox entry. A
+provider usage-limit pause is not announced.
+
 Sending runs beside the scheduler, never on its path: it reads the inbox when
-the [event stream](#event-stream) announces an inbox or configuration change,
+the [event stream](#event-stream) announces an inbox, runtime or configuration change,
 when a retry is due and at least once a minute. A slow or failing webhook
 delays nothing else.
 
-**Once per occurrence.** An entry is identified by its project, kind,
+**Once per occurrence.** A budget pause is identified by its project and the
+time it was set, so one that stays in force across a restart is not posted
+again and one on a later day is a new occurrence; a pause cleared before its
+post is dropped. An inbox entry is identified by its project, kind,
 workstream, number, unit, amendment, revision and `opened_at`, so a new
 revision of a packet or final report, or a unit contested again, is a new
 occurrence. The service records each new occurrence as pending in
@@ -2677,11 +2697,12 @@ before recording. The ledger keeps every occurrence it has seen, so one that
 leaves the inbox and returns, such as a delivery whose publication was
 refused, is not posted again.
 
-- Entries already open when notifications turn on, whether by a reload that
+- Entries and a budget pause already open when notifications turn on, whether by a reload that
   sets the webhook or by the first start with it set, are recorded as skipped
   and never posted.
 - A pending entry that is decided or superseded before it is posted is
-  dropped.
+  dropped. While today's spend cannot be read, pending records are kept but
+  none that is no longer open is posted.
 - A failed post (a transport error or a non-`2xx` response) is retried after
   `Options.NotifyRetry` (30 seconds by default), doubling each time, and given
   up after 5 attempts.
@@ -2694,12 +2715,16 @@ problem stands. They never quote the webhook's URL.
 
 | Code | Message | Until |
 | --- | --- | --- |
+| `internal` | `cannot read today's spend; the budget pause notification waits until it can be read` | Today's spend can be read |
 | `unavailable` | `notifying the owner of the <kind> decision in workstream <id> failed at <time> (attempt <n> of 5): <reason>; retrying` | A later post succeeds, or the webhook is removed |
 | `unavailable` | `gave up notifying the owner of the <kind> decision in workstream <id> at <time> after 5 attempts: <reason>` | A later post succeeds, or the webhook is removed |
 | `internal` | `cannot resolve the notification ledger under the root; nothing is sent` | The root's ledger path can be resolved |
 | `internal` | `cannot read <path>; nothing is sent until it can be read` | The ledger can be read |
 | `internal` | `cannot record notifications in <path>; nothing is sent until it can be written` | The ledger can be written |
 | `internal` | `cannot read the inbox; notifications wait until it can be read` | The inbox can be read |
+
+For a budget pause, the two `unavailable` messages name `the daily budget
+pause` in place of `the <kind> decision in workstream <id>`.
 
 `<reason>` is `the webhook responded <status>` or `the request failed:
 <error>`.

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/runtime"
 )
 
 // notifyAttempts is how many times one notification is posted before the
@@ -120,7 +121,7 @@ func (n *notifier) run(ctx context.Context) {
 				waiting = false
 			case <-wake:
 				waiting = !slices.ContainsFunc(sub.take(), func(e Event) bool {
-					return e.Kind == EventInbox || e.Kind == EventConfig || e.Kind == EventResync
+					return e.Kind == EventInbox || e.Kind == EventRuntime || e.Kind == EventConfig || e.Kind == EventResync
 				})
 			}
 		}
@@ -174,25 +175,32 @@ func (n *notifier) pass(ctx context.Context) time.Time {
 		return time.Time{}
 	}
 	link := n.link(ctx, cfg)
+	occurrences := make([]occurrence, 0, len(inbox.Entries)+1)
+	for _, e := range inbox.Entries {
+		occurrences = append(occurrences, occurrence{key: notificationKey(cfg.Project.ID, e), kind: e.Kind, workstream: string(e.Workstream), body: notificationBody(cfg.Project.ID, e, link)})
+	}
+	pause, fault := n.budgetPause(cfg, link)
+	if pause != nil {
+		occurrences = append(occurrences, *pause)
+	}
 	now := n.s.now()
 	open := map[string]bool{}
 	n.mu.Lock()
-	for _, e := range inbox.Entries {
-		key := notificationKey(cfg.Project.ID, e)
-		open[key] = true
-		if _, seen := ledger.Notifications[key]; seen {
+	for _, o := range occurrences {
+		open[o.key] = true
+		if _, seen := ledger.Notifications[o.key]; seen {
 			continue
 		}
-		rec := &notification{State: notificationPending, Kind: e.Kind, Workstream: string(e.Workstream), Recorded: now}
+		rec := &notification{State: notificationPending, Kind: o.kind, Workstream: o.workstream, Recorded: now}
 		if !ledger.Enabled {
 			rec.settle(notificationSkipped, now)
 		} else {
-			rec.Body = notificationBody(cfg.Project.ID, e, link)
+			rec.Body = o.body
 		}
-		ledger.Notifications[key] = rec
+		ledger.Notifications[o.key] = rec
 	}
 	for key, rec := range ledger.Notifications {
-		if rec.State == notificationPending && !open[key] {
+		if rec.State == notificationPending && !open[key] && fault == "" {
 			rec.settle(notificationDropped, now)
 		}
 	}
@@ -201,17 +209,67 @@ func (n *notifier) pass(ctx context.Context) time.Time {
 	if !n.save(path) {
 		return time.Time{}
 	}
-	n.fail("")
-	return n.send(ctx, path, webhook)
+	n.fail(fault)
+	return n.send(ctx, path, webhook, open)
 }
 
-// send posts every due pending notification, oldest first, recording each
+// occurrence is one thing to notify the owner of: an open inbox entry or the
+// daily budget pause in force.
+type occurrence struct {
+	key, kind, workstream, body string
+}
+
+// budgetPause is the occurrence for the daily budget pause in force, or nil
+// when there is none. fault is set when the pause cannot be described yet, in
+// which case pending notifications are kept rather than dropped.
+func (n *notifier) budgetPause(cfg *config.Config, link string) (pause *occurrence, fault string) {
+	if n.s.store == nil {
+		return nil, ""
+	}
+	state, _ := n.s.store.Snapshot()
+	for _, p := range state.Pauses {
+		if p.Target != factoryTarget || p.Source != runtime.PauseDailyBudget {
+			continue
+		}
+		day := n.s.localDay()
+		if day.of(p.SetAt) != day.date {
+			// The pause expired at midnight and awaits its clearing.
+			return nil, ""
+		}
+		status, diagnostic := n.s.dailyBudgetStatus()
+		if diagnostic != nil || status == nil {
+			return nil, "cannot read today's spend; the budget pause notification waits until it can be read"
+		}
+		key := strings.Join([]string{string(cfg.Project.ID), NotifyBudgetPause, p.SetAt.UTC().Format(time.RFC3339Nano)}, "/")
+		return &occurrence{key: key, kind: NotifyBudgetPause, body: budgetPauseBody(cfg.Project.ID, status, day.end, link)}, ""
+	}
+	return nil, ""
+}
+
+// NotifyBudgetPause is the kind of the notification for a daily budget pause.
+const NotifyBudgetPause = "budget_pause"
+
+// budgetPauseBody is the plain-text post for a daily budget pause.
+func budgetPauseBody(project config.ProjectID, status *DailyBudgetStatus, clears time.Time, link string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Osmia paused dispatch: the daily budget is reached.\nProject: %s\nSpend: USD %s", project, status.SpendUSD)
+	if status.LowerBound {
+		b.WriteString(" or more")
+	}
+	fmt.Fprintf(&b, "\nLimit: USD %s\nClears: %s\n", status.LimitUSD, clears.Format(time.RFC3339))
+	if link != "" {
+		fmt.Fprintf(&b, "Open: %s\n", link)
+	}
+	return b.String()
+}
+
+// send posts every due pending notification that is still open, oldest first, recording each
 // result before the next post.
-func (n *notifier) send(ctx context.Context, path, webhook string) time.Time {
+func (n *notifier) send(ctx context.Context, path, webhook string, open map[string]bool) time.Time {
 	n.mu.Lock()
 	var keys []string
 	for key, rec := range n.ledger.Notifications {
-		if rec.State == notificationPending {
+		if rec.State == notificationPending && open[key] {
 			keys = append(keys, key)
 		}
 	}
@@ -414,9 +472,13 @@ func (n *notifier) diagnostics() []Diagnostic {
 		return out
 	}
 	f := n.ledger.Failure
-	message := fmt.Sprintf("notifying the owner of the %s decision in workstream %s failed at %s (attempt %d of %d): %s; retrying", f.Kind, f.Workstream, f.At.Format(time.RFC3339), f.Attempts, notifyAttempts, f.Reason)
+	what := fmt.Sprintf("the %s decision in workstream %s", f.Kind, f.Workstream)
+	if f.Kind == NotifyBudgetPause {
+		what = "the daily budget pause"
+	}
+	message := fmt.Sprintf("notifying the owner of %s failed at %s (attempt %d of %d): %s; retrying", what, f.At.Format(time.RFC3339), f.Attempts, notifyAttempts, f.Reason)
 	if f.GaveUp {
-		message = fmt.Sprintf("gave up notifying the owner of the %s decision in workstream %s at %s after %d attempts: %s", f.Kind, f.Workstream, f.At.Format(time.RFC3339), f.Attempts, f.Reason)
+		message = fmt.Sprintf("gave up notifying the owner of %s at %s after %d attempts: %s", what, f.At.Format(time.RFC3339), f.Attempts, f.Reason)
 	}
 	return append(out, Diagnostic{"notify", Unavailable, message})
 }
