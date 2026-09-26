@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -26,6 +27,9 @@ type TraceSummary struct {
 	Gaps       []TraceGap          `json:"gaps"`
 	Complete   bool                `json:"complete"`
 }
+
+// changeReadTimeout bounds the read of a commit's change ID in a trace walk.
+const changeReadTimeout = 5 * time.Second
 
 func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (any, *APIError) {
 	_, stream, repository, api := s.conversationTrace(raw)
@@ -98,7 +102,17 @@ func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (an
 				message = commit.Message
 			}
 		}
-		out, err = traceCommit(repository, stream, selector, message)
+		// On Jujutsu a unit's commits carry the unit's change ID, which
+		// finds the unit of a commit no record names.
+		change := ""
+		if g, readErr := newUnitWorkspaces(s.current(), repository).of(stream); readErr == nil {
+			read, cancel := context.WithTimeout(ctx, changeReadTimeout)
+			if c, readErr := g.ChangeOf(read, selector); readErr == nil {
+				change = c
+			}
+			cancel()
+		}
+		out, err = traceCommit(repository, stream, selector, message, change)
 	default:
 		return nil, &APIError{Validation, "trace selector must be unit, criterion or commit"}
 	}

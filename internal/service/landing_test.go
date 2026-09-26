@@ -315,7 +315,14 @@ func approveDirectly(t *testing.T, s *Service, repository *trace.Repository, str
 // open.
 func newApprovedFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
-	f, masons := newMasonFixture(t, 1, independentPlan)
+	return newApprovedFixtureOn(t, key, config.WorkspacesGit)
+}
+
+// newApprovedFixtureOn is newApprovedFixture whose workstream is handed in
+// on the workspace backend given.
+func newApprovedFixtureOn(t *testing.T, key, backend string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
+	t.Helper()
+	f, masons := newMasonFixtureOn(t, backend, "masons = 1\n", independentPlan, "")
 	masons.play[masonTurnID("resume")] = reportDone("Built")
 	masons.play[masonTurnID("dedupe")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built", "criteria": []any{criterionArgs(dedupeReport)}})
@@ -344,6 +351,9 @@ func newApprovedFixture(t *testing.T, key string) (*shedFixture, config.Workstre
 func TestLandingIsSerialAndARebasedApprovalReturnsToReview(t *testing.T) {
 	t.Parallel()
 	f, stream, repository := newApprovedFixture(t, "serial")
+	if change, err := unitChange(repository, stream, "dedupe"); err != nil || change != "" {
+		t.Fatalf("a unit on Git worktrees records change %q: %v", change, err)
+	}
 	lands := &foreman{masons: newMasonController(f.s, repository)}
 	ctx := context.Background()
 	for range 2 {

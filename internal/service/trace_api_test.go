@@ -98,7 +98,7 @@ func TestTraceAPIGapsAndTerminal(t *testing.T) {
 	for _, test := range []struct {
 		kind, selector string
 		code           Code
-	}{{"criterion", "bad", Validation}, {"commit", "bad", Validation}, {"unit", "missing", NotFound}, {"other", "a", Validation}} {
+	}{{"criterion", "bad", Validation}, {"commit", "bad", Validation}, {"commit", strings.Repeat("a", 40) + ") | all()", Validation}, {"unit", "missing", NotFound}, {"other", "a", Validation}} {
 		_, api := s.traceView(context.Background(), string(stream), test.kind, test.selector)
 		if api == nil || api.Code != test.code {
 			t.Fatalf("%s %s: %+v", test.kind, test.selector, api)

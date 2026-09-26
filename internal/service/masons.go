@@ -702,13 +702,22 @@ func (m *masons) start(ctx context.Context, b building, unit string) (started, b
 	if err != nil {
 		return false, false, err
 	}
+	var docs []trace.Document
+	if changed {
+		docs = append(docs, decision)
+	}
+	if change, found, err := m.changeRecord(ctx, b.stream, unit, w); err != nil {
+		return false, false, err
+	} else if found {
+		docs = append(docs, change)
+	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: masonTransitionID(unit), Revision: 1, Project: m.repository.Project(), Workstream: b.stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: subject + "-" + UnitReady}
 	tr := trace.Transition{Header: h, Subject: subject, From: UnitReady, To: UnitImplementing,
 		Reason: fmt.Sprintf("unit %s is the next ready unit of the plan of seal %d; its mason works in the unit's workspace on %s, created from %s at %s", unit, mason.Seal, w.Branch, featureBranch(b.stream), base)}
 	tx := trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr,
 		Events: []trace.Event{trace.Notice(masonTransitionID(unit), "unit", fmt.Sprintf("Unit %s is implementing: its mason works on it in its unit workspace on %s.", unit, w.Branch))}}
-	if changed {
-		_, err = m.repository.RecordDocumentsWith(ctx, []trace.Document{decision}, tx)
+	if len(docs) != 0 {
+		_, err = m.repository.RecordDocumentsWith(ctx, docs, tx)
 	} else {
 		_, err = m.repository.Transact(ctx, tx)
 	}

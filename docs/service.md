@@ -1720,7 +1720,12 @@ mason thread,
 `mason-<id>` with the role `mason`, and queues its first turn,
 `mason-<id>-implement`, with the role's profile, the unit's bundle in its
 prompt and the transition as its cause. The scheduler dispatches that turn
-like any other thread turn. A unit is started once: the transition ID is
+like any other thread turn. On [Jujutsu workspaces](#workspace-backends) the
+commit that moves the unit also records `units/<id>/change.json` (`unit`,
+`branch` and `change`), the change ID of the workspace's first working-copy
+commit, which the unit's first snapshot commits and every
+[rebase](#rebasing-units-in-flight) of the unit keeps. The trace records it
+once, and no command shows it. A unit is started once: the transition ID is
 fixed and a unit already `implementing` or `waiting` is never started again. A unit found `implementing` without its first mason turn, as after a
 stop between the two, gets its workspace and that turn on the next pass.
 
@@ -2080,7 +2085,7 @@ agent takes part. The merge runs `git merge-tree --write-tree`, which needs
 Git 2.38 or later.
 
 On [Jujutsu workspaces](#workspace-backends) a clean rebase makes the same
-commit. A rebase that conflicts, or whose snapshot still holds a conflict,
+merge. A rebase that conflicts, or whose snapshot still holds a conflict,
 is made by Jujutsu instead: the same change on the new tip, with the same
 message and author, holding each conflicted path as a stored conflict rather
 than as markers, so every unit in flight is rebased, conflicted or not. The
@@ -2089,6 +2094,11 @@ feature branch's lines, `|||||||` above the lines both sides started from,
 `=======` above the unit's lines and `>>>>>>>` below them, and a side that
 deleted the file holds no lines. Resolving the markers in the workspace
 resolves the conflict in the unit's next snapshot; markers left keep it.
+Either way the rebased commit carries the change ID `units/<id>/change.json`
+records, as a `change-id` header of its Git object, so the unit keeps one
+change through every landing and drift rebase, and its trailers stay for
+plain Git. The change ID never carries an approval: a rebased candidate is a
+new candidate on a new base and returns to review as below.
 
 One trace commit then records `units/<id>/rebase.json` (the unit, rebase
 number, operation, the unit's state, branch, base, new tip, snapshot, rebased
