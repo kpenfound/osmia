@@ -342,7 +342,7 @@ Its controls are:
 | Decide, on a ratification: ask for a redraft | `POST /v1/shed/redraft/<id>` with the note | The note is not empty |
 | Decide, on a contested unit | the entry's `answer`: `POST /v1/contested/<id>/<unit>` with the chosen decision and the note | A decision is chosen and the note is not empty |
 | Decide, on an amendment | the entry's `answer`: `POST /v1/amendment/<id>/<n>` with the packet revision, the chosen decision and the note when there is one | A decision is chosen |
-| Approve, on a delivery | the entry's `answer`: `POST /v1/delivery/<id>` with the final review, report revision, commit and draft hash, and the description when the owner edited the draft | |
+| Approve, on a delivery | the entry's `answer`: `POST /v1/delivery/<id>` with the final review, report revision, commit and draft hash, and the description when the owner edited the draft | The page shows the final report and draft the entry pins; until it does, Approve is disabled |
 | Send, on a workstream's conversation | `POST /v1/conversation/<id>` | The message is not empty |
 | Pause the factory, the project or a workstream, soft or hard | `PUT /v1/runtime/pause` | A scope is chosen and the reason is not empty |
 | Resume, on a factory, project or workstream pause | `DELETE /v1/runtime/pause` with the pause's target | |
@@ -378,7 +378,8 @@ table says: every view for `resync`, `/status` and `/runtime` for `runtime`,
 for `inbox`, and the event's workstream's conversation for `conversation`.
 A workstream's conversation is read when `/status` first lists it, and a
 ratification's packet or a delivery's presentation when `/inbox` first lists
-the entry and again whenever its revision or pinned identity changes. Since an
+the entry, again whenever its revision or pinned identity changes, and again
+with the next read of `/inbox` after a read of it failed. Since an
 edit of a configuration file is not announced, the page also reads `/config`
 every 10 seconds while it is visible and its stream is live, and when it
 becomes visible again. Events that arrive during a read are read after it,

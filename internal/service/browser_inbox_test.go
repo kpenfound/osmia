@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -25,23 +26,24 @@ import (
 // loopback port.
 const listenWeb = "[listen]\nweb = \"127.0.0.1:0\"\n"
 
-// eventGate fails the page's requests for the event stream while it is
-// closed, so the page keeps what it last read until the gate opens again.
-type eventGate struct {
+// requestGate fails the page's requests of one kind while it is closed, so
+// the page keeps what it last read of them until the gate opens again.
+type requestGate struct {
 	mu     sync.Mutex
 	closed bool
 }
 
-func (g *eventGate) set(closed bool) {
+func (g *requestGate) set(closed bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.closed = closed
 }
 
-// gateEvents intercepts the page's event stream requests.
-func (p *page) gateEvents() *eventGate {
+// gate intercepts the page's requests whose URL matches pattern. A page has
+// one gate at a time.
+func (p *page) gate(pattern string) *requestGate {
 	p.t.Helper()
-	g := &eventGate{}
+	g := &requestGate{}
 	chromedp.ListenTarget(p.ctx, func(event any) {
 		e, ok := event.(*fetch.EventRequestPaused)
 		if !ok {
@@ -59,7 +61,7 @@ func (p *page) gateEvents() *eventGate {
 			}
 		}()
 	})
-	p.run(fetch.Enable().WithPatterns([]*fetch.RequestPattern{{URLPattern: "*" + Prefix + "/events"}}))
+	p.run(fetch.Enable().WithPatterns([]*fetch.RequestPattern{{URLPattern: pattern}}))
 	return g
 }
 
@@ -260,7 +262,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 
 	// The stream is held while the amendment's packet is presented again,
 	// so the page still shows the first revision when the owner decides.
-	gate := p.gateEvents()
+	gate := p.gate("*" + Prefix + "/events")
 	gate.set(true)
 	link.cut()
 	p.await("the lost connection", `document.body.dataset.connection === 'lost'`)
@@ -399,10 +401,13 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 }
 
 // The page shows a delivery with its final report's criteria and the drafted
-// description, and approves it with the description the owner edited; the
-// approval records that description, as osmia approve with a description
-// file does, and the entry leaves the inbox.
-func TestBrowserPageApprovesADeliveryWithAnEditedDescription(t *testing.T) {
+// description, and offers Approve only while the report and draft the
+// entry pins are the ones it shows: not before the presentation is read,
+// not while a read of it fails, and not while a newer report's read is
+// pending. A draft left as it is is approved as drafted, and an edited one
+// with the description the owner wrote, as osmia approve with and without a
+// description file records them; each approval takes the entry out.
+func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	p := openBrowser(t)
 	f, ws, repository, report := deliveryFixtureWith(t, listenWeb)
 	must(t, repository.Close())
@@ -411,33 +416,140 @@ func TestBrowserPageApprovesADeliveryWithAnEditedDescription(t *testing.T) {
 	ctx := context.Background()
 	// Publication waits while the workstream is paused.
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: ws}, Mode: "soft", Reason: "Hold the publication", Source: runtime.PauseOwner})
-	presented, err := f.c.Delivery(ctx, ws)
+	// recordReport records the next revision of the final report under a new
+	// summary, which changes the draft, and returns its presentation.
+	recordReport := func(revision int, summary string) DeliveryPresentation {
+		t.Helper()
+		report.Summary = summary
+		content, err := json.Marshal(report)
+		must(t, err)
+		h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalReportDocument, Revision: revision, Project: f.project, Workstream: ws, At: time.Now().UTC(), Actor: finalReviewActor, Cause: "final-review"}
+		must(t, f.repository().RecordDocuments(ctx, []trace.Document{{Header: h, Path: finalReportPath, Content: string(content)}}))
+		out, err := f.c.Delivery(ctx, ws)
+		must(t, err)
+		if out.ReviewRevision != revision {
+			t.Fatalf("presentation of report revision %d: %+v", revision, out)
+		}
+		return out
+	}
+	first, err := f.c.Delivery(ctx, ws)
 	must(t, err)
 	entries := entriesOf(t, f.c, InboxDelivery)
 	if len(entries) != 1 {
 		t.Fatalf("delivery entries %+v", entries)
 	}
 	card := decisionCard(entries[0])
+	description := card + "textarea"
+	approve := card + "button[type=submit]"
+	pins := func(revision int, presented DeliveryPresentation) string {
+		return fmt.Sprintf("final review 1 · report revision %d · commit %s · draft %s", revision, report.Commit[:12], presented.DraftHash[:12])
+	}
+	drafted := func(presented DeliveryPresentation) {
+		t.Helper()
+		p.await("the drafted description", `document.querySelector(`+quote(description)+`).value === `+quote(presented.Draft))
+		p.await("Approve enabled", `!document.querySelector(`+quote(approve)+`).disabled`)
+	}
+	disabled := func() {
+		t.Helper()
+		var off bool
+		p.eval(`document.querySelector(`+quote(approve)+`).disabled`, &off)
+		if !off {
+			t.Fatal("Approve is offered while the page does not show the draft it pins")
+		}
+	}
+	// resync reconnects the page, whose new stream reads the inbox again.
+	link := newLinkProxy(t, f.s.WebAddr())
+	resync := func() {
+		t.Helper()
+		link.cut()
+		p.await("the lost connection", `document.body.dataset.connection === 'lost'`)
+		link.restore()
+		p.await("the live connection again", `document.body.dataset.connection === 'live'`)
+	}
+	// sent is the body of the page's last approval.
+	sent := func() map[string]any {
+		t.Helper()
+		var out map[string]any
+		p.eval(`window.approvals[window.approvals.length - 1]`, &out)
+		return out
+	}
 
-	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	// The presentation cannot be read at first.
+	gate := p.gate("*" + Prefix + "/delivery/*")
+	gate.set(true)
+	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+link.listener.Addr().String()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.eval(`window.notReloaded = true`, nil)
+	p.eval(`(() => {
+		window.notReloaded = true;
+		window.approvals = [];
+		const send = window.fetch;
+		window.fetch = (url, init) => {
+			if (init && init.method === 'POST' && String(url).includes('/delivery/')) {
+				window.approvals.push(JSON.parse(init.body));
+			}
+			return send(url, init);
+		};
+	})()`, nil)
 	p.awaitText(card+"[data-field=kind]", "Delivery")
 	p.awaitText(card+"[data-field=question]", "Deliver Resumable uploads? Final review 1 of commit "+report.Commit)
 	p.awaitText(card+"[data-field=options]", "Options: approve")
-	p.awaitText(card+"[data-field=pins]", "final review 1 · report revision 1 · commit "+report.Commit[:12]+" · draft "+presented.DraftHash[:12])
+	p.awaitText(card+"[data-field=pins]", pins(1, first))
+	p.awaitText(card+"[data-field=reading]", "The final report is unavailable.")
+	disabled()
+	// The next read of the inbox reads the presentation again.
+	gate.set(false)
+	resync()
 	p.awaitText(card+`[data-criterion="spec#2"]`, "dedupe.go and TestDedupe")
-	p.await("the drafted description", `document.querySelector(`+quote(card+"textarea")+`).value === `+quote(presented.Draft))
+	drafted(first)
 
-	edited := presented.Draft + "\nReviewed on the phone.\n"
-	p.setValue(card+"textarea", edited)
-	p.click(card + "button[type=submit]")
+	// A new report is recorded while its presentation cannot be read: the
+	// entry pins its draft, and the page still holds the earlier one.
+	gate.set(true)
+	second := recordReport(2, "Resumable uploads with dedupe")
+	if second.DraftHash == first.DraftHash {
+		t.Fatal("the new summary left the draft as it was")
+	}
+	p.awaitText(card+"[data-field=pins]", pins(2, second))
+	p.awaitText(card+"[data-field=reading]", "The final report is unavailable.")
+	disabled()
+	var shown string
+	p.eval(`document.querySelector(`+quote(description)+`).value`, &shown)
+	if shown != first.Draft {
+		t.Fatalf("the description changed without a read of the new draft: %q", shown)
+	}
+	gate.set(false)
+	resync()
+	drafted(second)
+
+	// The draft as it stands is approved as drafted.
+	p.click(approve)
 	p.awaitText("#inbox-result", "Approved the delivery of final review 1")
 	p.awaitGone("the approved delivery", card)
+	if body := sent(); body["description"] != nil || body["review_revision"] != 2.0 || body["draft_hash"] != second.DraftHash {
+		t.Fatalf("the approval the page sent: %v", body)
+	}
 	after, err := f.c.Delivery(ctx, ws)
 	must(t, err)
-	if after.Approval == nil || after.Approval.Description != edited || after.Approval.Review != 1 || after.Approval.ReviewRevision != 1 || after.Approval.DraftHash != presented.DraftHash {
-		t.Fatalf("the recorded approval %+v", after.Approval)
+	if after.Approval == nil || after.Approval.Description != second.Draft || after.Approval.ReviewRevision != 2 || after.Approval.DraftHash != second.DraftHash {
+		t.Fatalf("the approval of the draft %+v", after.Approval)
+	}
+
+	// A newer report asks for approval again; the owner edits its draft.
+	third := recordReport(3, "Resumable uploads, reviewed again")
+	p.awaitText(card+"[data-field=pins]", pins(3, third))
+	drafted(third)
+	edited := third.Draft + "\nReviewed on the phone.\n"
+	p.setValue(description, edited)
+	p.click(approve)
+	p.awaitText("#inbox-result", "Approved the delivery of final review 1")
+	p.awaitGone("the approved delivery", card)
+	if body := sent(); body["description"] != edited || body["review_revision"] != 3.0 {
+		t.Fatalf("the edited approval the page sent: %v", body)
+	}
+	after, err = f.c.Delivery(ctx, ws)
+	must(t, err)
+	if after.Approval == nil || after.Approval.Description != edited || after.Approval.Review != 1 || after.Approval.ReviewRevision != 3 || after.Approval.DraftHash != third.DraftHash {
+		t.Fatalf("the edited approval %+v", after.Approval)
 	}
 	p.await("the same document", `window.notReloaded === true`)
 }

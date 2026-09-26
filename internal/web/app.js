@@ -136,7 +136,8 @@
   // workstream the status lists gets its conversation read, and one it no
   // longer lists loses it. A ratification or delivery the inbox lists gets
   // its packet or delivery read, again whenever the entry's revision or
-  // identity changes.
+  // identity changes, and again with the next read of the inbox after a read
+  // of it failed.
   async function refresh() {
     if (reading) {
       return;
@@ -145,6 +146,7 @@
     try {
       while (dirty.size > 0) {
         const names = [...dirty];
+        const inboxRead = names.includes('inbox');
         dirty.clear();
         await Promise.all(names.map(async (name) => {
           try {
@@ -178,7 +180,7 @@
             }
           }
           for (const [name, entry] of listed) {
-            if (details.get(name) !== entry) {
+            if (details.get(name) !== entry || (inboxRead && name in failures)) {
               details.set(name, entry);
               dirty.add(name);
             }
@@ -814,10 +816,24 @@
     return dissent;
   }
 
-  function renderDelivery(d, name) {
+  // presented returns the delivery view when it presents the final report
+  // and draft the entry pins, and null otherwise: before its first read, and
+  // while a read for the entry's newer pins is pending or failed.
+  function presented(entry, name) {
     const view = views[name];
+    const pin = entry.answer.body;
+    return view && view.report.review === pin.review && view.review_revision === pin.review_revision &&
+      view.report.commit === pin.commit && view.draft_hash === pin.draft_hash ? view : null;
+  }
+
+  // renderDelivery shows the final report and the draft the entry pins.
+  // Approve waits until they are shown, so an approval never pins a draft
+  // the page does not show.
+  function renderDelivery(d, name) {
+    const view = presented(d.entry, name);
+    block(d.submit, !view);
     if (!view) {
-      d.detail.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The final report is unavailable.' : 'Reading the final report…'));
+      d.detail.replaceChildren(el('p', { class: 'meta', 'data-field': 'reading' }, failures[name] ? 'The final report is unavailable.' : 'Reading the final report…'));
       return;
     }
     d.detail.replaceChildren(el('ul', { class: 'criteria', 'data-field': 'criteria' }, ...view.report.criteria.map((c) => el('li', { 'data-criterion': c.criterion },
