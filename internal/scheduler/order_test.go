@@ -236,7 +236,7 @@ func TestProjectsKeepIndependentSlotsAndRotation(t *testing.T) {
 		fits    bool
 	}{{project, "mason", false}, {project, "architect", false}, {otherProject, "mason", true}, {otherProject, "architect", true}} {
 		c := Candidate{Project: tc.project, Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: tc.role}}}
-		if got := s.fits(used, c); got != tc.fits {
+		if got := s.refusal(used, c) == ""; got != tc.fits {
 			t.Fatalf("%s %s fits %v, want %v", tc.project, tc.role, got, tc.fits)
 		}
 	}

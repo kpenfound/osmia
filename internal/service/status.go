@@ -150,16 +150,27 @@ func (s *Service) statusList() StatusResponse {
 		diagnostics = append(diagnostics, Diagnostic{"failure_streaks", Internal, "cannot read the turn attempts of the active project; check the trace repository"})
 	}
 	diagnostics = append(diagnostics, s.notifier.diagnostics()...)
+	usage, unread := s.providerUsage(state, profiles)
+	if unread != nil {
+		diagnostics = append(diagnostics, *unread)
+	}
 	list, unreadable, api := s.statuses()
 	if api != nil {
-		return StatusResponse{Workstreams: []WorkstreamStatus{}, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{"workstreams", api.Code, api.Message})}
+		list = []WorkstreamStatus{}
+	}
+	capacity, unread := s.capacityStatus(list)
+	if unread != nil {
+		diagnostics = append(diagnostics, *unread)
+	}
+	if api != nil {
+		return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{"workstreams", api.Code, api.Message})}
 	}
 	for _, w := range list {
 		if d, ok := unreadable[w.Workstream]; ok {
 			diagnostics = append(diagnostics, d)
 		}
 	}
-	return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, FailureStreaks: streaks, Diagnostics: diagnostics}
+	return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: diagnostics}
 }
 
 // failureStreaks returns the active project's nonzero infrastructure failure

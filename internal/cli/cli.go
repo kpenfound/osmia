@@ -55,6 +55,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   resume <all|project-id|workstream-id> [--json]
   priority set <workstream-id>... | priority clear [--json]
   profiles [set <role> <profile>|clear <role>|clear-limit <backend>] [--json]
+  config [--json]
   reload [--json]
 Client commands also accept --socket PATH (relative to root).
 Only these commands are available; serve runs in the foreground.
@@ -203,7 +204,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 1 || len(a) == 2
 	case "conversation":
 		valid = len(a) == 1
-	case "inbox", "reload":
+	case "inbox", "reload", "config":
 		valid = len(a) == 0
 	case "answer":
 		valid = o.accept && len(a) == 1 || !o.accept && len(a) == 2
@@ -272,6 +273,22 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Extraction %d of project %s (%s) started\nFollow it with osmia status\n", result.Extraction.Extraction, result.Project.ID, result.Project.Name)
+		return 0
+	}
+	if cmd == "config" {
+		cfg, err := c.Configuration(ctx)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, cfg)
+		}
+		fmt.Fprintf(stdout, "Configuration: %s (%s)\n", cfg.Digest, cfg.Root)
+		showConfigDrift(stdout, cfg.Drift)
+		diagnostics(stdout, cfg.Diagnostics)
+		if e := cfg.LastError; e != nil {
+			fmt.Fprintf(stdout, "Last reload failed at %s: %s\n", e.At.UTC().Format(time.RFC3339), e.Message)
+		}
 		return 0
 	}
 	if cmd == "reload" {
@@ -758,6 +775,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			}{h, cfg, rt, all})
 		}
 		fmt.Fprintf(stdout, "Service: %s ready=%t API=%d\nConfiguration: %s (%s)\n", h.Service, h.Ready, h.APIVersion, cfg.Digest, cfg.Root)
+		showConfigDrift(stdout, cfg.Drift)
 		showTailnet(stdout, h.Tailnet)
 		showProject(stdout, cfg.Project)
 		for _, p := range rt.Projects {
@@ -769,6 +787,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		showRuntime(stdout, rt)
 		showDailyBudget(stdout, all.DailyBudget)
+		showProviderUsage(stdout, all.ProviderUsage)
+		showCapacity(stdout, all.Capacity)
 		showFailureStreaks(stdout, all.FailureStreaks)
 		showWorkstreams(stdout, all)
 		return 0
@@ -970,6 +990,76 @@ func showDailyBudget(w io.Writer, b *service.DailyBudgetStatus) {
 		fmt.Fprintf(w, " (at least; %d attempt(s) have unknown cost)", b.UnknownCosts)
 	}
 	fmt.Fprintln(w)
+}
+
+// showConfigDrift prints each configuration file's state against the loaded
+// configuration.
+func showConfigDrift(w io.Writer, d service.ConfigDrift) {
+	for _, f := range d.Files {
+		line := "Config file: " + f.Path
+		if f.Project != "" {
+			line += " (project " + string(f.Project) + ")"
+		}
+		line += ": " + f.State
+		if f.Reason != "" {
+			line += ": " + f.Reason
+		}
+		fmt.Fprintln(w, line)
+	}
+}
+
+// showProviderUsage prints today's known spend by provider, each provider's
+// usage limit and the roles it moved to a fallback profile or paused.
+func showProviderUsage(w io.Writer, u *service.ProviderUsageStatus) {
+	if u == nil {
+		return
+	}
+	spend := func(s service.ProviderSpend) string {
+		line := "USD " + s.SpendUSD + " known spend"
+		if s.LowerBound {
+			line += fmt.Sprintf(" (at least; %d attempt(s) have unknown cost)", s.UnknownCosts)
+		}
+		return line
+	}
+	fmt.Fprintf(w, "Provider usage on %s:\n", u.Day)
+	for _, p := range u.Providers {
+		fmt.Fprintf(w, "  %s: %s\n", p.Provider, spend(p.ProviderSpend))
+		if l := p.Limit; l != nil {
+			until := "until cleared"
+			if !l.ResetsAt.IsZero() {
+				until = "until " + l.ResetsAt.UTC().Format(time.RFC3339)
+			}
+			fmt.Fprintf(w, "    Limit: %s kind=%s %s\n", l.Status, l.Kind, until)
+		}
+		for _, f := range p.Fallbacks {
+			fmt.Fprintf(w, "    Fallback: %s runs %s in place of %s\n", f.Role, f.Profile, f.Configured)
+		}
+		for _, role := range p.PausedRoles {
+			fmt.Fprintf(w, "    Paused: %s has no fallback available\n", role)
+		}
+	}
+	if u.Unattributed != nil {
+		fmt.Fprintf(w, "  unattributed: %s\n", spend(*u.Unattributed))
+	}
+}
+
+// showCapacity prints the slots used of each shared role kind and the work
+// waiting for one.
+func showCapacity(w io.Writer, c *service.CapacityStatus) {
+	if c == nil {
+		return
+	}
+	fmt.Fprintf(w, "Capacity (per workstream %d):\n", c.PerWorkstream)
+	for _, r := range c.Roles {
+		fmt.Fprintf(w, "  %s: %d of %d slot(s) in use\n", r.Role, r.Used, r.Limit)
+		for _, wait := range r.Waiting {
+			what := "unit " + wait.Unit
+			if wait.Turn != "" {
+				what = "turn " + wait.Turn + " of " + wait.Agent
+			}
+			fmt.Fprintf(w, "    Waiting: %s %s (%s)\n", wait.Workstream, what, wait.Reason)
+		}
+	}
 }
 
 // showFailureStreaks prints each role and profile whose latest turn attempts

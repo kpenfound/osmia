@@ -89,9 +89,38 @@ type ConfigResponse struct {
 	Project     *ProjectView   `json:"project"`
 	Diagnostics []Diagnostic   `json:"diagnostics"`
 	LastError   *ReloadError   `json:"last_error,omitempty"`
+	// Drift compares the configuration files on disk with the loaded
+	// configuration.
+	Drift ConfigDrift `json:"drift"`
 	// Tailnet is the tailnet listener's state; it is omitted unless
 	// listen.tailnet is configured.
 	Tailnet *TailnetStatus `json:"tailnet,omitempty"`
+}
+
+// The states of a configuration file on disk against the loaded
+// configuration.
+const (
+	ConfigUnchanged = "unchanged"
+	ConfigChanged   = "changed"
+	ConfigInvalid   = "invalid"
+)
+
+// ConfigDrift lists the top-level configuration file, then the active
+// project's, and any other file a reload would refuse. Differs is true when
+// any of them is not unchanged.
+type ConfigDrift struct {
+	Differs bool         `json:"differs"`
+	Files   []ConfigFile `json:"files"`
+}
+
+// ConfigFile is one configuration file's State against the loaded
+// configuration. Project names the project a project file belongs to. Reason
+// says why an invalid file fails, as a reload reports it.
+type ConfigFile struct {
+	Path    string           `json:"path"`
+	Project config.ProjectID `json:"project,omitempty"`
+	State   string           `json:"state"`
+	Reason  string           `json:"reason,omitempty"`
 }
 
 // ReloadResponse reports an applied reload: the digest of the configuration
@@ -364,6 +393,12 @@ type StatusResponse struct {
 	Profiles       map[string]EffectiveProfile `json:"profiles"`
 	ProviderLimits []runtime.ProviderLimit     `json:"provider_limits,omitempty"`
 	DailyBudget    *DailyBudgetStatus          `json:"daily_budget"`
+	// Capacity is null when the turns of the active project cannot be read,
+	// which a diagnostic reports.
+	Capacity *CapacityStatus `json:"capacity"`
+	// ProviderUsage is null when today's costs or turn attempts cannot be
+	// read, which a diagnostic reports.
+	ProviderUsage *ProviderUsageStatus `json:"provider_usage"`
 	// FailureStreaks lists the roles and profiles whose latest turn attempts
 	// failed with infrastructure failures; it is omitted when there are none.
 	FailureStreaks []FailureStreak `json:"failure_streaks,omitempty"`
@@ -397,6 +432,75 @@ type DailyBudgetStatus struct {
 	LimitUSD     string `json:"limit_usd"`
 	UnknownCosts int    `json:"unknown_costs"`
 	LowerBound   bool   `json:"lower_bound"`
+}
+
+// CapacityStatus is the scheduler's slot accounting for the role kinds whose
+// turns share slots across workstreams, mason, reviewer and committee in that
+// order, and the per-workstream limit in force.
+type CapacityStatus struct {
+	PerWorkstream int            `json:"per_workstream"`
+	Roles         []RoleCapacity `json:"roles"`
+}
+
+// RoleCapacity is one role kind's slots: Used counts its turns in flight and
+// Limit is its configured capacity. Waiting lists the work waiting for a slot
+// and never paused work.
+type RoleCapacity struct {
+	Role    string     `json:"role"`
+	Used    int        `json:"used"`
+	Limit   int        `json:"limit"`
+	Waiting []SlotWait `json:"waiting"`
+}
+
+// SlotWait is work waiting for a slot: a queued turn, with its Agent and
+// Turn, or a ready unit the mason controller deferred, with Unit alone.
+// Reason is capacity when every slot of the role kind is taken, priority
+// when higher-priority workstreams start a unit first, and workstream-cap
+// when the workstream holds capacity.per_workstream.
+type SlotWait struct {
+	Workstream config.WorkstreamID `json:"workstream"`
+	Unit       string              `json:"unit,omitempty"`
+	Agent      string              `json:"agent,omitempty"`
+	Turn       string              `json:"turn,omitempty"`
+	Reason     string              `json:"reason"`
+}
+
+// ProviderUsageStatus is the known spend of the service host's current local
+// calendar day, Day as YYYY-MM-DD, by provider, next to each provider's
+// usage limit. Unattributed holds the day's costs no recorded turn attempt
+// names a provider for, and is omitted when there are none.
+type ProviderUsageStatus struct {
+	Day          string          `json:"day"`
+	Providers    []ProviderUsage `json:"providers"`
+	Unattributed *ProviderSpend  `json:"unattributed,omitempty"`
+}
+
+// ProviderSpend is a known spend as a decimal USD string. UnknownCosts counts
+// the attempts whose cost is unknown; when there are any, LowerBound is true
+// and actual spend may be higher.
+type ProviderSpend struct {
+	SpendUSD     string `json:"spend_usd"`
+	UnknownCosts int    `json:"unknown_costs"`
+	LowerBound   bool   `json:"lower_bound"`
+}
+
+// ProviderUsage is one provider's day. Limit is its usage limit in force, or
+// null. Fallbacks lists the roles that run a fallback profile because the
+// provider of their configured profile is limited, and PausedRoles those
+// that are paused because no fallback is available.
+type ProviderUsage struct {
+	Provider string `json:"provider"`
+	ProviderSpend
+	Limit       *runtime.ProviderLimit `json:"limit"`
+	Fallbacks   []RoleFallback         `json:"fallbacks"`
+	PausedRoles []string               `json:"paused_roles"`
+}
+
+// RoleFallback is a role running Profile in place of its Configured profile.
+type RoleFallback struct {
+	Role       string `json:"role"`
+	Configured string `json:"configured"`
+	Profile    string `json:"profile"`
 }
 
 // WorkstreamStatus is the chief of staff's status for one workstream, next to

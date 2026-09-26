@@ -97,6 +97,7 @@ func (s *Service) configuration() ConfigResponse {
 		out.Diagnostics = append(out.Diagnostics, Diagnostic{"projects", Internal, "an interrupted project registration is incomplete; run osmia project add again to finish it, or inspect project-add.json under the root"})
 	}
 	next, restart, err := s.candidate(cfg)
+	out.Drift = s.configDrift(cfg, err)
 	if err != nil {
 		out.Diagnostics = append(out.Diagnostics, Diagnostic{"configuration", Validation, "disk configuration is invalid (" + reloadError(err, time.Time{}).Message + "); loaded configuration retained"})
 		return out
