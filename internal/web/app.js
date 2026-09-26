@@ -573,7 +573,9 @@
   function renderWorkstream(w) {
     const status = w.status;
     const c = card(w.workstream);
-    c.summary.replaceChildren(
+    // replaceChildren turns a null child into the text "null", so the absent
+    // ones are dropped first.
+    c.summary.replaceChildren(...[
       el('div', { class: 'line' },
         el('h3', { 'data-field': 'goal' }, status ? status.goal : 'No status yet'),
         w.state ? el('span', { class: 'tag', 'data-field': 'state' }, w.state) : null),
@@ -583,7 +585,7 @@
       el('h4', {}, 'Units'),
       renderUnits(w.units),
       el('h4', {}, 'Sessions'),
-      renderAgents(w.agents));
+      renderAgents(w.agents)].filter((node) => node !== null));
     renderConversation(c, w.workstream);
     return c.node;
   }
