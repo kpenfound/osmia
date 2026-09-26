@@ -255,12 +255,22 @@ func (a *OperationAttempt) Unlocked(ctx context.Context, fn func(context.Context
 // Relock runs fn after taking back the lock Unlocked released, when ctx comes
 // from Unlocked: the rest of that work, and the callback after it, run
 // serialized with reconciliation. Otherwise, in a callback that holds the
-// lock or outside any operation, it runs fn as it is.
+// lock or outside any operation, or with a context from Beside, it runs fn
+// as it is.
 func Relock(ctx context.Context, fn func() error) error {
-	if u, ok := ctx.Value(unlockedKey{}).(*unlocked); ok {
+	if u, ok := ctx.Value(unlockedKey{}).(*unlocked); ok && u != nil {
 		u.relock()
 	}
 	return fn()
+}
+
+// Beside returns ctx for one of several pieces of work that run at the same
+// time within one Unlocked call: Relock given it runs fn as it is, so one
+// piece ending does not take the lock back while the others are in flight.
+// Their writes land without the lock; the caller relocks with the context
+// Unlocked passed once they have all returned.
+func Beside(ctx context.Context) context.Context {
+	return context.WithValue(ctx, unlockedKey{}, (*unlocked)(nil))
 }
 
 // Serialize runs fn serialized with reconciliation and Close. fn must not call

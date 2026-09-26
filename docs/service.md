@@ -951,7 +951,9 @@ the thread runner and the [turn isolation](isolation.md) path, by the
 service's own reconciler: the scheduler's gate declines every committee
 thread. Turn `shed-<n>-<agent>-<attempt>` carries the operation ID as cause
 and the committee's effective profile. The operation waits for every member
-before it records anything.
+before it records anything. The reconciler runs the round beside its other
+operations, so another workstream's round, and the project's other
+operations, proceed while the members run.
 
 Each turn gets a read-only private copy of a view staged under
 `<root>/shed/<project-id>/<workstream-id>/<turn>/workspace`:
@@ -3190,7 +3192,16 @@ scheduler dispatched within capacity runs at the same time, and landings,
 rebases, reviews and later passes proceed while sessions are in flight. A
 turn's result, its costs and its completion land together between the
 controllers' runs, so every controller of one pass sees the turn either still
-running or finished. Shutdown cancels the sessions in flight and waits for them before the trace
+running or finished. The pass treats `shed-round` and `amendment-round`
+operations the same way: a round's members run without the trace's
+operation lock, so the rounds of different workstreams run at the same time,
+and the round takes the lock back once every member has ended, so its
+records, its shed transition and the operation's result land together. The
+`shed-reply`, `shed-redraft`, `architect-draft`, `architect-amendment-draft`,
+`amendment-reply` and `final-review` operations run in the pass, holding
+the lock: while one runs its session, no other operation of the project is
+claimed or recorded, turns and rounds already in flight record their results
+only once it ends, and the next pass starts after it. Shutdown cancels the sessions in flight and waits for them before the trace
 closes; the next startup settles each interrupted turn before dispatch, as
 described below.
 

@@ -390,7 +390,11 @@ while the work runs and takes it back before the callback goes on: other
 operations are reconciled meanwhile, and `Close` does not wait for the work, so
 the caller joins it before closing. `trace.Relock`, given the context
 `Unlocked` passed to the work, takes the lock back for the rest of that work,
-and `Repository.Serialize` runs other work serialized with reconciliation. Every
+and `Repository.Serialize` runs other work serialized with reconciliation.
+Work that runs several pieces at the same time, such as a committee round's
+members, gives each piece a context from `trace.Beside`: `Relock` with it runs
+as it is, so the first piece to end does not take the lock back while the
+others run, and the work relocks once they have all returned. Every
 trace write still goes through the repository's single writer. Operation claims use
 execution ownership rather than expiring notification leases: a slow external
 call cannot overlap a replacement worker, and `WithOperation` leaves an

@@ -647,7 +647,7 @@ func (s *Service) stop(active *activeProject) error {
 // adapters come from the pipeline, which a reload may restage for the next pass.
 // The loop holds the pending operations of the architect and committee
 // reconcilers while a pause covers their workstream, and runs thread turns
-// beside its other operations.
+// and committee rounds beside its other operations.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, *pipeline, error) {
 	options := s.options.Reconciliation
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
@@ -692,7 +692,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		options.Hold = s.holding(repository)
 	}
 	if options.Concurrent == nil {
-		options.Concurrent = turnOperation
+		options.Concurrent = concurrentOperation
 	}
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
@@ -750,11 +750,19 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		repository: repositoryAdapter{other: options.Adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish}}, nil
 }
 
-// turnOperation reports whether op delivers a thread turn. The reconciler
-// runs thread turns beside its other operations, so every turn the scheduler
-// dispatched within capacity is in flight at once.
-func turnOperation(op coreadapter.Operation) bool {
-	return op.Boundary == coreadapter.RunnerBoundary && op.Action == thread.TurnAction
+// concurrentOperation reports whether op delivers a thread turn or runs a
+// committee round. The reconciler runs those beside its other operations, so
+// every turn the scheduler dispatched within capacity, and the rounds of
+// different workstreams, are in flight at once.
+func concurrentOperation(op coreadapter.Operation) bool {
+	if op.Boundary != coreadapter.RunnerBoundary {
+		return false
+	}
+	switch op.Action {
+	case thread.TurnAction, RoundAction, AmendmentRoundAction:
+		return true
+	}
+	return false
 }
 
 // stagePriority orders the operations of a pass so that the factory finishes
