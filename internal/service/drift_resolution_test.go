@@ -148,7 +148,7 @@ func turnIDs(t *testing.T, repository *trace.Repository, stream config.Workstrea
 // resolutionWorkspace returns the workstream's drift resolution workspace.
 func resolutionWorkspace(t *testing.T, f *shedFixture, stream config.WorkstreamID) workspace.Worktree {
 	t.Helper()
-	w, found, err := driftWorkspaces(f.s.cfg).Workspace(context.Background(), string(stream))
+	w, found, err := workspaces(f.s.cfg, driftsDirectory, config.WorkspacesGit).Workspace(context.Background(), string(stream))
 	must(t, err)
 	if !found {
 		t.Fatal("the workstream has no drift resolution workspace")
@@ -159,7 +159,7 @@ func resolutionWorkspace(t *testing.T, f *shedFixture, stream config.WorkstreamI
 // featureTip returns the tip of the workstream's feature branch.
 func featureTip(t *testing.T, f *shedFixture, stream config.WorkstreamID) string {
 	t.Helper()
-	tip, _, err := featureWorkspaces(f.s.cfg).Branch(context.Background(), featureBranch(stream))
+	tip, _, err := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit).Branch(context.Background(), featureBranch(stream))
 	must(t, err)
 	return tip
 }
@@ -288,7 +288,7 @@ func TestDriftConflictIsResolvedByAMasonAndMovesTheBranchOnApproval(t *testing.T
 	if done := transitionByID(t, repository, stream, "drift-1-rebased"); done.From != "conflicted-1" || done.To != "rebased-1" {
 		t.Fatalf("the outcome %+v", done)
 	}
-	if _, found, err := driftWorkspaces(f.s.cfg).Workspace(ctx, string(stream)); err != nil || found {
+	if _, found, err := workspaces(f.s.cfg, driftsDirectory, config.WorkspacesGit).Workspace(ctx, string(stream)); err != nil || found {
 		t.Fatalf("the resolution workspace outlived the drift rebase: %t %v", found, err)
 	}
 	if seen, err := d.Inspect(ctx, op); err != nil || seen.State != coreadapter.EffectCompleted {
@@ -489,7 +489,7 @@ func TestRestartDuringDriftResolutionResumesWithoutDuplicates(t *testing.T) {
 	if ids := turnIDs(t, repository, stream, driftReviewerAgent); len(ids) != 1 {
 		t.Fatalf("drift reviewer turns %v", ids)
 	}
-	if _, found, err := driftWorkspaces(f.s.cfg).Workspace(ctx, string(stream)); err != nil || found {
+	if _, found, err := workspaces(f.s.cfg, driftsDirectory, config.WorkspacesGit).Workspace(ctx, string(stream)); err != nil || found {
 		t.Fatalf("the resolution workspace outlived the drift rebase: %t %v", found, err)
 	}
 	var outcomes []string
@@ -561,10 +561,10 @@ func TestDriftMasonTurnWorksInTheResolutionWorkspace(t *testing.T) {
 	_, _, op := conflictedDrift(t, f, d, stream)
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 	w := resolutionWorkspace(t, f, stream)
-	drifts := resolutions{git: driftWorkspaces(f.s.cfg)}
+	drifts := resolutions{driftWorkspaces(f.s.cfg, repository)}
 	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: driftMasonAgent, Turn: driftResolveTurnID(1, 1), Role: masonRole}
 
-	lease, err := threadWorkspaces{units: newUnitWorkspaces(f.s.cfg), drifts: drifts}.Acquire(ctx, coreadapter.WorkspaceRequest{Scope: scope, Access: coreadapter.ReadWrite})
+	lease, err := threadWorkspaces{units: newUnitWorkspaces(f.s.cfg, repository), drifts: drifts}.Acquire(ctx, coreadapter.WorkspaceRequest{Scope: scope, Access: coreadapter.ReadWrite})
 	must(t, err)
 	if lease.Workspace.Directory != w.Path {
 		t.Fatalf("the drift mason turn is lent %s, not %s", lease.Workspace.Directory, w.Path)

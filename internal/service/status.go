@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"slices"
@@ -154,6 +155,13 @@ func (s *Service) statusList() StatusResponse {
 	if unread != nil {
 		diagnostics = append(diagnostics, *unread)
 	}
+	// A jj that hangs must not hold up status.
+	checking, cancel := context.WithTimeout(context.Background(), jjCheckTimeout)
+	workspaces, err := s.newWorkspaces(checking, s.current())
+	cancel()
+	if err != nil {
+		diagnostics = append(diagnostics, Diagnostic{"workspaces", Unavailable, workspaces.Problem})
+	}
 	list, unreadable, api := s.statuses()
 	if api != nil {
 		list = []WorkstreamStatus{}
@@ -163,14 +171,14 @@ func (s *Service) statusList() StatusResponse {
 		diagnostics = append(diagnostics, *unread)
 	}
 	if api != nil {
-		return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{"workstreams", api.Code, api.Message})}
+		return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{"workstreams", api.Code, api.Message}), Workspaces: workspaces}
 	}
 	for _, w := range list {
 		if d, ok := unreadable[w.Workstream]; ok {
 			diagnostics = append(diagnostics, d)
 		}
 	}
-	return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: diagnostics}
+	return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: diagnostics, Workspaces: workspaces}
 }
 
 // failureStreaks returns the active project's nonzero infrastructure failure
@@ -251,7 +259,7 @@ func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 }
 
 func statusView(project config.ProjectID, mode bundle.Mode, w trace.WorkstreamStatus) WorkstreamStatus {
-	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, OpenQuestions: w.OpenQuestions, Gates: append([]trace.OwnerGate{}, w.Gates...), ContextMode: mode}
+	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, Workspaces: w.Workspaces, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, OpenQuestions: w.OpenQuestions, Gates: append([]trace.OwnerGate{}, w.Gates...), ContextMode: mode}
 	if w.State != "" {
 		state := w.State
 		out.State = &state

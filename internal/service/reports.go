@@ -356,7 +356,7 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 	if err != nil || !found {
 		return false, false, err
 	}
-	units := newUnitWorkspaces(m.cfg)
+	units := newUnitWorkspaces(m.cfg, m.repository)
 	if behind, err := units.behind(ctx, b.stream, unit); err != nil || behind {
 		return false, false, err
 	}
@@ -371,7 +371,11 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 	if err != nil {
 		return false, false, err
 	}
-	if marked, err := units.git.Markers(ctx, candidate, conflicted); err != nil || len(marked) != 0 {
+	g, err := units.of(b.stream)
+	if err != nil {
+		return false, false, err
+	}
+	if marked, err := g.Markers(ctx, candidate, conflicted); err != nil || len(marked) != 0 {
 		if err != nil {
 			return false, false, err
 		}

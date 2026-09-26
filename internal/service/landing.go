@@ -77,10 +77,10 @@ func landIDs(unit string, review int) (transition, event string) {
 	return transition, trace.EventID(transition, "run")
 }
 
-// featureWorkspaces returns the workspace provider of the feature branches of
-// the configured project.
-func featureWorkspaces(cfg *config.Config) workspace.Provider {
-	return workspaces(cfg, branchesDirectory)
+// featureWorkspaces returns the feature branch workspaces of the configured
+// project, each workstream's on the backend the repository records for it.
+func featureWorkspaces(cfg *config.Config, repository *trace.Repository) streamWorkspaces {
+	return streamWorkspaces{cfg: cfg, repository: repository, directory: branchesDirectory}
 }
 
 // foreman is the landing controller. Its pass asks to land one approved unit
@@ -327,14 +327,18 @@ func (f *foreman) Inspect(ctx context.Context, op coreadapter.Operation) (coread
 		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "landing " + result.Outcome, Result: result}, nil
 	}
 	branch := featureBranch(stream)
-	tip, exists, err := featureWorkspaces(f.cfg).Branch(ctx, branch)
+	g, err := featureWorkspaces(f.cfg, f.repository).of(stream)
+	if err != nil {
+		return coreadapter.Observation{}, err
+	}
+	tip, exists, err := g.Branch(ctx, branch)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
 	if !exists {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("the clone has no feature branch %s", branch)}, nil
 	}
-	if landed, err := landingCommit(ctx, featureWorkspaces(f.cfg), tip, in, op.ID); err != nil {
+	if landed, err := landingCommit(ctx, g, tip, in, op.ID); err != nil {
 		return coreadapter.Observation{}, err
 	} else if landed {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("feature branch %s is at %s, this operation's landing commit on %s; the landing records it without committing again", branch, tip, in.Base)}, nil
@@ -393,7 +397,10 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	g := featureWorkspaces(f.cfg)
+	g, err := featureWorkspaces(f.cfg, f.repository).of(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	branch := featureBranch(stream)
 	acquired, err := g.Acquire(ctx, vcs.Request{Name: string(stream), Branch: branch})
 	if err != nil {
@@ -566,7 +573,11 @@ func (f *foreman) record(ctx context.Context, stream config.WorkstreamID, in lan
 	if !ok {
 		return coreadapter.OperationResult{}, fmt.Errorf("the sealed plan and follow-ups of workstream %s have no unit %s", stream, in.Unit)
 	}
-	landed, err := featureWorkspaces(f.cfg).Commit(ctx, commit)
+	g, err := featureWorkspaces(f.cfg, f.repository).of(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	landed, err := g.Commit(ctx, commit)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}

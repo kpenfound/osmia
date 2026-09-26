@@ -81,8 +81,12 @@ func resolveTurnID(unit string, k int) string {
 // feature branch commits each unit's finished rebases were onto. refresh
 // reports whether every unit is current, so a landing may be asked for.
 func (f *foreman) refresh(ctx context.Context, b building, rebasing map[string]bool, dispatched map[string]bool, rebased map[string][]string) (bool, error) {
-	units := newUnitWorkspaces(f.cfg)
-	tip, exists, err := units.git.Branch(ctx, featureBranch(b.stream))
+	units := newUnitWorkspaces(f.cfg, f.repository)
+	g, err := units.of(b.stream)
+	if err != nil {
+		return false, err
+	}
+	tip, exists, err := g.Branch(ctx, featureBranch(b.stream))
 	if err != nil || !exists {
 		return true, err
 	}
@@ -408,14 +412,18 @@ func (r rebaser) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "rebase " + result.Outcome, Result: result}, nil
 	}
 	branch := unitBranch(stream, in.Unit)
-	tip, exists, err := newUnitWorkspaces(r.cfg).git.Branch(ctx, branch)
+	g, err := newUnitWorkspaces(r.cfg, r.repository).of(stream)
+	if err != nil {
+		return coreadapter.Observation{}, err
+	}
+	tip, exists, err := g.Branch(ctx, branch)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
 	if !exists {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("the clone has no unit branch %s", branch)}, nil
 	}
-	if snapshot, err := rebasedSnapshot(ctx, newUnitWorkspaces(r.cfg).git, tip, in, op.ID); err != nil {
+	if snapshot, err := rebasedSnapshot(ctx, g, tip, in, op.ID); err != nil {
 		return coreadapter.Observation{}, err
 	} else if snapshot != "" {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("unit branch %s is at %s, this operation's rebase of snapshot %s onto %s; the rebase records it without rebasing again", branch, tip, snapshot, in.Onto)}, nil
@@ -473,7 +481,10 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		}
 		return *result, nil
 	}
-	g := newUnitWorkspaces(r.cfg).git
+	g, err := newUnitWorkspaces(r.cfg, r.repository).of(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	w, found, err := g.Workspace(ctx, unitName(stream, in.Unit))
 	if err != nil {
 		return coreadapter.OperationResult{}, err

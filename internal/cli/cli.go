@@ -790,6 +790,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		showProviderUsage(stdout, all.ProviderUsage)
 		showCapacity(stdout, all.Capacity)
 		showFailureStreaks(stdout, all.FailureStreaks)
+		showWorkspaces(stdout, all.Workspaces)
 		showWorkstreams(stdout, all)
 		return 0
 	}
@@ -1070,6 +1071,21 @@ func showFailureStreaks(w io.Writer, streaks []service.FailureStreak) {
 	}
 }
 
+// showWorkspaces prints the workspace backend new workstreams get, none
+// when workspaces = "jujutsu" finds no supported jj, which a diagnostic
+// then describes.
+func showWorkspaces(w io.Writer, ws service.WorkspacesStatus) {
+	backend := ws.Backend
+	if backend == "" {
+		backend = "none"
+	}
+	fmt.Fprintf(w, "Workspaces: setting=%s new_workstreams=%s", ws.Setting, backend)
+	if ws.JJ != "" {
+		fmt.Fprintf(w, " jj=%s", ws.JJ)
+	}
+	fmt.Fprintln(w)
+}
+
 // showWorkstreams prints each workstream's gates, overlap advisories, latest
 // drift rebase, goal and attention.
 func showWorkstreams(w io.Writer, all service.StatusResponse) {
@@ -1311,7 +1327,7 @@ func facts(st service.WorkstreamStatus) string {
 	if st.State != nil {
 		state = *st.State
 	}
-	return fmt.Sprintf("state=%s open_questions=%d context_mode=%s", state, st.OpenQuestions, st.ContextMode)
+	return fmt.Sprintf("state=%s open_questions=%d context_mode=%s workspaces=%s", state, st.OpenQuestions, st.ContextMode, st.Workspaces)
 }
 
 func attention(s string) string {

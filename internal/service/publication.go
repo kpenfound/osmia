@@ -329,7 +329,10 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	g := featureWorkspaces(cfg)
+	g, err := featureWorkspaces(cfg, p.repository).of(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	branch := featureBranch(stream)
 	title := deliveryTitle(approval.Description, stream)
 	published := in.Commit

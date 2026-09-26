@@ -311,7 +311,7 @@ func (f *pageFixture) status(t *testing.T, content trace.StatusContent) {
 }
 
 // The page, opened through the web listener, shows each workstream's goal,
-// attention, note, units by state and sessions, the capacity and the pauses
+// attention, note, workspace backend, units by state and sessions, the capacity and the pauses
 // from the /v1 views; it follows a status change without a reload, at phone
 // and laptop widths, and after its event stream is lost it reconnects and
 // reads again what changed meanwhile.
@@ -328,6 +328,7 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	for selector, want := range map[string]string{
 		card + "[data-field=state]":                              "building",
 		card + "[data-field=note]":                               "A mason is building the upload unit.",
+		card + "[data-field=workspaces]":                         "git workspaces",
 		card + `[data-state=merged]`:                             "merged 1 resume",
 		card + `[data-state=implementing]`:                       "implementing 1 upload",
 		card + `[data-state=ready]`:                              "ready 1 audit",

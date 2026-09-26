@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
@@ -35,15 +36,14 @@ func unitBranch(stream config.WorkstreamID, unit string) string {
 // removes one, so a unit's work stays in its workspace between turns and
 // across restarts. They are also the workspaces a mason turn is lent: the
 // turn works on a copy without VCS metadata, which capture copies back.
-type unitWorkspaces struct{ git workspace.Provider }
+type unitWorkspaces struct{ streamWorkspaces }
 
 var _ coreadapter.Workspaces = unitWorkspaces{}
 
-func (s *Service) unitWorkspaces() unitWorkspaces { return newUnitWorkspaces(s.current()) }
-
-// newUnitWorkspaces returns the unit workspaces of the configured project.
-func newUnitWorkspaces(cfg *config.Config) unitWorkspaces {
-	return unitWorkspaces{git: workspaces(cfg, unitsDirectory)}
+// newUnitWorkspaces returns the unit workspaces of the configured project,
+// each workstream's on the backend the repository records for it.
+func newUnitWorkspaces(cfg *config.Config, repository *trace.Repository) unitWorkspaces {
+	return unitWorkspaces{streamWorkspaces{cfg: cfg, repository: repository, directory: unitsDirectory}}
 }
 
 func unitName(stream config.WorkstreamID, unit string) string {
@@ -55,17 +55,21 @@ func unitName(stream config.WorkstreamID, unit string) string {
 // clone has none. A workspace already there is returned with what it holds.
 func (u unitWorkspaces) open(ctx context.Context, stream config.WorkstreamID, unit string) (workspace.Worktree, string, error) {
 	feature := featureBranch(stream)
-	if _, exists, err := u.git.Branch(ctx, feature); err != nil {
+	g, err := u.of(stream)
+	if err != nil {
+		return workspace.Worktree{}, "", err
+	}
+	if _, exists, err := g.Branch(ctx, feature); err != nil {
 		return workspace.Worktree{}, "", err
 	} else if !exists {
 		return workspace.Worktree{}, "", fmt.Errorf("the clone has no feature branch %s", feature)
 	}
-	acquired, err := u.git.Acquire(ctx, vcs.Request{Name: unitName(stream, unit), Ref: feature, Branch: unitBranch(stream, unit)})
+	acquired, err := g.Acquire(ctx, vcs.Request{Name: unitName(stream, unit), Ref: feature, Branch: unitBranch(stream, unit)})
 	if err != nil {
 		return workspace.Worktree{}, "", err
 	}
 	w := acquired.(workspace.Worktree)
-	base, err := u.git.MergeBase(ctx, feature, w.Branch)
+	base, err := g.MergeBase(ctx, feature, w.Branch)
 	if err != nil {
 		return workspace.Worktree{}, "", err
 	}
@@ -75,11 +79,15 @@ func (u unitWorkspaces) open(ctx context.Context, stream config.WorkstreamID, un
 // find returns the unit's workspace and the feature branch commit it
 // descends from when the clone has it, and creates nothing.
 func (u unitWorkspaces) find(ctx context.Context, stream config.WorkstreamID, unit string) (workspace.Worktree, string, bool, error) {
-	w, found, err := u.git.Workspace(ctx, unitName(stream, unit))
+	g, err := u.of(stream)
+	if err != nil {
+		return workspace.Worktree{}, "", false, err
+	}
+	w, found, err := g.Workspace(ctx, unitName(stream, unit))
 	if err != nil || !found {
 		return workspace.Worktree{}, "", false, err
 	}
-	base, err := u.git.MergeBase(ctx, featureBranch(stream), w.Branch)
+	base, err := g.MergeBase(ctx, featureBranch(stream), w.Branch)
 	if err != nil {
 		return workspace.Worktree{}, "", false, err
 	}
@@ -90,15 +98,19 @@ func (u unitWorkspaces) find(ctx context.Context, stream config.WorkstreamID, un
 // the tip of its workstream's feature branch, as after a landing moved the
 // branch, until the workspace is rebased onto it.
 func (u unitWorkspaces) behind(ctx context.Context, stream config.WorkstreamID, unit string) (bool, error) {
-	w, found, err := u.git.Workspace(ctx, unitName(stream, unit))
+	g, err := u.of(stream)
+	if err != nil {
+		return false, err
+	}
+	w, found, err := g.Workspace(ctx, unitName(stream, unit))
 	if err != nil || !found {
 		return false, err
 	}
-	tip, exists, err := u.git.Branch(ctx, featureBranch(stream))
+	tip, exists, err := g.Branch(ctx, featureBranch(stream))
 	if err != nil || !exists {
 		return false, err
 	}
-	descends, err := u.git.Ancestor(ctx, tip, w.Branch)
+	descends, err := g.Ancestor(ctx, tip, w.Branch)
 	return !descends, err
 }
 
@@ -113,7 +125,11 @@ func (u unitWorkspaces) snapshot(ctx context.Context, stream config.WorkstreamID
 	if !found {
 		return workspace.Worktree{}, "", "", fmt.Errorf("unit %s of workstream %s has no workspace", unit, stream)
 	}
-	candidate, err := u.git.Snapshot(ctx, w, featureBranch(stream))
+	g, err := u.of(stream)
+	if err != nil {
+		return workspace.Worktree{}, "", "", err
+	}
+	candidate, err := g.Snapshot(ctx, w, featureBranch(stream))
 	return w, base, candidate, err
 }
 

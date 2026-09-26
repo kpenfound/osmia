@@ -406,6 +406,22 @@ type StatusResponse struct {
 	// Tailnet is the tailnet listener's state; it is omitted unless
 	// listen.tailnet is configured.
 	Tailnet *TailnetStatus `json:"tailnet,omitempty"`
+	// Workspaces is the workspace backend new workstreams get. With
+	// workspaces = "jujutsu" and no supported jj, a diagnostic also
+	// reports its problem.
+	Workspaces WorkspacesStatus `json:"workspaces"`
+}
+
+// WorkspacesStatus is the backend new workstreams get. Setting is the
+// configured workspaces value and Backend what a new workstream is created
+// on, empty when none can be: workspaces = "jujutsu" without a supported jj,
+// which Problem then describes. JJ is the jj version found, empty when none
+// was found or the setting is git, which checks for none.
+type WorkspacesStatus struct {
+	Setting string `json:"setting"`
+	Backend string `json:"backend"`
+	JJ      string `json:"jj,omitempty"`
+	Problem string `json:"problem,omitempty"`
 }
 
 // FailureStreak counts the consecutive infrastructure failures of one role's
@@ -510,10 +526,12 @@ type RoleFallback struct {
 // active overlap advisories about other workstreams of the project; Gates is
 // empty while no owner decision waits; Drift is null before the first drift
 // rebase; Status is null until the chief of staff writes one. Agents holds
-// service-owned facts about claimed and parked turns.
+// service-owned facts about claimed and parked turns. Workspaces is the
+// workspace backend the workstream was created on, git or jujutsu.
 type WorkstreamStatus struct {
 	Workstream    config.WorkstreamID `json:"workstream"`
 	Project       config.ProjectID    `json:"project"`
+	Workspaces    string              `json:"workspaces"`
 	State         *string             `json:"state"`
 	Units         []UnitStatus        `json:"units"`
 	Advisories    []OverlapAdvisory   `json:"advisories"`

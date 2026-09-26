@@ -241,7 +241,7 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 		t.Fatalf("final review result %+v", result)
 	}
 
-	g := featureWorkspaces(f.s.cfg)
+	g := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit)
 	tip, _, err := g.Branch(ctx, featureBranch(stream))
 	must(t, err)
 	if on, err := g.Ancestor(ctx, upstream, tip); err != nil || !on || tip == head {
@@ -507,7 +507,7 @@ func TestFinalReviewThatCannotRebaseFailsAndAuthorisesNothing(t *testing.T) {
 	if result.Outcome != "failed" || !strings.Contains(result.Evidence, "CODEOWNERS conflicted") {
 		t.Fatalf("final review result %+v", result)
 	}
-	if tip, _, err := featureWorkspaces(f.s.cfg).Branch(ctx, featureBranch(stream)); err != nil || tip != head {
+	if tip, _, err := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit).Branch(ctx, featureBranch(stream)); err != nil || tip != head {
 		t.Fatalf("a conflicted rebase moved the feature branch to %s: %v", tip, err)
 	}
 	if ran := f.runs()[runs:]; len(ran) != 0 {
@@ -576,7 +576,7 @@ func TestInterruptedFinalReviewKeepsItsRecordedRebase(t *testing.T) {
 		t.Fatalf("the interrupted review: %v", err)
 	}
 	f.s.boundary = nil
-	g := featureWorkspaces(f.s.cfg)
+	g := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit)
 	if tip, _, err := g.Branch(ctx, featureBranch(stream)); err != nil || tip != head {
 		t.Fatalf("the branch moved to %s before the review resumed: %v", tip, err)
 	}
@@ -667,7 +667,7 @@ func TestInterruptedFinalRebaseIsReconciled(t *testing.T) {
 			if err := errors.Join(problems...); err != nil {
 				t.Fatal(err)
 			}
-			tip, _, err := featureWorkspaces(f.s.cfg).Branch(ctx, featureBranch(stream))
+			tip, _, err := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit).Branch(ctx, featureBranch(stream))
 			must(t, err)
 			var rebase FinalRebase
 			rebases := streamDocuments(t, repository, stream, finalRebaseDocument)

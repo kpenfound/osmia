@@ -186,7 +186,11 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	if reason := checkReport(planned, MasonReport{Outcome: report.Outcome, Criteria: report.Criteria}); reason != "" {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("%s: %s", reportDoc.Path, reason)
 	}
-	diff, err := newUnitWorkspaces(m.cfg).git.Diff(ctx, report.Base, report.Candidate)
+	g, err := newUnitWorkspaces(m.cfg, m.repository).of(stream)
+	if err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	diff, err := g.Diff(ctx, report.Base, report.Candidate)
 	if err != nil {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("candidate diff: %w", err)
 	}

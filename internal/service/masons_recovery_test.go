@@ -37,7 +37,7 @@ func TestCompletedMasonTurnFinishesAfterRestart(t *testing.T) {
 	if !started {
 		t.Fatal("mason did not start")
 	}
-	unit := newUnitWorkspaces(f.s.cfg)
+	unit := newUnitWorkspaces(f.s.cfg, repo)
 	w, _, found, err := unit.find(ctx, stream, "resume")
 	must(t, err)
 	if !found {
@@ -101,7 +101,7 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	if !started {
 		t.Fatal("mason did not start")
 	}
-	units := newUnitWorkspaces(f.s.cfg)
+	units := newUnitWorkspaces(f.s.cfg, repo)
 	w, _, found, err := units.find(ctx, stream, "resume")
 	must(t, err)
 	if !found {
@@ -131,6 +131,7 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	must(t, err)
 	defer repo.Close()
 	m.repository = repo
+	units.repository = repo
 	must(t, m.Pass(ctx))
 	must(t, m.Pass(ctx))
 	th, err := repo.Thread(stream, masonAgent("resume"))

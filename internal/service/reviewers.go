@@ -705,7 +705,10 @@ func (m *masons) staleInputs(ctx context.Context, stream config.WorkstreamID, un
 	if reason := staleReview(reviewed, current); reason != "" {
 		return reason, nil
 	}
-	git := newUnitWorkspaces(m.cfg).git
+	git, err := newUnitWorkspaces(m.cfg, m.repository).of(stream)
+	if err != nil {
+		return "", err
+	}
 	candidate, exists, err := git.Branch(ctx, unitBranch(stream, unit))
 	if err != nil {
 		return "", err
@@ -761,7 +764,11 @@ func (r *reviewers) checkReviewFootprint(ctx context.Context, stream config.Work
 	if err != nil || len(footprint.Entities) == 0 {
 		return "missing sealed footprint", nil
 	}
-	paths, err := newUnitWorkspaces(r.cfg).git.ChangedPaths(ctx, result.Identity.Candidate.BaseRevision, result.Identity.Candidate.Revision)
+	git, err := newUnitWorkspaces(r.cfg, r.repository).of(stream)
+	if err != nil {
+		return "", err
+	}
+	paths, err := git.ChangedPaths(ctx, result.Identity.Candidate.BaseRevision, result.Identity.Candidate.Revision)
 	if err != nil {
 		return "", err
 	}

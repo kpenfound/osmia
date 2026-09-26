@@ -9,18 +9,21 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/busybees/core/agent/agenttest/enforcertest"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // unitsFixture is a service configuration whose clone holds the feature
 // branch of stream, one commit with README, LICENSE, bin/run and docs/guide.
 type unitsFixture struct {
 	cfg        *config.Config
+	repository *trace.Repository
 	home, base string
 }
 
@@ -42,11 +45,18 @@ func newUnitsFixture(t *testing.T) unitsFixture {
 	demoGit(t, home, "-C", clone, "add", "README", "bin/run", "LICENSE", "docs/guide")
 	demoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "--quiet", "-m", "base")
 	demoGit(t, home, "-C", clone, "branch", featureBranch(stream))
-	return unitsFixture{cfg: cfg, home: home, base: strings.TrimSpace(demoGit(t, home, "-C", clone, "rev-parse", "HEAD"))}
+	ctx := context.Background()
+	at := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	repository, err := trace.Create(ctx, cfg.Root, cfg.Project, at, registrationActor)
+	must(t, err)
+	t.Cleanup(func() { repository.Close() })
+	must(t, repository.CreateWorkstreamOn(ctx, stream, config.WorkspacesGit, at, registrationActor))
+	must(t, repository.CreateWorkstreamOn(ctx, "w_ffffffffffffffffffffffffffffffff", config.WorkspacesGit, at, registrationActor))
+	return unitsFixture{cfg: cfg, repository: repository, home: home, base: strings.TrimSpace(demoGit(t, home, "-C", clone, "rev-parse", "HEAD"))}
 }
 
 // units is a new service's view of the unit workspaces, as after a restart.
-func (f unitsFixture) units() unitWorkspaces { return (&Service{cfg: f.cfg}).unitWorkspaces() }
+func (f unitsFixture) units() unitWorkspaces { return newUnitWorkspaces(f.cfg, f.repository) }
 
 // A unit's workspace is created once from the feature branch, under the
 // root, and a service built afresh finds the same one with the same base. It
@@ -79,7 +89,7 @@ func TestUnitWorkspaceIsFoundAgainAfterARestart(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(clone, "NEWS"), []byte("later\n"), 0644))
 	demoGit(t, f.home, "-C", clone, "add", "NEWS")
 	demoGit(t, f.home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "--quiet", "-m", "later")
-	if tip, _, err := units.git.Branch(ctx, featureBranch(stream)); err != nil || tip == f.base || candidate == f.base {
+	if tip, _, err := providerOf(t, units.streamWorkspaces, stream).Branch(ctx, featureBranch(stream)); err != nil || tip == f.base || candidate == f.base {
 		t.Fatalf("the feature branch at %s and the candidate %s have not moved from %s: %v", tip, candidate, f.base, err)
 	}
 
@@ -92,7 +102,7 @@ func TestUnitWorkspaceIsFoundAgainAfterARestart(t *testing.T) {
 	if err != nil || reopened.Path != w.Path || reopenedBase != f.base {
 		t.Fatalf("opened again %+v at %s, %v", reopened, reopenedBase, err)
 	}
-	must(t, restarted.git.Prune(ctx))
+	must(t, providerOf(t, restarted.streamWorkspaces, stream).Prune(ctx))
 	if data, err := os.ReadFile(filepath.Join(w.Path, "work")); err != nil || string(data) != "in progress\n" {
 		t.Fatalf("the unit's work after finding, opening and pruning: %q %v", data, err)
 	}
@@ -123,7 +133,7 @@ func TestUnitSnapshotIsACandidateOnTheFeatureBranch(t *testing.T) {
 	if got := strings.TrimSpace(demoGit(t, f.home, "-C", f.cfg.Project.Clone, "diff-tree", "-r", "--name-status", f.base, candidate)); got != "M\tREADME\nA\tadded" {
 		t.Fatalf("the candidate's changes:\n%s", got)
 	}
-	if descends, err := units.git.Ancestor(ctx, featureBranch(stream), candidate); err != nil || !descends {
+	if descends, err := providerOf(t, units.streamWorkspaces, stream).Ancestor(ctx, featureBranch(stream), candidate); err != nil || !descends {
 		t.Fatalf("the candidate descends from the feature branch: %v %v", descends, err)
 	}
 }

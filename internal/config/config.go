@@ -25,6 +25,7 @@ type Config struct {
 	Root           Root               `toml:"-" json:"-"`
 	Version        int                `toml:"version" json:"version"`
 	ActiveProjects []string           `toml:"active_projects" json:"active_projects"`
+	Workspaces     string             `toml:"workspaces" json:"workspaces"`
 	Listen         Listen             `toml:"listen" json:"listen"`
 	Capacity       Capacity           `toml:"capacity" json:"capacity"`
 	Budget         Budget             `toml:"budget" json:"budget"`
@@ -77,6 +78,17 @@ type Mason struct {
 type Notify struct {
 	Webhook string `toml:"webhook" json:"webhook,omitempty"`
 }
+
+// The workspaces values. WorkspacesAuto gives each new workstream Jujutsu
+// workspaces when a supported jj is installed and Git worktrees otherwise;
+// WorkspacesGit and WorkspacesJujutsu give it that backend. A workstream
+// records WorkspacesGit or WorkspacesJujutsu, never WorkspacesAuto.
+const (
+	WorkspacesAuto    = "auto"
+	WorkspacesGit     = "git"
+	WorkspacesJujutsu = "jujutsu"
+)
+
 type Events struct {
 	Window string `toml:"window" json:"window"`
 }
@@ -190,7 +202,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Mason: Mason{3}, Events: Events{"5s"}}
+	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Mason: Mason{3}, Events: Events{"5s"}, Workspaces: WorkspacesAuto}
 	md, err := decode(path, c, false)
 	if err != nil {
 		return nil, err
@@ -254,6 +266,9 @@ func LoadTopLevel(options Options) (*Config, error) {
 	}
 	if d, err := time.ParseDuration(c.Events.Window); err != nil || d <= 0 {
 		return nil, fieldError(path, "events.window", "must be a positive Go duration")
+	}
+	if !slices.Contains([]string{WorkspacesAuto, WorkspacesGit, WorkspacesJujutsu}, c.Workspaces) {
+		return nil, fieldError(path, "workspaces", fmt.Sprintf("must be %q, %q or %q", WorkspacesAuto, WorkspacesGit, WorkspacesJujutsu))
 	}
 	if c.Notify.Webhook != "" {
 		if err := validateWebhook(c.Notify.Webhook); err != nil {
@@ -438,7 +453,7 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "sandbox", "image"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window", "notify", "notify.webhook"}, path)
+	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window", "notify", "notify.webhook"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {

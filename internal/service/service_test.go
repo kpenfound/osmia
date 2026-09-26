@@ -68,13 +68,15 @@ func fixture(t *testing.T) Options {
 	return fixtureAt(t, home)
 }
 
-// fixtureAt writes a minimal root and project configuration under home.
+// fixtureAt writes a minimal root and project configuration under home. Its
+// workstreams are created on Git worktrees whether or not jj is installed.
 func fixtureAt(t *testing.T, home string) Options {
 	t.Helper()
 	root := filepath.Join(home, "root")
 	must(t, os.MkdirAll(filepath.Join(root, "projects", string(project)), 0700))
 	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(fmt.Sprintf(`version = 1
 active_projects = [%q]
+workspaces = "git"
 [profiles.default]
 agent = "claude"
 model = "test"

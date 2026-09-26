@@ -51,9 +51,10 @@ func resolving(outcome string) bool {
 
 // driftWorkspaces returns the provider of the resolution workspaces of the
 // configured project's drift rebases: one workspace per workstream,
-// <root>/drifts/<project>/<workstream>, on driftBranch.
-func driftWorkspaces(cfg *config.Config) workspace.Provider {
-	return workspaces(cfg, driftsDirectory)
+// <root>/drifts/<project>/<workstream>, on driftBranch and on the backend the
+// repository records for the workstream.
+func driftWorkspaces(cfg *config.Config, repository *trace.Repository) streamWorkspaces {
+	return streamWorkspaces{cfg: cfg, repository: repository, directory: driftsDirectory}
 }
 
 // driftBranch names the branch drift rebase k of the workstream is
@@ -77,11 +78,15 @@ func driftReviewTurnID(k, review int) string {
 // resolutions are the resolution workspaces of a project's drift rebases.
 // They are also the workspaces a drift mason turn is lent: the turn works
 // on a copy without VCS metadata, which capture copies back.
-type resolutions struct{ git workspace.Provider }
+type resolutions struct{ streamWorkspaces }
 
 // find returns the workstream's resolution workspace when the clone has one.
 func (r resolutions) find(ctx context.Context, stream config.WorkstreamID) (workspace.Worktree, error) {
-	w, found, err := r.git.Workspace(ctx, string(stream))
+	g, err := r.of(stream)
+	if err != nil {
+		return workspace.Worktree{}, err
+	}
+	w, found, err := g.Workspace(ctx, string(stream))
 	if err != nil {
 		return workspace.Worktree{}, err
 	}
@@ -319,7 +324,10 @@ func (d drifter) resolve(ctx context.Context, stream config.WorkstreamID, rebase
 	if err != nil {
 		return rebase, err
 	}
-	g := driftWorkspaces(d.cfg)
+	g, err := driftWorkspaces(d.cfg, d.repository).of(stream)
+	if err != nil {
+		return rebase, err
+	}
 	requested, err := d.requestedAt(stream, rebase.Operation)
 	if err != nil {
 		return rebase, err
@@ -438,7 +446,10 @@ func awaiting(rebase DriftRebase, err error, format string, args ...any) error {
 // k, creating it on driftBranch from the feature branch's old tip when the
 // clone has none. One a drift rebase before this one left is removed first.
 func (d drifter) resolution(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase) (workspace.Worktree, error) {
-	g := driftWorkspaces(d.cfg)
+	g, err := driftWorkspaces(d.cfg, d.repository).of(stream)
+	if err != nil {
+		return workspace.Worktree{}, err
+	}
 	branch := driftBranch(stream, rebase.Drift)
 	w, found, err := g.Workspace(ctx, string(stream))
 	if err != nil {
@@ -459,7 +470,10 @@ func (d drifter) resolution(ctx context.Context, stream config.WorkstreamID, reb
 // release removes the workstream's resolution workspace when the clone has
 // one. Its branch stays.
 func (d drifter) release(ctx context.Context, stream config.WorkstreamID) error {
-	g := driftWorkspaces(d.cfg)
+	g, err := driftWorkspaces(d.cfg, d.repository).of(stream)
+	if err != nil {
+		return err
+	}
 	w, found, err := g.Workspace(ctx, string(stream))
 	if err != nil || !found {
 		return err
@@ -503,7 +517,11 @@ func (d drifter) masonDone(ctx context.Context, stream config.WorkstreamID, w wo
 	default:
 		return false, nil
 	}
-	marked, err := driftWorkspaces(d.cfg).MarkedFiles(w, paths)
+	g, err := driftWorkspaces(d.cfg, d.repository).of(stream)
+	if err != nil {
+		return false, err
+	}
+	marked, err := g.MarkedFiles(w, paths)
 	if err != nil || len(marked) == 0 {
 		return err == nil, err
 	}
@@ -653,7 +671,11 @@ func (d drifter) resolvePrompt(ctx context.Context, stream config.WorkstreamID, 
 	if err != nil {
 		return "", err
 	}
-	c, err := driftWorkspaces(d.cfg).Commit(ctx, rebase.Stop)
+	g, err := driftWorkspaces(d.cfg, d.repository).of(stream)
+	if err != nil {
+		return "", err
+	}
+	c, err := g.Commit(ctx, rebase.Stop)
 	if err != nil {
 		return "", err
 	}
@@ -700,7 +722,10 @@ func (d drifter) reviewPrompt(ctx context.Context, stream config.WorkstreamID, r
 	if err != nil {
 		return "", err
 	}
-	g := driftWorkspaces(d.cfg)
+	g, err := driftWorkspaces(d.cfg, d.repository).of(stream)
+	if err != nil {
+		return "", err
+	}
 	base, err := g.MergeBase(ctx, rebase.Before, rebase.Upstream.Commit)
 	if err != nil {
 		return "", err

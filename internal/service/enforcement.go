@@ -79,8 +79,8 @@ func Enforce(opts Options, e Enforcement) Options {
 			return nil, err
 		}
 		project := string(r.Project())
-		units := newUnitWorkspaces(cfg)
-		drifts := resolutions{git: driftWorkspaces(cfg)}
+		units := newUnitWorkspaces(cfg, r)
+		drifts := resolutions{driftWorkspaces(cfg, r)}
 		reports := &masonReports{}
 		verdicts := &reviewerReports{}
 		turns := &isolation.Turns{

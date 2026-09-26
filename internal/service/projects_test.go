@@ -24,6 +24,7 @@ import (
 const commentedConfig = `# Owner's notes stay at the top.
 version = 1
 active_projects = [] # none yet
+workspaces = "git" # the tests run on Git worktrees whether or not jj is installed
 
 [profiles.default] # keep this profile
 agent = "claude"

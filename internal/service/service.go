@@ -106,6 +106,9 @@ type Options struct {
 	controls *runtimeControls
 	// notifyInbox replaces the inbox the notifier reads, for tests.
 	notifyInbox func(context.Context) (InboxResponse, *APIError)
+	// checkJJ replaces the check of the jj on PATH that picks the workspace
+	// backend of new workstreams, for tests.
+	checkJJ jjCheck
 }
 
 // activeProject is the runtime state of the configured project: its open trace
@@ -516,7 +519,7 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(context.Context, scheduler.Candidate) (bool, error) {
 	project := cfg.Project.ID
 	librarian := librarianWorkstream(project)
-	units := newUnitWorkspaces(cfg)
+	units := newUnitWorkspaces(cfg, repository)
 	return func(ctx context.Context, c scheduler.Candidate) (bool, error) {
 		if held, err := s.holds(project, librarian, repository, c); err != nil || held {
 			return false, err

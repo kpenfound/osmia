@@ -52,7 +52,7 @@ func newRebaseFixture(t *testing.T, key string) (*shedFixture, config.Workstream
 func moveFeature(t *testing.T, f *shedFixture, stream config.WorkstreamID, files map[string]string) string {
 	t.Helper()
 	ctx := context.Background()
-	g := featureWorkspaces(f.s.cfg)
+	g := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit)
 	acquired, err := g.Acquire(ctx, vcs.Request{Name: string(stream), Branch: featureBranch(stream)})
 	must(t, err)
 	w := acquired.(workspace.Worktree)
@@ -148,7 +148,7 @@ func TestRebaseWaitsForAnInterruptedWriterAndKeepsItsWork(t *testing.T) {
 	ctx := context.Background()
 	m := newMasonController(f.s, repository)
 	lands := &foreman{masons: m}
-	units := newUnitWorkspaces(f.s.cfg)
+	units := newUnitWorkspaces(f.s.cfg, repository)
 	w, base, found, err := units.find(ctx, stream, "dedupe")
 	must(t, err)
 	if !found {
@@ -281,7 +281,7 @@ func TestInterruptedRebaseIsReconciled(t *testing.T) {
 			defer repository.Close()
 			ctx := context.Background()
 			lands := &foreman{masons: newMasonController(f.s, repository)}
-			w, _, _, err := newUnitWorkspaces(f.s.cfg).find(ctx, stream, "resume")
+			w, _, _, err := newUnitWorkspaces(f.s.cfg, repository).find(ctx, stream, "resume")
 			must(t, err)
 			must(t, os.WriteFile(filepath.Join(w.Path, "RESUME.md"), []byte("resume\n"), 0600))
 			landed := moveFeature(t, f, stream, map[string]string{"LANDED.md": "landed\n"})
@@ -369,7 +369,7 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 	if len(rebases) != 1 || !slices.Equal(rebases[0].Conflicts, []string{masonWrote}) || rebases[0].State != UnitApproved || rebases[0].Snapshot != before.Candidate {
 		t.Fatalf("rebase records %+v", rebases)
 	}
-	w, _, _, err := newUnitWorkspaces(f.s.cfg).find(ctx, stream, "dedupe")
+	w, _, _, err := newUnitWorkspaces(f.s.cfg, repository).find(ctx, stream, "dedupe")
 	must(t, err)
 	data, err := os.ReadFile(filepath.Join(w.Path, masonWrote))
 	must(t, err)

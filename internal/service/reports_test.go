@@ -357,7 +357,7 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 		if sessionStream(req) != string(blocked) {
 			return nil
 		}
-		w, found, err := newUnitWorkspaces(f.s.cfg).git.Workspace(ctx, unitName(blocked, "resume"))
+		w, found, err := workspaces(f.s.cfg, unitsDirectory, config.WorkspacesGit).Workspace(ctx, unitName(blocked, "resume"))
 		if err != nil || !found {
 			return fmt.Errorf("the unit's workspace: %t %v", found, err)
 		}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/busybees/core/vcs"
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -155,7 +156,7 @@ func TestM3DeliveryDemonstration(t *testing.T) {
 			if _, reason, err := f.s.deliveryGate(ctx, repository, stream, edited); err != nil || !strings.Contains(reason, "stale") {
 				t.Fatalf("changed branch passed: %q %v", reason, err)
 			}
-			g := featureWorkspaces(f.s.cfg)
+			g := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit)
 			acquired, err := g.Acquire(ctx, vcs.Request{Name: string(stream), Branch: featureBranch(stream)})
 			must(t, err)
 			current, _, err := g.Branch(ctx, featureBranch(stream))

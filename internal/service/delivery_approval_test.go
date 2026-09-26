@@ -158,7 +158,7 @@ func TestDeliveryApprovalAcceptEditRetryAndInvalidation(t *testing.T) {
 		t.Fatalf("branch change: %q %v", reason, err)
 	}
 	// Restore the branch and revise a governing criterion.
-	g := featureWorkspaces(f.s.cfg)
+	g := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit)
 	acquired, err := g.Acquire(ctx, vcs.Request{Name: string(stream), Branch: featureBranch(stream)})
 	must(t, err)
 	current, _, err := g.Branch(ctx, featureBranch(stream))
