@@ -43,6 +43,7 @@
   ```
 
   The arguments after `--args=` are the `go test` command line, separated by commas. Add `-count=5` there to reproduce a flake and `-race` to match the race detector.
+- Browser tests of the web page run in the `browser:test` check (`dagger check browser:test`), which installs Chromium and names it in `OSMIA_BROWSER`; without it they skip.
 - Add meaningful tests for changed behavior and regressions, especially state transitions, recovery, owner gates and execution boundaries. Use temporary directories and local repositories for filesystem and VCS tests.
 - Tests must use fake agents, GitHub clients, providers and container engines. Never launch real model sessions, the live factory, remote pushes or pull requests from tests.
 - Report the checks actually run and their results. If validation is blocked, state the exact blocker; do not report success.
