@@ -382,6 +382,13 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	p.awaitText("#pause-list", "Nothing is paused.")
 	p.await("the same document", `window.notReloaded === true`)
 
+	// A pause set while the stream is live appears without a reload.
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Reason: "Hold the uploads", Source: runtime.PauseOwner})
+	livePause := `[data-pause="workstream:` + string(stream) + `"] `
+	p.awaitText(livePause+"[data-field=reason]", "Hold the uploads")
+	p.awaitText(livePause+"[data-field=source]", "the owner")
+	p.await("the same document", `window.notReloaded === true`)
+
 	// Everything the page showed came from the page's own files and /v1.
 	var views []string
 	for _, path := range p.paths() {

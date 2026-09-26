@@ -103,7 +103,7 @@ prints it as a `Tailnet:` line, and `osmia status --json` includes it.
 
 ## Contract
 
-All paths start with `/v1`. Shared request, response and error types and a Unix-only
+All API paths start with `/v1`; the [web page](#web-page) is served outside it. Shared request, response and error types and a Unix-only
 `Client` live in `internal/service`. `NewClient(socket)` accepts an explicit socket
 path; it never reads configuration or runtime files. `Do` supports all operations,
 `Health`, `Configuration` and `Runtime` provide typed read helpers, and `Events`
