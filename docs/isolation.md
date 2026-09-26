@@ -87,6 +87,12 @@ GitHub, SSH-agent or cloud/delivery credentials. Unresolved credential reference
 fail closed. Provider transport/authentication is the execution engine's concern;
 it must not give tools general network access or delivery credentials.
 
+A workspace's `VCS()` access, which names the metadata a provider keeps (the
+clone's `.git` for a git worktree; the Jujutsu repository and the clone's `.git`
+for a Jujutsu workspace), is never granted to a session. A session in a Jujutsu
+workspace sees the workspace's files alone: no `jj` executable, no `.jj`
+directory and no writable Git metadata.
+
 ## Enforced execution
 
 `coreadapter.CoreExecutor` runs a turn through a busybees/core enforcer with
