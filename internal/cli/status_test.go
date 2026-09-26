@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -119,7 +120,11 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		Goal: "Ship resumable uploads.", Note: "The plan is drafted. Review is underway.",
 		Agents: []string{"The architect is preparing the packet.", "A reviewer is idle."}, Revision: 1, UpdatedAt: written}}
 	none := service.WorkstreamStatus{Workstream: quiet, Project: project, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file"}
-	if !all.Health.Ready || all.Configuration.Project == nil || !reflect.DeepEqual(all.Status, service.StatusResponse{Workstreams: []service.WorkstreamStatus{full, none}, Profiles: all.Runtime.Profiles, Diagnostics: []service.Diagnostic{}}) {
+	capacity := &service.CapacityStatus{PerWorkstream: 2, Roles: []service.RoleCapacity{{Role: "mason", Limit: 4, Waiting: []service.SlotWait{}}, {Role: "reviewer", Limit: 2, Waiting: []service.SlotWait{}}, {Role: "committee", Limit: 3, Waiting: []service.SlotWait{}}}}
+	if all.Status.ProviderUsage == nil || all.Status.ProviderUsage.Unattributed != nil {
+		t.Fatalf("status --json provider usage: %+v", all.Status.ProviderUsage)
+	}
+	if !all.Health.Ready || all.Configuration.Project == nil || !reflect.DeepEqual(all.Status, service.StatusResponse{Workstreams: []service.WorkstreamStatus{full, none}, Profiles: all.Runtime.Profiles, Capacity: capacity, ProviderUsage: all.Status.ProviderUsage, Diagnostics: []service.Diagnostic{}}) {
 		t.Fatalf("status --json: %+v", all.Status)
 	}
 
@@ -383,5 +388,78 @@ func TestStatusShowsTheTailnetListener(t *testing.T) {
 	overview := successful(t, opts.Config.Root, "status")
 	if !strings.Contains(overview, "ready=true") || !strings.Contains(overview, "Tailnet: down (permission denied)\n") {
 		t.Fatalf("status:\n%s", overview)
+	}
+}
+
+func TestStatusPrintsCapacity(t *testing.T) {
+	var out strings.Builder
+	showCapacity(&out, nil)
+	showCapacity(&out, &service.CapacityStatus{PerWorkstream: 2, Roles: []service.RoleCapacity{
+		{Role: "mason", Used: 1, Limit: 1, Waiting: []service.SlotWait{
+			{Workstream: stream, Unit: "parser", Agent: "mason-parser", Turn: "mason-parser-1", Reason: "capacity"},
+			{Workstream: quiet, Unit: "validator", Reason: "priority"}}},
+		{Role: "reviewer", Used: 0, Limit: 2, Waiting: []service.SlotWait{}},
+	}})
+	if want := "Capacity (per workstream 2):\n" +
+		"  mason: 1 of 1 slot(s) in use\n" +
+		"    Waiting: " + stream + " turn mason-parser-1 of mason-parser (capacity)\n" +
+		"    Waiting: " + quiet + " unit validator (priority)\n" +
+		"  reviewer: 0 of 2 slot(s) in use\n"; out.String() != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
+	}
+}
+
+func TestStatusPrintsProviderUsage(t *testing.T) {
+	var out strings.Builder
+	showProviderUsage(&out, nil)
+	resets := time.Date(2026, 9, 24, 17, 0, 0, 0, time.UTC)
+	showProviderUsage(&out, &service.ProviderUsageStatus{Day: "2026-09-24", Providers: []service.ProviderUsage{
+		{Provider: "claude", ProviderSpend: service.ProviderSpend{SpendUSD: "3.5"}, Limit: &runtime.ProviderLimit{Backend: "claude", Status: "rejected", Kind: "five_hour", ResetsAt: resets},
+			Fallbacks: []service.RoleFallback{{Role: "mason", Configured: "claude", Profile: "codex-fast"}}, PausedRoles: []string{"reviewer"}},
+		{Provider: "codex", ProviderSpend: service.ProviderSpend{SpendUSD: "1", UnknownCosts: 2, LowerBound: true}, Limit: &runtime.ProviderLimit{Backend: "codex", Status: "rejected"}},
+	}, Unattributed: &service.ProviderSpend{SpendUSD: "0.25"}})
+	if want := "Provider usage on 2026-09-24:\n" +
+		"  claude: USD 3.5 known spend\n" +
+		"    Limit: rejected kind=five_hour until 2026-09-24T17:00:00Z\n" +
+		"    Fallback: mason runs codex-fast in place of claude\n" +
+		"    Paused: reviewer has no fallback available\n" +
+		"  codex: USD 1 known spend (at least; 2 attempt(s) have unknown cost)\n" +
+		"    Limit: rejected kind= until cleared\n" +
+		"  unattributed: USD 0.25 known spend\n"; out.String() != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
+	}
+}
+
+func TestConfigCommandShowsDiskDrift(t *testing.T) {
+	opts := fixture(t)
+	s, err := service.Start(context.Background(), opts)
+	must(t, err)
+	t.Cleanup(func() { s.Close() })
+	root := opts.Config.Root
+	var loaded service.ConfigResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "config", "--json")), &loaded))
+	top, proj := loaded.Drift.Files[0].Path, loaded.Drift.Files[1].Path
+	if want := "Configuration: " + loaded.Digest + " (" + loaded.Root + ")\nConfig file: " + top + ": unchanged\nConfig file: " + proj + " (project " + project + "): unchanged\n"; successful(t, root, "config") != want {
+		t.Fatalf("config as loaded:\n%s\nwant:\n%s", successful(t, root, "config"), want)
+	}
+
+	original, err := os.ReadFile(top)
+	must(t, err)
+	must(t, os.WriteFile(top, append(append([]byte{}, original...), "[capacity]\nmasons = 0\n"...), 0600))
+	text := successful(t, root, "config")
+	if !strings.Contains(text, "Config file: "+top+": invalid: capacity.masons: must be positive\n") || !strings.Contains(text, "Diagnostic: configuration: validation: ") {
+		t.Fatalf("config with an invalid file:\n%s", text)
+	}
+	if status := successful(t, root, "status"); !strings.Contains(status, "Config file: "+top+": invalid: capacity.masons: must be positive\n") || !strings.Contains(status, "Capacity (per workstream ") || !strings.Contains(status, "Provider usage on ") {
+		t.Fatalf("status with an invalid file:\n%s", status)
+	}
+	must(t, os.WriteFile(top, append(append([]byte{}, original...), "[capacity]\nmasons = 7\n"...), 0600))
+	var drift service.ConfigResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "config", "--json")), &drift))
+	if !drift.Drift.Differs || drift.Drift.Files[0].State != service.ConfigChanged || drift.Digest != loaded.Digest {
+		t.Fatalf("config with an edited file: %+v", drift)
+	}
+	if code, out, diag := invoke(t, root, "config", "extra"); code != 2 || out != "" || !strings.Contains(diag, "invalid arguments") {
+		t.Fatalf("config with arguments: %d %q %q", code, out, diag)
 	}
 }

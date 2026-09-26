@@ -118,10 +118,10 @@ set through `Options` by embedders.
 | Method | Path after `/v1` | Input / response |
 | --- | --- | --- |
 | GET | `/health` | Readiness, service name, API version, and the build version and commit (`osmia serve` reports the ones `osmia --version` prints; see [releases](release.md)) |
-| GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics, and `last_error`, the last failed [reload](#reload) (`path`, `field`, `message`, `at`), until a reload succeeds |
+| GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics, `drift`, each configuration file on disk against the loaded configuration ([disk drift](#disk-drift)), and `last_error`, the last failed [reload](#reload) (`path`, `field`, `message`, `at`), until a reload succeeds |
 | POST | `/reload` | No body; [reloads](#reload) the configuration and returns `ReloadResponse`: the loaded `digest` and the `restart_required` settings |
 | GET | `/runtime` | Effective runtime state, each role's next-turn profile (`name` and `source`: `configuration` or `owner_override`), each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
-| GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, each role's effective profile and source, today's [daily budget](#daily-budget) spend, and diagnostics |
+| GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, each role's effective profile and source, today's [daily budget](#daily-budget) spend, the [capacity](#capacity) view, today's [provider usage](#provider-usage), and diagnostics |
 | GET | `/events` | The [event stream](#event-stream): server-sent events naming the views that changed |
 | GET | `/status/<workstream-id>` | `WorkstreamStatus` for one workstream of the active project |
 | GET | `/trace/<workstream-id>` | `TraceSummary`: sealed revisions, criteria, unit walks, delivery and explicit gaps |
@@ -164,7 +164,8 @@ without a restart.
 The configuration digest hashes the canonical JSON of the effective loaded
 configuration, including defaults and the resolved socket/project paths, not TOML
 comments or formatting. Configuration reads validate current disk input for
-comparison but never apply it. Invalid/unreadable configuration yields a
+comparison but never apply it; `drift` reports the result by file
+([disk drift](#disk-drift)). Invalid/unreadable configuration yields a
 `validation` diagnostic naming the file and field and retains the loaded digest
 and view. Valid changes report a `reload_required` diagnostic, and changed
 settings that only a restart applies a `restart_required` one naming them.
@@ -227,12 +228,12 @@ views an event names.
 | Kind | Fields | Announces | Read again |
 | --- | --- | --- | --- |
 | `resync` | none | Anything may have changed | Every view |
-| `workstream` | `project`, `workstream` | A change in the workstream's trace: its state, status, units, agents, gates or questions | `/status`, `/status/<id>` |
+| `workstream` | `project`, `workstream` | A change in the workstream's trace: its state, status, units, agents and turns, which move the [capacity](#capacity) view, gates or questions | `/status`, `/status/<id>` |
 | `conversation` | `project`, `workstream` | A message to or a turn of the workstream's chief of staff | `/conversation/<id>` |
 | `inbox` | `project`, `workstream` | A question of the workstream asked, escalated, ruled or answered, a workflow transition, which can open or close a decision or abandon the workstream, or a recorded document, such as a packet, a final report or the owner's decision | `/inbox` |
 | `runtime` | none | A pause, priority, profile override or provider limit set or cleared, by the owner or by the service | `/runtime`, `/status` |
-| `config` | none | A reload, successful or failed | `/config` |
-| `spend` | `project` when one is configured | A recorded cost, or a reload, which can change the daily limit | `/status` |
+| `config` | none | A reload, successful or failed; an edit of a configuration file on disk is not announced, and `/config` reads the files on every request | `/config` |
+| `spend` | `project` when one is configured | A recorded cost, or a reload, which can change the daily limit, the capacity limits and the providers | `/status` |
 
 A successful reload also announces `runtime` and `spend`, whose views follow
 the configuration. Adding or removing a project announces `resync`. The
@@ -335,6 +336,25 @@ overrides stay as they were. They are resolved against the new configuration,
 so an override naming a profile the new configuration lacks is excluded from
 the effective state with a diagnostic, and applies again once a reload brings
 the profile back.
+
+### Disk drift
+
+`drift` in `GET /v1/config` compares the configuration files on disk with the
+loaded configuration, so "does a reload have something to apply" is checkable
+without applying it. `files` lists the top-level `config.toml`, then the
+active project's `config.toml` with its `project`, each with its `path` and a
+`state`: `unchanged`, `changed` when a setting it holds differs from the
+loaded one, or `invalid` when it cannot be read or does not validate, with
+`reason`, the field and why as a reload reports them. Each file is compared
+as parsed, so a comment or a formatting change leaves it `unchanged`, and a
+setting only a restart applies, such as `listen.web`, makes it `changed`. The
+project file is validated with the loaded top-level settings. When the files
+pass on their own but a reload of them together fails, the file the reload
+names is `invalid`; when that is the file of another project `active_projects`
+lists, it is added to `files`, and when the failure names no file, the
+top-level file is `invalid` with the reload's message. `differs` is true when any file is not
+`unchanged`. Reading the view writes nothing and changes neither the loaded
+configuration nor `last_error`.
 
 ## Hand-in
 
@@ -2411,7 +2431,8 @@ and a reset streak is left out; a cancelled or stopped attempt leaves it as
 it is. The field is omitted when no streak runs. When the turn attempts
 cannot be read, the response carries a `failure_streaks` diagnostic with code
 `internal`. `osmia status` prints each streak on an
-`Infrastructure failures:` line after the daily budget.
+`Infrastructure failures:` line after the daily budget, the provider usage
+and the capacity.
 
 `set_status` requires a non-empty `attention` while any gate is open and
 refuses a non-empty one when no gate is open. The chief of staff writes the
@@ -2444,6 +2465,67 @@ returns `not_found`, and an unreadable trace, or agent turns, unit states,
 overlap advisories or drift rebases of that workstream that cannot be read,
 returns `internal`; these messages name the
 workstream or project.
+
+### Capacity
+
+`capacity` in `GET /v1/status` is the scheduler's slot accounting for the role
+kinds whose turns share slots across workstreams: `per_workstream`, the
+project's `capacity.per_workstream` (the top-level one without a project), and
+`roles`, one entry each for `mason`, `reviewer` and `committee`, in that
+order, with `used`, the role's turns in flight as the
+[scheduler](#running-turns) counts them, `limit`, its `capacity.*` setting,
+and `waiting`. A turn in flight holds its slot even while a pause covers its
+workstream. Committee turns run in [shed rounds](#a-members-turn), which the
+scheduler does not dispatch, so `used` may exceed `limit` there and nothing
+waits for a committee slot.
+
+`waiting` lists the work waiting for a slot, never work a pause holds:
+
+- Each queued turn a pass would find no free slot for, with `workstream`,
+  `unit` when it has one, `agent` and `turn`, in the order a pass offers
+  them. The turns are offered to the free slots as a pass would, so only
+  those left over wait. A turn the service's gate declines whatever the
+  capacity waits for no slot: a paused scope's, an abandoned workstream's,
+  the librarian's, and architect and committee turns, which their own passes
+  run.
+- Then each `ready` unit whose current
+  [deferral](#why-a-ready-unit-waits) waits for a mason slot, with
+  `workstream` and `unit`, in workstream and plan order, unless a pause now
+  covers its workstream or the workstream is abandoned.
+
+`reason` is `capacity` when every slot of the role kind is taken (for a
+unit, as the mason controller counts implementing units), `priority` when
+higher-priority workstreams start a unit first, and `workstream-cap` when the
+workstream holds `per_workstream` slots. Without an active project nothing is
+used or waiting. When the turns cannot be read, `capacity` is `null` and the
+response carries a `capacity` diagnostic with code `internal` (`cannot read
+the turns of project <id>; check the trace repository`).
+
+### Provider usage
+
+`provider_usage` in `GET /v1/status` reports, for the service host's current
+local calendar `day` (`YYYY-MM-DD`), the known spend of each provider, the
+`agent` of a profile. `providers` lists, by name, the providers of the
+configured profiles, of the day's costs and of the usage limits in force.
+Each has `provider`, `spend_usd`, `unknown_costs` and `lower_bound` as in the
+[daily budget](#daily-budget), counting the day's costs of the attempts that
+ran on it; `limit`, the provider's usage limit in force (`backend`,
+`status`, `kind`, `set_at` and `resets_at`, as in
+[runtime overrides](runtime.md)), or `null`; `fallbacks`, the roles that run
+a fallback profile because their configured profile's provider is limited,
+each with `role`, `configured` and `profile`, as `/runtime` reports them with
+source `provider_fallback`; and `paused_roles`, the roles that are paused
+because no fallback is available. A cost is attributed to the provider of the
+turn attempt its ledger record names; a cost no recorded attempt matches, such
+as a mason response classifier's, is summed in `unattributed`, which is
+omitted when there is none. The providers' spend and `unattributed` add up to
+the daily budget's spend. When the costs or turn attempts cannot be read,
+`provider_usage` is `null` and the response carries a `provider_usage`
+diagnostic with code `internal` (`cannot read today's costs or turn attempts
+in project <id>; check the trace repository`).
+
+`osmia status` prints the provider usage and then the capacity after the
+daily budget.
 
 ## Inbox and rulings
 

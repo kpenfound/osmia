@@ -176,7 +176,7 @@ func TestClientDoesNotOpenState(t *testing.T) {
 
 func TestUsageAndFailures(t *testing.T) {
 	root := fixture(t).Config.Root
-	for _, args := range [][]string{nil, {"unknown"}, {"pause"}, {"pause", "nonsense"}, {"resume", "all", "--hard"}, {"serve", "--json"}, {"priority", "set"}, {"profiles", "clear"}, {"status", "--reason", "secret"}, {"status", "--wat"}, {"status", "--json=true"}, {"status", "--root"}, {"status", "--root", "x"}, {"priority", "set", "invalid"}} {
+	for _, args := range [][]string{nil, {"unknown"}, {"pause"}, {"pause", "nonsense"}, {"resume", "all", "--hard"}, {"serve", "--json"}, {"priority", "set"}, {"profiles", "clear"}, {"status", "--reason", "secret"}, {"status", "--wat"}, {"status", "--json=true"}, {"status", "--root"}, {"status", "--root", "x"}, {"priority", "set", "invalid"}, {"config", "extra"}, {"config", "--hard"}} {
 		code, out, diag := invoke(t, root, args...)
 		if code != 2 || out != "" || !strings.Contains(diag, "invalid arguments") {
 			t.Fatalf("%v: %d %s %s", args, code, out, diag)
