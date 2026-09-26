@@ -1,7 +1,8 @@
 // Package workspace creates and inspects the service's workspaces on a
 // project's clone behind the Provider interface, which also satisfies core's
-// workspace provider interface. Git implements it with worktrees; the service
-// alone runs it, and no agent holds it.
+// workspace provider interface. Git implements it with worktrees and Jujutsu
+// with Jujutsu workspaces on the clone's Git store; the service alone runs
+// them, and no agent holds them.
 package workspace
 
 import (
@@ -28,15 +29,16 @@ type Git struct {
 }
 
 // Worktree is one workspace. Git's is a linked worktree whose repository
-// metadata is the clone's.
+// metadata is the clone's; Jujutsu's is a Jujutsu workspace whose metadata is
+// its repository's and the clone's.
 type Worktree struct {
 	Path   string
 	Branch string
-	git    string
+	mounts []string
 }
 
 func (w Worktree) Directory() string { return w.Path }
-func (w Worktree) VCS() *vcs.Access  { return &vcs.Access{Mounts: []string{w.git}} }
+func (w Worktree) VCS() *vcs.Access  { return &vcs.Access{Mounts: w.mounts} }
 
 // Remote returns the name of the clone's remote whose URL names the given
 // owner/repository, however the URL spells it: HTTPS, SSH, with or without a
@@ -521,7 +523,13 @@ func (g *Git) Replaying(ctx context.Context, w Worktree) (string, []string, bool
 // holds a conflict marker line, as Markers finds them in a commit. A path
 // the worktree does not hold as a regular file has none.
 func (g *Git) MarkedFiles(w Worktree, paths []string) ([]string, error) {
-	root, err := os.OpenRoot(w.Path)
+	return markedFiles(w.Path, paths)
+}
+
+// markedFiles returns the paths, of those given, whose regular file in the
+// directory dir holds a conflict marker line.
+func markedFiles(dir string, paths []string) ([]string, error) {
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -677,7 +685,7 @@ func (g *Git) Workspace(ctx context.Context, name string) (Worktree, bool, error
 				return Worktree{}, false, err
 			}
 		}
-		return Worktree{Path: g.path(name), Branch: branch, git: filepath.Join(g.Clone, ".git")}, true, nil
+		return Worktree{Path: g.path(name), Branch: branch, mounts: []string{filepath.Join(g.Clone, ".git")}}, true, nil
 	}
 	return Worktree{}, false, nil
 }
@@ -755,7 +763,7 @@ func (g *Git) Acquire(ctx context.Context, req vcs.Request) (vcs.Workspace, erro
 	if _, err := g.run(ctx, args...); err != nil {
 		return nil, err
 	}
-	return Worktree{Path: path, Branch: req.Branch, git: filepath.Join(g.Clone, ".git")}, nil
+	return Worktree{Path: path, Branch: req.Branch, mounts: []string{filepath.Join(g.Clone, ".git")}}, nil
 }
 
 // Release removes the worktree, whatever it holds; the branch stays.
