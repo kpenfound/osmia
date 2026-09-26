@@ -10,8 +10,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/busybees/core/agent"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -74,23 +78,32 @@ var (
 	auditReport  = CriterionReport{Criterion: "spec#2", Done: "record acknowledged chunks", Evidence: "acknowledgements are recorded", Proof: "reviewer judgement"}
 )
 
-// jujutsuConflicts are the unit files newJujutsuRebaseFixture writes: resume
-// and audit each add masonWrote as the landing does, differently, and upload
-// adds a file of its own.
+// trackedFile is a file of the clone the landing of newJujutsuLandedFixture
+// changes and audit deletes.
+const trackedFile = "internal/trace/git.go"
+
+// jujutsuConflicts are the unit files newJujutsuLandedFixture writes, an
+// empty one deleted: resume and audit each add masonWrote as the landing
+// does, differently, audit also deletes trackedFile, which the landing
+// changes, and upload adds a file of its own.
 var jujutsuConflicts = map[string]map[string]string{
 	"resume": {masonWrote: "package trace\n\n// resume\n"},
-	"audit":  {masonWrote: "package trace\n\n// audit\n"},
+	"audit":  {masonWrote: "package trace\n\n// audit\n", trackedFile: ""},
 	"upload": {"internal/upload/upload.go": "package upload\n"},
 }
 
-// newJujutsuRebaseFixture builds disjointPlan on Jujutsu workspaces with the
+// jujutsuConflicted are the paths each unit's rebase onto the landing of
+// newJujutsuLandedFixture leaves conflicted.
+var jujutsuConflicted = map[string][]string{"resume": {masonWrote}, "audit": {masonWrote, trackedFile}, "upload": nil}
+
+// newJujutsuLandedFixture builds disjointPlan on Jujutsu workspaces with the
 // service stopped once resume's mason reported done: resume is reviewing,
 // and upload and audit are implementing with a done turn each. Every unit's
 // workspace gets its jujutsuConflicts, a landing moves the feature branch to
-// a masonWrote of its own, and one foreman pass asks to rebase all three,
-// which are then rebased. It returns the workstream, the open trace, the
-// foreman and the landed tip.
-func newJujutsuRebaseFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *foreman, string) {
+// a masonWrote of its own and changes trackedFile, and one foreman pass asks
+// to rebase all three. It returns the workstream, the open trace, the
+// foreman, the landed tip and each unit's rebase operation.
+func newJujutsuLandedFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *foreman, string, map[string]coreadapter.Operation) {
 	t.Helper()
 	ctx := context.Background()
 	f, masons := newParallelMasonFixtureOn(t, config.WorkspacesJujutsu, 1, 3, disjointPlan)
@@ -125,33 +138,75 @@ func newJujutsuRebaseFixture(t *testing.T, key string) (*shedFixture, config.Wor
 			t.Fatalf("unit %s has no workspace", unit)
 		}
 		for name, content := range files {
+			if content == "" {
+				must(t, os.Remove(filepath.Join(w.Path, name)))
+				continue
+			}
 			must(t, os.MkdirAll(filepath.Dir(filepath.Join(w.Path, name)), 0700))
 			must(t, os.WriteFile(filepath.Join(w.Path, name), []byte(content), 0600))
 		}
 	}
-	landed := moveFeature(t, f, stream, map[string]string{masonWrote: "package trace\n\n// landed\n"})
+	landed := moveFeature(t, f, stream, map[string]string{masonWrote: "package trace\n\n// landed\n", trackedFile: "package trace\n\n// landed git\n"})
 	lands := &foreman{masons: m}
 	must(t, lands.Pass(ctx))
-	var ops []trace.OperationRecord
+	ops := map[string]coreadapter.Operation{}
 	for _, unit := range []string{"resume", "upload", "audit"} {
 		asked := rebaseOperations(t, repository, stream, unit)
 		if len(asked) != 1 {
 			t.Fatalf("one pass asked to rebase unit %s %d times", unit, len(asked))
 		}
-		ops = append(ops, asked...)
+		ops[unit] = asked[0].Operation
 	}
-	for _, op := range ops {
-		if result, err := (rebaser{lands}).Apply(ctx, op.Operation); err != nil || result.Outcome != "succeeded" {
-			t.Fatalf("rebase %s: %+v %v", op.Operation.ID, result, err)
+	return f, stream, repository, lands, landed, ops
+}
+
+// newJujutsuRebaseFixture is newJujutsuLandedFixture with every unit's
+// rebase applied.
+func newJujutsuRebaseFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *foreman, string) {
+	t.Helper()
+	f, stream, repository, lands, landed, ops := newJujutsuLandedFixture(t, key)
+	for _, unit := range []string{"resume", "upload", "audit"} {
+		if result, err := (rebaser{lands}).Apply(context.Background(), ops[unit]); err != nil || result.Outcome != "succeeded" {
+			t.Fatalf("rebase of unit %s: %+v %v", unit, result, err)
 		}
 	}
 	return f, stream, repository, lands, landed
 }
 
+// conflictSides returns the lines of each side of the one conflict the file
+// holds: the side rebased onto, the base and the side rebased.
+func conflictSides(t *testing.T, data []byte) (onto, base, change []string) {
+	t.Helper()
+	var section *[]string
+	markers := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		switch {
+		case strings.HasPrefix(line, "<<<<<<< "):
+			section = &onto
+		case strings.HasPrefix(line, "||||||| "):
+			section = &base
+		case line == "=======":
+			section = &change
+		case strings.HasPrefix(line, ">>>>>>> "):
+			section = nil
+		default:
+			if section != nil {
+				*section = append(*section, line)
+			}
+			continue
+		}
+		markers++
+	}
+	if markers != 4 {
+		t.Fatalf("the file holds %d marker lines, not one conflict's four:\n%s", markers, data)
+	}
+	return onto, base, change
+}
+
 // On Jujutsu workspaces, one landing rebases every unit in flight: the two
 // whose change conflicts with it hold the conflict stored in their rebased
-// commit and materialized with markers in their workspace, and the third is
-// rebased cleanly. One pass then routes each conflicted unit, reviewing or
+// commit and materialized with markers in their workspace, a file one side
+// deleted with no lines on that side, and the third is rebased cleanly. One pass then routes each conflicted unit, reviewing or
 // implementing, to its own mason, whose turns are queued side by side, with
 // the markers explained. A resolved unit goes to review with a candidate
 // that holds no conflict and a diff with no marker; one whose mason left the
@@ -169,10 +224,10 @@ func TestJujutsuRebaseStoresEachUnitsConflictAndRoutesItToItsMason(t *testing.T)
 
 	for _, unit := range []string{"resume", "audit"} {
 		rebases := unitRebases(t, repository, stream, unit)
-		if len(rebases) != 1 || !slices.Equal(rebases[0].Conflicts, []string{masonWrote}) || rebases[0].Onto != landed {
+		if len(rebases) != 1 || !slices.Equal(rebases[0].Conflicts, jujutsuConflicted[unit]) || rebases[0].Onto != landed {
 			t.Fatalf("unit %s's rebases %+v", unit, rebases)
 		}
-		if stored, err := g.StoredConflicts(ctx, rebases[0].Commit); err != nil || !slices.Equal(stored, []string{masonWrote}) {
+		if stored, err := g.StoredConflicts(ctx, rebases[0].Commit); err != nil || !slices.Equal(stored, jujutsuConflicted[unit]) {
 			t.Fatalf("unit %s's rebased commit %s stores %v: %v", unit, rebases[0].Commit, stored, err)
 		}
 		if c, err := g.Commit(ctx, rebases[0].Commit); err != nil || !slices.Equal(c.Parents, []string{landed}) {
@@ -182,12 +237,17 @@ func TestJujutsuRebaseStoresEachUnitsConflictAndRoutesItToItsMason(t *testing.T)
 		must(t, err)
 		data, err := os.ReadFile(filepath.Join(w.Path, masonWrote))
 		must(t, err)
-		lines := strings.Split(string(data), "\n")
-		for _, want := range []string{"<<<<<<< ", "// landed", "||||||| ", "=======", "// " + unit, ">>>>>>> "} {
-			if !slices.ContainsFunc(lines, func(line string) bool { return strings.HasPrefix(line, want) }) {
-				t.Fatalf("unit %s's conflicted file lacks a line %q:\n%s", unit, want, data)
-			}
+		onto, base, change := conflictSides(t, data)
+		if !slices.Contains(onto, "// landed") || len(base) != 0 || !slices.Contains(change, "// "+unit) {
+			t.Fatalf("unit %s's conflicted %s reads %q | %q | %q", unit, masonWrote, onto, base, change)
 		}
+	}
+	audit, _, _, err := units.find(ctx, stream, "audit")
+	must(t, err)
+	data, err := os.ReadFile(filepath.Join(audit.Path, trackedFile))
+	must(t, err)
+	if onto, base, change := conflictSides(t, data); !slices.Equal(onto, []string{"package trace", "", "// landed git"}) || !slices.Equal(base, []string{"package trace"}) || len(change) != 0 {
+		t.Fatalf("audit's deleted %s reads %q | %q | %q", trackedFile, onto, base, change)
 	}
 	rebases := unitRebases(t, repository, stream, "upload")
 	if len(rebases) != 1 || len(rebases[0].Conflicts) != 0 || rebases[0].Onto != landed {
@@ -198,7 +258,7 @@ func TestJujutsuRebaseStoresEachUnitsConflictAndRoutesItToItsMason(t *testing.T)
 	}
 	w, _, _, err := units.find(ctx, stream, "upload")
 	must(t, err)
-	for name, want := range map[string]string{masonWrote: "package trace\n\n// landed\n", "internal/upload/upload.go": "package upload\n"} {
+	for name, want := range map[string]string{masonWrote: "package trace\n\n// landed\n", trackedFile: "package trace\n\n// landed git\n", "internal/upload/upload.go": "package upload\n"} {
 		if data, err := os.ReadFile(filepath.Join(w.Path, name)); err != nil || string(data) != want {
 			t.Fatalf("upload's %s after its rebase: %q %v", name, data, err)
 		}
@@ -218,7 +278,7 @@ func TestJujutsuRebaseStoresEachUnitsConflictAndRoutesItToItsMason(t *testing.T)
 		if resolve.Request.TurnID != resolveTurnID(unit, 1) || !resolve.CompletedAt.IsZero() {
 			t.Fatalf("unit %s's mason's last turn is %s", unit, resolve.Request.TurnID)
 		}
-		for _, want := range []string{"- " + masonWrote + "\n", `the lines between "<<<<<<<" and "|||||||" are the feature branch's`, `those between "=======" and ">>>>>>>" are your unit's`, "## end of spec.md"} {
+		for _, want := range []string{"- " + strings.Join(jujutsuConflicted[unit], "\n- ") + "\n", `the lines between "<<<<<<<" and "|||||||" are the feature branch's`, `those between "=======" and ">>>>>>>" are your unit's`, "A side that deleted the file holds no lines.", "## end of spec.md"} {
 			if !strings.Contains(resolve.Request.Prompt, want) {
 				t.Fatalf("unit %s's resolve turn lacks %q:\n%s", unit, want, resolve.Request.Prompt)
 			}
@@ -261,7 +321,7 @@ func TestJujutsuRebaseStoresEachUnitsConflictAndRoutesItToItsMason(t *testing.T)
 	th, err := repository.Thread(stream, masonAgent("audit"))
 	must(t, err)
 	remind := th.Turns[len(th.Turns)-1]
-	if remind.Request.TurnID != fmt.Sprintf("%s-markers-%d", masonAgent("audit"), done.Sequence) || !strings.Contains(remind.Request.Prompt, "still carry conflict markers") || !strings.Contains(remind.Request.Prompt, masonWrote) {
+	if remind.Request.TurnID != fmt.Sprintf("%s-markers-%d", masonAgent("audit"), done.Sequence) || !strings.Contains(remind.Request.Prompt, "still carry conflict markers") || !strings.Contains(remind.Request.Prompt, masonWrote+", "+trackedFile) {
 		t.Fatalf("the reminder %s:\n%s", remind.Request.TurnID, remind.Request.Prompt)
 	}
 }
@@ -298,8 +358,9 @@ func plantDocument(t *testing.T, repository *trace.Repository, stream config.Wor
 	return doc
 }
 
-// A candidate that holds a stored conflict is refused at both gates even
-// when the trace names it: the reviewer's bundle is not assembled, so no
+// A candidate that holds a stored conflict, of a file both sides changed and
+// of one a side deleted, is refused at both gates even when the trace names
+// it: the reviewer's bundle is not assembled, so no
 // reviewer turn is queued and why is recorded, and its approval does not
 // land, so the feature branch stays.
 func TestJujutsuCandidateHoldingAConflictIsNeitherReviewedNorLanded(t *testing.T) {
@@ -319,7 +380,7 @@ func TestJujutsuCandidateHoldingAConflictIsNeitherReviewedNorLanded(t *testing.T
 	report := plantDocument(t, repository, stream, "audit", reportDocument("audit"), fmt.Sprintf(reportPath, "audit"),
 		UnitReport{Unit: "audit", Turn: "test", Seal: latest.Seal, Outcome: "Built", Criteria: []CriterionReport{auditReport}, Branch: unitBranch(stream, "audit"), Base: landed, Candidate: candidate})
 	plantUnit(t, repository, stream, "audit", UnitReviewing)
-	refused := fmt.Sprintf("candidate %s holds unresolved conflicts in %s", candidate, masonWrote)
+	refused := fmt.Sprintf("candidate %s holds unresolved conflicts in %s, %s", candidate, masonWrote, trackedFile)
 
 	r := &reviewers{masons: lands.masons}
 	state, err := repository.Workflow(stream, trace.UnitSubject("audit"))
@@ -435,5 +496,230 @@ func TestJujutsuDriftConflictIsResolvedInItsWorkspaceBeforeReview(t *testing.T) 
 	}
 	if tip := featureTip(t, f, stream); tip != candidate || fileAt(t, f, tip, "CODEOWNERS") != "/internal/ @upstream @feature\n" {
 		t.Fatalf("the feature branch is at %s, not the approved candidate %s", tip, candidate)
+	}
+}
+
+// crashedRebase applies the rebase operation with the service cut off once
+// the unit's branch and files moved, and checks that the retry completes it
+// from the commit the branch moved to: the operation reads as this
+// operation's rebase, nothing is rebased again, and the rebase is recorded
+// once, on onto, with conflicts, which that commit stores, conflicted or
+// else rebased. It records the operation's result and returns the commit.
+func crashedRebase(t *testing.T, f *shedFixture, repository *trace.Repository, r rebaser, stream config.WorkstreamID, unit string, op coreadapter.Operation, onto string, conflicts []string) string {
+	t.Helper()
+	ctx := context.Background()
+	crashed := false
+	f.s.boundary = func(name string) error {
+		if name == "rebase-moved" && !crashed {
+			crashed = true
+			return errors.New("crash")
+		}
+		return nil
+	}
+	defer func() { f.s.boundary = nil }()
+	if result, err := r.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "crash") {
+		t.Fatalf("unit %s's rebase never moved the workspace: %+v %v", unit, result, err)
+	}
+	g := providerOf(t, newUnitWorkspaces(f.s.cfg, repository).streamWorkspaces, stream)
+	moved, _, err := g.Branch(ctx, unitBranch(stream, unit))
+	must(t, err)
+	if observed, err := r.Inspect(ctx, op); err != nil || observed.State != coreadapter.EffectAbsent || !strings.Contains(observed.Evidence, "this operation's rebase of snapshot") {
+		t.Fatalf("inspection of unit %s's interrupted rebase %+v %v", unit, observed, err)
+	}
+	if result, err := r.Apply(ctx, op); err != nil || result.Outcome != "succeeded" {
+		t.Fatalf("unit %s's retried rebase %+v %v", unit, result, err)
+	}
+	if tip, _, err := g.Branch(ctx, unitBranch(stream, unit)); err != nil || tip != moved {
+		t.Fatalf("the retry moved unit %s's branch from %s to %s: %v", unit, moved, tip, err)
+	}
+	if c, err := g.Commit(ctx, moved); err != nil || !slices.Equal(c.Parents, []string{onto}) {
+		t.Fatalf("unit %s's rebased commit %+v: %v", unit, c, err)
+	}
+	if stored, err := g.StoredConflicts(ctx, moved); err != nil || !slices.Equal(stored, conflicts) {
+		t.Fatalf("unit %s's rebased commit stores %v: %v", unit, stored, err)
+	}
+	rebases := unitRebases(t, repository, stream, unit)
+	last := rebases[len(rebases)-1]
+	if last.Commit != moved || last.Onto != onto || !slices.Equal(last.Conflicts, conflicts) {
+		t.Fatalf("unit %s's rebase records %+v", unit, rebases)
+	}
+	transition, _ := rebaseIDs(unit, last.Rebase)
+	var outcomes []string
+	for _, tr := range allTransitions(t, f.trace, stream) {
+		if tr.Subject == rebaseSubject(unit) && strings.HasPrefix(tr.ID, transition+"-") {
+			outcomes = append(outcomes, tr.ID)
+		}
+	}
+	outcome := transition + "-rebased"
+	if len(conflicts) != 0 {
+		outcome = transition + "-conflicted"
+	}
+	if !slices.Equal(outcomes, []string{outcome}) {
+		t.Fatalf("unit %s's rebase outcomes %v", unit, outcomes)
+	}
+	settleOperation(t, f.s, repository, stream, op, r)
+	return moved
+}
+
+// rebaseNumber returns the unit's rebase operation number k.
+func rebaseNumber(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string, k int) coreadapter.Operation {
+	t.Helper()
+	for _, o := range rebaseOperations(t, repository, stream, unit) {
+		if in, err := decodeRebase(o.Operation); err == nil && in.Rebase == k {
+			return o.Operation
+		}
+	}
+	t.Fatalf("unit %s has no rebase %d", unit, k)
+	return coreadapter.Operation{}
+}
+
+// A conflicted rebase on Jujutsu workspaces cut off after the unit's branch
+// and files moved completes on retry from the commit the branch holds,
+// though a conflicted rebase makes a new commit each time it runs. So does
+// the next rebase of the unit while its conflict is unresolved, and the one
+// after, onto a landing that makes the unit's change itself, which resolves
+// the conflict.
+func TestInterruptedJujutsuConflictedRebaseCompletesOnRetry(t *testing.T) {
+	t.Parallel()
+	f, stream, repository, lands, landed, ops := newJujutsuLandedFixture(t, "jj-interrupted")
+	ctx := context.Background()
+	r := rebaser{lands}
+	for _, unit := range []string{"resume", "upload"} {
+		if result := settleOperation(t, f.s, repository, stream, ops[unit], r); result.Outcome != "succeeded" {
+			t.Fatalf("rebase of unit %s: %+v", unit, result)
+		}
+	}
+	commits := []string{crashedRebase(t, f, repository, r, stream, "audit", ops["audit"], landed, jujutsuConflicted["audit"])}
+	for k, landing := range []struct {
+		files     map[string]string
+		conflicts []string
+	}{
+		{map[string]string{"LANDED.md": "landed again\n"}, jujutsuConflicted["audit"]},
+		{map[string]string{masonWrote: jujutsuConflicts["audit"][masonWrote], trackedFile: ""}, nil},
+	} {
+		onto := moveFeature(t, f, stream, landing.files)
+		must(t, lands.Pass(ctx))
+		for _, unit := range []string{"resume", "upload"} {
+			if result := settleOperation(t, f.s, repository, stream, rebaseNumber(t, repository, stream, unit, k+2), r); result.Outcome != "succeeded" {
+				t.Fatalf("rebase %d of unit %s: %+v", k+2, unit, result)
+			}
+		}
+		commits = append(commits, crashedRebase(t, f, repository, r, stream, "audit", rebaseNumber(t, repository, stream, "audit", k+2), onto, landing.conflicts))
+	}
+	rebases := unitRebases(t, repository, stream, "audit")
+	if len(rebases) != 3 || rebases[1].Snapshot != commits[0] || rebases[2].Snapshot != commits[1] {
+		t.Fatalf("audit's rebase records %+v, rebased commits %v", rebases, commits)
+	}
+	w, _, _, err := newUnitWorkspaces(f.s.cfg, repository).find(ctx, stream, "audit")
+	must(t, err)
+	if data, err := os.ReadFile(filepath.Join(w.Path, masonWrote)); err != nil || string(data) != jujutsuConflicts["audit"][masonWrote] {
+		t.Fatalf("audit's resolved %s holds %q: %v", masonWrote, data, err)
+	}
+	if _, err := os.Stat(filepath.Join(w.Path, trackedFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("audit's %s after both sides deleted it: %v", trackedFile, err)
+	}
+}
+
+// Several conflicted units on Jujutsu workspaces are resolved at once within
+// mason capacity: with two mason slots, the one conflict-free unit reviewing
+// and the other two routed to their masons, the resolve turns of both
+// conflicted units are in flight together, taking both slots with none
+// waiting, each on a view of its own unit's workspace with its markers, and
+// both units go to review once resolved.
+func TestJujutsuConflictedUnitsAreResolvedInParallel(t *testing.T) {
+	t.Parallel()
+	f, stream, repository, lands, _ := newJujutsuRebaseFixture(t, "jj-parallel")
+	must(t, lands.Pass(context.Background()))
+	for _, unit := range []string{"resume", "audit"} {
+		th, err := repository.Thread(stream, masonAgent(unit))
+		must(t, err)
+		if last := th.Turns[len(th.Turns)-1]; last.Request.TurnID != resolveTurnID(unit, 1) {
+			t.Fatalf("unit %s's mason's last turn is %s", unit, last.Request.TurnID)
+		}
+	}
+	must(t, repository.Close())
+	path := filepath.Join(f.opts.Config.Root, "config.toml")
+	data, err := os.ReadFile(path)
+	must(t, err)
+	// Two mason slots, and room in the workstream for both and the
+	// reviewers' two, so only capacity.masons bounds the resolve turns.
+	raised := strings.Replace(string(data), "\nmasons = 1\nper_workstream = 3\n", "\nmasons = 2\nper_workstream = 4\n", 1)
+	if raised == string(data) {
+		t.Fatalf("%s sets no capacity of one mason", path)
+	}
+	must(t, os.WriteFile(path, []byte(raised), 0600))
+
+	resolutions := map[string]map[string]string{
+		"resume": {masonWrote: "package trace\n\n// landed and resumed\n"},
+		"audit":  {masonWrote: "package trace\n\n// landed and audited\n", trackedFile: "package trace\n\n// landed git\n"},
+	}
+	reports := map[string]CriterionReport{"resume": resumeReport, "audit": auditReport}
+	var mu sync.Mutex
+	var problems []string
+	release := make(chan struct{})
+	f.engine.mu.Lock()
+	for unit, files := range resolutions {
+		f.engine.turns[resolveTurnID(unit, 1)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			view := req.Workspace.Directory()
+			for name := range files {
+				if data, err := os.ReadFile(filepath.Join(view, name)); err != nil || !strings.Contains(string(data), "\n||||||| ") {
+					mu.Lock()
+					problems = append(problems, fmt.Sprintf("unit %s's view holds %s as %q: %v", unit, name, data, err))
+					mu.Unlock()
+				}
+			}
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			for name, content := range files {
+				if err := os.WriteFile(filepath.Join(view, name), []byte(content), 0600); err != nil {
+					return nil, err
+				}
+			}
+			if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Resolved", "criteria": []any{criterionArgs(reports[unit])}}); err != nil || !recorded {
+				mu.Lock()
+				problems = append(problems, fmt.Sprintf("unit %s's done refused: %q %v", unit, reason, err))
+				mu.Unlock()
+			}
+			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Resolved", SessionDir: req.SessionDir, NumTurns: 2}, nil
+		}
+	}
+	f.engine.mu.Unlock()
+
+	f.start(t)
+	var masons RoleCapacity
+	for deadline := time.Now().Add(demoTimeout); ; time.Sleep(10 * time.Millisecond) {
+		capacity, diagnostic := f.s.capacityStatus(nil)
+		if diagnostic != nil {
+			t.Fatal(diagnostic.Message)
+		}
+		masons = capacity.Roles[slices.IndexFunc(capacity.Roles, func(r RoleCapacity) bool { return r.Role == masonRole })]
+		if masons.Used == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the resolve turns were never in flight together: %+v", masons)
+		}
+	}
+	if masons.Limit != 2 || len(masons.Waiting) != 0 {
+		t.Fatalf("mason capacity with both resolve turns in flight %+v", masons)
+	}
+	for _, unit := range []string{"resume", "audit"} {
+		th, err := f.repository().Thread(stream, masonAgent(unit))
+		must(t, err)
+		if last := th.Turns[len(th.Turns)-1]; last.Request.TurnID != resolveTurnID(unit, 1) || !last.CompletedAt.IsZero() {
+			t.Fatalf("unit %s's mason's last turn is %s, completed at %s", unit, last.Request.TurnID, last.CompletedAt)
+		}
+	}
+	close(release)
+	f.awaitUnit(t, stream, "resume", UnitReviewing)
+	f.awaitUnit(t, stream, "audit", UnitReviewing)
+	f.stop(t)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(problems) != 0 {
+		t.Fatal(strings.Join(problems, "\n"))
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
@@ -475,7 +476,8 @@ func rebasedSnapshot(ctx context.Context, g workspace.Provider, head string, in 
 // Apply rebases the unit's workspace onto the feature branch commit the
 // operation names. A unit branch whose tip is this operation's commit on that
 // commit is an interrupted rebase: its snapshot is read from the commit's
-// trailer, and nothing is snapshotted or committed again. Otherwise the
+// trailer, the tip is the rebased commit, and nothing is snapshotted or
+// committed again. Otherwise the
 // feature branch must still be at that commit and the workspace must not
 // descend from it; the workspace is snapshotted, and the change the snapshot
 // holds since its base is merged onto the commit as one rebased commit,
@@ -522,7 +524,10 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	if snapshot == "" {
+	rebased := ""
+	if snapshot != "" {
+		rebased = head
+	} else {
 		tip, _, err := g.Branch(ctx, featureBranch(stream))
 		if err != nil {
 			return coreadapter.OperationResult{}, err
@@ -565,7 +570,14 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		}
 	}
 	message := fmt.Sprintf("Rebase unit %s onto %s\n\nOsmia-Workstream: %s\nOsmia-Unit: %s\n%s: %s\nOsmia-Base: %s\nOsmia-Onto: %s\n%s: %s\n", in.Unit, in.Onto, stream, in.Unit, rebaseSnapshotTrailer, snapshot, base, in.Onto, landingTrailer, op.ID)
-	commit, conflicts, err := g.RebaseFrom(ctx, driftBase, in.Onto, snapshot, message, requested)
+	var commit string
+	var conflicts []string
+	if rebased != "" {
+		commit = rebased
+		conflicts, err = rebasedConflicts(ctx, g, driftBase, in.Onto, snapshot, rebased, message, requested)
+	} else {
+		commit, conflicts, err = g.RebaseFrom(ctx, driftBase, in.Onto, snapshot, message, requested)
+	}
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -576,6 +588,29 @@ func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		return coreadapter.OperationResult{}, err
 	}
 	return r.record(ctx, stream, in, op.ID, UnitRebase{Unit: in.Unit, Rebase: in.Rebase, Operation: op.ID, Branch: w.Branch, Base: base, Onto: in.Onto, Snapshot: snapshot, Commit: commit, Conflicts: conflicts})
+}
+
+// rebasedConflicts returns the paths the rebase of snapshot that made commit
+// rebased left conflicted. A commit that holds stored conflicts holds those
+// paths, and one Jujutsu made from a snapshot that held stored conflicts
+// holds no other. Any other commit is the one Git's merge makes from the
+// rebase's arguments, which is made again to read its conflicted paths.
+func rebasedConflicts(ctx context.Context, g workspace.Provider, base, onto, snapshot, rebased, message string, at time.Time) ([]string, error) {
+	stored, err := g.StoredConflicts(ctx, rebased)
+	if err != nil || len(stored) != 0 {
+		return stored, err
+	}
+	if held, err := g.StoredConflicts(ctx, snapshot); err != nil || len(held) != 0 {
+		return nil, err
+	}
+	commit, conflicts, err := g.RebaseFrom(ctx, base, onto, snapshot, message, at)
+	if err != nil {
+		return nil, err
+	}
+	if commit != rebased {
+		return nil, fmt.Errorf("the rebase of snapshot %s onto %s makes %s, not the unit branch's %s", snapshot, onto, commit, rebased)
+	}
+	return conflicts, nil
 }
 
 // record records, in one commit, units/<unit>/rebase.json and the rebase's

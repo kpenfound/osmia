@@ -2125,8 +2125,8 @@ unresolved conflicts to `implementing` through
 turn `mason-<id>-rebase-<k>`, whose prompt lists the conflicted files,
 explains the markers of the workstream's backend and carries the unit's
 bundle with the sealed spec to resolve them against. Each conflicted unit's
-mason works in its own workspace, so several resolve at once within mason
-capacity. A `waiting` or `contested` unit keeps its state until
+mason works in its own workspace, and each resolve turn takes a mason slot
+of its own, so several are in flight at once within mason capacity. A `waiting` or `contested` unit keeps its state until
 its answer or the owner's ruling moves it on; the same rules then apply. The
 mason reports `done` as usual, and the mason controller
 [finishes](#finishing-units) the unit only once its candidate holds no stored
