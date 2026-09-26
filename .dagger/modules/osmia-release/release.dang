@@ -108,7 +108,7 @@ type Release {
         "/src",
         ws.directory(
           "/",
-          include: ["go.mod", "go.sum", "**/*.go", "LICENSE", "README.md"],
+          include: ["go.mod", "go.sum", "**/*.go", "internal/web/**", "LICENSE", "README.md"],
           exclude: [".bees/**", ".dagger/**"],
         ),
       )

@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/web"
 )
 
 func respond(w http.ResponseWriter, status int, value any) {
@@ -166,6 +167,9 @@ func (s *Service) effectiveProfiles(state runtime.State) map[string]EffectivePro
 	return profiles
 }
 func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
+	if web.Serve(w, r) {
+		return
+	}
 	if r.Method == http.MethodGet {
 		switch r.URL.Path {
 		case Prefix + "/health":

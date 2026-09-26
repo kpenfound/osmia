@@ -121,7 +121,8 @@ Unix socket; the loader neither binds nor removes it. `listen.web` is
 free port). An empty host, any other address or hostname, and a missing or
 named port are errors that name `listen.web`. The listener has no
 authentication: anyone who can connect to the host's loopback interface can
-use the API ([web listener](service.md#web-listener)). `listen.tailnet` is
+use the API ([web listener](service.md#web-listener)). A browser on the
+same machine opens the [page](service.md#web-page) at `http://<listen.web>/`. `listen.tailnet` is
 one DNS label of 1 to 63 lowercase letters, digits and hyphens that neither
 starts nor ends with a hyphen, such as `osmia`; anything else is an error that
 names `listen.tailnet`. With it set, the service joins your tailnet through
