@@ -459,7 +459,8 @@ live-owned socket. Unsupported responses identify the M1 limit; restart-required
 responses instruct the operator to stop and start the service.
 
 Detached management, install/upgrade commands, completion and the web
-interface's inbox, conversation and controls are unavailable; the service
-serves the active-work [page](service.md#web-page). The command examples in
+interface's inbox are unavailable; the service serves the
+[page](service.md#web-page) with the active work, each workstream's
+conversation and the controls. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.
