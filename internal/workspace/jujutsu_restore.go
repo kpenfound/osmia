@@ -89,17 +89,17 @@ func (j *Jujutsu) Settle(_ context.Context, operation string) error {
 
 // Recover restores the repository to the oldest operation-log entry a
 // checkpoint still records, drops every checkpoint and returns the
-// operations they were taken for, oldest first. No mason edit is lost: every
+// operations they were taken for, oldest first. No file is lost: every
 // workspace is snapshotted before the restore, so what its files held stays
-// in the operation log, and one whose files the restore takes back to the
-// checkpoint gets the files it held then, which the checkpoint's snapshot
-// holds. Each workspace gets back the metadata recorded then, and
-// the repository imports the clone's branches as they are, since a restore
-// moves no branch of the clone. A workspace, with no replay in progress,
-// whose branch moved while it held nothing of its own, or to a commit
-// holding exactly its files, as a snapshot does, is then moved onto the
-// branch. A workspace a checkpoint does not know is no longer one of the
-// repository's, as Workspace reports.
+// in the operation log, and one the restore takes back to the checkpoint
+// gets the files it held then, which the checkpoint's snapshot holds. Each
+// workspace gets back the metadata recorded then, its replay in progress
+// included, and the repository imports the clone's branches as they are,
+// since a restore moves no branch of the clone. A workspace with no replay in
+// progress whose branch moved from under it is then put on the branch when
+// it holds nothing of its own, or exactly the files of the branch's commit,
+// as after a snapshot. A workspace made after the entry is no longer one of
+// the repository's, as Workspace reports, so Acquire makes it again.
 func (j *Jujutsu) Recover(ctx context.Context) ([]string, error) {
 	entries, err := os.ReadDir(j.checkpoints())
 	if errors.Is(err, os.ErrNotExist) {

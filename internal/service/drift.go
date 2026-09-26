@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kpenfound/busybees/core/vcs"
 
@@ -369,12 +370,12 @@ func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		providers = append(providers, g)
 	}
 	return checkpointed(ctx, op.ID, requested, providers, func() (coreadapter.OperationResult, error) {
-		return d.drift(ctx, op.ID, stream, in)
+		return d.drift(ctx, op.ID, stream, in, requested)
 	})
 }
 
 // drift is one attempt of the drift rebase Apply describes.
-func (d drifter) drift(ctx context.Context, operation string, stream config.WorkstreamID, in driftInput) (coreadapter.OperationResult, error) {
+func (d drifter) drift(ctx context.Context, operation string, stream config.WorkstreamID, in driftInput, requested time.Time) (coreadapter.OperationResult, error) {
 	rebase, found, err := d.latest(stream, in.Drift)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -413,10 +414,6 @@ func (d drifter) drift(ctx context.Context, operation string, stream config.Work
 		}
 		if !exists {
 			return d.skip(ctx, stream, in.Drift, operation, fmt.Sprintf("the clone has no feature branch %s", branch))
-		}
-		requested, err := d.requestedAt(stream, operation)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
 		}
 		sealed, _, found, err := seal.Latest(d.repository, stream)
 		if err != nil {
