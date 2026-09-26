@@ -955,17 +955,24 @@ func (j *Jujutsu) StoredConflicts(ctx context.Context, commit string) ([]string,
 // changePattern is a full Jujutsu change ID.
 var changePattern = regexp.MustCompile(`^[k-z]{32}$`)
 
-// Change returns the change ID of the workspace's first working-copy commit,
-// which the first snapshot of the workspace commits. A workspace made before
-// the provider recorded it returns "".
+// Change returns the change ID of the workspace's first working-copy
+// commit, which the first snapshot of the workspace commits. A workspace
+// whose metadata records no change returns "".
 func (j *Jujutsu) Change(_ context.Context, w Worktree) (string, error) {
 	meta, err := readMetadata(w.Path)
 	return meta.Change, err
 }
 
+// commitIDPattern is a full Git commit ID, SHA-1 or SHA-256.
+var commitIDPattern = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+
 // ChangeOf returns the change ID the repository gives commit: one it made,
-// or one on a branch it imported. A commit it does not know returns "".
+// or one on a branch it imported. A commit it does not know returns "". A
+// commit that is not a full commit ID is refused.
 func (j *Jujutsu) ChangeOf(ctx context.Context, commit string) (string, error) {
+	if !commitIDPattern.MatchString(commit) {
+		return "", fmt.Errorf("%q is not a full commit ID", commit)
+	}
 	if exists, err := j.initialized(); err != nil || !exists {
 		return "", err
 	}

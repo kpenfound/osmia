@@ -936,6 +936,11 @@ func TestJujutsuCarriesAWorkspacesChangeThroughItsRebases(t *testing.T) {
 	if got, err := j.ChangeOf(ctx, carried); err != nil || got != change {
 		t.Fatalf("the rebased commit is change %q, %v; want %s", got, err, change)
 	}
+	for _, selector := range []string{carried + ") | all()", "all()", carried[:12], strings.ToUpper(carried)} {
+		if got, err := j.ChangeOf(ctx, selector); err == nil || got != "" {
+			t.Fatalf("ChangeOf(%q) read %q: %v", selector, got, err)
+		}
+	}
 
 	conflicting := snapshotJJ(t, j, feature, tip, map[string]string{"README": "widgets by the feature\n"})
 	conflicted, conflicts, err := j.Rebase(ctx, conflicting, carried, "Rebase unit u1 again", at)
