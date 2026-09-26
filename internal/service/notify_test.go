@@ -360,6 +360,12 @@ func TestNotifyReloadTurnsNotificationsOnAndOff(t *testing.T) {
 	if cfg.Effective.Notify.Webhook != first.hook() {
 		t.Fatalf("effective notify %+v", cfg.Effective.Notify)
 	}
+	// The pass the reload triggers records what is open as skipped; an entry
+	// that opens before that pass reads the inbox would be skipped too.
+	soon(t, "the open entry recorded as skipped", func() bool {
+		l := readLedger(t, opts)
+		return l.Enabled && l.Notifications[notificationKey(project, e1)] != nil
+	})
 	e2 := entryOf(InboxAmendment, 2)
 	inbox.set(e1, e2)
 	if got := first.await(t, 1); len(got) != 1 || !strings.Contains(got[0], "Kind: amendment") {
