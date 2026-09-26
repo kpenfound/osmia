@@ -9,6 +9,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/kpenfound/busybees/core/vcs"
 	"github.com/kpenfound/osmia/internal/config"
@@ -248,8 +250,93 @@ func (u unitWorkspaces) selection(ctx context.Context, scope coreadapter.Scope, 
 	if !found {
 		return isolation.Selection{}, fmt.Errorf("unit %s of workstream %s has no workspace", scope.Unit, stream)
 	}
+	if err := u.record(ctx, scope, w); err != nil {
+		return isolation.Selection{}, err
+	}
 	paths, err := u.paths(w)
 	return isolation.Selection{Paths: paths, Execution: execution}, err
+}
+
+// recordedName names the file, in the directory under views of a mason turn,
+// that holds the revision recording its unit workspace's files as the turn
+// first started.
+const recordedName = "recorded"
+
+// turnViews is the directory under views that holds the view of a mason turn
+// while it runs, and what the service keeps about the turn beside it.
+func turnViews(cfg *config.Config, project config.ProjectID, stream config.WorkstreamID, agent, turn string) string {
+	return filepath.Join(cfg.Root.String(), "views", string(project), string(stream), agent, turn)
+}
+
+// record records the unit workspace's files as the mason turn of scope first
+// starts, so that the files the turn changed can be named once it is cut
+// short. A later attempt of the turn keeps what the first one recorded. A
+// workspace on git worktrees records nothing.
+func (u unitWorkspaces) record(ctx context.Context, scope coreadapter.Scope, w workspace.Worktree) error {
+	stream := config.WorkstreamID(scope.Workstream)
+	dir := turnViews(u.cfg, u.repository.Project(), stream, scope.Thread, scope.Turn)
+	path := filepath.Join(dir, recordedName)
+	if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	g, err := u.of(stream)
+	if err != nil {
+		return err
+	}
+	revision, err := g.Record(ctx, w)
+	if err != nil || revision == "" {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	// A stop mid-write leaves the temporary file, never a partial record.
+	if err := os.WriteFile(path+".tmp", []byte(revision), 0600); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
+}
+
+// changed records the files of the unit's workspace, as its backend's Record
+// does, and returns the paths whose files differ from those the mason turn
+// started with, and whether the turn's start was recorded: a turn on git
+// worktrees records nothing, and neither does one stopped before it started.
+func (u unitWorkspaces) changed(ctx context.Context, stream config.WorkstreamID, unit, turn string) ([]string, bool, error) {
+	w, _, found, err := u.find(ctx, stream, unit)
+	if err != nil {
+		return nil, false, err
+	}
+	if !found {
+		return nil, false, fmt.Errorf("unit %s of workstream %s has no workspace", unit, stream)
+	}
+	g, err := u.of(stream)
+	if err != nil {
+		return nil, false, err
+	}
+	revision, err := os.ReadFile(filepath.Join(turnViews(u.cfg, u.repository.Project(), stream, masonAgent(unit), turn), recordedName))
+	if errors.Is(err, fs.ErrNotExist) {
+		_, err := g.Record(ctx, w)
+		return nil, false, err
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	paths, err := g.Changed(ctx, w, string(revision))
+	return paths, err == nil, err
+}
+
+// kept says what the workspace of a mason turn cut short holds: the files
+// left by what ended, and, when the turn's start was recorded, which files
+// that changed.
+func kept(ended string, paths []string, recorded bool) string {
+	switch {
+	case !recorded:
+		return "Your workspace includes the files left by " + ended + "."
+	case len(paths) == 0:
+		return "Your workspace includes the files left by " + ended + ", which changed none of them."
+	default:
+		return "Your workspace includes the files left by " + ended + ", which changed " + strings.Join(paths, ", ") + "."
+	}
 }
 
 // capture copies a mason turn's view back into its unit's workspace, whatever
@@ -266,6 +353,49 @@ func (u unitWorkspaces) capture(ctx context.Context, scope coreadapter.Scope, vi
 		return fmt.Errorf("unit %s of workstream %s has no workspace", scope.Unit, stream)
 	}
 	return mirror(view.Workspace().Directory, w.Path)
+}
+
+// retriedTurns tells a unit mason's attempt that follows an attempt of the
+// same turn that timed out what the earlier attempts left in its workspace,
+// when the turn's start was recorded.
+type retriedTurns struct {
+	Turns      coreadapter.Turns
+	units      unitWorkspaces
+	repository *trace.Repository
+}
+
+var _ coreadapter.Turns = (*retriedTurns)(nil)
+var _ coreadapter.ResumeChecker = (*retriedTurns)(nil)
+
+func (t *retriedTurns) Run(ctx context.Context, prepared coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	scope := prepared.Scope
+	if scope.Role == masonRole && scope.Thread != driftMasonAgent && scope.Unit != "" {
+		stream := config.WorkstreamID(scope.Workstream)
+		th, err := t.repository.Thread(stream, scope.Thread)
+		if err != nil {
+			return coreadapter.SessionResult{}, err
+		}
+		i := slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == scope.Turn })
+		if i >= 0 && slices.ContainsFunc(th.Turns[i].Attempts, func(a trace.TurnAttempt) bool { return a.Result != nil && a.Result.TimedOut }) {
+			paths, recorded, err := t.units.changed(ctx, stream, scope.Unit, scope.Turn)
+			if err != nil {
+				return coreadapter.SessionResult{}, err
+			}
+			if recorded {
+				prepared.Prompt += "\n\nAn earlier attempt at this turn timed out. " + kept("the earlier attempts", paths, true) + " Continue from those files."
+			}
+		}
+	}
+	return t.Turns.Run(ctx, prepared)
+}
+
+// CheckResume defers to the wrapped runner; one that cannot check resumes
+// makes the turn replay.
+func (t *retriedTurns) CheckResume(ctx context.Context, previous, next coreadapter.Profile, session coreadapter.BackendSession) error {
+	if checker, ok := t.Turns.(coreadapter.ResumeChecker); ok {
+		return checker.CheckResume(ctx, previous, next, session)
+	}
+	return coreadapter.ErrResumeUnavailable
 }
 
 // mirror makes dst hold the regular files and directories of src, and

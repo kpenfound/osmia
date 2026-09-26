@@ -48,6 +48,10 @@ type Provider interface {
 	ChangeOf(ctx context.Context, commit string) (string, error)
 	Carry(ctx context.Context, commit, change string) (string, error)
 
+	// Recording a workspace's files between commits.
+	Record(ctx context.Context, w Worktree) (string, error)
+	Changed(ctx context.Context, w Worktree, since string) ([]string, error)
+
 	// Moving a workspace, and replaying in it with conflicts to resolve.
 	Move(ctx context.Context, w Worktree, from, to string) error
 	Advance(ctx context.Context, w Worktree, from, to string) error

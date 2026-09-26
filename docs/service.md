@@ -2391,6 +2391,23 @@ the turn removed such a directory from its view; a file or directory the turn
 put in the place of one of them is not copied back. A candidate snapshot
 therefore records the workspace's symlinks unchanged.
 
+On [Jujutsu workspaces](#workspace-backends) the service records the
+workspace's files in its working-copy commit as each mason turn is first lent
+the workspace, and records them again before it continues a turn that was cut
+short. The continuation of a mason turn that a service stop interrupted or a
+hard pause stopped then says in its prompt which files that turn changed:
+`Your workspace includes the files left by that turn, which changed <paths>.`,
+the paths sorted and separated by `, `, or `which changed none of them` when
+it changed none. An attempt of a mason turn that follows an attempt of the
+same turn that timed out gets `An earlier attempt at this turn timed out. Your
+workspace includes the files left by the earlier attempts, which changed
+<paths>. Continue from those files.` after the turn's prompt. On Git worktrees
+a continuation's prompt says `Your workspace includes the files left by that
+turn.` and names no file, and a retried attempt's prompt is the turn's own. A
+[rebase](#rebasing-units-in-flight) snapshots the workspace before it moves
+it, so the files a stopped turn left are carried onto the new feature branch
+tip on either backend.
+
 The service can snapshot a unit's workspace as its candidate: a commit of the
 worktree's whole tree, untracked files included and files the repository
 ignores left out, on top of the commit the worktree is on, by `Osmia
@@ -3222,7 +3239,8 @@ and the stopped session.
 The controllers continue a stopped turn as they continue one a service stop
 interrupted, on the same thread: the mason controller queues its
 `-recover-<sequence>` turn with the stopped turn's prompt and a note that a
-hard pause stopped it, the reviewer controller its review's
+hard pause stopped it, naming on Jujutsu workspaces the files the stopped turn
+changed ([unit workspaces](#unit-workspaces)), the reviewer controller its review's
 `-recover-<sequence>` turn once the workstream is not paused, and the drift
 controller its mason's or reviewer's continuation once the drift resumes. The
 gate holds each continuation until the pause is cleared, and it then resumes
