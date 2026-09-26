@@ -389,8 +389,8 @@ work through `OperationAttempt.Unlocked`, which releases that serialization
 while the work runs and takes it back before the callback goes on: other
 operations are reconciled meanwhile, and `Close` does not wait for the work, so
 the caller joins it before closing. `trace.Relock`, given the context
-`Unlocked` passed to the work, serializes one step of it with reconciliation
-again, and `Repository.Serialize` runs other work serialized with it. Every
+`Unlocked` passed to the work, takes the lock back for the rest of that work,
+and `Repository.Serialize` runs other work serialized with reconciliation. Every
 trace write still goes through the repository's single writer. Operation claims use
 execution ownership rather than expiring notification leases: a slow external
 call cannot overlap a replacement worker, and `WithOperation` leaves an
@@ -435,8 +435,8 @@ Production capability enforcement remains the execution adapter's responsibility
 
 `reconcile.Options.Schedule` is an optional hook that runs at the start of every
 pass, before operations are read, so the intent it publishes is reconciled in the
-same pass. It runs through `Serialize`, so a step a concurrent operation
-relocks lands wholly before or after it. An error from it stops the loop. The service installs event delivery and its
+same pass. It runs through `Serialize`, so what a concurrent operation does
+after `Relock` lands wholly before or after it. An error from it stops the loop. The service installs event delivery and its
 queued-turn scheduler as this hook (see [the service](service.md)). The controller makes no
 capacity or owner-authorization decisions.
 
@@ -591,8 +591,9 @@ A captured backend or isolation failure is a terminal result with outcome
 does not run it again. A turn that is still not
 complete after Apply returns an error and stays pending. A restarted controller
 finds this work by scanning operations, so no wakeup from before shutdown is
-needed. When the controller runs a turn beside its passes, the runner captures,
-costs and completes the turn as one step through `trace.Relock`, so a pass's
+needed. When the controller runs a turn beside its passes, the runner takes the
+lock back through `trace.Relock` before it captures, costs and completes the
+turn, so those writes and the operation's result land together and a pass's
 schedule hooks see the turn either unfinished or finished; its claim and
 session run without the lock.
 

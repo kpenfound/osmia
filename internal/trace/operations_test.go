@@ -152,9 +152,10 @@ func TestOperationPublicationRecovery(t *testing.T) {
 
 // Work an attempt runs through Unlocked leaves the other operations free to
 // be claimed, while the attempt keeps its own: its operation is left alone
-// until the attempt returns, and the attempt still records afterwards. A step
-// of that work run through Relock holds other operations off again; Relock
-// runs as it is under a callback that holds the lock.
+// until the attempt returns, and the attempt still records afterwards. Relock
+// holds other operations off again for the rest of the work and the callback;
+// it runs as it is under a callback that holds the lock, and once the lock is
+// back.
 func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -175,6 +176,7 @@ func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
 		})
 		return claimed, err
 	}
+	claimed := make(chan struct{})
 	err := r.WithOperation(ctx, streamID, first, actor, now, func(a *OperationAttempt, _ OperationRecord) error {
 		if err := Relock(ctx, func() error { return nil }); err != nil {
 			return err
@@ -196,25 +198,26 @@ func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
 				t.Error("Unlocked kept the operation lock")
 				return
 			}
-			claimed := make(chan struct{})
 			err := Relock(ctx, func() error {
 				go func() {
 					defer close(claimed)
 					if ok, err := claim(third); err != nil || !ok {
-						t.Errorf("an operation was not claimed after Relock: %v %v", ok, err)
+						t.Errorf("an operation was not claimed after the attempt: %v %v", ok, err)
 					}
 				}()
-				select {
-				case <-claimed:
-					return errors.New("an operation was claimed while Relock held the lock")
-				case <-time.After(200 * time.Millisecond):
-					return nil
-				}
+				return nil
 			})
+			if err == nil {
+				err = Relock(ctx, func() error { return nil })
+			}
 			if err != nil {
 				t.Error(err)
 			}
-			<-claimed
+			select {
+			case <-claimed:
+				t.Error("an operation was claimed while Relock held the lock")
+			case <-time.After(200 * time.Millisecond):
+			}
 		})
 		action := a.Action("observe", at)
 		action.Observation = &coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "nothing ran"}
@@ -222,6 +225,11 @@ func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case <-claimed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the operation was never claimed after the attempt")
 	}
 	if claimed, err := claim(first); err != nil || !claimed {
 		t.Fatalf("a closed attempt's operation was not claimed: %v %v", claimed, err)

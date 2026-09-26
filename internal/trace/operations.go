@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -231,26 +232,33 @@ func (r *Repository) WithOperation(ctx context.Context, stream config.Workstream
 // unlockedKey marks the context Unlocked passes to its work.
 type unlockedKey struct{}
 
-// Unlocked runs fn without the lock WithOperation holds, so other operations
-// are reconciled, and Close may run, while fn is in flight; it takes the lock
-// again before it returns. fn receives ctx, with which Relock serializes a
-// step of fn's work with reconciliation again. The attempt keeps its claim
-// throughout, and fn must not use the attempt. A caller that closes the
-// repository joins fn first.
-func (a *OperationAttempt) Unlocked(ctx context.Context, fn func(context.Context)) {
-	r := a.repository
-	r.operationMu.Unlock()
-	defer r.operationMu.Lock()
-	fn(context.WithValue(ctx, unlockedKey{}, r))
+// unlocked is the lock work run through Unlocked takes back once.
+type unlocked struct {
+	r    *Repository
+	back sync.Once
 }
 
-// Relock runs fn serialized with reconciliation when ctx comes from Unlocked,
-// and runs it as it is otherwise: in a callback that already holds the lock,
-// or outside any operation. fn must not call Relock with ctx.
+func (u *unlocked) relock() { u.back.Do(u.r.operationMu.Lock) }
+
+// Unlocked runs fn without the lock WithOperation holds, so other operations
+// are reconciled, and Close may run, while fn is in flight; the lock is taken
+// back before it returns. fn receives ctx, with which Relock takes the lock
+// back early. The attempt keeps its claim throughout, and fn must not use the
+// attempt. A caller that closes the repository joins fn first.
+func (a *OperationAttempt) Unlocked(ctx context.Context, fn func(context.Context)) {
+	u := &unlocked{r: a.repository}
+	u.r.operationMu.Unlock()
+	defer u.relock()
+	fn(context.WithValue(ctx, unlockedKey{}, u))
+}
+
+// Relock runs fn after taking back the lock Unlocked released, when ctx comes
+// from Unlocked: the rest of that work, and the callback after it, run
+// serialized with reconciliation. Otherwise, in a callback that holds the
+// lock or outside any operation, it runs fn as it is.
 func Relock(ctx context.Context, fn func() error) error {
-	if r, ok := ctx.Value(unlockedKey{}).(*Repository); ok {
-		r.operationMu.Lock()
-		defer r.operationMu.Unlock()
+	if u, ok := ctx.Value(unlockedKey{}).(*unlocked); ok {
+		u.relock()
 	}
 	return fn()
 }

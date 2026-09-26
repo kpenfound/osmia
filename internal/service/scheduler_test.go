@@ -145,12 +145,16 @@ func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
 	// Second lifetime: the startup pass recovers the first turn and runs the second.
 	s, err = Start(ctx, opts)
 	must(t, err)
-	select {
-	case ticks <- clock.Now():
-	case <-time.After(demoTimeout):
-		s.Close()
-		t.Fatal("restarted service did not finish its startup pass")
-	}
+	awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
+		bound.Lock()
+		defer bound.Unlock()
+		ops, err := live.Operations(stream)
+		must(t, err)
+		if len(ops) != 2 {
+			return nil
+		}
+		return ops
+	})
 	must(t, s.Close())
 
 	repo, err = trace.Open(cfg.Root, cfg.Project)

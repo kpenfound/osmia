@@ -96,7 +96,7 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 		return q, errors.Join(runErr, persistErr)
 	}
 	// Cancellation stops execution, not durable recording of its partial
-	// result, which lands serialized with reconciliation as one step.
+	// result, which lands serialized with reconciliation.
 	cleanup := context.WithoutCancel(ctx)
 	err = trace.Relock(cleanup, func() error {
 		if err := r.Store.CaptureTurn(cleanup, q.Claim.Token, response); err != nil {
