@@ -181,7 +181,7 @@ func TestEventStreamAnnouncesTraceChanges(t *testing.T) {
 	}
 	awaitEvents(t, events, Event{Kind: EventConversation, Project: project, Workstream: stream}, Event{Kind: EventWorkstream, Project: project, Workstream: stream})
 
-	if _, err := c.Answer(ctx, 1, "In files."); err != nil {
+	if _, err := c.Answer(ctx, 1, "In files.", ""); err != nil {
 		t.Fatal(err)
 	}
 	awaitEvents(t, events, Event{Kind: EventInbox, Project: project, Workstream: quiet}, Event{Kind: EventWorkstream, Project: project, Workstream: quiet})

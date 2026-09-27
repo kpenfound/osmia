@@ -148,7 +148,7 @@ set through `Options` by embedders.
 | Method | Path after `/v1` | Input / response |
 | --- | --- | --- |
 | GET | `/health` | Readiness, service name, API version, and the build version and commit (`osmia serve` reports the ones `osmia --version` prints; see [releases](release.md)) |
-| GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics, `drift`, each configuration file on disk against the loaded configuration ([disk drift](#disk-drift)), and `last_error`, the last failed [reload](#reload) (`path`, `field`, `message`, `at`), until a reload succeeds |
+| GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, `projects` (every active project's view) and `project` (the only active project's view; null without a project or while several are active), diagnostics, `drift`, each configuration file on disk against the loaded configuration ([disk drift](#disk-drift)), and `last_error`, the last failed [reload](#reload) (`path`, `field`, `message`, `at`), until a reload succeeds |
 | POST | `/reload` | No body; [reloads](#reload) the configuration and returns `ReloadResponse`: the loaded `digest` and the `restart_required` settings |
 | GET | `/runtime` | Effective runtime state, each role's next-turn profile (`name` and `source`: `configuration` or `owner_override`), each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
 | GET | `/status` | `StatusResponse`: every workstream's status and facts in the active projects, each role's effective profile and source, today's [daily budget](#daily-budget) spend, the [capacity](#capacity) view, today's [provider usage](#provider-usage), and diagnostics |
@@ -161,7 +161,7 @@ set through `Options` by embedders.
 | POST | `/conversation/<workstream-id>` | `SendRequest`: text; returns the accepted `ConversationEntry` |
 | GET | `/conversation/<workstream-id>` | `ConversationResponse`: the workstream's conversation with its chief of staff |
 | GET | `/inbox` | `InboxResponse`: every open owner decision of the active projects, with the endpoint and identity that answer it |
-| POST | `/inbox/<number>` | `AnswerRequest`: text; records the owner's ruling and returns `AnswerResponse` |
+| POST | `/inbox/<number>` | `AnswerRequest`: text and project; records the owner's ruling and returns `AnswerResponse` |
 | GET | `/amendment/<workstream-id>/<n>` | `AmendmentResponse`: amendment `n`'s state, debate round, latest packet and its revision, and the owner's latest decision; see [amendment decisions](#amendment-decisions) |
 | POST | `/amendment/<workstream-id>/<n>` | `AmendmentDecisionRequest`: decision (`approve`, `reject`, `round` or `overrule`), optional note and the packet revision decided; returns `AmendmentResponse` |
 | POST | `/contested/<workstream-id>/<unit-id>` | `ContestedRulingRequest`: decision (`review` or `revise`) and note; records the owner's direction and returns `ContestedRulingResponse` |
@@ -2773,8 +2773,11 @@ waits for a committee slot.
 unit, as the mason controller counts implementing units), `priority` when
 higher-priority workstreams start a unit first, and `workstream-cap` when the
 workstream holds `per_workstream` slots. `used` and `waiting` span every
-active project, whose turns share the role slots; `per_workstream` is the only
-active project's limit, or the configured default while several are active.
+active project, whose turns share the role slots: the free slots are offered
+to the projects' queued turns in `active_projects` order, as their passes would
+take them one after another, so a turn is waiting when earlier projects' turns
+would take the slot it needs. `per_workstream` is the only active project's
+limit, or the configured default while several are active.
 Without an active project nothing is used or waiting. When the turns cannot be read, `capacity` is `null` and the
 response carries a `capacity` diagnostic with code `internal` (`cannot read
 the turns of project <id>; check the trace repository`).
@@ -2832,6 +2835,7 @@ debate leaves the list until its next packet is presented.
 | Field | Meaning |
 | --- | --- |
 | `kind` | One of the kinds above |
+| `project` | The project of the workstream; an escalation's number is unique only within it |
 | `workstream` | The workstream the decision is about |
 | `number`, `batch` | An escalation's inbox number, which `POST /v1/inbox/<number>` accepts, and its batch ID. The trace assigns the number when the questions are escalated, counting the project's escalations from 1, and never reuses it. `0` and empty for other kinds |
 | `unit` | The contested unit, or the unit an amendment was filed from; empty otherwise |
@@ -2844,10 +2848,11 @@ debate leaves the list until its next packet is presented.
 | `quick_reply` | The exact recommendation when this is an escalated question eligible for one-tap acceptance; otherwise an empty string |
 | `opened_at` | When the questions were escalated, the listed packet revision or final report was recorded, or the unit became contested |
 | `asked` | Each question of an escalation in the order it was escalated: `id`, `asked_by` (the asking agent), `unit` when the asking turn had one, and `question` as asked; empty for other kinds |
-| `answer` | `method` and `path` of the answering endpoint, and `body`, the request fields that pin what the owner read: nothing for an escalation or a contested unit, `spec` and `plan` for a ratification, `packet` for an amendment, and `review`, `review_revision`, `commit` and `draft_hash` for a delivery. The client adds the endpoint's decision fields |
+| `answer` | `method` and `path` of the answering endpoint, and `body`, the request fields that pin what the owner read: `project` for an escalation, nothing for a contested unit, `spec` and `plan` for a ratification, `packet` for an amendment, and `review`, `review_revision`, `commit` and `draft_hash` for a delivery. The client adds the endpoint's decision fields |
 
-`POST /v1/inbox/<number>` takes an `AnswerRequest`, `text`, and records it as
-the owner's ruling on that entry. One commit holds revision 1 of the ruling of
+`POST /v1/inbox/<number>` takes an `AnswerRequest`, `text` and `project`, and
+records the text as the owner's ruling on entry `number` of that project. The
+`project` may be left out while exactly one project is active. One commit holds revision 1 of the ruling of
 every question in the batch, each question's move from `escalated` to `ruled`
 and one notice event for the workstream's chief of staff, so the ruling is
 durable before anything acts on it and a failed write leaves neither a ruling

@@ -175,7 +175,7 @@ func (f *shedFixture) rule(t *testing.T, id string) {
 		must(t, err)
 		for _, e := range inbox.Entries {
 			if slices.ContainsFunc(e.Asked, func(q InboxQuestion) bool { return q.ID == id }) {
-				if _, err := f.c.Answer(ctx, e.Number, ownerRuling); err != nil {
+				if _, err := f.c.Answer(ctx, e.Number, ownerRuling, ""); err != nil {
 					t.Fatalf("rule on inbox entry %d: %v", e.Number, err)
 				}
 				return

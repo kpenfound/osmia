@@ -194,32 +194,60 @@ type Slots struct {
 // whatever the capacity, such as a pause; a candidate it holds is not waiting
 // for a slot.
 func (s *Scheduler) Slots(holds func(Candidate) (bool, error)) (Slots, error) {
-	defer s.lock()()
-	r, err := s.read()
-	if err != nil {
-		return Slots{}, err
+	return SlotsOf([]Gated{{s, holds}})
+}
+
+// Gated is a scheduler and the part of its dispatch gate that declines a
+// candidate whatever the capacity.
+type Gated struct {
+	Scheduler *Scheduler
+	Holds     func(Candidate) (bool, error)
+}
+
+// SlotsOf reports the slots of schedulers that draw on one shared pool as
+// Slots does for one, as if their passes ran one after another in the order
+// given: a slot one scheduler's candidates take is not free to the next, so a
+// turn that would find no slot after the earlier passes is waiting. Used
+// counts the turns in flight before any of them.
+func SlotsOf(gated []Gated) (Slots, error) {
+	out := Slots{}
+	if len(gated) == 0 {
+		return out, nil
 	}
-	out := Slots{Used: maps.Clone(r.used.roles)}
-	candidates, used, order := r.candidates, r.used, s.order(r.served)
-	at := s.options.Now()
-	for len(candidates) > 0 {
-		slices.SortStableFunc(candidates, order)
-		c := candidates[0]
-		candidates = candidates[1:]
-		held, err := holds(c)
+	defer gated[0].Scheduler.lock()()
+	taken := usage{roles: map[string]int{}, streams: map[streamKey]int{}, local: map[localKey]int{}}
+	for i, g := range gated {
+		s := g.Scheduler
+		r, err := s.read()
 		if err != nil {
 			return Slots{}, err
 		}
-		if held {
-			continue
+		if i == 0 {
+			out.Used = maps.Clone(r.used.roles)
 		}
-		role := c.Thread.Identity.Role
-		if reason := s.refusal(used, c); reason != "" {
-			out.Waiting = append(out.Waiting, Wait{c, reason})
-			continue
+		r.used.merge(taken)
+		candidates, used, order := r.candidates, r.used, s.order(r.served)
+		at := s.options.Now()
+		for len(candidates) > 0 {
+			slices.SortStableFunc(candidates, order)
+			c := candidates[0]
+			candidates = candidates[1:]
+			held, err := g.Holds(c)
+			if err != nil {
+				return Slots{}, err
+			}
+			if held {
+				continue
+			}
+			role := c.Thread.Identity.Role
+			if reason := s.refusal(used, c); reason != "" {
+				out.Waiting = append(out.Waiting, Wait{c, reason})
+				continue
+			}
+			used.add(c.Project, c.Workstream, role)
+			taken.add(c.Project, c.Workstream, role)
+			r.served[rotationKey(c.Project, c.Workstream, role)] = at
 		}
-		used.add(c.Project, c.Workstream, role)
-		r.served[rotationKey(c.Project, c.Workstream, role)] = at
 	}
 	return out, nil
 }
@@ -404,6 +432,19 @@ func (u usage) add(project config.ProjectID, stream config.WorkstreamID, role st
 	u.roles[role]++
 	u.streams[streamKey{project, stream}]++
 	u.local[localKey{project, stream, role}]++
+}
+
+// merge adds the counts of other to u.
+func (u usage) merge(other usage) {
+	for k, n := range other.roles {
+		u.roles[k] += n
+	}
+	for k, n := range other.streams {
+		u.streams[k] += n
+	}
+	for k, n := range other.local {
+		u.local[k] += n
+	}
 }
 
 // refusal returns why the candidate's turn has no free slot, or "" when it

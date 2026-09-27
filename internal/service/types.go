@@ -604,9 +604,11 @@ const (
 // amendment was filed from; Amendment names an amendment. Revision is the
 // revision of the record the decision is taken on. Question is the chief of
 // staff's rephrasing of an escalation, and the service's statement of the
-// decision for the other kinds.
+// decision for the other kinds. Project names the project whose workstream
+// the decision belongs to; escalation numbers are unique only within it.
 type InboxEntry struct {
 	Kind           string              `json:"kind"`
+	Project        config.ProjectID    `json:"project"`
 	Workstream     config.WorkstreamID `json:"workstream"`
 	Number         int                 `json:"number"`
 	Batch          string              `json:"batch"`

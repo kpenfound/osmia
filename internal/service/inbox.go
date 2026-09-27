@@ -70,6 +70,13 @@ func (s *Service) projectInbox(ctx context.Context, active *activeProject) ([]In
 		}
 		out.Entries = append(out.Entries, entries...)
 	}
+	for i := range out.Entries {
+		e := &out.Entries[i]
+		e.Project = active.id
+		if e.Kind == InboxEscalation {
+			e.Answer.Body["project"] = string(active.id)
+		}
+	}
 	return out.Entries, nil
 }
 

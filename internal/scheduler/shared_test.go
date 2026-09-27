@@ -92,3 +92,31 @@ func TestPerWorkstreamCapStaysWithTheProject(t *testing.T) {
 		}
 	}
 }
+
+func TestSlotsOfSharedPoolOfferFreeSlotsAcrossProjects(t *testing.T) {
+	// One mason and one reviewer slot, both free: the first project's pass
+	// would take them, so every turn of the second project waits.
+	_, schedulers := twoProjects(t, &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 3})
+	none := func(Candidate) (bool, error) { return false, nil }
+	slots, err := SlotsOf([]Gated{{schedulers[0], none}, {schedulers[1], none}})
+	must(t, err)
+	waiting := map[config.ProjectID]int{}
+	for _, w := range slots.Waiting {
+		waiting[w.Project]++
+	}
+	if slots.Used["mason"] != 0 || waiting[project] != 2 || waiting[second] != 4 {
+		t.Fatalf("used %v, waiting by project %v", slots.Used, waiting)
+	}
+	// A candidate the gate holds takes no slot, so the next project's turn
+	// finds it free.
+	slots, err = SlotsOf([]Gated{{schedulers[0], func(Candidate) (bool, error) { return true, nil }}, {schedulers[1], none}})
+	must(t, err)
+	if len(slots.Waiting) != 2 {
+		t.Fatalf("waiting %+v", slots.Waiting)
+	}
+	for _, w := range slots.Waiting {
+		if w.Project != second || w.Thread.Identity.Role != "mason" {
+			t.Fatalf("waiting turn %+v", w)
+		}
+	}
+}

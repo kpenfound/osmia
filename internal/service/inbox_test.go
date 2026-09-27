@@ -226,8 +226,8 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	if batch.Workstream != stream {
 		batch, single = single, batch
 	}
-	wantBatch := InboxEntry{Kind: InboxEscalation, Number: batch.Number, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format part of the contract?", Blocked: "The upload unit and its review.",
-		Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", OpenedAt: f.clock.Now(), Answer: InboxAnswer{Method: "POST", Path: "/v1/inbox/" + strconv.Itoa(batch.Number), Body: map[string]any{}},
+	wantBatch := InboxEntry{Kind: InboxEscalation, Project: project, Number: batch.Number, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format part of the contract?", Blocked: "The upload unit and its review.",
+		Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", OpenedAt: f.clock.Now(), Answer: InboxAnswer{Method: "POST", Path: "/v1/inbox/" + strconv.Itoa(batch.Number), Body: map[string]any{"project": string(project)}},
 		Asked: []InboxQuestion{{ID: "1", AskedBy: demoAgent, Question: "Where does state live?"}, {ID: "2", AskedBy: "agent_reviewer", Question: "Is the log format fixed?"}}}
 	// The two askers run in one pass, in either order.
 	if batch.Asked[0].Question != "Where does state live?" {
@@ -256,9 +256,9 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	traceDir, err := f.cfg.Root.ProjectTrace(project)
 	must(t, err)
 	head := demoGit(t, "", "-C", traceDir, "rev-parse", "HEAD")
-	_, err = c.Answer(ctx, 9, "Both are part of the contract.")
+	_, err = c.Answer(ctx, 9, "Both are part of the contract.", "")
 	apiError(t, err, Validation, "there is no inbox entry 9; list the entries with osmia inbox")
-	_, err = c.Answer(ctx, batch.Number, " \n")
+	_, err = c.Answer(ctx, batch.Number, " \n", "")
 	apiError(t, err, Validation, "text must not be empty")
 	for _, number := range []string{"0", "-1", "01", "x", "1.5"} {
 		apiError(t, c.Do(ctx, "POST", Prefix+"/inbox/"+number, AnswerRequest{Text: "x"}, new(AnswerResponse)), Validation, "inbox entry must be a number from osmia inbox")
@@ -266,7 +266,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	if got := demoGit(t, "", "-C", traceDir, "rev-parse", "HEAD"); got != head {
 		t.Fatalf("a refused answer committed: %s, was %s", got, head)
 	}
-	answered, err := c.Answer(ctx, batch.Number, "Both are part of the contract.")
+	answered, err := c.Answer(ctx, batch.Number, "Both are part of the contract.", "")
 	must(t, err)
 	if got, err := c.Status(ctx, stream); err != nil || len(got.Gates) != 0 {
 		t.Fatalf("ruled status gates: %+v %v", got.Gates, err)
@@ -274,7 +274,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	if !reflect.DeepEqual(answered, AnswerResponse{Number: batch.Number, Workstream: stream, Batch: "escalation_1", Questions: []string{"1", "2"}, Ruling: "Both are part of the contract.", At: f.clock.Now()}) {
 		t.Fatalf("answer: %+v", answered)
 	}
-	_, err = c.Answer(ctx, batch.Number, "Neither is.")
+	_, err = c.Answer(ctx, batch.Number, "Neither is.", "")
 	apiError(t, err, Conflict, "inbox entry "+strconv.Itoa(batch.Number)+" is already answered")
 	inbox, err = c.Inbox(ctx)
 	must(t, err)
@@ -357,7 +357,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 			t.Fatalf("%s after the ruling: parked %v, turns %+v", agent, th.Parked(), th.Turns)
 		}
 	}
-	_, err = c.Answer(ctx, single.Number, "No new dependencies.")
+	_, err = c.Answer(ctx, single.Number, "No new dependencies.", "")
 	must(t, err)
 	f.clock.Advance(time.Minute)
 	f.settle(t, s)
@@ -485,7 +485,7 @@ func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
 	if inbox, err := c.Inbox(ctx); err != nil || inbox.Entries == nil || len(inbox.Entries) != 0 {
 		t.Fatalf("inbox without a project: %+v %v", inbox, err)
 	}
-	_, err = c.Answer(ctx, 1, "In files.")
+	_, err = c.Answer(ctx, 1, "In files.", "")
 	apiError(t, err, NoProject, "no project is configured; add one with osmia project add")
 }
 

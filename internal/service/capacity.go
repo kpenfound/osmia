@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -16,7 +17,8 @@ import (
 // admit but that find no free slot, and, for masons, the ready units of list
 // whose latest mason controller decision is to wait for a slot. The role slots
 // are shared by every active project, so their use counts the turns in flight
-// on all of them. PerWorkstream is the only active project's limit, or the
+// on all of them, and the free slots go to the projects' queued turns in
+// active_projects order. PerWorkstream is the only active project's limit, or the
 // configured default otherwise. Work a pause in force holds, and work of an
 // abandoned workstream, is not waiting. Without an active project no slot is
 // used.
@@ -31,8 +33,8 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) (*CapacityStatus, *Dia
 		{Role: reviewerRole, Limit: limits.Reviewers, Waiting: []SlotWait{}},
 		{Role: committeeRole, Limit: limits.Committee, Waiting: []SlotWait{}},
 	}}
-	var used map[string]int
-	var waiting []scheduler.Wait
+	var gated []scheduler.Gated
+	var ids []config.ProjectID
 	for _, p := range projects {
 		view := cfg.For(p.id)
 		if !view.HasProject() {
@@ -40,25 +42,25 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) (*CapacityStatus, *Dia
 		}
 		project, repository := p.id, p.repository
 		librarian := librarianWorkstream(project)
-		unreadable := &Diagnostic{"capacity", Internal, fmt.Sprintf("cannot read the turns of project %s; check the trace repository", project)}
 		projectLimits := cfg.Capacity
 		projectLimits.PerWorkstream = view.Project.Capacity.PerWorkstream
 		dispatch, err := scheduler.New(repository, scheduler.Options{Now: s.now, Capacity: &projectLimits, Priorities: s.priorities, Shared: s.pool})
 		if err != nil {
-			return nil, unreadable
+			return nil, &Diagnostic{"capacity", Internal, fmt.Sprintf("cannot read the turns of project %s; check the trace repository", project)}
 		}
-		slots, err := dispatch.Slots(func(c scheduler.Candidate) (bool, error) { return s.holds(project, librarian, repository, c) })
-		if err == nil {
-			err = s.step("status-capacity")
-		}
-		if err != nil {
-			return nil, unreadable
-		}
-		if used == nil {
-			used = slots.Used
-		}
-		waiting = append(waiting, slots.Waiting...)
+		gated = append(gated, scheduler.Gated{Scheduler: dispatch, Holds: func(c scheduler.Candidate) (bool, error) { return s.holds(project, librarian, repository, c) }})
+		ids = append(ids, project)
 	}
+	// The projects' passes take the shared slots one after another, so a
+	// turn one project's pass would leave without a slot is waiting.
+	slots, err := scheduler.SlotsOf(gated)
+	if err == nil && len(gated) > 0 {
+		err = s.step("status-capacity")
+	}
+	if err != nil {
+		return nil, &Diagnostic{"capacity", Internal, fmt.Sprintf("cannot read the turns of project %s; check the trace repository", projectList(ids))}
+	}
+	used, waiting := slots.Used, slots.Waiting
 	state, _ := s.effective()
 	for i := range out.Roles {
 		role := &out.Roles[i]

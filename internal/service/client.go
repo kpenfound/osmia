@@ -406,10 +406,11 @@ func (c *Client) Inbox(ctx context.Context) (InboxResponse, error) {
 	return v, err
 }
 
-// Answer records the owner's ruling on an inbox entry.
-func (c *Client) Answer(ctx context.Context, number int, text string) (AnswerResponse, error) {
+// Answer records the owner's ruling on inbox entry number of project, which
+// may be empty while exactly one project is active.
+func (c *Client) Answer(ctx context.Context, number int, text string, project config.ProjectID) (AnswerResponse, error) {
 	var v AnswerResponse
-	err := c.Do(ctx, "POST", Prefix+"/inbox/"+strconv.Itoa(number), AnswerRequest{Text: text}, &v)
+	err := c.Do(ctx, "POST", Prefix+"/inbox/"+strconv.Itoa(number), AnswerRequest{Text: text, Project: project}, &v)
 	return v, err
 }
 

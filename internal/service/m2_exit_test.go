@@ -548,7 +548,7 @@ func TestM2HandInToRatifiedPlan(t *testing.T) {
 	if state, err := f.repository().Workflow(capped, shedSubject); err != nil || state.Value != "waiting-1" {
 		t.Fatalf("the retention shed while the question is open: %+v %v", state, err)
 	}
-	if _, err := f.c.Answer(ctx, entry.Number, exitRuling); err != nil {
+	if _, err := f.c.Answer(ctx, entry.Number, exitRuling, ""); err != nil {
 		t.Fatal(err)
 	}
 	// 6. The ruling reaches the member as its next turn, and round 1 resumes.

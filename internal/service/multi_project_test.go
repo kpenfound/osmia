@@ -267,7 +267,7 @@ func TestProjectScopedRequestsNameOneOfSeveralProjects(t *testing.T) {
 	for name, call := range map[string]func() error{
 		"extract": func() error { _, err := c.ExtractProject(ctx, ""); return err },
 		"rebase":  func() error { _, err := c.RebaseProject(ctx, ""); return err },
-		"answer":  func() error { _, err := c.Answer(ctx, 1, "yes"); return err },
+		"answer":  func() error { _, err := c.Answer(ctx, 1, "yes", ""); return err },
 	} {
 		if err := call(); !errors.As(err, &api) || api.Code != Validation || !strings.Contains(api.Message, both) {
 			t.Fatalf("%s without a project: %v", name, err)
@@ -279,7 +279,7 @@ func TestProjectScopedRequestsNameOneOfSeveralProjects(t *testing.T) {
 	// A named project is acted on alone.
 	out, err := c.RebaseProject(ctx, otherProject)
 	must(t, err)
-	if out.Project != otherProject || len(out.Covered)+len(out.Skipped) != 1 || len(out.Skipped) == 1 && out.Skipped[0].Workstream != otherStream {
+	if out.Project != otherProject || len(out.Covered)+len(out.Skipped) != 1 || len(out.Covered) == 1 && out.Covered[0].Workstream != otherStream || len(out.Skipped) == 1 && out.Skipped[0].Workstream != otherStream {
 		t.Fatalf("rebase of the other project: %+v", out)
 	}
 	cfg, err := c.Configuration(ctx)
@@ -302,5 +302,84 @@ func TestProjectScopedRequestsNameOneOfSeveralProjects(t *testing.T) {
 	}
 	if p, ws, repo, api := s.conversationTrace(string(otherStream)); api != nil || p != otherProject || ws != otherStream || repo.Project() != otherProject {
 		t.Fatalf("conversation of the other project's workstream: %v %v %v", p, ws, api)
+	}
+}
+
+func TestRemovingOneOfSeveralProjectsLeavesTheOtherRunning(t *testing.T) {
+	ctx := context.Background()
+	f := newTwoProjectFixture(t)
+	s, c := start(t, f.opts)
+	for _, id := range []config.ProjectID{project, otherProject} {
+		awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
+			ops, err := f.repository(id).Operations(f.streams[id])
+			must(t, err)
+			return ops
+		})
+	}
+	removed, err := c.RemoveProject(ctx, project)
+	must(t, err)
+	if removed.Project.ID != project {
+		t.Fatalf("removed %+v", removed.Project)
+	}
+	cfg, err := c.Configuration(ctx)
+	must(t, err)
+	if cfg.Project == nil || cfg.Project.ID != otherProject || len(cfg.Projects) != 1 || cfg.Projects[0].ID != otherProject {
+		t.Fatalf("configuration after removal: %+v %+v", cfg.Project, cfg.Projects)
+	}
+	if traces := s.traces(); len(traces) != 1 || traces[0].Project() != otherProject {
+		t.Fatalf("traces in the capacity pool: %d", len(traces))
+	}
+	disk, err := config.Load(f.opts.Config)
+	must(t, err)
+	if !slices.Equal(disk.ProjectIDs(), []config.ProjectID{otherProject}) {
+		t.Fatalf("active projects on disk %v", disk.ProjectIDs())
+	}
+	// The remaining project still dispatches.
+	other := f.repository(otherProject)
+	f.queue(t, other, otherProject, "second")
+	awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
+		ops, err := other.Operations(otherStream)
+		must(t, err)
+		if len(ops) != 2 {
+			return nil
+		}
+		return ops
+	})
+	// The removed project's trace is closed: it can be opened again.
+	repo, err := trace.Open(f.cfg.Root, f.cfg.For(project).Project)
+	must(t, err)
+	must(t, repo.Close())
+}
+
+// appendCost records a known cost of amount on stream of repository's
+// project at at.
+func appendCost(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, id string, at time.Time, amount float64) {
+	t.Helper()
+	p := repository.Project()
+	must(t, repository.Append(context.Background(), trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: id, Revision: 1, Project: p, Workstream: stream, At: at, Actor: trace.Actor{Kind: "service", ID: "thread-runner"}, Cause: "budget-fixture"},
+		Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(p), Workstream: string(stream), Thread: "thread", Turn: id, Role: masonRole}, AttemptID: id, At: at, Usage: coreadapter.Usage{CostUSD: amount, CostKnown: true, Turns: 1}}}))
+}
+
+func TestDailyBudgetCountsTheSpendOfEveryProject(t *testing.T) {
+	f := newTwoProjectFixture(t)
+	top := filepath.Join(f.opts.Config.Root, "config.toml")
+	data, err := os.ReadFile(top)
+	must(t, err)
+	must(t, os.WriteFile(top, append(data, []byte("[budget]\nper_day = \"1.00\"\n")...), 0600))
+	// Each project's spend alone stays under the limit; together they reach it.
+	for _, p := range f.cfg.Projects {
+		repo, err := trace.Open(f.cfg.Root, p)
+		must(t, err)
+		appendCost(t, repo, f.streams[p.ID], "cost", demoStart, 0.6)
+		must(t, repo.Close())
+	}
+	f.opts.Location = time.UTC
+	s, _ := start(t, f.opts)
+	soon(t, "the daily budget pauses the factory", func() bool {
+		p, ok := factoryPause(t, s)
+		return ok && p.Source == runtime.PauseDailyBudget
+	})
+	if got := budgetStatus(t, s); got.SpendUSD != "1.2" || got.LimitUSD != "1.00" {
+		t.Fatalf("daily budget status %+v", got)
 	}
 }
