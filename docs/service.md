@@ -175,8 +175,8 @@ set through `Options` by embedders.
 | POST | `/handin` | `HandInRequest`: project, key, one of path, url and stdin, optional skip_debate; returns `HandInResponse` |
 | PUT | `/runtime/pause` | `PauseRequest`: target, mode, reason; the local API attributes it to the owner and records its set time |
 | DELETE | `/runtime/pause` | `ClearPauseRequest`: scope, project, workstream |
-| PUT | `/runtime/priority` | `PriorityRequest`: project, workstreams |
-| DELETE | `/runtime/priority` | `ClearPriorityRequest`: project |
+| PUT | `/runtime/priority` | `PriorityRequest`: order, a list of `{"project", "workstream"}` of any active projects, highest priority first; it replaces the whole order |
+| DELETE | `/runtime/priority` | `ClearPriorityRequest`: optional project; removes that project's workstreams from the order, or the whole order without one |
 | PUT | `/runtime/profile` | `ProfileRequest`: role, profile |
 | DELETE | `/runtime/profile` | `ClearProfileRequest`: role |
 
@@ -347,7 +347,7 @@ widths:
   agents with role, unit, profile, state and elapsed time as of the last read,
   and its [conversation](#conversation), each message and response with its
   turn's state;
-- the priority order in force, each role's next-turn profile and its source
+- the priority order in force, each workstream with its project, each role's next-turn profile and its source
   with the day's usage of that profile's provider beside it, and every
   provider's [usage](#provider-usage);
 - the loaded configuration's digest, each configuration file's
@@ -371,7 +371,7 @@ Its controls are:
 | Send, on a workstream's conversation | `POST /v1/conversation/<id>` | The message is not empty |
 | Pause the factory, the project or a workstream, soft or hard | `PUT /v1/runtime/pause` | A scope is chosen and the reason is not empty |
 | Resume, on a factory, project or workstream pause | `DELETE /v1/runtime/pause` with the pause's target | |
-| Set order, of the chosen workstreams in the order shown | `PUT /v1/runtime/priority` | At least one workstream is chosen |
+| Set order, of the chosen workstreams of every project in the order shown | `PUT /v1/runtime/priority` | At least one workstream is chosen |
 | Clear order | `DELETE /v1/runtime/priority` | |
 | Set, on a role's profile | `PUT /v1/runtime/profile` | A profile is chosen |
 | Clear, on a role with an owner override | `DELETE /v1/runtime/profile` | |
@@ -1713,7 +1713,7 @@ are not paused. Before it starts anything, a pass reads every `implementing`
 unit from the trace, so after a restart the units in flight hold their slots
 and none is started twice.
 
-Each free slot goes first to the workstream earliest in the project's priority
+Each free slot goes first to the workstream earliest in the priority
 order (`PUT /v1/runtime/priority`), then to those it does not name; among
 equals, to the workstream that started a unit least recently, one that never
 did first (a unit resuming from `waiting` is not a start), then in workstream
@@ -3091,14 +3091,17 @@ with `Options.Threads` runs them.
 ### Priority at the owner's request
 
 The owner can ask the chief of staff to change which workstreams go first.
-The chief of staff's `prioritise` tool sets the project's runtime priority
-order, the same state `PUT /v1/runtime/priority` and `osmia priority set`
-store, so `GET /v1/runtime`, `osmia status` and the scheduler see the order it
+The chief of staff's `prioritise` tool sets the project's workstreams in the
+runtime priority order, the same state `PUT /v1/runtime/priority` and
+`osmia priority set` store, so `GET /v1/runtime`, `osmia status` and the scheduler see the order it
 sets. It changes the order only; pauses and workstream states stay as they
 are.
 
-Its input is `{"workstreams": [...]}`: workstream IDs, highest priority first.
-Workstreams it leaves out come after those it names. The order is refused,
+Its input is `{"workstreams": [...]}`: workstream IDs of the chief of staff's
+project, highest priority first. They go first in the one priority order of
+every project; the project's workstreams it leaves out come after those it
+names, and the other projects' workstreams keep their places in the order
+after them. The order is refused,
 and nothing changes, when it is empty, names something that is not a
 workstream ID, names a workstream twice, names a workstream the project's
 trace does not hold (the librarian's included), or names a `delivered` or
@@ -3106,8 +3109,9 @@ trace does not hold (the librarian's included), or names a `delivered` or
 message from the owner, such as an event turn, and when the runtime store
 refuses the order or finds `runtime.json` changed outside the service. A
 refusal is an ordinary tool result, `{"recorded":false,"reason":"…"}`. An
-accepted order replaces the project's previous one and returns
-`{"recorded":true,"workstreams":[…]}`, the order in force.
+accepted order replaces the project's previous places and returns
+`{"recorded":true,"workstreams":[…]}`, the project's workstreams in the order
+in force.
 
 Each accepted order is recorded as a [priority change](trace.md#priority-changes)
 in the trace of the workstream whose chief of staff set it, with the owner
@@ -3408,18 +3412,30 @@ a later pass.
 Each pass offers queued turns to the free slots one at a time, finishing work
 before widening it: reviewer turns first, then mason, committee and architect
 turns, then every other role's. Within one of those stages the turn of the
-workstream first in the project's [runtime priority](runtime.md) order goes
-first; workstreams the order does not name follow those it names, in the same
-order the [mason controller](#starting-units) starts units. Among workstreams
-of equal priority, the one whose last turn of that stage was dispatched least
-recently goes first, so equal workstreams take a stage's slots in turn, within
-a pass and across passes. The last dispatch of each stage is read from the
-workstream's turn operations in the trace, so a restart continues the rotation
-rather than resetting it. A turn without a free slot, or one the gate holds,
-such as a paused workstream's, is not dispatched and leaves its workstream's
+workstream first in the [runtime priority](runtime.md) order goes first; that
+order is one across every active project's workstreams, and workstreams it
+does not name follow those it names. Among equal priorities the rotation runs
+across projects first: the project whose last turn of that stage was
+dispatched least recently goes first, and within it the workstream whose last
+turn of that stage was, so a project with five workstreams ready takes no more
+of a stage's slots than a project with one, and equal workstreams of one
+project take their project's share in turn, within a pass and across passes.
+The last dispatch of each stage is read from the workstreams' turn operations
+in the traces, so a restart continues the rotation rather than resetting it.
+A turn without a free slot, or one the gate holds, such as a paused
+workstream's, is not dispatched and leaves its project's and its workstream's
 place in the rotation unchanged. Candidates, capacity counts per workstream,
 priority lookups and the rotation are keyed by project and workstream, while
 the role kinds' slots are shared across projects.
+
+Each project's loop runs its own pass, and a pass dispatches only its own
+project's turns, but it orders the queued turns of every active project
+together. A free slot that goes to another project's turn is left free for
+that project's next pass, so a busy project's loop cannot take slots that a
+quieter project's turn is first in line for. A turn the other project's gate
+declined on its latest pass, such as a paused one, is left out, so it holds
+no slot; a turn that project has not offered to its gate yet can hold one
+until that project's next pass.
 
 A turn whose outcome is `waiting` parks its thread (`trace.Thread.Parked`). A
 parked thread has no unfinished turn, so the scheduler offers it to no gate and

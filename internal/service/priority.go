@@ -101,8 +101,9 @@ func (c *runtimeControls) prioritise(repository *trace.Repository, scope coreada
 	return tool
 }
 
-// checkPriority returns order as workstream IDs, or why it cannot be the
-// project's priority order: it must name at least one workstream, each once,
+// checkPriority returns order as workstream IDs, or why the project's
+// workstreams cannot go first in that order: it must name at least one
+// workstream, each once,
 // and each must be an active workstream of the project, neither delivered nor
 // abandoned. The librarian's workstream is not one.
 func checkPriority(repository *trace.Repository, project config.ProjectID, order []string) ([]config.WorkstreamID, string, error) {

@@ -371,16 +371,16 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   status and command output show each pause's source, reason and UTC set time.
 - `resume <all|project-id|workstream-id>` clears that scope's pause. Parent pauses
   still apply; all effective pauses are displayed.
-- `priority set <workstream-id>...` stores the ordered list of the project the
-  workstreams belong to; while several projects are active the project is
-  found from the first workstream.
-  The chief of staff sets the same list when you ask it to in a message; see
-  [service](service.md#priority-at-the-owners-request).
-  `priority clear` removes that preference; while several projects are active
-  it fails with `validation` (exit 4) and lists the active project IDs. Both,
-  and `pause`/`resume` of a workstream, need an active project and say so
-  otherwise; a workstream's pause names the project that holds it, and a
-  workstream in no active project fails with `not_found` (exit 4).
+- `priority set <workstream-id>...` replaces the priority order, one order
+  across every active project's workstreams, highest first; each workstream
+  is placed with the project that holds it, so one order can mix projects.
+  The output lists the order in force, each workstream after its project.
+  The chief of staff puts its project's workstreams first when you ask it to
+  in a message; see [service](service.md#priority-at-the-owners-request).
+  `priority clear` removes the whole order. Both, and `pause`/`resume` of a
+  workstream, need an active project and say so otherwise; a workstream's
+  pause names the project that holds it, and a workstream in no active
+  project fails with `not_found` (exit 4).
 - `profiles` displays every role's effective binding and its source
   (`configuration` or `owner_override`), plus runtime diagnostics. `status`
   shows the same profile information.

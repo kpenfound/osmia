@@ -252,6 +252,56 @@ func TestSeveralProjectsShareCapacityPauseApartAndResumeFromTheirOwnTraces(t *te
 	}
 }
 
+// The priority order is one across projects: the other project's
+// workstream, named first, takes the shared mason slot before the first
+// project's, which the rotation would otherwise start with. The order set
+// through the API names each workstream with its project.
+func TestOnePriorityOrderAcrossProjects(t *testing.T) {
+	ctx := context.Background()
+	f := newTwoProjectFixture(t)
+	store, _, err := runtime.Open(runtime.Inputs{Config: f.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{project: {stream}, otherProject: {otherStream}}})
+	must(t, err)
+	must(t, store.SetPriority(ranked(otherProject, otherStream)))
+	must(t, store.Close())
+	otherEntered, otherRelease := f.block(otherProject, "first")
+	entered, release := f.block(project, "first")
+	s, c := start(t, f.opts)
+	await(t, "the other project's turn", otherEntered)
+	soon(t, "the first project's turn waits for the shared mason slot", func() bool {
+		st, d := s.capacityStatus(nil)
+		return d == nil && st.Roles[0].Used == 1 && len(st.Roles[0].Waiting) == 1 && st.Roles[0].Waiting[0].Workstream == stream
+	})
+	if got := f.dispatchedTurns(t, f.repository(project), project); len(got) != 0 {
+		t.Fatalf("first project dispatched %v before the higher-priority workstream", got)
+	}
+	close(otherRelease)
+	await(t, "the first project's turn", entered)
+	close(release)
+
+	order := append(ranked(project, stream), ranked(otherProject, otherStream)...)
+	mutation(t, c, "PUT", "priority", PriorityRequest{Order: order})
+	rt, err := c.Runtime(ctx)
+	must(t, err)
+	if !slices.Equal(rt.Effective.Priority, order) {
+		t.Fatalf("priority %+v, want %+v", rt.Effective.Priority, order)
+	}
+	// Clearing one project's places keeps the other's.
+	mutation(t, c, "DELETE", "priority", ClearPriorityRequest{Project: otherProject})
+	rt, err = c.Runtime(ctx)
+	must(t, err)
+	if !slices.Equal(rt.Effective.Priority, ranked(project, stream)) {
+		t.Fatalf("priority after clearing the other project %+v", rt.Effective.Priority)
+	}
+	// A workstream is placed only with the project that holds it.
+	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/priority", PriorityRequest{Order: ranked(project, otherStream)}, nil), Validation)
+	mutation(t, c, "DELETE", "priority", ClearPriorityRequest{})
+	rt, err = c.Runtime(ctx)
+	must(t, err)
+	if len(rt.Effective.Priority) != 0 {
+		t.Fatalf("priority after clearing %+v", rt.Effective.Priority)
+	}
+}
+
 func TestProjectScopedRequestsNameOneOfSeveralProjects(t *testing.T) {
 	ctx := context.Background()
 	f := newTwoProjectFixture(t)

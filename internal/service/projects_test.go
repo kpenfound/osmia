@@ -195,7 +195,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	mutation(t, c, "PUT", "priority", PriorityRequest{Order: ranked(id, librarianWorkstream(id))})
 	rt, err := c.Runtime(ctx)
 	must(t, err)
-	if len(rt.Effective.Pauses) != 1 || len(rt.Effective.Priorities) != 1 || len(rt.Diagnostics) != 0 || !reflect.DeepEqual(rt.Projects, []ProjectRuntime{{id, bundle.ModeFile}}) {
+	if len(rt.Effective.Pauses) != 1 || len(rt.Effective.Priority) != 1 || len(rt.Diagnostics) != 0 || !reflect.DeepEqual(rt.Projects, []ProjectRuntime{{id, bundle.ModeFile}}) {
 		t.Fatalf("%+v", rt)
 	}
 	// Repeating the same registration returns the project; another is refused.
@@ -240,7 +240,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	}
 	rt, err = c.Runtime(ctx)
 	must(t, err)
-	if len(rt.Effective.Pauses) != 0 || len(rt.Effective.Priorities) != 0 || len(rt.Diagnostics) != 3 || len(rt.Projects) != 0 {
+	if len(rt.Effective.Pauses) != 0 || len(rt.Effective.Priority) != 0 || len(rt.Diagnostics) != 3 || len(rt.Projects) != 0 {
 		t.Fatalf("%+v", rt)
 	}
 	// The released trace can be opened by another owner.
