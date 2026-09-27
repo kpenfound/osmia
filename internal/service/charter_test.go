@@ -177,6 +177,7 @@ func TestContextProviderReadsActiveProject(t *testing.T) {
 	}
 	_, err = c.RemoveProject(ctx, id)
 	must(t, err)
+	awaitDrained(t, s)
 	if _, err := provider.Assemble(ctx, id, bundle.Scope{}); !errors.Is(err, errNoActiveProject) {
 		t.Fatalf("removed project: %v", err)
 	}

@@ -147,9 +147,13 @@ func TestProjectCommands(t *testing.T) {
 	if !strings.Contains(successful(t, root, "priority", "clear"), "applied=true") {
 		t.Fatal("priority without restart")
 	}
-	code, out, diag = invoke(t, root, "project", "add", "other", "--upstream", "other/repo", "--fork", "owner/repo", "--clone", clone)
-	if code != 5 || out != "" || !strings.Contains(diag, "project_active: project "+string(id)) {
-		t.Fatalf("%d %s %s", code, out, diag)
+	other := successful(t, root, "project", "add", "other", "--upstream", "other/repo", "--fork", "owner/repo", "--clone", clone)
+	otherID, _, _ := strings.Cut(strings.TrimPrefix(other, "Project "), " ")
+	if !strings.Contains(other, " (other) added") || otherID == string(id) {
+		t.Fatalf("second project:\n%s", other)
+	}
+	if !strings.Contains(successful(t, root, "project", "remove", otherID), "Project "+otherID+" (other) removed") {
+		t.Fatal("second project not removed")
 	}
 	removed := successful(t, root, "project", "remove", string(id))
 	if !strings.Contains(removed, "Project "+string(id)+" (dagger) removed") || !strings.Contains(removed, "Trace: "+added.Project.Trace) || !strings.Contains(removed, "retained") {

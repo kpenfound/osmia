@@ -326,6 +326,7 @@ func TestRemovingOneOfSeveralProjectsLeavesTheOtherRunning(t *testing.T) {
 	if cfg.Project == nil || cfg.Project.ID != otherProject || len(cfg.Projects) != 1 || cfg.Projects[0].ID != otherProject {
 		t.Fatalf("configuration after removal: %+v %+v", cfg.Project, cfg.Projects)
 	}
+	awaitDrained(t, s)
 	if traces := s.traces(); len(traces) != 1 || traces[0].Project() != otherProject {
 		t.Fatalf("traces in the capacity pool: %d", len(traces))
 	}

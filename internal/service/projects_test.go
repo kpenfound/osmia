@@ -198,18 +198,11 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	if len(rt.Effective.Pauses) != 1 || len(rt.Effective.Priorities) != 1 || len(rt.Diagnostics) != 0 || !reflect.DeepEqual(rt.Projects, []ProjectRuntime{{id, bundle.ModeFile}}) {
 		t.Fatalf("%+v", rt)
 	}
-	// Repeating the same registration returns the project; another is refused.
+	// Repeating the same registration returns the project.
 	again, err := c.AddProject(ctx, request(clone))
 	must(t, err)
 	if again.Project.ID != id {
 		t.Fatal(again)
-	}
-	other := request(clone)
-	other.Upstream = "other/repo"
-	_, err = c.AddProject(ctx, other)
-	assertCode(t, err, ProjectActive)
-	if !strings.Contains(err.Error(), string(id)) {
-		t.Fatal(err)
 	}
 	if names := projectDirectories(t, root); len(names) != 1 {
 		t.Fatal(names)
@@ -222,7 +215,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	traceBefore := snapshot(t, traceDir)
 	removed, err := c.RemoveProject(ctx, id)
 	must(t, err)
-	if removed.Project.ID != id || removed.Project.Trace != traceDir || !strings.Contains(removed.NextStep, traceDir) {
+	if removed.Project.ID != id || removed.Project.Trace != traceDir || !strings.Contains(removed.NextStep, traceDir) || !strings.Contains(removed.NextStep, "drains") || len(removed.Unfinished) != 0 {
 		t.Fatalf("%+v", removed)
 	}
 	text, err = os.ReadFile(filepath.Join(root, "config.toml"))
@@ -243,6 +236,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	if len(rt.Effective.Pauses) != 0 || len(rt.Effective.Priorities) != 0 || len(rt.Diagnostics) != 3 || len(rt.Projects) != 0 {
 		t.Fatalf("%+v", rt)
 	}
+	awaitDrained(t, s)
 	// The released trace can be opened by another owner.
 	resolved, err := config.ResolveRoot(root, "")
 	must(t, err)
@@ -270,6 +264,58 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	must(t, err)
 	if cfg.Project == nil || cfg.Project.ID != readded.Project.ID || s.sole() == nil {
 		t.Fatalf("%+v", cfg)
+	}
+}
+
+// A project added while another runs starts beside it: both are listed and
+// active, both traces run their loops, and each registration repeated returns
+// its own project.
+func TestProjectAddStartsASecondProjectBesideTheFirst(t *testing.T) {
+	t.Parallel()
+	opts, clone := projectFixture(t)
+	s, c := start(t, opts)
+	ctx := context.Background()
+	first, err := c.AddProject(ctx, request(clone))
+	must(t, err)
+	second := request(clone)
+	second.Name, second.Upstream = "other", "other/repo"
+	added, err := c.AddProject(ctx, second)
+	must(t, err)
+	ids := []config.ProjectID{first.Project.ID, added.Project.ID}
+	if ids[0] == ids[1] || added.Project.Name != "other" || !strings.Contains(added.NextStep, added.Project.Charter) {
+		t.Fatalf("second project: %+v", added)
+	}
+	if got := activeProjects(t, opts.Config.Root); !reflect.DeepEqual(got, []string{string(ids[0]), string(ids[1])}) {
+		t.Fatalf("active projects %v", got)
+	}
+	cfg, err := c.Configuration(ctx)
+	must(t, err)
+	if cfg.Project != nil || len(cfg.Projects) != 2 || cfg.Projects[0].ID != ids[0] || cfg.Projects[1].ID != ids[1] {
+		t.Fatalf("configuration: %+v", cfg)
+	}
+	var running []config.ProjectID
+	for _, r := range s.traces() {
+		running = append(running, r.Project())
+	}
+	if !reflect.DeepEqual(running, ids) {
+		t.Fatalf("running %v", running)
+	}
+	// Each project's loop runs its own first extraction.
+	for _, id := range ids {
+		soon(t, "the extraction of project "+string(id), func() bool {
+			x, err := s.projectExtraction(id)
+			return err == nil && x != nil && x.State == "failed"
+		})
+	}
+	for i, req := range []ProjectAddRequest{request(clone), second} {
+		again, err := c.AddProject(ctx, req)
+		must(t, err)
+		if again.Project.ID != ids[i] {
+			t.Fatalf("repeated registration %d returned %s", i, again.Project.ID)
+		}
+	}
+	if names := projectDirectories(t, opts.Config.Root); len(names) != 2 {
+		t.Fatal(names)
 	}
 }
 
@@ -455,10 +501,10 @@ func TestInterruptedAddWithDifferentRequestIsRefused(t *testing.T) {
 	other := request(clone)
 	other.Name = "renamed"
 	_, refused := c.AddProject(ctx, other)
-	assertCode(t, refused, ProjectActive)
+	assertCode(t, refused, Conflict)
 	cfg, err := c.Configuration(ctx)
 	must(t, err)
-	if cfg.Project == nil || !strings.Contains(refused.Error(), string(cfg.Project.ID)) || cfg.Project.Name != "dagger" {
+	if cfg.Project == nil || !strings.Contains(refused.Error(), "an interrupted registration was finished instead: project "+string(cfg.Project.ID)+" is now active") || cfg.Project.Name != "dagger" {
 		t.Fatalf("%v %+v", refused, cfg)
 	}
 	if names := projectDirectories(t, opts.Config.Root); len(names) != 1 {
@@ -511,53 +557,73 @@ func TestStartupRecoveryFailureIsDiagnosed(t *testing.T) {
 	}
 }
 
-func TestJournalForAnotherProjectIsRefused(t *testing.T) {
+// An interrupted registration finishes beside a project that is already
+// active, whether a restart or a repeated add finishes it, and both projects
+// then run.
+func TestInterruptedAddFinishesBesideAnActiveProject(t *testing.T) {
 	t.Parallel()
-	opts, clone := projectFixture(t)
-	root := opts.Config.Root
-	s, c := start(t, opts)
-	ctx := context.Background()
-	added, err := c.AddProject(ctx, request(clone))
-	must(t, err)
-	active := added.Project.ID
-	// A journal left by another registration names a project that is not active.
-	stale := config.Project{ID: "p_ffffffffffffffffffffffffffffffff", Version: 1, Name: "dagger", Upstream: "dagger/dagger", Fork: "owner/dagger", Clone: added.Project.Clone, BaseBranch: "main", Landing: "commit-per-unit"}
-	data, err := json.Marshal(pendingProject{Version: 1, Project: stale})
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(root, "project-add.json"), data, 0600))
-	before, err := os.ReadFile(filepath.Join(root, "config.toml"))
-	must(t, err)
-	_, err = c.AddProject(ctx, request(clone))
-	assertCode(t, err, Internal)
-	if !strings.Contains(err.Error(), string(stale.ID)) || !strings.Contains(err.Error(), string(active)) {
-		t.Fatal(err)
-	}
-	after, err := os.ReadFile(filepath.Join(root, "config.toml"))
-	must(t, err)
-	if string(after) != string(before) || !reflect.DeepEqual(activeProjects(t, root), []string{string(active)}) {
-		t.Fatalf("configuration changed:\n%s", after)
-	}
-	if names := projectDirectories(t, root); !reflect.DeepEqual(names, []string{string(active)}) {
-		t.Fatal(names)
-	}
-	// Startup reports the mismatch and keeps the active project running.
-	must(t, s.Close())
-	s, c = start(t, opts)
-	cfg, err := c.Configuration(ctx)
-	must(t, err)
-	if cfg.Project == nil || cfg.Project.ID != active || !hasDiagnostic(cfg.Diagnostics, Internal) || s.sole() == nil {
-		t.Fatalf("%+v", cfg)
-	}
-	if !reflect.DeepEqual(activeProjects(t, root), []string{string(active)}) {
-		t.Fatal("startup listed the journaled project")
-	}
-	// Removing the active project lets the journaled registration finish.
-	_, err = c.RemoveProject(ctx, active)
-	must(t, err)
-	finished, err := c.AddProject(ctx, request(clone))
-	must(t, err)
-	if finished.Project.ID != stale.ID || !reflect.DeepEqual(activeProjects(t, root), []string{string(stale.ID)}) {
-		t.Fatalf("%+v", finished)
+	for _, step := range []string{"journal-written", "trace-created", "active-project-listed"} {
+		for _, mode := range []string{"restart", "retry"} {
+			t.Run(step+"/"+mode, func(t *testing.T) {
+				opts, clone := projectFixture(t)
+				root := opts.Config.Root
+				s, c := start(t, opts)
+				ctx := context.Background()
+				first, err := c.AddProject(ctx, request(clone))
+				must(t, err)
+				second := request(clone)
+				second.Name, second.Upstream = "other", "other/repo"
+				s.boundary = func(name string) error {
+					if name == step {
+						return errors.New("crash")
+					}
+					return nil
+				}
+				_, err = c.AddProject(ctx, second)
+				assertCode(t, err, Internal)
+				s.boundary = nil
+				data, err := os.ReadFile(filepath.Join(root, "project-add.json"))
+				must(t, err)
+				var journal pendingProject
+				must(t, json.Unmarshal(data, &journal))
+				id := journal.Project.ID
+				if mode == "restart" {
+					must(t, s.Close())
+					s, c = start(t, opts)
+				} else {
+					finished, err := c.AddProject(ctx, second)
+					must(t, err)
+					if finished.Project.ID != id {
+						t.Fatalf("retry registered %s instead of finishing %s", finished.Project.ID, id)
+					}
+				}
+				want := []string{string(first.Project.ID), string(id)}
+				if got := activeProjects(t, root); !reflect.DeepEqual(got, want) {
+					t.Fatalf("active projects %v, want %v", got, want)
+				}
+				if _, err := os.Lstat(filepath.Join(root, "project-add.json")); !os.IsNotExist(err) {
+					t.Fatal("journal retained")
+				}
+				cfg, err := c.Configuration(ctx)
+				must(t, err)
+				if len(cfg.Projects) != 2 || cfg.Projects[0].ID != first.Project.ID || cfg.Projects[1].ID != id || cfg.Projects[1].Name != "other" || len(cfg.Diagnostics) != 0 {
+					t.Fatalf("configuration: %+v", cfg)
+				}
+				var running []string
+				for _, p := range s.traces() {
+					running = append(running, string(p.Project()))
+				}
+				if !reflect.DeepEqual(running, want) {
+					t.Fatalf("running projects %v, want %v", running, want)
+				}
+				// The first registration repeated still returns its project.
+				again, err := c.AddProject(ctx, request(clone))
+				must(t, err)
+				if again.Project.ID != first.Project.ID {
+					t.Fatalf("repeated registration: %+v", again)
+				}
+			})
+		}
 	}
 }
 

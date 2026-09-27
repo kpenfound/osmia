@@ -824,9 +824,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		showConfigDrift(stdout, cfg.Drift)
 		showTailnet(stdout, h.Tailnet)
 		showProject(stdout, cfg.Project)
-		for _, p := range all.Draining {
-			fmt.Fprintf(stdout, "Draining: %s (%s) trace=%s\n", p.ID, p.Name, p.Trace)
-		}
+		showDraining(stdout, all.Draining)
 		for _, p := range rt.Projects {
 			fmt.Fprintf(stdout, "Context: %s context_mode=%s\n", p.Project, p.ContextMode)
 		}
@@ -990,6 +988,14 @@ func projectOf(ctx context.Context, c *service.Client, cfg service.ConfigRespons
 		return "", err
 	}
 	return st.Project, nil
+}
+
+// showDraining prints the removed projects that are still finishing the work
+// they had in flight.
+func showDraining(w io.Writer, projects []service.ProjectView) {
+	for _, p := range projects {
+		fmt.Fprintf(w, "Draining: %s (%s) trace=%s\n", p.ID, p.Name, p.Trace)
+	}
 }
 
 func showProject(w io.Writer, p *service.ProjectView) {

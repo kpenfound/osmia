@@ -153,17 +153,15 @@ func TestReloadReportsRestartRequiredSettings(t *testing.T) {
 		t.Fatalf("diagnostics: %+v", now.Diagnostics)
 	}
 
-	// The loaded project stays when the disk stops listing it, and its file
-	// is still validated.
+	// The project list applies without a restart: a project the disk stops
+	// listing leaves the loaded configuration, and its file is no longer read.
 	unlisted := strings.Replace(files.topText, `active_projects = ["`+string(project)+`"]`, "active_projects = []", 1)
-	files.write(t, unlisted, files.projectText+"landing = \"sideways\"\n")
-	reloadFails(t, c, files.project, "landing")
-	files.write(t, unlisted, files.projectText+"landing = \"squash\"\n")
+	files.write(t, unlisted+"[listen]\nsocket = \"local.sock\"\n", files.projectText+"landing = \"sideways\"\n")
 	reloaded, err = c.Reload(ctx)
 	must(t, err)
 	now, err = c.Configuration(ctx)
 	must(t, err)
-	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"active_projects"}) || now.Effective.Project.ID != project || now.Effective.Project.Landing != "squash" || now.Effective.Listen.Socket != socket {
+	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.socket"}) || now.Effective.HasProject() || len(now.Projects) != 0 || now.Effective.Listen.Socket != socket {
 		t.Fatalf("unlisted project: %+v %+v", reloaded, now.Effective)
 	}
 }

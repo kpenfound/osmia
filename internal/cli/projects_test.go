@@ -128,3 +128,28 @@ func TestPauseAndPriorityFindTheProjectOfTheWorkstream(t *testing.T) {
 		t.Fatalf("pause of an unknown workstream: %d %q %q", code, out, diag)
 	}
 }
+
+func TestProjectRemoveListsUnfinishedWorkstreams(t *testing.T) {
+	opts := withTwoProjects(t)
+	s, err := service.Start(context.Background(), opts)
+	must(t, err)
+	t.Cleanup(func() { s.Close() })
+	root := opts.Config.Root
+	removed := successful(t, root, "project", "remove", otherProject)
+	if !strings.Contains(removed, "Project "+otherProject+" () removed\n") || !strings.Contains(removed, "\nUnfinished: "+otherStream+" state=") || !strings.Contains(removed, "\nNext: The project drains") {
+		t.Fatalf("remove output:\n%s", removed)
+	}
+	var result service.ProjectResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "project", "remove", project, "--json")), &result))
+	if len(result.Unfinished) != 1 || result.Unfinished[0].Workstream != stream {
+		t.Fatalf("remove JSON: %+v", result)
+	}
+}
+
+func TestStatusShowsDrainingProjects(t *testing.T) {
+	var out strings.Builder
+	showDraining(&out, []service.ProjectView{{ID: otherProject, Name: "other", Trace: "/root/projects/" + otherProject}})
+	if got := out.String(); got != "Draining: "+otherProject+" (other) trace=/root/projects/"+otherProject+"\n" {
+		t.Fatalf("draining line: %q", got)
+	}
+}
