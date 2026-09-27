@@ -2,7 +2,7 @@
 
 A personal software factory for long-running feature work on repositories you contribute to but do not own. It is configured at the user level, keeps its factory state outside the repository it works on, is driven by a person through one aide, and shares one pool of agent capacity across several workstreams on several projects.
 
-Status: design v0.2, 2026-09-15. M1 implementation is under construction. This document is the source of truth for feature proposals and implementation. Milestones phase the work; an issue does not override the design. Osmia uses `github.com/kpenfound/busybees/core` as a Go dependency and supports an optional Hearsay memory integration. Section 17 defines those boundaries and section 18 records the implementation order.
+Status: design v0.2, 2026-09-15. This document is the source of truth for feature proposals and implementation; an issue does not override the design. Osmia uses `github.com/kpenfound/busybees/core` as a Go dependency and defines an optional Hearsay memory integration. Section 17 defines those boundaries and section 18 summarizes the feature guarantees.
 
 ---
 
@@ -437,9 +437,8 @@ Built for a phone as much as a laptop. Embedded in the binary, one page, fed by 
 
 ### 11.2 Command line
 
-The following is the full design; see the [M1 command line](cli.md) for the
-implemented subset. Detached serving and the later lifecycle commands are
-unavailable in M1.
+The following is the full design; see the [command line](cli.md) for supported
+commands. The service runs in the foreground; detached serving is not implemented.
 
 ```
 osmia serve                          the service, foreground or detached
@@ -463,7 +462,7 @@ Every command is an API call. Nothing reads state files directly.
 
 ## 12. Hearsay
 
-Hearsay is an optional external context and memory service. It is not an orchestrator, has no work-unit model, delivers no agent messages and synthesises nothing at read time. The state machine, the plan, the mailbox and the documents of record stay in Osmia. Hearsay ingests source records (L0), distils them into memory (L1), and serves scoped bundles of decisions and source pointers. It is under development independently; integration is the final planned milestone and does not block the earlier product.
+Hearsay is an optional external context and memory service. It is not an orchestrator, has no work-unit model, delivers no agent messages and synthesises nothing at read time. The state machine, the plan, the mailbox and the documents of record stay in Osmia. Hearsay ingests source records (L0), distils them into memory (L1), and serves scoped bundles of decisions and source pointers. Its integration is planned independently; the complete local workflow must remain usable without it.
 
 ### 12.1 What lives there
 
@@ -498,14 +497,14 @@ The chief of staff watches the project scope. A Discord thread that decides some
 
 Osmia runs without it. The null provider uses the charter, knowledge-base prose, local entity map, spec, plan, questions, notices, trace decisions and private role notes. Footprint checks and scheduling still work. File-based context is a supported operating mode, not an error; status reports it explicitly. If Hearsay is configured but unavailable, status reports degraded memory and the same local path continues to work.
 
-Asserts are the fast path and the connector is the durable one: a ruling is written locally before assertion and later ingested and distilled to the same stance, so an outage loses nothing. Historical traces can be ingested when Hearsay becomes available. The first release and all milestones before M8 use this provider. M8 starts when Hearsay serves anchors, entity resolution, stance history, assert, agent classes, watch and replayable connector ingestion. Hearsay readiness does not delay Jujutsu or multi-project support.
+Asserts are the fast path and the connector is the durable one: a ruling is written locally before assertion and later ingested and distilled to the same stance, so an outage loses nothing. Historical traces can be ingested when Hearsay becomes available. File-based context is the supported provider. Hearsay integration requires anchors, entity resolution, stance history, assert, agent classes, watch and replayable connector ingestion. Jujutsu and multi-project support must work without Hearsay.
 
 ---
 
 ## 13. Configuration
 
-The supported M1 subset, defaults and stable directory identifiers are documented
-in [M1 configuration](configuration.md). The examples below describe the full design.
+Supported settings, defaults and stable directory identifiers are documented
+in [configuration](configuration.md). The examples below describe the full design.
 
 ### 13.1 User configuration
 
@@ -602,7 +601,7 @@ Every key has a default, validation, a documented meaning and a test. The config
 
 ### 14.3 First run
 
-The first release, at the end of M5, runs on git worktrees, without Hearsay, with a single project and the web interface on the tailnet. Multiple workstreams on that project are supported. The order of what comes after is Jujutsu behind the workspace interface (M6), multi-project operation and cross-workstream bases (M7), then the Hearsay connector, bundles and watches (M8). Hearsay can be made ready independently while Osmia progresses through the earlier milestones.
+Git worktrees and Jujutsu share the workspace interface. The service supports multiple projects and workstreams, with a web interface on the tailnet and file-based context. Cross-workstream bases and the optional Hearsay connector, bundles and watches are separate capabilities; neither is required for independent workstreams to run and deliver features.
 
 ---
 
@@ -637,22 +636,20 @@ The first release, at the end of M5, runs on git worktrees, without Hearsay, wit
 
 ---
 
-## 18. Implementation milestones
+## 18. Feature guarantees
 
-Milestones run in order. Feature issues name outcomes and refer back to this document; their later work-item decomposition must preserve its constraints. The first release is M5. Hearsay is deliberately last so its development can proceed independently.
+The workflow builds on durable local state, planning and owner ratification before implementation and delivery. Concurrency, alternate workspace backends and multi-project operation preserve those guarantees. The web interface exposes the same owner decisions as the local API. Optional memory integration must preserve a complete file-based workflow.
 
-| Milestone | Feature outcomes | Exit condition |
+| Feature | Scope | Required behavior |
 |---|---|---|
-| M1 — A durable local service | Core integration; personal service, configuration and local API; durable records and outbox; isolated durable threads. | A role receives successive turns and survives a restart with an inspectable record. |
-| M2 — From a handed design to a ratified plan | Project onboarding and local knowledge; chief of staff and inbox; feature intake and planning; debate and ratification. | An owner can hand in a design and ratify a buildable plan using local context. |
-| M3 — Deliver one feature end to end | Sequential implementation; exact-candidate review; serial landing and librarian updates; final review and delivery; trace navigation. | A small feature reaches an owner-approved pull request with a complete trace. |
-| M4 — Run long-lived work reliably | Parallel workstreams and shared capacity; amendments and standing rulings; concurrent landing and drift; budgets, profiles, pause, reload and recovery. | Several workstreams on one project progress through interruptions, questions and conflicts without lost work or duplicate landings. |
-| M5 — Operate Osmia from a phone | Embedded web interface; tailnet access; notifications and the product's installation, release and first-run experience. | The first release supports the full lifecycle and every owner decision from a phone, on one project with git worktrees and local context. |
-| M6 — Jujutsu workspaces | Jujutsu provider; rebase and interruption recovery. | The complete lifecycle works with either workspace backend. |
-| M7 — Several projects and dependent features | Multi-project operation; cross-workstream bases and dependent pull requests. | One service handles several projects and sequences of dependent features. |
-| M8 — Project memory through Hearsay | Replayable connector; scoped memory bundles; ruling reconciliation and watches. | Memory enriches the workflow while outages lose no decisions and local operation remains supported. |
-
-Repository bootstrap is completed separately from these milestones: importing this design, initializing the Go module and Dagger checks, configuring the development factory, writing contributor guardrails and adding the placeholder README are not implementation feature issues. The GitHub roadmap is at <https://github.com/kpenfound/osmia/milestones>.
+| Durable local service | Core integration; personal service, configuration and local API; durable records and outbox; isolated durable threads. | A role receives successive turns and survives a restart with an inspectable record. |
+| Planning and ratification | Project onboarding and local knowledge; chief of staff and inbox; feature intake and planning; debate and ratification. | An owner can hand in a design and ratify a buildable plan using local context. |
+| Feature delivery | Sequential implementation; exact-candidate review; serial landing and librarian updates; final review and delivery; trace navigation. | A small feature reaches an owner-approved pull request with a complete trace. |
+| Concurrency and recovery | Parallel workstreams and shared capacity; amendments and standing rulings; concurrent landing and drift; budgets, profiles, pause, reload and recovery. | Several workstreams on one project progress through interruptions, questions and conflicts without lost work or duplicate landings. |
+| Phone operation and notifications | Embedded web interface; tailnet access; notifications and the product's installation, release and first-run experience. | The full lifecycle and every owner decision are available from a phone, with local context. |
+| Jujutsu workspaces | Jujutsu provider; rebase and interruption recovery. | The complete lifecycle works with either workspace backend. |
+| Multiple projects and dependent features | Multi-project operation; cross-workstream bases and dependent pull requests. | One service handles several projects and sequences of dependent features. |
+| Project memory through Hearsay | Replayable connector; scoped memory bundles; ruling reconciliation and watches. | Memory enriches the workflow while outages lose no decisions and local operation remains supported. |
 
 ---
 

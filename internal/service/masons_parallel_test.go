@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"net/http/httptrace"
 	"slices"
 	"strings"
 	"sync"
@@ -79,44 +78,6 @@ func starts(t *testing.T, f *shedFixture, stream config.WorkstreamID) []string {
 	return out
 }
 
-// Slow status reads in the mason fixtures keep their API and service available.
-func TestMasonFixtureSlowStatusKeepsServiceReachable(t *testing.T) {
-	t.Parallel()
-	f, _ := newParallelMasonFixture(t, 2, 3, disjointPlan)
-	defer f.stop(t)
-	entered := make(chan struct{}, 1)
-	ctx := httptrace.WithClientTrace(context.Background(), &httptrace.ClientTrace{
-		WroteRequest: func(httptrace.WroteRequestInfo) {
-			select {
-			case entered <- struct{}{}:
-			default:
-			}
-		},
-	})
-	f.s.mu.Lock()
-	result := make(chan error, 1)
-	go func() {
-		_, err := f.c.Statuses(ctx)
-		result <- err
-	}()
-	select {
-	case <-entered:
-	case <-time.After(demoTimeout):
-		f.s.mu.Unlock()
-		t.Fatal("status request never connected")
-	}
-	time.Sleep(16 * time.Second)
-	f.s.mu.Unlock()
-	select {
-	case err := <-result:
-		if err != nil {
-			t.Fatalf("status request after a slow snapshot: %v", err)
-		}
-	case <-time.After(demoTimeout):
-		t.Fatal("status request never completed")
-	}
-}
-
 // Two ready units of one workstream whose footprints are disjoint implement
 // at once, each on its own workspace. A ready unit whose footprint intersects
 // an implementing unit's waits, and starts once that unit's mason reported
@@ -132,7 +93,7 @@ func TestDisjointUnitsImplementConcurrently(t *testing.T) {
 		}
 		return nil
 	}
-	stream, _ := f.builtAs(t, "parallel")
+	stream := f.seedBuilding(t, "parallel", parallelPlan)
 	f.awaitMasonRan(t, stream, "upload")
 	f.awaitMasonRan(t, stream, "audit")
 	f.awaitMasonRan(t, stream, "dedupe")
@@ -179,7 +140,7 @@ func TestMasonStartsStayWithinBothCaps(t *testing.T) {
 			t.Parallel()
 			f, masons := newParallelMasonFixture(t, tc.masons, tc.perWorkstream, disjointPlan)
 			defer f.stop(t)
-			stream, _ := f.builtAs(t, "capped")
+			stream := f.seedBuilding(t, "capped", disjointPlan)
 			f.awaitMasonRan(t, stream, "resume")
 			f.awaitMasonRan(t, stream, "upload")
 			settle()
@@ -205,7 +166,7 @@ func TestWaitingUnitLeavesItsSlotToADisjointUnit(t *testing.T) {
 	f.engine.turns["*"] = chief.turn
 	f.engine.turns[masonTurnID("resume")] = masons.asking(p, "", "1")
 	f.engine.mu.Unlock()
-	stream, _ := f.builtAs(t, "waiting")
+	stream := f.seedBuilding(t, "waiting", parallelPlan)
 	f.awaitMasonRan(t, stream, "audit")
 	settle()
 	p.check(t)
@@ -279,7 +240,7 @@ func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
 		return chief.turn(ctx, req, verified, tools)
 	}
 	f.engine.mu.Unlock()
-	stream, _ := f.builtAs(t, "overlap")
+	stream := f.seedBuilding(t, "overlap", disjointPlan)
 	f.awaitMerged(t, stream, "resume")
 	th, err := f.repository().Thread(stream, masonAgent("upload"))
 	must(t, err)

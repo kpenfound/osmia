@@ -110,16 +110,16 @@ func factoryPauseOf(t *testing.T, c *Client) (runtime.Pause, bool) {
 	return runtime.Pause{}, false
 }
 
-// TestM4ReliabilityDemonstration drives one workstream through the local API
+// TestReliabilityDemonstration drives one workstream through the local API
 // with fake masons, reviewer and chief of staff while the daily budget, a
 // hard pause, a live profile switch, a reload, a provider usage limit and a
-// crash during landing interrupt it. See docs/m4-reliability.md.
-func TestM4ReliabilityDemonstration(t *testing.T) {
+// crash during landing interrupt it. See docs/reliability-demonstration.md.
+func TestReliabilityDemonstration(t *testing.T) {
 	t.Parallel()
 	reliabilityDemonstration(t, agent.AgentCodex)
 }
 
-func TestM4ReliabilityDemonstrationOpenCode(t *testing.T) {
+func TestReliabilityDemonstrationOpenCode(t *testing.T) {
 	t.Parallel()
 	reliabilityDemonstration(t, agent.AgentOpenCode)
 }

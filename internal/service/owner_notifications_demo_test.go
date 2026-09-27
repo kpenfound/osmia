@@ -37,12 +37,12 @@ func notifiedKind(body string) string {
 	return ""
 }
 
-// TestM5FirstReleaseDemonstration takes one workstream from hand-in to a
+// TestOwnerNotificationsDemonstration takes one workstream from hand-in to a
 // delivered pull request through the local API while notify.webhook is set.
 // Every owner decision on the way, and the daily budget pause, reaches the
 // fake webhook exactly once, across a restart while a sent notification is
-// open and another while one is still pending. See docs/m5-first-release.md.
-func TestM5FirstReleaseDemonstration(t *testing.T) {
+// open and another while one is still pending. See docs/owner-notifications-demonstration.md.
+func TestOwnerNotificationsDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, masons := newMasonFixture(t, 1, validPlan)

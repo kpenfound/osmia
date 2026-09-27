@@ -314,13 +314,13 @@ sandbox requires a Claude classifier profile. Its attempts are limited to two,
 each with a 30 second maximum timeout. Invalid or unavailable answers retain
 the code classification.
 
-## Milestone and restart behavior
+## Configuration and restart behavior
 
 Loading accepts profiles, bindings, capacity, budgets, shed limits, repository identity
 and landing preferences as declarative inputs. Review slot
 configuration is `capacity.reviewers`; no separate review-policy schema is defined.
 Runtime profile overrides, pauses and priorities belong in `runtime.json`, never
-these files; see [runtime overrides](runtime.md) for M1 persistence and resolution.
+these files; see [runtime overrides](runtime.md) for persistence and resolution.
 `osmia config` shows whether each file on disk differs from what is loaded
 ([disk drift](service.md#disk-drift)), and `osmia reload` applies edited files
 to a running service after validating all of them ([reload](service.md#reload)). The root, `listen.socket`,
@@ -338,10 +338,10 @@ calendar day reaches `per_day`, the service pauses factory dispatch until the
 next local day ([daily budget](service.md#daily-budget)).
 Missing values impose no cap. Unknown cost does not establish that a cap was reached.
 
-The full design's `hearsay` and
-project `hearsay_scope` settings are rejected as unsupported
-in M1, even if supplied empty. Multi-project operation belongs to M7, and
-Hearsay to M8. Unsupported keys do not silently enable later behavior.
+The full design's `hearsay` and project `hearsay_scope` settings are rejected
+because Hearsay integration is not supported, even if supplied empty. Use
+file-based context. Multiple active projects are supported through
+`active_projects`. Unsupported keys do not enable additional behavior.
 
 Representative errors include the file and offending field:
 

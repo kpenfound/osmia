@@ -1,17 +1,17 @@
-# M1 demonstration
+# Thread continuity demonstration
 
-The M1 exit condition is: a role receives successive turns and survives a
-restart with an inspectable record. `TestM1ThreadContinuityAcrossRestart` in
+A role receives successive turns and survives a
+restart with an inspectable record. `TestThreadContinuityAcrossRestart` in
 `internal/service/continuity_test.go` demonstrates it using the production
 service, trace repository, reconciliation controller, thread runner, turn
 dispatcher and turn isolation path. The agent backend, container engine, MCP
 transport and workspace provider are fakes. The test uses no network, live
 model or real container, and it runs in a temporary root with a local Git
-repository as the target clone. The [M2 hand-in demonstration](m2-demonstration.md)
+repository as the target clone. The [hand-in demonstration](hand-in-demonstration.md)
 follows the same pattern from handed material to a sketched spec and plan,
-the [M2 chief-of-staff demonstration](m2-chief-of-staff.md) from a
+the [chief-of-staff demonstration](chief-of-staff-demonstration.md) from a
 worker's question to the owner's ruling, and the
-[M2 exit demonstration](m2-exit.md) from hand-in to a ratified, sealed plan.
+[plan ratification demonstration](plan-ratification-demonstration.md) from hand-in to a ratified, sealed plan.
 
 ## Running it
 
@@ -22,26 +22,27 @@ as part of `dagger check`. To run it alone:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
-  with-exec --args=go,test,-count=1,-run,TestM1ThreadContinuityAcrossRestart,-v,./internal/service \
+  with-mounted-temp --path /tmp \
+  with-exec --args=go,test,-count=1,-run,TestThreadContinuityAcrossRestart,-v,./internal/service \
   combined-output
 ```
 
 It removes its temporary roots when it finishes. To keep them for inspection,
-name a directory inside the container with `OSMIA_M1_DEMO_DIR` and export it:
+name a directory inside the container with `OSMIA_CONTINUITY_DEMO_DIR` and export it:
 
 ```sh
-rm -rf ./osmia-m1
+rm -rf ./osmia-continuity
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
-  with-env-variable --name OSMIA_M1_DEMO_DIR --value /tmp/osmia-m1 \
-  with-exec --args=go,test,-count=1,-run,TestM1ThreadContinuityAcrossRestart,-v,./internal/service \
-  directory --path /tmp/osmia-m1 export --path ./osmia-m1
+  with-env-variable --name OSMIA_CONTINUITY_DEMO_DIR --value /tmp/osmia-continuity \
+  with-exec --args=go,test,-count=1,-run,TestThreadContinuityAcrossRestart,-v,./internal/service \
+  directory --path /tmp/osmia-continuity export --path ./osmia-continuity
 ```
 
 Each case gets its own directory, `<dir>/resume` and `<dir>/replay`, and the
 verbose output of the first command prints its root and trace paths. Keep the
-directory named by `OSMIA_M1_DEMO_DIR` short: the service socket lives under
+directory named by `OSMIA_CONTINUITY_DEMO_DIR` short: the service socket lives under
 the root, and Unix socket paths are limited to about 100 bytes.
 
 ## What happens

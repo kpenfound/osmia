@@ -1,7 +1,7 @@
-# M5 first-release demonstration
+# Owner notifications demonstration
 
-`TestM5FirstReleaseDemonstration` in
-`internal/service/first_release_demo_test.go` takes one workstream from
+`TestOwnerNotificationsDemonstration` in
+`internal/service/owner_notifications_demo_test.go` takes one workstream from
 hand-in to a delivered pull request through the service's local API client,
 the same API the `osmia` commands use. `notify.webhook` is set, and a fake
 webhook checks that every owner decision on the way, and the daily budget
@@ -18,7 +18,8 @@ Run it with `dagger check`, or run just the demonstration inside Dagger:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
-  with-exec --args=go,test,-count=1,-run,TestM5FirstReleaseDemonstration,-v,./internal/service \
+  with-mounted-temp --path /tmp \
+  with-exec --args=go,test,-count=1,-run,TestOwnerNotificationsDemonstration,-v,./internal/service \
   combined-output
 ```
 

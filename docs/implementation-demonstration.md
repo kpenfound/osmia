@@ -1,6 +1,6 @@
-# M3 sequential implementation demonstration
+# Sequential implementation demonstration
 
-`TestM3SequentialImplementation` in `internal/service/m3_exit_test.go` follows a
+`TestSequentialImplementation` in `internal/service/implementation_demo_test.go` follows a
 ratified two-unit plan through the service's local API client, the same API
 used by the `osmia` commands. A fake mason and chief of staff run through
 core's fake enforcer and an in-memory MCP transport. The test uses a temporary
@@ -13,7 +13,8 @@ Run it with `dagger check`, or run just the demonstration inside Dagger:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
-  with-exec --args=go,test,-count=1,-run,TestM3SequentialImplementation,-v,./internal/service \
+  with-mounted-temp --path /tmp \
+  with-exec --args=go,test,-count=1,-run,TestSequentialImplementation,-v,./internal/service \
   combined-output
 ```
 
@@ -50,7 +51,7 @@ both turns, and `units/resume/report.json` for the report and candidate.
 
 ## Landing and recovery demonstration
 
-`TestM3LandingDemonstration` in `internal/service/landing_demo_test.go` lands
+`TestLandingDemonstration` in `internal/service/landing_demo_test.go` lands
 the units of one workstream on its feature branch. Fake masons, reviewer and
 librarian run through the same local API, temporary Osmia root and local Git
 clone as above. The test starts no model, container, remote push or pull
@@ -60,7 +61,8 @@ request. Run it with `dagger check`, or alone inside Dagger:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
-  with-exec --args=go,test,-count=1,-run,TestM3LandingDemonstration,-v,./internal/service \
+  with-mounted-temp --path /tmp \
+  with-exec --args=go,test,-count=1,-run,TestLandingDemonstration,-v,./internal/service \
   combined-output
 ```
 
@@ -101,9 +103,9 @@ with `kb/sources.json`.
 
 ## Final review and delivery demonstration
 
-`TestM3DeliveryDemonstration` in `internal/service/delivery_demo_test.go` runs
-both `commit-per-unit` and `squash` delivery against a local bare fork and an
-in-memory pull request client. Fake masons and reviewers use the ordinary
+`TestDeliveryDemonstration` in `internal/service/delivery_demo_test.go` runs
+`commit-per-unit` delivery against a local bare fork and an in-memory pull
+request client. Fake masons and reviewers use the ordinary
 service turns; no model session, container, remote push or live pull request is
 started. Run the focused demonstration inside Dagger:
 
@@ -111,7 +113,8 @@ started. Run the focused demonstration inside Dagger:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
-  with-exec --args=go,test,-count=1,-run,TestM3DeliveryDemonstration,-v,./internal/service \
+  with-mounted-temp --path /tmp \
+  with-exec --args=go,test,-count=1,-run,TestDeliveryDemonstration,-v,./internal/service \
   combined-output
 ```
 
@@ -124,12 +127,12 @@ review records evidence for both criteria.
 
 The delivery API presents the report and a description drafted from the
 trace. The owner edits that description and approves its reviewed commit.
-Changing the description or moving the branch makes the delivery gate refuse
-publication. After restoring the approved branch, the test interrupts
-publication after the pull request opens, reopens the trace as on restart and
-reconciles the existing branch and pull request. It checks one pull request,
-the approved tree and description, and the recorded review, approval and
-publication provenance for each delivery style.
+The test checks one pull request, the approved tree and description, and the
+recorded review, approval and publication provenance. Focused tests in
+`delivery_approval_test.go` cover changes to the approved description and
+governing revisions. `publication_test.go` covers both delivery styles,
+stale approvals, interrupted publication and reconciliation of an existing
+branch or pull request using an assembled, reviewed feature fixture.
 
 The relevant trace files are `final/report.json`, `final/followups.json`,
 `units/<follow-up>/report.json`, `units/<follow-up>/review.json`,

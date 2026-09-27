@@ -25,9 +25,9 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// newFinalFixture builds validPlan with a committee runner and no masons,
-// and stops the service. It returns the workstream, the trace, open, and the
-// assembly controller over it.
+// newFinalFixture seeds a sealed validPlan with a committee runner and no
+// masons. It returns the stopped service, workstream, open trace and assembly
+// controller. Intake, debate and ratification are covered by lifecycle tests.
 func newFinalFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *finalReviewer) {
 	t.Helper()
 	return newFinalFixtureWith(t, key, "")
@@ -37,12 +37,8 @@ func newFinalFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamI
 func newFinalFixtureWith(t *testing.T, key, extra string) (*shedFixture, config.WorkstreamID, *trace.Repository, *finalReviewer) {
 	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, extra, nil)
-	f.upstream(t)
-	stream, _ := f.builtAs(t, key)
-	f.stop(t)
-	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	t.Cleanup(func() { repository.Close() })
+	base := f.upstream(t)
+	stream, repository := seedBuild(t, f, key, validPlan, config.WorkspacesGit, base)
 	return f, stream, repository, &finalReviewer{s: f.s, repository: repository}
 }
 

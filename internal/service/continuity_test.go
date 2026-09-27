@@ -29,10 +29,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The M1 demonstration: one mason thread receives two messages, the service
+// The thread continuity demonstration: one mason thread receives two messages, the service
 // restarts between them, and the second turn continues either by resuming the
-// fake backend session or by replaying the owned log. Set OSMIA_M1_DEMO_DIR to
-// keep each case's root for inspection; see docs/m1-demonstration.md.
+// fake backend session or by replaying the owned log. Set OSMIA_CONTINUITY_DEMO_DIR to
+// keep each case's root for inspection; see docs/thread-continuity-demonstration.md.
 
 const (
 	demoAgent  = "agent_mason"
@@ -313,7 +313,7 @@ func deliver(t *testing.T, repo *trace.Repository, turn string, version uint64, 
 	return req
 }
 
-func TestM1ThreadContinuityAcrossRestart(t *testing.T) {
+func TestThreadContinuityAcrossRestart(t *testing.T) {
 	for _, mode := range []string{"resume", "replay"} {
 		t.Run(mode, func(t *testing.T) { demonstrate(t, mode) })
 	}
@@ -325,13 +325,13 @@ func demonstrate(t *testing.T, mode string) {
 	}
 	ctx := context.Background()
 	var home string
-	if keep := os.Getenv("OSMIA_M1_DEMO_DIR"); keep != "" {
+	if keep := os.Getenv("OSMIA_CONTINUITY_DEMO_DIR"); keep != "" {
 		home = filepath.Join(keep, mode)
 		must(t, os.MkdirAll(keep, 0700))
 		must(t, os.Mkdir(home, 0700))
 	} else {
 		var err error
-		home, err = os.MkdirTemp("", "m1-")
+		home, err = os.MkdirTemp("", "continuity-")
 		must(t, err)
 		t.Cleanup(func() { os.RemoveAll(home) })
 	}

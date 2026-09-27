@@ -1,9 +1,9 @@
-# M2 chief-of-staff demonstration
+# Chief-of-staff demonstration
 
 A workstream's chief of staff talks with the owner, answers the workers'
 questions or escalates them, and relays the owner's rulings. It keeps doing
-this across service restarts. `TestM2ChiefOfStaffQuestionsAndInbox` in
-`internal/service/m2_chief_of_staff_test.go` shows each step through the
+this across service restarts. `TestChiefOfStaffQuestionsAndInbox` in
+`internal/service/chief_of_staff_demo_test.go` shows each step through the
 service's local API client, which is what the `osmia` commands below call.
 The librarian, the chief of staff and the workers are scripted fakes behind
 core's fake enforcer, with an in-memory MCP transport. The test makes no
@@ -19,22 +19,23 @@ as part of `dagger check`. To run it alone:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
-  with-exec --args=go,test,-count=1,-run,TestM2ChiefOfStaffQuestionsAndInbox,-v,./internal/service \
+  with-mounted-temp --path /tmp \
+  with-exec --args=go,test,-count=1,-run,TestChiefOfStaffQuestionsAndInbox,-v,./internal/service \
   combined-output
 ```
 
 ## Setup
 
 The project is onboarded the way the
-[onboarding walkthrough](m2-onboarding.md) describes: `osmia project add`,
+[onboarding walkthrough](onboarding-demonstration.md) describes: `osmia project add`,
 a librarian extraction that succeeds, and a charter with one rule,
 `1. Keep state in files under the root.` The root's configuration allows one
 mason at a time (`[capacity] masons = 1`) and runs the chief of staff, mason
 and reviewer roles in a container with a fixture image.
 
 With the service stopped, the test fixture creates a workstream with three
-worker threads, each with one queued turn: two masons and a reviewer. No M2
-command creates worker threads. The service gives the workstream its chief of
+worker threads, each with one queued turn: two masons and a reviewer.
+Worker threads are created by the service, not directly by CLI commands. The service gives the workstream its chief of
 staff when it starts.
 
 Clock time does not advance in the test, so an

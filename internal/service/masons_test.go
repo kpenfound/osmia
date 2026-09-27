@@ -96,6 +96,10 @@ func sessionStream(req agent.Request) string {
 // is not retried.
 var errFailTurn = errors.New("the turn fails")
 
+func failMasonTurn(context.Context, agent.Request, *mcp.ClientSession) error {
+	return errFailTurn
+}
+
 // errCrashTurn is what a fake mason's play returns to end its turn with an
 // infrastructure failure, which the runner retries.
 var errCrashTurn = errors.New("the turn crashes")
@@ -105,6 +109,14 @@ func (m *fakeMasons) requests(stream config.WorkstreamID) []agent.Request {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return slices.Clone(m.runs[string(stream)])
+}
+
+// implementationRuns returns first implementation turns; clarification and
+// revision turns belong to the same unit's continuing work.
+func implementationRuns(m *fakeMasons, stream config.WorkstreamID) []agent.Request {
+	return slices.DeleteFunc(m.requests(stream), func(req agent.Request) bool {
+		return !strings.HasSuffix(req.Name, "-implement")
+	})
 }
 
 func (m *fakeMasons) check(t *testing.T) {
@@ -173,7 +185,7 @@ func newMasonFixtureOn(t *testing.T, backend, capacity, drafted, classifier stri
 	for _, unit := range []string{"resume", "dedupe"} {
 		for i := 1; i <= 3; i++ {
 			name := fmt.Sprintf("%s-clarify-%d", masonAgent(unit), i)
-			fake.play[name] = func(context.Context, agent.Request, *mcp.ClientSession) error { return errFailTurn }
+			fake.play[name] = failMasonTurn
 			f.engine.turns[name] = fake.turn
 		}
 	}
@@ -196,6 +208,8 @@ func masonTransitions(t *testing.T, f *shedFixture, stream config.WorkstreamID) 
 // awaitMasonRan waits until the unit's first mason turn completed.
 func (f *shedFixture) awaitMasonRan(t *testing.T, stream config.WorkstreamID, unit string) trace.Thread {
 	t.Helper()
+	wait, close := serviceChanges(t, f.s)
+	defer close()
 	deadline := time.Now().Add(demoTimeout)
 	for {
 		select {
@@ -216,7 +230,7 @@ func (f *shedFixture) awaitMasonRan(t *testing.T, stream config.WorkstreamID, un
 		if time.Now().After(deadline) {
 			t.Fatalf("the mason of unit %s of %s never ran: %+v", unit, stream, th)
 		}
-		time.Sleep(50 * time.Millisecond)
+		wait()
 	}
 }
 
@@ -309,7 +323,7 @@ func TestMasonStartsTheFirstOfTwoEntangledUnits(t *testing.T) {
 	t.Parallel()
 	f, masons := newMasonFixture(t, 4, independentPlan)
 	defer f.stop(t)
-	stream, _ := f.builtAs(t, "design")
+	stream := f.seedBuilding(t, "design", independentPlan)
 	f.awaitMasonRan(t, stream, "resume")
 	settle()
 	masons.check(t)
@@ -378,7 +392,7 @@ func TestMasonSlotsFollowPriorityAndPause(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	built := f.builtPaused(t, factory, "first", "second")
+	built := f.seedBuildingPaused(t, factory, validPlan, "first", "second")
 	first, second := built[0], built[1]
 	settle()
 	for _, stream := range []config.WorkstreamID{first, second} {
@@ -425,7 +439,7 @@ func TestImplementingUnitGetsItsMasonTurnAfterARestart(t *testing.T) {
 	f, masons := newMasonFixture(t, 4, validPlan)
 	defer func() { f.stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
-	stream := f.builtPaused(t, factory, "design")[0]
+	stream := f.seedBuildingPaused(t, factory, validPlan, "design")[0]
 	f.stop(t)
 
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
@@ -440,10 +454,9 @@ func TestImplementingUnitGetsItsMasonTurnAfterARestart(t *testing.T) {
 	f.start(t)
 	mutation(t, f.c, "DELETE", "pause", factory)
 	f.awaitMasonRan(t, stream, "resume")
-	settle()
 	masons.check(t)
-	if runs := masons.requests(stream); len(runs) != 1 || !strings.Contains(runs[0].Prompt, "# Unit resume\n") {
-		t.Fatalf("mason turns %+v", runs)
+	if runs := implementationRuns(masons, stream); len(runs) != 1 || !strings.Contains(runs[0].Prompt, "# Unit resume\n") {
+		t.Fatalf("initial mason turns: got %d", len(runs))
 	}
 	if got := masonTransitions(t, f, stream); len(got) != 1 || got[0].Reason != "planted" {
 		t.Fatalf("mason transitions %+v", got)
@@ -498,7 +511,7 @@ func TestStaleSpecLeavesTheUnitReady(t *testing.T) {
 	f, masons := newMasonFixture(t, 4, validPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	stream := f.builtPaused(t, factory, "design")[0]
+	stream := f.seedBuildingPaused(t, factory, validPlan, "design")[0]
 	f.editSpec(t, stream, staleSpec)
 	mutation(t, f.c, "DELETE", "pause", factory)
 	f.awaitMasonTransition(t, stream)
@@ -544,7 +557,7 @@ func TestUnitWorkspaceFailureBlocksItsWorkstreamAlone(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	built := f.builtPaused(t, factory, "first", "second")
+	built := f.seedBuildingPaused(t, factory, validPlan, "first", "second")
 	a, b := built[0], built[1]
 	broken, other := lowHigh(a, b)
 	squatter := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(broken), "resume")
@@ -604,7 +617,7 @@ func TestBlockedImplementingUnitHoldsNoSlot(t *testing.T) {
 			f, masons := newMasonFixture(t, 1, validPlan)
 			defer func() { f.stop(t) }()
 			factory := runtime.Target{Scope: "factory"}
-			built := f.builtPaused(t, factory, "first", "second")
+			built := f.seedBuildingPaused(t, factory, validPlan, "first", "second")
 			a, b := built[0], built[1]
 			blocked, other := lowHigh(a, b)
 			f.stop(t)

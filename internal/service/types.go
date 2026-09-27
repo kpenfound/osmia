@@ -1,4 +1,4 @@
-// Package service owns the M1 stores and their local HTTP boundary.
+// Package service owns the durable stores and their local HTTP boundary.
 package service
 
 import (

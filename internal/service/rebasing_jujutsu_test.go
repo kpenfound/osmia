@@ -97,7 +97,7 @@ var jujutsuConflicts = map[string]map[string]string{
 var jujutsuConflicted = map[string][]string{"resume": {masonWrote}, "audit": {masonWrote, trackedFile}, "upload": nil}
 
 // newJujutsuLandedFixture builds disjointPlan on Jujutsu workspaces with the
-// service stopped once resume's mason reported done: resume is reviewing,
+// service stopped and a completed report for resume: resume is reviewing,
 // and upload and audit are implementing with a done turn each. Every unit's
 // workspace gets its jujutsuConflicts, a landing moves the feature branch to
 // a masonWrote of its own and changes trackedFile, and one foreman pass asks
@@ -106,15 +106,10 @@ var jujutsuConflicted = map[string][]string{"resume": {masonWrote}, "audit": {ma
 func newJujutsuLandedFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *foreman, string, map[string]coreadapter.Operation) {
 	t.Helper()
 	ctx := context.Background()
-	f, masons := newParallelMasonFixtureOn(t, config.WorkspacesJujutsu, 1, 3, disjointPlan)
-	masons.play[masonTurnID("resume")] = reportDone("Built")
-	stream, _ := f.builtAs(t, key)
-	f.awaitUnit(t, stream, "resume", UnitReviewing)
-	masons.check(t)
-	f.stop(t)
-	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	t.Cleanup(func() { repository.Close() })
+	f, _ := newParallelMasonFixtureOn(t, config.WorkspacesJujutsu, 1, 3, disjointPlan)
+	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	stream, repository := seedBuild(t, f, key, disjointPlan, config.WorkspacesJujutsu, base)
+	seedReview(t, f, repository, stream, "resume", resumeReport)
 	if backend, err := repository.Workspaces(stream); err != nil || backend != config.WorkspacesJujutsu {
 		t.Fatalf("workstream %s is on %q: %v", stream, backend, err)
 	}
@@ -429,12 +424,8 @@ func TestJujutsuCandidateHoldingAConflictIsNeitherReviewedNorLanded(t *testing.T
 func TestJujutsuDriftConflictIsResolvedInItsWorkspaceBeforeReview(t *testing.T) {
 	t.Parallel()
 	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) { onWorkspaces(t, *opts, config.WorkspacesJujutsu) })
-	f.upstream(t)
-	stream, _ := f.builtAs(t, "jj-drift")
-	f.stop(t)
-	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	t.Cleanup(func() { repository.Close() })
+	base := f.upstream(t)
+	stream, repository := seedBuild(t, f, "jj-drift", validPlan, config.WorkspacesJujutsu, base)
 	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
 	ctx := context.Background()
 	before, upstream, op := conflictedDrift(t, f, d, stream)

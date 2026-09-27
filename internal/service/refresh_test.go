@@ -92,7 +92,7 @@ func awaitRefresh(t *testing.T, f *shedFixture) trace.OperationRecord {
 	return trace.OperationRecord{}
 }
 
-func TestRefreshResultFollowsSlowLibrarianTurn(t *testing.T) {
+func TestRefreshResultWaitsForLibrarianTurn(t *testing.T) {
 	t.Parallel()
 	f, _ := refreshFixture(t, "# Internal\n\nPrevious project knowledge.\n\nTrace snapshots require a clean worktree.\n", false)
 	defer f.stop(t)
@@ -112,7 +112,7 @@ func TestRefreshResultFollowsSlowLibrarianTurn(t *testing.T) {
 		return previous(ctx, req, verified, tools)
 	}
 	f.engine.mu.Unlock()
-	stream, _ := f.builtAs(t, "refresh-in-flight")
+	stream := f.seedBuilding(t, "refresh-in-flight", validPlan)
 	f.awaitMerged(t, stream, "resume")
 	select {
 	case <-entered:
@@ -130,9 +130,25 @@ func TestRefreshResultFollowsSlowLibrarianTurn(t *testing.T) {
 	if pending == nil || pending.Claim == nil || !pending.EffectStarted || pending.Result != nil {
 		t.Fatalf("expected an in-flight refresh: %+v", ops)
 	}
-	// Keep the effect in flight past the former short polling deadline.
-	timer := time.AfterFunc(21*time.Second, func() { release <- struct{}{} })
-	defer timer.Stop()
+	// Reconciliation must leave the running refresh in flight without
+	// requesting a second one or treating its missing result as a failure.
+	r := &refresher{extractor: &extractor{s: f.s, repository: f.repository()}}
+	must(t, r.Pass(context.Background()))
+	again, err := f.repository().Operations(librarianWorkstream(f.project))
+	must(t, err)
+	refreshes := 0
+	for _, op := range again {
+		if op.Operation.Action == RefreshAction {
+			refreshes++
+			if op.Operation.ID != pending.Operation.ID || op.Result != nil {
+				t.Fatalf("running refresh changed: %+v", op)
+			}
+		}
+	}
+	if refreshes != 1 {
+		t.Fatalf("running refresh has %d operations", refreshes)
+	}
+	release <- struct{}{}
 	op := awaitRefresh(t, f)
 	if op.Operation.ID != pending.Operation.ID || op.Result.Outcome != "succeeded" {
 		t.Fatalf("in-flight refresh did not reconcile: %+v", op)
@@ -143,7 +159,7 @@ func TestLandedLearningsRefreshKnowledgeAndSurviveRestart(t *testing.T) {
 	t.Parallel()
 	f, masons := refreshFixture(t, "# Internal\n\nPrevious project knowledge.\n\nTrace snapshots require a clean worktree.\n", false)
 	defer f.stop(t)
-	stream, _ := f.builtAs(t, "refresh-success")
+	stream := f.seedBuilding(t, "refresh-success", validPlan)
 	f.awaitMerged(t, stream, "resume")
 	op := awaitRefresh(t, f)
 	if op.Result.Outcome != "succeeded" {
@@ -208,7 +224,7 @@ func TestRefreshRequiresRecordedLanding(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
 	masons.play[masonTurnID("resume")] = reportDone("Built")
-	stream, _ := f.builtAs(t, "refresh-before-landing")
+	stream := f.seedBuilding(t, "refresh-before-landing", validPlan)
 	f.awaitUnit(t, stream, "resume", UnitReviewing)
 	r := &refresher{extractor: &extractor{s: f.s, repository: f.repository()}}
 	must(t, r.Pass(context.Background()))
@@ -222,6 +238,7 @@ func TestRefreshRequiresRecordedLanding(t *testing.T) {
 }
 
 func TestFailedRefreshPreservesKnowledge(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, output string
 		fail         bool
@@ -231,7 +248,7 @@ func TestFailedRefreshPreservesKnowledge(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f, _ := refreshFixture(t, tc.output, tc.fail)
 			defer f.stop(t)
-			stream, _ := f.builtAs(t, "refresh-"+tc.name)
+			stream := f.seedBuilding(t, "refresh-"+tc.name, validPlan)
 			f.awaitMerged(t, stream, "resume")
 			op := awaitRefresh(t, f)
 			if op.Result.Outcome != "failed" {

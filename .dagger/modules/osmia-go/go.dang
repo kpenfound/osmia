@@ -587,6 +587,9 @@ type GoModule {
         # -count=1 keeps go test from recording every file the tests touch
         # for its result cache and reading that log back after each package:
         # the service tests' log outgrows the engine's memory.
+        # Temporary repositories live in memory for this test process. Service
+        # restarts still reopen their files; container-layer fsync is expensive.
+        .withMountedTemp("/tmp")
         .withExec(["otelgotest", "-count=1", "-timeout=30m", "./..."], experimentalPrivilegedNesting: true)
     }
   }
@@ -733,6 +736,9 @@ type GoDirectory {
         # -count=1 keeps go test from recording every file the tests touch
         # for its result cache and reading that log back after each package:
         # the service tests' log outgrows the engine's memory.
+        # Temporary repositories live in memory for this test process. Service
+        # restarts still reopen their files; container-layer fsync is expensive.
+        .withMountedTemp("/tmp")
         .withExec(["otelgotest", "-count=1", "-timeout=30m"], experimentalPrivilegedNesting: true)
     }
   }

@@ -1,6 +1,6 @@
-# M2 hand-in demonstration
+# Hand-in demonstration
 
-`TestM2HandInToSketchedPlan` in `internal/service/handover_test.go` takes
+`TestHandInToSketchedPlan` in `internal/service/handover_test.go` takes
 handed material to a validated feature spec and plan. It drives the
 production service through its local API client: project registration,
 hand-in, status. The architect's engine, the chief of staff's engine, the MCP
@@ -17,7 +17,8 @@ as part of `dagger check`. To run it alone:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
-  with-exec --args=go,test,-count=1,-run,TestM2HandInToSketchedPlan,-v,./internal/service \
+  with-mounted-temp --path /tmp \
+  with-exec --args=go,test,-count=1,-run,TestHandInToSketchedPlan,-v,./internal/service \
   combined-output
 ```
 

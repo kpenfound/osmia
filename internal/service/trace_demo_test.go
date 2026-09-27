@@ -14,9 +14,10 @@ import (
 	"github.com/kpenfound/osmia/internal/plan"
 )
 
-// TestM3TraceNavigationDemonstration follows one local workstream through
+// TestTraceNavigationDemonstration follows one local workstream through
 // unfinished work and delivery using both the API and the command line.
-func TestM3TraceNavigationDemonstration(t *testing.T) {
+func TestTraceNavigationDemonstration(t *testing.T) {
+	t.Parallel()
 	f := newWalkFixture(t)
 	f.sealed()
 	f.buildA()

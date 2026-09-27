@@ -1,6 +1,6 @@
-# M6 Jujutsu recovery demonstration
+# Jujutsu recovery demonstration
 
-`TestM6JujutsuRecoveryDemonstration` in
+`TestJujutsuRecoveryDemonstration` in
 `internal/service/jujutsu_recovery_demo_test.go` takes one workstream on
 [Jujutsu workspaces](service.md#workspace-backends) from hand-in to an
 owner-approved pull request through the three events Jujutsu workspaces
@@ -80,9 +80,10 @@ its test container. To run just the demonstration inside Dagger:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
+  with-mounted-temp --path /tmp \
   with-exec --args=sh,-c,'curl -fsSL https://github.com/jj-vcs/jj/releases/download/v0.45.1/jj-v0.45.1-$(uname -m)-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin ./jj' \
   with-env-variable --name=OSMIA_REQUIRE_JJ --value=1 \
-  with-exec --args=go,test,-count=1,-run,TestM6JujutsuRecoveryDemonstration,-v,./internal/service \
+  with-exec --args=go,test,-count=1,-run,TestJujutsuRecoveryDemonstration,-v,./internal/service \
   combined-output
 ```
 

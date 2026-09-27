@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -82,6 +83,8 @@ func (f *shedFixture) landedCommits(t *testing.T, stream config.WorkstreamID, ba
 // merges.
 func (f *shedFixture) awaitMerged(t *testing.T, stream config.WorkstreamID, unit string) {
 	t.Helper()
+	wait, close := serviceChanges(t, f.s)
+	defer close()
 	deadline := time.Now().Add(demoTimeout)
 	for {
 		got, err := f.repository().Workflow(stream, trace.UnitSubject(unit))
@@ -94,7 +97,7 @@ func (f *shedFixture) awaitMerged(t *testing.T, stream config.WorkstreamID, unit
 			data, _ := json.MarshalIndent(landOperations(t, f.repository(), stream), "", "  ")
 			t.Fatalf("unit %s of %s is %q, never merged; landings %s", unit, stream, got.Value, data)
 		}
-		time.Sleep(50 * time.Millisecond)
+		wait()
 	}
 }
 
@@ -195,33 +198,34 @@ func TestInterruptedLandingIsReconciled(t *testing.T) {
 	for _, step := range []string{"land-committing", "land-committed", "land-advanced", "land-recorded"} {
 		t.Run(step, func(t *testing.T) {
 			t.Parallel()
-			f, masons := newLandingFixture(t, independentPlan)
-			defer f.stop(t)
-			crashed := make(chan struct{}, 1)
+			f, stream, repository := newReviewFixture(t, "interrupted-landing")
+			approveDirectly(t, f.s, repository, stream, "resume", "spec#1")
+			lands := &foreman{masons: newMasonController(f.s, repository)}
+			ctx := context.Background()
+			must(t, lands.Pass(ctx))
+			crashed := false
 			f.s.boundary = func(name string) error {
-				if name == step && len(crashed) == 0 {
-					crashed <- struct{}{}
+				if name == step && !crashed {
+					crashed = true
 					return errors.New("crash")
 				}
 				return nil
 			}
-			stream, _ := f.builtAs(t, "interrupted")
-			f.awaitMerged(t, stream, "resume")
-			masons.check(t)
-			if len(crashed) != 1 {
+			controller, err := reconcile.New(repository, reconcile.Options{
+				Worker: "landing-test", Now: f.clock.Now, RetryDelay: time.Second,
+				Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: lands},
+				Hold:     func(_ config.WorkstreamID, op coreadapter.Operation) bool { return op.Action != LandAction },
+			})
+			must(t, err)
+			must(t, controller.Pass(ctx))
+			if !crashed {
 				t.Fatal("the landing never reached " + step)
 			}
-			deadline := time.Now().Add(demoTimeout)
-			var ops []trace.OperationRecord
-			for {
-				ops = landOperations(t, f.repository(), stream)
-				if len(ops) == 1 && ops[0].Result != nil {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("landing operations %+v", ops)
-				}
-				time.Sleep(50 * time.Millisecond)
+			jump(f.clock, f.clock.Now().Add(time.Second))
+			must(t, controller.Pass(ctx))
+			ops := landOperations(t, repository, stream)
+			if len(ops) != 1 || ops[0].Result == nil {
+				t.Fatalf("landing operations %+v", ops)
 			}
 			retries := 0
 			var observations []coreadapter.Observation
@@ -242,7 +246,7 @@ func TestInterruptedLandingIsReconciled(t *testing.T) {
 			if len(observations) != 2 || (observations[1].State == coreadapter.EffectCompleted) != (step == "land-recorded") || !strings.Contains(observations[1].Evidence, observed[step]) {
 				t.Fatalf("the retry observed %+v", observations)
 			}
-			_, result := approvedReview(t, f.repository(), stream, "resume")
+			_, result := approvedReview(t, repository, stream, "resume")
 			commits := f.landedCommits(t, stream, result.Identity.Candidate.BaseRevision)
 			if len(commits) != 1 {
 				t.Fatalf("the feature branch gained %d commits: %v", len(commits), commits)
@@ -259,7 +263,7 @@ func TestInterruptedLandingIsReconciled(t *testing.T) {
 			if len(merged) != 1 || len(landed) != 1 {
 				t.Fatalf("merged %v, landed %v", merged, landed)
 			}
-			docs, err := trace.Read[trace.Document](f.repository(), stream)
+			docs, err := trace.Read[trace.Document](repository, stream)
 			must(t, err)
 			var landing UnitLanding
 			for _, d := range docs {
@@ -309,35 +313,21 @@ func approveDirectly(t *testing.T, s *Service, repository *trace.Repository, str
 	}
 }
 
-// newApprovedFixture builds independentPlan with both units' masons
-// reporting done, stops the service once both are reviewing and approves
-// both with the service stopped. It returns the workstream and the trace,
-// open.
+// newApprovedFixture creates two units with completed mason turns, candidate
+// snapshots and approved reviews. It returns the stopped service and open trace.
 func newApprovedFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
 	return newApprovedFixtureOn(t, key, config.WorkspacesGit)
 }
 
-// newApprovedFixtureOn is newApprovedFixture whose workstream is handed in
-// on the workspace backend given.
+// newApprovedFixtureOn creates approved units on the given workspace backend.
 func newApprovedFixtureOn(t *testing.T, key, backend string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
-	f, masons := newMasonFixtureOn(t, backend, "masons = 1\n", independentPlan, "")
-	masons.play[masonTurnID("resume")] = reportDone("Built")
-	masons.play[masonTurnID("dedupe")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-		recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built", "criteria": []any{criterionArgs(dedupeReport)}})
-		if err != nil || !recorded {
-			return fmt.Errorf("done refused: %q %v", reason, err)
-		}
-		return nil
-	}
-	stream, _ := f.builtAs(t, key)
-	f.awaitUnit(t, stream, "resume", UnitReviewing)
-	f.awaitUnit(t, stream, "dedupe", UnitReviewing)
-	masons.check(t)
-	f.stop(t)
-	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", independentPlan, "")
+	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	stream, repository := seedBuild(t, f, key, independentPlan, backend, base)
+	seedReview(t, f, repository, stream, "resume", resumeReport)
+	seedReview(t, f, repository, stream, "dedupe", dedupeReport)
 	approveDirectly(t, f.s, repository, stream, "resume", "spec#1")
 	approveDirectly(t, f.s, repository, stream, "dedupe", "spec#2")
 	return f, stream, repository

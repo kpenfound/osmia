@@ -1440,7 +1440,7 @@ func report(w io.Writer, err error, project bool) int {
 	case service.Conflict:
 		msg = "runtime conflict; restore externally edited state or restart the service"
 	case service.Unsupported:
-		msg = "operation unavailable in M1; use osmia --help for supported commands"
+		msg = "operation unavailable; use osmia --help for supported commands"
 	case service.RestartRequired:
 		msg = "restart required; stop the service and run osmia serve again"
 	case service.Unavailable:

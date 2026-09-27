@@ -1,8 +1,8 @@
-# M2 exit demonstration
+# Plan ratification demonstration
 
-The M2 exit condition is: an owner can hand in a design and ratify a buildable
-plan using local context. `TestM2HandInToRatifiedPlan` in
-`internal/service/m2_exit_test.go` shows it through the service's local API
+An owner can hand in a design and ratify a buildable
+plan using local context. `TestHandInToRatifiedPlan` in
+`internal/service/plan_ratification_demo_test.go` shows it through the service's local API
 client, which is what the `osmia` commands call. The service is wired the way
 `osmia serve` wires it: one engine runs the librarian, the architect, the
 committee and the chief of staff. That engine is core's fake enforcer driving
@@ -20,7 +20,8 @@ as part of `dagger check`. To run it alone:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
-  with-exec --args=go,test,-count=1,-run,TestM2HandInToRatifiedPlan,-v,./internal/service \
+  with-mounted-temp --path /tmp \
+  with-exec --args=go,test,-count=1,-run,TestHandInToRatifiedPlan,-v,./internal/service \
   combined-output
 ```
 

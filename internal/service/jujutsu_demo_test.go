@@ -39,13 +39,13 @@ type delivered struct {
 	Commits []forkCommit
 }
 
-// TestM6JujutsuWorkspacesDemonstration takes the same handed-in feature to an
+// TestJujutsuWorkspacesDemonstration takes the same handed-in feature to an
 // owner-approved pull request twice through the local API, once with
 // workspaces = "git" and once with workspaces = "jujutsu" and the jj on PATH.
 // The fork receives the same plain Git branch and commits from both, status
 // reports each run's backend, and no .jj ever appears in the owner's clone.
-// See docs/m6-jujutsu-workspaces.md.
-func TestM6JujutsuWorkspacesDemonstration(t *testing.T) {
+// See docs/jujutsu-workspaces-demonstration.md.
+func TestJujutsuWorkspacesDemonstration(t *testing.T) {
 	if _, err := exec.LookPath("jj"); err != nil {
 		if os.Getenv("OSMIA_REQUIRE_JJ") != "" {
 			t.Fatalf("jj is required but not on PATH: %v", err)

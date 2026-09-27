@@ -43,6 +43,7 @@ type Browser {
         ws.directory("/", exclude: [".git/**", ".bees/**", ".dagger/**"]),
       )
       .withWorkdir("/src")
+      .withMountedTemp("/tmp")
       .withExec(["go", "test", "-count=1", "-timeout=10m", "-run", "^TestBrowser", "-v", "./internal/service"])
       .sync
     null

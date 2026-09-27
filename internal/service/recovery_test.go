@@ -16,6 +16,7 @@ import (
 )
 
 func TestStartupRecoversClaimedAndUnclaimedSessionsForEveryRole(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := fixtureAt(t, t.TempDir())
 	cfg, err := config.Load(opts.Config)
@@ -99,6 +100,7 @@ func TestStartupRecoversClaimedAndUnclaimedSessionsForEveryRole(t *testing.T) {
 }
 
 func TestServiceStartRunsChiefInterruptionTurn(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := fixtureAt(t, t.TempDir())
 	cfg, err := config.Load(opts.Config)
@@ -139,6 +141,7 @@ func TestServiceStartRunsChiefInterruptionTurn(t *testing.T) {
 }
 
 func TestStartupPreservesHardPausedTurn(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := fixtureAt(t, t.TempDir())
 	cfg, err := config.Load(opts.Config)

@@ -17,9 +17,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestM3SequentialImplementation demonstrates the M3 build through the local
-// API with a fake mason. See docs/m3-exit.md.
-func TestM3SequentialImplementation(t *testing.T) {
+// TestSequentialImplementation demonstrates sequential implementation through the local
+// API with a fake mason. See docs/implementation-demonstration.md.
+func TestSequentialImplementation(t *testing.T) {
 	t.Parallel()
 	p := &faults{}
 	f, fake, _ := newAskingMasonFixture(t, 1, validPlan, p)

@@ -120,10 +120,10 @@ func landingByUnit(t *testing.T, repository *trace.Repository, stream config.Wor
 	return out
 }
 
-// TestM3LandingDemonstration lands three units of one workstream through
+// TestLandingDemonstration lands three units of one workstream through
 // the local API and trace with fake masons, reviewer and librarian. See
-// docs/m3-exit.md.
-func TestM3LandingDemonstration(t *testing.T) {
+// docs/implementation-demonstration.md.
+func TestLandingDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, masons := newMasonFixture(t, 1, landingPlan)

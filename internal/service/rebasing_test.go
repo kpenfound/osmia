@@ -21,28 +21,32 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-// newRebaseFixture builds independentPlan with masons that never report
-// done, stops the service once resume's mason ran, and starts dedupe with the
-// service stopped, so both units are implementing: resume with its turn
-// completed and dedupe with its first turn queued. It returns the workstream
-// and the trace, open.
+// newRebaseFixture creates two implementing units: resume has completed its
+// first turn without reporting done, and dedupe has its first turn queued.
 func newRebaseFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
-	f, masons := newMasonFixture(t, 1, independentPlan)
-	stream, _ := f.builtAs(t, key)
-	f.awaitMasonRan(t, stream, "resume")
-	masons.check(t)
-	f.stop(t)
-	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	f, _ := newMasonFixture(t, 1, independentPlan)
+	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	stream, repository := seedBuild(t, f, key, independentPlan, config.WorkspacesGit, base)
 	m := newMasonController(f.s, repository)
-	b, found, err := m.read(stream)
-	must(t, err)
-	if !found {
-		t.Fatal("the workstream is not building")
-	}
-	if started, _, err := m.start(context.Background(), b, "dedupe"); err != nil || !started {
-		t.Fatalf("dedupe did not start: %v", err)
+	ctx := context.Background()
+	for _, unit := range []string{"resume", "dedupe"} {
+		b, found, err := m.read(stream)
+		must(t, err)
+		if !found {
+			t.Fatal("fixture workstream is not building")
+		}
+		started, blocked, err := m.start(ctx, b, unit)
+		must(t, err)
+		if !started || blocked {
+			t.Fatalf("fixture unit %s did not start", unit)
+		}
+		if unit == "resume" {
+			w, _, err := newUnitWorkspaces(f.s.cfg, repository).open(ctx, stream, unit)
+			must(t, err)
+			must(t, os.WriteFile(filepath.Join(w.Path, masonWrote), []byte("package trace\n"), 0644))
+			captureMasonTurn(t, f, repository, stream, unit, nil)
+		}
 	}
 	return f, stream, repository
 }
@@ -121,6 +125,13 @@ func latestReport(t *testing.T, repository *trace.Repository, stream config.Work
 // finished turn that reported the unit done.
 func completeMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, criterion CriterionReport) trace.QueuedTurn {
 	t.Helper()
+	content, err := json.Marshal(MasonReport{Outcome: "Built", Criteria: []CriterionReport{criterion}})
+	must(t, err)
+	return captureMasonTurn(t, f, repository, stream, unit, &coreadapter.Outcome{Status: masonDone, Report: string(content), Card: &exampleCard})
+}
+
+func captureMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome *coreadapter.Outcome) trace.QueuedTurn {
+	t.Helper()
 	ctx := context.Background()
 	agent := masonAgent(unit)
 	th, err := repository.Thread(stream, agent)
@@ -129,12 +140,10 @@ func completeMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repositor
 	directory := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), agent, token)
 	q, err := repository.ClaimTurn(ctx, stream, agent, token, directory, f.clock.Now())
 	must(t, err)
-	content, err := json.Marshal(MasonReport{Outcome: "Built", Criteria: []CriterionReport{criterion}})
-	must(t, err)
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.clock.Now()
 	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: agent, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision,
-		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: token}, SessionDirectory: directory, StartedAt: q.Claim.At, Outcome: &coreadapter.Outcome{Status: masonDone, Report: string(content), Card: &exampleCard}}}
+		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: token}, SessionDirectory: directory, StartedAt: q.Claim.At, FinalResponse: "Built", Outcome: outcome}}
 	must(t, repository.CaptureTurn(ctx, q.Claim.Token, response))
 	must(t, repository.CompleteTurn(ctx, stream, agent, q.Request.TurnID, q.Claim.Token, f.clock.Now()))
 	return q

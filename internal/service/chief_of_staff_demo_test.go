@@ -27,10 +27,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The M2 chief-of-staff demonstration: on an onboarded project, the owner
+// The chief-of-staff demonstration: on an onboarded project, the owner
 // talks to a workstream's chief of staff, fake workers ask questions, the
 // chief of staff answers one and escalates another, and the owner's ruling
-// reaches the asker across a service restart. See docs/m2-chief-of-staff.md.
+// reaches the asker across a service restart. See docs/chief-of-staff-demonstration.md.
 
 // chiefDemoRoles runs every role of the demonstration in a container, the
 // only sandbox the fake engine's boundary check accepts, with one mason slot.
@@ -68,7 +68,7 @@ var chiefDemoStatus = StatusView{
 // chiefDemoAgents maps each worker thread of the demonstration to its agent.
 var chiefDemoAgents = map[string]string{demoThread: demoAgent, "thread_mason2": "agent_mason2", "thread_reviewer": "agent_reviewer"}
 
-func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
+func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 

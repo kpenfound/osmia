@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,8 +19,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestM3ExactReviewDemonstration exercises review through the local API and trace.
-func TestM3ExactReviewDemonstration(t *testing.T) {
+// TestExactReviewDemonstration exercises review through the local API and trace.
+func TestExactReviewDemonstration(t *testing.T) {
 	t.Parallel()
 	p := &faults{}
 	f, masons, chief := newAskingMasonFixture(t, 1, independentPlan, p)
@@ -48,6 +49,18 @@ func TestM3ExactReviewDemonstration(t *testing.T) {
 			return &agent.Result{ClaudeID: req.Name, ResultText: "Revised", SessionDir: req.SessionDir, NumTurns: 1}, nil
 		}
 		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
+			listed, err := tools.ListTools(ctx, nil)
+			if err != nil {
+				return nil, err
+			}
+			var names []string
+			for _, tool := range listed.Tools {
+				names = append(names, tool.Name)
+			}
+			slices.Sort(names)
+			if !slices.Equal(names, []string{questions.AmendTool, questions.AskTool, "file_read", verdictTool}) {
+				return nil, fmt.Errorf("reviewer tools %+v", listed.Tools)
+			}
 			identity, err := reviewIdentityInPrompt(req.Prompt)
 			if err != nil {
 				return nil, err
@@ -160,7 +173,7 @@ func TestM3ExactReviewDemonstration(t *testing.T) {
 		t.Fatalf("missing footprint rejection, exact approval or ruling: blocked %t, approved %t", footprintBlocked, approved)
 	}
 	thread := f.thread(t, stream, reviewerAgent("resume"))
-	if len(thread.Turns) != 4 || thread.Turns[1].Status() != questions.Waiting {
+	if thread.Identity.Role != reviewerRole || len(thread.Turns) != 4 || thread.Turns[1].Status() != questions.Waiting {
 		t.Fatalf("reviewer requests and responses: %+v", thread.Turns)
 	}
 	masons.check(t)

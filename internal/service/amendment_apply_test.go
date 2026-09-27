@@ -87,6 +87,7 @@ func approveAmendment(t *testing.T, f *shedFixture, repository *trace.Repository
 }
 
 func TestApprovedAmendmentUsesCurrentDriftBase(t *testing.T) {
+	t.Parallel()
 	f, stream, repository := newApprovedFixture(t, "drifted-amendment")
 	defer repository.Close()
 	a, req := approveAmendment(t, f, repository, stream, amendedSpec, independentPlan)
@@ -105,6 +106,7 @@ func TestApprovedAmendmentUsesCurrentDriftBase(t *testing.T) {
 }
 
 func TestApprovedAmendmentWithChangedSealedDocumentsIsUnapplied(t *testing.T) {
+	t.Parallel()
 	for name, change := range map[string]func(*seal.Seal){
 		"spec": func(s *seal.Seal) { s.Revision.Spec++; s.SpecHash = seal.SpecHash(amendedSpec) },
 		"plan": func(s *seal.Seal) { s.Revision.Plan++ },

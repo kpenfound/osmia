@@ -210,7 +210,7 @@ func TestAPIErrorsAreSafe(t *testing.T) {
 		hint string
 	}{
 		{service.Malformed, 4, "versions"}, {service.Validation, 4, "IDs"}, {service.Conflict, 5, "restart"},
-		{service.Unsupported, 5, "M1"}, {service.RestartRequired, 5, "restart required"}, {service.Unavailable, 3, "osmia serve"}, {service.Internal, 5, "status"},
+		{service.Unsupported, 5, "supported commands"}, {service.RestartRequired, 5, "restart required"}, {service.Unavailable, 3, "osmia serve"}, {service.Internal, 5, "status"},
 	} {
 		response = tc.code
 		code, out, diag := invoke(t, root, "status", "--socket", "fake.sock")

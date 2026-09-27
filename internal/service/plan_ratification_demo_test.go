@@ -27,13 +27,13 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The M2 exit demonstration: on an onboarded project, the owner hands in four
+// The plan ratification demonstration: on an onboarded project, the owner hands in four
 // designs. One is debated to consensus after a redraft, one reaches the round
 // cap with a charter veto the owner overrules, one is handed in with debate
 // skipped and one, also handed in with debate skipped, is abandoned. Each
 // ratified plan is sealed with a feature branch on the clone, across a restart
 // in the middle of one sealing, and a question a committee member asks during
-// the shed is answered through the inbox. See docs/m2-exit.md.
+// the shed is answered through the inbox. See docs/plan-ratification-demonstration.md.
 
 // exitDemoRoles runs every role in a container, the only sandbox the fake
 // engine's boundary check accepts, with a committee of two and a cap of two
@@ -313,8 +313,9 @@ func (f *shedFixture) awaitRecoveredSeal(t *testing.T, stream config.WorkstreamI
 	}
 }
 
-// TestM2HandInToRatifiedPlan demonstrates the M2 exit: see docs/m2-exit.md.
-func TestM2HandInToRatifiedPlan(t *testing.T) {
+// TestHandInToRatifiedPlan demonstrates hand-in through ratification: see docs/plan-ratification-demonstration.md.
+func TestHandInToRatifiedPlan(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts, clone, engine, sessions, clock := newArchitectOptions(t)
 	home := filepath.Dir(clone)

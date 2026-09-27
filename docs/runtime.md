@@ -91,7 +91,7 @@ repository operation, not live reload orchestration.
 `Snapshot` returns the entire stored state plus reference diagnostics. `Effective`
 returns valid pauses and priorities, and every configured role binding with valid
 runtime overrides applied. Both return independent copies. Clearing a profile
-reveals the current configured binding. M1 configuration defines no pause or
+reveals the current configured binding. Declarative configuration defines no pause or
 priority settings, so their defaults are unpaused and no explicit ordering.
 The effective pause list preserves all scopes; consumers can see every applicable
 pause rather than losing a factory pause behind a workstream record.

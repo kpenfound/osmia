@@ -3,10 +3,10 @@
 ## Design and scope
 
 - Read [docs/design.md](docs/design.md) before proposing, planning or implementing a feature. It is the source of truth; issues describe outcomes and do not override it.
-- Follow the milestone order in the design and the active `filter.milestone` in `bees.toml`. Leave work-item decomposition to the development factory.
+- Follow the feature dependencies in the design and the active scope in `bees.toml`. Leave work-item decomposition to the development factory.
 - Keep behavior changes and the design consistent. Surface a conflict with the design instead of silently changing product scope.
 - Repository bootstrap, the Go module, initial Dagger checks and factory configuration are already initialized. Do not create work items to repeat them.
-- Hearsay is optional and scheduled last. File-based context must support every earlier milestone.
+- Hearsay is optional. File-based context must support the complete workflow without it.
 
 ## Architecture guardrails
 
@@ -38,6 +38,7 @@
   dagger core container from --address golang:1.26-bookworm \
     with-directory --path /src --source . --exclude .git,.bees \
     with-workdir --path /src \
+    with-mounted-temp --path /tmp \
     with-exec --args=sh,-c,'curl -fsSL https://github.com/jj-vcs/jj/releases/download/v0.45.1/jj-v0.45.1-$(uname -m)-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin ./jj' \
     with-env-variable --name=OSMIA_REQUIRE_JJ --value=1 \
     with-exec --args=go,test,-count=1,-run,'TestA|TestB',-v,./internal/service \
@@ -62,5 +63,6 @@
 ## Comments and documentation
 
 - Comments and documentation always represent the current state. Its never helpful to reference a change in behavior or how things used to work
+- Name code, tests, documentation and user-facing messages after product features and behavior, without development phase labels.
 - Comments and documentation should never reference github issues, pull requests, or commits
 - Comment blocks can describe a function API or specific behavior of nearby code, but never a whole feature. That belongs in actual documentation

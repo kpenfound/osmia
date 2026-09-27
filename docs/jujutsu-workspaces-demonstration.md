@@ -1,6 +1,6 @@
-# M6 Jujutsu workspaces demonstration
+# Jujutsu workspaces demonstration
 
-`TestM6JujutsuWorkspacesDemonstration` in
+`TestJujutsuWorkspacesDemonstration` in
 `internal/service/jujutsu_demo_test.go` takes the same handed-in feature from
 hand-in to an owner-approved pull request twice through the service's local
 API client, the same API the `osmia` commands use: once on Git worktrees and
@@ -56,7 +56,7 @@ differ, and those differ between any two runs.
 
 How Jujutsu workspaces recover from a stopped mason turn, a restart in the
 middle of a landing and conflicting upstream drift is the
-[M6 Jujutsu recovery demonstration](m6-jujutsu-recovery.md).
+[Jujutsu recovery demonstration](jujutsu-recovery-demonstration.md).
 
 ## Running it
 
@@ -67,9 +67,10 @@ its test container. To run just the demonstration inside Dagger:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
+  with-mounted-temp --path /tmp \
   with-exec --args=sh,-c,'curl -fsSL https://github.com/jj-vcs/jj/releases/download/v0.45.1/jj-v0.45.1-$(uname -m)-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin ./jj' \
   with-env-variable --name=OSMIA_REQUIRE_JJ --value=1 \
-  with-exec --args=go,test,-count=1,-run,TestM6JujutsuWorkspacesDemonstration,-v,./internal/service \
+  with-exec --args=go,test,-count=1,-run,TestJujutsuWorkspacesDemonstration,-v,./internal/service \
   combined-output
 ```
 

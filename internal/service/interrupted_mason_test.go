@@ -118,7 +118,7 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 			}
 			f.engine.mu.Unlock()
 
-			stream, _ := f.builtAs(t, "stopped-"+backend)
+			stream := f.seedBuilding(t, "stopped-"+backend, validPlan)
 			if got := backendOf(t, f, stream); got != backend {
 				t.Fatalf("the workstream is on %s", got)
 			}
@@ -188,7 +188,7 @@ func TestTimedOutMasonAttemptKeepsItsEditsAndTheRetryNamesThem(t *testing.T) {
 			}
 			f.engine.mu.Unlock()
 
-			stream, _ := f.builtAs(t, "timed-out-"+backend)
+			stream := f.seedBuilding(t, "timed-out-"+backend, validPlan)
 			if got := backendOf(t, f, stream); got != backend {
 				t.Fatalf("the workstream is on %s", got)
 			}
@@ -223,7 +223,7 @@ func TestMasonTurnInterruptedByARestartKeepsItsEditsAndTheContinuationNamesThem(
 			t.Parallel()
 			f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", validPlan, "")
 			defer func() { f.stop(t) }()
-			stream := f.builtPaused(t, runtime.Target{Scope: "factory"}, "restart-"+backend)[0]
+			stream := f.seedBuildingPaused(t, runtime.Target{Scope: "factory"}, validPlan, "restart-"+backend)[0]
 			if got := backendOf(t, f, stream); got != backend {
 				t.Fatalf("the workstream is on %s", got)
 			}
@@ -302,7 +302,7 @@ func TestJujutsuRebaseCarriesTheEditsOfAStoppedMasonTurn(t *testing.T) {
 		return &agent.Result{ClaudeID: "session-stopped", ResultText: "Half built", SessionDir: req.SessionDir, NumTurns: 1, IsError: true, Signal: 15}, nil
 	}
 	f.engine.mu.Unlock()
-	stream, _ := f.builtAs(t, "stopped-rebase")
+	stream := f.seedBuilding(t, "stopped-rebase", validPlan)
 	select {
 	case <-entered:
 	case <-time.After(demoTimeout):

@@ -21,7 +21,7 @@ func TestCompletedMasonTurnFinishesAfterRestart(t *testing.T) {
 	t.Parallel()
 	f, _ := newMasonFixture(t, 1, validPlan)
 	defer func() { f.stop(t) }()
-	stream := f.builtPaused(t, runtime.Target{Scope: "factory"}, "finish-recovery")[0]
+	stream := f.seedBuildingPaused(t, runtime.Target{Scope: "factory"}, validPlan, "finish-recovery")[0]
 	f.stop(t)
 	ctx := context.Background()
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
@@ -85,7 +85,7 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	t.Parallel()
 	f, _ := newMasonFixture(t, 1, validPlan)
 	defer func() { f.stop(t) }()
-	stream := f.builtPaused(t, runtime.Target{Scope: "factory"}, "recover")[0]
+	stream := f.seedBuildingPaused(t, runtime.Target{Scope: "factory"}, validPlan, "recover")[0]
 	f.stop(t)
 	ctx := context.Background()
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
@@ -178,13 +178,20 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 // A unit started just before a stop, its mason's first turn queued and not
 // yet run, is recovered from the trace before anything starts: it takes a
 // mason slot, the one slot left goes to one more unit, and its turn runs
-// once. Later restarts start and run nothing more.
+// once. Later restarts preserve the occupied slots and first-turn identities.
 func TestRestartCountsImplementingUnitsBeforeStarting(t *testing.T) {
 	t.Parallel()
 	f, masons := newParallelMasonFixture(t, 2, 3, disjointPlan)
+	// Keep upload implementing after its first turn so the restart exercises
+	// occupied capacity throughout the assertions.
+	clarification := masonAgent("upload") + "-clarify-1"
+	masons.play[clarification] = failMasonTurn
+	f.engine.mu.Lock()
+	f.engine.turns[clarification] = masons.turn
+	f.engine.mu.Unlock()
 	defer func() { f.stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
-	stream := f.builtPaused(t, factory, "start-recovery")[0]
+	stream := f.seedBuildingPaused(t, factory, disjointPlan, "start-recovery")[0]
 	f.stop(t)
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
@@ -208,13 +215,13 @@ func TestRestartCountsImplementingUnitsBeforeStarting(t *testing.T) {
 		}
 		f.awaitMasonRan(t, stream, "resume")
 		f.awaitMasonRan(t, stream, "upload")
-		settle()
+		f.awaitDeferral(t, stream, "audit", DeferCapacity)
 		masons.check(t)
 		if got := starts(t, f, stream); !slices.Equal(got, want) {
 			t.Fatalf("after restart %d, started %v, want %v", restart+1, got, want)
 		}
 		var ran []string
-		for _, req := range masons.requests(stream) {
+		for _, req := range implementationRuns(masons, stream) {
 			ran = append(ran, req.Name)
 		}
 		if slices.Sort(ran); !slices.Equal(ran, []string{masonTurnID("resume"), masonTurnID("upload")}) {

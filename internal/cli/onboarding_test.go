@@ -33,10 +33,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The M2 onboarding demonstration: a project is added from a local fixture
+// The project onboarding demonstration: a project is added from a local fixture
 // clone, a scripted fake librarian writes its knowledge base across a service
 // restart, the owner writes the charter, and the project's local context
-// resolves without any network. See docs/m2-onboarding.md.
+// resolves without any network. See docs/onboarding-demonstration.md.
 
 // onboardingEntities is the entity map the fake librarian writes. Entity IDs
 // name the kb/<subsystem>.md file holding their prose.
@@ -225,7 +225,7 @@ func onboardingStatus(t *testing.T, root string) service.ConfigResponse {
 	return st.Configuration
 }
 
-func TestM2ProjectOnboarding(t *testing.T) {
+func TestProjectOnboarding(t *testing.T) {
 	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
 		t.Setenv(name, "ghp_onboarding_credential_must_not_be_used")
 	}

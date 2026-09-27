@@ -1,4 +1,4 @@
-// Package config loads the declarative M1 configuration without creating state
+// Package config loads the declarative service configuration without creating state
 // or starting execution. A successful load is not an execution capability grant.
 package config
 
@@ -537,8 +537,10 @@ func knownKey(key toml.Key, project bool) bool {
 
 func unsupportedKey(key toml.Key) string {
 	switch key[0] {
-	case "hearsay", "hearsay_scope", "pause", "priority":
-		return "unsupported in M1; requires a later milestone"
+	case "hearsay", "hearsay_scope":
+		return "Hearsay integration is not supported"
+	case "pause", "priority":
+		return "runtime overrides belong in runtime.json; use osmia pause or osmia priority"
 	}
 	return "unknown configuration key"
 }
