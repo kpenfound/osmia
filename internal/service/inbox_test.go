@@ -605,7 +605,7 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 		Question: fmt.Sprintf("Deliver Resumable uploads? Final review 1 of commit %s shows evidence for every criterion.", report.Commit), Blocked: "Publishing the pull request.",
 		Answer: answer("delivery/"+string(assembled), "review", 1, "review_revision", 1, "commit", report.Commit, "draft_hash", presented.DraftHash)}
 	escalation := InboxEntry{Kind: InboxEscalation, Workstream: escalating, Number: 1, Batch: "escalation_1", Question: "Where should state live?", Blocked: "The unit.", Options: []string{"Files", "A database"},
-		Recommendation: "In files.", QuickReply: "In files.", OpenedAt: tick(1), Asked: []InboxQuestion{{ID: "1", AskedBy: demoAgent, Question: "Where does state live?"}}, Answer: answer("inbox/1")}
+		Recommendation: "In files.", QuickReply: "In files.", OpenedAt: tick(1), Asked: []InboxQuestion{{ID: "1", AskedBy: demoAgent, Question: "Where does state live?"}}, Answer: answer("inbox/1", "project", string(repository.Project()))}
 	ratification := InboxEntry{Kind: InboxRatification, Workstream: shedding, Revision: 2, OpenedAt: tick(2), Options: []string{"ratify"}, Asked: []InboxQuestion{},
 		Question: "Ratify spec.md revision 1 and plan.json revision 1? Debate ended after round 1: no objection stands", Blocked: "Sealing the spec and plan, and building the workstream.",
 		Recommendation: "ratify: nothing blocks, and 1 objection stands as advice on the record", Answer: answer("ratify/"+string(shedding), "spec", 1, "plan", 1)}
@@ -627,6 +627,9 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 		}
 		if want == nil {
 			want = []InboxEntry{}
+		}
+		for i := range want {
+			want[i].Project = repository.Project()
 		}
 		if !reflect.DeepEqual(got.Entries, want) {
 			t.Fatalf("%s: inbox\n%+v\nwant\n%+v", step, got.Entries, want)
