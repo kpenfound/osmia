@@ -67,7 +67,7 @@ func (p *page) gate(pattern string) *requestGate {
 
 // decisionCard is the selector of the page's card of an inbox entry.
 func decisionCard(e InboxEntry) string {
-	return fmt.Sprintf(`[data-decision="%s"] `, strings.Join([]string{e.Kind, string(e.Workstream), strconv.Itoa(e.Number), e.Unit, e.Amendment}, ":"))
+	return fmt.Sprintf(`[data-decision="%s"] `, strings.Join([]string{e.Kind, string(e.Project), string(e.Workstream), strconv.Itoa(e.Number), e.Unit, e.Amendment}, ":"))
 }
 
 // awaitGone waits until the page shows no card for the entry.
