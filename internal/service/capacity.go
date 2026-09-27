@@ -1,11 +1,15 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -36,10 +40,11 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) (*CapacityStatus, *Dia
 	var gated []scheduler.Gated
 	var ids []config.ProjectID
 	for _, p := range projects {
-		view := cfg.For(p.id)
-		if !view.HasProject() {
+		if !cfg.Active(p.id) && p.pipeline == nil {
 			continue
 		}
+		view := s.about(p.repository)
+		draining := !cfg.Active(p.id)
 		project, repository := p.id, p.repository
 		librarian := librarianWorkstream(project)
 		projectLimits := cfg.Capacity
@@ -48,7 +53,12 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) (*CapacityStatus, *Dia
 		if err != nil {
 			return nil, &Diagnostic{"capacity", Internal, fmt.Sprintf("cannot read the turns of project %s; check the trace repository", project)}
 		}
-		gated = append(gated, scheduler.Gated{Scheduler: dispatch, Holds: func(c scheduler.Candidate) (bool, error) { return s.holds(project, librarian, repository, c) }})
+		gated = append(gated, scheduler.Gated{Scheduler: dispatch, Holds: func(c scheduler.Candidate) (bool, error) {
+			if draining {
+				return true, nil
+			}
+			return s.holds(project, librarian, repository, c)
+		}})
 		ids = append(ids, project)
 	}
 	// The projects' passes take the shared slots one after another, so a
@@ -105,7 +115,7 @@ func (s *Service) providerUsage(state runtime.State, profiles map[string]Effecti
 	unreadable := &Diagnostic{"provider_usage", Internal, fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", cfg.Project.ID)}
 	costs := map[string][]trace.Cost{}
 	for _, p := range projects {
-		if !cfg.Active(p.id) {
+		if !cfg.Active(p.id) && p.pipeline == nil {
 			continue
 		}
 		unreadable = &Diagnostic{"provider_usage", Internal, fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", p.id)}
@@ -202,4 +212,40 @@ func providerSpend(costs []trace.Cost) (ProviderSpend, error) {
 		return ProviderSpend{}, err
 	}
 	return ProviderSpend{SpendUSD: spend.String(), UnknownCosts: spend.unknown, LowerBound: spend.unknown > 0}, nil
+}
+
+// capacity exposes the shared slot accounting without handing scheduling to a model.
+func (c *runtimeControls) capacity(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	return coreadapter.Tool{Name: "capacity", Effect: coreadapter.ToolRead, Description: "Read factory-wide role slot limits, usage, waiting work, and pauses. Limits are configured through config.toml and reload.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		var input map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return nil, err
+		}
+		if input == nil || len(input) != 0 {
+			return nil, errors.New("capacity accepts an empty object")
+		}
+		if _, _, err := repo.OwnerTurn(trace.ChiefOfStaff, scope); err != nil {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		s := c.service.Load()
+		if s == nil {
+			return nil, errors.New("capacity is unavailable")
+		}
+		list, _, api := s.statuses()
+		if api != nil {
+			return nil, api
+		}
+		slots, diagnostic := s.capacityStatus(list)
+		if diagnostic != nil {
+			return nil, errors.New(diagnostic.Message)
+		}
+		state, _ := s.effective()
+		return json.Marshal(struct {
+			Capacity *CapacityStatus `json:"capacity"`
+			Pauses   []runtime.Pause `json:"pauses"`
+		}{slots, state.Pauses})
+	}}
 }

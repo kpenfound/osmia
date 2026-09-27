@@ -384,19 +384,15 @@ func (z *sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if len(unresolved) > 0 {
 		return fail("the plan's footprints name what the entity map does not resolve: " + strings.Join(unresolved, ", "))
 	}
-	cfg := z.s.about(z.repository)
 	g, err := z.git(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	remote, err := g.Remote(ctx, cfg.Project.Upstream)
+	selected, err := z.selectedBase(ctx, stream, in.Seal, op.ID, g)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	fetched, err := g.Fetch(ctx, remote, cfg.Project.BaseBranch)
-	if err != nil {
-		return coreadapter.OperationResult{}, fmt.Errorf("fetch %s of %s: %w", cfg.Project.BaseBranch, remote, err)
-	}
+	remote, fetched := selected.Remote, selected.Commit
 	branch := featureBranch(stream)
 	base, exists, err := g.Branch(ctx, branch)
 	if err != nil {
@@ -406,12 +402,8 @@ func (z *sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		// A branch an earlier attempt created is the feature branch, and the
 		// commit it was created from is the seal. Any other branch of that
 		// name is not the service's to build on.
-		on, err := g.Ancestor(ctx, base, fetched)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		if !on {
-			return fail(fmt.Sprintf("the clone has a branch %s at %s that is not on %s/%s; it is not the service's feature branch", branch, base, remote, cfg.Project.BaseBranch))
+		if base != fetched {
+			return fail(fmt.Sprintf("the clone has a branch %s at %s that is not on %s/%s; it is not the service's feature branch", branch, base, remote, selected.Branch))
 		}
 	} else {
 		base = fetched
@@ -423,8 +415,9 @@ func (z *sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err := z.s.step("seal-branch-created"); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	selected.Commit = base
 	record := seal.Seal{Version: seal.Version, Seal: in.Seal, Round: in.Round, Revision: in.pin(), SpecHash: seal.SpecHash(spec.Content),
-		Base: seal.Base{Remote: remote, Branch: cfg.Project.BaseBranch, Commit: base}, Branch: branch, Workspace: ws.Directory(), Footprints: footprints}
+		Base: selected, Branch: branch, Workspace: ws.Directory(), Footprints: footprints}
 	// The branch stays whatever happens next. An abandonment up to here
 	// records nothing more; one that lands between this check and the
 	// record leaves seal.json on the abandoned workstream, and the move to
@@ -442,7 +435,7 @@ func (z *sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		return coreadapter.OperationResult{}, err
 	}
 	reason := fmt.Sprintf("sealed %s at %s of %s/%s (%s); feature branch %s is checked out in %s; the footprints of %s are recorded",
-		in.pin(), base, remote, cfg.Project.BaseBranch, record.SpecHash, branch, ws.Directory(), units(len(footprints)))
+		in.pin(), base, remote, selected.Branch, record.SpecHash, branch, ws.Directory(), units(len(footprints)))
 	h := z.header(RatifiedState, stream, op.ID, z.s.now())
 	_, err = z.repository.MoveFeatureState(ctx, h, feature.Value, RatifiedState, reason)
 	if err == nil {
@@ -561,7 +554,9 @@ func (a repositoryAdapter) Inspect(ctx context.Context, op coreadapter.Operation
 		return rebaser{a.lands}.Inspect(ctx, op)
 	case DriftAction:
 		return drifter{a.lands}.Inspect(ctx, op)
-	case PublishAction:
+	case baseRefreshAction:
+		return (&baseRefresher{s: a.seals.s, repository: a.seals.repository}).Inspect(ctx, op)
+	case PublishAction, publishUpstreamAction:
 		return a.publishes.Inspect(ctx, op)
 	}
 	if a.other == nil {
@@ -581,11 +576,47 @@ func (a repositoryAdapter) Apply(ctx context.Context, op coreadapter.Operation) 
 		return rebaser{a.lands}.Apply(ctx, op)
 	case DriftAction:
 		return drifter{a.lands}.Apply(ctx, op)
-	case PublishAction:
+	case baseRefreshAction:
+		return (&baseRefresher{s: a.seals.s, repository: a.seals.repository}).Apply(ctx, op)
+	case PublishAction, publishUpstreamAction:
 		return a.publishes.Apply(ctx, op)
 	}
 	if a.other == nil {
 		return coreadapter.OperationResult{}, errors.New("no repository adapter is configured")
 	}
 	return a.other.Apply(ctx, op)
+}
+
+// selectedBase commits the exact starting revision before a branch can exist.
+// Restart recovery reuses it even if the dependency integrates meanwhile.
+func (z *sealer) selectedBase(ctx context.Context, stream config.WorkstreamID, number int, operation string, g workspace.Provider) (seal.Base, error) {
+	id := fmt.Sprintf("seal-base-%d", number)
+	docs, err := trace.Read[trace.Document](z.repository, stream)
+	if err != nil {
+		return seal.Base{}, err
+	}
+	for _, doc := range docs {
+		if doc.ID == id {
+			var base seal.Base
+			if err := json.Unmarshal([]byte(doc.Content), &base); err != nil {
+				return base, err
+			}
+			if doc.Cause != operation || base.Commit == "" || base.Branch == "" {
+				return base, errors.New("sealing base intent differs from its operation")
+			}
+			return base, nil
+		}
+	}
+	selected, err := z.s.resolveBase(ctx, z.s.about(z.repository), z.repository, stream, g)
+	if err != nil {
+		return selected, err
+	}
+	data, err := json.Marshal(selected)
+	if err != nil {
+		return selected, err
+	}
+	h := z.header(id, stream, operation, z.s.now())
+	h.Schema = "osmia.trace.document"
+	err = z.repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: fmt.Sprintf("sealing/base-%d.json", number), Content: string(data)}})
+	return selected, err
 }

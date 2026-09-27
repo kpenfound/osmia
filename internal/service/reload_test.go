@@ -153,17 +153,14 @@ func TestReloadReportsRestartRequiredSettings(t *testing.T) {
 		t.Fatalf("diagnostics: %+v", now.Diagnostics)
 	}
 
-	// The loaded project stays when the disk stops listing it, and its file
-	// is still validated.
+	// Removing a project applies live; its unlisted file is no longer loaded.
 	unlisted := strings.Replace(files.topText, `active_projects = ["`+string(project)+`"]`, "active_projects = []", 1)
 	files.write(t, unlisted, files.projectText+"landing = \"sideways\"\n")
-	reloadFails(t, c, files.project, "landing")
-	files.write(t, unlisted, files.projectText+"landing = \"squash\"\n")
 	reloaded, err = c.Reload(ctx)
 	must(t, err)
 	now, err = c.Configuration(ctx)
 	must(t, err)
-	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"active_projects"}) || now.Effective.Project.ID != project || now.Effective.Project.Landing != "squash" || now.Effective.Listen.Socket != socket {
+	if len(reloaded.RestartRequired) != 0 || len(now.Effective.Projects) != 0 || now.Effective.Listen.Socket != socket {
 		t.Fatalf("unlisted project: %+v %+v", reloaded, now.Effective)
 	}
 }

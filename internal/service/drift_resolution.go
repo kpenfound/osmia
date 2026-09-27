@@ -346,7 +346,7 @@ func (d drifter) resolve(ctx context.Context, stream config.WorkstreamID, rebase
 			if err := d.s.step("drift-resolving"); err != nil {
 				return rebase, err
 			}
-			if _, _, err := g.ReplayIn(ctx, w, rebase.Upstream.Commit, requested); err != nil {
+			if _, _, err := g.ReplayInFrom(ctx, w, rebase.From, rebase.Upstream.Commit, requested); err != nil {
 				return rebase, err
 			}
 			continue

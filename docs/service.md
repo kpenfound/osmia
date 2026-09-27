@@ -343,7 +343,8 @@ widths:
 - the [capacity](#capacity): each role kind's slots used against its limit,
   the work waiting for a slot and why, and the per-workstream limit;
 - each workstream of `/status`: the chief of staff's goal, attention and
-  note, its state, its workspace backend, its units grouped by state in lifecycle order, its
+  note, its project, its state, its workspace backend, its units grouped by state
+  in lifecycle order, its
   agents with role, unit, profile, state and elapsed time as of the last read,
   and its [conversation](#conversation), each message and response with its
   turn's state;
@@ -369,13 +370,19 @@ Its controls are:
 | Decide, on an amendment | the entry's `answer`: `POST /v1/amendment/<id>/<n>` with the packet revision, the chosen decision and the note when there is one | A decision is chosen |
 | Approve, on a delivery | the entry's `answer`: `POST /v1/delivery/<id>` with the final review, report revision, commit and draft hash, and the description when the owner edited the draft | The page shows the final report and draft the entry pins; until it does, Approve is disabled |
 | Send, on a workstream's conversation | `POST /v1/conversation/<id>` | The message is not empty |
-| Pause the factory, the project or a workstream, soft or hard | `PUT /v1/runtime/pause` | A scope is chosen and the reason is not empty |
+| Pause the factory, any active project or a workstream, soft or hard | `PUT /v1/runtime/pause` | A scope is chosen and the reason is not empty |
 | Resume, on a factory, project or workstream pause | `DELETE /v1/runtime/pause` with the pause's target | |
-| Set order, of the chosen workstreams in the order shown | `PUT /v1/runtime/priority` | At least one workstream is chosen |
-| Clear order | `DELETE /v1/runtime/priority` | |
+| Set order, of the selected project's chosen workstreams in the order shown | `PUT /v1/runtime/priority` | At least one workstream is chosen |
+| Clear order, for the selected project | `DELETE /v1/runtime/priority` | |
 | Set, on a role's profile | `PUT /v1/runtime/profile` | A profile is chosen |
 | Clear, on a role with an owner override | `DELETE /v1/runtime/profile` | |
 | Reload | `POST /v1/reload` | |
+
+The priority selector lists every configured project and shows only that
+project's workstreams. Switching projects loads its saved order; background reads
+preserve edits while the project and saved order stay the same. Configuration
+changes remove unavailable pause and priority targets without reloading the page.
+With no projects, priority actions are disabled and factory pause remains available.
 
 A control the page refuses sends nothing. Each shows what the API answered:
 its refusal's message, or what it did; a reload also names the loaded digest
@@ -469,8 +476,7 @@ pending or running `conflict`, naming the extraction to wait for.
 ## Reload
 
 `POST /v1/reload` (`osmia reload`) reads the top-level `config.toml` and the
-`config.toml` of every registered project (the active projects, and the
-projects `active_projects` lists when they differ) and validates them as one
+`config.toml` of every project named in the candidate `active_projects` list and validates them as one
 candidate. If any file fails, nothing changes: the loaded configuration and
 its digest stay in force, the request fails with `validation` and a message
 naming the file, the field and why (a file that is not valid TOML is named
@@ -491,9 +497,10 @@ Some settings keep their loaded values until the service restarts; the
 response lists each one the files change in `restart_required`, and `/config`
 reports them in a `restart_required` diagnostic: `listen.socket`,
 `listen.web`, which keeps the bound listener, `listen.tailnet`, which keeps
-the joined node and its hostname, and
-`active_projects`, which in a running service only `project add` and
-`project remove` change. The root is an option of the service, not a setting
+the joined node and its hostname. The `active_projects` list applies live.
+New entries start their retained traces. Removed entries stop admitting new
+operations and drain in-flight work before their traces close; the reload
+response waits for that drain. The root is an option of the service, not a setting
 of the files.
 
 `runtime.json` is not read or written: pauses, priorities and profile
@@ -1802,8 +1809,8 @@ is `ready` in the state it was decided on.
 
 ### Overlapping workstreams
 
-Workstreams of one project share no spec, so the only entanglement between
-them is code. Every pass, after the building controller, the overlap
+Workstreams of one project have separate specifications and may explicitly
+depend on each other. Every pass, after the building controller, the overlap
 controller compares the latest seals of each pair of the project's `building`
 or `assembled` workstreams that no runtime pause covers; a delivered or
 abandoned workstream, and every other project, is left out. Two sealed
@@ -3522,3 +3529,69 @@ asker stays parked until the owner rules. A restart after the owner's ruling
 delivers its event once the window closes; a restart after the relay queues
 each asker's answer turn once; a restart with an answer turn queued runs it
 once.
+
+## Owner documents and notices
+
+The phone page supports project registration, hand-in, charter reads and edits,
+charter proposal decisions, draft reads and edits, shed actions, abandonment,
+and workstream, unit, criterion and commit trace inspection.
+
+`GET /v1/projects/charter/<project>` returns the current recorded charter.
+`PUT` accepts `revision` and `content`; the revision must match the owner's
+read. `GET /v1/documents/<workstream>` returns the latest handed input, spec
+and plan records. `PUT` accepts `spec_revision`, `plan_revision`, `spec` and
+`plan`, validates the pair, and saves it atomically while the workstream is
+sketched or in the shed. Stale revisions and unrecorded local file edits return
+`conflict`. Ratified documents require the amendment workflow.
+
+The chief's `notify` tool records an informational project notice with its
+originating workstream, thread and turn. Subsequent project bundles include it,
+along with pointers to direct owner charter edits. These notices do not create
+owner rulings, modify the charter, or send external messages.
+
+## Detached serving
+
+`osmia serve --detach --root <path>` starts a separate service session and waits
+up to 30 seconds for its readiness acknowledgement. Startup failure or timeout
+returns an error and leaves no child from that attempt. Root ownership prevents
+another service from starting on the same root. Output appends to the private
+`service.log` under the root; a symlink or a log readable by other users is
+refused. The log is retained across restarts and can be rotated while stopped.
+
+`osmia stop --root <path>` requests shutdown through the local Unix socket;
+`--socket` selects a non-default socket. The command acknowledges the request;
+the service cancels active turns, retains their recovery records, and releases
+its socket and root lock after shutdown. `POST /v1/stop` is unavailable through
+the browser or tailnet listener. No PID file or PID-based signaling is used.
+
+## Dependent delivery and code knowledge
+
+Hand-in accepts `base`, a workstream ID on the same project; the CLI exposes
+`--base`. The phone hand-in form lists available bases. `GET /v1/base/<workstream>`
+returns the relation and revision; `PUT` takes `base` and `revision` before
+ratification. Self-reference, cycles and unknown or abandoned bases are refused.
+A ratified base cannot be edited. An unavailable ancestor parks descendants
+without consuming agent slots; the owner can restore the branch or abandon the
+workstream and hand in a replacement.
+
+The service checks dependency integration durably. Dependent requests open on
+the fork against the published base branch. After integration, a delivered
+child receives a separate delivery review and a fresh owner approval in the
+inbox before its upstream request opens. Both request URLs remain in the trace.
+The feature stays delivered throughout; review gaps or conflicts do not create
+implementation units in terminal work.
+
+The chief's `inspect_code` reads an immutable local commit, lists directories or
+returns a bounded file excerpt with an `inspection#...` citation. Answering a
+question using that citation queues the librarian to fill the knowledge gap
+from the recorded answer and commit. Refreshes share the queue used for landed
+unit learnings.
+
+Each scoped tool call has a start and completion record. An interrupted call
+remains visibly incomplete. Large values retain their hashes and sizes; private
+role-note bodies are excluded from tool payloads.
+
+`GET /v1/projects/memory/<project>` returns reviewable Hearsay configuration
+fragments, local-to-Hearsay scope mappings and anchor artifact handles. It is a
+local read and applies no external configuration. The CLI exposes it as
+`osmia project memory <project>`; see [Hearsay setup](hearsay.md).

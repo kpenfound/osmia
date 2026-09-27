@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,13 +27,15 @@ import (
 
 const usage = `Usage: osmia <command> [--root PATH]
        osmia --version
-  serve
+  serve [--detach]
+  stop
   status [workstream-id] [--json]
   project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH [--base-branch NAME] [--json]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
+  project memory <project-id>
   project rebase <project-id> [--json]
-  handin <project-id> <path|issue-url|-> [--skip-debate] [--json]
+  handin <project-id> <path|issue-url|-> [--base WORKSTREAM] [--skip-debate] [--json]
   abandon <workstream-id> <reason> [--json]
   shed object <workstream-id> <argument> [--json]
   shed rule <workstream-id> <objection-id> <sustain|dismiss> [note] [--json]
@@ -58,14 +61,14 @@ const usage = `Usage: osmia <command> [--root PATH]
   config [--json]
   reload [--json]
 Client commands also accept --socket PATH (relative to root).
-Only these commands are available; serve runs in the foreground.
+serve runs in the foreground unless --detach is set. Detached logs are in root/service.log.
 `
 
 type options struct {
-	root, socket, reason, project               string
+	root, socket, reason, project, base         string
 	upstream, fork, clone, baseBranch           string
 	json, hard, reasonSet, help, target, accept bool
-	skipDebate, version                         bool
+	skipDebate, version, detach                 bool
 	args                                        []string
 }
 
@@ -83,7 +86,7 @@ func parse(args []string) (o options, err error) {
 		}
 		seen[key] = true
 		switch key {
-		case "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project":
+		case "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -114,14 +117,18 @@ func parse(args []string) (o options, err error) {
 			case "--base-branch":
 				o.baseBranch = value
 				o.target = true
+			case "--base":
+				o.base = value
 			case "--project":
 				o.project = value
 			}
-		case "--json", "--hard", "--skip-debate", "--accept", "--version", "--help", "-h":
+		case "--detach", "--json", "--hard", "--skip-debate", "--accept", "--version", "--help", "-h":
 			if has {
 				return o, errors.New("boolean flags take no value")
 			}
 			switch key {
+			case "--detach":
+				o.detach = true
 			case "--json":
 				o.json = true
 			case "--hard":
@@ -188,7 +195,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	a := o.args[1:]
 	valid := false
 	switch cmd {
-	case "serve":
+	case "serve", "stop":
 		valid = len(a) == 0
 	case "status":
 		valid = len(a) <= 1
@@ -227,10 +234,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "overrule" && (len(a) == 3 || len(a) == 4) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3 ||
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
-		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase")
+		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
-	if !valid || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && o.skipDebate || cmd != "answer" && (o.accept || o.project != "") || cmd == "serve" && (o.json || o.socket != "") {
+	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && (o.accept || o.project != "") || cmd == "serve" && (o.json || o.socket != "") {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -239,7 +246,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return 2
 	}
 	if cmd == "serve" {
-		if err := service.Run(ctx, service.Enforce(service.Options{Config: config.Options{Root: root.String()}, Build: build()}, enforcement())); err != nil {
+		if err := runService(ctx, root, o.detach, stdout); err != nil {
 			// Startup errors may contain raw TOML values or paths; do not echo them.
 			fmt.Fprintln(stderr, "service startup failed: check root/configuration/runtime permissions and validity; stop any existing owner before starting; socket must be unused or stale")
 			return 6
@@ -257,6 +264,13 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	defer c.Close()
 	fail := func(err error) int {
 		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "trace" || cmd == "reload" || cmd == "status" && len(a) == 1)
+	}
+	if cmd == "stop" {
+		if err := c.Do(ctx, "POST", service.Prefix+"/stop", nil, nil); err != nil {
+			return fail(err)
+		}
+		fmt.Fprintln(stdout, "Service shutdown requested.")
+		return 0
 	}
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
@@ -320,6 +334,17 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			fmt.Fprintf(stdout, "Restart required to apply: %s\n", strings.Join(result.RestartRequired, ", "))
 		}
 		return 0
+	}
+	if cmd == "project" && a[0] == "memory" {
+		id, err := config.ParseProjectID(a[1])
+		if err != nil {
+			return invalid()
+		}
+		var out service.MemorySetup
+		if err := c.Do(ctx, http.MethodGet, service.Prefix+"/projects/memory/"+string(id), nil, &out); err != nil {
+			return fail(err)
+		}
+		return output(stdout, stderr, out)
 	}
 	if cmd == "project" && a[0] == "rebase" {
 		id, err := config.ParseProjectID(a[1])
@@ -387,6 +412,12 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return 1
 		}
 		req := service.HandInRequest{Project: id, Key: key, SkipDebate: o.skipDebate}
+		if o.base != "" {
+			req.Base, err = config.ParseWorkstreamID(o.base)
+			if err != nil {
+				return invalid()
+			}
+		}
 		switch input := a[1]; {
 		case input == "-":
 			data, err := io.ReadAll(io.LimitReader(stdin, service.MaxHandedBytes+1))

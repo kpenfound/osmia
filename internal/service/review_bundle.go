@@ -165,7 +165,7 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	if len(footprint.Entities) == 0 || len(footprint.Paths) == 0 {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("seal %d has no resolved footprint for unit %s", s.Seal, unit)
 	}
-	files := bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }, Now: m.s.now}
+	files := bundle.Files{Provider: m.s.contextFor(m.repository), Role: "reviewer", Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }, Now: m.s.now}
 	mason, err := files.Mason(ctx, m.repository.Project(), stream, unit)
 	if err != nil {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err

@@ -972,3 +972,106 @@ func TestReplayInStopsAtEachConflictAndContinuesFromTheResolvedFiles(t *testing.
 		t.Fatalf("the replay moved the feature branch to %s, %v", tip, err)
 	}
 }
+
+func TestReplayFromDropsSquashedDependencyHistory(t *testing.T) {
+	for _, backend := range []string{"git", "jujutsu"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newFixture(t)
+			ctx := context.Background()
+			base, feature, _ := rebaseFixture(t, f)
+			parent1 := f.commitFiles(t, feature, base, map[string]string{"parent.go": "one\n"})
+			parent2 := f.commitFiles(t, feature, parent1, map[string]string{"parent.go": "two\n"})
+			child1 := f.commitFiles(t, feature, parent2, map[string]string{"child.go": "one\n"})
+			child2 := f.commitFiles(t, feature, child1, map[string]string{"child.go": "two\n"})
+			at := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+			squashed, err := f.provider.Squash(ctx, base, parent2, "Integrate dependency", at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var g Provider = f.provider
+			if backend == "jujutsu" {
+				requireJJ(t)
+				g = &Jujutsu{Clone: f.clone, Directory: filepath.Join(t.TempDir(), "dependent-jj")}
+			}
+			commit, conflicts, err := g.ReplayFrom(ctx, parent2, child2, squashed, at)
+			if err != nil || len(conflicts) != 0 {
+				t.Fatalf("replay %s %v %v", commit, conflicts, err)
+			}
+			if commits := strings.Fields(git(t, "-C", f.clone, "rev-list", squashed+".."+commit)); len(commits) != 2 {
+				t.Fatalf("replayed dependency history: %v", commits)
+			}
+			if got := git(t, "-C", f.clone, "show", commit+":parent.go"); got != "two" {
+				t.Fatalf("parent content %q", got)
+			}
+			if got := git(t, "-C", f.clone, "show", commit+":child.go"); got != "two" {
+				t.Fatalf("child content %q", got)
+			}
+			again, _, err := g.ReplayFrom(ctx, parent2, child2, squashed, at)
+			if err != nil || again != commit {
+				t.Fatalf("retry %s %v", again, err)
+			}
+		})
+	}
+}
+
+func TestReplayInFromResumesAfterSquashedDependencyConflict(t *testing.T) {
+	for _, backend := range []string{"git", "jujutsu"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newFixture(t)
+			ctx := context.Background()
+			base, feature, _ := rebaseFixture(t, f)
+			parent1 := f.commitFiles(t, feature, base, map[string]string{"parent.go": "one\n"})
+			parent2 := f.commitFiles(t, feature, parent1, map[string]string{"parent.go": "two\n"})
+			child := f.commitFiles(t, feature, parent2, map[string]string{"parent.go": "child\n", "child.go": "child\n"})
+			at := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+			squashed, err := f.provider.Squash(ctx, base, parent2, "Integrate parent", at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			upstreamWork, err := f.provider.Acquire(ctx, vcs.Request{Name: "upstream-edit", Ref: squashed, Branch: "upstream-edit"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			upstream := f.commitFiles(t, upstreamWork.(Worktree), squashed, map[string]string{"parent.go": "upstream\n"})
+			var g Provider = f.provider
+			if backend == "jujutsu" {
+				requireJJ(t)
+				g = &Jujutsu{Clone: f.clone, Directory: filepath.Join(t.TempDir(), "replay-jj")}
+			}
+			acquired, err := g.Acquire(ctx, vcs.Request{Name: "resolve-child", Ref: child, Branch: "resolve-child"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := acquired.(Worktree)
+			_, conflicts, err := g.ReplayInFrom(ctx, w, parent2, upstream, at)
+			if err != nil || !slices.Equal(conflicts, []string{"parent.go"}) {
+				t.Fatalf("conflict %v %v", conflicts, err)
+			}
+			// Recreate the provider while the durable replay is stopped.
+			switch p := g.(type) {
+			case *Git:
+				copy := *p
+				g = &copy
+			case *Jujutsu:
+				g = &Jujutsu{Clone: p.Clone, Directory: p.Directory}
+			}
+			_, paths, running, err := g.Replaying(ctx, w)
+			if err != nil || !running || !slices.Equal(paths, conflicts) {
+				t.Fatalf("recovered %v %v %v", paths, running, err)
+			}
+			if err := os.WriteFile(filepath.Join(w.Path, "parent.go"), []byte("combined\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			commit, conflicts, err := g.ContinueReplay(ctx, w, at)
+			if err != nil || len(conflicts) != 0 {
+				t.Fatalf("continue %s %v %v", commit, conflicts, err)
+			}
+			if count := len(strings.Fields(git(t, "-C", f.clone, "rev-list", upstream+".."+commit))); count != 1 {
+				t.Fatalf("replayed %d commits; dependency leaked", count)
+			}
+			if got := git(t, "-C", f.clone, "show", commit+":parent.go"); got != "combined" {
+				t.Fatal(got)
+			}
+		})
+	}
+}

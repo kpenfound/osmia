@@ -362,7 +362,7 @@ func TestDeclinedCharterProposalChangesNothing(t *testing.T) {
 		t.Fatalf("charter.md:\n%s", content)
 	}
 	for _, ws := range []config.WorkstreamID{stream, quiet} {
-		if b := assemble(t, repo, ws); len(b.CharterNotices) != 0 || !strings.HasSuffix(b.Render(), "## Notices\nNo project-wide notices.\n") {
+		if b := assemble(t, repo, ws); len(b.CharterNotices) != 0 || len(b.CharterEdits) != 1 || len(b.Notices) != 0 {
 			t.Fatalf("bundle of %s:\n%s", ws, b.Render())
 		}
 	}

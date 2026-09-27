@@ -138,7 +138,7 @@ func (s *Service) openDecisions(ctx context.Context, repository *trace.Repositor
 			}
 		}
 	}
-	if w.State == AssembledState {
+	if w.State == AssembledState || w.State == DeliveredState {
 		if err := add(s.deliveryEntry(ctx, repository, w.Workstream)); err != nil {
 			return nil, err
 		}
@@ -284,7 +284,7 @@ func (s *Service) deliveryEntry(ctx context.Context, repository *trace.Repositor
 		return InboxEntry{}, false, nil
 	case api != nil:
 		return InboxEntry{}, false, errors.New(api.Message)
-	case p.Delivered:
+	case p.Delivered && !p.Maintenance:
 		return InboxEntry{}, false, nil
 	}
 	for _, c := range p.Report.Criteria {

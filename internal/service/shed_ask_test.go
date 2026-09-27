@@ -103,6 +103,11 @@ func (c *chief) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tool
 func (c *chief) choose(ctx context.Context, tools *mcp.ClientSession, name string, args map[string]any) {
 	got, err := callTool(ctx, tools, name, args)
 	if err != nil {
+		// Restart tests may cancel the transport after the tool committed its
+		// choice. The durable question assertions check the resulting effect.
+		if ctx.Err() != nil {
+			return
+		}
 		c.p.report("%s: %v", name, err)
 		return
 	}

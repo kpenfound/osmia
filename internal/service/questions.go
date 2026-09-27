@@ -3,9 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/questions"
@@ -19,7 +17,7 @@ const chiefEvents = "You are the chief of staff for workstream %s. The prompt li
 // chiefEventsPrompt returns the system prompt of a workstream's event turns.
 // The bundle is assembled from the project's files and the given trace only.
 func (s *Service) chiefEventsPrompt(project config.ProjectID, repository *trace.Repository) func(context.Context, config.WorkstreamID) (string, error) {
-	files := bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return repository, nil }, Now: func() time.Time { return time.Now().UTC() }}
+	files := s.contextFor(repository)
 	return func(ctx context.Context, stream config.WorkstreamID) (string, error) {
 		context, err := chiefContext(ctx, files, repository, project, stream)
 		if err != nil {

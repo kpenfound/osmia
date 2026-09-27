@@ -37,6 +37,91 @@
       <p id="pause-result" class="result" role="status"></p>
     </form>
   </section>
+  <section aria-labelledby="projects-title">
+    <h2 id="projects-title">Projects and new work</h2>
+    <details class="control">
+      <summary>Register a project</summary>
+      <form id="project-add">
+        <label>Name <input name="name" required></label>
+        <label>Upstream repository <input name="upstream" placeholder="owner/repository" required></label>
+        <label>Your fork <input name="fork" placeholder="owner/repository" required></label>
+        <label>Clone path on the service machine <input name="clone" required></label>
+        <label>Base branch <input name="base_branch" value="main" required></label>
+        <button type="submit">Register project</button>
+        <p class="result" role="status"></p>
+      </form>
+    </details>
+    <form id="handin-form" class="control">
+      <label>Project <select name="project" data-project-select required></select></label>
+      <label>Base workstream <select name="base"><option value="">Project upstream</option></select></label>
+      <label>Input <select name="source"><option value="text">Written description</option><option value="url">GitHub issue URL</option></select></label>
+      <label>Feature description or issue URL <textarea name="content" rows="5" required></textarea></label>
+      <label><input name="skip_debate" type="checkbox"> Skip debate; I will still ratify the spec and plan</label>
+      <button type="submit">Hand in feature</button>
+      <p class="result" role="status"></p>
+    </form>
+    <details class="control">
+      <summary>Project charter and maintenance</summary>
+      <form id="project-edit">
+        <label>Project <select name="project" data-project-select required></select></label>
+        <button type="button" data-action="read-charter">Read charter</button>
+        <label>Numbered contributor rules <textarea name="content" rows="8"></textarea></label>
+        <div class="actions">
+          <button type="submit" disabled>Save charter</button>
+          <button type="button" data-action="extract">Extract knowledge</button>
+          <button type="button" data-action="rebase">Rebase workstreams</button>
+          <button type="button" data-action="remove">Remove project from active work</button>
+        </div>
+        <p class="result" role="status"></p>
+      </form>
+    </details>
+  </section>
+  <section aria-labelledby="charter-decisions-title">
+    <h2 id="charter-decisions-title">Charter proposals</h2>
+    <div id="charter-decisions"></div>
+    <p id="charter-result" class="result" role="status"></p>
+  </section>
+  <section aria-labelledby="documents-title">
+    <h2 id="documents-title">Documents and trace</h2>
+    <form id="documents-form" class="control">
+      <label>Workstream <select name="workstream" required></select></label>
+      <button type="button" data-action="read">Read documents</button>
+      <p id="document-revisions" class="meta"></p>
+      <label>Specification <textarea name="spec" rows="8"></textarea></label>
+      <label>Plan <textarea name="plan" rows="8"></textarea></label>
+      <button type="submit" disabled>Save draft documents</button>
+      <p class="result" role="status"></p>
+    </form>
+    <form id="base-form" class="control">
+      <label>Workstream <select name="workstream" required></select></label>
+      <button type="button" data-action="read">Read dependency</button>
+      <label>Base <select name="base"><option value="">Project upstream</option></select></label>
+      <button type="submit" disabled>Save dependency</button>
+      <p class="meta">Dependencies can be changed before ratification.</p>
+      <p class="result" role="status"></p>
+    </form>
+    <form id="workstream-action" class="control">
+      <label>Workstream <select name="workstream" required></select></label>
+      <label>Action <select name="action">
+        <option value="object">Raise a shed objection</option>
+        <option value="more">Request another debate round</option>
+        <option value="redraft">Request a redraft</option>
+        <option value="skip">Skip debate; ratification still required</option>
+        <option value="abandon">Abandon workstream</option>
+      </select></label>
+      <label>Reason or requested change <textarea name="note" rows="3" required></textarea></label>
+      <button type="submit">Apply action</button>
+      <p class="result" role="status"></p>
+    </form>
+    <form id="trace-form" class="control">
+      <label>Workstream <select name="workstream" required></select></label>
+      <label>Trace <select name="kind"><option value="">Whole workstream</option><option value="unit">Unit</option><option value="criterion">Criterion</option><option value="commit">Commit</option></select></label>
+      <label>Unit, criterion, or commit <input name="selector"></label>
+      <button type="submit">Read trace</button>
+      <p class="result" role="status"></p>
+      <div id="trace-content"></div>
+    </form>
+  </section>
   <section aria-labelledby="capacity-title">
     <h2 id="capacity-title">Capacity</h2>
     <div id="capacity" class="capacity"></div>
@@ -48,6 +133,7 @@
   <section aria-labelledby="priority-title">
     <h2 id="priority-title">Priority</h2>
     <form id="priority-form" class="control">
+      <label>Project <select id="priority-project" name="project"></select></label>
       <p id="priority-current" class="meta"></p>
       <ol id="priority-list" class="priority"></ol>
       <div class="actions">
@@ -63,6 +149,7 @@
       <div id="profiles" class="profiles"></div>
       <h4>Provider usage</h4>
       <ul id="providers" class="providers"></ul>
+      <p id="provider-result" class="result" role="status"></p>
       <p id="profile-result" class="result" role="status"></p>
     </div>
   </section>

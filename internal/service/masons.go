@@ -583,6 +583,12 @@ func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
 	if err != nil || (feature.Value != BuildingState && feature.Value != AssembledState) {
 		return building{}, false, err
 	}
+	return m.readSealed(stream)
+}
+
+// readSealed reads unit evidence without admitting implementation. Delivery
+// maintenance uses it while the feature remains terminal.
+func (m *masons) readSealed(stream config.WorkstreamID) (building, bool, error) {
 	latest, _, found, err := seal.Latest(m.repository, stream)
 	if err != nil || !found {
 		return building{}, false, err
@@ -672,7 +678,7 @@ func dependencyOrder(p plan.Plan) []plan.Unit {
 // bundle assembles the mason bundle of one unit, from the service's files
 // and this trace.
 func (m *masons) bundle(ctx context.Context, stream config.WorkstreamID, unit string) (bundle.Mason, error) {
-	files := bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }, Now: m.s.now}
+	files := bundle.Files{Provider: m.s.contextFor(m.repository), Role: "mason", Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }, Now: m.s.now}
 	return files.Mason(ctx, m.repository.Project(), stream, unit)
 }
 

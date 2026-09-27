@@ -270,8 +270,7 @@ func (r *Repository) recoverPublication(ctx context.Context) error {
 
 // publicationPath accepts the ordinary files the publication journal may
 // materialize or remove: workflow, transition, question, shed, unit, final
-// review, drift rebase and owned agent files of a workstream, private role notes, and project documents other than
-// the charter.
+// review, drift rebase and owned agent files of a workstream, private role notes, project notices, and project documents.
 func publicationPath(name string) error {
 	parts := strings.Split(name, "/")
 	switch {
@@ -279,7 +278,7 @@ func publicationPath(name string) error {
 		if _, err := config.ParseWorkstreamID(parts[1]); err != nil {
 			return err
 		}
-		if len(parts) == 3 && (parts[2] == "workflow.json" || parts[2] == "events.jsonl" || parts[2] == "documents.jsonl" || parts[2] == "spec.md" || parts[2] == "plan.json" || parts[2] == "seal.json") {
+		if len(parts) == 3 && (parts[2] == "workflow.json" || parts[2] == "events.jsonl" || parts[2] == "documents.jsonl" || parts[2] == "spec.md" || parts[2] == "plan.json" || parts[2] == "seal.json" || (parts[2] == "base.json" || parts[2] == "base-observation.json")) {
 			return nil
 		}
 		if len(parts) == 5 && parts[2] == "agents" && key(parts[3]) && (parts[4] == "identity.jsonl" || parts[4] == "log.jsonl") {
@@ -294,10 +293,16 @@ func publicationPath(name string) error {
 		if len(parts) >= 5 && (amendmentDraftPath(parts[2:]) || amendmentRoundPath(parts[2:])) {
 			return nil
 		}
-		if shedPath(parts[2:]) || unitPath(parts[2:]) || finalPath(parts[2:]) || driftPath(parts[2:]) || charterProposalPath(parts[2:]) {
+		if shedPath(parts[2:]) || unitPath(parts[2:]) || finalPath(parts[2:]) || driftPath(parts[2:]) || toolPath(parts[2:]) || sealingPath(parts[2:]) || charterProposalPath(parts[2:]) {
 			return nil
 		}
 	case len(parts) == 2 && parts[0] == "notes" && strings.HasSuffix(parts[1], ".md") && key(strings.TrimSuffix(parts[1], ".md")):
+		return nil
+	case memoryPath(parts):
+		return nil
+	case name == "charter.md":
+		return nil
+	case len(parts) == 2 && parts[0] == "notices" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json")):
 		return nil
 	case name == "documents.jsonl" || name == EntitiesPath || name == "kb/sources.json":
 		return nil

@@ -128,3 +128,24 @@ func (r *Repository) turnScope(agent string, scope coreadapter.Scope, active boo
 	}
 	return Thread{}, QueuedTurn{}, fmt.Errorf("turn not found")
 }
+
+// ActiveTurn requires the exact role, thread, unit and current service claim.
+// It lets service-owned auxiliary tools share the workflow's execution boundary.
+func (r *Repository) ActiveTurn(scope coreadapter.Scope) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if scope.Project != string(r.project) {
+		return fmt.Errorf("turn scope denied")
+	}
+	log, _, err := r.loadWorkflow(config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return err
+	}
+	for agent, t := range log.Threads {
+		if t.Identity.ThreadID == scope.Thread && t.Identity.Role == scope.Role {
+			_, _, err := r.turnScope(agent, scope, true)
+			return err
+		}
+	}
+	return fmt.Errorf("turn scope denied")
+}

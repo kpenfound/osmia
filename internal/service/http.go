@@ -175,6 +175,18 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if web.Serve(w, r) {
 		return
 	}
+	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/stop" {
+		if arrivedOn(r) != 0 {
+			fail(w, Forbidden)
+			return
+		}
+		respond(w, http.StatusAccepted, map[string]bool{"stopping": true})
+		s.cancel()
+		return
+	}
+	if s.documentRequest(w, r) {
+		return
+	}
 	if r.Method == http.MethodGet {
 		switch r.URL.Path {
 		case Prefix + "/health":

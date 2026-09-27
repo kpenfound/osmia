@@ -816,7 +816,7 @@ func (d *debate) replyPath(stream config.WorkstreamID, in roundInput) *isolation
 		engine, hosts = a.Engine, a.Hosts
 	}
 	denied := errors.New("turn scope denied")
-	return &isolation.Turns{
+	turns := &isolation.Turns{
 		Workspaces: stagedWorkspaces{},
 		Views:      isolation.Views{Directory: filepath.Join(d.s.current().Root.String(), "views")},
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
@@ -872,6 +872,7 @@ func (d *debate) replyPath(stream config.WorkstreamID, in roundInput) *isolation
 		Hosts:  hosts,
 		Engine: engine,
 	}
+	return memoryTurns(turns, d.s.about(d.repository), d.repository)
 }
 
 // selectReplyView stages the architect's view for the claimed turn and
@@ -917,7 +918,7 @@ func (d *debate) stageReply(ctx context.Context, stream config.WorkstreamID, in 
 	if err != nil {
 		return nil, err
 	}
-	b, err := d.s.Context().Assemble(ctx, d.repository.Project(), bundle.Scope{Workstream: stream})
+	b, err := d.s.contextFor(d.repository).Assemble(ctx, d.repository.Project(), bundle.Scope{Role: "architect", Workstream: stream})
 	if err != nil {
 		return nil, err
 	}

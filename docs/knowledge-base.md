@@ -264,3 +264,16 @@ The operation and librarian turn IDs derive from the landing commit. A retry
 finds the already recorded revisions and does not add them again. The next
 unit waits while a refresh is pending; its file-based bundle then reads the
 newest local prose without Hearsay.
+
+## Refresh after a code answer
+
+The chief of staff's `inspect_code` tool reads an immutable committed snapshot
+and returns an `inspection#<id>` citation. When a recorded answer cites that
+inspection, the service queues a librarian refresh with the question, answer,
+inspection and exact inspected commit under `source/` and `repo/`. The operation
+survives restarts and shares the serialized extraction and landing-refresh queue.
+Later branch movement cannot change its source evidence.
+
+Accepted `output/kb/` revisions record the question and inspection in
+`kb/sources.json`. An invalid or failed refresh preserves the previous knowledge
+base; retrying an accepted refresh does not duplicate its ledger entry.

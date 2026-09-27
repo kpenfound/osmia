@@ -20,7 +20,7 @@ import (
 
 const pauseTool = "pause"
 const resumeTool = "resume"
-const pauseGuidance = "When the owner asks you to pause or resume work, call pause or resume with scope factory, project, or workstream. For a workstream include its ID; for a project use this project's ID. Give a reason for a pause. These controls are attributed to the owner."
+const pauseGuidance = "When the owner asks you to pause or resume work, call pause or resume with scope factory, project, or workstream. For a workstream include its ID; include the target project's ID when it is another project. Give a reason for a pause. These controls are attributed to the owner."
 
 func (c *runtimeControls) pauseControl(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time, resume bool) coreadapter.Tool {
 	name := pauseTool
@@ -64,7 +64,7 @@ func (c *runtimeControls) pauseControl(repository *trace.Repository, scope corea
 		if target.Scope == "workstream" && target.Project == "" {
 			target.Project = repository.Project()
 		}
-		if target.Scope != "factory" && target.Project != repository.Project() {
+		if target.Scope != "factory" && !s.current().Active(target.Project) {
 			return priorityRefusal("the requested project is not active")
 		}
 		if resume {
@@ -110,7 +110,7 @@ func pauseStop(p runtime.Pause) *thread.Stop {
 // pausedActions are the operations of the service's reconcilers that run
 // architect and committee turns. A pause covering an operation's workstream
 // holds it; a hard pause also stops the turn it is running.
-var pausedActions = map[string]bool{DraftAction: true, AmendmentDraftAction: true, RoundAction: true, ReplyAction: true, RedraftAction: true, AmendmentRoundAction: true, AmendmentReplyAction: true, FinalReviewAction: true}
+var pausedActions = map[string]bool{DraftAction: true, AmendmentDraftAction: true, RoundAction: true, ReplyAction: true, RedraftAction: true, AmendmentRoundAction: true, AmendmentReplyAction: true, FinalReviewAction: true, deliveryReviewAction: true}
 
 // errPaused leaves a reconciler operation pending instead of starting a turn:
 // the controller holds the operation until the pause is lifted.
@@ -145,6 +145,13 @@ func (s *Service) held(repository *trace.Repository, stream config.WorkstreamID)
 // runs architect or committee turns while held holds its workstream.
 func (s *Service) holding(repository *trace.Repository) func(config.WorkstreamID, coreadapter.Operation) bool {
 	return func(stream config.WorkstreamID, op coreadapter.Operation) bool {
+		if waiting, err := baseWaiting(repository, stream); op.Action != baseRefreshAction && (err != nil || waiting) {
+			if input, err := thread.DecodeTurn(op); err == nil {
+				t, err := repository.Thread(stream, input.Agent)
+				return err != nil || t.Identity.Role != trace.ChiefOfStaff
+			}
+			return true
+		}
 		return pausedActions[op.Action] && op.Boundary == coreadapter.RunnerBoundary && errors.Is(s.held(repository, stream), errPaused)
 	}
 }

@@ -55,9 +55,10 @@ type Seal struct {
 // Base names the upstream commit of the seal: the remote it was fetched
 // from, the branch and the commit.
 type Base struct {
-	Remote string `json:"remote"`
-	Branch string `json:"branch"`
-	Commit string `json:"commit"`
+	Workstream config.WorkstreamID `json:"workstream,omitempty"`
+	Remote     string              `json:"remote"`
+	Branch     string              `json:"branch"`
+	Commit     string              `json:"commit"`
 }
 
 // Footprint is what one unit of the plan touches: the entities its footprint
@@ -104,6 +105,11 @@ func (s Seal) check() error {
 		return errors.New("a seal requires the upstream remote, branch and commit")
 	case s.Branch == "" || s.Workspace == "":
 		return errors.New("a seal requires the feature branch and its workspace")
+	}
+	if s.Base.Workstream != "" {
+		if err := config.CheckWorkstreamIDs(s.Base.Workstream); err != nil {
+			return err
+		}
 	}
 	seen := map[string]bool{}
 	for _, f := range s.Footprints {

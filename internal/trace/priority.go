@@ -18,15 +18,16 @@ const PriorityID = "priority"
 // made the change in Turn. Order is the project's order in force after it.
 type PriorityChange struct {
 	Header
-	Agent string                `json:"agent"`
-	Turn  string                `json:"turn"`
-	Order []config.WorkstreamID `json:"order"`
+	Agent         string                `json:"agent"`
+	Turn          string                `json:"turn"`
+	TargetProject config.ProjectID      `json:"target_project,omitempty"`
+	Order         []config.WorkstreamID `json:"order"`
 }
 
 func (PriorityChange) traceRecord() {}
 
 func (v PriorityChange) valid() bool {
-	return v.ID == PriorityID && v.Unit == "" && v.Actor.Kind == "owner" && key(v.Agent) && key(v.Turn) && v.Order != nil && config.CheckWorkstreamIDs(v.Order...) == nil
+	return v.ID == PriorityID && v.Unit == "" && v.Actor.Kind == "owner" && key(v.Agent) && key(v.Turn) && (v.TargetProject == "" || config.CheckProjectIDs(v.TargetProject) == nil) && v.Order != nil && config.CheckWorkstreamIDs(v.Order...) == nil
 }
 
 // PriorityRefused is returned by SetPriority for a change that cannot be
@@ -42,6 +43,12 @@ func (e *PriorityRefused) Error() string { return "priority refused: " + e.Reaso
 // and returns the order in force after it, which is recorded; an error from
 // apply records nothing and is returned as it is. It returns the record.
 func (r *Repository) SetPriority(ctx context.Context, agent string, scope coreadapter.Scope, at time.Time, apply func() ([]config.WorkstreamID, error)) (PriorityChange, error) {
+	return r.SetProjectPriority(ctx, agent, scope, "", at, apply)
+}
+
+// SetProjectPriority records a factory-wide priority request in its originating
+// thread, naming the project whose order changed. Empty target means this project.
+func (r *Repository) SetProjectPriority(ctx context.Context, agent string, scope coreadapter.Scope, target config.ProjectID, at time.Time, apply func() ([]config.WorkstreamID, error)) (PriorityChange, error) {
 	if at.IsZero() || apply == nil {
 		return PriorityChange{}, fmt.Errorf("timestamp and apply required")
 	}
@@ -72,7 +79,7 @@ func (r *Repository) SetPriority(ctx context.Context, agent string, scope coread
 		}
 	}
 	v := PriorityChange{Header: Header{Schema: "osmia.trace.priority", Version: Version, ID: PriorityID, Revision: revision, Project: r.project, Workstream: stream,
-		At: at, Actor: q.Request.Actor, Cause: q.Request.ID, Depth: q.Request.Depth + 1}, Agent: agent, Turn: scope.Turn, Order: []config.WorkstreamID{}}
+		At: at, Actor: q.Request.Actor, Cause: q.Request.ID, Depth: q.Request.Depth + 1}, Agent: agent, Turn: scope.Turn, TargetProject: target, Order: []config.WorkstreamID{}}
 	if err := validate(v); err != nil {
 		return PriorityChange{}, err
 	}

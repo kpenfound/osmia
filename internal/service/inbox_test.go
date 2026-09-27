@@ -374,7 +374,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	for _, ws := range []config.WorkstreamID{stream, quiet} {
 		b, err := s.Context().Assemble(ctx, project, bundle.Scope{Workstream: ws})
 		must(t, err)
-		if len(b.Notices) != 1 || !strings.HasSuffix(b.Render(), "## Notices\n"+notice) {
+		if len(b.Notices) != 1 || !strings.Contains(b.Render(), "## Notices\n"+notice) {
 			t.Fatalf("notices of %s: %+v", ws, b.Notices)
 		}
 	}

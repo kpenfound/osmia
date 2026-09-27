@@ -42,6 +42,9 @@ type Provider interface {
 	Rebase(ctx context.Context, onto, head, message string, at time.Time) (string, []string, error)
 	RebaseFrom(ctx context.Context, base, onto, head, message string, at time.Time) (string, []string, error)
 	Replay(ctx context.Context, head, onto string, at time.Time) (string, []string, error)
+	// TODO: Remove Osmia's explicit-base replay adapters when busybees/core
+	// provides service-owned revision replay and resumable conflict recovery.
+	ReplayFrom(ctx context.Context, base, head, onto string, at time.Time) (string, []string, error)
 
 	// Change identity.
 	Change(ctx context.Context, w Worktree) (string, error)
@@ -56,6 +59,7 @@ type Provider interface {
 	Move(ctx context.Context, w Worktree, from, to string) error
 	Advance(ctx context.Context, w Worktree, from, to string) error
 	ReplayIn(ctx context.Context, w Worktree, onto string, at time.Time) (string, []string, error)
+	ReplayInFrom(ctx context.Context, w Worktree, base, onto string, at time.Time) (string, []string, error)
 	ContinueReplay(ctx context.Context, w Worktree, at time.Time) (string, []string, error)
 	Replaying(ctx context.Context, w Worktree) (string, []string, bool, error)
 	MarkedFiles(w Worktree, paths []string) ([]string, error)

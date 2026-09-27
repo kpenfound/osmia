@@ -246,19 +246,18 @@ Registration is recoverable. If the service stops at any step, the journal makes
 the next start finish the registration with the same ID, or `osmia project add`
 run again finishes it. A retry never creates a second trace repository and an
 interrupted registration never blocks a retry: the same request returns the
-finished project, a different request while a project is active is refused with
-the active project's ID. A trace initialization that never committed is
+finished project; a different request waits until the pending registration finishes. A trace initialization that never committed is
 discarded and redone; one with history is kept. The extraction is requested
 once; a retry finds it in the trace and does not request another.
 
-Adding a project while one or more are active is refused, and the error names
-an active project; list further projects in `active_projects` and restart the
-service to run them together. Repeating an active project's exact registration
-returns it without change.
+Registration can add distinct projects while other projects run. Each active
+registration needs its own clone. Repeating an active project's exact
+registration returns it without change. Existing project runtimes and overrides
+are retained.
 
 `osmia project remove <project-id>` (API: `DELETE /v1/projects`) removes the
-active ID from `active_projects` as a text edit and closes the project's runtime
-state; other active projects keep running. The trace directory and the owner's clone are not deleted. Adding the
+active ID from `active_projects` as a text edit, stops admitting new work,
+and waits for in-flight operations to finish before closing its runtime; other active projects keep running. The trace directory and the owner's clone are not deleted. Adding the
 same upstream again afterwards generates a new project ID and a new trace
 repository; the archived trace stays untouched under `projects/<old-id>/` and is
 never reused, so archived history is immutable and every add is a fresh start.
@@ -324,9 +323,9 @@ these files; see [runtime overrides](runtime.md) for persistence and resolution.
 `osmia config` shows whether each file on disk differs from what is loaded
 ([disk drift](service.md#disk-drift)), and `osmia reload` applies edited files
 to a running service after validating all of them ([reload](service.md#reload)). The root, `listen.socket`,
-`listen.web`, `listen.tailnet` and `active_projects` keep their loaded values until the service
-restarts; project registration and removal change the active project without
-one.
+`listen.web` and `listen.tailnet` keep their loaded values until the service
+restarts. The `active_projects` list applies live: additions start their retained
+traces and removals drain in-flight operations before stopping.
 
 The optional `[budget]` table accepts `per_session`, `per_unit` and `per_day` as
 positive decimal USD strings. `per_session` caps known spend on each new turn.
@@ -337,11 +336,6 @@ attempts whose cost is unknown. When known spend on the service host's local
 calendar day reaches `per_day`, the service pauses factory dispatch until the
 next local day ([daily budget](service.md#daily-budget)).
 Missing values impose no cap. Unknown cost does not establish that a cap was reached.
-
-The full design's `hearsay` and project `hearsay_scope` settings are rejected
-because Hearsay integration is not supported, even if supplied empty. Use
-file-based context. Multiple active projects are supported through
-`active_projects`. Unsupported keys do not enable additional behavior.
 
 Representative errors include the file and offending field:
 
@@ -354,3 +348,65 @@ Representative errors include the file and offending field:
 Malformed TOML and values of the wrong type name the last key read and the line
 (`<path>: capacity.masons: value has the wrong type at line 3`), never
 the file's text; an unreadable file is `<path>: cannot be read`. On any error `Load` returns `nil`, never a usable partial configuration.
+
+## Optional Hearsay context
+
+Omit `[hearsay]` for complete file-based operation. To enable external context,
+configure the API endpoint and environment references for both the owner token
+and the delegated agent tokens. The service resolves secrets when making a call;
+configuration responses, agent environments, and local trace records contain no
+credential values.
+
+```toml
+[hearsay]
+url = "https://memory.example"
+principal = "owner"
+token_env = "HEARSAY_OWNER_TOKEN"
+
+[hearsay.agents.worker]
+id = "osmia-worker"
+token_env = "HEARSAY_WORKER_TOKEN"
+[hearsay.agents.orchestrator]
+id = "osmia-chief"
+token_env = "HEARSAY_CHIEF_TOKEN"
+[hearsay.agents.observer]
+id = "osmia-observer"
+token_env = "HEARSAY_OBSERVER_TOKEN"
+```
+
+Each enabled project names its Hearsay scope in project `config.toml`:
+
+```toml
+hearsay_scope = "example"
+
+[hearsay_entities]
+"internal.storage" = "example-storage"
+```
+
+The optional entity mapping selects scope bundles for unit footprints; without
+mapped footprint entities, the project scope is used. An empty project scope
+keeps that project in file mode. Settings apply through reload. Hearsay must
+configure the named principals with the worker, orchestrator, and observer
+classes and grants intersected with the owner's access.
+
+Bundles preserve local charter, documents, entities and rulings. External
+context is separately labelled, limited to 8,000 bytes across scope bundles,
+and fetched under a three-second deadline. Missing credentials, invalid
+responses and outages produce `degraded` context with the local bundle intact.
+Status reports `file`, `hearsay`, or `degraded`; a configured service starts
+unverified (`degraded`) until a bundle succeeds. Credentials are not forwarded
+through HTTP redirects.
+
+The service exposes Hearsay read tools within role turns. Workers and the chief
+also receive `assert`, which proposes an agent learning and does not ratify an
+owner ruling. The endpoint, human token and agent tokens remain service-owned.
+Live Hearsay sources, identities, authority policy, entities and anchors are
+configured by the operator in Hearsay.
+
+Hearsay watches use the orchestrator identity. Their opaque cursors, seen event
+identities and chief notices commit together in the local trace. Remote failures
+retain the last cursor and leave local work running. Changed connection or
+identity settings select a separate cursor; the first watch begins at Hearsay's
+current position. Existing history remains available through bundles and read
+tools. Feedback on a delivered workstream can produce a notice or question; it
+cannot reopen implementation.

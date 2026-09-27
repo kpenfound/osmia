@@ -21,10 +21,12 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// RefreshAction folds a landed unit's reported learnings into the local KB.
+// RefreshAction updates local knowledge from landings and code-based answers.
 const RefreshAction = "kb-refresh"
 
 type refreshInput struct {
+	Question   string              `json:"question,omitempty"`
+	Inspection string              `json:"inspection,omitempty"`
 	Workstream config.WorkstreamID `json:"workstream"`
 	Unit       string              `json:"unit"`
 	Landing    int                 `json:"landing"`
@@ -32,8 +34,10 @@ type refreshInput struct {
 	Report     int                 `json:"report"`
 }
 
-// KnowledgeSource attributes one accepted subsystem revision to its unit and landing.
+// KnowledgeSource attributes a subsystem revision to its immutable evidence.
 type KnowledgeSource struct {
+	Question   string              `json:"question,omitempty"`
+	Inspection string              `json:"inspection,omitempty"`
 	Subsystem  string              `json:"subsystem"`
 	Revision   int                 `json:"revision"`
 	Workstream config.WorkstreamID `json:"workstream"`
@@ -80,8 +84,8 @@ func refreshPending(repo *trace.Repository) (bool, error) {
 	return false, nil
 }
 
-// Pass asks for one refresh at a time, after a recorded landing. The source
-// document is immutable and the request ID is derived from its landed commit.
+// Pass serializes refreshes from recorded landings and code-based answers.
+// Each request derives its identity from the immutable source records.
 func (r *refresher) Pass(ctx context.Context) error {
 	stream := librarianWorkstream(r.repository.Project())
 	streams, err := r.repository.Workstreams()
@@ -106,7 +110,10 @@ func (r *refresher) Pass(ctx context.Context) error {
 			if len(in.Commit) < 16 {
 				return errors.New("recorded refresh has no landing commit")
 			}
-			known[in.Commit] = true
+			if in.Inspection == "" {
+				known[in.Commit] = true
+			}
+			known[in.key()] = true
 			knownUnit[string(in.Workstream)+"/"+in.Unit] = true
 			if op.Result == nil {
 				return nil
@@ -177,7 +184,7 @@ func (r *refresher) Pass(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			id := refreshKey(in.Commit)
+			id := in.key()
 			event := trace.EventID(id, "run")
 			op := coreadapter.Operation{ID: trace.OperationID(r.repository.Project(), stream, event), Boundary: coreadapter.RunnerBoundary, Action: RefreshAction, Input: data}
 			at := r.s.now()
@@ -186,7 +193,7 @@ func (r *refresher) Pass(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	return r.requestKnowledgeGap(ctx, streams, known)
 }
 
 func (r *refresher) source(in refreshInput) (UnitLanding, UnitReport, error) {
@@ -232,7 +239,7 @@ func (r *refresher) decode(op coreadapter.Operation) (refreshInput, error) {
 	if err := json.Unmarshal(op.Input, &in); err != nil {
 		return in, err
 	}
-	if in.Workstream == "" || in.Unit == "" || in.Landing < 1 || in.Report < 1 || len(in.Commit) < 16 {
+	if in.Workstream == "" || len(in.Commit) < 16 || (in.Inspection == "" && (in.Unit == "" || in.Landing < 1 || in.Report < 1)) || (in.Inspection != "" && in.Question == "") {
 		return in, errors.New("incomplete refresh operation")
 	}
 	return in, nil
@@ -243,7 +250,7 @@ func (r *refresher) Inspect(ctx context.Context, op coreadapter.Operation) (core
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
-	if _, _, err := r.source(in); err != nil {
+	if err := r.checkSource(in); err != nil {
 		return coreadapter.Observation{}, err
 	}
 	docs, err := r.recorded(op.ID)
@@ -259,7 +266,7 @@ func (r *refresher) Inspect(ctx context.Context, op coreadapter.Operation) (core
 		return coreadapter.Observation{}, err
 	}
 	for _, turn := range t.Turns {
-		if strings.HasPrefix(turn.Request.TurnID, refreshKey(in.Commit)+"-") && turn.Claim != nil && turn.Response == nil && t.Status != "interrupted" {
+		if strings.HasPrefix(turn.Request.TurnID, in.key()+"-") && turn.Claim != nil && turn.Response == nil && t.Status != "interrupted" {
 			return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "librarian turn is running"}, nil
 		}
 	}
@@ -271,9 +278,16 @@ func (r *refresher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	landing, report, err := r.source(in)
-	if err != nil {
+	var landing UnitLanding
+	var report UnitReport
+	if err := r.checkSource(in); err != nil {
 		return coreadapter.OperationResult{}, err
+	}
+	if in.Inspection == "" {
+		landing, report, err = r.source(in)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
 	}
 	docs, err := r.recorded(op.ID)
 	if err != nil {
@@ -293,7 +307,7 @@ func (r *refresher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		}
 		var turns []trace.QueuedTurn
 		for _, turn := range t.Turns {
-			if strings.HasPrefix(turn.Request.TurnID, refreshKey(in.Commit)+"-") {
+			if strings.HasPrefix(turn.Request.TurnID, in.key()+"-") {
 				turns = append(turns, turn)
 			}
 		}
@@ -321,8 +335,11 @@ func (r *refresher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 			if err != nil {
 				return coreadapter.OperationResult{}, err
 			}
-			turn := fmt.Sprintf("%s-%d", refreshKey(in.Commit), len(turns)+1)
+			turn := fmt.Sprintf("%s-%d", in.key(), len(turns)+1)
 			prompt := fmt.Sprintf("Fold the reported learnings of unit %s into the current knowledge base. Read source/landing.json and source/report.json for exact provenance and learnings. Read repo/, kb/ and seed/ as needed. Write the complete resulting KB under output/kb/ with entities.json and one nonempty <subsystem>.md per subsystem. Preserve useful current content and stable entity IDs. Only output/kb/ is accepted. Do not repeat AGENTS.md, CLAUDE.md or CONTRIBUTING.md. Source landing: %s; commit: %s.", in.Unit, landing.Operation, in.Commit)
+			if in.Inspection != "" {
+				prompt = fmt.Sprintf("A chief-of-staff answer required inspecting code. Fill this knowledge gap using source/ruling.json and source/inspection.json, with repo/ fixed at commit %s. Read context.md, kb/ and seed/. Write the complete resulting KB under output/kb/. Preserve stable entity IDs and useful content; do not treat the chief's answer as an owner ruling. Only output/kb/ is accepted.", in.Commit)
+			}
 			req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.repository.Project(), Workstream: stream, At: r.s.now(), Actor: librarianActor, Cause: op.ID, Depth: 1}, AgentID: librarianAgent, ThreadID: librarianThread, TurnID: turn, Profile: profile, SystemPrompt: librarianSystemPrompt(cfg.Project), Prompt: prompt}
 			if _, err := r.repository.EnqueueTurn(ctx, req); err != nil {
 				return coreadapter.OperationResult{}, err
@@ -360,14 +377,25 @@ func stageRefreshSource(ctx context.Context, repo *trace.Repository, clone, turn
 		if err := json.Unmarshal(op.Operation.Input, &in); err != nil {
 			return err
 		}
-		if !strings.HasPrefix(turn, refreshKey(in.Commit)+"-") {
+		if !strings.HasPrefix(turn, in.key()+"-") {
 			continue
 		}
 		r := &refresher{extractor: &extractor{repository: repo}}
-		landing, report, err := r.source(in)
-		if err != nil {
-			return err
+		sources := map[string]any{}
+		if in.Inspection != "" {
+			ruling, inspection, err := r.codeSource(in)
+			if err != nil {
+				return err
+			}
+			sources["ruling.json"], sources["inspection.json"] = ruling, inspection
+		} else {
+			landing, report, err := r.source(in)
+			if err != nil {
+				return err
+			}
+			sources["landing.json"], sources["report.json"] = landing, report
 		}
+
 		if err := os.RemoveAll(filepath.Join(workspace, "repo")); err != nil {
 			return err
 		}
@@ -392,7 +420,7 @@ func stageRefreshSource(ctx context.Context, repo *trace.Repository, clone, turn
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return err
 		}
-		for name, value := range map[string]any{"landing.json": landing, "report.json": report} {
+		for name, value := range sources {
 			data, err := json.MarshalIndent(value, "", "  ")
 			if err != nil {
 				return err
@@ -484,7 +512,7 @@ func (r *refresher) recordRefresh(ctx context.Context, operation string, in refr
 		if latest[id].Content == out.Prose[name] {
 			continue
 		}
-		sources = append(sources, KnowledgeSource{Subsystem: name, Revision: latest[id].Revision + 1, Workstream: in.Workstream, Unit: in.Unit, Landing: in.Landing, Commit: in.Commit, Report: in.Report, Operation: operation})
+		sources = append(sources, KnowledgeSource{Question: in.Question, Inspection: in.Inspection, Subsystem: name, Revision: latest[id].Revision + 1, Workstream: in.Workstream, Unit: in.Unit, Landing: in.Landing, Commit: in.Commit, Report: in.Report, Operation: operation})
 		records = append(records, trace.Document{Header: header(id), Path: trace.ProsePath(name), Content: out.Prose[name]})
 	}
 	for _, d := range latestDocuments(docs) {

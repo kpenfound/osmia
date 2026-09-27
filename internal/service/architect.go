@@ -678,7 +678,7 @@ func (d *drafter) turns(stream config.WorkstreamID) *isolation.Turns {
 	if a := d.s.options.Architect; a != nil {
 		engine, hosts = a.Engine, a.Hosts
 	}
-	return &isolation.Turns{
+	turns := &isolation.Turns{
 		Workspaces: stagedWorkspaces{},
 		Views:      isolation.Views{Directory: filepath.Join(d.s.current().Root.String(), "views")},
 		Select:     d.selectView,
@@ -700,6 +700,7 @@ func (d *drafter) turns(stream config.WorkstreamID) *isolation.Turns {
 		Hosts:  hosts,
 		Engine: engine,
 	}
+	return memoryTurns(turns, d.s.about(d.repository), d.repository)
 }
 
 // continued returns the architect's turn the given turn continues: the turn
@@ -802,7 +803,7 @@ func (d *drafter) stage(ctx context.Context, stream config.WorkstreamID, turn, w
 	if err != nil {
 		return nil, err
 	}
-	b, err := (bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return d.repository, nil }, Now: d.s.now}).Assemble(ctx, d.repository.Project(), bundle.Scope{Workstream: stream})
+	b, err := d.s.contextFor(d.repository).Assemble(ctx, d.repository.Project(), bundle.Scope{Role: "architect", Workstream: stream})
 	if err != nil {
 		return nil, err
 	}

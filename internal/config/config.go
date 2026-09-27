@@ -34,6 +34,7 @@ type Config struct {
 	Shed           Shed               `toml:"shed" json:"shed"`
 	Mason          Mason              `toml:"mason" json:"mason"`
 	Events         Events             `toml:"events" json:"events"`
+	Hearsay        Hearsay            `toml:"hearsay" json:"hearsay"`
 	Notify         Notify             `toml:"notify" json:"notify"`
 	// Project is the project this configuration is about: the only active
 	// project of a loaded configuration, or the project For selected. It is
@@ -119,15 +120,17 @@ type Role struct {
 	Image   string `toml:"image" json:"image"`
 }
 type Project struct {
-	ID         ProjectID `toml:"-" json:"id"`
-	Version    int       `toml:"version" json:"version"`
-	Name       string    `toml:"name" json:"name"`
-	Upstream   string    `toml:"upstream" json:"upstream"`
-	Fork       string    `toml:"fork" json:"fork"`
-	Clone      string    `toml:"clone" json:"clone"`
-	BaseBranch string    `toml:"base_branch" json:"base_branch"`
-	Landing    string    `toml:"landing" json:"landing"`
-	Classifier string    `toml:"classifier" json:"classifier"`
+	ID              ProjectID         `toml:"-" json:"id"`
+	Version         int               `toml:"version" json:"version"`
+	Name            string            `toml:"name" json:"name"`
+	Upstream        string            `toml:"upstream" json:"upstream"`
+	Fork            string            `toml:"fork" json:"fork"`
+	Clone           string            `toml:"clone" json:"clone"`
+	BaseBranch      string            `toml:"base_branch" json:"base_branch"`
+	Landing         string            `toml:"landing" json:"landing"`
+	Classifier      string            `toml:"classifier" json:"classifier"`
+	HearsayScope    string            `toml:"hearsay_scope" json:"hearsay_scope,omitempty"`
+	HearsayEntities map[string]string `toml:"hearsay_entities" json:"hearsay_entities,omitempty"`
 	// UpstreamRebase is the Go duration between a workstream's scheduled
 	// drift rebases; zero disables them.
 	UpstreamRebase string          `toml:"upstream_rebase" json:"upstream_rebase"`
@@ -275,6 +278,9 @@ func LoadTopLevel(options Options) (*Config, error) {
 	if !slices.Contains([]string{WorkspacesAuto, WorkspacesGit, WorkspacesJujutsu}, c.Workspaces) {
 		return nil, fieldError(path, "workspaces", fmt.Sprintf("must be %q, %q or %q", WorkspacesAuto, WorkspacesGit, WorkspacesJujutsu))
 	}
+	if err := c.Hearsay.validate(path); err != nil {
+		return nil, err
+	}
 	if c.Notify.Webhook != "" {
 		if err := validateWebhook(c.Notify.Webhook); err != nil {
 			return nil, fieldError(path, "notify.webhook", err.Error())
@@ -345,6 +351,26 @@ func (c *Config) WithProject(id ProjectID, home string) (*Config, error) {
 	out.ActiveProjects = []string{string(id)}
 	out.Project = p
 	out.Projects = []Project{p}
+	return &out, nil
+}
+
+// AddProject loads one project's configuration while preserving the loaded
+// settings of every other project.
+func (c *Config) AddProject(id ProjectID, home string) (*Config, error) {
+	if c.Active(id) {
+		return c, nil
+	}
+	loaded, err := c.WithProject(id, home)
+	if err != nil {
+		return nil, err
+	}
+	out := *c
+	out.ActiveProjects = append(slices.Clone(c.ActiveProjects), string(id))
+	out.Projects = append(slices.Clone(c.Projects), loaded.Project)
+	out.Project = Project{}
+	if len(out.Projects) == 1 {
+		out.Project = out.Projects[0]
+	}
 	return &out, nil
 }
 
@@ -422,6 +448,9 @@ func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Proje
 		return Project{}, err
 	}
 	p.ID = id
+	if err := p.validateHearsay(projectPath); err != nil {
+		return Project{}, err
+	}
 	if p.Version != 1 {
 		return Project{}, fieldError(projectPath, "version", "must be 1 (no migrations supported)")
 	}
@@ -518,7 +547,19 @@ func decodeError(path string, err error) error {
 func knownKey(key toml.Key, project bool) bool {
 	path := key.String()
 	if project {
-		return slices.Contains([]string{"version", "name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "capacity", "capacity.per_workstream"}, path)
+		if len(key) == 2 && key[0] == "hearsay_entities" {
+			return true
+		}
+		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "version", "name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "capacity", "capacity.per_workstream"}, path)
+	}
+	if key[0] == "hearsay" {
+		if len(key) == 1 {
+			return true
+		}
+		if len(key) == 2 {
+			return slices.Contains([]string{"url", "principal", "token_env", "agents"}, key[1])
+		}
+		return key[1] == "agents" && (len(key) == 3 || len(key) == 4 && (key[3] == "id" || key[3] == "token_env"))
 	}
 	if len(key) >= 2 && (key[0] == "profiles" || key[0] == "roles") {
 		if len(key) == 2 {
@@ -537,8 +578,6 @@ func knownKey(key toml.Key, project bool) bool {
 
 func unsupportedKey(key toml.Key) string {
 	switch key[0] {
-	case "hearsay", "hearsay_scope":
-		return "Hearsay integration is not supported"
 	case "pause", "priority":
 		return "runtime overrides belong in runtime.json; use osmia pause or osmia priority"
 	}

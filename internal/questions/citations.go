@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/charter"
@@ -21,7 +22,7 @@ import (
 
 // CitationForms lists the citations an answer may rest on, for prompts and
 // refusals.
-const CitationForms = "charter#<n> (a charter rule), kb/<subsystem>.md (a knowledge-base file), ruling#<record> (a ruling recorded in this workstream), spec#<n> (an acceptance criterion of this workstream's spec) or plan#<unit> (a unit of this workstream's plan)"
+const CitationForms = "inspection#<record> (a recorded code inspection), charter#<n> (a charter rule), kb/<subsystem>.md (a knowledge-base file), ruling#<record> (a ruling recorded in this workstream), spec#<n> (an acceptance criterion of this workstream's spec) or plan#<unit> (a unit of this workstream's plan)"
 
 var (
 	charterCitation = regexp.MustCompile(`^charter#([1-9][0-9]{0,8})$`)
@@ -52,6 +53,12 @@ func (e *Unresolved) Error() string {
 func Resolve(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, citation string, now time.Time) error {
 	unresolved := func(format string, args ...any) error {
 		return &Unresolved{Citation: citation, Reason: fmt.Sprintf(format, args...)}
+	}
+	if id, ok := strings.CutPrefix(citation, "inspection#"); ok {
+		if _, err := repository.CodeInspection(stream, id); err != nil {
+			return unresolved("%s", err)
+		}
+		return nil
 	}
 	if m := charterCitation.FindStringSubmatch(citation); m != nil {
 		doc, err := repository.Charter(ctx, now)

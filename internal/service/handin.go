@@ -135,6 +135,9 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		return h.failed("reading")
 	}
 	exists := slices.Contains(streams, stream)
+	if req.Base != "" && (req.Base == stream || !slices.Contains(streams, req.Base) || req.Base == librarianWorkstream(req.Project)) {
+		return HandInResponse{}, false, &APIError{Validation, "base must name another feature workstream in the same project"}
+	}
 	var doc *trace.Document
 	var handed, skipped bool
 	if exists {
@@ -142,10 +145,20 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		if err != nil {
 			return h.failed("reading")
 		}
+		var initial trace.WorkstreamBase
 		for _, d := range docs {
+			if d.ID == "workstream-base" {
+				if err := json.Unmarshal([]byte(d.Content), &initial); err != nil {
+					return h.failed("reading the original base of")
+				}
+			}
 			if d.ID == handedDocument {
 				doc = &d
+				break
 			}
+		}
+		if (doc != nil || initial.Revision > 0) && initial.Base != req.Base {
+			return HandInResponse{}, false, &APIError{Conflict, "the hand-in key already names a different base"}
 		}
 		transitions, err := trace.Read[trace.Transition](repository, stream)
 		if err != nil {
@@ -187,6 +200,15 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		}
 		if err != nil {
 			return h.failed("creating")
+		}
+		if req.Base != "" {
+			recorded, err := repository.WorkstreamBase(stream)
+			if err != nil {
+				return h.failed("reading base of")
+			}
+			if _, err := repository.SetWorkstreamBase(ctx, stream, req.Base, recorded.Revision, now); err != nil {
+				return HandInResponse{}, false, &APIError{Validation, "base must form an acyclic graph of available workstreams in this project"}
+			}
 		}
 		// The workstream may be new: the runtime store learns it before the
 		// input is copied, so a retried hand-in resolves it again and a

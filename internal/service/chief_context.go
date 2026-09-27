@@ -13,7 +13,7 @@ import (
 // chiefContext renders the bundle and the durable status and open escalations
 // that a fresh chief-of-staff session cannot recover from bounded replay.
 func chiefContext(ctx context.Context, provider bundle.Provider, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID) (string, error) {
-	b, err := provider.Assemble(ctx, project, bundle.Scope{Workstream: stream})
+	b, err := provider.Assemble(ctx, project, bundle.Scope{Role: "chief_of_staff", Workstream: stream})
 	if err != nil {
 		return "", fmt.Errorf("context of workstream %s: %w", stream, err)
 	}
