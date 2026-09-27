@@ -174,6 +174,10 @@ func (s *Service) statusList() StatusResponse {
 	if err != nil {
 		diagnostics = append(diagnostics, Diagnostic{"workspaces", Unavailable, workspaces.Problem})
 	}
+	var draining []ProjectView
+	for _, p := range s.drainingProjects() {
+		draining = append(draining, projectView(s.current().Root, p))
+	}
 	list, unreadable, api := s.statuses()
 	if api != nil {
 		list = []WorkstreamStatus{}
@@ -183,14 +187,14 @@ func (s *Service) statusList() StatusResponse {
 		diagnostics = append(diagnostics, *unread)
 	}
 	if api != nil {
-		return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{"workstreams", api.Code, api.Message}), Workspaces: workspaces}
+		return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{"workstreams", api.Code, api.Message}), Workspaces: workspaces, Draining: draining}
 	}
 	for _, w := range list {
 		if d, ok := unreadable[w.Workstream]; ok {
 			diagnostics = append(diagnostics, d)
 		}
 	}
-	return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: diagnostics, Workspaces: workspaces}
+	return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: diagnostics, Workspaces: workspaces, Draining: draining}
 }
 
 // failureStreaks returns the nonzero infrastructure failure streaks across

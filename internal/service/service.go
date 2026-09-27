@@ -114,8 +114,8 @@ type Options struct {
 	checkJJ jjCheck
 }
 
-// activeProject is the runtime state of one active project: its open trace
-// and the reconciliation loop running against it.
+// activeProject is the runtime state of one active or draining project: its
+// open trace and the reconciliation loop running against it.
 type activeProject struct {
 	id         config.ProjectID
 	repository *trace.Repository
@@ -123,14 +123,19 @@ type activeProject struct {
 	pipeline   *pipeline
 	cancel     context.CancelFunc
 	done       chan error
+	// removed is the project's configuration once it is removed and drains.
+	removed config.Project
 }
 
 type Service struct {
-	mu  sync.Mutex // guards cfg, projects, pending and reloadErr
+	mu  sync.Mutex // guards cfg, projects, draining, pending and reloadErr
 	cfg *config.Config
 	// projects holds the runtime of every active project that has a trace, in
 	// active_projects order.
 	projects []*activeProject
+	// draining holds the runtime of every removed project whose loop is
+	// finishing the work it had in flight, in order of removal.
+	draining []*activeProject
 	// pool is the role capacity the schedulers of every project draw on.
 	pool      *scheduler.Shared
 	pending   error
@@ -297,16 +302,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 	}
 	for _, p := range projects {
-		view := cfg.For(p.id)
-		if err = s.recoverWorkspaces(ctx, view); err != nil {
+		if err = s.recover(ctx, cfg.For(p.id), p); err != nil {
 			s.cleanupSocket()
 			st.Close()
-			return nil, fmt.Errorf("recover interrupted workspace operations: %w", err)
-		}
-		if err = s.recoverSessions(ctx, view, p.repository); err != nil {
-			s.cleanupSocket()
-			st.Close()
-			return nil, fmt.Errorf("recover thread sessions: %w", err)
+			return nil, err
 		}
 	}
 	s.lifetime, s.cancel = context.WithCancel(ctx)
@@ -382,8 +381,8 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 		s.requests.Wait()
 		s.mu.Lock()
-		projects := s.projects
-		s.projects = nil
+		projects := append(s.projects, s.draining...)
+		s.projects, s.draining = nil, nil
 		s.mu.Unlock()
 		s.err = errors.Join(s.err, s.stop(projects...))
 		s.cleanupSocket()
@@ -442,10 +441,37 @@ func (s *Service) current() *config.Config {
 	return s.cfg
 }
 
-// about returns the loaded configuration about the project of repository. Its
-// Project is zero once that project is no longer active.
+// about returns the loaded configuration about the project of repository.
+// While the project drains its Project is the one it was removed with; it is
+// zero once the project is neither active nor draining.
 func (s *Service) about(repository *trace.Repository) *config.Config {
-	return s.current().For(repository.Project())
+	id := repository.Project()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cfg := s.cfg.For(id)
+	if cfg.HasProject() {
+		return cfg
+	}
+	for _, p := range s.draining {
+		if p.id == id {
+			out := *cfg
+			out.Project = p.removed
+			return &out
+		}
+	}
+	return cfg
+}
+
+// drainingProjects returns the projects that are draining, in order of
+// removal.
+func (s *Service) drainingProjects() []config.Project {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]config.Project, len(s.draining))
+	for i, p := range s.draining {
+		out[i] = p.removed
+	}
+	return out
 }
 
 // runtimes returns the loaded configuration and the runtime of every active
@@ -470,13 +496,14 @@ func (s *Service) runtimeOf(id config.ProjectID) (*config.Config, *activeProject
 	return cfg, nil
 }
 
-// traces returns the open traces of the active projects, whose turns in
-// flight share the role capacity.
+// traces returns the open traces of the active projects, then of the
+// draining ones, whose turns in flight share the role capacity.
 func (s *Service) traces() []*trace.Repository {
-	_, projects := s.runtimes()
-	out := make([]*trace.Repository, len(projects))
-	for i, p := range projects {
-		out[i] = p.repository
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*trace.Repository, 0, len(s.projects)+len(s.draining))
+	for _, p := range append(slices.Clone(s.projects), s.draining...) {
+		out = append(out, p.repository)
 	}
 	return out
 }
@@ -697,8 +724,9 @@ func ensureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at t
 	return nil
 }
 
-// launch runs the controller for the service's lifetime. A loop failure stops
-// the service; cancellation from stop or shutdown does not.
+// launch runs the controller for the service's lifetime, or until the
+// project has drained, which retires it. A loop failure stops the service;
+// cancellation from stop or shutdown does not.
 func (s *Service) launch(active *activeProject) {
 	if active == nil {
 		return
@@ -707,6 +735,9 @@ func (s *Service) launch(active *activeProject) {
 	active.cancel = cancel
 	go func() {
 		err := active.controller.Run(ctx)
+		if errors.Is(err, errDrained) {
+			err = s.retire(active)
+		}
 		active.done <- err
 		if err != nil && !errors.Is(err, context.Canceled) {
 			select {
@@ -715,6 +746,48 @@ func (s *Service) launch(active *activeProject) {
 			}
 		}
 	}()
+}
+
+// recover restores the project's interrupted workspace operations and thread
+// sessions before its loop first runs.
+func (s *Service) recover(ctx context.Context, cfg *config.Config, p *activeProject) error {
+	if err := s.recoverWorkspaces(ctx, cfg); err != nil {
+		return fmt.Errorf("recover interrupted workspace operations: %w", err)
+	}
+	if err := s.recoverSessions(ctx, cfg, p.repository); err != nil {
+		return fmt.Errorf("recover thread sessions: %w", err)
+	}
+	return nil
+}
+
+// drain stops the project's dispatch; its loop goes on reconciling the
+// operations already recorded and ends once none is left.
+func (s *Service) drain(p *activeProject, removed config.Project) {
+	p.removed = removed
+	p.pipeline.draining.Store(true)
+	s.draining = append(s.draining, p)
+}
+
+// retire takes a drained project out of the capacity pool and closes its
+// trace, unless shutdown has already taken it to stop. No scheduler pass
+// reads the trace once it has left the pool, so it closes unread. A trace
+// that fails to close is logged; the other projects keep running.
+func (s *Service) retire(active *activeProject) error {
+	found := false
+	s.pool.Hold(func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		found = slices.Contains(s.draining, active)
+		s.draining = slices.DeleteFunc(s.draining, func(p *activeProject) bool { return p == active })
+	})
+	if !found {
+		return nil
+	}
+	if err := active.repository.Close(); err != nil {
+		log.Printf("osmia: close the trace of drained project %s: %v", active.id, err)
+	}
+	s.hub.publish(Event{Kind: EventResync})
+	return nil
 }
 
 // halt cancels the project's controller and joins it. It reports loop
@@ -810,6 +883,8 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if options.Hold == nil {
 		options.Hold = s.holding(repository)
 	}
+	hold := options.Hold
+	p.drained = func() (bool, error) { return settled(repository, hold) }
 	if options.Concurrent == nil {
 		options.Concurrent = concurrentOperation
 	}

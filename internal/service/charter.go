@@ -44,9 +44,23 @@ func (s *Service) repository(id config.ProjectID) (*trace.Repository, error) {
 }
 
 // Context returns the provider that assembles turn bundles for the active
-// project. Its charter reads record owner edits as loadCharter does.
+// projects and for the draining ones, whose turns in flight still read them.
+// Its charter reads record owner edits as loadCharter does.
 func (s *Service) Context() bundle.Provider {
-	return bundle.Files{Repository: s.repository, Now: func() time.Time { return time.Now().UTC() }}
+	return bundle.Files{Repository: s.turnRepository, Now: func() time.Time { return time.Now().UTC() }}
+}
+
+// turnRepository returns the open trace of the active or draining project id.
+func (s *Service) turnRepository(id config.ProjectID) (*trace.Repository, error) {
+	s.mu.Lock()
+	for _, p := range s.draining {
+		if p.id == id {
+			s.mu.Unlock()
+			return p.repository, nil
+		}
+	}
+	s.mu.Unlock()
+	return s.repository(id)
 }
 
 func (s *Service) charterState(id config.ProjectID) (CharterState, error) {

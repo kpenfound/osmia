@@ -373,7 +373,15 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if a[0] == "remove" {
 			verb = "removed"
 		}
-		fmt.Fprintf(stdout, "Project %s (%s) %s\nUpstream: %s fork: %s clone: %s\nTrace: %s\nNext: %s\n", result.Project.ID, result.Project.Name, verb, result.Project.Upstream, result.Project.Fork, result.Project.Clone, result.Project.Trace, result.NextStep)
+		fmt.Fprintf(stdout, "Project %s (%s) %s\nUpstream: %s fork: %s clone: %s\nTrace: %s\n", result.Project.ID, result.Project.Name, verb, result.Project.Upstream, result.Project.Fork, result.Project.Clone, result.Project.Trace)
+		for _, u := range result.Unfinished {
+			state := u.State
+			if state == "" {
+				state = "none"
+			}
+			fmt.Fprintf(stdout, "Unfinished: %s state=%s\n", u.Workstream, state)
+		}
+		fmt.Fprintf(stdout, "Next: %s\n", result.NextStep)
 		return 0
 	}
 	if cmd == "handin" {
@@ -816,6 +824,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		showConfigDrift(stdout, cfg.Drift)
 		showTailnet(stdout, h.Tailnet)
 		showProject(stdout, cfg.Project)
+		for _, p := range all.Draining {
+			fmt.Fprintf(stdout, "Draining: %s (%s) trace=%s\n", p.ID, p.Name, p.Trace)
+		}
 		for _, p := range rt.Projects {
 			fmt.Fprintf(stdout, "Context: %s context_mode=%s\n", p.Project, p.ContextMode)
 		}
@@ -1427,8 +1438,6 @@ func report(w io.Writer, err error, project bool) int {
 	switch api.Code {
 	case service.NoProject:
 		code, msg = 4, "no project is configured; add one with osmia project add"
-	case service.ProjectActive:
-		msg = "a project is already active; remove it before adding another"
 	case service.NotFound:
 		code, msg = 4, "project not found; check the project ID with status"
 	case service.CharterEmpty:

@@ -26,7 +26,6 @@ const (
 	Unavailable     Code = "unavailable"
 	Internal        Code = "internal"
 	NoProject       Code = "no_project"
-	ProjectActive   Code = "project_active"
 	NotFound        Code = "not_found"
 	CharterEmpty    Code = "charter_empty"
 	Forbidden       Code = "forbidden"
@@ -344,6 +343,17 @@ type ProjectRemoveRequest struct {
 type ProjectResponse struct {
 	Project  ProjectView `json:"project"`
 	NextStep string      `json:"next_step"`
+	// Unfinished lists, on removal, the workstreams the retained trace
+	// leaves neither delivered nor abandoned; it is omitted when there are
+	// none and on registration.
+	Unfinished []UnfinishedWorkstream `json:"unfinished,omitempty"`
+}
+
+// UnfinishedWorkstream is a workstream a removed project leaves unfinished,
+// with its feature state, empty while none is recorded.
+type UnfinishedWorkstream struct {
+	Workstream config.WorkstreamID `json:"workstream"`
+	State      string              `json:"state"`
 }
 type RuntimeResponse struct {
 	Effective runtime.State               `json:"effective"`
@@ -413,6 +423,10 @@ type StatusResponse struct {
 	// workspaces = "jujutsu" and no supported jj, a diagnostic also
 	// reports its problem.
 	Workspaces WorkspacesStatus `json:"workspaces"`
+	// Draining lists the removed projects whose loops are still finishing
+	// the work they had in flight, in order of removal; it is omitted when
+	// there are none.
+	Draining []ProjectView `json:"draining,omitempty"`
 }
 
 // WorkspacesStatus is the backend new workstreams get. Setting is the

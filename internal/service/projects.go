@@ -92,9 +92,11 @@ func sameRegistration(a, b config.Project) bool {
 	return a.Name == b.Name && a.Upstream == b.Upstream && a.Fork == b.Fork && a.Clone == b.Clone && a.BaseBranch == b.BaseBranch
 }
 
-// addProject registers a project. An interrupted registration is completed
-// before a new one is considered. Repeating the active project's registration
-// returns it; any other request while a project is active is refused.
+// addProject registers a project and activates it beside the projects
+// already active. An interrupted registration is completed before a new one
+// is considered: a request that is not the interrupted one is refused once
+// that one is finished. Repeating an active project's registration returns
+// it.
 func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (ProjectResponse, *APIError) {
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
@@ -103,31 +105,24 @@ func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (Projec
 		return ProjectResponse{}, &APIError{Internal, "the project registration journal is unreadable; inspect project-add.json under the root"}
 	}
 	if pending != nil {
-		if active := s.current(); len(active.Projects) > 0 && !active.Active(pending.Project.ID) {
-			return ProjectResponse{}, journalMismatch(pending.Project.ID, active.Projects[0].ID)
-		}
 		p, err := s.complete(ctx, *pending, true)
 		if err != nil {
 			return ProjectResponse{}, incomplete(pending.Project.ID, err)
 		}
 		if requested, api := s.validateAdd(req); api != nil || !sameRegistration(requested, p) {
-			return ProjectResponse{}, activeError(p.ID)
+			return ProjectResponse{}, finishedInstead(p.ID)
 		}
 		return s.added(p), nil
 	}
-	cfg := s.current()
 	p, api := s.validateAdd(req)
-	if len(cfg.Projects) > 0 {
-		// The same registration again is the retry of a finished add.
-		for _, active := range cfg.Projects {
-			if api == nil && sameRegistration(p, active) {
-				return s.added(active), nil
-			}
-		}
-		return ProjectResponse{}, activeError(cfg.Projects[0].ID)
-	}
 	if api != nil {
 		return ProjectResponse{}, api
+	}
+	// The same registration again is the retry of a finished add.
+	for _, active := range s.current().Projects {
+		if sameRegistration(p, active) {
+			return s.added(active), nil
+		}
 	}
 	if err := s.reserve(&p); err != nil {
 		return ProjectResponse{}, &APIError{Internal, "cannot reserve a project identity under the root; check its permissions"}
@@ -142,11 +137,8 @@ func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (Projec
 	return s.added(p), nil
 }
 
-func journalMismatch(pending, active config.ProjectID) *APIError {
-	return &APIError{Internal, fmt.Sprintf("the registration journal names project %s while %s is active; remove %s or inspect project-add.json under the root", pending, active, active)}
-}
-func activeError(id config.ProjectID) *APIError {
-	return &APIError{ProjectActive, fmt.Sprintf("project %s is already active; single-project operation requires removing it before adding another", id)}
+func finishedInstead(id config.ProjectID) *APIError {
+	return &APIError{Conflict, fmt.Sprintf("an interrupted registration was finished instead: project %s is now active; run osmia project add again to add another project", id)}
 }
 func incomplete(id config.ProjectID, err error) *APIError {
 	reason := "storage failure"
@@ -312,7 +304,7 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 		return p, err
 	}
 	if activate {
-		if p, err = s.activate(p.ID); err != nil {
+		if p, err = s.activate(ctx, p.ID); err != nil {
 			return p, err
 		}
 	}
@@ -362,28 +354,27 @@ func (s *Service) runtimeInputs(cfg *config.Config, projects []*activeProject) (
 	return runtime.Inputs{Config: cfg, Workstreams: workstreams}, nil
 }
 
-// activate loads the project into the running configuration and opens its
-// trace and reconciliation loop the way startup does.
-func (s *Service) activate(id config.ProjectID) (config.Project, error) {
+// activate loads the project into the running configuration beside the
+// projects already active and opens its trace and reconciliation loop the way
+// startup does. Callers hold projectMu.
+func (s *Service) activate(ctx context.Context, id config.ProjectID) (config.Project, error) {
+	cfg := s.current()
+	if cfg.Active(id) {
+		return cfg.For(id).Project, nil
+	}
+	cfg, err := cfg.WithAddedProject(id, s.options.Config.Home)
+	if err != nil {
+		return config.Project{}, err
+	}
+	active, err := s.openRecovered(ctx, cfg.For(id))
+	if err != nil {
+		return config.Project{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.projects) > 0 {
-		if s.cfg.Project.ID == id {
-			return s.cfg.Project, nil
-		}
-		return config.Project{}, fmt.Errorf("project %s is active", s.projects[0].id)
-	}
-	cfg, err := s.cfg.WithProject(id, s.options.Config.Home)
-	if err != nil {
-		return config.Project{}, err
-	}
-	active, err := s.open(cfg)
-	if err != nil {
-		return config.Project{}, err
-	}
-	var projects []*activeProject
+	projects := s.projects
 	if active != nil {
-		projects = append(projects, active)
+		projects = append(slices.Clone(projects), active)
 	}
 	if err := s.resolveRuntime(cfg, projects); err != nil {
 		if active != nil {
@@ -392,18 +383,30 @@ func (s *Service) activate(id config.ProjectID) (config.Project, error) {
 		return config.Project{}, err
 	}
 	s.cfg, s.projects, s.pending = cfg, projects, nil
-	if active != nil {
-		s.launch(active)
-	}
+	s.launch(active)
 	s.hub.publish(Event{Kind: EventResync})
-	return cfg.Project, nil
+	return cfg.For(id).Project, nil
+}
+
+// openRecovered opens the runtime of the project cfg is about, as open does,
+// and recovers its interrupted work before its loop first runs.
+func (s *Service) openRecovered(ctx context.Context, cfg *config.Config) (*activeProject, error) {
+	active, err := s.open(cfg)
+	if err != nil || active == nil {
+		return nil, err
+	}
+	if err := s.recover(ctx, cfg, active); err != nil {
+		active.repository.Close()
+		return nil, err
+	}
+	return active, nil
 }
 
 // recoverPending finishes an interrupted registration at startup, leaving the
 // trace to open through the ordinary startup path. Failure keeps the journal
 // for a later retry and starts the service with the configuration as loaded,
-// which has no project unless one is already listed, reporting the problem
-// through configuration diagnostics.
+// without the journaled project unless it is already listed, reporting the
+// problem through configuration diagnostics.
 func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*config.Config, error) {
 	s.cfg = cfg
 	pending, err := s.readPending()
@@ -412,9 +415,6 @@ func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*conf
 	}
 	if pending == nil {
 		return cfg, nil
-	}
-	if len(cfg.Projects) > 0 && !cfg.Active(pending.Project.ID) {
-		return cfg, fmt.Errorf("journal names %s while %s is active", pending.Project.ID, cfg.Projects[0].ID)
 	}
 	if _, err := s.complete(ctx, *pending, false); err != nil {
 		return cfg, err
@@ -426,9 +426,11 @@ func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*conf
 	return loaded, nil
 }
 
-// removeProject takes an active project out of configuration and closes its
-// runtime state; the other active projects keep running. Its trace and the
-// owner's clone stay where they are.
+// removeProject takes an active project out of configuration and drains it:
+// its loop dispatches nothing new, finishes the operations already recorded,
+// then stops and closes the trace. The other active projects keep running. The
+// response lists the workstreams the trace leaves unfinished. Its trace and
+// the owner's clone stay where they are.
 func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *APIError) {
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
@@ -446,6 +448,14 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 		return ProjectResponse{}, &APIError{Validation, fmt.Sprintf("project %s is not active; the active projects are %s", req.Project, projectList(cfg.ProjectIDs()))}
 	}
 	removed := cfg.For(req.Project).Project
+	_, active := s.runtimeOf(req.Project)
+	var unfinished []UnfinishedWorkstream
+	if active != nil {
+		var err error
+		if unfinished, err = unfinishedWorkstreams(active.repository); err != nil {
+			return ProjectResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", req.Project)}
+		}
+	}
 	configPath, err := cfg.Root.Config()
 	if err == nil {
 		err = config.RemoveActiveProject(configPath, req.Project)
@@ -454,30 +464,45 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 		return ProjectResponse{}, &APIError{Internal, "cannot edit active_projects in config.toml; check the file and its permissions"}
 	}
 	s.mu.Lock()
-	var active *activeProject
-	for _, p := range s.projects {
-		if p.id == req.Project {
-			active = p
-		}
-	}
-	s.cfg = cfg.WithoutProjectID(req.Project)
-	s.mu.Unlock()
-	var closed error
+	s.cfg = s.cfg.WithoutProjectID(req.Project)
 	if active != nil {
-		// The loop stops before the trace leaves the pool, and no scheduler
-		// pass reads the trace once it has left, so it closes unread.
-		closed = s.halt(active)
-		s.pool.Hold(func() {
-			s.mu.Lock()
-			s.projects = slices.DeleteFunc(s.projects, func(p *activeProject) bool { return p == active })
-			s.mu.Unlock()
-		})
-		closed = errors.Join(closed, active.repository.Close())
+		s.projects = slices.DeleteFunc(slices.Clone(s.projects), func(p *activeProject) bool { return p == active })
+		s.drain(active, removed)
 	}
-	if err := errors.Join(closed, s.refreshRuntime()); err != nil {
-		return ProjectResponse{}, &APIError{Internal, "the project is removed from configuration but its runtime state did not close cleanly; restart the service"}
+	s.mu.Unlock()
+	if err := s.refreshRuntime(); err != nil {
+		return ProjectResponse{}, &APIError{Internal, "the project is removed from configuration but the runtime state did not resolve; restart the service"}
 	}
 	s.hub.publish(Event{Kind: EventResync})
 	view := projectView(cfg.Root, removed)
-	return ProjectResponse{Project: view, NextStep: "The trace at " + view.Trace + " and the clone are retained; adding the project again starts a new trace under a new ID."}, nil
+	next := "The trace at " + view.Trace + " and the clone are retained; adding the project again starts a new trace under a new ID."
+	if active != nil {
+		next = "The project drains: turns and landings already in flight finish, nothing new is dispatched, and status lists it as draining until its loop stops. " + next
+	}
+	return ProjectResponse{Project: view, NextStep: next, Unfinished: unfinished}, nil
+}
+
+// unfinishedWorkstreams lists the workstreams of the trace that are neither
+// delivered nor abandoned, with their feature state, in manifest order. The
+// librarian's workstream is not listed.
+func unfinishedWorkstreams(repository *trace.Repository) ([]UnfinishedWorkstream, error) {
+	streams, err := repository.Workstreams()
+	if err != nil {
+		return nil, err
+	}
+	librarian := librarianWorkstream(repository.Project())
+	out := []UnfinishedWorkstream{}
+	for _, stream := range streams {
+		if stream == librarian {
+			continue
+		}
+		state, err := repository.Workflow(stream, trace.FeatureSubject)
+		if err != nil {
+			return nil, err
+		}
+		if state.Value != DeliveredState && state.Value != AbandonedState {
+			out = append(out, UnfinishedWorkstream{Workstream: stream, State: state.Value})
+		}
+	}
+	return out, nil
 }

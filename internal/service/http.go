@@ -52,7 +52,7 @@ func failWith(w http.ResponseWriter, api *APIError) {
 	switch api.Code {
 	case Validation:
 		status = 422
-	case NoProject, ProjectActive, CharterEmpty, Conflict:
+	case NoProject, CharterEmpty, Conflict:
 		status = 409
 	case NotFound:
 		status = 404
@@ -233,7 +233,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/reload" {
-		if out, api := s.reload(); api != nil {
+		if out, api := s.reload(r.Context()); api != nil {
 			failWith(w, api)
 		} else {
 			respond(w, 200, out)

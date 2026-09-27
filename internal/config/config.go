@@ -371,6 +371,30 @@ func (c *Config) WithProjects(ids []ProjectID, home string) (*Config, error) {
 	return &out, nil
 }
 
+// WithAddedProject returns a copy of c with id appended to its active
+// projects, loaded and validated from its configuration file; the projects
+// already active keep their loaded values. The receiver is unchanged.
+func (c *Config) WithAddedProject(id ProjectID, home string) (*Config, error) {
+	if c.Active(id) {
+		return c, nil
+	}
+	p, err := loadProject(c.Root, id, home, c.Capacity.PerWorkstream)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.validateClassifier(p); err != nil {
+		return nil, err
+	}
+	out := *c
+	out.ActiveProjects = append(slices.Clone(c.ActiveProjects), string(id))
+	out.Projects = append(slices.Clone(c.Projects), p)
+	out.Project = Project{}
+	if len(out.Projects) == 1 {
+		out.Project = p
+	}
+	return &out, nil
+}
+
 func (c *Config) validateClassifier(p Project) error {
 	if p.Classifier == "" {
 		return nil
