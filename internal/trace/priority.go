@@ -12,10 +12,11 @@ import (
 // PriorityID is the record ID of every priority change of a workstream.
 const PriorityID = "priority"
 
-// PriorityChange records a change the chief of staff made to the project's
-// runtime workstream priority order at the owner's request. The actor is the
-// owner whose message the turn answered; Agent is the chief of staff that
-// made the change in Turn. Order is the project's order in force after it.
+// PriorityChange records a change the chief of staff made to the places of
+// the project's workstreams in the runtime priority order at the owner's
+// request. The actor is the owner whose message the turn answered; Agent is
+// the chief of staff that made the change in Turn. Order is the project's
+// workstreams in the order in force after it, in that order.
 type PriorityChange struct {
 	Header
 	Agent string                `json:"agent"`

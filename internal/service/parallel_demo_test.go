@@ -111,7 +111,7 @@ func TestM4ParallelUnitsDemonstration(t *testing.T) {
 	// slots with its disjoint resume and upload; dedupe, ahead of upload in
 	// the plan, shares resume's footprint and waits. resume's mason reports done, and its freed slot
 	// goes to hi again, to dedupe, though lo never started a unit.
-	mutation(t, f.c, "PUT", "priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{hi, lo}})
+	mutation(t, f.c, "PUT", "priority", PriorityRequest{Order: ranked(f.project, hi, lo)})
 	mutation(t, f.c, "DELETE", "pause", factory)
 	select {
 	case <-entered:

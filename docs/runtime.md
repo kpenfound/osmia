@@ -34,10 +34,10 @@ The version 1 JSON representation is:
       "set_at": "2026-09-24T13:00:00Z"
     }
   ],
-  "priorities": [
+  "priority": [
     {
       "project": "p_0123456789abcdef0123456789abcdef",
-      "workstreams": ["w_0123456789abcdef0123456789abcdef"]
+      "workstream": "w_0123456789abcdef0123456789abcdef"
     }
   ],
   "profiles": {"mason": "default"},
@@ -73,23 +73,37 @@ which the [daily budget](service.md#daily-budget) last paused the factory.
 `SetBudgetPause` writes the budget's pause and this day together; the budget
 pauses at most once per day.
 
-Priority contains a unique ordered subset of workstream IDs, scoped to a project.
-An empty array is allowed; null is not. Unlisted workstreams have no explicit
-preference. There is one priority record per project. Free mason slots and
-turn slots go first to the workstreams it names, in its order
-([service](service.md#starting-units)). Profiles map global role
+`priority` is one order of the workstreams of every active project, highest
+first: each entry names a project and one of its workstreams, and each
+workstream appears once. Unlisted workstreams have no explicit preference and
+share the place after the last listed one. Free mason slots and turn slots go
+first to the workstreams it names, in its order
+([service](service.md#starting-units),
+[scheduler](service.md#running-turns)). `priorities`, an order per project
+(`{"project": …, "workstreams": […]}`, one record per project, workstreams
+an array, never null), is the form an older file may hold. It still loads:
+the effective order places those workstreams after the ones `priority` names,
+the first of each project's order, by project ID, then the second of each,
+and so on, leaving out a workstream `priority` already names. Profiles map global role
 names to named profiles; bindings must satisfy the role's sandbox requirements,
 including the selected profile's fallback chain.
 
 `SetPause`, `SetPriority` and `SetProfile` validate new overrides against the current
-resolver input before writing. The corresponding `Clear` operations remove the
-exact key, including a stale key, subject to the pause clearing rule. They never rewrite `config.toml`. `Resolve`
+resolver input before writing. `SetPriority` replaces the whole stored order,
+stale entries and per-project `priorities` included. `Prioritise(project,
+workstreams)` puts the named workstreams of one project first, leaves that
+project's other workstreams unlisted and keeps the other projects' entries of
+the effective order after them. The corresponding `Clear` operations remove the
+exact key, including a stale key, subject to the pause clearing rule;
+`ClearPriority` removes one project's entries, stale ones included, or the
+whole order when it is given no project. They never rewrite `config.toml`. `Resolve`
 copies a newly validated configuration and identity list into the resolver without
 changing runtime state or files; changing the root requires reopening. This is a
 repository operation, not live reload orchestration.
 
 `Snapshot` returns the entire stored state plus reference diagnostics. `Effective`
-returns valid pauses and priorities, and every configured role binding with valid
+returns valid pauses, the effective priority order in `priority` (with
+`priorities` empty), and every configured role binding with valid
 runtime overrides applied. Both return independent copies. Clearing a profile
 reveals the current configured binding. M1 configuration defines no pause or
 priority settings, so their defaults are unpaused and no explicit ordering.
@@ -110,7 +124,8 @@ path and reason for each stale reference. Consumers must surface these diagnosti
 A load cannot distinguish a removed identity from an unknown manually entered one;
 both follow this same explicit policy. New mutations cannot introduce unknown
 references. Stale pause/profile entries do not affect effective values; stale
-priority members are excluded while valid members retain their relative order.
+priority entries, each with its own diagnostic, are excluded while valid
+entries retain their relative order.
 Other valid overrides remain effective and survive subsequent mutations. Restoring
 the exact referenced key makes it effective again; no name-based retargeting occurs.
 Clearing stale keys is the explicit way to discard them.

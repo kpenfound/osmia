@@ -43,9 +43,10 @@ type Options struct {
 	// most PerWorkstream turns. Chief-of-staff turns take no slot. Nil leaves
 	// dispatch unbounded.
 	Capacity *config.Capacity
-	// Priorities returns the runtime priority order of workstreams, read once
-	// per pass. Nil gives every workstream the same priority.
-	Priorities func() []runtime.Priority
+	// Priorities returns the runtime priority order of the workstreams of
+	// every project, read once per pass. Nil gives every workstream the same
+	// priority.
+	Priorities func() []runtime.Ranked
 	// Shared is the pool of role slots this scheduler shares with the
 	// schedulers of other projects. Nil keeps the slots to this trace.
 	Shared *Shared
@@ -56,11 +57,52 @@ type Options struct {
 // the turns in flight on every trace Traces returns against the role slots of
 // Capacity, so the limits hold across projects. PerWorkstream and the one
 // turn per workstream of the other roles stay per workstream.
+//
+// Each pass also orders the queued turns of every project together and
+// leaves a slot free for another project's turn that goes before its own,
+// which that project's pass then dispatches. A turn the other project's own
+// gate declined on its latest pass is left out until that project passes
+// again.
 type Shared struct {
 	mu sync.Mutex
 	// Traces returns the open traces of every project that draws on the
 	// pool. A scheduler's own trace may be among them.
 	Traces func() []*trace.Repository
+	// perWorkstream is each project's capacity.per_workstream, as its
+	// latest pass used it.
+	perWorkstream map[config.ProjectID]int
+	// declined holds the turns each project's gate declined on its latest
+	// pass.
+	declined map[offer]bool
+}
+
+// offer names one queued turn of one project.
+type offer struct {
+	project    config.ProjectID
+	workstream config.WorkstreamID
+	agent      string
+	turn       string
+}
+
+func offerOf(c Candidate) offer {
+	return offer{c.Project, c.Workstream, c.Thread.Identity.ID, c.Turn.Request.TurnID}
+}
+
+// begin records the project's per-workstream limit and forgets what its gate
+// declined, before a pass of the project offers its turns again.
+func (p *Shared) begin(project config.ProjectID, limits *config.Capacity) {
+	if p.perWorkstream == nil {
+		p.perWorkstream, p.declined = map[config.ProjectID]int{}, map[offer]bool{}
+	}
+	delete(p.perWorkstream, project)
+	if limits != nil {
+		p.perWorkstream[project] = limits.PerWorkstream
+	}
+	for o := range p.declined {
+		if o.project == project {
+			delete(p.declined, o)
+		}
+	}
 }
 
 // Hold runs fn while no pass of a scheduler drawing on the pool is in
@@ -121,26 +163,45 @@ func New(repository *trace.Repository, options Options) (*Scheduler, error) {
 //
 // Candidates are offered one at a time, by stage first: review, then
 // implementation, then debate, then drafting, then every other role. Within a
-// stage the candidate of the highest-priority workstream goes first, and among
-// workstreams of equal priority the one whose last turn of that stage was
-// dispatched least recently, so equal workstreams take the stage's slots in
-// turn. The last dispatch of each stage is read from the trace's turn
-// operations, so the rotation continues across restarts. A candidate that
-// finds no free slot or that Admit declines is not dispatched and leaves its
-// workstream's place in the rotation unchanged.
+// stage the candidate of the highest-priority workstream goes first. Among
+// equal priorities the project whose last turn of that stage was dispatched
+// least recently goes first, and within it the workstream whose last turn of
+// that stage was, so equal projects take the stage's slots in turn however
+// many workstreams each has ready, and so do equal workstreams of a project.
+// The last dispatch of each stage is read from the trace's turn operations,
+// so the rotation continues across restarts. A candidate that finds no free
+// slot or that Admit declines is not dispatched and leaves its place in the
+// rotation unchanged.
+//
+// With a shared pool the candidates of every project in it are ordered
+// together. A slot that goes to another project's candidate is left free
+// for that project's pass, and the candidate takes its place in the rotation
+// for the rest of this pass.
 func (s *Scheduler) Pass(ctx context.Context) error {
 	defer s.lock()()
+	project, shared := s.repository.Project(), s.options.Shared
+	if shared != nil {
+		shared.begin(project, s.options.Capacity)
+	}
 	r, err := s.read()
 	if err != nil {
 		return err
 	}
 	candidates, used, order := r.candidates, r.used, s.order(r.served)
+	if shared != nil {
+		candidates = slices.DeleteFunc(candidates, func(c Candidate) bool { return c.Project != project && shared.declined[offerOf(c)] })
+	}
 	for len(candidates) > 0 {
 		slices.SortStableFunc(candidates, order)
 		c := candidates[0]
 		candidates = candidates[1:]
 		role := c.Thread.Identity.Role
-		if s.refusal(used, c) != "" {
+		if refusal(s.limits(c.Project), used, c) != "" {
+			continue
+		}
+		if c.Project != project {
+			used.add(c.Project, c.Workstream, role)
+			r.served.serve(c, s.options.Now())
 			continue
 		}
 		if s.options.Admit != nil {
@@ -149,6 +210,9 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 				return err
 			}
 			if !admitted {
+				if shared != nil {
+					shared.declined[offerOf(c)] = true
+				}
 				continue
 			}
 		}
@@ -157,9 +221,26 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 			return fmt.Errorf("workstream %s: %w", c.Workstream, err)
 		}
 		used.add(c.Project, c.Workstream, role)
-		r.served[rotationKey(c.Project, c.Workstream, role)] = at
+		r.served.serve(c, at)
 	}
 	return nil
+}
+
+// limits returns the capacity that holds the project's turns: the
+// scheduler's own, with the per-workstream limit of the project's latest
+// pass when the project is another one of the shared pool.
+func (s *Scheduler) limits(project config.ProjectID) *config.Capacity {
+	shared := s.options.Shared
+	if s.options.Capacity == nil || shared == nil || project == s.repository.Project() {
+		return s.options.Capacity
+	}
+	n, ok := shared.perWorkstream[project]
+	if !ok {
+		return s.options.Capacity
+	}
+	limits := *s.options.Capacity
+	limits.PerWorkstream = n
+	return &limits
 }
 
 // The reasons a queued turn finds no free slot.
@@ -205,94 +286,110 @@ type Gated struct {
 }
 
 // SlotsOf reports the slots of schedulers that draw on one shared pool as
-// Slots does for one, as if their passes ran one after another in the order
-// given: a slot one scheduler's candidates take is not free to the next, so a
-// turn that would find no slot after the earlier passes is waiting. Used
-// counts the turns in flight before any of them.
+// Slots does for one, offering the candidates of all of them to the free
+// slots in one order, the order their passes follow together. Each
+// candidate is held by its own scheduler's Holds and bounded by its own
+// scheduler's capacity. Used counts the turns in flight before any of them.
 func SlotsOf(gated []Gated) (Slots, error) {
 	out := Slots{}
 	if len(gated) == 0 {
 		return out, nil
 	}
 	defer gated[0].Scheduler.lock()()
-	taken := usage{roles: map[string]int{}, streams: map[streamKey]int{}, local: map[localKey]int{}}
-	for i, g := range gated {
-		s := g.Scheduler
-		r, err := s.read()
+	of := map[config.ProjectID]Gated{}
+	var traces []*trace.Repository
+	for _, g := range gated {
+		of[g.Scheduler.repository.Project()] = g
+		for _, t := range g.Scheduler.traces() {
+			if !slices.Contains(traces, t) {
+				traces = append(traces, t)
+			}
+		}
+	}
+	r, err := readTraces(traces)
+	if err != nil {
+		return Slots{}, err
+	}
+	out.Used = maps.Clone(r.used.roles)
+	candidates := slices.DeleteFunc(r.candidates, func(c Candidate) bool { _, ok := of[c.Project]; return !ok })
+	used, order, at := r.used, gated[0].Scheduler.order(r.served), gated[0].Scheduler.options.Now()
+	for len(candidates) > 0 {
+		slices.SortStableFunc(candidates, order)
+		c := candidates[0]
+		candidates = candidates[1:]
+		g := of[c.Project]
+		held, err := g.Holds(c)
 		if err != nil {
 			return Slots{}, err
 		}
-		if i == 0 {
-			out.Used = maps.Clone(r.used.roles)
+		if held {
+			continue
 		}
-		r.used.merge(taken)
-		candidates, used, order := r.candidates, r.used, s.order(r.served)
-		at := s.options.Now()
-		for len(candidates) > 0 {
-			slices.SortStableFunc(candidates, order)
-			c := candidates[0]
-			candidates = candidates[1:]
-			held, err := g.Holds(c)
-			if err != nil {
-				return Slots{}, err
-			}
-			if held {
-				continue
-			}
-			role := c.Thread.Identity.Role
-			if reason := s.refusal(used, c); reason != "" {
-				out.Waiting = append(out.Waiting, Wait{c, reason})
-				continue
-			}
-			used.add(c.Project, c.Workstream, role)
-			taken.add(c.Project, c.Workstream, role)
-			r.served[rotationKey(c.Project, c.Workstream, role)] = at
+		if reason := refusal(g.Scheduler.options.Capacity, used, c); reason != "" {
+			out.Waiting = append(out.Waiting, Wait{c, reason})
+			continue
 		}
+		used.add(c.Project, c.Workstream, c.Thread.Identity.Role)
+		r.served.serve(c, at)
 	}
 	return out, nil
 }
 
-// reading is what a pass reads from the trace before it offers slots: the
+// reading is what a pass reads from the traces before it offers slots: the
 // turns in flight, the queued turns and each stage's last dispatch.
 type reading struct {
 	used       usage
 	candidates []Candidate
-	served     map[rotation]time.Time
+	served     served
 }
 
-// read reads every workstream's threads, then its turn operations. With a
-// shared pool it also counts the turns in flight on the pool's other traces.
-func (s *Scheduler) read() (reading, error) {
-	project := s.repository.Project()
-	own, err := load(s.repository)
-	if err != nil {
-		return reading{}, err
-	}
-	used := usage{roles: map[string]int{}, streams: map[streamKey]int{}, local: map[localKey]int{}}
-	own.count(used)
+// traces returns the scheduler's trace, then, with a shared pool, the
+// pool's other traces.
+func (s *Scheduler) traces() []*trace.Repository {
+	out := []*trace.Repository{s.repository}
 	if s.options.Shared != nil && s.options.Shared.Traces != nil {
 		for _, other := range s.options.Shared.Traces() {
-			if other == s.repository {
-				continue
+			if other != s.repository {
+				out = append(out, other)
 			}
-			l, err := load(other)
-			if err != nil {
-				return reading{}, fmt.Errorf("project %s: %w", other.Project(), err)
-			}
-			l.count(used)
 		}
 	}
-	var candidates []Candidate
-	for _, stream := range own.streams {
-		for _, t := range own.threads[stream] {
-			q, ok := next(t)
-			if !ok || own.dispatched[turnKey{stream, t.Identity.ID, q.Request.TurnID}] {
-				continue
+	return out
+}
+
+// read reads the scheduler's traces.
+func (s *Scheduler) read() (reading, error) {
+	return readTraces(s.traces())
+}
+
+// readTraces reads every workstream's threads of each trace, then its turn
+// operations, and returns the turns in flight on all of them, their queued
+// turns and each stage's last dispatch.
+func readTraces(traces []*trace.Repository) (reading, error) {
+	r := reading{used: usage{roles: map[string]int{}, streams: map[streamKey]int{}, local: map[localKey]int{}}, served: served{}}
+	for i, repository := range traces {
+		l, err := load(repository)
+		if err != nil {
+			if i > 0 {
+				err = fmt.Errorf("project %s: %w", repository.Project(), err)
 			}
-			candidates = append(candidates, Candidate{Project: project, Workstream: stream, Thread: t, Turn: q})
+			return reading{}, err
+		}
+		l.count(r.used)
+		for _, stream := range l.streams {
+			for _, t := range l.threads[stream] {
+				q, ok := next(t)
+				if !ok || l.dispatched[turnKey{stream, t.Identity.ID, q.Request.TurnID}] {
+					continue
+				}
+				r.candidates = append(r.candidates, Candidate{Project: l.project, Workstream: stream, Thread: t, Turn: q})
+			}
+		}
+		for k, at := range l.served {
+			r.served.at(k, at)
 		}
 	}
-	return reading{used: used, candidates: candidates, served: own.served}, nil
+	return r, nil
 }
 
 // loaded is one trace's workstreams, their threads, the turns its turn
@@ -302,7 +399,7 @@ type loaded struct {
 	streams    []config.WorkstreamID
 	threads    map[config.WorkstreamID][]trace.Thread
 	dispatched map[turnKey]bool
-	served     map[rotation]time.Time
+	served     served
 }
 
 // load reads every workstream's threads of repository, then its turn
@@ -324,7 +421,7 @@ func load(repository *trace.Repository) (loaded, error) {
 		}
 	}
 	dispatched := map[turnKey]bool{}
-	served := map[rotation]time.Time{}
+	served := served{}
 	for _, stream := range streams {
 		records, err := repository.Operations(stream)
 		if err != nil {
@@ -339,10 +436,7 @@ func load(repository *trace.Repository) (loaded, error) {
 			}
 			dispatched[turnKey{in.Workstream, in.Agent, in.Turn}] = true
 			if role, ok := roles[localKey{project, in.Workstream, in.Agent}]; ok {
-				key := rotationKey(project, in.Workstream, role)
-				if at := record.Transition.At; at.After(served[key]) {
-					served[key] = at
-				}
+				served.dispatched(project, in.Workstream, role, record.Transition.At)
 			}
 		}
 	}
@@ -362,20 +456,43 @@ func (l loaded) count(used usage) {
 
 // order is the order candidates are offered in, given each stage's last
 // dispatch. Ties keep trace order, for stable admission across passes.
-func (s *Scheduler) order(served map[rotation]time.Time) func(a, b Candidate) int {
-	project := s.repository.Project()
-	rank := Rank(nil, project)
+func (s *Scheduler) order(served served) func(a, b Candidate) int {
+	rank := Rank(nil)
 	if s.options.Priorities != nil {
-		rank = Rank(s.options.Priorities(), project)
+		rank = Rank(s.options.Priorities())
 	}
 	return func(a, b Candidate) int {
 		ra, rb := a.Thread.Identity.Role, b.Thread.Identity.Role
 		return cmp.Or(cmp.Compare(stage(ra), stage(rb)),
-			cmp.Compare(rank(a.Workstream), rank(b.Workstream)),
+			cmp.Compare(rank(a.Project, a.Workstream), rank(b.Project, b.Workstream)),
+			served[rotationKey(a.Project, "", ra)].Compare(served[rotationKey(b.Project, "", rb)]),
 			served[rotationKey(a.Project, a.Workstream, ra)].Compare(served[rotationKey(b.Project, b.Workstream, rb)]),
 			strings.Compare(string(a.Project), string(b.Project)),
 			strings.Compare(string(a.Workstream), string(b.Workstream)))
 	}
+}
+
+// served holds the last dispatch of each stage, by workstream and, under
+// the empty workstream ID, by project.
+type served map[rotation]time.Time
+
+// at moves the last dispatch of key to at when at is later.
+func (s served) at(key rotation, at time.Time) {
+	if at.After(s[key]) {
+		s[key] = at
+	}
+}
+
+// dispatched records a dispatch of a turn of role in the project's
+// workstream at the given time.
+func (s served) dispatched(project config.ProjectID, stream config.WorkstreamID, role string, at time.Time) {
+	s.at(rotationKey(project, stream, role), at)
+	s.at(rotationKey(project, "", role), at)
+}
+
+// serve records the candidate's dispatch at the given time.
+func (s served) serve(c Candidate, at time.Time) {
+	s.dispatched(c.Project, c.Workstream, c.Thread.Identity.Role, at)
 }
 
 // stage orders the roles whose turns compete for a freed slot, so the factory
@@ -412,7 +529,8 @@ type localKey struct {
 	name       string
 }
 
-// rotation names one workstream's place in a stage's rotation.
+// rotation names one workstream's place in a stage's rotation, or with an
+// empty workstream, one project's.
 type rotation struct {
 	project    config.ProjectID
 	workstream config.WorkstreamID
@@ -434,23 +552,10 @@ func (u usage) add(project config.ProjectID, stream config.WorkstreamID, role st
 	u.local[localKey{project, stream, role}]++
 }
 
-// merge adds the counts of other to u.
-func (u usage) merge(other usage) {
-	for k, n := range other.roles {
-		u.roles[k] += n
-	}
-	for k, n := range other.streams {
-		u.streams[k] += n
-	}
-	for k, n := range other.local {
-		u.local[k] += n
-	}
-}
-
-// refusal returns why the candidate's turn has no free slot, or "" when it
-// has one.
-func (s *Scheduler) refusal(used usage, c Candidate) string {
-	limits, role := s.options.Capacity, c.Thread.Identity.Role
+// refusal returns why the candidate's turn has no free slot within limits,
+// or "" when it has one. Nil limits leave every turn a slot.
+func refusal(limits *config.Capacity, used usage, c Candidate) string {
+	role := c.Thread.Identity.Role
 	if limits == nil || role == trace.ChiefOfStaff {
 		return ""
 	}

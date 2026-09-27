@@ -183,7 +183,7 @@ func (f *foreman) Pass(ctx context.Context) error {
 	if !settled {
 		return nil
 	}
-	for _, b := range startOrder(candidates, state.Priorities, f.cfg.Project.ID) {
+	for _, b := range startOrder(candidates, state.Priority, f.cfg.Project.ID) {
 		for _, u := range dependencyOrder(b.plan) {
 			if b.states[trace.UnitSubject(u.ID)].Value != UnitApproved {
 				continue

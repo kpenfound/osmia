@@ -134,7 +134,7 @@ func TestRoundTripsAndChangedDefaults(t *testing.T) {
 	original, err := os.ReadFile(configPath)
 	must(t, err)
 	effective, ds := s.Effective()
-	if len(ds) != 0 || len(effective.Pauses) != 0 || len(effective.Priorities) != 0 || effective.Profiles["mason"] != "default" {
+	if len(ds) != 0 || len(effective.Pauses) != 0 || len(effective.Priority) != 0 || effective.Profiles["mason"] != "default" {
 		t.Fatal(effective, ds)
 	}
 	if _, err := os.Stat(filepath.Join(in.Config.Root.String(), "runtime.json")); !os.IsNotExist(err) {
@@ -143,7 +143,7 @@ func TestRoundTripsAndChangedDefaults(t *testing.T) {
 	for _, p := range pauses() {
 		must(t, s.SetPause(p))
 	}
-	must(t, s.SetPriority(Priority{pid, []config.WorkstreamID{w2, w1}}))
+	must(t, s.SetPriority([]Ranked{{pid, w2}, {pid, w1}}))
 	must(t, s.SetProfile("mason", "other"))
 	before, _ := s.Snapshot()
 	restarted := open(t, in)
@@ -152,7 +152,7 @@ func TestRoundTripsAndChangedDefaults(t *testing.T) {
 		t.Fatal(before, after, ds)
 	}
 	effective, _ = restarted.Effective()
-	if effective.Profiles["mason"] != "other" || !reflect.DeepEqual(effective.Priorities[0].Workstreams, []config.WorkstreamID{w2, w1}) || len(effective.Pauses) != 3 {
+	if effective.Profiles["mason"] != "other" || !reflect.DeepEqual(effective.Priority, []Ranked{{pid, w2}, {pid, w1}}) || len(effective.Pauses) != 3 {
 		t.Fatal(effective)
 	}
 	unchanged, err := os.ReadFile(configPath)
@@ -178,7 +178,7 @@ func TestRoundTripsAndChangedDefaults(t *testing.T) {
 	}
 	cleared := open(t, in)
 	effective, ds = cleared.Effective()
-	if effective.Profiles["mason"] != "other" || len(effective.Pauses) != 0 || len(effective.Priorities) != 0 || len(ds) != 0 {
+	if effective.Profiles["mason"] != "other" || len(effective.Pauses) != 0 || len(effective.Priority) != 0 || len(ds) != 0 {
 		t.Fatal(effective, ds)
 	}
 }
@@ -187,7 +187,7 @@ func TestStaleReferencesAreRetainedAndNeverRetargeted(t *testing.T) {
 	s := open(t, in)
 	must(t, s.SetPause(pauses()[0]))
 	must(t, s.SetPause(pauses()[2]))
-	must(t, s.SetPriority(Priority{pid, []config.WorkstreamID{w1, w2}}))
+	must(t, s.SetPriority([]Ranked{{pid, w1}, {pid, w2}}))
 	must(t, s.SetProfile("mason", "other"))
 	saved := disk(t, in)
 	changed, _ := copyInputs(in)
@@ -195,7 +195,7 @@ func TestStaleReferencesAreRetainedAndNeverRetargeted(t *testing.T) {
 	changed.Workstreams = map[config.ProjectID][]config.WorkstreamID{pid: {w2}}
 	must(t, s.Resolve(changed))
 	effective, ds := s.Effective()
-	if len(ds) != 3 || len(effective.Pauses) != 1 || effective.Profiles["mason"] != "default" || !reflect.DeepEqual(effective.Priorities[0].Workstreams, []config.WorkstreamID{w2}) {
+	if len(ds) != 3 || len(effective.Pauses) != 1 || effective.Profiles["mason"] != "default" || !reflect.DeepEqual(effective.Priority, []Ranked{{pid, w2}}) {
 		t.Fatal(effective, ds)
 	}
 	restarted := open(t, changed)
@@ -205,7 +205,7 @@ func TestStaleReferencesAreRetainedAndNeverRetargeted(t *testing.T) {
 	}
 	must(t, restarted.SetProfile("reviewer", "default"))
 	raw, _ := restarted.Snapshot()
-	if len(raw.Pauses) != 2 || raw.Profiles["mason"] != "other" || len(raw.Priorities[0].Workstreams) != 2 {
+	if len(raw.Pauses) != 2 || raw.Profiles["mason"] != "other" || len(raw.Priority) != 2 {
 		t.Fatal("stale entries lost", raw)
 	}
 	must(t, restarted.Resolve(in))
@@ -221,7 +221,8 @@ func TestStaleReferencesAreRetainedAndNeverRetargeted(t *testing.T) {
 	changed.Workstreams = map[config.ProjectID][]config.WorkstreamID{changed.Config.Project.ID: changed.Workstreams[pid]}
 	must(t, s.Resolve(changed))
 	effective, ds = s.Effective()
-	if len(ds) != 2 || len(effective.Pauses) != 1 || len(effective.Priorities) != 0 {
+	// Each stale entry of the priority order has its own diagnostic.
+	if len(ds) != 3 || len(effective.Pauses) != 1 || len(effective.Priority) != 0 {
 		t.Fatal(effective, ds)
 	}
 	if bytes.Equal(saved, disk(t, in)) {
@@ -237,6 +238,9 @@ func TestInvalidFiles(t *testing.T) {
 		`{"version":1,"pauses":[{"target":{"scope":"factory"},"mode":"soft","source":"budget"}]}`,
 		`{"version":1,"priorities":[{"project":"` + string(pid) + `","workstreams":["` + string(w1) + `","` + string(w1) + `"]}]}`,
 		`{"version":1,"priorities":[{"project":"../bad","workstreams":[]}]}`,
+		`{"version":1,"priority":[{"project":"` + string(pid) + `","workstream":"` + string(w1) + `"},{"project":"` + string(pid) + `","workstream":"` + string(w1) + `"}]}`,
+		`{"version":1,"priority":[{"project":"../bad","workstream":"` + string(w1) + `"}]}`,
+		`{"version":1,"priority":[{"project":"` + string(pid) + `","workstream":"bad"}]}`,
 		`{"version":1,"profiles":{"mason":""}}`,
 	} {
 		t.Run(body, func(t *testing.T) {
@@ -266,11 +270,11 @@ func TestRejectedMutationsPreserveState(t *testing.T) {
 		func() error {
 			return s.SetPause(Pause{Target: Target{Scope: "workstream", Project: pid, Workstream: "w_3123456789abcdef0123456789abcdef"}, Mode: "soft", Source: PauseOwner, Reason: "test"})
 		},
-		func() error { return s.SetPriority(Priority{pid, []config.WorkstreamID{w1, w1}}) },
+		func() error { return s.SetPriority([]Ranked{{pid, w1}, {pid, w1}}) },
 		func() error {
-			return s.SetPriority(Priority{pid, []config.WorkstreamID{"w_3123456789abcdef0123456789abcdef"}})
+			return s.SetPriority([]Ranked{{pid, "w_3123456789abcdef0123456789abcdef"}})
 		},
-		func() error { return s.SetPriority(Priority{pid, nil}) },
+		func() error { return s.SetPriority(nil) },
 	}
 	for i, bad := range bads {
 		if bad() == nil {
@@ -449,7 +453,7 @@ func TestProjectlessInputs(t *testing.T) {
 	if len(ds) != 0 || len(effective.Profiles) != 7 || len(effective.Pauses) != 0 {
 		t.Fatalf("%+v %v", effective, ds)
 	}
-	if err := s.SetPriority(Priority{Project: pid, Workstreams: []config.WorkstreamID{}}); err == nil || !errors.Is(err, ErrValidation) {
+	if err := s.SetPriority([]Ranked{{pid, w1}}); err == nil || !errors.Is(err, ErrValidation) {
 		t.Fatal("priority stored without a project")
 	}
 	if err := s.SetPause(Pause{Target: Target{Scope: "project", Project: pid}, Mode: "soft", Source: PauseOwner, Reason: "test"}); err == nil || !errors.Is(err, ErrValidation) {
@@ -479,5 +483,5 @@ func TestProjectlessInputs(t *testing.T) {
 	if err := s.Resolve(full); err != nil {
 		t.Fatal(err)
 	}
-	must(t, s.SetPriority(Priority{Project: pid, Workstreams: []config.WorkstreamID{w1}}))
+	must(t, s.SetPriority([]Ranked{{pid, w1}}))
 }

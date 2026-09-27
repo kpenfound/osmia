@@ -91,7 +91,7 @@ does not infer authority, readiness or workflow transitions from them.
 | `TurnResponse` | `agents/<agent-id>/log.jsonl` | Exact request revision, thread/turn identity, adapter result (including the accepted `done` report and card), any execution failure, and the `stop` of a turn the service stopped |
 | `Cost` | `ledger.jsonl` | Adapter ledger entry with attempt, full scope, time and explicit cost knowledge |
 | `Status` | `status.jsonl` | The chief of staff's goal, attention, note and agent lines; see [workstream status](#workstream-status) |
-| `PriorityChange` | `priority.jsonl` | The chief of staff's agent and turn and the project's priority order it set at the owner's request; see [priority changes](#priority-changes) |
+| `PriorityChange` | `priority.jsonl` | The chief of staff's agent and turn and the project's workstreams in the priority order it set at the owner's request; see [priority changes](#priority-changes) |
 
 Only documents can be project-scoped. Project document paths are `charter.md`,
 `kb/entities.json`, `kb/<name>.md` and `notes/<role>.md`; workstream document paths
@@ -770,7 +770,8 @@ runtime priority order because the owner asked. Its record ID is always
 the change. The actor is the owner whose message the turn answers, the cause
 is that turn's request ID and the depth is one more than the request's.
 `agent` and `turn` name the chief of staff and its turn, and `order` is the
-project's order in force after the change, possibly empty.
+project's workstreams in the priority order in force after the change, in
+that order, possibly empty.
 
 `Repository.SetPriority(ctx, agent, scope, at, apply)` records the next
 revision. The scope must name this service session's active, uncaptured turn

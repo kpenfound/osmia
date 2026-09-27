@@ -114,7 +114,7 @@ func TestEventStreamAnnouncesRuntimeAndConfigurationChanges(t *testing.T) {
 	}{
 		{"PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft"}},
 		{"DELETE", "pause", ClearPauseRequest{Scope: "factory"}},
-		{"PUT", "priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{stream}}},
+		{"PUT", "priority", PriorityRequest{Order: ranked(project, stream)}},
 		{"DELETE", "priority", ClearPriorityRequest{project}},
 		{"PUT", "profile", ProfileRequest{"mason", "other"}},
 		{"DELETE", "profile", ClearProfileRequest{"mason"}},

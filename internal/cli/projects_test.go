@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -105,24 +106,35 @@ func TestPauseAndPriorityFindTheProjectOfTheWorkstream(t *testing.T) {
 	t.Cleanup(c.Close)
 
 	successful(t, root, "pause", otherStream)
-	successful(t, root, "priority", "set", otherStream)
+	// The priority order is one across projects: each workstream is placed
+	// with its own project.
+	set := successful(t, root, "priority", "set", otherStream, stream)
+	if !strings.Contains(set, "priority order: applied=true\n") || !strings.Contains(set, "  1. "+otherProject+" "+otherStream+"\n  2. "+project+" "+stream+"\n") {
+		t.Fatalf("priority set output:\n%s", set)
+	}
 	rt, err := c.Runtime(context.Background())
 	must(t, err)
 	want := runtime.Target{Scope: "workstream", Project: otherProject, Workstream: otherStream}
 	if len(rt.Effective.Pauses) != 1 || rt.Effective.Pauses[0].Target != want {
 		t.Fatalf("pauses %+v", rt.Effective.Pauses)
 	}
-	if len(rt.Effective.Priorities) != 1 || rt.Effective.Priorities[0].Project != otherProject {
-		t.Fatalf("priorities %+v", rt.Effective.Priorities)
+	if want := []runtime.Ranked{{Project: otherProject, Workstream: otherStream}, {Project: project, Workstream: stream}}; !slices.Equal(rt.Effective.Priority, want) {
+		t.Fatalf("priority %+v, want %+v", rt.Effective.Priority, want)
 	}
 	successful(t, root, "resume", otherStream)
 
-	// Without a workstream there is no project to act on.
-	code, out, diag := invoke(t, root, "priority", "clear")
-	if code != 4 || out != "" || diag != "validation: several projects are active ("+project+", "+otherProject+"); name a workstream of the project\n" {
-		t.Fatalf("priority clear: %d %q %q", code, out, diag)
+	// Clearing the order needs no workstream: it clears every project's.
+	successful(t, root, "priority", "clear")
+	rt, err = c.Runtime(context.Background())
+	must(t, err)
+	if len(rt.Effective.Priority) != 0 {
+		t.Fatalf("priority after clearing %+v", rt.Effective.Priority)
 	}
 	unknown := "w_00000000000000000000000000000abc"
+	code, out, diag := invoke(t, root, "priority", "set", stream, unknown)
+	if code != 4 || out != "" || diag != "not_found: workstream "+unknown+" is not in an active project; list workstreams with osmia status\n" {
+		t.Fatalf("priority of an unknown workstream: %d %q %q", code, out, diag)
+	}
 	code, out, diag = invoke(t, root, "pause", unknown)
 	if code != 4 || out != "" || diag != "not_found: workstream "+unknown+" is not in an active project; list workstreams with osmia status\n" {
 		t.Fatalf("pause of an unknown workstream: %d %q %q", code, out, diag)

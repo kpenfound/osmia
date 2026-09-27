@@ -554,7 +554,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		if !decode(w, r, &v) {
 			return
 		}
-		err = s.store.SetPriority(v)
+		err = s.store.SetPriority(v.Order)
 	case r.Method == http.MethodDelete && r.URL.Path == Prefix+"/runtime/priority":
 		var v ClearPriorityRequest
 		if !decode(w, r, &v) {

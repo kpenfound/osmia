@@ -34,8 +34,8 @@ const (
 	// DeferWorkstreamCap: capacity.per_workstream of the workstream's units
 	// are implementing.
 	DeferWorkstreamCap = "workstream-cap"
-	// DeferPriority: every mason slot is taken and workstreams earlier in the
-	// project's priority order have a unit to start first.
+	// DeferPriority: every mason slot is taken and workstreams of the project
+	// earlier in the priority order have a unit to start first.
 	DeferPriority = "priority"
 	// DeferCapacity: every mason slot is taken.
 	DeferCapacity = "capacity"

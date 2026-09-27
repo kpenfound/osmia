@@ -101,7 +101,7 @@ func TestZeroProjectStart(t *testing.T) {
 	}
 	_, err = c.RemoveProject(ctx, project)
 	assertCode(t, err, NoProject)
-	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{}}, nil), Validation)
+	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/priority", PriorityRequest{Order: ranked(project, librarianWorkstream(project))}, nil), Validation)
 	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: project}, Mode: "soft", Source: "owner"}, nil), Validation)
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "owner"})
 	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
@@ -192,10 +192,10 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	awaitExtractionAcknowledged(t, s)
 	// The runtime store resolves against the new project without a restart.
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: id}, Mode: "soft", Source: "owner"})
-	mutation(t, c, "PUT", "priority", PriorityRequest{Project: id, Workstreams: []config.WorkstreamID{}})
+	mutation(t, c, "PUT", "priority", PriorityRequest{Order: ranked(id, librarianWorkstream(id))})
 	rt, err := c.Runtime(ctx)
 	must(t, err)
-	if len(rt.Effective.Pauses) != 1 || len(rt.Effective.Priorities) != 1 || len(rt.Diagnostics) != 0 || !reflect.DeepEqual(rt.Projects, []ProjectRuntime{{id, bundle.ModeFile}}) {
+	if len(rt.Effective.Pauses) != 1 || len(rt.Effective.Priority) != 1 || len(rt.Diagnostics) != 0 || !reflect.DeepEqual(rt.Projects, []ProjectRuntime{{id, bundle.ModeFile}}) {
 		t.Fatalf("%+v", rt)
 	}
 	// Repeating the same registration returns the project; another is refused.
@@ -240,7 +240,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	}
 	rt, err = c.Runtime(ctx)
 	must(t, err)
-	if len(rt.Effective.Pauses) != 0 || len(rt.Effective.Priorities) != 0 || len(rt.Diagnostics) != 3 || len(rt.Projects) != 0 {
+	if len(rt.Effective.Pauses) != 0 || len(rt.Effective.Priority) != 0 || len(rt.Diagnostics) != 3 || len(rt.Projects) != 0 {
 		t.Fatalf("%+v", rt)
 	}
 	// The released trace can be opened by another owner.
