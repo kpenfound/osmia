@@ -65,8 +65,10 @@ func recordAmendmentSealRevision(t *testing.T, f *shedFixture, repository *trace
 func builtForAmendment(t *testing.T, rounds int) (*shedFixture, config.WorkstreamID) {
 	t.Helper()
 	f := newDebateFixture(t, 1, rounds)
-	f.upstream(t)
-	stream, _ := f.built(t)
+	base := f.upstream(t)
+	stream, repository := seedBuild(t, f, "amendment", validPlan, config.WorkspacesGit, base)
+	must(t, repository.Close())
+	f.start(t)
 	return f, stream
 }
 
@@ -384,6 +386,7 @@ func TestOwnerOverrulesAVetoToApproveAnAmendment(t *testing.T) {
 }
 
 func TestAmendmentDecisionAcrossSealRevisions(t *testing.T) {
+	t.Parallel()
 	for _, decision := range []string{AmendmentApprove, AmendmentOverrule} {
 		t.Run(decision+" base move", func(t *testing.T) {
 			f, stream := builtForAmendment(t, 1)

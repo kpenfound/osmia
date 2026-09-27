@@ -15,6 +15,7 @@ import (
 )
 
 func TestMasonContestedRuling(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, response, reason string
 	}{
@@ -118,6 +119,7 @@ func TestMasonContestedRuling(t *testing.T) {
 }
 
 func TestMasonCleanTurnPolicy(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, response, class, tool string
 		contested                   bool
@@ -177,6 +179,7 @@ func TestMasonCleanTurnPolicy(t *testing.T) {
 }
 
 func TestMasonModelClassifier(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		replies  []string

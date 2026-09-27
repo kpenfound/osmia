@@ -149,6 +149,7 @@ func await(t *testing.T, what string, ch chan struct{}) {
 }
 
 func TestSeveralProjectsShareCapacityPauseApartAndResumeFromTheirOwnTraces(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newTwoProjectFixture(t)
 	// The first project starts paused, so the other project's turn takes the
@@ -253,6 +254,7 @@ func TestSeveralProjectsShareCapacityPauseApartAndResumeFromTheirOwnTraces(t *te
 }
 
 func TestProjectScopedRequestsNameOneOfSeveralProjects(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newTwoProjectFixture(t)
 	s, c := start(t, f.opts)
@@ -306,6 +308,7 @@ func TestProjectScopedRequestsNameOneOfSeveralProjects(t *testing.T) {
 }
 
 func TestRemovingOneOfSeveralProjectsLeavesTheOtherRunning(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newTwoProjectFixture(t)
 	s, c := start(t, f.opts)
@@ -361,6 +364,7 @@ func appendCost(t *testing.T, repository *trace.Repository, stream config.Workst
 }
 
 func TestDailyBudgetCountsTheSpendOfEveryProject(t *testing.T) {
+	t.Parallel()
 	f := newTwoProjectFixture(t)
 	top := filepath.Join(f.opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(top)

@@ -17,6 +17,7 @@ import (
 // TestTraceNavigationDemonstration follows one local workstream through
 // unfinished work and delivery using both the API and the command line.
 func TestTraceNavigationDemonstration(t *testing.T) {
+	t.Parallel()
 	f := newWalkFixture(t)
 	f.sealed()
 	f.buildA()

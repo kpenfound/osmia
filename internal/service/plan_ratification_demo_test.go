@@ -315,6 +315,7 @@ func (f *shedFixture) awaitRecoveredSeal(t *testing.T, stream config.WorkstreamI
 
 // TestHandInToRatifiedPlan demonstrates hand-in through ratification: see docs/plan-ratification-demonstration.md.
 func TestHandInToRatifiedPlan(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts, clone, engine, sessions, clock := newArchitectOptions(t)
 	home := filepath.Dir(clone)

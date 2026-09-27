@@ -311,35 +311,21 @@ func approveDirectly(t *testing.T, s *Service, repository *trace.Repository, str
 	}
 }
 
-// newApprovedFixture builds independentPlan with both units' masons
-// reporting done, stops the service once both are reviewing and approves
-// both with the service stopped. It returns the workstream and the trace,
-// open.
+// newApprovedFixture creates two units with completed mason turns, candidate
+// snapshots and approved reviews. It returns the stopped service and open trace.
 func newApprovedFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
 	return newApprovedFixtureOn(t, key, config.WorkspacesGit)
 }
 
-// newApprovedFixtureOn is newApprovedFixture whose workstream is handed in
-// on the workspace backend given.
+// newApprovedFixtureOn creates approved units on the given workspace backend.
 func newApprovedFixtureOn(t *testing.T, key, backend string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
-	f, masons := newMasonFixtureOn(t, backend, "masons = 1\n", independentPlan, "")
-	masons.play[masonTurnID("resume")] = reportDone("Built")
-	masons.play[masonTurnID("dedupe")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-		recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built", "criteria": []any{criterionArgs(dedupeReport)}})
-		if err != nil || !recorded {
-			return fmt.Errorf("done refused: %q %v", reason, err)
-		}
-		return nil
-	}
-	stream, _ := f.builtAs(t, key)
-	f.awaitUnit(t, stream, "resume", UnitReviewing)
-	f.awaitUnit(t, stream, "dedupe", UnitReviewing)
-	masons.check(t)
-	f.stop(t)
-	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", independentPlan, "")
+	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	stream, repository := seedBuild(t, f, key, independentPlan, backend, base)
+	seedReview(t, f, repository, stream, "resume", resumeReport)
+	seedReview(t, f, repository, stream, "dedupe", dedupeReport)
 	approveDirectly(t, f.s, repository, stream, "resume", "spec#1")
 	approveDirectly(t, f.s, repository, stream, "dedupe", "spec#2")
 	return f, stream, repository

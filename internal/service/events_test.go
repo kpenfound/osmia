@@ -164,6 +164,7 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 }
 
 func TestAbandonedWorkstreamEventsAreNotDelivered(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "eva-")
 	must(t, err)

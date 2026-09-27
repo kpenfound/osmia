@@ -24,6 +24,7 @@ import (
 // TestDeliveryDemonstration follows one feature from ordinary unit turns
 // through final review, a follow-up, the owner's decision and publication.
 func TestDeliveryDemonstration(t *testing.T) {
+	t.Parallel()
 	for _, style := range []string{"commit-per-unit", "squash"} {
 		t.Run(style, func(t *testing.T) {
 			ctx := context.Background()

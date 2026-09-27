@@ -13,6 +13,7 @@ import (
 )
 
 func TestBudgetAmendmentThresholdAndRestart(t *testing.T) {
+	t.Parallel()
 	f, stream := builtForAmendment(t, 1)
 	active := true
 	defer func() {

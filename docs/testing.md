@@ -44,14 +44,30 @@ boundaries determine confidence.
 ## Keep service tests focused
 
 Service lifecycle tests start real reconcilers and write durable traces in local
-Git repositories. Each workflow read verifies and decodes trace records; frequent
+Git repositories. The standard Go and browser checks mount `/tmp` in memory
+for their test commands. Temporary repositories survive service restarts within that command
+and are discarded when the command ends. This exercises real Git, Jujutsu and
+filesystem operations, including the service's durability calls, without paying
+for container-layer disk writes on every fixture transaction.
+
+Each workflow read verifies and decodes trace records; frequent
 polling competes with the controllers doing the work. Parallel tests also share
 the container's CPU and filesystem, so adding parallelism can increase contention.
 
 - Keep the end-to-end demonstrations for lifecycle, recovery and wiring coverage.
+- Mark isolated top-level tests parallel, including parents of parallel table
+  cases. A serial parent prevents the other parallel tests from running until
+  its children finish. Tests that change process environment variables must
+  stay serial.
 - For controller tests, seed the state immediately before the behavior under
-  test. The final-review and delivery fixtures record a sealed plan and create
-  its build state without running the earlier agent turns.
+  test. `seedBuild` records a sealed plan and builds its unit graph for amendment,
+  review, landing, rebase, final-review and delivery fixtures. Landing fixtures capture
+  completed mason reports, snapshot candidates and approve reviews directly;
+  rebase fixtures create the required completed and queued turns.
+- Use the running service when the assertion concerns scheduling, API wiring or
+  recovery across a service restart. Use direct controller passes for individual
+  decisions and idempotency. Keep rejection tests that protect owner gates,
+  stale-candidate checks, capacity and execution boundaries.
 - In running-service fixtures, use `serviceChanges` before the first predicate
   read and release the subscription when finished. Notifications are hints: read
   the durable state after each wake. The helper has a timer fallback for changes
@@ -73,6 +89,7 @@ summaries. The binary and profiles stay in the container:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
+  with-mounted-temp --path /tmp \
   with-exec --args=sh,-c,'go test -count=1 -parallel=1 -timeout=10m -run=TestDisjointUnitsImplementConcurrently -v -o /tmp/service.test -cpuprofile=/tmp/service.cpu -blockprofile=/tmp/service.block ./internal/service && go tool pprof -top -cum /tmp/service.cpu && go tool pprof -top /tmp/service.block' \
   combined-output
 ```

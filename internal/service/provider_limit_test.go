@@ -13,6 +13,7 @@ import (
 )
 
 func TestProviderLimitStatusAndOwnerClear(t *testing.T) {
+	t.Parallel()
 	opts := fixture(t)
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(path)

@@ -23,25 +23,8 @@ func (f *capturedReview) Review(_ context.Context, req coreadapter.ReviewRequest
 
 func TestReviewBundlePinsCandidateAndPersistsIdentity(t *testing.T) {
 	t.Parallel()
-	f, agents := newMasonFixture(t, 1, independentPlan)
-	stopped := false
-	defer func() {
-		if !stopped {
-			f.stop(t)
-		}
-	}()
-	agents.play[masonTurnID("resume")] = reportDone("Built")
-	stream, _ := f.builtAs(t, "design")
-	f.awaitUnit(t, stream, "resume", UnitReviewing)
+	f, stream, repo := newReviewFixture(t, "TestReviewBundlePinsCandidateAndPersistsIdentity")
 	svc := f.s
-	f.stop(t)
-	stopped = true
-	agents.check(t)
-	repo, err := trace.Open(svc.cfg.Root, svc.cfg.Project)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repo.Close()
 	controller := newMasonController(svc, repo)
 	first, identity, err := controller.prepareUnitReview(context.Background(), stream, "resume")
 	if err != nil {
@@ -106,24 +89,8 @@ func TestReviewBundlePinsCandidateAndPersistsIdentity(t *testing.T) {
 
 func TestReviewBundleMissingCandidateFailsClosed(t *testing.T) {
 	t.Parallel()
-	f, agents := newMasonFixture(t, 1, independentPlan)
-	stopped := false
-	defer func() {
-		if !stopped {
-			f.stop(t)
-		}
-	}()
-	agents.play[masonTurnID("resume")] = reportDone("Built")
-	stream, _ := f.builtAs(t, "design")
-	f.awaitUnit(t, stream, "resume", UnitReviewing)
+	f, stream, repo := newReviewFixture(t, "TestReviewBundleMissingCandidateFailsClosed")
 	svc := f.s
-	f.stop(t)
-	stopped = true
-	repo, err := trace.Open(svc.cfg.Root, svc.cfg.Project)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repo.Close()
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
 		t.Fatal(err)

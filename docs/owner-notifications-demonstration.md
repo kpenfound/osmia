@@ -18,6 +18,7 @@ Run it with `dagger check`, or run just the demonstration inside Dagger:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
+  with-mounted-temp --path /tmp \
   with-exec --args=go,test,-count=1,-run,TestOwnerNotificationsDemonstration,-v,./internal/service \
   combined-output
 ```

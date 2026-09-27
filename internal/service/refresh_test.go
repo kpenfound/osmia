@@ -238,6 +238,7 @@ func TestRefreshRequiresRecordedLanding(t *testing.T) {
 }
 
 func TestFailedRefreshPreservesKnowledge(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, output string
 		fail         bool

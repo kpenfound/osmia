@@ -64,23 +64,7 @@ func TestReviewFootprintDecisions(t *testing.T) {
 
 func TestReviewFootprintUsesRecordedCommits(t *testing.T) {
 	t.Parallel()
-	f, masons := newMasonFixture(t, 1, independentPlan)
-	stopped := false
-	defer func() {
-		if !stopped {
-			f.stop(t)
-		}
-	}()
-	masons.play[masonTurnID("resume")] = reportDone("Built")
-	stream, _ := f.builtAs(t, "footprint")
-	f.awaitUnit(t, stream, "resume", UnitReviewing)
-	f.stop(t)
-	stopped = true
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repo.Close()
+	f, stream, repo := newReviewFixture(t, "footprint")
 	r := &reviewers{masons: newMasonController(f.s, repo)}
 	_, identity, err := r.unitReviewEvidence(context.Background(), stream, "resume")
 	if err != nil {
@@ -296,25 +280,7 @@ func TestReviewerSendBackResubmitAndApprove(t *testing.T) {
 
 func TestReviewResultReconcilesAfterRestart(t *testing.T) {
 	t.Parallel()
-	f, masons := newMasonFixture(t, 1, independentPlan)
-	stopped := false
-	defer func() {
-		if !stopped {
-			f.stop(t)
-		}
-	}()
-	masons.play[masonTurnID("resume")] = reportDone("Built")
-	stream, _ := f.builtAs(t, "recovery")
-	f.awaitUnit(t, stream, "resume", UnitReviewing)
-	// The service may run a failed fake reviewer turn. Stop it, then persist a
-	// complete exact result as if the process stopped before the transition.
-	f.stop(t)
-	stopped = true
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repo.Close()
+	f, stream, repo := newReviewFixture(t, "review-recovery")
 	r := &reviewers{masons: newMasonController(f.s, repo)}
 	state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
 	if err != nil {
@@ -344,6 +310,11 @@ func TestReviewResultReconcilesAfterRestart(t *testing.T) {
 	if err := repo.RecordDocuments(context.Background(), []trace.Document{latest}); err != nil {
 		t.Fatal(err)
 	}
+	must(t, repo.Close())
+	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	defer repo.Close()
+	r = &reviewers{masons: newMasonController(f.s, repo)}
 	if err := r.one(context.Background(), stream, "resume", state, false); err != nil {
 		t.Fatal(err)
 	}
@@ -358,23 +329,7 @@ func TestReviewResultReconcilesAfterRestart(t *testing.T) {
 
 func TestStaleCandidateReturnsUnitToReview(t *testing.T) {
 	t.Parallel()
-	f, masons := newMasonFixture(t, 1, independentPlan)
-	stopped := false
-	defer func() {
-		if !stopped {
-			f.stop(t)
-		}
-	}()
-	masons.play[masonTurnID("resume")] = reportDone("Built")
-	stream, _ := f.builtAs(t, "stale-review")
-	f.awaitUnit(t, stream, "resume", UnitReviewing)
-	f.stop(t)
-	stopped = true
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repo.Close()
+	f, stream, repo := newReviewFixture(t, "stale-review")
 	r := &reviewers{masons: newMasonController(f.s, repo)}
 	state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
 	if err != nil {
