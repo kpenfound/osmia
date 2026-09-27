@@ -235,13 +235,13 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	p.click("#priority-form button[type=submit]")
 	p.awaitText("#priority-result", "Priority order set.")
 	p.awaitText("#priority-current", "In force")
-	if got := runtimeView().Effective.Priorities; len(got) != 1 || got[0].Project != project || !slices.Equal(got[0].Workstreams, []config.WorkstreamID{quiet, stream}) {
+	if got := runtimeView().Effective.Priority; !slices.Equal(got, ranked(project, quiet, stream)) {
 		t.Fatalf("priority after setting it: %+v", got)
 	}
 	p.click("#priority-clear")
 	p.awaitText("#priority-result", "Priority order cleared.")
 	p.awaitText("#priority-current", "No order is set")
-	if got := runtimeView().Effective.Priorities; len(got) != 0 {
+	if got := runtimeView().Effective.Priority; len(got) != 0 {
 		t.Fatalf("priority after clearing it: %+v", got)
 	}
 

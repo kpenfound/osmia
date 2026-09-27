@@ -17,13 +17,14 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// prioritiseTool sets the project's runtime workstream priority order.
+// prioritiseTool puts the project's workstreams first in the runtime
+// priority order.
 const prioritiseTool = "prioritise"
 
 // priorityGuidance tells the chief of staff when and how to use prioritise.
 // It belongs in the system prompt of every owner message turn.
 const priorityGuidance = "When the owner asks you to change which workstreams go first, call prioritise with the IDs of the project's active workstreams in the order the owner wants, highest priority first. " +
-	"Workstreams you leave out come after the ones you name. Name each workstream once, and never a delivered or abandoned one. " +
+	"They go first in the one order of every project's workstreams; the project's workstreams you leave out come after the ones you name. Name each workstream once, and never a delivered or abandoned one. " +
 	"prioritise changes the order only: it does not pause, resume or abandon work, and it is the same order the owner sets with osmia priority."
 
 // runtimeControls hands the chief-of-staff tools that Enforce binds the
@@ -31,13 +32,15 @@ const priorityGuidance = "When the owner asks you to change which workstreams go
 type runtimeControls struct{ service atomic.Pointer[Service] }
 
 // prioritise returns the prioritise tool of one claimed chief-of-staff turn.
-// It changes the same runtime priority state as PUT /runtime/priority and
+// It puts the named workstreams of the turn's project first in the runtime
+// priority order PUT /runtime/priority sets, the project's other workstreams
+// unnamed and other projects' workstreams after them in their order, and
 // records the change, with the owner who asked as its actor, in the turn's
 // workstream trace. An order it refuses is an ordinary result,
 // {"recorded":false,"reason":...}, and changes nothing.
 func (c *runtimeControls) prioritise(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: prioritiseTool, Effect: coreadapter.ToolMemory,
-		Description: "Set the project's workstream priority order when the owner asks for it in a message. workstreams: the IDs of active workstreams of this project, highest priority first, each once; workstreams left out come after them. " +
+		Description: "Set the project's workstream priority order when the owner asks for it in a message. workstreams: the IDs of active workstreams of this project, highest priority first, each once; they go before every other workstream, and this project's workstreams left out come after them. " +
 			"Delivered and abandoned workstreams cannot be ordered. The order replaces the previous one and is what osmia status shows; it does not pause, resume or abandon anything.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"workstreams":{"type":"array","items":{"type":"string"}}},"required":["workstreams"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -64,10 +67,10 @@ func (c *runtimeControls) prioritise(repository *trace.Repository, scope coreada
 		if reason != "" {
 			return priorityRefusal(reason)
 		}
-		previous, stored := storedPriority(s.store, project)
+		previous, _ := s.store.Snapshot()
 		applied := false
 		change, err := repository.SetPriority(ctx, trace.ChiefOfStaff, scope, now(), func() ([]config.WorkstreamID, error) {
-			if err := s.store.SetPriority(runtime.Priority{Project: project, Workstreams: order}); err != nil {
+			if err := s.store.Prioritise(project, order); err != nil {
 				switch {
 				case errors.Is(err, runtime.ErrValidation):
 					return nil, &trace.PriorityRefused{Reason: "the runtime settings refused the order: " + err.Error()}
@@ -86,11 +89,7 @@ func (c *runtimeControls) prioritise(repository *trace.Repository, scope coreada
 		if err != nil {
 			if applied {
 				// The trace could not record the change, so it is undone.
-				restore := s.store.ClearPriority(project)
-				if stored {
-					restore = s.store.SetPriority(previous)
-				}
-				err = errors.Join(err, restore)
+				err = errors.Join(err, s.store.RestorePriority(previous))
 			}
 			return nil, err
 		}
@@ -138,26 +137,17 @@ func checkPriority(repository *trace.Repository, project config.ProjectID, order
 	return out, "", nil
 }
 
-// storedPriority returns the project's stored priority record, if any.
-func storedPriority(store *runtime.Store, project config.ProjectID) (runtime.Priority, bool) {
-	st, _ := store.Snapshot()
-	for _, p := range st.Priorities {
-		if p.Project == project {
-			return p, true
-		}
-	}
-	return runtime.Priority{}, false
-}
-
-// effectivePriority returns the project's priority order in force.
+// effectivePriority returns the project's workstreams in the priority order
+// in force, in that order.
 func effectivePriority(store *runtime.Store, project config.ProjectID) []config.WorkstreamID {
 	st, _ := store.Effective()
-	for _, p := range st.Priorities {
-		if p.Project == project {
-			return p.Workstreams
+	out := []config.WorkstreamID{}
+	for _, r := range st.Priority {
+		if r.Project == project {
+			out = append(out, r.Workstream)
 		}
 	}
-	return []config.WorkstreamID{}
+	return out
 }
 
 func priorityRefusal(reason string) (json.RawMessage, error) {

@@ -22,6 +22,15 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
+// ranked names workstreams of project in the priority order, in order.
+func ranked(project config.ProjectID, streams ...config.WorkstreamID) []runtime.Ranked {
+	out := []runtime.Ranked{}
+	for _, w := range streams {
+		out = append(out, runtime.Ranked{Project: project, Workstream: w})
+	}
+	return out
+}
+
 // The chief of staff sets the project's priority order when the owner asks,
 // through the production tools: a turn the owner did not ask for and every
 // invalid order change nothing, and a valid order is the one the runtime API
@@ -132,17 +141,18 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 		t.Fatal("the service's chief-of-staff turn did not run")
 	}
 	// The owner's order through the runtime API.
-	mutation(t, c, "PUT", "priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{stream}})
+	mutation(t, c, "PUT", "priority", PriorityRequest{Order: ranked(project, stream)})
 	order := func(c *Client) []config.WorkstreamID {
 		t.Helper()
 		rt, err := c.Runtime(ctx)
 		must(t, err)
-		for _, p := range rt.Effective.Priorities {
-			if p.Project == project {
-				return p.Workstreams
+		var out []config.WorkstreamID
+		for _, r := range rt.Effective.Priority {
+			if r.Project == project {
+				out = append(out, r.Workstream)
 			}
 		}
-		return nil
+		return out
 	}
 	changes := func(r *trace.Repository) []trace.PriorityChange {
 		t.Helper()
@@ -238,8 +248,8 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 	}
 	check(changes(s.sole().repository))
 	st, _ := s.store.Effective()
-	if !reflect.DeepEqual(st.Priorities, []runtime.Priority{{Project: project, Workstreams: want}}) {
-		t.Fatalf("scheduler priorities %+v", st.Priorities)
+	if !reflect.DeepEqual(st.Priority, ranked(project, want...)) {
+		t.Fatalf("scheduler priorities %+v", st.Priority)
 	}
 	_, err = c.Send(ctx, stream, "Resume all work.")
 	must(t, err)

@@ -39,7 +39,16 @@ const (
 	PauseProviderUsageLimit = "provider-usage-limit"
 )
 
-type Priority struct {
+// Ranked is one workstream's place in the priority order.
+type Ranked struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+}
+
+// ProjectPriority is one project's own order of its workstreams, the form in
+// which a runtime file may still hold priorities. The effective order places
+// these after the workstreams Priority names.
+type ProjectPriority struct {
 	Project     config.ProjectID      `json:"project"`
 	Workstreams []config.WorkstreamID `json:"workstreams"`
 }
@@ -53,9 +62,12 @@ type ProviderLimit struct {
 	ResetsAt time.Time `json:"resets_at,omitempty"`
 }
 type State struct {
-	Version        int               `json:"version"`
-	Pauses         []Pause           `json:"pauses,omitempty"`
-	Priorities     []Priority        `json:"priorities,omitempty"`
+	Version int     `json:"version"`
+	Pauses  []Pause `json:"pauses,omitempty"`
+	// Priority is the one priority order of every project's workstreams,
+	// highest first.
+	Priority       []Ranked          `json:"priority,omitempty"`
+	Priorities     []ProjectPriority `json:"priorities,omitempty"`
 	Profiles       map[string]string `json:"profiles,omitempty"`
 	ProviderLimits []ProviderLimit   `json:"provider_limits,omitempty"`
 	// BudgetPausedOn is the local calendar day, as YYYY-MM-DD, on which the
@@ -239,6 +251,7 @@ func clone(st State) State {
 	st.Pauses = slices.Clone(st.Pauses)
 	st.ProviderLimits = slices.Clone(st.ProviderLimits)
 	st.Profiles = maps.Clone(st.Profiles)
+	st.Priority = slices.Clone(st.Priority)
 	st.Priorities = slices.Clone(st.Priorities)
 	for i := range st.Priorities {
 		st.Priorities[i].Workstreams = slices.Clone(st.Priorities[i].Workstreams)
@@ -253,8 +266,9 @@ func (s *Store) Snapshot() (State, []Diagnostic) {
 }
 
 // Effective includes configured role bindings, valid runtime pauses and the
-// active projects' explicit orderings. An absent pause means unpaused; an absent
-// priority means no ordering preference. The store performs no scheduling.
+// priority order of the active projects' workstreams in Priority, Priorities
+// left empty. An absent pause means unpaused; an absent priority means no
+// ordering preference. The store performs no scheduling.
 func (s *Store) Effective() (State, []Diagnostic) {
 	return s.EffectiveAt(time.Now().UTC())
 }
@@ -279,20 +293,41 @@ func resolveAt(st State, in Inputs, at time.Time) (State, []Diagnostic) {
 			out.Pauses = append(out.Pauses, p)
 		}
 	}
+	for i, r := range st.Priority {
+		if err := rankedReference(r, in); err != nil {
+			ds = append(ds, Diagnostic{fmt.Sprintf("priority[%d]", i), err.Error()})
+		} else {
+			out.Priority = append(out.Priority, r)
+		}
+	}
+	// Each project's own order follows, place by place: the first workstream
+	// of every project, by project, then the second of every project.
+	var legacy [][]Ranked
 	for i, p := range st.Priorities {
 		if !in.Config.Active(p.Project) {
 			ds = append(ds, Diagnostic{fmt.Sprintf("priorities[%d]", i), "inactive project " + string(p.Project)})
 			continue
 		}
-		valid := Priority{Project: p.Project, Workstreams: []config.WorkstreamID{}}
+		var valid []Ranked
 		for j, w := range p.Workstreams {
 			if !slices.Contains(in.Workstreams[p.Project], w) {
 				ds = append(ds, Diagnostic{fmt.Sprintf("priorities[%d].workstreams[%d]", i, j), "unknown workstream " + string(w)})
-			} else {
-				valid.Workstreams = append(valid.Workstreams, w)
+			} else if r := (Ranked{p.Project, w}); !slices.Contains(out.Priority, r) {
+				valid = append(valid, r)
 			}
 		}
-		out.Priorities = append(out.Priorities, valid)
+		legacy = append(legacy, valid)
+	}
+	for place := 0; ; place++ {
+		more := false
+		for _, order := range legacy {
+			if place < len(order) {
+				out.Priority, more = append(out.Priority, order[place]), true
+			}
+		}
+		if !more {
+			break
+		}
 	}
 	for _, r := range slices.Sorted(maps.Keys(st.Profiles)) {
 		if err := profileReference(r, st.Profiles[r], in); err != nil {
@@ -356,6 +391,15 @@ func targetReference(t Target, in Inputs) error {
 	}
 	if t.Scope == "workstream" && !slices.Contains(in.Workstreams[t.Project], t.Workstream) {
 		return fmt.Errorf("unknown workstream %s", t.Workstream)
+	}
+	return nil
+}
+func rankedReference(r Ranked, in Inputs) error {
+	if !in.Config.Active(r.Project) {
+		return fmt.Errorf("inactive project %s", r.Project)
+	}
+	if !slices.Contains(in.Workstreams[r.Project], r.Workstream) {
+		return fmt.Errorf("unknown workstream %s", r.Workstream)
 	}
 	return nil
 }
@@ -434,6 +478,19 @@ func validate(st State) error {
 			return fmt.Errorf("pause set time must be non-zero")
 		}
 	}
+	ranked := map[Ranked]bool{}
+	for _, r := range st.Priority {
+		if err := config.CheckProjectIDs(r.Project); err != nil {
+			return err
+		}
+		if err := config.CheckWorkstreamIDs(r.Workstream); err != nil {
+			return err
+		}
+		if ranked[r] {
+			return fmt.Errorf("duplicate priority workstream")
+		}
+		ranked[r] = true
+	}
 	projects := map[config.ProjectID]bool{}
 	for _, p := range st.Priorities {
 		if err := config.CheckProjectIDs(p.Project); err != nil {
@@ -482,7 +539,7 @@ func (s *Store) mutate(f func(*State, Inputs) error) error {
 	slices.SortFunc(next.Pauses, func(a, b Pause) int {
 		return strings.Compare(a.Target.Scope+string(a.Target.Project)+string(a.Target.Workstream), b.Target.Scope+string(b.Target.Project)+string(b.Target.Workstream))
 	})
-	slices.SortFunc(next.Priorities, func(a, b Priority) int { return strings.Compare(string(a.Project), string(b.Project)) })
+	slices.SortFunc(next.Priorities, func(a, b ProjectPriority) int { return strings.Compare(string(a.Project), string(b.Project)) })
 	data, err := s.ops.encode(next)
 	if err != nil {
 		return err
@@ -575,28 +632,74 @@ func (s *Store) ClearPause(t Target, actor string) error {
 		return nil
 	})
 }
-func (s *Store) SetPriority(p Priority) error {
+
+// SetPriority replaces the whole priority order, stale entries and every
+// project's own order included, with order: workstreams of active projects,
+// highest first, each once. Workstreams it does not name share the place
+// after the last one it names.
+func (s *Store) SetPriority(order []Ranked) error {
 	return s.mutate(func(st *State, in Inputs) error {
-		if !in.Config.Active(p.Project) {
-			return fmt.Errorf("inactive project %s", p.Project)
+		if order == nil {
+			return fmt.Errorf("priority order must be an array")
 		}
-		for _, w := range p.Workstreams {
-			if !slices.Contains(in.Workstreams[p.Project], w) {
-				return fmt.Errorf("unknown workstream %s", w)
+		for _, r := range order {
+			if err := rankedReference(r, in); err != nil {
+				return err
 			}
 		}
-		st.Priorities = slices.DeleteFunc(st.Priorities, func(v Priority) bool { return v.Project == p.Project })
-		p.Workstreams = slices.Clone(p.Workstreams)
-		st.Priorities = append(st.Priorities, p)
+		st.Priority, st.Priorities = slices.Clone(order), nil
 		return nil
 	})
 }
-func (s *Store) ClearPriority(p config.ProjectID) error {
+
+// Prioritise puts workstreams of project first in the priority order, in the
+// order given, and leaves the project's other workstreams unnamed. The other
+// projects' workstreams in the effective order keep their relative order
+// after them. The result replaces the stored order as SetPriority does.
+func (s *Store) Prioritise(project config.ProjectID, workstreams []config.WorkstreamID) error {
+	return s.mutate(func(st *State, in Inputs) error {
+		order := make([]Ranked, 0, len(workstreams))
+		for _, w := range workstreams {
+			r := Ranked{project, w}
+			if err := rankedReference(r, in); err != nil {
+				return err
+			}
+			order = append(order, r)
+		}
+		current, _ := resolve(*st, in)
+		for _, r := range current.Priority {
+			if r.Project != project {
+				order = append(order, r)
+			}
+		}
+		st.Priority, st.Priorities = order, nil
+		return nil
+	})
+}
+
+// RestorePriority puts back the stored priority state of snapshot, stale
+// entries included, as Snapshot returned it.
+func (s *Store) RestorePriority(snapshot State) error {
 	return s.mutate(func(st *State, _ Inputs) error {
-		if err := config.CheckProjectIDs(p); err != nil {
+		st.Priority = slices.Clone(snapshot.Priority)
+		st.Priorities = clone(State{Priorities: snapshot.Priorities}).Priorities
+		return nil
+	})
+}
+
+// ClearPriority removes project's workstreams from the priority order, stale
+// ones included, or, when project is empty, the whole order.
+func (s *Store) ClearPriority(project config.ProjectID) error {
+	return s.mutate(func(st *State, _ Inputs) error {
+		if project == "" {
+			st.Priority, st.Priorities = nil, nil
+			return nil
+		}
+		if err := config.CheckProjectIDs(project); err != nil {
 			return err
 		}
-		st.Priorities = slices.DeleteFunc(st.Priorities, func(v Priority) bool { return v.Project == p })
+		st.Priority = slices.DeleteFunc(st.Priority, func(r Ranked) bool { return r.Project == project })
+		st.Priorities = slices.DeleteFunc(st.Priorities, func(v ProjectPriority) bool { return v.Project == project })
 		return nil
 	})
 }

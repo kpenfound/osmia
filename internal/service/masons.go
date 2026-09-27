@@ -223,7 +223,7 @@ func (m *masons) Pass(ctx context.Context) error {
 	}
 	// Each start re-sorts the workstreams, so equals take turns.
 	for implementing < m.cfg.Capacity.Masons {
-		i, unit, err := m.nextStart(startOrder(candidates, state.Priorities, m.cfg.Project.ID), entities)
+		i, unit, err := m.nextStart(startOrder(candidates, state.Priority, m.cfg.Project.ID), entities)
 		if err != nil {
 			return err
 		}
@@ -250,7 +250,7 @@ func (m *masons) Pass(ctx context.Context) error {
 		b.inFlight, b.implementing, b.started = append(b.inFlight, unit), b.implementing+1, m.s.now()
 		candidates[i] = b
 	}
-	decisions := dispatchPass{cfg: m.cfg, pauses: state.Pauses, rank: scheduler.Rank(state.Priorities, m.cfg.Project.ID), entities: entities, candidates: candidates, held: held}
+	decisions := dispatchPass{cfg: m.cfg, pauses: state.Pauses, rank: projectRank(state.Priority, m.cfg.Project.ID), entities: entities, candidates: candidates, held: held}
 	return m.recordDeferrals(ctx, decisions, append(read, candidates...))
 }
 
@@ -619,11 +619,18 @@ func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
 	return b, true, nil
 }
 
-// startOrder sorts the workstreams by the project's priority order, those
-// it does not name last, then by when each last started a unit, least
-// recently first, then by ID.
-func startOrder(streams []building, priorities []runtime.Priority, project config.ProjectID) []building {
-	order := scheduler.Rank(priorities, project)
+// projectRank ranks the project's workstreams by their places in the
+// priority order, as scheduler.Rank does.
+func projectRank(priority []runtime.Ranked, project config.ProjectID) func(config.WorkstreamID) int {
+	rank := scheduler.Rank(priority)
+	return func(stream config.WorkstreamID) int { return rank(project, stream) }
+}
+
+// startOrder sorts the project's workstreams by the priority order, those it
+// does not name last, then by when each last started a unit, least recently
+// first, then by ID.
+func startOrder(streams []building, priority []runtime.Ranked, project config.ProjectID) []building {
+	order := projectRank(priority, project)
 	slices.SortFunc(streams, func(a, b building) int {
 		return cmp.Or(cmp.Compare(order(a.stream), order(b.stream)), a.started.Compare(b.started), strings.Compare(string(a.stream), string(b.stream)))
 	})

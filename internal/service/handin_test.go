@@ -283,16 +283,15 @@ func TestHandInMakesItsWorkstreamKnownToRuntime(t *testing.T) {
 	text := "design"
 	out := f.handIn(t, HandInRequest{Key: "known", Stdin: &text})
 	target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: out.Workstream}
-	mutation(t, f.c, "PUT", "priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{out.Workstream}})
+	mutation(t, f.c, "PUT", "priority", PriorityRequest{Order: ranked(f.project, out.Workstream)})
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
 	rt, err := f.c.Runtime(ctx)
 	must(t, err)
 	if len(rt.Diagnostics) != 0 {
 		t.Fatalf("diagnostics %+v", rt.Diagnostics)
 	}
-	if len(rt.Effective.Priorities) != 1 || rt.Effective.Priorities[0].Project != f.project ||
-		!reflect.DeepEqual(rt.Effective.Priorities[0].Workstreams, []config.WorkstreamID{out.Workstream}) {
-		t.Fatalf("effective priorities %+v", rt.Effective.Priorities)
+	if !reflect.DeepEqual(rt.Effective.Priority, ranked(f.project, out.Workstream)) {
+		t.Fatalf("effective priorities %+v", rt.Effective.Priority)
 	}
 	if len(rt.Effective.Pauses) != 1 || rt.Effective.Pauses[0].Target != target || rt.Effective.Pauses[0].Mode != "soft" {
 		t.Fatalf("effective pauses %+v", rt.Effective.Pauses)
@@ -302,7 +301,7 @@ func TestHandInMakesItsWorkstreamKnownToRuntime(t *testing.T) {
 		t.Fatalf("retry %+v, first %+v", again, out)
 	}
 	unknown := config.WorkstreamID("w_00000000000000000000000000000000")
-	assertCode(t, f.c.Do(ctx, "PUT", Prefix+"/runtime/priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{unknown}}, nil), Validation)
+	assertCode(t, f.c.Do(ctx, "PUT", Prefix+"/runtime/priority", PriorityRequest{Order: ranked(f.project, unknown)}, nil), Validation)
 	assertCode(t, f.c.Do(ctx, "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: unknown}, Mode: "soft", Source: "owner"}, nil), Validation)
 }
 

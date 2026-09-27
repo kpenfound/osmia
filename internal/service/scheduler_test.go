@@ -484,7 +484,7 @@ func TestServiceOffersFreedSlotsInRuntimePriorityOrder(t *testing.T) {
 		must(t, err)
 	}
 	must(t, repo.Close())
-	priority, err := json.Marshal(runtime.State{Version: runtime.Version, Priorities: []runtime.Priority{{Project: project, Workstreams: []config.WorkstreamID{second}}}})
+	priority, err := json.Marshal(runtime.State{Version: runtime.Version, Priority: ranked(project, second)})
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(root, "runtime.json"), priority, 0600))
 

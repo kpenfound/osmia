@@ -395,7 +395,7 @@ func TestMasonSlotsFollowPriorityAndPause(t *testing.T) {
 	if hi < lo {
 		hi, lo = lo, hi
 	}
-	mutation(t, f.c, "PUT", "priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{hi, lo}})
+	mutation(t, f.c, "PUT", "priority", PriorityRequest{Order: ranked(f.project, hi, lo)})
 	mutation(t, f.c, "DELETE", "pause", factory)
 	f.awaitMasonRan(t, hi, "resume")
 	settle()
@@ -701,7 +701,7 @@ func TestStartOrderIsPriorityThenRoundRobin(t *testing.T) {
 	t.Parallel()
 	at := func(minutes int) time.Time { return demoStart.Add(time.Duration(minutes) * time.Minute) }
 	streams := []building{{stream: "a", started: at(2)}, {stream: "b", started: at(1)}, {stream: "c", started: at(3)}, {stream: "d"}, {stream: "e"}}
-	priorities := []runtime.Priority{{Project: "other", Workstreams: []config.WorkstreamID{"a"}}, {Project: project, Workstreams: []config.WorkstreamID{"c"}}}
+	priorities := []runtime.Ranked{{Project: "other", Workstream: "a"}, {Project: project, Workstream: "c"}}
 	var got []config.WorkstreamID
 	for _, b := range startOrder(streams, priorities, project) {
 		got = append(got, b.stream)

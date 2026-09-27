@@ -20,6 +20,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/buildinfo"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -901,21 +902,26 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if cfg.Effective == nil {
 			return fail(errors.New("missing configuration"))
 		}
-		var stream config.WorkstreamID
-		if len(ids) > 0 {
-			stream = ids[0]
-		}
-		project, err := projectOf(ctx, c, cfg, stream)
-		if err != nil {
+		if cfg.Project == nil && len(cfg.Projects) == 0 {
+			_, err := projectOf(ctx, c, cfg, "")
 			return refuse(err)
 		}
-		scope = string(project)
-		kind = "priority"
+		// The order is one across projects: each workstream is named with
+		// the project it belongs to.
+		order := []runtime.Ranked{}
+		for _, id := range ids {
+			project, err := projectOf(ctx, c, cfg, id)
+			if err != nil {
+				return refuse(err)
+			}
+			order = append(order, runtime.Ranked{Project: project, Workstream: id})
+		}
+		scope, kind = "order", "priority"
 		if a[0] == "clear" {
 			method = "DELETE"
-			input = service.ClearPriorityRequest{Project: project}
+			input = service.ClearPriorityRequest{}
 		} else {
-			input = service.PriorityRequest{Project: project, Workstreams: ids}
+			input = service.PriorityRequest{Order: order}
 		}
 	case "profiles":
 		kind = "profile"
@@ -1031,9 +1037,9 @@ func showRuntime(w io.Writer, rt service.RuntimeResponse) {
 	for _, limit := range rt.Effective.ProviderLimits {
 		fmt.Fprintf(w, "Provider limit: %s status=%s kind=%s reset=%s\n", limit.Backend, limit.Status, limit.Kind, limit.ResetsAt.UTC().Format(time.RFC3339))
 	}
-	fmt.Fprintln(w, "Priority (absent projects have no preference):")
-	for _, p := range rt.Effective.Priorities {
-		fmt.Fprintf(w, "  %s: %v\n", p.Project, p.Workstreams)
+	fmt.Fprintln(w, "Priority (unnamed workstreams follow with equal priority):")
+	for i, r := range rt.Effective.Priority {
+		fmt.Fprintf(w, "  %d. %s %s\n", i+1, r.Project, r.Workstream)
 	}
 	fmt.Fprintln(w, "Profiles:")
 	for _, r := range slices.Sorted(maps.Keys(rt.Profiles)) {

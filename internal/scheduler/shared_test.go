@@ -35,18 +35,20 @@ func twoProjects(t *testing.T, limits *config.Capacity) (repos [2]*trace.Reposit
 func TestSharedPoolHoldsRoleCapacityAcrossProjects(t *testing.T) {
 	ctx := context.Background()
 	repos, schedulers := twoProjects(t, &config.Capacity{Masons: 2, Reviewers: 1, Committee: 1, PerWorkstream: 3})
+	// The first project's pass takes the reviewer slot and one mason slot,
+	// and leaves the other mason slot to the second project.
 	must(t, schedulers[0].Pass(ctx))
-	if got := counts(dispatched(t, repos[0])); got["mason"] != 2 || got["reviewer"] != 1 {
+	if got := counts(dispatched(t, repos[0])); got["mason"] != 1 || got["reviewer"] != 1 {
 		t.Fatalf("first project dispatched %v", got)
 	}
-	// Every mason and reviewer slot is taken by the first project's turns.
 	must(t, schedulers[1].Pass(ctx))
-	if got := dispatched(t, repos[1]); len(got) != 0 {
-		t.Fatalf("second project dispatched %v past the shared capacity", got)
+	if got := counts(dispatched(t, repos[1])); got["mason"] != 1 || got["reviewer"] != 0 {
+		t.Fatalf("second project dispatched %v", got)
 	}
+	// Every mason and reviewer slot is taken.
 	slots, err := schedulers[1].Slots(func(Candidate) (bool, error) { return false, nil })
 	must(t, err)
-	if slots.Used["mason"] != 2 || slots.Used["reviewer"] != 1 || len(slots.Waiting) != 4 {
+	if slots.Used["mason"] != 2 || slots.Used["reviewer"] != 1 || len(slots.Waiting) != 3 {
 		t.Fatalf("second project's slots: %+v", slots)
 	}
 	for _, w := range slots.Waiting {

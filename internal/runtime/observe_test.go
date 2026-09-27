@@ -3,8 +3,6 @@ package runtime
 import (
 	"errors"
 	"testing"
-
-	"github.com/kpenfound/osmia/internal/config"
 )
 
 // The observer hears every mutation that changes the persisted state, and
@@ -25,7 +23,7 @@ func TestObserverHearsChangingMutations(t *testing.T) {
 	if err := s.SetProfile("mason", "missing"); !errors.Is(err, ErrValidation) {
 		t.Fatalf("unknown profile: %v", err)
 	}
-	must(t, s.SetPriority(Priority{Project: pid, Workstreams: []config.WorkstreamID{w1}}))
+	must(t, s.SetPriority([]Ranked{{pid, w1}}))
 	must(t, s.ClearProfile("mason"))
 	if heard != 3 {
 		t.Fatalf("after a refused override, a priority and a clear: %d", heard)

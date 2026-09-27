@@ -138,11 +138,11 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal(info.Mode())
 	}
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "hard", Source: "owner"})
-	mutation(t, c, "PUT", "priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{stream}})
+	mutation(t, c, "PUT", "priority", PriorityRequest{Order: ranked(project, stream)})
 	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
 	before, err := c.Runtime(ctx)
 	must(t, err)
-	if len(before.Effective.Pauses) != 1 || len(before.Effective.Priorities) != 1 || before.Effective.Profiles["mason"] != "other" {
+	if len(before.Effective.Pauses) != 1 || len(before.Effective.Priority) != 1 || before.Effective.Profiles["mason"] != "other" {
 		t.Fatal(before)
 	}
 	if len(before.Profiles) != len(s.cfg.Roles) || before.Profiles["mason"] != (EffectiveProfile{Name: "other", Source: "owner_override"}) || before.Profiles["reviewer"] != (EffectiveProfile{Name: "default", Source: "configuration"}) {
@@ -168,7 +168,7 @@ func TestRoundTrip(t *testing.T) {
 	mutation(t, c2, "DELETE", "profile", ClearProfileRequest{"mason"})
 	after, err = c2.Runtime(ctx)
 	must(t, err)
-	if len(after.Effective.Pauses) != 0 || len(after.Effective.Priorities) != 0 || after.Effective.Profiles["mason"] != "default" {
+	if len(after.Effective.Pauses) != 0 || len(after.Effective.Priority) != 0 || after.Effective.Profiles["mason"] != "default" {
 		t.Fatal(after)
 	}
 	if after.Profiles["mason"] != (EffectiveProfile{Name: "default", Source: "configuration"}) {

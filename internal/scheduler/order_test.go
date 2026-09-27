@@ -77,12 +77,12 @@ func TestRuntimePriorityWinsWithinAStage(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name       string
-		priorities []runtime.Priority
+		priorities []runtime.Ranked
 		want       string
 	}{
-		{"first named", []runtime.Priority{{Project: project, Workstreams: []config.WorkstreamID{other, stream}}}, "b1/one"},
-		{"named before unnamed", []runtime.Priority{{Project: project, Workstreams: []config.WorkstreamID{other}}}, "b1/one"},
-		{"other project's order", []runtime.Priority{{Project: otherProject, Workstreams: []config.WorkstreamID{other}}}, "a1/one"},
+		{"first named", []runtime.Ranked{{Project: project, Workstream: other}, {Project: project, Workstream: stream}}, "b1/one"},
+		{"named before unnamed", []runtime.Ranked{{Project: project, Workstream: other}}, "b1/one"},
+		{"another project's workstream", []runtime.Ranked{{Project: otherProject, Workstream: other}}, "a1/one"},
 		{"no order", nil, "a1/one"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -94,7 +94,7 @@ func TestRuntimePriorityWinsWithinAStage(t *testing.T) {
 			f.queue(t, repo, "reviewer1", "one")
 			var offered []string
 			s, err := New(repo, Options{Now: f.clock.Now, Capacity: &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 5},
-				Priorities: func() []runtime.Priority { return tc.priorities },
+				Priorities: func() []runtime.Ranked { return tc.priorities },
 				Admit: func(_ context.Context, c Candidate) (bool, error) {
 					if c.Project != project {
 						t.Errorf("candidate project %s", c.Project)
@@ -229,14 +229,13 @@ func TestProjectsKeepIndependentSlotsAndRotation(t *testing.T) {
 	// The per-workstream count and the rotation are keyed by project.
 	used := usage{roles: map[string]int{}, streams: map[streamKey]int{}, local: map[localKey]int{}}
 	used.add(project, stream, "architect")
-	s := schedulers[0]
 	for _, tc := range []struct {
 		project config.ProjectID
 		role    string
 		fits    bool
 	}{{project, "mason", false}, {project, "architect", false}, {otherProject, "mason", true}, {otherProject, "architect", true}} {
 		c := Candidate{Project: tc.project, Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: tc.role}}}
-		if got := s.refusal(used, c) == ""; got != tc.fits {
+		if got := refusal(limits, used, c) == ""; got != tc.fits {
 			t.Fatalf("%s %s fits %v, want %v", tc.project, tc.role, got, tc.fits)
 		}
 	}
@@ -245,17 +244,19 @@ func TestProjectsKeepIndependentSlotsAndRotation(t *testing.T) {
 	}
 }
 
-func TestRankFollowsTheProjectsOrder(t *testing.T) {
+func TestRankFollowsTheOneOrderOfEveryProject(t *testing.T) {
 	t.Parallel()
 	const third config.WorkstreamID = "w_00000000000000000000000000000003"
-	rank := Rank([]runtime.Priority{
-		{Project: otherProject, Workstreams: []config.WorkstreamID{third, stream}},
-		{Project: project, Workstreams: []config.WorkstreamID{other, stream}},
-	}, project)
-	if rank(other) != 1 || rank(stream) != 2 || rank(third) != 3 {
-		t.Fatalf("ranks %d %d %d", rank(other), rank(stream), rank(third))
+	rank := Rank([]runtime.Ranked{{Project: project, Workstream: other}, {Project: otherProject, Workstream: stream}, {Project: project, Workstream: stream}})
+	if rank(project, other) != 1 || rank(otherProject, stream) != 2 || rank(project, stream) != 3 {
+		t.Fatalf("ranks %d %d %d", rank(project, other), rank(otherProject, stream), rank(project, stream))
 	}
-	if rank := Rank(nil, project); rank(stream) != rank(other) {
+	// A workstream is ranked with its project: the same ID of another
+	// project is not named.
+	if rank(project, third) != 4 || rank(otherProject, other) != 4 {
+		t.Fatalf("unnamed ranks %d %d", rank(project, third), rank(otherProject, other))
+	}
+	if rank := Rank(nil); rank(project, stream) != rank(otherProject, other) {
 		t.Fatal("workstreams without an order are not equal")
 	}
 }

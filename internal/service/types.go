@@ -368,9 +368,17 @@ type ProjectRuntime struct {
 }
 type PauseRequest = runtime.Pause
 type ClearPauseRequest = runtime.Target
-type PriorityRequest = runtime.Priority
+
+// PriorityRequest replaces the priority order with Order, workstreams of
+// any active project, highest priority first.
+type PriorityRequest struct {
+	Order []runtime.Ranked `json:"order"`
+}
+
+// ClearPriorityRequest removes Project's workstreams from the priority
+// order, or, without a project, clears the whole order.
 type ClearPriorityRequest struct {
-	Project config.ProjectID `json:"project"`
+	Project config.ProjectID `json:"project,omitempty"`
 }
 type ProfileRequest struct {
 	Role    string `json:"role"`

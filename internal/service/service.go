@@ -657,9 +657,9 @@ func (s *Service) holds(project config.ProjectID, librarian config.WorkstreamID,
 }
 
 // priorities returns the runtime priority order in force.
-func (s *Service) priorities() []runtime.Priority {
+func (s *Service) priorities() []runtime.Ranked {
 	st, _ := s.effective()
-	return st.Priorities
+	return st.Priority
 }
 
 // chiefProfile returns the chief of staff's effective profile for a new turn.

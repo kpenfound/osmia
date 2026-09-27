@@ -13,7 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -51,8 +50,8 @@ func TestDeferralReasons(t *testing.T) {
 	}
 	cfg := &config.Config{Capacity: config.Capacity{Masons: 3}, Project: config.Project{ID: project, Capacity: config.ProjectCapacity{PerWorkstream: 2}}}
 	factory := runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "owner"}
-	pass := func(pauses []runtime.Pause, priorities []runtime.Priority, held map[config.WorkstreamID]string, candidates ...building) dispatchPass {
-		return dispatchPass{cfg: cfg, pauses: pauses, rank: scheduler.Rank(priorities, project), entities: entities, candidates: candidates, held: held}
+	pass := func(pauses []runtime.Pause, priorities []runtime.Ranked, held map[config.WorkstreamID]string, candidates ...building) dispatchPass {
+		return dispatchPass{cfg: cfg, pauses: pauses, rank: projectRank(priorities, project), entities: entities, candidates: candidates, held: held}
 	}
 	busy := stream(first, 1, "resume")
 	behind := stream(second, 1, "upload")
@@ -79,9 +78,9 @@ func TestDeferralReasons(t *testing.T) {
 			UnitDispatch{Reason: DeferWorkstreamCap, Limit: 2, Message: "Waits for a slot in its workstream: 2 of its units are implementing, the per-workstream cap."}},
 		{"capacity", pass(nil, nil, nil, busy, behind), busy, "index",
 			UnitDispatch{Reason: DeferCapacity, Limit: 3, Message: "Waits for a mason slot: all 3 are in use."}},
-		{"capacity behind a capped higher-priority workstream", pass(nil, []runtime.Priority{{Project: project, Workstreams: []config.WorkstreamID{second, first}}}, nil, busy, stream(second, 2, "resume", "upload")), busy, "index",
+		{"capacity behind a capped higher-priority workstream", pass(nil, ranked(project, second, first), nil, busy, stream(second, 2, "resume", "upload")), busy, "index",
 			UnitDispatch{Reason: DeferCapacity, Limit: 3, Message: "Waits for a mason slot: all 3 are in use."}},
-		{"priority", pass(nil, []runtime.Priority{{Project: project, Workstreams: []config.WorkstreamID{second, first}}}, nil, busy, behind), busy, "index",
+		{"priority", pass(nil, ranked(project, second, first), nil, busy, behind), busy, "index",
 			UnitDispatch{Reason: DeferPriority, Limit: 3, Workstreams: []config.WorkstreamID{second}, Message: "Waits for a mason slot: all 3 are in use, and higher-priority workstreams start first: " + string(second) + "."}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -230,7 +229,7 @@ func TestReadyUnitDecisionsFollowPauseAndPriority(t *testing.T) {
 		f.checkUnits(t, stream, want)
 	}
 
-	mutation(t, f.c, "PUT", "priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{hi, lo}})
+	mutation(t, f.c, "PUT", "priority", PriorityRequest{Order: ranked(f.project, hi, lo)})
 	mutation(t, f.c, "DELETE", "pause", factory)
 	f.awaitMasonRan(t, hi, "resume")
 	settle()

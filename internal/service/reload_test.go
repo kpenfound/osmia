@@ -179,7 +179,7 @@ func TestReloadPreservesRuntimeState(t *testing.T) {
 	files := configFiles(t, opts)
 	_, c := start(t, opts)
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "travel", Source: "owner"})
-	mutation(t, c, "PUT", "priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{stream}})
+	mutation(t, c, "PUT", "priority", PriorityRequest{Order: ranked(project, stream)})
 	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
 	before, err := c.Runtime(ctx)
 	must(t, err)
@@ -200,7 +200,7 @@ func TestReloadPreservesRuntimeState(t *testing.T) {
 	unchanged(t)
 	now, err := c.Runtime(ctx)
 	must(t, err)
-	if !reflect.DeepEqual(now.Effective.Pauses, before.Effective.Pauses) || !reflect.DeepEqual(now.Effective.Priorities, before.Effective.Priorities) {
+	if !reflect.DeepEqual(now.Effective.Pauses, before.Effective.Pauses) || !reflect.DeepEqual(now.Effective.Priority, before.Effective.Priority) {
 		t.Fatalf("runtime controls changed: %+v", now.Effective)
 	}
 	if now.Profiles["mason"] != (EffectiveProfile{Name: "other", Source: "owner_override"}) || now.Profiles["reviewer"] != (EffectiveProfile{Name: "other", Source: "configuration"}) {

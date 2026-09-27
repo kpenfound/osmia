@@ -930,61 +930,72 @@
     place(box, entries.map(renderDecision));
   }
 
-  // priority is the order being edited: the workstreams in the order shown
-  // and those chosen to go first. It starts again from the order in force
-  // whenever that changes.
+  // priority is the order being edited: the workstreams of every project in
+  // the order shown, each keyed by its project and ID, and those chosen to go
+  // first. It starts again from the order in force whenever that changes.
   const priority = { inForce: null, order: [], chosen: new Set(), shown: null };
+
+  function rankedKey(project, workstream) {
+    return project + '/' + workstream;
+  }
+
+  function projects() {
+    const config = views.config;
+    return config ? (config.projects || (config.project ? [config.project] : [])) : [];
+  }
 
   function renderPriority() {
     const current = byId('priority-current');
     const list = byId('priority-list');
-    const id = project();
     if (!views.status || !views.runtime || !views.config) {
       return;
     }
-    if (!id) {
+    if (projects().length === 0) {
       current.textContent = 'No project is configured.';
       list.replaceChildren();
       return;
     }
-    const record = (views.runtime.effective.priorities || []).find((p) => p.project === id);
-    const inForce = record ? record.workstreams : [];
+    const inForce = (views.runtime.effective.priority || []).map((r) => rankedKey(r.project, r.workstream));
     const key = JSON.stringify(inForce);
     if (priority.inForce !== key) {
       priority.inForce = key;
       priority.order = [...inForce];
       priority.chosen = new Set(inForce);
     }
-    const workstreams = views.status.workstreams;
-    const ids = workstreams.map((w) => w.workstream);
-    priority.order = priority.order.filter((w) => ids.includes(w)).concat(ids.filter((w) => !priority.order.includes(w)));
-    for (const w of [...priority.chosen]) {
-      if (!ids.includes(w)) {
-        priority.chosen.delete(w);
+    const workstreams = new Map(views.status.workstreams.map((w) => [rankedKey(w.project, w.workstream), w]));
+    const keys = [...workstreams.keys()];
+    priority.order = priority.order.filter((k) => workstreams.has(k)).concat(keys.filter((k) => !priority.order.includes(k)));
+    for (const k of [...priority.chosen]) {
+      if (!workstreams.has(k)) {
+        priority.chosen.delete(k);
       }
     }
-    const goals = new Map(workstreams.map((w) => [w.workstream, goal(w)]));
+    const label = (k) => {
+      const w = workstreams.get(k);
+      return w ? goal(w) + ' (' + w.project + ')' : k;
+    };
     current.textContent = inForce.length === 0
       ? 'No order is set; free slots go to workstreams without preference.'
-      : 'In force: ' + inForce.map((w) => goals.get(w) || w).join(', then ') + '.';
-    const shown = JSON.stringify([priority.order, [...priority.chosen], [...goals]]);
+      : 'In force: ' + inForce.map(label).join(', then ') + '.';
+    const shown = JSON.stringify([priority.order, [...priority.chosen], [...workstreams.values()].map((w) => goal(w))]);
     if (priority.shown === shown) {
       return;
     }
     priority.shown = shown;
-    list.replaceChildren(...priority.order.map((w, i) => {
+    list.replaceChildren(...priority.order.map((k, i) => {
+      const w = workstreams.get(k);
       const box = el('input', { type: 'checkbox', 'data-field': 'chosen' });
-      box.checked = priority.chosen.has(w);
+      box.checked = priority.chosen.has(k);
       box.addEventListener('change', () => {
         if (box.checked) {
-          priority.chosen.add(w);
+          priority.chosen.add(k);
         } else {
-          priority.chosen.delete(w);
+          priority.chosen.delete(k);
         }
         renderPriority();
       });
-      const move = (label, by) => {
-        const button = el('button', { type: 'button', 'data-field': by < 0 ? 'up' : 'down', 'aria-label': label }, by < 0 ? '↑' : '↓');
+      const move = (text, by) => {
+        const button = el('button', { type: 'button', 'data-field': by < 0 ? 'up' : 'down', 'aria-label': text }, by < 0 ? '↑' : '↓');
         button.disabled = i + by < 0 || i + by >= priority.order.length;
         button.addEventListener('click', () => {
           const order = priority.order;
@@ -993,8 +1004,8 @@
         });
         return button;
       };
-      return el('li', { 'data-priority': w },
-        el('label', {}, box, ' ', goals.get(w), el('span', { class: 'id' }, ' ' + w)),
+      return el('li', { 'data-priority': w.workstream, 'data-project': w.project },
+        el('label', {}, box, ' ', goal(w), el('span', { class: 'id' }, ' ' + w.project + ' ' + w.workstream)),
         el('span', { class: 'moves' }, move('Move up', -1), move('Move down', 1)));
     }));
   }
@@ -1002,28 +1013,28 @@
   function setPriority(event) {
     event.preventDefault();
     const result = byId('priority-result');
-    const id = project();
-    const workstreams = priority.order.filter((w) => priority.chosen.has(w));
-    if (!id) {
+    if (projects().length === 0) {
       show(result, 'error', 'No project is configured.');
       return;
     }
-    if (workstreams.length === 0) {
+    const workstreams = new Map(views.status.workstreams.map((w) => [rankedKey(w.project, w.workstream), w]));
+    const order = priority.order.filter((k) => priority.chosen.has(k) && workstreams.has(k))
+      .map((k) => ({ project: workstreams.get(k).project, workstream: workstreams.get(k).workstream }));
+    if (order.length === 0) {
       show(result, 'error', 'Choose the workstreams that go first, or clear the order.');
       return;
     }
-    act(result, event.submitter || byId('priority-form').querySelector('button'), () => request('PUT', '/runtime/priority', { project: id, workstreams }),
+    act(result, event.submitter || byId('priority-form').querySelector('button'), () => request('PUT', '/runtime/priority', { order }),
       () => 'Priority order set.');
   }
 
   function clearPriority() {
     const result = byId('priority-result');
-    const id = project();
-    if (!id) {
+    if (projects().length === 0) {
       show(result, 'error', 'No project is configured.');
       return;
     }
-    act(result, byId('priority-clear'), () => request('DELETE', '/runtime/priority', { project: id }), () => 'Priority order cleared.');
+    act(result, byId('priority-clear'), () => request('DELETE', '/runtime/priority', {}), () => 'Priority order cleared.');
   }
 
   function money(spend) {
