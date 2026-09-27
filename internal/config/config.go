@@ -314,13 +314,14 @@ func (c *Config) Active(id ProjectID) bool {
 	return slices.ContainsFunc(c.Projects, func(p Project) bool { return p.ID == id })
 }
 
-// For returns a copy of c about the active project id: its Project is that
-// project, or zero when id is not active. The receiver is unchanged.
+// For returns the configuration about the active project id: c itself when
+// its Project is already id, otherwise a copy whose Project is that project,
+// or zero when id is not active. The receiver is unchanged.
 func (c *Config) For(id ProjectID) *Config {
-	out := *c
 	if c.Project.ID == id {
-		return &out
+		return c
 	}
+	out := *c
 	out.Project = Project{}
 	for _, p := range c.Projects {
 		if p.ID == id {

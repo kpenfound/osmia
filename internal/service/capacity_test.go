@@ -102,11 +102,11 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 	}
 	gone := AbandonedState
 	list := []WorkstreamStatus{
-		{Workstream: sibling, Units: []UnitStatus{deferred("a", DeferCapacity), deferred("b", DeferEntangled), deferred("c", DeferPriority), deferred("d", DeferWorkstreamCap), deferred("e", DeferPaused)}},
-		{Workstream: stream, Units: []UnitStatus{deferred("f", DeferCapacity)}},
+		{Project: project, Workstream: sibling, Units: []UnitStatus{deferred("a", DeferCapacity), deferred("b", DeferEntangled), deferred("c", DeferPriority), deferred("d", DeferWorkstreamCap), deferred("e", DeferPaused)}},
+		{Project: project, Workstream: stream, Units: []UnitStatus{deferred("f", DeferCapacity)}},
 		// An abandoned workstream keeps its units' last deferral but never
 		// starts them.
-		{Workstream: "w_00000000000000000000000000000abc", State: &gone, Units: []UnitStatus{deferred("g", DeferCapacity)}},
+		{Project: project, Workstream: "w_00000000000000000000000000000abc", State: &gone, Units: []UnitStatus{deferred("g", DeferCapacity)}},
 	}
 	capacity, unread := s.capacityStatus(list)
 	if unread != nil {
