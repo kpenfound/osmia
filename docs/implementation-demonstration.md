@@ -104,8 +104,8 @@ with `kb/sources.json`.
 ## Final review and delivery demonstration
 
 `TestDeliveryDemonstration` in `internal/service/delivery_demo_test.go` runs
-both `commit-per-unit` and `squash` delivery against a local bare fork and an
-in-memory pull request client. Fake masons and reviewers use the ordinary
+`commit-per-unit` delivery against a local bare fork and an in-memory pull
+request client. Fake masons and reviewers use the ordinary
 service turns; no model session, container, remote push or live pull request is
 started. Run the focused demonstration inside Dagger:
 
@@ -127,12 +127,12 @@ review records evidence for both criteria.
 
 The delivery API presents the report and a description drafted from the
 trace. The owner edits that description and approves its reviewed commit.
-Changing the description or moving the branch makes the delivery gate refuse
-publication. After restoring the approved branch, the test interrupts
-publication after the pull request opens, reopens the trace as on restart and
-reconciles the existing branch and pull request. It checks one pull request,
-the approved tree and description, and the recorded review, approval and
-publication provenance for each delivery style.
+The test checks one pull request, the approved tree and description, and the
+recorded review, approval and publication provenance. Focused tests in
+`delivery_approval_test.go` cover changes to the approved description and
+governing revisions. `publication_test.go` covers both delivery styles,
+stale approvals, interrupted publication and reconciliation of an existing
+branch or pull request using an assembled, reviewed feature fixture.
 
 The relevant trace files are `final/report.json`, `final/followups.json`,
 `units/<follow-up>/report.json`, `units/<follow-up>/review.json`,

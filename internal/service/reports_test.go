@@ -221,7 +221,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		}
 		return errFailTurn
 	}
-	stream, _ := f.builtAs(t, "design")
+	stream := f.seedBuilding(t, "design", independentPlan)
 	f.awaitUnit(t, stream, "resume", UnitReviewing)
 	deadline := time.Now().Add(demoTimeout)
 	for {
@@ -352,7 +352,7 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, independentPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	built := f.builtPaused(t, factory, "first", "second")
+	built := f.seedBuildingPaused(t, factory, independentPlan, "first", "second")
 	blocked, other := lowHigh(built[0], built[1])
 	var lock string
 	masons.play[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {

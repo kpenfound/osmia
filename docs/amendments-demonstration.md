@@ -6,6 +6,10 @@ starts with a sealed, building workstream. A fake mason calls `amend` with
 continues. The fake architect drafts a revised criterion, the committee runs
 one amendment round, and the chief of staff presents the packet. The service
 restarts before the owner decides; the same packet and round remain available.
+The owner approves the amendment, and the test checks the new seal, affected
+and unaffected units, and delivery of the ruling across another restart.
+`amendment_decision_test.go` covers rejection, veto overrides, extra rounds
+and stale decisions from a sealed build fixture.
 `TestAmendmentRoundResumesCompletedMember` stops after one committee member
 objects, then resumes the round. It checks that the member is not run again,
 the objection reaches the packet, and the reply and packet are written once.

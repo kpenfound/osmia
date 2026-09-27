@@ -323,7 +323,7 @@ func TestMasonStartsTheFirstOfTwoEntangledUnits(t *testing.T) {
 	t.Parallel()
 	f, masons := newMasonFixture(t, 4, independentPlan)
 	defer f.stop(t)
-	stream, _ := f.builtAs(t, "design")
+	stream := f.seedBuilding(t, "design", independentPlan)
 	f.awaitMasonRan(t, stream, "resume")
 	settle()
 	masons.check(t)
@@ -392,7 +392,7 @@ func TestMasonSlotsFollowPriorityAndPause(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	built := f.builtPaused(t, factory, "first", "second")
+	built := f.seedBuildingPaused(t, factory, validPlan, "first", "second")
 	first, second := built[0], built[1]
 	settle()
 	for _, stream := range []config.WorkstreamID{first, second} {
@@ -439,7 +439,7 @@ func TestImplementingUnitGetsItsMasonTurnAfterARestart(t *testing.T) {
 	f, masons := newMasonFixture(t, 4, validPlan)
 	defer func() { f.stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
-	stream := f.builtPaused(t, factory, "design")[0]
+	stream := f.seedBuildingPaused(t, factory, validPlan, "design")[0]
 	f.stop(t)
 
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
@@ -511,7 +511,7 @@ func TestStaleSpecLeavesTheUnitReady(t *testing.T) {
 	f, masons := newMasonFixture(t, 4, validPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	stream := f.builtPaused(t, factory, "design")[0]
+	stream := f.seedBuildingPaused(t, factory, validPlan, "design")[0]
 	f.editSpec(t, stream, staleSpec)
 	mutation(t, f.c, "DELETE", "pause", factory)
 	f.awaitMasonTransition(t, stream)
@@ -557,7 +557,7 @@ func TestUnitWorkspaceFailureBlocksItsWorkstreamAlone(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	built := f.builtPaused(t, factory, "first", "second")
+	built := f.seedBuildingPaused(t, factory, validPlan, "first", "second")
 	a, b := built[0], built[1]
 	broken, other := lowHigh(a, b)
 	squatter := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(broken), "resume")
@@ -617,7 +617,7 @@ func TestBlockedImplementingUnitHoldsNoSlot(t *testing.T) {
 			f, masons := newMasonFixture(t, 1, validPlan)
 			defer func() { f.stop(t) }()
 			factory := runtime.Target{Scope: "factory"}
-			built := f.builtPaused(t, factory, "first", "second")
+			built := f.seedBuildingPaused(t, factory, validPlan, "first", "second")
 			a, b := built[0], built[1]
 			blocked, other := lowHigh(a, b)
 			f.stop(t)

@@ -54,14 +54,21 @@ Each workflow read verifies and decodes trace records; frequent
 polling competes with the controllers doing the work. Parallel tests also share
 the container's CPU and filesystem, so adding parallelism can increase contention.
 
-- Keep the end-to-end demonstrations for lifecycle, recovery and wiring coverage.
+- Keep one end-to-end journey for each distinct integration contract. Exercise
+  decision, delivery-style and failure variants at the controller boundary.
+  Before adding a journey, identify an assertion that the existing journeys
+  and focused tests cannot establish.
 - Mark isolated top-level tests parallel, including parents of parallel table
   cases. A serial parent prevents the other parallel tests from running until
   its children finish. Tests that change process environment variables must
   stay serial.
 - For controller tests, seed the state immediately before the behavior under
-  test. `seedBuild` records a sealed plan and builds its unit graph for amendment,
-  review, landing, rebase, final-review and delivery fixtures. Landing fixtures capture
+  test. `seedBuild` records a sealed plan and unit states for a stopped service;
+  `seedBuilding` supplies the same state to a running service, and
+  `seedBuildingPaused` sets an owner pause before creating its builds.
+  Documents and unit states are published together. Use `builtAs` and
+  `builtPaused` when intake and ratification are part of the assertion.
+  Landing fixtures capture
   completed mason reports, snapshot candidates and approve reviews directly;
   rebase fixtures create the required completed and queued turns.
 - Use the running service when the assertion concerns scheduling, API wiring or
@@ -74,6 +81,25 @@ the container's CPU and filesystem, so adding parallelism can increase contentio
   the event stream does not announce.
 - Coordinate blocked fake turns with channels. Use elapsed-time assertions only
   when a timeout is the behavior being tested, with a small configured budget.
+
+### Service coverage ownership
+
+| Contract | Journey coverage | Focused coverage and fixture |
+| --- | --- | --- |
+| Intake and ratification | `TestHandInToRatifiedPlan` | Architect, shed, ratification and build tests exercise their own transitions. Implementation tests start with sealed builds. |
+| Review and revision | `TestExactReviewDemonstration` checks actionable findings, revised candidates, reviewer tool scope, questions and a restart | Review bundle, footprint, stale identity and interrupted-result tests start with a completed candidate. |
+| Landing and rebase | Landing, parallel-work and drift demonstrations check controller wiring | Landing interruption cases start with an approved candidate and drive the production reconciler with a controlled clock. Git and Jujutsu rebase fixtures prepare unit reports and local workspace changes. |
+| Final review and delivery | `TestDeliveryDemonstration` follows a final-review gap through a follow-up unit to approved publication | Final-review tests cover report decisions. Delivery and publication tests start with an assembled, reviewed feature and cover styles, approval invalidation and side-effect recovery. |
+| Amendments | `TestAmendmentDemonstration` follows a mason request through approval and continuation across restarts | Draft, debate, decision and application tests cover the respective stage, including rejection and stale owner decisions. |
+| Runtime controls | Reliability demonstrations combine pause, budget, profile changes, provider limits and recovery | Capacity, classification, turn failure and interrupted-mason tests start with sealed builds. |
+| Workspace backend compatibility | The Jujutsu delivery demonstration compares the delivered branch from both backends | Workspace and Jujutsu recovery tests cover backend operations and interruption points. |
+| Interfaces | Browser, notification and trace demonstrations check their actual transport and presentation paths | API, inbox and trace tests use records appropriate to the requested view. |
+
+Retain a matrix at the journey level when the comparison itself is the
+contract: Git/Jujutsu delivered-branch equivalence and the reliability
+demonstrations' cross-provider continuation histories are examples. A fixture
+should establish its starting state and fail clearly if setup fails; unrelated
+workflow decisions belong in the tests responsible for those decisions.
 
 ## Profile inside Dagger
 

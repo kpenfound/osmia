@@ -112,7 +112,7 @@ func TestMasonInfrastructureFailureContestsUnitAndStreakResets(t *testing.T) {
 	f.engine.mu.Lock()
 	f.engine.turns[owner] = fake.turn
 	f.engine.mu.Unlock()
-	stream, _ := f.builtAs(t, "crashing-mason")
+	stream := f.seedBuilding(t, "crashing-mason", validPlan)
 	f.awaitUnit(t, stream, "resume", UnitContested)
 
 	q := f.awaitCompleted(t, stream, masonAgent("resume"), masonTurnID("resume"))
@@ -151,7 +151,7 @@ func TestMasonBehaviouralFailureIsNotRetried(t *testing.T) {
 	f, fake := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
 	fake.play[masonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return errFailTurn }
-	stream, _ := f.builtAs(t, "misreporting-mason")
+	stream := f.seedBuilding(t, "misreporting-mason", validPlan)
 	q := f.awaitCompleted(t, stream, masonAgent("resume"), masonTurnID("resume"))
 	if q.Status() != "failed" || q.Response.FailureClass != coreadapter.Behavioural || len(q.Attempts) != 1 {
 		t.Fatalf("turn ended %s with %+v after %d attempts", q.Status(), q.Response, len(q.Attempts))
@@ -197,7 +197,7 @@ func TestReviewerInfrastructureFailureContestsUnit(t *testing.T) {
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 	f.engine.mu.Unlock()
-	stream, _ := f.builtAs(t, "crashing-reviewer")
+	stream := f.seedBuilding(t, "crashing-reviewer", validPlan)
 	f.awaitUnit(t, stream, "resume", UnitContested)
 	th := f.thread(t, stream, reviewerAgent("resume"))
 	q := f.awaitCompleted(t, stream, reviewerAgent("resume"), th.Turns[len(th.Turns)-1].Request.TurnID)

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,9 +9,9 @@ import (
 
 	"github.com/kpenfound/busybees/core/vcs"
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -26,7 +25,35 @@ func seedBuild(t *testing.T, f *shedFixture, key, graph, backend, base string) (
 	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	t.Cleanup(func() { repository.Close() })
+	return recordBuild(t, f, repository, key, graph, backend, base), repository
+}
 
+// seedBuilding gives a running service a sealed build ready for unit dispatch.
+func (f *shedFixture) seedBuilding(t *testing.T, key, graph string) config.WorkstreamID {
+	t.Helper()
+	backend, err := f.s.newWorkspaces(context.Background(), f.s.about(f.repository()))
+	must(t, err)
+	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	stream := recordBuild(t, f, f.repository(), key, graph, backend.Backend, base)
+	must(t, f.s.refreshRuntime())
+	return stream
+}
+
+// seedBuildingPaused creates ready builds under an owner pause.
+func (f *shedFixture) seedBuildingPaused(t *testing.T, target runtime.Target, graph string, keys ...string) []config.WorkstreamID {
+	t.Helper()
+	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
+	var streams []config.WorkstreamID
+	for _, key := range keys {
+		streams = append(streams, f.seedBuilding(t, key, graph))
+	}
+	return streams
+}
+
+// recordBuild publishes the sealed documents and unit states atomically so
+// running controllers only see a complete build fixture.
+func recordBuild(t *testing.T, f *shedFixture, repository *trace.Repository, key, graph, backend, base string) config.WorkstreamID {
+	t.Helper()
 	ctx := context.Background()
 	stream, err := config.NewWorkstreamID()
 	must(t, err)
@@ -60,28 +87,31 @@ func seedBuild(t *testing.T, f *shedFixture, key, graph, backend, base string) (
 	document := func(id, path, content string) trace.Document {
 		return trace.Document{Header: header("osmia.trace.document", id), Path: path, Content: content}
 	}
+	txs := []trace.Transaction{{Transition: trace.Transition{
+		Header: header("osmia.trace.transition", "fixture-building"), Subject: trace.FeatureSubject,
+		To: BuildingState, Reason: "fixture with a sealed build",
+	}}}
+	for _, unit := range p.Units {
+		subject := trace.UnitSubject(unit.ID)
+		txs = append(txs, trace.Transaction{Transition: trace.Transition{
+			Header: header("osmia.trace.transition", subject+"-planned"), Subject: subject,
+			To: UnitPlanned, Reason: "unit in the fixture plan",
+		}})
+		if len(unit.DependsOn) == 0 {
+			txs = append(txs, trace.Transaction{ExpectedVersion: 1, Transition: trace.Transition{
+				Header: header("osmia.trace.transition", subject+"-ready"), Subject: subject,
+				From: UnitPlanned, To: UnitReady, Reason: "fixture unit with no dependencies",
+			}})
+		}
+	}
 	_, err = repository.RecordDocumentsWith(ctx, []trace.Document{
 		document(plan.SpecDocument, plan.SpecPath, validSpec),
 		document(plan.PlanDocument, plan.PlanPath, graph),
 		document(shed.RatificationDocumentID(1), shed.RatificationPath(1), string(ratification)),
 		document(seal.DocumentID, seal.Path, string(sealed)),
-	}, trace.Transaction{Transition: trace.Transition{
-		Header: header("osmia.trace.transition", "fixture-ratified"), Subject: trace.FeatureSubject,
-		To: RatifiedState, Reason: "fixture with a ratified spec and sealed plan",
-	}})
+	}, txs...)
 	must(t, err)
-	_, event := buildIDs(1)
-	input, err := json.Marshal(buildInput{Seal: 1})
-	must(t, err)
-	result, err := (&builder{s: f.s, repository: repository}).Apply(ctx, coreadapter.Operation{
-		ID: trace.OperationID(repository.Project(), stream, event), Boundary: coreadapter.RepositoryBoundary,
-		Action: BuildAction, Input: input,
-	})
-	must(t, err)
-	if result.Outcome != "succeeded" {
-		t.Fatalf("fixture build: %+v", result)
-	}
-	return stream, repository
+	return stream
 }
 
 // newReviewFixture creates a unit whose completed report and candidate await review.

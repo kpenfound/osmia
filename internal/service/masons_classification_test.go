@@ -38,7 +38,7 @@ func TestMasonContestedRuling(t *testing.T) {
 			f.engine.turns[ownerTurn+"2"] = fake.turn
 			f.engine.turns[ownerTurn+"3"] = fake.turn
 			f.engine.mu.Unlock()
-			stream, _ := f.builtAs(t, tc.name+"-ruling")
+			stream := f.seedBuilding(t, tc.name+"-ruling", validPlan)
 			f.awaitUnit(t, stream, "resume", UnitContested)
 			status, err := f.c.Status(context.Background(), stream)
 			if err != nil || len(status.Gates) != 1 || !strings.Contains(status.Gates[0].Reason, tc.reason) {
@@ -141,7 +141,7 @@ func TestMasonCleanTurnPolicy(t *testing.T) {
 			f.engine.mu.Lock()
 			f.engine.turns[masonAgent("resume")+"-clarify-1"] = fake.turn
 			f.engine.mu.Unlock()
-			stream, _ := f.builtAs(t, "classified")
+			stream := f.seedBuilding(t, "classified", validPlan)
 			deadline := time.Now().Add(demoTimeout)
 			for {
 				th, err := f.repository().Thread(stream, masonAgent("resume"))
@@ -210,7 +210,7 @@ func TestMasonModelClassifier(t *testing.T) {
 				}
 			}
 			f.engine.mu.Unlock()
-			stream, _ := f.builtAs(t, "model-classifier")
+			stream := f.seedBuilding(t, "model-classifier", validPlan)
 			th := f.awaitMasonRan(t, stream, "resume")
 			if got := th.Turns[0].Response.Classification.Class; got != tc.want {
 				f.engine.mu.Lock()
@@ -247,7 +247,7 @@ func TestMasonCleanTurnBound(t *testing.T) {
 		f.engine.turns[name] = fake.turn
 	}
 	f.engine.mu.Unlock()
-	stream, _ := f.builtAs(t, "bounded")
+	stream := f.seedBuilding(t, "bounded", validPlan)
 	f.awaitUnit(t, stream, "resume", UnitContested)
 	th, err := f.repository().Thread(stream, masonAgent("resume"))
 	if err != nil || len(th.Turns) != f.s.cfg.Mason.MaxCleanTurns {

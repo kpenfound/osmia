@@ -341,25 +341,39 @@ func TestOwnerApprovesAPlanOnlyAmendment(t *testing.T) {
 // requester still receives the ruling and its unit resumes.
 func TestOwnerRejectsAnAmendment(t *testing.T) {
 	t.Parallel()
-	f, stream := builtForAmendment(t, 1)
-	defer f.stop(t)
-	requester := presentAmendment(t, f, stream, reviewerRole, amendedSpec, validPlan)
-	out, err := f.c.DecideAmendment(context.Background(), stream, "1", AmendmentDecisionRequest{Decision: AmendmentReject, Note: "Keep the chunk semantics.", Packet: 1})
-	must(t, err)
-	if out.State != amendmentRejected {
-		t.Fatalf("decision %+v", out)
+	for _, tc := range []struct{ role, state string }{
+		{masonRole, UnitImplementing},
+		{reviewerRole, UnitReviewing},
+	} {
+		t.Run(tc.role, func(t *testing.T) {
+			t.Parallel()
+			f, stream := builtForAmendment(t, 1)
+			defer f.stop(t)
+			requester := presentAmendment(t, f, stream, tc.role, amendedSpec, validPlan)
+			out, err := f.c.DecideAmendment(context.Background(), stream, "1", AmendmentDecisionRequest{Decision: AmendmentReject, Note: "Keep the chunk semantics.", Packet: 1})
+			must(t, err)
+			if out.State != amendmentRejected {
+				t.Fatalf("decision %+v", out)
+			}
+			f.awaitAmendment(t, stream, amendmentRuled)
+			for id, want := range map[string][]int{plan.SpecDocument: {1}, plan.PlanDocument: {1}, seal.DocumentID: {1}} {
+				if got := f.revisions(t, stream, id); !slices.Equal(got, want) {
+					t.Fatalf("%s revisions %v after a rejection", id, got)
+				}
+			}
+			turns := f.ruling(t, stream, requester)
+			if len(turns) != 1 || !strings.Contains(turns[0].Request.Prompt, "Decision: reject") || !strings.Contains(turns[0].Request.Prompt, "stay in force") || !strings.Contains(turns[0].Request.Prompt, "| Keep the chunk semantics.") {
+				t.Fatalf("ruling %+v", turns)
+			}
+			f.resumed(t, stream, tc.state)
+			f.stop(t)
+			f.start(t)
+			f.resumed(t, stream, tc.state)
+			if turns := f.ruling(t, stream, requester); len(turns) != 1 {
+				t.Fatalf("requester ruling after restart %+v", turns)
+			}
+		})
 	}
-	f.awaitAmendment(t, stream, amendmentRuled)
-	for id, want := range map[string][]int{plan.SpecDocument: {1}, plan.PlanDocument: {1}, seal.DocumentID: {1}} {
-		if got := f.revisions(t, stream, id); !slices.Equal(got, want) {
-			t.Fatalf("%s revisions %v after a rejection", id, got)
-		}
-	}
-	turns := f.ruling(t, stream, requester)
-	if len(turns) != 1 || !strings.Contains(turns[0].Request.Prompt, "Decision: reject") || !strings.Contains(turns[0].Request.Prompt, "stay in force") || !strings.Contains(turns[0].Request.Prompt, "| Keep the chunk semantics.") {
-		t.Fatalf("ruling %+v", turns)
-	}
-	f.resumed(t, stream, UnitReviewing)
 }
 
 // A charter veto blocks approval; the owner overrules it to approve, and the

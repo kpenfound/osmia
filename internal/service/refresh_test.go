@@ -112,7 +112,7 @@ func TestRefreshResultWaitsForLibrarianTurn(t *testing.T) {
 		return previous(ctx, req, verified, tools)
 	}
 	f.engine.mu.Unlock()
-	stream, _ := f.builtAs(t, "refresh-in-flight")
+	stream := f.seedBuilding(t, "refresh-in-flight", validPlan)
 	f.awaitMerged(t, stream, "resume")
 	select {
 	case <-entered:
@@ -159,7 +159,7 @@ func TestLandedLearningsRefreshKnowledgeAndSurviveRestart(t *testing.T) {
 	t.Parallel()
 	f, masons := refreshFixture(t, "# Internal\n\nPrevious project knowledge.\n\nTrace snapshots require a clean worktree.\n", false)
 	defer f.stop(t)
-	stream, _ := f.builtAs(t, "refresh-success")
+	stream := f.seedBuilding(t, "refresh-success", validPlan)
 	f.awaitMerged(t, stream, "resume")
 	op := awaitRefresh(t, f)
 	if op.Result.Outcome != "succeeded" {
@@ -224,7 +224,7 @@ func TestRefreshRequiresRecordedLanding(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, validPlan)
 	defer f.stop(t)
 	masons.play[masonTurnID("resume")] = reportDone("Built")
-	stream, _ := f.builtAs(t, "refresh-before-landing")
+	stream := f.seedBuilding(t, "refresh-before-landing", validPlan)
 	f.awaitUnit(t, stream, "resume", UnitReviewing)
 	r := &refresher{extractor: &extractor{s: f.s, repository: f.repository()}}
 	must(t, r.Pass(context.Background()))
@@ -248,7 +248,7 @@ func TestFailedRefreshPreservesKnowledge(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f, _ := refreshFixture(t, tc.output, tc.fail)
 			defer f.stop(t)
-			stream, _ := f.builtAs(t, "refresh-"+tc.name)
+			stream := f.seedBuilding(t, "refresh-"+tc.name, validPlan)
 			f.awaitMerged(t, stream, "resume")
 			op := awaitRefresh(t, f)
 			if op.Result.Outcome != "failed" {

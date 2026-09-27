@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -197,33 +198,34 @@ func TestInterruptedLandingIsReconciled(t *testing.T) {
 	for _, step := range []string{"land-committing", "land-committed", "land-advanced", "land-recorded"} {
 		t.Run(step, func(t *testing.T) {
 			t.Parallel()
-			f, masons := newLandingFixture(t, independentPlan)
-			defer f.stop(t)
-			crashed := make(chan struct{}, 1)
+			f, stream, repository := newReviewFixture(t, "interrupted-landing")
+			approveDirectly(t, f.s, repository, stream, "resume", "spec#1")
+			lands := &foreman{masons: newMasonController(f.s, repository)}
+			ctx := context.Background()
+			must(t, lands.Pass(ctx))
+			crashed := false
 			f.s.boundary = func(name string) error {
-				if name == step && len(crashed) == 0 {
-					crashed <- struct{}{}
+				if name == step && !crashed {
+					crashed = true
 					return errors.New("crash")
 				}
 				return nil
 			}
-			stream, _ := f.builtAs(t, "interrupted")
-			f.awaitMerged(t, stream, "resume")
-			masons.check(t)
-			if len(crashed) != 1 {
+			controller, err := reconcile.New(repository, reconcile.Options{
+				Worker: "landing-test", Now: f.clock.Now, RetryDelay: time.Second,
+				Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: lands},
+				Hold:     func(_ config.WorkstreamID, op coreadapter.Operation) bool { return op.Action != LandAction },
+			})
+			must(t, err)
+			must(t, controller.Pass(ctx))
+			if !crashed {
 				t.Fatal("the landing never reached " + step)
 			}
-			deadline := time.Now().Add(demoTimeout)
-			var ops []trace.OperationRecord
-			for {
-				ops = landOperations(t, f.repository(), stream)
-				if len(ops) == 1 && ops[0].Result != nil {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("landing operations %+v", ops)
-				}
-				time.Sleep(50 * time.Millisecond)
+			jump(f.clock, f.clock.Now().Add(time.Second))
+			must(t, controller.Pass(ctx))
+			ops := landOperations(t, repository, stream)
+			if len(ops) != 1 || ops[0].Result == nil {
+				t.Fatalf("landing operations %+v", ops)
 			}
 			retries := 0
 			var observations []coreadapter.Observation
@@ -244,7 +246,7 @@ func TestInterruptedLandingIsReconciled(t *testing.T) {
 			if len(observations) != 2 || (observations[1].State == coreadapter.EffectCompleted) != (step == "land-recorded") || !strings.Contains(observations[1].Evidence, observed[step]) {
 				t.Fatalf("the retry observed %+v", observations)
 			}
-			_, result := approvedReview(t, f.repository(), stream, "resume")
+			_, result := approvedReview(t, repository, stream, "resume")
 			commits := f.landedCommits(t, stream, result.Identity.Candidate.BaseRevision)
 			if len(commits) != 1 {
 				t.Fatalf("the feature branch gained %d commits: %v", len(commits), commits)
@@ -261,7 +263,7 @@ func TestInterruptedLandingIsReconciled(t *testing.T) {
 			if len(merged) != 1 || len(landed) != 1 {
 				t.Fatalf("merged %v, landed %v", merged, landed)
 			}
-			docs, err := trace.Read[trace.Document](f.repository(), stream)
+			docs, err := trace.Read[trace.Document](repository, stream)
 			must(t, err)
 			var landing UnitLanding
 			for _, d := range docs {

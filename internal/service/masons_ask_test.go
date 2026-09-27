@@ -90,7 +90,7 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	f, masons, _ := newAskingMasonFixture(t, 1, independentPlan, p)
 	defer func() { f.stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
-	built := f.builtPaused(t, factory, "first", "second", "third")
+	built := f.seedBuildingPaused(t, factory, independentPlan, "first", "second", "third")
 	a, b, c := built[0], built[1], built[2]
 	// Among equal workstreams, the slot goes in ID order.
 	ids := []config.WorkstreamID{a, b, c}
@@ -233,7 +233,7 @@ func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 	f.engine.mu.Unlock()
 	f.answer("1", asks(p, "2"))
 	f.answer("2", func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error { return nil })
-	stream, _ := f.builtAs(t, "design")
+	stream := f.seedBuilding(t, "design", independentPlan)
 	f.awaitMasonTransitions(t, stream, 5)
 	settle()
 	p.check(t)
