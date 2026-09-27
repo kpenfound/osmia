@@ -74,9 +74,7 @@ func deliveryFixtureWith(t *testing.T, extra string) (*shedFixture, config.Works
 		must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalReportDocument, Revision: rev, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: finalReviewActor, Cause: "final-review"}, Path: finalReportPath, Content: string(content)}}))
 	}
 	record(report, 1)
-	f.s.mu.Lock()
 	f.s.setSole(&activeProject{repository: repository})
-	f.s.mu.Unlock()
 	return f, stream, repository, report
 }
 
@@ -143,9 +141,7 @@ func TestDeliveryApprovalAcceptEditRetryAndInvalidation(t *testing.T) {
 	reopened, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	defer reopened.Close()
-	f.s.mu.Lock()
 	f.s.setSole(&activeProject{repository: reopened})
-	f.s.mu.Unlock()
 	after, api := f.s.deliveryPresentation(ctx, string(stream))
 	if api != nil || after.Approval == nil || after.Approval.Description != editedText {
 		t.Fatalf("restart %+v %v", after.Approval, api)

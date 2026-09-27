@@ -65,11 +65,15 @@ model = "your-model-name"
 
 Only IDs in `active_projects` are loaded; the list may be empty or absent, and
 the service then starts without a project until `osmia project add` registers
-one. At most one ID is accepted until multi-project operation arrives in M7.
-Additional project directories may hold archived traces and are not scanned or
-activated. Duplicate IDs are errors; two distinct active IDs report unsupported
-multi-project operation. The top-level file, and the active project's file, must
-exist and specify `version = 1`. Unknown versions, keys (including empty unknown
+one. With several IDs the service runs every listed project at once, each with
+its own trace, reconciliation loop, lander and drift cadence. Role capacity
+(`capacity.*`), budgets and the factory-level pause are shared by all of them:
+a turn in flight on any project takes a slot of its role kind. Each project's
+`capacity.per_workstream` still applies to its own workstreams, and a project
+pause holds only that project. Additional project directories may hold archived
+traces and are not scanned or activated. Duplicate IDs are errors. The
+top-level file, and every active project's file, must exist and specify
+`version = 1`; one project file that fails to load fails the whole load. Unknown versions, keys (including empty unknown
 tables and case variants), duplicate TOML keys, malformed TOML and incorrect
 types are errors.
 
@@ -247,13 +251,14 @@ the active project's ID. A trace initialization that never committed is
 discarded and redone; one with history is kept. The extraction is requested
 once; a retry finds it in the trace and does not request another.
 
-Operation stays single-project until M7: adding another project while one is
-active is refused, and the error names the active project. Repeating the active
-project's exact registration returns it without change.
+Adding a project while one or more are active is refused, and the error names
+an active project; list further projects in `active_projects` and restart the
+service to run them together. Repeating an active project's exact registration
+returns it without change.
 
 `osmia project remove <project-id>` (API: `DELETE /v1/projects`) removes the
 active ID from `active_projects` as a text edit and closes the project's runtime
-state. The trace directory and the owner's clone are not deleted. Adding the
+state; other active projects keep running. The trace directory and the owner's clone are not deleted. Adding the
 same upstream again afterwards generates a new project ID and a new trace
 repository; the archived trace stays untouched under `projects/<old-id>/` and is
 never reused, so archived history is immutable and every add is a fresh start.
@@ -343,7 +348,6 @@ Representative errors include the file and offending field:
 ```text
 <root>/config.toml: profiles.default.fallback: unknown profile backup
 <root>/config.toml: roles.mason.image: container requires an explicit image
-<root>/config.toml: active_projects: at most one active project is supported; multi-project operation is unsupported
 <root>/projects/<id>/config.toml: clone: clone and Osmia root must be separate, non-nested directories
 ```
 

@@ -151,16 +151,16 @@ set through `Options` by embedders.
 | GET | `/config` | Resolved root, loaded effective-config SHA-256 digest, effective validated configuration, project view (null without a project), diagnostics, `drift`, each configuration file on disk against the loaded configuration ([disk drift](#disk-drift)), and `last_error`, the last failed [reload](#reload) (`path`, `field`, `message`, `at`), until a reload succeeds |
 | POST | `/reload` | No body; [reloads](#reload) the configuration and returns `ReloadResponse`: the loaded `digest` and the `restart_required` settings |
 | GET | `/runtime` | Effective runtime state, each role's next-turn profile (`name` and `source`: `configuration` or `owner_override`), each active project's `context_mode` (`file`; see [context](context.md)), and diagnostics |
-| GET | `/status` | `StatusResponse`: every workstream's status and facts in the active project, each role's effective profile and source, today's [daily budget](#daily-budget) spend, the [capacity](#capacity) view, today's [provider usage](#provider-usage), and diagnostics |
+| GET | `/status` | `StatusResponse`: every workstream's status and facts in the active projects, each role's effective profile and source, today's [daily budget](#daily-budget) spend, the [capacity](#capacity) view, today's [provider usage](#provider-usage), and diagnostics |
 | GET | `/events` | The [event stream](#event-stream): server-sent events naming the views that changed |
-| GET | `/status/<workstream-id>` | `WorkstreamStatus` for one workstream of the active project |
+| GET | `/status/<workstream-id>` | `WorkstreamStatus` for one workstream of an active project |
 | GET | `/trace/<workstream-id>` | `TraceSummary`: sealed revisions, criteria, unit walks, delivery and explicit gaps |
 | GET | `/trace/<workstream-id>/unit/<unit-id>` | `UnitTrace`: document revisions, reports, reviews, rulings, landings, turns, costs, history and gaps |
 | GET | `/trace/<workstream-id>/criterion/<spec#n>` | `CriterionTrace`: sealed criterion, assigned unit evidence, rulings, final account, delivery and gaps |
 | GET | `/trace/<workstream-id>/commit/<sha>` | `CommitTrace`: records naming the full commit ID, linked landings and their reviewed evidence, delivery and gaps |
 | POST | `/conversation/<workstream-id>` | `SendRequest`: text; returns the accepted `ConversationEntry` |
 | GET | `/conversation/<workstream-id>` | `ConversationResponse`: the workstream's conversation with its chief of staff |
-| GET | `/inbox` | `InboxResponse`: every open owner decision of the active project, with the endpoint and identity that answer it |
+| GET | `/inbox` | `InboxResponse`: every open owner decision of the active projects, with the endpoint and identity that answer it |
 | POST | `/inbox/<number>` | `AnswerRequest`: text; records the owner's ruling and returns `AnswerResponse` |
 | GET | `/amendment/<workstream-id>/<n>` | `AmendmentResponse`: amendment `n`'s state, debate round, latest packet and its revision, and the owner's latest decision; see [amendment decisions](#amendment-decisions) |
 | POST | `/amendment/<workstream-id>/<n>` | `AmendmentDecisionRequest`: decision (`approve`, `reject`, `round` or `overrule`), optional note and the packet revision decided; returns `AmendmentResponse` |
@@ -221,8 +221,8 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 | `unavailable` | 503 | Service shutting down, or a hand-in under `workspaces = "jujutsu"` without a supported `jj`; also the client's code for transport failure |
 | `internal` | 500 | Storage or other internal failure, including an interrupted project registration |
 | `no_project` | 409 | The operation needs an active project and none is configured |
-| `project_active` | 409 | A project is active and single-project operation refuses another |
-| `not_found` | 404 | The project ID is not the active project, or the workstream is not in it |
+| `project_active` | 409 | A project is active and registration refuses another |
+| `not_found` | 404 | The project ID is not an active project, or the workstream is not in one |
 | `charter_empty` | 409 | Hand-in refused: the project's charter has no rules |
 | `forbidden` | 403 | A web listener request with a non-loopback `Host`, a tailnet listener request whose `Host` is not an IP address or the node's name, or a write over either without a JSON content type |
 
@@ -240,11 +240,33 @@ not discard that valid view. Lifecycle endpoints are outside M1. Pauses hold que
 bounds dispatch, and a `waiting` turn parks its thread, as described with the
 queued-turn scheduler below.
 
-The service opens the active project's existing trace and starts the
-[local operation reconciliation loop](trace.md#durable-local-operations).
-Startup scans durable intent even without wakeups. Missing reconciliation
-adapters leave work pending; corrupt or locked traces prevent startup. Shutdown
-cancels and joins the loop before releasing trace ownership.
+The service opens the existing trace of every active project and starts a
+[local operation reconciliation loop](trace.md#durable-local-operations) for
+each, with its own lander and drift cadence. Restart recovery runs per project
+from that project's own trace. Startup scans durable intent even without
+wakeups. Missing reconciliation adapters leave work pending; corrupt or locked
+traces prevent startup. Shutdown cancels and joins every loop before releasing
+trace ownership.
+
+### Several projects
+
+With several active projects, their schedulers draw on one pool of role
+capacity: a turn in flight on any project takes a slot of its role kind, and
+the passes of the projects' schedulers run one at a time, so `capacity.masons`,
+`capacity.reviewers` and `capacity.committee` hold across projects. Each
+project's `capacity.per_workstream` applies to its own workstreams. Budgets
+and the factory pause are shared; the daily budget counts the spend of every
+active project. A `project` pause holds only that project's work.
+
+A project-scoped request (hand-in, `POST /v1/projects/extract`,
+`POST /v1/projects/rebase`, and an inbox answer, whose `project` field names
+the project whose inbox numbers the entry) may leave out its `project` only
+while exactly one project is active. With several active it is refused with
+`validation`, and the message lists the active project IDs; a project that is
+not active is `not_found`, with the same list. Requests about a workstream find
+the project that holds it. `GET /v1/config` lists every active project in
+`projects`; `project` is the only active project, or `null` while several are
+active.
 
 ## Event stream
 
@@ -407,11 +429,12 @@ hand-in to delivery on the page. They need a Chromium binary named by
 service, opening its new trace and reconciliation loop exactly as startup does.
 Its response write deadline extends to 60 seconds so registration can finish
 beyond the server's default 10-second write timeout.
-`DELETE /v1/projects` removes the active project from configuration, stops its
-loop and releases its trace; the trace and the clone stay on disk. Both edit
+`DELETE /v1/projects` removes an active project from configuration, stops its
+loop and releases its trace; the trace and the clone stay on disk, and the
+other active projects keep running. Both edit
 `config.toml` as text and replace the loaded configuration's project only, so
 `/config` keeps matching the disk. Validation, recovery after an interrupted
-registration and the single-project rule are described in
+registration and the rule that refuses a second registration are described in
 [configuration](configuration.md#project-registration). Without a project,
 `/config` and `/runtime` carry a `no_project` diagnostic, project-scoped
 overrides are rejected as validation failures, and `DELETE /v1/projects`
@@ -423,7 +446,7 @@ it. A journal naming a project other than the active one is never finished:
 startup reports it, and `POST /v1/projects` refuses with the two IDs until the
 active project is removed or the journal is inspected.
 
-`/config` reports the active project's `charter_state`: `ready`, the number of
+`/config` reports each active project's `charter_state`: `ready`, the number of
 `rules`, the recorded `revision` and numbering `diagnostics`. Reading it records
 any owner edit to the charter first; if the charter cannot be read or recorded,
 `charter_state` is absent and a `charter` diagnostic with code `internal` names
@@ -439,15 +462,15 @@ retry, the `reason`. It is absent for a project whose trace has no librarian
 workstream, and an unreadable state adds an `extraction` diagnostic with code
 `internal`. Registration requests extraction 1; `POST /v1/projects/extract`
 requests the next one and returns it as `pending`. A malformed project ID
-returns `validation`, an ID that is not the active project `not_found`, a
+returns `validation`, an ID that is not an active project `not_found`, a
 project without a trace `internal`, and a request while an extraction is
 pending or running `conflict`, naming the extraction to wait for.
 
 ## Reload
 
 `POST /v1/reload` (`osmia reload`) reads the top-level `config.toml` and the
-`config.toml` of every registered project (the active project, and the
-project `active_projects` lists when it differs) and validates them as one
+`config.toml` of every registered project (the active projects, and the
+projects `active_projects` lists when they differ) and validates them as one
 candidate. If any file fails, nothing changes: the loaded configuration and
 its digest stay in force, the request fails with `validation` and a message
 naming the file, the field and why (a file that is not valid TOML is named
@@ -483,7 +506,7 @@ the profile back.
 
 `drift` in `GET /v1/config` compares the configuration files on disk with the
 loaded configuration, so "does a reload have something to apply" is checkable
-without applying it. `files` lists the top-level `config.toml`, then the
+without applying it. `files` lists the top-level `config.toml`, then each
 active project's `config.toml` with its `project`, each with its `path` and a
 `state`: `unchanged`, `changed` when a setting it holds differs from the
 loaded one, or `invalid` when it cannot be read or does not validate, with
@@ -2181,7 +2204,7 @@ landing controller asks for no landing and no unit rebase.
 
 `POST /v1/projects/rebase` with a `ProjectRebaseRequest` (`project`) records
 the owner's request for a drift rebase of every `building` or `assembled`
-workstream of the active project that is not paused, and returns once each
+workstream of the named project that is not paused, and returns once each
 request is durable. Each covered workstream gets the transition
 `drift-request-<k>` (actor `owner`/`local`), which moves the workflow subject
 `drift-request` to `requested-<k>`, where `k` is the next drift rebase the
@@ -2192,7 +2215,7 @@ whatever the cadence. The `ProjectRebaseResponse` names the `project`, the
 `covered` workstreams, each with the `drift` number that answers the
 request, and the `skipped` workstreams, each with the `reason` it was
 skipped: paused, or neither building nor assembled. A malformed project ID
-returns `validation`, an ID that is not the active project `not_found`, and a
+returns `validation`, an ID that is not an active project `not_found`, and a
 project without a trace or a trace that cannot be written `internal`.
 
 The operation checks the workstream again: one that is no longer `building`
@@ -2649,8 +2672,8 @@ abandoned and that its queued turns are cancelled at the next start.
 
 ## Workstream status
 
-`GET /v1/status` lists each workstream of the active project in trace manifest
-order, except the librarian's, which carries no feature (see
+`GET /v1/status` lists each workstream of every active project, project by
+project in `active_projects` order and in trace manifest order within one, except the librarian's, which carries no feature (see
 [extraction](knowledge-base.md#extraction)), and
 `GET /v1/status/<workstream-id>` returns one. Each
 `WorkstreamStatus` carries the chief of staff's latest
@@ -2674,7 +2697,7 @@ order, except the librarian's, which carries no feature (see
 `budget.per_day` ([daily budget](#daily-budget)), or `null` without one.
 `osmia status` prints it on a `Daily budget:` line before the workstreams.
 
-`failure_streaks` lists, by `role` and `profile`, the active project's
+`failure_streaks` lists, by `role` and `profile`, the active projects'
 consecutive `infrastructure` turn-attempt failures
 ([retries and fallbacks](trace.md#retries-and-fallbacks)) across its
 workstreams, with `consecutive`, `last_failure` and `last_at` (when the
@@ -2697,7 +2720,7 @@ gates and the overlap advisories' messages under each workstream status, and
 each available unit card and landing, beneath its unit, apart from the chief
 of staff's status.
 
-Without an active project or its trace, the list is empty. If the trace
+Without an active project with a trace, the list is empty. If the trace
 cannot be read, the list is empty and carries a `workstreams` diagnostic with
 code `internal`. A workstream whose sealed plan cannot be read is listed with
 no `units`, and the list carries a `units` diagnostic with code `internal`
@@ -2749,15 +2772,18 @@ waits for a committee slot.
 `reason` is `capacity` when every slot of the role kind is taken (for a
 unit, as the mason controller counts implementing units), `priority` when
 higher-priority workstreams start a unit first, and `workstream-cap` when the
-workstream holds `per_workstream` slots. Without an active project nothing is
-used or waiting. When the turns cannot be read, `capacity` is `null` and the
+workstream holds `per_workstream` slots. `used` and `waiting` span every
+active project, whose turns share the role slots; `per_workstream` is the only
+active project's limit, or the configured default while several are active.
+Without an active project nothing is used or waiting. When the turns cannot be read, `capacity` is `null` and the
 response carries a `capacity` diagnostic with code `internal` (`cannot read
 the turns of project <id>; check the trace repository`).
 
 ### Provider usage
 
 `provider_usage` in `GET /v1/status` reports, for the service host's current
-local calendar `day` (`YYYY-MM-DD`), the known spend of each provider, the
+local calendar `day` (`YYYY-MM-DD`), the known spend of each provider across
+every active project, the
 `agent` of a profile. `providers` lists, by name, the providers of the
 configured profiles, of the day's costs and of the usage limits in force.
 Each has `provider`, `spend_usd`, `unknown_costs` and `lower_bound` as in the
@@ -2783,7 +2809,7 @@ daily budget.
 ## Inbox and rulings
 
 `GET /v1/inbox` returns an `InboxResponse`: `entries`, every owner decision
-of the active project that waits for the owner, oldest first by `opened_at`.
+of every active project that waits for the owner, oldest first by `opened_at`.
 Every entry names the existing endpoint that answers it; answering records
 what that endpoint records, and the entry leaves the list once the decision is
 taken or the record it was presented on is superseded. Decisions of an
@@ -2960,7 +2986,7 @@ described under [charter proposals](trace.md#charter-proposals) in the trace
 reference.
 
 `GET /v1/charter` returns a `CharterProposalsResponse`: `proposals`, oldest
-first, the active project's proposals still waiting for the owner, leaving
+first, the active projects' proposals still waiting for the owner, leaving
 out those of abandoned workstreams. `GET /v1/charter/<workstream-id>/<question>`
 returns one proposal in any state. Both describe a proposal as a
 `CharterProposalView`:
@@ -3313,8 +3339,8 @@ failure and moves no workflow state.
 ### Daily budget
 
 With `budget.per_day` configured, each reconciliation pass first sums the
-known cost of every workstream's attempts that started on the service host's
-current local calendar day. An attempt whose cost is unknown adds nothing. Once
+known cost of every workstream's attempts, across every active project, that
+started on the service host's current local calendar day. An attempt whose cost is unknown adds nothing. Once
 that sum reaches the limit, the service sets a factory-wide `soft` pause with
 source `daily-budget`, a reason giving the day, the spend and the limit, and,
 when some of the day's attempts have unknown cost, how many. The pause holds

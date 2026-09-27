@@ -153,9 +153,7 @@ func (p *publicationFixture) reopen(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { reopened.Close() })
 	p.repository = reopened
-	p.s.mu.Lock()
 	p.s.setSole(&activeProject{repository: reopened})
-	p.s.mu.Unlock()
 }
 
 func TestPublicationCommitPerUnitPushesTheReviewedCommitsAndOpensOnePullRequest(t *testing.T) {

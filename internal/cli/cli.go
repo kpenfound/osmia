@@ -931,6 +931,7 @@ func output(w, stderr io.Writer, v any) int {
 	}
 	return 0
 }
+
 // projectOf returns the project a command about stream acts on: the only
 // active project, or, while several are active, the project stream belongs
 // to. Without a stream several active projects are refused.

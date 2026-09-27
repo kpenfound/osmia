@@ -216,7 +216,9 @@ func TestStaleReferencesAreRetainedAndNeverRetargeted(t *testing.T) {
 	// A different project must not inherit any project-scoped records.
 	changed, _ = copyInputs(in)
 	changed.Config.Project.ID = "p_2123456789abcdef0123456789abcdef"
+	changed.Config.Projects = []config.Project{changed.Config.Project}
 	changed.Config.ActiveProjects = []string{string(changed.Config.Project.ID)}
+	changed.Workstreams = map[config.ProjectID][]config.WorkstreamID{changed.Config.Project.ID: changed.Workstreams[pid]}
 	must(t, s.Resolve(changed))
 	effective, ds = s.Effective()
 	if len(ds) != 2 || len(effective.Pauses) != 1 || len(effective.Priorities) != 0 {

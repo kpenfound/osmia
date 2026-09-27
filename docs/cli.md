@@ -312,10 +312,10 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   `<trace>/charter.md`. The extraction runs in the service after the command
   returns; `status` shows its state, and the project is usable whether it
   succeeds or fails; after a failure `osmia project extract` starts a new
-  attempt. Operation
-  stays single-project: adding another project while one is active is refused
-  and the error names the active project. Repeating the active project's exact registration
-  returns it again.
+  attempt. Adding a
+  project while one or more are active is refused and the error names an
+  active project. Repeating an active project's exact registration returns it
+  again.
 - `project extract <project-id>` starts a new
   [knowledge-base extraction](knowledge-base.md#extraction) of the active
   project: a librarian turn that rewrites `kb/<subsystem>.md` and
