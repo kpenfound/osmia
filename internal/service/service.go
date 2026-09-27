@@ -462,6 +462,13 @@ func (s *Service) about(repository *trace.Repository) *config.Config {
 	return cfg
 }
 
+// isDraining reports whether project id is draining.
+func (s *Service) isDraining(id config.ProjectID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.ContainsFunc(s.draining, func(p *activeProject) bool { return p.id == id })
+}
+
 // drainingProjects returns the projects that are draining, in order of
 // removal.
 func (s *Service) drainingProjects() []config.Project {
@@ -644,7 +651,8 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	return &activeProject{id: cfg.Project.ID, repository: repository, controller: controller, pipeline: p, done: make(chan error, 1)}, nil
 }
 
-// admit is the scheduler's gate. It declines every turn of the librarian's
+// admit is the scheduler's gate. It declines every turn of a draining project,
+// whose pass may have begun before the removal, and of the librarian's
 // workstream and of every architect and committee thread, which the service's
 // own reconcilers run in their staged views, and of abandoned workstreams, and
 // holds the project's other queued turns that a runtime pause in force covers.
@@ -657,6 +665,9 @@ func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(c
 	librarian := librarianWorkstream(project)
 	units := newUnitWorkspaces(cfg, repository)
 	return func(ctx context.Context, c scheduler.Candidate) (bool, error) {
+		if s.isDraining(project) {
+			return false, nil
+		}
 		if held, err := s.holds(project, librarian, repository, c); err != nil || held {
 			return false, err
 		}

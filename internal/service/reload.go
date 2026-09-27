@@ -34,10 +34,10 @@ type stages struct {
 // before its first hook, so an operation already running finishes on the
 // stages it started with.
 //
-// Once draining is set, a pass runs no hook, so the project dispatches and
-// requests nothing new, while the operations already recorded are reconciled
-// as before. The first pass that finds drained true ends the loop with
-// errDrained.
+// Once draining is set, a pass runs no further hook, so the project
+// dispatches and requests nothing new, while the operations already recorded
+// are reconciled as before. The first pass that finds drained true ends the
+// loop with errDrained.
 type pipeline struct {
 	current, next atomic.Pointer[stages]
 	draining      atomic.Bool
@@ -63,6 +63,9 @@ func (p *pipeline) schedule(ctx context.Context) error {
 		p.current.Store(next)
 	}
 	for _, hook := range p.current.Load().hooks {
+		if p.draining.Load() {
+			return nil
+		}
 		if err := hook.pass(ctx); err != nil {
 			return fmt.Errorf("%s pass: %w", hook.name, err)
 		}
