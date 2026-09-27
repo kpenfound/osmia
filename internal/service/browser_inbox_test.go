@@ -67,7 +67,7 @@ func (p *page) gate(pattern string) *requestGate {
 
 // decisionCard is the selector of the page's card of an inbox entry.
 func decisionCard(e InboxEntry) string {
-	return fmt.Sprintf(`[data-decision="%s"] `, strings.Join([]string{e.Kind, string(e.Workstream), strconv.Itoa(e.Number), e.Unit, e.Amendment}, ":"))
+	return fmt.Sprintf(`[data-decision="%s"] `, strings.Join([]string{e.Kind, string(e.Project), string(e.Workstream), strconv.Itoa(e.Number), e.Unit, e.Amendment}, ":"))
 }
 
 // awaitGone waits until the page shows no card for the entry.
@@ -108,7 +108,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	p := openBrowser(t)
 	f := newPageFixture(t)
 	ctx := context.Background()
-	live := f.s.active.repository
+	live := f.s.sole().repository
 	at := time.Now().UTC()
 	header := func(schema, id string, actor trace.Actor) trace.Header {
 		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, At: at, Actor: actor, Cause: "planted"}

@@ -199,7 +199,7 @@ func TestInvalid(t *testing.T) {
 		{"socket state collision", topConfig + "[listen]\nsocket = 'runtime.json'\n", "", "direct child"},
 		{"duplicate key", topConfig + "model = 'other'\n", "", "config.toml:"},
 
-		{"two active", strings.Replace(topConfig, `"`+pid+`"`, `"`+pid+`", "p_1123456789abcdef0123456789abcdef"`, 1), "", "unsupported"},
+		{"second active project missing", strings.Replace(topConfig, `"`+pid+`"`, `"`+pid+`", "p_1123456789abcdef0123456789abcdef"`, 1), "", "p_1123456789abcdef0123456789abcdef/config.toml: cannot be read"},
 		{"duplicate identity", strings.Replace(topConfig, `"`+pid+`"`, `"`+pid+`", "`+pid+`"`, 1), "", "identity already exists"},
 		{"traversal", strings.Replace(topConfig, pid, "../escape", 1), "", "active_projects[0]"},
 		{"zero capacity", topConfig + "[capacity]\nmasons = 0\n", "", "capacity.masons"},

@@ -85,7 +85,7 @@ func (f *handInFixture) handIn(t *testing.T, req HandInRequest) HandInResponse {
 	return out
 }
 
-func (f *handInFixture) repository() *trace.Repository { return f.s.active.repository }
+func (f *handInFixture) repository() *trace.Repository { return f.s.sole().repository }
 
 func (f *handInFixture) head(t *testing.T) string {
 	t.Helper()

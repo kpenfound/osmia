@@ -136,7 +136,7 @@ func (f *architectFixture) handIn(t *testing.T, key, content string) config.Work
 	return out.Workstream
 }
 
-func (f *architectFixture) repository() *trace.Repository { return f.s.active.repository }
+func (f *architectFixture) repository() *trace.Repository { return f.s.sole().repository }
 
 // script installs the fake architect's behaviour for one turn: it delivers
 // the given files and returns a successful result.

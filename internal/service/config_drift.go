@@ -8,7 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// configDrift compares the top-level configuration file and the loaded
+// configDrift compares the top-level configuration file and each loaded
 // project's file on disk with cfg, each on its own, and reads them without
 // applying anything. A file that cannot be read or does not validate is
 // invalid. reloaded is the error a reload of the files together fails with,
@@ -22,12 +22,12 @@ func (s *Service) configDrift(cfg *config.Config, reloaded error) ConfigDrift {
 	} else if topLevelDigest(disk) != topLevelDigest(cfg) {
 		files[0].State = ConfigChanged
 	}
-	if cfg.HasProject() {
-		path, _ := cfg.Root.ProjectConfig(cfg.Project.ID)
-		file := ConfigFile{Path: path, Project: cfg.Project.ID, State: ConfigUnchanged}
-		if disk, err := cfg.WithProject(cfg.Project.ID, s.options.Config.Home); err != nil {
+	for _, p := range cfg.Projects {
+		path, _ := cfg.Root.ProjectConfig(p.ID)
+		file := ConfigFile{Path: path, Project: p.ID, State: ConfigUnchanged}
+		if disk, err := cfg.WithProject(p.ID, s.options.Config.Home); err != nil {
 			file.State, file.Reason = ConfigInvalid, fileReason(err)
-		} else if digest(&config.Config{Project: disk.Project}) != digest(&config.Config{Project: cfg.Project}) {
+		} else if digest(&config.Config{Project: disk.Project}) != digest(&config.Config{Project: p}) {
 			file.State = ConfigChanged
 		}
 		files = append(files, file)
@@ -54,6 +54,7 @@ func (s *Service) configDrift(cfg *config.Config, reloaded error) ConfigDrift {
 func topLevelDigest(c *config.Config) string {
 	top := *c
 	top.Project = config.Project{}
+	top.Projects = nil
 	if len(top.ActiveProjects) == 0 {
 		top.ActiveProjects = nil
 	}

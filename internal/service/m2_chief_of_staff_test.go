@@ -396,8 +396,8 @@ func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	// restart.
 	inbox, err := c.Inbox(ctx)
 	must(t, err)
-	want := InboxEntry{Kind: InboxEscalation, Number: 1, Workstream: stream, Batch: "escalation_2", Question: "May the upload API's response change?", Blocked: "The reviewer's review of the upload unit.",
-		Options: []string{"Change it", "Keep it and add an endpoint"}, Recommendation: "Keep it and add an endpoint.", QuickReply: "Keep it and add an endpoint.", OpenedAt: clock.Now(), Answer: InboxAnswer{Method: "POST", Path: "/v1/inbox/1", Body: map[string]any{}},
+	want := InboxEntry{Kind: InboxEscalation, Project: repo.Project(), Number: 1, Workstream: stream, Batch: "escalation_2", Question: "May the upload API's response change?", Blocked: "The reviewer's review of the upload unit.",
+		Options: []string{"Change it", "Keep it and add an endpoint"}, Recommendation: "Keep it and add an endpoint.", QuickReply: "Keep it and add an endpoint.", OpenedAt: clock.Now(), Answer: InboxAnswer{Method: "POST", Path: "/v1/inbox/1", Body: map[string]any{"project": string(repo.Project())}},
 		Asked: []InboxQuestion{{ID: "2", AskedBy: "agent_reviewer", Question: chiefDemoQuestion}}}
 	if len(inbox.Entries) != 1 || !reflect.DeepEqual(inbox.Entries[0], want) {
 		t.Fatalf("inbox:\n%+v\nwant\n%+v", inbox.Entries, want)
@@ -445,7 +445,7 @@ func TestM2ChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	// 5. The owner rules. The chief of staff rephrases the ruling as a
 	// project notice, the reviewer resumes with it, and the next message's
 	// context carries the notice.
-	answered, err := c.Answer(ctx, want.Number, chiefDemoRuling)
+	answered, err := c.Answer(ctx, want.Number, chiefDemoRuling, "")
 	must(t, err)
 	if !reflect.DeepEqual(answered, AnswerResponse{Number: 1, Workstream: stream, Batch: "escalation_2", Questions: []string{"2"}, Ruling: chiefDemoRuling, At: clock.Now()}) {
 		t.Fatalf("answer: %+v", answered)

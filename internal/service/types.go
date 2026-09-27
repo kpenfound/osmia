@@ -80,13 +80,16 @@ type Diagnostic struct {
 }
 
 // ConfigResponse contains validated fields only, never raw configuration text.
-// Project is null until a project is registered. LastError is the last failed
-// reload, until a reload succeeds.
+// Project is the only active project: null until a project is registered and
+// while several are active. Projects lists every active project, in
+// active_projects order. LastError is the last failed reload, until a reload
+// succeeds.
 type ConfigResponse struct {
 	Root        string         `json:"root"`
 	Digest      string         `json:"digest"`
 	Effective   *config.Config `json:"effective"`
 	Project     *ProjectView   `json:"project"`
+	Projects    []ProjectView  `json:"projects,omitempty"`
 	Diagnostics []Diagnostic   `json:"diagnostics"`
 	LastError   *ReloadError   `json:"last_error,omitempty"`
 	// Drift compares the configuration files on disk with the loaded
@@ -105,7 +108,7 @@ const (
 	ConfigInvalid   = "invalid"
 )
 
-// ConfigDrift lists the top-level configuration file, then the active
+// ConfigDrift lists the top-level configuration file, then each active
 // project's, and any other file a reload would refuse. Differs is true when
 // any of them is not unchanged.
 type ConfigDrift struct {
@@ -601,9 +604,11 @@ const (
 // amendment was filed from; Amendment names an amendment. Revision is the
 // revision of the record the decision is taken on. Question is the chief of
 // staff's rephrasing of an escalation, and the service's statement of the
-// decision for the other kinds.
+// decision for the other kinds. Project names the project whose workstream
+// the decision belongs to; escalation numbers are unique only within it.
 type InboxEntry struct {
 	Kind           string              `json:"kind"`
+	Project        config.ProjectID    `json:"project"`
 	Workstream     config.WorkstreamID `json:"workstream"`
 	Number         int                 `json:"number"`
 	Batch          string              `json:"batch"`
@@ -640,6 +645,9 @@ type InboxQuestion struct {
 // AnswerRequest is the owner's ruling on an inbox entry.
 type AnswerRequest struct {
 	Text string `json:"text"`
+	// Project names the project whose inbox numbers the entry. It may be
+	// left out while exactly one project is active.
+	Project config.ProjectID `json:"project,omitempty"`
 }
 
 // AnswerResponse reports a recorded ruling and the questions it covers.

@@ -39,7 +39,7 @@ func TestPauseHoldsReconcilerOperationsInItsScope(t *testing.T) {
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	must(t, repo.CreateWorkstream(ctx, sibling, clock.Now(), owner))
 	s, _ := hardPauseService(t, cfg, repo, clock, nil)
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: []config.WorkstreamID{stream, sibling}})
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{stream, sibling}}})
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s.store = store
@@ -366,7 +366,7 @@ func TestHardPauseStopsACommitteeMemberAndResumeContinuesIt(t *testing.T) {
 // takes pauses, for reconcilers applied directly.
 func openPauseStore(t *testing.T, f *architectFixture, streams ...config.WorkstreamID) *runtime.Store {
 	t.Helper()
-	store, _, err := runtime.Open(runtime.Inputs{Config: f.s.cfg, Workstreams: streams})
+	store, _, err := runtime.Open(runtime.Inputs{Config: f.s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{f.s.cfg.Project.ID: streams}})
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
 	f.s.store = store
@@ -483,7 +483,7 @@ func TestPauseHoldsAndStopsAmendmentTurns(t *testing.T) {
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	defer repo.Close()
-	f.s.active = &activeProject{repository: repo}
+	f.s.setSole(&activeProject{repository: repo})
 	store := openPauseStore(t, f.architectFixture, stream)
 	hard := ownerPause("workstream", f.project, stream, "hard", "Stop the amendment")
 

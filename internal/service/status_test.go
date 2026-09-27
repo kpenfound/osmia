@@ -278,10 +278,10 @@ func TestStatusReportsUnreadableTrace(t *testing.T) {
 	must(t, repo.CreateWorkstream(ctx, stream, demoStart, owner))
 	// A running controller stops the service on a damaged trace, so the
 	// handlers are called on a service value without one.
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: []config.WorkstreamID{stream}})
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{stream}}})
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
-	s := &Service{cfg: cfg, active: &activeProject{repository: repo}, store: store}
+	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, store: store}
 	directory, err := cfg.Root.ProjectTrace(project)
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(directory, "workstreams", string(stream), "status.jsonl"), []byte("{not json}\n"), 0600))

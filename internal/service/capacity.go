@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -14,12 +15,15 @@ import (
 // capacityStatus reports the slots of the mason, reviewer and committee role
 // kinds as the scheduler counts them, with the queued turns its gate would
 // admit but that find no free slot, and, for masons, the ready units of list
-// whose latest mason controller decision is to wait for a slot. Work a pause
-// in force holds, and work of an abandoned workstream, is not waiting. Without an active project no slot is used.
+// whose latest mason controller decision is to wait for a slot. The role slots
+// are shared by every active project, so their use counts the turns in flight
+// on all of them, and the free slots go to the projects' queued turns in
+// active_projects order. PerWorkstream is the only active project's limit, or the
+// configured default otherwise. Work a pause in force holds, and work of an
+// abandoned workstream, is not waiting. Without an active project no slot is
+// used.
 func (s *Service) capacityStatus(list []WorkstreamStatus) (*CapacityStatus, *Diagnostic) {
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
+	cfg, projects := s.runtimes()
 	limits := cfg.Capacity
 	if cfg.HasProject() {
 		limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
@@ -29,28 +33,39 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) (*CapacityStatus, *Dia
 		{Role: reviewerRole, Limit: limits.Reviewers, Waiting: []SlotWait{}},
 		{Role: committeeRole, Limit: limits.Committee, Waiting: []SlotWait{}},
 	}}
-	if !cfg.HasProject() || active == nil {
-		return out, nil
+	var gated []scheduler.Gated
+	var ids []config.ProjectID
+	for _, p := range projects {
+		view := cfg.For(p.id)
+		if !view.HasProject() {
+			continue
+		}
+		project, repository := p.id, p.repository
+		librarian := librarianWorkstream(project)
+		projectLimits := cfg.Capacity
+		projectLimits.PerWorkstream = view.Project.Capacity.PerWorkstream
+		dispatch, err := scheduler.New(repository, scheduler.Options{Now: s.now, Capacity: &projectLimits, Priorities: s.priorities, Shared: s.pool})
+		if err != nil {
+			return nil, &Diagnostic{"capacity", Internal, fmt.Sprintf("cannot read the turns of project %s; check the trace repository", project)}
+		}
+		gated = append(gated, scheduler.Gated{Scheduler: dispatch, Holds: func(c scheduler.Candidate) (bool, error) { return s.holds(project, librarian, repository, c) }})
+		ids = append(ids, project)
 	}
-	project, repository := cfg.Project.ID, active.repository
-	librarian := librarianWorkstream(project)
-	unreadable := &Diagnostic{"capacity", Internal, fmt.Sprintf("cannot read the turns of project %s; check the trace repository", project)}
-	dispatch, err := scheduler.New(repository, scheduler.Options{Now: s.now, Capacity: &limits, Priorities: s.priorities})
-	if err != nil {
-		return nil, unreadable
-	}
-	slots, err := dispatch.Slots(func(c scheduler.Candidate) (bool, error) { return s.holds(project, librarian, repository, c) })
-	if err == nil {
+	// The projects' passes take the shared slots one after another, so a
+	// turn one project's pass would leave without a slot is waiting.
+	slots, err := scheduler.SlotsOf(gated)
+	if err == nil && len(gated) > 0 {
 		err = s.step("status-capacity")
 	}
 	if err != nil {
-		return nil, unreadable
+		return nil, &Diagnostic{"capacity", Internal, fmt.Sprintf("cannot read the turns of project %s; check the trace repository", projectList(ids))}
 	}
+	used, waiting := slots.Used, slots.Waiting
 	state, _ := s.effective()
 	for i := range out.Roles {
 		role := &out.Roles[i]
-		role.Used = slots.Used[role.Role]
-		for _, w := range slots.Waiting {
+		role.Used = used[role.Role]
+		for _, w := range waiting {
 			if w.Thread.Identity.Role == role.Role {
 				role.Waiting = append(role.Waiting, SlotWait{Workstream: w.Workstream, Unit: w.Turn.Request.Unit, Agent: w.Thread.Identity.ID, Turn: w.Turn.Request.TurnID, Reason: w.Reason})
 			}
@@ -59,7 +74,7 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) (*CapacityStatus, *Dia
 			continue
 		}
 		for _, w := range list {
-			if scheduler.Paused(state.Pauses, project, w.Workstream) || w.State != nil && *w.State == AbandonedState {
+			if scheduler.Paused(state.Pauses, w.Project, w.Workstream) || w.State != nil && *w.State == AbandonedState {
 				continue
 			}
 			for _, u := range w.Units {
@@ -78,9 +93,7 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) (*CapacityStatus, *Dia
 // of it. The providers are those of the configured profiles, of today's
 // costs and of the limits, by name.
 func (s *Service) providerUsage(state runtime.State, profiles map[string]EffectiveProfile) (*ProviderUsageStatus, *Diagnostic) {
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
+	cfg, projects := s.runtimes()
 	day := s.localDay()
 	names := map[string]bool{}
 	for _, p := range cfg.Profiles {
@@ -91,15 +104,20 @@ func (s *Service) providerUsage(state runtime.State, profiles map[string]Effecti
 	}
 	unreadable := &Diagnostic{"provider_usage", Internal, fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", cfg.Project.ID)}
 	costs := map[string][]trace.Cost{}
-	if cfg.HasProject() && active != nil {
-		var err error
-		if costs, err = providerCosts(active.repository, day); err == nil {
+	for _, p := range projects {
+		if !cfg.Active(p.id) {
+			continue
+		}
+		unreadable = &Diagnostic{"provider_usage", Internal, fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", p.id)}
+		found, err := providerCosts(p.repository, day)
+		if err == nil {
 			err = s.step("status-provider-usage")
 		}
 		if err != nil {
 			return nil, unreadable
 		}
-		for name := range costs {
+		for name, c := range found {
+			costs[name] = append(costs[name], c...)
 			if name != "" {
 				names[name] = true
 			}

@@ -47,11 +47,14 @@ func HandInWorkstream(project config.ProjectID, key string) config.WorkstreamID 
 }
 
 // handIn checks that the project is active and its charter has rules, then
-// copies the input into a new workstream and moves it to the handed state.
+// copies the input into a new workstream and moves it to the handed state. The
+// project may be left out while exactly one project is active.
 func (s *Service) handIn(ctx context.Context, req HandInRequest) (HandInResponse, *APIError) {
-	if err := config.CheckProjectIDs(req.Project); err != nil {
-		return HandInResponse{}, &APIError{Validation, "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
+	project, api := s.projectFor(req.Project)
+	if api != nil {
+		return HandInResponse{}, api
 	}
+	req.Project = project
 	cfg := s.current()
 	_, c, err := s.loadCharter(ctx, req.Project)
 	if errors.Is(err, errNoActiveProject) {
@@ -176,7 +179,7 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		} else {
 			// A new workstream records the backend its workspaces use; it
 			// keeps it until it is delivered or abandoned.
-			backend, checkErr := h.s.newWorkspaces(ctx, h.s.current())
+			backend, checkErr := h.s.newWorkspaces(ctx, h.s.about(h.repository))
 			if checkErr != nil {
 				return HandInResponse{}, false, &APIError{Unavailable, fmt.Sprintf("workstream %s cannot start: %v", stream, checkErr)}
 			}
@@ -188,7 +191,7 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		// The workstream may be new: the runtime store learns it before the
 		// input is copied, so a retried hand-in resolves it again and a
 		// priority or pause may name it as soon as this hand-in finishes.
-		if err := h.s.resolveRuntime(h.s.current(), repository); err != nil {
+		if err := h.s.refreshRuntime(); err != nil {
 			return h.failed("resolving the runtime workstreams of")
 		}
 		doc = &trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: handedDocument, Revision: 1, Project: req.Project, Workstream: stream, At: now, Actor: ownerActor, Cause: handInTransition},

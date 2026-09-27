@@ -136,7 +136,7 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 		t.Fatalf("acknowledgement: %+v", first)
 	}
 	// The acknowledged message is already in the trace.
-	th, err := s.active.repository.ChiefOfStaffThread(stream)
+	th, err := s.sole().repository.ChiefOfStaffThread(stream)
 	must(t, err)
 	if len(th.Turns) != 1 || th.Turns[0].Request.TurnID != first.Turn {
 		t.Fatalf("thread after send: %+v", th)
@@ -203,7 +203,7 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 
 	// Turns the owner did not send are not part of the conversation.
 	h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_question", Project: project, Workstream: stream, At: demoStart, Actor: trace.Actor{Kind: "agent", ID: "mason"}, Cause: "ask"}
-	_, err = s.active.repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "question", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, Prompt: "A mason asks"})
+	_, err = s.sole().repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "question", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, Prompt: "A mason asks"})
 	must(t, err)
 	if again, err := c.Conversation(ctx, stream); err != nil || len(again.Entries) != 9 {
 		t.Fatalf("listing with an agent turn: %+v %v", again, err)
@@ -230,9 +230,9 @@ func TestConversationRejections(t *testing.T) {
 		}
 	}
 	_, err := c.Send(ctx, unknown, "hello")
-	expect(err, Validation, "workstream "+string(unknown)+" is not in the active project")
+	expect(err, Validation, "workstream "+string(unknown)+" is not in an active project")
 	_, err = c.Conversation(ctx, unknown)
-	expect(err, Validation, "workstream "+string(unknown)+" is not in the active project")
+	expect(err, Validation, "workstream "+string(unknown)+" is not in an active project")
 	_, err = c.Send(ctx, "w_bad", "hello")
 	expect(err, Validation, "workstream must be a workstream ID")
 	_, err = c.Conversation(ctx, "w_bad")
@@ -243,7 +243,7 @@ func TestConversationRejections(t *testing.T) {
 	expect(err, Malformed, "")
 	err = c.Do(ctx, "PUT", Prefix+"/conversation/"+string(stream), SendRequest{Text: "hello"}, nil)
 	expect(err, Unsupported, "")
-	th, err := s.active.repository.ChiefOfStaffThread(stream)
+	th, err := s.sole().repository.ChiefOfStaffThread(stream)
 	must(t, err)
 	if len(th.Turns) != 0 {
 		t.Fatalf("rejected messages were recorded: %+v", th.Turns)
@@ -251,13 +251,13 @@ func TestConversationRejections(t *testing.T) {
 
 	// The librarian's workstream is in the trace but not in status, and its
 	// chief of staff never gets a turn: it is unknown to the conversation too.
-	librarian, err := ensureLibrarianThread(ctx, s.active.repository, demoStart, ownerActor)
+	librarian, err := ensureLibrarianThread(ctx, s.sole().repository, demoStart, ownerActor)
 	must(t, err)
 	_, err = c.Send(ctx, librarian, "hello")
-	expect(err, Validation, "workstream "+string(librarian)+" is not in the active project")
+	expect(err, Validation, "workstream "+string(librarian)+" is not in an active project")
 	_, err = c.Conversation(ctx, librarian)
-	expect(err, Validation, "workstream "+string(librarian)+" is not in the active project")
-	th, err = s.active.repository.ChiefOfStaffThread(librarian)
+	expect(err, Validation, "workstream "+string(librarian)+" is not in an active project")
+	th, err = s.sole().repository.ChiefOfStaffThread(librarian)
 	must(t, err)
 	if len(th.Turns) != 0 {
 		t.Fatalf("a message to the librarian's workstream was recorded: %+v", th.Turns)
@@ -267,7 +267,7 @@ func TestConversationRejections(t *testing.T) {
 	unbound := fixture(t)
 	_, c = start(t, unbound)
 	_, err = c.Send(ctx, stream, "hello")
-	expect(err, Validation, "workstream "+string(stream)+" is not in the active project")
+	expect(err, Validation, "workstream "+string(stream)+" is not in an active project")
 
 	empty, _ := projectFixture(t)
 	_, c = start(t, empty)
@@ -289,7 +289,7 @@ func TestConversationUsesProfileOverride(t *testing.T) {
 	mutation(t, c, "PUT", "profile", ProfileRequest{trace.ChiefOfStaff, "other"})
 	sent, err := c.Send(ctx, stream, "hello")
 	must(t, err)
-	th, err := s.active.repository.ChiefOfStaffThread(stream)
+	th, err := s.sole().repository.ChiefOfStaffThread(stream)
 	must(t, err)
 	if len(th.Turns) != 1 || th.Turns[0].Request.TurnID != sent.Turn || th.Turns[0].Request.Profile.Name != "other" || th.Turns[0].Request.Profile.Backend != "codex" {
 		t.Fatalf("accepted profile: %+v", th.Turns)
@@ -346,7 +346,7 @@ func TestConversationProfileChangesResumeOrReplay(t *testing.T) {
 			t.Fatalf("turn %d omitted owned log: %q", i, calls[i].History)
 		}
 	}
-	th, err := s.active.repository.ChiefOfStaffThread(stream)
+	th, err := s.sole().repository.ChiefOfStaffThread(stream)
 	must(t, err)
 	if len(th.Turns) != 4 || th.Turns[0].Request.Profile.Name != "default" || th.Turns[3].Request.Profile.Name != "default" {
 		t.Fatalf("recorded profiles: %+v", th.Turns)
@@ -360,7 +360,7 @@ func TestConversationUsesOverrideOutsideFallbackChain(t *testing.T) {
 	mutation(t, c, "PUT", "profile", ProfileRequest{trace.ChiefOfStaff, "other"})
 	sent, err := c.Send(context.Background(), stream, "hello")
 	must(t, err)
-	th, err := s.active.repository.ChiefOfStaffThread(stream)
+	th, err := s.sole().repository.ChiefOfStaffThread(stream)
 	must(t, err)
 	if len(th.Turns) != 1 || th.Turns[0].Request.TurnID != sent.Turn || th.Turns[0].Request.Profile.Name != "other" || th.Turns[0].Request.Profile.Backend != "codex" {
 		t.Fatalf("accepted profile: %+v", th.Turns)
@@ -430,7 +430,7 @@ func TestConversationUnusableProfileIsInternal(t *testing.T) {
 	if !errors.As(err, &api) || api.Code != Internal || !strings.Contains(api.Message, "role chief_of_staff has no usable profile \"default\"") {
 		t.Fatalf("unusable profile: %v", err)
 	}
-	th, err := s.active.repository.ChiefOfStaffThread(stream)
+	th, err := s.sole().repository.ChiefOfStaffThread(stream)
 	must(t, err)
 	if len(th.Turns) != 0 {
 		t.Fatalf("message recorded without a profile: %+v", th.Turns)

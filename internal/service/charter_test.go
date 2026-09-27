@@ -37,7 +37,7 @@ func handInStatus(t *testing.T, s *Service, body string) int {
 // documentRevisions returns the active project's revisions of one document.
 func documentRevisions(t *testing.T, s *Service, id string) []trace.Document {
 	t.Helper()
-	docs, err := trace.Read[trace.Document](s.active.repository, "")
+	docs, err := trace.Read[trace.Document](s.sole().repository, "")
 	must(t, err)
 	var out []trace.Document
 	for _, d := range docs {

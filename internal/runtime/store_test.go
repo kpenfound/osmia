@@ -44,7 +44,7 @@ clone = "`+filepath.Join(home, "clone")+`"
 `), 0600))
 	c, err := config.Load(config.Options{Root: root})
 	must(t, err)
-	return Inputs{c, []config.WorkstreamID{w1, w2}}
+	return Inputs{c, map[config.ProjectID][]config.WorkstreamID{pid: {w1, w2}}}
 }
 func must(t *testing.T, err error) {
 	t.Helper()
@@ -192,7 +192,7 @@ func TestStaleReferencesAreRetainedAndNeverRetargeted(t *testing.T) {
 	saved := disk(t, in)
 	changed, _ := copyInputs(in)
 	delete(changed.Config.Profiles, "other")
-	changed.Workstreams = []config.WorkstreamID{w2}
+	changed.Workstreams = map[config.ProjectID][]config.WorkstreamID{pid: {w2}}
 	must(t, s.Resolve(changed))
 	effective, ds := s.Effective()
 	if len(ds) != 3 || len(effective.Pauses) != 1 || effective.Profiles["mason"] != "default" || !reflect.DeepEqual(effective.Priorities[0].Workstreams, []config.WorkstreamID{w2}) {
@@ -216,7 +216,9 @@ func TestStaleReferencesAreRetainedAndNeverRetargeted(t *testing.T) {
 	// A different project must not inherit any project-scoped records.
 	changed, _ = copyInputs(in)
 	changed.Config.Project.ID = "p_2123456789abcdef0123456789abcdef"
+	changed.Config.Projects = []config.Project{changed.Config.Project}
 	changed.Config.ActiveProjects = []string{string(changed.Config.Project.ID)}
+	changed.Workstreams = map[config.ProjectID][]config.WorkstreamID{changed.Config.Project.ID: changed.Workstreams[pid]}
 	must(t, s.Resolve(changed))
 	effective, ds = s.Effective()
 	if len(ds) != 2 || len(effective.Pauses) != 1 || len(effective.Priorities) != 0 {
@@ -345,11 +347,11 @@ func TestPersistenceFailures(t *testing.T) {
 func TestConcurrentMutationsAndReaderIsolation(t *testing.T) {
 	in := fixture(t)
 	for i := 0; i < 30; i++ {
-		in.Workstreams = append(in.Workstreams, config.WorkstreamID(fmt.Sprintf("w_%032x", i)))
+		in.Workstreams[pid] = append(in.Workstreams[pid], config.WorkstreamID(fmt.Sprintf("w_%032x", i)))
 	}
 	s := open(t, in)
 	var wg sync.WaitGroup
-	for _, w := range in.Workstreams {
+	for _, w := range in.Workstreams[pid] {
 		wg.Go(func() {
 			err := s.SetPause(Pause{Target: Target{Scope: "workstream", Project: pid, Workstream: w}, Mode: "soft", Source: PauseOwner, Reason: "test"})
 			if err != nil {
@@ -367,7 +369,7 @@ func TestConcurrentMutationsAndReaderIsolation(t *testing.T) {
 	wg.Wait()
 	restarted := open(t, in)
 	raw, _ := restarted.Snapshot()
-	if len(raw.Pauses) != len(in.Workstreams) {
+	if len(raw.Pauses) != len(in.Workstreams[pid]) {
 		t.Fatalf("lost updates: %d", len(raw.Pauses))
 	}
 	for _, p := range raw.Pauses {
@@ -413,7 +415,7 @@ func TestUnknownReferencesDiagnosedOnLoad(t *testing.T) {
 func TestFilesystemBoundariesAndInputIsolation(t *testing.T) {
 	in := fixture(t)
 	s := open(t, in)
-	in.Workstreams[0] = "invalid"
+	in.Workstreams[pid][0] = "invalid"
 	in.Config.Roles["mason"] = config.Role{Profile: "invalid"}
 	must(t, s.SetPause(pauses()[2]))
 	effective, _ := s.Effective()
@@ -455,7 +457,7 @@ func TestProjectlessInputs(t *testing.T) {
 	}
 	must(t, s.SetPause(Pause{Target: Target{Scope: "factory"}, Mode: "soft", Source: PauseOwner, Reason: "test"}))
 	withWorkstreams := in
-	withWorkstreams.Workstreams = []config.WorkstreamID{w1}
+	withWorkstreams.Workstreams = map[config.ProjectID][]config.WorkstreamID{pid: {w1}}
 	if err := s.Resolve(withWorkstreams); err == nil {
 		t.Fatal("workstreams accepted without a project")
 	}

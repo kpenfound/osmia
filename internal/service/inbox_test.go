@@ -226,8 +226,8 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	if batch.Workstream != stream {
 		batch, single = single, batch
 	}
-	wantBatch := InboxEntry{Kind: InboxEscalation, Number: batch.Number, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format part of the contract?", Blocked: "The upload unit and its review.",
-		Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", OpenedAt: f.clock.Now(), Answer: InboxAnswer{Method: "POST", Path: "/v1/inbox/" + strconv.Itoa(batch.Number), Body: map[string]any{}},
+	wantBatch := InboxEntry{Kind: InboxEscalation, Project: project, Number: batch.Number, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format part of the contract?", Blocked: "The upload unit and its review.",
+		Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", OpenedAt: f.clock.Now(), Answer: InboxAnswer{Method: "POST", Path: "/v1/inbox/" + strconv.Itoa(batch.Number), Body: map[string]any{"project": string(project)}},
 		Asked: []InboxQuestion{{ID: "1", AskedBy: demoAgent, Question: "Where does state live?"}, {ID: "2", AskedBy: "agent_reviewer", Question: "Is the log format fixed?"}}}
 	// The two askers run in one pass, in either order.
 	if batch.Asked[0].Question != "Where does state live?" {
@@ -256,9 +256,9 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	traceDir, err := f.cfg.Root.ProjectTrace(project)
 	must(t, err)
 	head := demoGit(t, "", "-C", traceDir, "rev-parse", "HEAD")
-	_, err = c.Answer(ctx, 9, "Both are part of the contract.")
+	_, err = c.Answer(ctx, 9, "Both are part of the contract.", "")
 	apiError(t, err, Validation, "there is no inbox entry 9; list the entries with osmia inbox")
-	_, err = c.Answer(ctx, batch.Number, " \n")
+	_, err = c.Answer(ctx, batch.Number, " \n", "")
 	apiError(t, err, Validation, "text must not be empty")
 	for _, number := range []string{"0", "-1", "01", "x", "1.5"} {
 		apiError(t, c.Do(ctx, "POST", Prefix+"/inbox/"+number, AnswerRequest{Text: "x"}, new(AnswerResponse)), Validation, "inbox entry must be a number from osmia inbox")
@@ -266,7 +266,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	if got := demoGit(t, "", "-C", traceDir, "rev-parse", "HEAD"); got != head {
 		t.Fatalf("a refused answer committed: %s, was %s", got, head)
 	}
-	answered, err := c.Answer(ctx, batch.Number, "Both are part of the contract.")
+	answered, err := c.Answer(ctx, batch.Number, "Both are part of the contract.", "")
 	must(t, err)
 	if got, err := c.Status(ctx, stream); err != nil || len(got.Gates) != 0 {
 		t.Fatalf("ruled status gates: %+v %v", got.Gates, err)
@@ -274,7 +274,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	if !reflect.DeepEqual(answered, AnswerResponse{Number: batch.Number, Workstream: stream, Batch: "escalation_1", Questions: []string{"1", "2"}, Ruling: "Both are part of the contract.", At: f.clock.Now()}) {
 		t.Fatalf("answer: %+v", answered)
 	}
-	_, err = c.Answer(ctx, batch.Number, "Neither is.")
+	_, err = c.Answer(ctx, batch.Number, "Neither is.", "")
 	apiError(t, err, Conflict, "inbox entry "+strconv.Itoa(batch.Number)+" is already answered")
 	inbox, err = c.Inbox(ctx)
 	must(t, err)
@@ -357,7 +357,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 			t.Fatalf("%s after the ruling: parked %v, turns %+v", agent, th.Parked(), th.Turns)
 		}
 	}
-	_, err = c.Answer(ctx, single.Number, "No new dependencies.")
+	_, err = c.Answer(ctx, single.Number, "No new dependencies.", "")
 	must(t, err)
 	f.clock.Advance(time.Minute)
 	f.settle(t, s)
@@ -456,7 +456,7 @@ func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
 	_, err = repo.SetFeatureState(ctx, h, AbandonedState, "gone")
 	must(t, err)
 
-	s := &Service{cfg: cfg, active: &activeProject{repository: repo}, options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}}
+	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}}
 	inbox, api := s.inbox(ctx)
 	if api != nil || len(inbox.Entries) != 1 || inbox.Entries[0].Number != 2 || inbox.Entries[0].Workstream != quiet {
 		t.Fatalf("inbox: %+v %v", inbox, api)
@@ -485,7 +485,7 @@ func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
 	if inbox, err := c.Inbox(ctx); err != nil || inbox.Entries == nil || len(inbox.Entries) != 0 {
 		t.Fatalf("inbox without a project: %+v %v", inbox, err)
 	}
-	_, err = c.Answer(ctx, 1, "In files.")
+	_, err = c.Answer(ctx, 1, "In files.", "")
 	apiError(t, err, NoProject, "no project is configured; add one with osmia project add")
 }
 
@@ -605,7 +605,7 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 		Question: fmt.Sprintf("Deliver Resumable uploads? Final review 1 of commit %s shows evidence for every criterion.", report.Commit), Blocked: "Publishing the pull request.",
 		Answer: answer("delivery/"+string(assembled), "review", 1, "review_revision", 1, "commit", report.Commit, "draft_hash", presented.DraftHash)}
 	escalation := InboxEntry{Kind: InboxEscalation, Workstream: escalating, Number: 1, Batch: "escalation_1", Question: "Where should state live?", Blocked: "The unit.", Options: []string{"Files", "A database"},
-		Recommendation: "In files.", QuickReply: "In files.", OpenedAt: tick(1), Asked: []InboxQuestion{{ID: "1", AskedBy: demoAgent, Question: "Where does state live?"}}, Answer: answer("inbox/1")}
+		Recommendation: "In files.", QuickReply: "In files.", OpenedAt: tick(1), Asked: []InboxQuestion{{ID: "1", AskedBy: demoAgent, Question: "Where does state live?"}}, Answer: answer("inbox/1", "project", string(repository.Project()))}
 	ratification := InboxEntry{Kind: InboxRatification, Workstream: shedding, Revision: 2, OpenedAt: tick(2), Options: []string{"ratify"}, Asked: []InboxQuestion{},
 		Question: "Ratify spec.md revision 1 and plan.json revision 1? Debate ended after round 1: no objection stands", Blocked: "Sealing the spec and plan, and building the workstream.",
 		Recommendation: "ratify: nothing blocks, and 1 objection stands as advice on the record", Answer: answer("ratify/"+string(shedding), "spec", 1, "plan", 1)}
@@ -627,6 +627,9 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 		}
 		if want == nil {
 			want = []InboxEntry{}
+		}
+		for i := range want {
+			want[i].Project = repository.Project()
 		}
 		if !reflect.DeepEqual(got.Entries, want) {
 			t.Fatalf("%s: inbox\n%+v\nwant\n%+v", step, got.Entries, want)

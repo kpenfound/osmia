@@ -260,7 +260,7 @@ func TestRatifiedCharterRuleReachesEveryWorkstreamOnce(t *testing.T) {
 	if st, err := f.c.Status(ctx, stream); err != nil || !reflect.DeepEqual(st.Gates, []trace.OwnerGate{{Kind: "charter", Reference: "1"}}) {
 		t.Fatalf("status gates %+v: %v", st.Gates, err)
 	}
-	if b := assemble(t, f.s.active.repository, quiet); len(b.CharterNotices) != 0 {
+	if b := assemble(t, f.s.sole().repository, quiet); len(b.CharterNotices) != 0 {
 		t.Fatalf("a proposed rule is a notice: %+v", b.CharterNotices)
 	}
 	_, err = f.c.DecideCharter(ctx, stream, "1", CharterDecisionRequest{Decision: "accept"})
@@ -286,7 +286,7 @@ func TestRatifiedCharterRuleReachesEveryWorkstreamOnce(t *testing.T) {
 	if string(content) != withRule(charterBefore, 2) {
 		t.Fatalf("charter.md:\n%s", content)
 	}
-	checkChartered(t, f.s.active.repository, withRule(charterBefore, 2), 2)
+	checkChartered(t, f.s.sole().repository, withRule(charterBefore, 2), 2)
 	if st, err := f.c.Status(ctx, stream); err != nil || len(st.Gates) != 0 {
 		t.Fatalf("status gates after the decision %+v: %v", st.Gates, err)
 	}
@@ -300,7 +300,7 @@ func TestRatifiedCharterRuleReachesEveryWorkstreamOnce(t *testing.T) {
 	}
 	_, err = f.c.DecideCharter(ctx, stream, "1", CharterDecisionRequest{Decision: trace.CharterDecline})
 	apiError(t, err, Conflict, "the charter proposal of question 1 is already decided: ratify")
-	revisions := len(charterRevisions(t, f.s.active.repository))
+	revisions := len(charterRevisions(t, f.s.sole().repository))
 	f.stop(t)
 
 	f.start(t)

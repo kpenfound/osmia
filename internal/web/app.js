@@ -664,7 +664,7 @@
   }
 
   function decisionKey(entry) {
-    return [entry.kind, entry.workstream, entry.number, entry.unit, entry.amendment].join(':');
+    return [entry.kind, entry.project, entry.workstream, entry.number, entry.unit, entry.amendment].join(':');
   }
 
   // decisions keeps each inbox entry's card between renders, so an answer

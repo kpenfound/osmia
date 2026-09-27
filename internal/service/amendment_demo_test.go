@@ -119,7 +119,7 @@ func TestM4CharterDemonstration(t *testing.T) {
 	if proposal.State != trace.CharterChartered || proposal.Charter == 0 {
 		t.Fatalf("ratified rule %+v", proposal)
 	}
-	other := assemble(t, f.s.active.repository, quiet)
+	other := assemble(t, f.s.sole().repository, quiet)
 	if len(other.CharterNotices) != 1 || other.CharterNotices[0].Rule != charterRule || other.CharterNotices[0].OwnerResponse != charterRuling {
 		t.Fatalf("other workstream's next bundle %+v", other.CharterNotices)
 	}

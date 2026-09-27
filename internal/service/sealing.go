@@ -293,7 +293,7 @@ func (z *sealer) outcome(stream config.WorkstreamID, k int, operation string) (*
 
 // git returns the provider of the workstream's feature branch workspace.
 func (z *sealer) git(stream config.WorkstreamID) (workspace.Provider, error) {
-	return featureWorkspaces(z.s.current(), z.repository).of(stream)
+	return featureWorkspaces(z.s.about(z.repository), z.repository).of(stream)
 }
 
 // Inspect reads the recorded transitions and the clone. A recorded outcome
@@ -384,7 +384,7 @@ func (z *sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if len(unresolved) > 0 {
 		return fail("the plan's footprints name what the entity map does not resolve: " + strings.Join(unresolved, ", "))
 	}
-	cfg := z.s.current()
+	cfg := z.s.about(z.repository)
 	g, err := z.git(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err

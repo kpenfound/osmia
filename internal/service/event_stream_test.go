@@ -181,16 +181,16 @@ func TestEventStreamAnnouncesTraceChanges(t *testing.T) {
 	}
 	awaitEvents(t, events, Event{Kind: EventConversation, Project: project, Workstream: stream}, Event{Kind: EventWorkstream, Project: project, Workstream: stream})
 
-	if _, err := c.Answer(ctx, 1, "In files."); err != nil {
+	if _, err := c.Answer(ctx, 1, "In files.", ""); err != nil {
 		t.Fatal(err)
 	}
 	awaitEvents(t, events, Event{Kind: EventInbox, Project: project, Workstream: quiet}, Event{Kind: EventWorkstream, Project: project, Workstream: quiet})
 
-	appendDayCost(t, s.active.repository, stream, "cost", demoStart, 0.25, true)
+	appendDayCost(t, s.sole().repository, stream, "cost", demoStart, 0.25, true)
 	awaitEvents(t, events, Event{Kind: EventSpend, Project: project}, Event{Kind: EventWorkstream, Project: project, Workstream: stream})
 
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "feature_handed", Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: ownerActor, Cause: "owner"}
-	_, err := s.active.repository.SetFeatureState(ctx, h, "handed", "Owner handed the feature in")
+	_, err := s.sole().repository.SetFeatureState(ctx, h, "handed", "Owner handed the feature in")
 	must(t, err)
 	awaitEvents(t, events, Event{Kind: EventWorkstream, Project: project, Workstream: stream}, Event{Kind: EventInbox, Project: project, Workstream: stream})
 }

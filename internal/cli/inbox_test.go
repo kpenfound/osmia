@@ -24,12 +24,23 @@ func withInbox(t *testing.T) service.Options {
 
 func withInboxRecommendations(t *testing.T, first, second string) service.Options {
 	t.Helper()
-	ctx := context.Background()
 	opts := fixture(t)
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
+	escalate(t, cfg.Root, cfg.Project, stream, first, second)
+	opts.Reconciliation.Now = func() time.Time { return written.Add(2 * time.Hour) }
+	return opts
+}
+
+// escalate creates the trace of project p with workstream ws, a batch of two
+// escalated questions and a single escalated question, as fake askers and a
+// fake chief of staff left them. The escalations are inbox entries 1 and 2.
+func escalate(t *testing.T, root config.Root, p config.Project, ws config.WorkstreamID, first, second string) {
+	t.Helper()
+	ctx := context.Background()
+	project, stream := p.ID, ws
 	owner := trace.Actor{Kind: "owner", ID: "local"}
-	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, written, owner)
+	repo, err := trace.Create(ctx, root, p, written, owner)
 	must(t, err)
 	must(t, repo.CreateWorkstream(ctx, stream, written, owner))
 	claim := func(agent, role, turn string) coreadapter.Scope {
@@ -39,9 +50,9 @@ func withInboxRecommendations(t *testing.T, first, second string) service.Option
 		h.Schema, h.ID = "osmia.trace.turn-request", "request_"+turn
 		_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: agent, ThreadID: agent + "_thread", TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, Prompt: "Work"})
 		must(t, err)
-		_, err = repo.ClaimTurn(ctx, stream, agent, "token_"+turn, filepath.Join(cfg.Root.String(), turn), written)
+		_, err = repo.ClaimTurn(ctx, stream, agent, "token_"+turn, filepath.Join(root.String(), string(project), turn), written)
 		must(t, err)
-		return coreadapter.Scope{Project: project, Workstream: stream, Thread: agent + "_thread", Turn: turn, Role: role}
+		return coreadapter.Scope{Project: string(project), Workstream: string(stream), Thread: agent + "_thread", Turn: turn, Role: role}
 	}
 	for i, question := range []string{"Where does state live?", "Is the log format fixed?", "May I add a dependency?"} {
 		agent := []string{"mason1", "reviewer1", "mason2"}[i]
@@ -57,8 +68,6 @@ func withInboxRecommendations(t *testing.T, first, second string) service.Option
 		must(t, err)
 	}
 	must(t, repo.Close())
-	opts.Reconciliation.Now = func() time.Time { return written.Add(2 * time.Hour) }
-	return opts
 }
 
 func TestInboxAndAnswer(t *testing.T) {
@@ -72,9 +81,9 @@ func TestInboxAndAnswer(t *testing.T) {
 	var list service.InboxResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "inbox", "--json")), &list))
 	want := service.InboxResponse{Entries: []service.InboxEntry{
-		{Kind: service.InboxEscalation, Number: 1, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format\npart of the contract?", Blocked: "The upload unit and its review.", Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", OpenedAt: escalated, Answer: service.InboxAnswer{Method: "POST", Path: "/v1/inbox/1", Body: map[string]any{}},
+		{Kind: service.InboxEscalation, Project: project, Number: 1, Workstream: stream, Batch: "escalation_1", Question: "Are state files and the log format\npart of the contract?", Blocked: "The upload unit and its review.", Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", OpenedAt: escalated, Answer: service.InboxAnswer{Method: "POST", Path: "/v1/inbox/1", Body: map[string]any{"project": string(project)}},
 			Asked: []service.InboxQuestion{{ID: "1", AskedBy: "mason1", Question: "Where does state live?"}, {ID: "2", AskedBy: "reviewer1", Question: "Is the log format fixed?"}}},
-		{Kind: service.InboxEscalation, Number: 2, Workstream: stream, Batch: "escalation_3", Question: "May the index unit add a dependency?", Blocked: "The index unit.", Options: []string{}, Recommendation: "No.", QuickReply: "No.", OpenedAt: escalated, Answer: service.InboxAnswer{Method: "POST", Path: "/v1/inbox/2", Body: map[string]any{}},
+		{Kind: service.InboxEscalation, Project: project, Number: 2, Workstream: stream, Batch: "escalation_3", Question: "May the index unit add a dependency?", Blocked: "The index unit.", Options: []string{}, Recommendation: "No.", QuickReply: "No.", OpenedAt: escalated, Answer: service.InboxAnswer{Method: "POST", Path: "/v1/inbox/2", Body: map[string]any{"project": string(project)}},
 			Asked: []service.InboxQuestion{{ID: "3", AskedBy: "mason2", Question: "May I add a dependency?"}}},
 	}}
 	if !reflect.DeepEqual(list, want) {

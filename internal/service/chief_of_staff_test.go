@@ -31,7 +31,7 @@ func plantWorkstream(t *testing.T, home, traceDir string, project config.Project
 
 func chiefOfStaffAgents(t *testing.T, s *Service, id config.WorkstreamID) []trace.Agent {
 	t.Helper()
-	agents, err := trace.Read[trace.Agent](s.active.repository, id)
+	agents, err := trace.Read[trace.Agent](s.sole().repository, id)
 	must(t, err)
 	var out []trace.Agent
 	for _, a := range agents {
@@ -55,7 +55,7 @@ func TestStartGivesExistingWorkstreamsOneChiefOfStaffThread(t *testing.T) {
 	plantWorkstream(t, home, added.Project.Trace, id, legacy)
 
 	s, _ = start(t, opts)
-	th, err := s.active.repository.ChiefOfStaffThread(legacy)
+	th, err := s.sole().repository.ChiefOfStaffThread(legacy)
 	must(t, err)
 	if th.Identity.Role != trace.ChiefOfStaff || th.Identity.Actor != serviceActor || th.Status != "idle" {
 		t.Fatalf("thread = %+v", th)
@@ -63,7 +63,7 @@ func TestStartGivesExistingWorkstreamsOneChiefOfStaffThread(t *testing.T) {
 	must(t, s.Close())
 
 	s, _ = start(t, opts)
-	again, err := s.active.repository.ChiefOfStaffThread(legacy)
+	again, err := s.sole().repository.ChiefOfStaffThread(legacy)
 	must(t, err)
 	if got := chiefOfStaffAgents(t, s, legacy); len(got) != 1 || !again.Identity.At.Equal(th.Identity.At) {
 		t.Fatalf("agents after restart = %+v", got)

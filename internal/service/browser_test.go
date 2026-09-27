@@ -290,7 +290,7 @@ func newPageFixture(t *testing.T) *pageFixture {
 	f := &pageFixture{s: s, c: c}
 	// The service abandons claimed chief-of-staff turns when it starts, so
 	// the turns are claimed once it runs.
-	live := s.active.repository
+	live := s.sole().repository
 	_, err = live.EnsureChiefOfStaff(ctx, stream, at, serviceActor)
 	must(t, err)
 	f.chief = claimTurn(t, live, t.TempDir(), stream, trace.ChiefOfStaff, trace.ChiefOfStaff, "status", at)
@@ -306,7 +306,7 @@ func newPageFixture(t *testing.T) *pageFixture {
 // status writes the next status revision through the chief of staff's turn.
 func (f *pageFixture) status(t *testing.T, content trace.StatusContent) {
 	t.Helper()
-	_, err := f.s.active.repository.SetStatus(context.Background(), trace.ChiefOfStaff, f.chief, content, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
+	_, err := f.s.sole().repository.SetStatus(context.Background(), trace.ChiefOfStaff, f.chief, content, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, err)
 }
 

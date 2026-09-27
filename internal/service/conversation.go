@@ -30,7 +30,7 @@ func (s *Service) now() time.Time {
 	return time.Now().UTC()
 }
 
-// conversationTrace resolves raw to a workstream of the active project and
+// conversationTrace resolves raw to a workstream of an active project and
 // returns the project's open trace. The librarian's workstream is unknown
 // here as it is in status: its chief of staff never gets a turn.
 func (s *Service) conversationTrace(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
@@ -38,24 +38,23 @@ func (s *Service) conversationTrace(raw string) (config.ProjectID, config.Workst
 	if err != nil {
 		return "", "", nil, &APIError{Validation, "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
 	}
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
-	if !cfg.HasProject() {
+	cfg, projects := s.runtimes()
+	if len(cfg.Projects) == 0 {
 		return "", "", nil, &APIError{NoProject, "no project is configured; add one with osmia project add"}
 	}
-	unknown := &APIError{Validation, fmt.Sprintf("workstream %s is not in the active project; list workstreams with osmia status", id)}
-	if active == nil {
-		return "", "", nil, unknown
+	for _, active := range projects {
+		if !cfg.Active(active.id) || id == librarianWorkstream(active.id) {
+			continue
+		}
+		streams, err := active.repository.Workstreams()
+		if err != nil {
+			return "", "", nil, &APIError{Internal, fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", active.id)}
+		}
+		if slices.Contains(streams, id) {
+			return active.id, id, active.repository, nil
+		}
 	}
-	streams, err := active.repository.Workstreams()
-	if err != nil {
-		return "", "", nil, &APIError{Internal, fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", cfg.Project.ID)}
-	}
-	if !slices.Contains(streams, id) || id == librarianWorkstream(cfg.Project.ID) {
-		return "", "", nil, unknown
-	}
-	return cfg.Project.ID, id, active.repository, nil
+	return "", "", nil, &APIError{Validation, fmt.Sprintf("workstream %s is not in an active project; list workstreams with osmia status", id)}
 }
 
 // send accepts an owner message as the next turn of the workstream's

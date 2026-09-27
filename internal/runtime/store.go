@@ -74,14 +74,14 @@ type Diagnostic struct {
 var ErrValidation = errors.New("invalid runtime override")
 var ErrConflict = errors.New("runtime changed outside this store")
 
-// Inputs contains a validated config and the active project's persisted keys.
-// Workstreams must come from the record repository, never display names or a
-// directory scan. The store copies inputs so callers can safely replace them.
-// Without an active project every project reference is stale and no
-// project-scoped override can be stored.
+// Inputs contains a validated config and the persisted workstream keys of its
+// active projects, by project. Workstreams must come from the record
+// repositories, never display names or a directory scan. The store copies
+// inputs so callers can safely replace them. A reference to a project that is
+// not active is stale and no project-scoped override can be stored for it.
 type Inputs struct {
 	Config      *config.Config
-	Workstreams []config.WorkstreamID
+	Workstreams map[config.ProjectID][]config.WorkstreamID
 }
 type Store struct {
 	mu    sync.RWMutex
@@ -192,23 +192,32 @@ func copyInputs(in Inputs) (Inputs, error) {
 		return Inputs{}, fmt.Errorf("configuration required")
 	}
 	c := *in.Config
-	if c.HasProject() {
-		if err := config.CheckProjectIDs(c.Project.ID); err != nil {
+	if len(c.ActiveProjects) != len(c.Projects) {
+		return Inputs{}, fmt.Errorf("every active identity requires a loaded project")
+	}
+	for i, p := range c.Projects {
+		if err := config.CheckProjectIDs(p.ID); err != nil {
 			return Inputs{}, err
 		}
-		if len(c.ActiveProjects) != 1 || c.ActiveProjects[0] != string(c.Project.ID) {
-			return Inputs{}, fmt.Errorf("one matching active project required")
+		if c.ActiveProjects[i] != string(p.ID) {
+			return Inputs{}, fmt.Errorf("loaded projects must match the active identities")
 		}
-	} else if len(c.ActiveProjects) != 0 || len(in.Workstreams) != 0 {
-		return Inputs{}, fmt.Errorf("workstreams and active identities require a loaded project")
 	}
-	if err := config.CheckWorkstreamIDs(in.Workstreams...); err != nil {
-		return Inputs{}, err
+	workstreams := map[config.ProjectID][]config.WorkstreamID{}
+	for project, streams := range in.Workstreams {
+		if !c.Active(project) {
+			return Inputs{}, fmt.Errorf("workstreams require a loaded project")
+		}
+		if err := config.CheckWorkstreamIDs(streams...); err != nil {
+			return Inputs{}, err
+		}
+		workstreams[project] = slices.Clone(streams)
 	}
 	c.Profiles = maps.Clone(c.Profiles)
 	c.Roles = maps.Clone(c.Roles)
 	c.ActiveProjects = slices.Clone(c.ActiveProjects)
-	return Inputs{&c, slices.Clone(in.Workstreams)}, nil
+	c.Projects = slices.Clone(c.Projects)
+	return Inputs{&c, workstreams}, nil
 }
 
 // Resolve replaces resolver input only; it never rewrites or drops overrides.
@@ -244,7 +253,7 @@ func (s *Store) Snapshot() (State, []Diagnostic) {
 }
 
 // Effective includes configured role bindings, valid runtime pauses and the
-// active project's explicit ordering. An absent pause means unpaused; an absent
+// active projects' explicit orderings. An absent pause means unpaused; an absent
 // priority means no ordering preference. The store performs no scheduling.
 func (s *Store) Effective() (State, []Diagnostic) {
 	return s.EffectiveAt(time.Now().UTC())
@@ -271,13 +280,13 @@ func resolveAt(st State, in Inputs, at time.Time) (State, []Diagnostic) {
 		}
 	}
 	for i, p := range st.Priorities {
-		if p.Project != in.Config.Project.ID {
+		if !in.Config.Active(p.Project) {
 			ds = append(ds, Diagnostic{fmt.Sprintf("priorities[%d]", i), "inactive project " + string(p.Project)})
 			continue
 		}
 		valid := Priority{Project: p.Project, Workstreams: []config.WorkstreamID{}}
 		for j, w := range p.Workstreams {
-			if !slices.Contains(in.Workstreams, w) {
+			if !slices.Contains(in.Workstreams[p.Project], w) {
 				ds = append(ds, Diagnostic{fmt.Sprintf("priorities[%d].workstreams[%d]", i, j), "unknown workstream " + string(w)})
 			} else {
 				valid.Workstreams = append(valid.Workstreams, w)
@@ -342,10 +351,10 @@ func targetReference(t Target, in Inputs) error {
 		}
 		return nil
 	}
-	if t.Project != in.Config.Project.ID {
+	if !in.Config.Active(t.Project) {
 		return fmt.Errorf("inactive project %s", t.Project)
 	}
-	if t.Scope == "workstream" && !slices.Contains(in.Workstreams, t.Workstream) {
+	if t.Scope == "workstream" && !slices.Contains(in.Workstreams[t.Project], t.Workstream) {
 		return fmt.Errorf("unknown workstream %s", t.Workstream)
 	}
 	return nil
@@ -568,11 +577,11 @@ func (s *Store) ClearPause(t Target, actor string) error {
 }
 func (s *Store) SetPriority(p Priority) error {
 	return s.mutate(func(st *State, in Inputs) error {
-		if p.Project != in.Config.Project.ID {
+		if !in.Config.Active(p.Project) {
 			return fmt.Errorf("inactive project %s", p.Project)
 		}
 		for _, w := range p.Workstreams {
-			if !slices.Contains(in.Workstreams, w) {
+			if !slices.Contains(in.Workstreams[p.Project], w) {
 				return fmt.Errorf("unknown workstream %s", w)
 			}
 		}

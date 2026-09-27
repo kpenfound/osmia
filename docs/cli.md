@@ -162,7 +162,11 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   a number no entry carries fails with `validation` (exit 4); with no project
   configured it fails with `no_project` (exit 4). An entry that already has a
   ruling, or belongs to an abandoned workstream, fails with `conflict`
-  (exit 5) and records nothing.
+  (exit 5) and records nothing. While several projects are active, inbox
+  numbers are counted per project: `answer` finds the project whose open
+  escalation carries the number, and when more than one does it fails with
+  `validation` (exit 4), listing them; `--project <project-id>` names the
+  project to answer in, with or without `--accept`.
 - `answer <inbox-number> --accept` records the entry's eligible `quick_reply`
   as your ruling through the same path. When the entry has no eligible quick
   reply, or the inbox lists no escalation with that number because it is
@@ -312,10 +316,10 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   `<trace>/charter.md`. The extraction runs in the service after the command
   returns; `status` shows its state, and the project is usable whether it
   succeeds or fails; after a failure `osmia project extract` starts a new
-  attempt. Operation
-  stays single-project: adding another project while one is active is refused
-  and the error names the active project. Repeating the active project's exact registration
-  returns it again.
+  attempt. Adding a
+  project while one or more are active is refused and the error names an
+  active project. Repeating an active project's exact registration returns it
+  again.
 - `project extract <project-id>` starts a new
   [knowledge-base extraction](knowledge-base.md#extraction) of the active
   project: a librarian turn that rewrites `kb/<subsystem>.md` and
@@ -367,11 +371,16 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   status and command output show each pause's source, reason and UTC set time.
 - `resume <all|project-id|workstream-id>` clears that scope's pause. Parent pauses
   still apply; all effective pauses are displayed.
-- `priority set <workstream-id>...` stores the active project's ordered list.
+- `priority set <workstream-id>...` stores the ordered list of the project the
+  workstreams belong to; while several projects are active the project is
+  found from the first workstream.
   The chief of staff sets the same list when you ask it to in a message; see
   [service](service.md#priority-at-the-owners-request).
-  `priority clear` removes that preference. Both, and `pause`/`resume` of a
-  workstream, need an active project and say so otherwise.
+  `priority clear` removes that preference; while several projects are active
+  it fails with `validation` (exit 4) and lists the active project IDs. Both,
+  and `pause`/`resume` of a workstream, need an active project and say so
+  otherwise; a workstream's pause names the project that holds it, and a
+  workstream in no active project fails with `not_found` (exit 4).
 - `profiles` displays every role's effective binding and its source
   (`configuration` or `owner_override`), plus runtime diagnostics. `status`
   shows the same profile information.

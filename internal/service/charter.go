@@ -33,10 +33,8 @@ func (s *Service) loadCharter(ctx context.Context, id config.ProjectID) (trace.D
 
 // repository returns the open trace of the active project id.
 func (s *Service) repository(id config.ProjectID) (*trace.Repository, error) {
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
-	if !cfg.HasProject() || cfg.Project.ID != id {
+	cfg, active := s.runtimeOf(id)
+	if !cfg.HasProject() {
 		return nil, errNoActiveProject
 	}
 	if active == nil {

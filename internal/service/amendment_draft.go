@@ -173,7 +173,7 @@ func (a *amendmentDrafter) Apply(ctx context.Context, op coreadapter.Operation) 
 	if a.s.options.Architect == nil {
 		return coreadapter.OperationResult{}, errNoArchitect
 	}
-	cfg := a.s.current()
+	cfg := a.s.about(a.repository)
 	for {
 		if err := ctx.Err(); err != nil {
 			return coreadapter.OperationResult{}, err

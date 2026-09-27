@@ -186,7 +186,7 @@ func (a *finalReviewer) Pass(ctx context.Context) error {
 // assemble moves a building workstream to assembled once every unit of its
 // sealed plan has merged, and does nothing while any has not.
 func (a *finalReviewer) assemble(ctx context.Context, stream config.WorkstreamID) error {
-	b, found, err := (&masons{s: a.s, cfg: a.s.current(), repository: a.repository}).read(stream)
+	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).read(stream)
 	if err != nil || !found {
 		return err
 	}
@@ -244,7 +244,7 @@ func (a *finalReviewer) governing(ctx context.Context, stream config.WorkstreamI
 	if !found {
 		return finalReviewInput{}, seal.Seal{}, fmt.Errorf("workstream %s has no seal", stream)
 	}
-	g, err := featureWorkspaces(a.s.current(), a.repository).of(stream)
+	g, err := featureWorkspaces(a.s.about(a.repository), a.repository).of(stream)
 	if err != nil {
 		return finalReviewInput{}, seal.Seal{}, err
 	}
@@ -286,7 +286,7 @@ func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID)
 	if scheduler.Paused(state.Pauses, a.repository.Project(), stream) {
 		return nil
 	}
-	b, found, err := (&masons{s: a.s, cfg: a.s.current(), repository: a.repository}).read(stream)
+	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).read(stream)
 	if err != nil || !found {
 		return err
 	}
@@ -445,7 +445,7 @@ func (a *finalReviewer) Inspect(ctx context.Context, op coreadapter.Operation) (
 	if !rebased {
 		return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("final review %d is not recorded and has recorded no rebase", in.Review)}, nil
 	}
-	g, err := featureWorkspaces(a.s.current(), a.repository).of(stream)
+	g, err := featureWorkspaces(a.s.about(a.repository), a.repository).of(stream)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -490,7 +490,7 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 		}
 		return *result, nil
 	}
-	cfg := a.s.current()
+	cfg := a.s.about(a.repository)
 	if !cfg.HasProject() || cfg.Project.ID != a.repository.Project() {
 		return coreadapter.OperationResult{}, errors.New("the project is not active")
 	}
@@ -809,7 +809,7 @@ func (a *finalReviewer) enqueue(ctx context.Context, cfg *config.Config, stream 
 func (a *finalReviewer) dispatch(ctx context.Context, stream config.WorkstreamID, in finalReviewInput, report FinalReport, member, turn string) (coreadapter.OperationResult, error) {
 	ctx, release := a.s.stoppable(ctx, a.repository.Project(), stream)
 	defer release()
-	dispatcher := thread.Dispatcher{Runner: a.s.threadRunner(a.s.current(), a.repository, a.turns(stream, in, report), a.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	dispatcher := thread.Dispatcher{Runner: a.s.threadRunner(a.s.about(a.repository), a.repository, a.turns(stream, in, report), a.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(a.turnDirectory(input.Workstream, input.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 	}}
@@ -965,7 +965,7 @@ func (a *finalReviewer) documents(stream config.WorkstreamID, report FinalReport
 // selectView stages the reader's view for the claimed turn and selects all of
 // it, read-only.
 func (a *finalReviewer) selectView(ctx context.Context, scope coreadapter.Scope, stream config.WorkstreamID, report FinalReport) (isolation.Selection, error) {
-	cfg := a.s.current()
+	cfg := a.s.about(a.repository)
 	if scope.Role != committeeRole || scope.Workstream != string(stream) || scope.Project != string(a.repository.Project()) || !cfg.HasProject() || cfg.Project.ID != a.repository.Project() {
 		return isolation.Selection{}, errors.New("view selection denied")
 	}
@@ -1293,7 +1293,7 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 			return report, fmt.Sprintf("final review %d has an unresolved gap for %s; follow-up units must land and a new final review is required", report.Review, c.Criterion), nil
 		}
 	}
-	b, found, err := (&masons{s: a.s, cfg: a.s.current(), repository: a.repository}).read(stream)
+	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).read(stream)
 	if err != nil {
 		return report, "", err
 	}

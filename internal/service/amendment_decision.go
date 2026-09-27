@@ -652,7 +652,7 @@ func (a amendmentDebate) deliverRuling(ctx context.Context, stream config.Workst
 			system = t.Request.SystemPrompt
 		}
 	}
-	profile, _, err := a.s.roleExecution(a.s.current(), th.Identity.Role)
+	profile, _, err := a.s.roleExecution(a.s.about(a.repository), th.Identity.Role)
 	if err != nil {
 		return err
 	}

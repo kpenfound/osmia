@@ -14,31 +14,43 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// statuses reports every workstream of the active project, or none when no
-// project or trace is active. The librarian's workstream carries no feature
-// and is left out. A workstream whose agent turns, unit states, overlap
-// advisories or drift rebases cannot be read is reported without them and its
-// first such failure in unreadable, by workstream.
+// statuses reports every workstream of every active project, project by
+// project in active_projects order, or none when no project or trace is
+// active. The librarian's workstream carries no feature and is left out. A
+// workstream whose agent turns, unit states, overlap advisories or drift
+// rebases cannot be read is reported without them and its first such failure
+// in unreadable, by workstream.
 func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagnostic, *APIError) {
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
+	cfg, projects := s.runtimes()
 	out := []WorkstreamStatus{}
 	unreadable := map[config.WorkstreamID]Diagnostic{}
-	if !cfg.HasProject() || active == nil {
-		return out, unreadable, nil
+	for _, active := range projects {
+		if !cfg.Active(active.id) {
+			continue
+		}
+		list, api := s.projectStatuses(active, unreadable)
+		if api != nil {
+			return nil, nil, api
+		}
+		out = append(out, list...)
 	}
+	return out, unreadable, nil
+}
+
+// projectStatuses reports every workstream of one project, as statuses does.
+func (s *Service) projectStatuses(active *activeProject, unreadable map[config.WorkstreamID]Diagnostic) ([]WorkstreamStatus, *APIError) {
+	out := []WorkstreamStatus{}
 	list, err := active.repository.Statuses()
 	if err != nil {
-		return nil, nil, &APIError{Internal, fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", cfg.Project.ID)}
+		return nil, &APIError{Internal, fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
 	}
-	mode := s.Context().Mode(cfg.Project.ID)
-	librarian := librarianWorkstream(cfg.Project.ID)
+	mode := s.Context().Mode(active.id)
+	librarian := librarianWorkstream(active.id)
 	for _, w := range list {
 		if w.Workstream == librarian {
 			continue
 		}
-		view := statusView(cfg.Project.ID, mode, w)
+		view := statusView(active.id, mode, w)
 		agents, err := agentStatuses(active.repository, w.Workstream, time.Now())
 		if err == nil {
 			err = s.step("status-agents")
@@ -84,7 +96,7 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 		}
 		out = append(out, view)
 	}
-	return out, unreadable, nil
+	return out, nil
 }
 
 func agentStatuses(repository *trace.Repository, stream config.WorkstreamID, now time.Time) ([]AgentStatus, error) {
@@ -181,36 +193,37 @@ func (s *Service) statusList() StatusResponse {
 	return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: diagnostics, Workspaces: workspaces}
 }
 
-// failureStreaks returns the active project's nonzero infrastructure failure
-// streaks, ordered by role and profile, or none when no project is active.
+// failureStreaks returns the nonzero infrastructure failure streaks across
+// every active project, ordered by role and profile, or none when no project
+// is active.
 func (s *Service) failureStreaks() ([]FailureStreak, error) {
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
-	if !cfg.HasProject() || active == nil {
-		return nil, nil
-	}
-	streams, err := active.repository.Workstreams()
-	if err != nil {
-		return nil, err
-	}
+	cfg, projects := s.runtimes()
 	type attempt struct {
 		role string
 		trace.TurnAttempt
 	}
 	var attempts []attempt
-	for _, stream := range streams {
-		threads, err := active.repository.Threads(stream)
+	for _, active := range projects {
+		if !cfg.Active(active.id) {
+			continue
+		}
+		streams, err := active.repository.Workstreams()
 		if err != nil {
 			return nil, err
 		}
-		for _, th := range threads {
-			for _, q := range th.Turns {
-				for _, a := range q.Attempts {
-					// An attempt still running, or one a stop or restart
-					// cancelled, says nothing about the plumbing.
-					if a.Result != nil && !a.Result.Cancelled {
-						attempts = append(attempts, attempt{th.Identity.Role, a})
+		for _, stream := range streams {
+			threads, err := active.repository.Threads(stream)
+			if err != nil {
+				return nil, err
+			}
+			for _, th := range threads {
+				for _, q := range th.Turns {
+					for _, a := range q.Attempts {
+						// An attempt still running, or one a stop or restart
+						// cancelled, says nothing about the plumbing.
+						if a.Result != nil && !a.Result.Cancelled {
+							attempts = append(attempts, attempt{th.Identity.Role, a})
+						}
 					}
 				}
 			}
@@ -240,7 +253,7 @@ func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 	if err != nil {
 		return WorkstreamStatus{}, &APIError{Validation, "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
 	}
-	if !s.current().HasProject() {
+	if len(s.current().Projects) == 0 {
 		return WorkstreamStatus{}, &APIError{NoProject, "no project is configured; add one with osmia project add"}
 	}
 	list, unreadable, api := s.statuses()
@@ -255,7 +268,7 @@ func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 			return w, nil
 		}
 	}
-	return WorkstreamStatus{}, &APIError{NotFound, fmt.Sprintf("workstream %s is not in the active project; list workstreams with osmia status", id)}
+	return WorkstreamStatus{}, &APIError{NotFound, fmt.Sprintf("workstream %s is not in an active project; list workstreams with osmia status", id)}
 }
 
 func statusView(project config.ProjectID, mode bundle.Mode, w trace.WorkstreamStatus) WorkstreamStatus {

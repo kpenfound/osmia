@@ -33,7 +33,7 @@ func dailyBudgetService(t *testing.T, n int, backend coreadapter.Turns) (*Servic
 	budget.Budget.PerDay = "1.00"
 	s.cfg = &budget
 	s.options.Location = budgetZone
-	s.active = &activeProject{repository: repo}
+	s.setSole(&activeProject{repository: repo})
 	return s, a, repo, clock
 }
 
@@ -173,7 +173,7 @@ func TestOwnerClearSuppressesTheDailyBudgetForTheRestOfTheDay(t *testing.T) {
 	// A restart reopens the runtime store from disk.
 	cfg := *s.cfg
 	must(t, s.store.Close())
-	store, _, err := runtime.Open(runtime.Inputs{Config: &cfg, Workstreams: []config.WorkstreamID{stream}})
+	store, _, err := runtime.Open(runtime.Inputs{Config: &cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{stream}}})
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s.store = store

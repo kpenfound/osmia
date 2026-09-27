@@ -154,7 +154,7 @@ func (p *publisher) request(ctx context.Context, stream config.WorkstreamID) err
 	if _, reason, err := p.s.deliveryGate(ctx, p.repository, stream, approval.Description); err != nil || reason != "" {
 		return err
 	}
-	cfg := p.s.current()
+	cfg := p.s.about(p.repository)
 	if !cfg.HasProject() || cfg.Project.ID != p.repository.Project() {
 		return nil
 	}
@@ -293,7 +293,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		}
 		return *result, nil
 	}
-	cfg := p.s.current()
+	cfg := p.s.about(p.repository)
 	if !cfg.HasProject() || cfg.Project.ID != p.repository.Project() {
 		return coreadapter.OperationResult{}, errors.New("the project is not active")
 	}

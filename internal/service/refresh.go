@@ -316,7 +316,7 @@ func (r *refresher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 			if r.s.options.Librarian == nil {
 				return failedExtraction("this service has no librarian runner"), nil
 			}
-			cfg := r.s.current()
+			cfg := r.s.about(r.repository)
 			profile, _, err := r.s.roleExecution(cfg, librarianRole)
 			if err != nil {
 				return coreadapter.OperationResult{}, err

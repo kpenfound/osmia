@@ -48,7 +48,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
   inbox [--json]
-  answer <inbox-number> <ruling>|--accept [--json]
+  answer <inbox-number> <ruling>|--accept [--project ID] [--json]
   charter [<workstream-id> <question> [ratify|decline [note]]] [--json]
   contested <workstream> <unit> <review|revise> <note> [--json]
   pause <all|project-id|workstream-id> [--hard] [--reason TEXT] [--json]
@@ -62,7 +62,7 @@ Only these commands are available; serve runs in the foreground.
 `
 
 type options struct {
-	root, socket, reason                        string
+	root, socket, reason, project               string
 	upstream, fork, clone, baseBranch           string
 	json, hard, reasonSet, help, target, accept bool
 	skipDebate, version                         bool
@@ -83,7 +83,7 @@ func parse(args []string) (o options, err error) {
 		}
 		seen[key] = true
 		switch key {
-		case "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch":
+		case "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -114,6 +114,8 @@ func parse(args []string) (o options, err error) {
 			case "--base-branch":
 				o.baseBranch = value
 				o.target = true
+			case "--project":
+				o.project = value
 			}
 		case "--json", "--hard", "--skip-debate", "--accept", "--version", "--help", "-h":
 			if has {
@@ -228,7 +230,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase")
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
-	if !valid || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && o.skipDebate || cmd != "answer" && o.accept || cmd == "serve" && (o.json || o.socket != "") {
+	if !valid || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && o.skipDebate || cmd != "answer" && (o.accept || o.project != "") || cmd == "serve" && (o.json || o.socket != "") {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -259,6 +261,20 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	noProject := func() int {
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
 		return 4
+	}
+	// refuse reports why a command found no project to act on: none is
+	// configured, several are and the command names no workstream, or the
+	// workstream it names is in none of them.
+	refuse := func(err error) int {
+		var api *service.APIError
+		if errors.As(err, &api) && api.Code == service.NoProject {
+			return noProject()
+		}
+		if errors.As(err, &api) && (api.Code == service.Validation || api.Code == service.NotFound) {
+			fmt.Fprintf(stderr, "%s: %s\n", api.Code, api.Message)
+			return 4
+		}
+		return fail(err)
 	}
 	if cmd == "project" && a[0] == "extract" {
 		id, err := config.ParseProjectID(a[1])
@@ -690,17 +706,39 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err != nil || number < 1 {
 			return invalid()
 		}
+		var project config.ProjectID
+		if o.project != "" {
+			if project, err = config.ParseProjectID(o.project); err != nil {
+				return invalid()
+			}
+		}
+		// The inbox names the project of each escalation, so an entry number
+		// that only one project carries needs no --project.
+		list, err := c.Inbox(ctx)
+		if err != nil && o.accept {
+			return fail(err)
+		}
+		var matches []service.InboxEntry
+		for _, entry := range list.Entries {
+			if entry.Kind == service.InboxEscalation && entry.Number == number && (project == "" || entry.Project == project) {
+				matches = append(matches, entry)
+			}
+		}
+		if len(matches) > 1 {
+			ids := make([]string, len(matches))
+			for i, m := range matches {
+				ids[i] = string(m.Project)
+			}
+			fmt.Fprintf(stderr, "validation: inbox entry %d is open in projects %s; name one with --project\n", number, strings.Join(ids, ", "))
+			return 4
+		}
+		if len(matches) == 1 {
+			project = matches[0].Project
+		}
 		ruling := ""
 		if o.accept {
-			list, err := c.Inbox(ctx)
-			if err != nil {
-				return fail(err)
-			}
-			for _, entry := range list.Entries {
-				if entry.Kind == service.InboxEscalation && entry.Number == number {
-					ruling = entry.QuickReply
-					break
-				}
+			if len(matches) == 1 {
+				ruling = matches[0].QuickReply
 			}
 			if ruling == "" {
 				fmt.Fprintf(stderr, "validation: inbox entry %d has no eligible quick reply; give a ruling explicitly\n", number)
@@ -709,7 +747,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		} else {
 			ruling = a[1]
 		}
-		result, err := c.Answer(ctx, number, ruling)
+		result, err := c.Answer(ctx, number, ruling, project)
 		if err != nil {
 			return fail(err)
 		}
@@ -822,11 +860,12 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				if cfg.Effective == nil {
 					return fail(errors.New("missing configuration"))
 				}
-				if cfg.Project == nil {
-					return noProject()
+				project, err := projectOf(ctx, c, cfg, w)
+				if err != nil {
+					return refuse(err)
 				}
 				target.Scope = "workstream"
-				target.Project = cfg.Effective.Project.ID
+				target.Project = project
 				target.Workstream = w
 			} else {
 				return invalid()
@@ -862,10 +901,14 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if cfg.Effective == nil {
 			return fail(errors.New("missing configuration"))
 		}
-		if cfg.Project == nil {
-			return noProject()
+		var stream config.WorkstreamID
+		if len(ids) > 0 {
+			stream = ids[0]
 		}
-		project := cfg.Effective.Project.ID
+		project, err := projectOf(ctx, c, cfg, stream)
+		if err != nil {
+			return refuse(err)
+		}
 		scope = string(project)
 		kind = "priority"
 		if a[0] == "clear" {
@@ -914,6 +957,30 @@ func output(w, stderr io.Writer, v any) int {
 	}
 	return 0
 }
+
+// projectOf returns the project a command about stream acts on: the only
+// active project, or, while several are active, the project stream belongs
+// to. Without a stream several active projects are refused.
+func projectOf(ctx context.Context, c *service.Client, cfg service.ConfigResponse, stream config.WorkstreamID) (config.ProjectID, error) {
+	switch {
+	case cfg.Project != nil:
+		return cfg.Project.ID, nil
+	case len(cfg.Projects) == 0:
+		return "", &service.APIError{Code: service.NoProject, Message: "no project is configured; add one with osmia project add"}
+	case stream == "":
+		ids := make([]string, len(cfg.Projects))
+		for i, p := range cfg.Projects {
+			ids[i] = string(p.ID)
+		}
+		return "", &service.APIError{Code: service.Validation, Message: "several projects are active (" + strings.Join(ids, ", ") + "); name a workstream of the project"}
+	}
+	st, err := c.Status(ctx, stream)
+	if err != nil {
+		return "", err
+	}
+	return st.Project, nil
+}
+
 func showProject(w io.Writer, p *service.ProjectView) {
 	if p == nil {
 		fmt.Fprintln(w, "Project: none configured; add one with osmia project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH")

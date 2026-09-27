@@ -321,7 +321,7 @@ func (a amendmentDebate) round(ctx context.Context, op coreadapter.Operation, st
 	records := roundRecords(all, n)
 	if len(records) == 0 {
 		in := roundInput{Round: n, Spec: 1, Plan: 1, Amendment: id}
-		cfg := a.s.current()
+		cfg := a.s.about(a.repository)
 		records = make([]shed.Record, len(members))
 		failures := make([]error, len(members))
 		waiting := make([]string, len(members))
@@ -431,7 +431,7 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 		if err := a.s.held(a.repository, stream); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		next, err := a.s.continueStopped(ctx, a.repository, a.s.current(), architectRole, *queued)
+		next, err := a.s.continueStopped(ctx, a.repository, a.s.about(a.repository), architectRole, *queued)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
@@ -454,7 +454,7 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 			return coreadapter.OperationResult{}, err
 		}
 		turn := fmt.Sprintf("%s%d", prefix, attempts+1)
-		profile, _, err := a.s.roleExecution(a.s.current(), architectRole)
+		profile, _, err := a.s.roleExecution(a.s.about(a.repository), architectRole)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
@@ -463,7 +463,7 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 			lines = append(lines, fmt.Sprintf("%s (%s on %s): %s", e.ID, e.Kind, e.Part, e.Argument))
 		}
 		prompt := fmt.Sprintf("Answer once for amendment %s, round %d. Read request.json, affected.json, spec.md, plan.json, charter.md and context.md. Use %s to answer each standing objection. You answer this round once; do not redraft or decide for the owner. Dissent: %s", id, n, shed.ReplyTool, strings.Join(lines, "; "))
-		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: architectActor, Cause: op.ID, Depth: 1}, AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: architectSystemPrompt(a.s.current().Project), Prompt: prompt}
+		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: architectActor, Cause: op.ID, Depth: 1}, AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: architectSystemPrompt(a.s.about(a.repository).Project), Prompt: prompt}
 		if _, err := a.repository.EnqueueTurn(ctx, req); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
@@ -489,7 +489,7 @@ func (a amendmentDebate) reply(ctx context.Context, op coreadapter.Operation, st
 			}
 		}
 		path := a.replyTurns(stream, id, n, open)
-		dispatcher := thread.Dispatcher{Runner: a.s.threadRunner(a.s.current(), a.repository, &questions.Turns{Turns: path, Repository: a.repository}, a.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
+		dispatcher := thread.Dispatcher{Runner: a.s.threadRunner(a.s.about(a.repository), a.repository, &questions.Turns{Turns: path, Repository: a.repository}, a.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 			dir := filepath.Join(a.drafter().turnDirectory(input.Workstream, input.Turn), "session")
 			return coreadapter.PreparedTurn{SessionDirectory: dir}, os.MkdirAll(dir, 0700)
 		}}
@@ -583,7 +583,7 @@ func (a amendmentDebate) replied(stream config.WorkstreamID, t trace.Thread, q *
 }
 
 func (a amendmentDebate) replyTurns(stream config.WorkstreamID, id string, n int, open []shed.Entry) *isolation.Turns {
-	cfg := a.s.current()
+	cfg := a.s.about(a.repository)
 	var engine coreadapter.Engine
 	var hosts coreadapter.MCPHosts
 	if cfg != nil && a.s.options.Architect != nil {

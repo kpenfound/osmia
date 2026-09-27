@@ -148,7 +148,7 @@ func hardPauseRepository(t *testing.T, n int) (*config.Config, *trace.Repository
 // turns, and an abandonable reconciler running turns through backend.
 func hardPauseService(t *testing.T, cfg *config.Config, repo *trace.Repository, clock *demoClock, backend coreadapter.Turns) (*Service, abandonable) {
 	t.Helper()
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: []config.WorkstreamID{stream}})
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{stream}}})
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}, store: store}

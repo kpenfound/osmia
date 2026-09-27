@@ -334,7 +334,7 @@ func (r replier) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		}
 		return *result, nil
 	}
-	cfg := d.s.current()
+	cfg := d.s.about(d.repository)
 	if !cfg.HasProject() || cfg.Project.ID != d.repository.Project() {
 		return none, errors.New("the project is not active")
 	}
@@ -792,7 +792,7 @@ func (d *debate) dispatchReply(ctx context.Context, stream config.WorkstreamID, 
 	ctx, release := d.s.stoppable(ctx, d.repository.Project(), stream)
 	defer release()
 	dr := d.drafter()
-	dispatcher := thread.Dispatcher{Runner: d.s.threadRunner(d.s.current(), d.repository, &questions.Turns{Turns: d.replyPath(stream, in), Repository: d.repository}, d.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	dispatcher := thread.Dispatcher{Runner: d.s.threadRunner(d.s.about(d.repository), d.repository, &questions.Turns{Turns: d.replyPath(stream, in), Repository: d.repository}, d.s.now), Prepare: func(_ context.Context, input thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(dr.turnDirectory(input.Workstream, input.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 	}}
@@ -877,7 +877,7 @@ func (d *debate) replyPath(stream config.WorkstreamID, in roundInput) *isolation
 // selectReplyView stages the architect's view for the claimed turn and
 // selects all of it, read-only.
 func (d *debate) selectReplyView(ctx context.Context, scope coreadapter.Scope, in roundInput) (isolation.Selection, error) {
-	cfg := d.s.current()
+	cfg := d.s.about(d.repository)
 	if scope.Role != architectRole || scope.Project != string(d.repository.Project()) || !cfg.HasProject() || cfg.Project.ID != d.repository.Project() {
 		return isolation.Selection{}, errors.New("view selection denied")
 	}

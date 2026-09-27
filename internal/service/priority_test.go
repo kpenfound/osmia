@@ -157,7 +157,7 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 	if got := order(c); !slices.Equal(got, []config.WorkstreamID{stream}) {
 		t.Fatalf("refused orders changed the priority to %v", got)
 	}
-	if got := changes(s.active.repository); len(got) != 0 {
+	if got := changes(s.sole().repository); len(got) != 0 {
 		t.Fatalf("refused orders were recorded: %+v", got)
 	}
 
@@ -222,7 +222,7 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 			t.Fatalf("priority record %+v", p)
 		}
 	}
-	check(changes(s.active.repository))
+	check(changes(s.sole().repository))
 
 	// A new service lifetime reads the same order and the same record.
 	c.Close()
@@ -236,7 +236,7 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 	if !reflect.DeepEqual(reopened.Effective.Pauses, paused.Effective.Pauses) {
 		t.Fatalf("chief pause after restart: %+v", reopened.Effective.Pauses)
 	}
-	check(changes(s.active.repository))
+	check(changes(s.sole().repository))
 	st, _ := s.store.Effective()
 	if !reflect.DeepEqual(st.Priorities, []runtime.Priority{{Project: project, Workstreams: want}}) {
 		t.Fatalf("scheduler priorities %+v", st.Priorities)

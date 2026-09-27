@@ -18,26 +18,38 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// inbox lists the active project's open owner decisions, oldest first, or
-// none when no project or trace is active. Decisions of abandoned workstreams
-// are left out.
+// inbox lists the open owner decisions of every active project, oldest
+// first, or none when no project or trace is active. Decisions of abandoned
+// workstreams are left out.
 func (s *Service) inbox(ctx context.Context) (InboxResponse, *APIError) {
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
+	cfg, projects := s.runtimes()
 	out := InboxResponse{Entries: []InboxEntry{}}
-	if !cfg.HasProject() || active == nil {
-		return out, nil
+	for _, active := range projects {
+		if !cfg.Active(active.id) {
+			continue
+		}
+		entries, api := s.projectInbox(ctx, active)
+		if api != nil {
+			return InboxResponse{}, api
+		}
+		out.Entries = append(out.Entries, entries...)
 	}
-	failed := &APIError{Internal, fmt.Sprintf("cannot read the inbox of project %s; check the trace repository", cfg.Project.ID)}
+	slices.SortStableFunc(out.Entries, func(a, b InboxEntry) int { return a.OpenedAt.Compare(b.OpenedAt) })
+	return out, nil
+}
+
+// projectInbox lists the open owner decisions of one project.
+func (s *Service) projectInbox(ctx context.Context, active *activeProject) ([]InboxEntry, *APIError) {
+	out := InboxResponse{Entries: []InboxEntry{}}
+	failed := &APIError{Internal, fmt.Sprintf("cannot read the inbox of project %s; check the trace repository", active.id)}
 	repository := active.repository
 	statuses, err := repository.Statuses()
 	if err != nil {
-		return InboxResponse{}, failed
+		return nil, failed
 	}
 	escalations, err := repository.Inbox()
 	if err != nil {
-		return InboxResponse{}, failed
+		return nil, failed
 	}
 	gone := map[config.WorkstreamID]bool{}
 	for _, w := range statuses {
@@ -49,17 +61,23 @@ func (s *Service) inbox(ctx context.Context) (InboxResponse, *APIError) {
 		}
 	}
 	for _, w := range statuses {
-		if gone[w.Workstream] || w.Workstream == librarianWorkstream(cfg.Project.ID) {
+		if gone[w.Workstream] || w.Workstream == librarianWorkstream(active.id) {
 			continue
 		}
 		entries, err := s.openDecisions(ctx, repository, w)
 		if err != nil {
-			return InboxResponse{}, failed
+			return nil, failed
 		}
 		out.Entries = append(out.Entries, entries...)
 	}
-	slices.SortStableFunc(out.Entries, func(a, b InboxEntry) int { return a.OpenedAt.Compare(b.OpenedAt) })
-	return out, nil
+	for i := range out.Entries {
+		e := &out.Entries[i]
+		e.Project = active.id
+		if e.Kind == InboxEscalation {
+			e.Answer.Body["project"] = string(active.id)
+		}
+	}
+	return out.Entries, nil
 }
 
 func inboxView(e trace.InboxEntry) InboxEntry {
@@ -186,7 +204,7 @@ func (s *Service) contestedEntry(repository *trace.Repository, stream config.Wor
 	case mason:
 		options = []string{"revise"}
 	default:
-		r := &reviewers{masons: &masons{s: s, cfg: s.current(), repository: repository}}
+		r := &reviewers{masons: &masons{s: s, cfg: s.about(repository), repository: repository}}
 		result, ok, err := r.storedResult(stream, unit, state)
 		if err != nil {
 			return InboxEntry{}, false, err
@@ -332,12 +350,11 @@ func (s *Service) answer(ctx context.Context, raw string, req AnswerRequest) (An
 	if err != nil || number < 1 || strconv.Itoa(number) != raw {
 		return AnswerResponse{}, &APIError{Validation, "inbox entry must be a number from osmia inbox"}
 	}
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
-	if !cfg.HasProject() {
-		return AnswerResponse{}, &APIError{NoProject, "no project is configured; add one with osmia project add"}
+	project, api := s.projectFor(req.Project)
+	if api != nil {
+		return AnswerResponse{}, api
 	}
+	_, active := s.runtimeOf(project)
 	unknown := &APIError{Validation, fmt.Sprintf("there is no inbox entry %d; list the entries with osmia inbox", number)}
 	if active == nil {
 		return AnswerResponse{}, unknown

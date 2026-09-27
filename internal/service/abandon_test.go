@@ -104,8 +104,8 @@ func TestAbandonRefusals(t *testing.T) {
 	}{
 		{"delivered", delivered, `{"reason":"r"}`, http.StatusConflict, "is delivered and cannot be abandoned"},
 		{"empty reason", handed, `{"reason":" "}`, 422, "reason must not be empty"},
-		{"unknown", unknown, `{"reason":"r"}`, 422, "is not in the active project"},
-		{"librarian", librarianWorkstream(f.project), `{"reason":"r"}`, 422, "is not in the active project"},
+		{"unknown", unknown, `{"reason":"r"}`, 422, "is not in an active project"},
+		{"librarian", librarianWorkstream(f.project), `{"reason":"r"}`, 422, "is not in an active project"},
 		{"malformed ID", "w_x", `{"reason":"r"}`, 422, "workstream must be a workstream ID"},
 		{"unknown field", handed, `{"reason":"r","force":true}`, http.StatusBadRequest, ""},
 	} {
