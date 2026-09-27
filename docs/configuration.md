@@ -244,21 +244,28 @@ its workspace, and forgets that workspace alone when its directory is gone.
 
 Registration is recoverable. If the service stops at any step, the journal makes
 the next start finish the registration with the same ID, or `osmia project add`
-run again finishes it. A retry never creates a second trace repository and an
-interrupted registration never blocks a retry: the same request returns the
-finished project, a different request while a project is active is refused with
-the active project's ID. A trace initialization that never committed is
+run again finishes it, whether or not other projects are active. A retry never
+creates a second trace repository and an interrupted registration never blocks
+a retry: the same request returns the finished project, and a different request
+finishes the interrupted registration instead and is refused with `conflict`,
+naming the project it finished; run it again to add that project too. A trace initialization that never committed is
 discarded and redone; one with history is kept. The extraction is requested
 once; a retry finds it in the trace and does not request another.
 
-Adding a project while one or more are active is refused, and the error names
-an active project; list further projects in `active_projects` and restart the
-service to run them together. Repeating an active project's exact registration
-returns it without change.
+A project added while others are active starts beside them. Repeating an active
+project's exact registration returns it without change.
 
 `osmia project remove <project-id>` (API: `DELETE /v1/projects`) removes the
-active ID from `active_projects` as a text edit and closes the project's runtime
-state; other active projects keep running. The trace directory and the owner's clone are not deleted. Adding the
+active ID from `active_projects` as a text edit and drains the project: it
+dispatches nothing new and requests no new work, the operations it already
+recorded (turns and landings in flight among them) finish, and then its loop
+stops and its trace closes. Its turns in flight keep their role slots until
+they finish. Status lists the project under `draining` until then, and the
+response lists, under `unfinished`, each workstream the trace leaves neither
+delivered nor abandoned, with its state. Other active projects keep running.
+A restart during the drain does not bring the project back: it is no longer
+listed, and its interrupted work stays in its trace. The trace directory and
+the owner's clone are not deleted. Adding the
 same upstream again afterwards generates a new project ID and a new trace
 repository; the archived trace stays untouched under `projects/<old-id>/` and is
 never reused, so archived history is immutable and every add is a fresh start.
@@ -324,9 +331,10 @@ these files; see [runtime overrides](runtime.md) for M1 persistence and resoluti
 `osmia config` shows whether each file on disk differs from what is loaded
 ([disk drift](service.md#disk-drift)), and `osmia reload` applies edited files
 to a running service after validating all of them ([reload](service.md#reload)). The root, `listen.socket`,
-`listen.web`, `listen.tailnet` and `active_projects` keep their loaded values until the service
-restarts; project registration and removal change the active project without
-one.
+`listen.web` and `listen.tailnet` keep their loaded values until the service
+restarts. A reload applies `active_projects` live: a listed project that is not
+running starts, and one no longer listed drains as `osmia project remove`
+drains it.
 
 The optional `[budget]` table accepts `per_session`, `per_unit` and `per_day` as
 positive decimal USD strings. `per_session` caps known spend on each new turn.

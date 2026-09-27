@@ -316,10 +316,8 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   `<trace>/charter.md`. The extraction runs in the service after the command
   returns; `status` shows its state, and the project is usable whether it
   succeeds or fails; after a failure `osmia project extract` starts a new
-  attempt. Adding a
-  project while one or more are active is refused and the error names an
-  active project. Repeating an active project's exact registration returns it
-  again.
+  attempt. The project starts beside any projects already active. Repeating
+  an active project's exact registration returns it again.
 - `project extract <project-id>` starts a new
   [knowledge-base extraction](knowledge-base.md#extraction) of the active
   project: a librarian turn that rewrites `kb/<subsystem>.md` and
@@ -337,10 +335,16 @@ a service restart. The [M2 exit demonstration](m2-exit.md) runs
   foreman runs the drift rebases on the project's lander once no landing or
   other drift rebase holds it; follow them with `status`. A project ID that is
   not the active project fails with `not_found` (exit 4).
-- `project remove <project-id>` takes the active project out of
-  `active_projects` and closes its runtime state. The trace directory and the
-  clone are kept. Adding the same upstream again afterwards creates a new
-  project ID and a new trace; see [configuration](configuration.md#project-registration).
+- `project remove <project-id>` takes the project out of `active_projects`
+  and drains it: it dispatches nothing new, lets the turns and landings
+  already in flight finish, then stops. The other active projects keep
+  running. The output lists each workstream the retained trace leaves
+  neither delivered nor abandoned (`Unfinished: <workstream> state=<state>`,
+  `none` when no state is recorded yet), and `status` shows
+  `Draining: <project-id> (<name>) trace=<path>` until the project stops. The
+  trace directory and the clone are kept. Adding the same upstream again
+  afterwards creates a new project ID and a new trace; see
+  [configuration](configuration.md#project-registration).
 - `handin <project-id> <path|issue-url|-> [--skip-debate]` hands one input to the active
   project and creates a workstream in state `handed`. The input is a file
   (made absolute by the client and read by the service), a GitHub issue URL
@@ -465,7 +469,7 @@ never raw file contents.
 | 2 | Invalid command, flags, arguments or root |
 | 3 | Missing socket, connection failure or unavailable service |
 | 4 | API malformed-input or validation rejection, no project is configured, unknown project or workstream, empty charter on hand-in, or stdin over the hand-in limit or not UTF-8 |
-| 5 | API conflict (including an extraction already running or abandoning a delivered or abandoned workstream), project already active, unsupported operation, restart required or internal failure |
+| 5 | API conflict (including an extraction already running, abandoning a delivered or abandoned workstream, or a project add that finished an interrupted registration instead), unsupported operation, restart required or internal failure |
 | 6 | Foreground startup/service failure, including ownership conflict |
 
 For exit 3, start the service and verify matching root/socket and permissions.

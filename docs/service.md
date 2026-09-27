@@ -215,21 +215,20 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 | --- | --- | --- |
 | `malformed_input` | 400 | Malformed, ambiguous, unknown-field or oversized JSON |
 | `validation` | 422 | Invalid override or unavailable reference |
-| `conflict` | 409 | Runtime file changed outside the store, an extraction requested while one is pending or running, or a hand-in key reused for other input |
+| `conflict` | 409 | Runtime file changed outside the store, an extraction requested while one is pending or running, a hand-in key reused for other input, or a project registration that finished an interrupted one instead |
 | `unsupported` | 501 | Unknown path/method or later-milestone operation |
 | `restart_required` | 409 | PUT `/config/root` or `/config/listen` |
 | `unavailable` | 503 | Service shutting down, or a hand-in under `workspaces = "jujutsu"` without a supported `jj`; also the client's code for transport failure |
 | `internal` | 500 | Storage or other internal failure, including an interrupted project registration |
 | `no_project` | 409 | The operation needs an active project and none is configured |
-| `project_active` | 409 | A project is active and registration refuses another |
 | `not_found` | 404 | The project ID is not an active project, or the workstream is not in one |
 | `charter_empty` | 409 | Hand-in refused: the project's charter has no rules |
 | `forbidden` | 403 | A web listener request with a non-loopback `Host`, a tailnet listener request whose `Host` is not an IP address or the node's name, or a write over either without a JSON content type |
 
 Project operations compose their messages from the request's fields and
-identities: a validation failure names the field at fault, `project_active`
-names the active project, and an incomplete registration names the project ID
-to finish. They never include raw file contents or parser output.
+identities: a validation failure names the field at fault, a registration
+that finished an interrupted one instead names that project, and an incomplete
+registration names the project ID to finish. They never include raw file contents or parser output.
 Client transport errors use `unavailable`: a timeout reports `no response within
 15s` (or the applicable call budget), a caller context deadline reports `no
 response before caller's context deadline`, and an unreachable or closed socket
@@ -426,15 +425,15 @@ hand-in to delivery on the page. They need a Chromium binary named by
 ## Projects
 
 `POST /v1/projects` registers a project and activates it in the running
-service, opening its new trace and reconciliation loop exactly as startup does.
+service beside the projects already active, opening its new trace and
+reconciliation loop exactly as startup does.
 Its response write deadline extends to 60 seconds so registration can finish
 beyond the server's default 10-second write timeout.
-`DELETE /v1/projects` removes an active project from configuration, stops its
-loop and releases its trace; the trace and the clone stay on disk, and the
-other active projects keep running. Both edit
-`config.toml` as text and replace the loaded configuration's project only, so
-`/config` keeps matching the disk. Validation, recovery after an interrupted
-registration and the rule that refuses a second registration are described in
+`DELETE /v1/projects` removes an active project from configuration and drains
+it; the other active projects keep running. Both edit
+`config.toml` as text and add or drop that project in the loaded configuration
+only, so `/config` keeps matching the disk. Validation and recovery after an
+interrupted registration are described in
 [configuration](configuration.md#project-registration). Without a project,
 `/config` and `/runtime` carry a `no_project` diagnostic, project-scoped
 overrides are rejected as validation failures, and `DELETE /v1/projects`
@@ -442,9 +441,21 @@ returns `no_project`. A registration interrupted by a service stop is finished
 at the next start; if that fails, the service starts with the configuration as
 loaded (without a project unless the registration had already listed it) and
 reports an `internal` diagnostic on `projects` until `POST /v1/projects` finishes
-it. A journal naming a project other than the active one is never finished:
-startup reports it, and `POST /v1/projects` refuses with the two IDs until the
-active project is removed or the journal is inspected.
+it.
+
+A draining project dispatches no turn and runs none of its schedule hooks, so
+it requests no new landing, rebase, round or draft; a pass already under way
+when it was removed runs no further hook and its dispatch admits nothing. Its
+loop goes on reconciling the operations its trace already records, turns and
+landings in flight among them, with the project settings it was removed with, and
+the context of its turns still reads its trace. Once every operation is
+acknowledged or held by a pause, the loop stops, the trace closes and leaves
+the capacity pool; until then its turns in flight hold their role slots.
+`GET /v1/status` lists it under `draining` (its project view) meanwhile, and
+the `DELETE /v1/projects` response lists its `unfinished` workstreams: each
+`workstream` the trace leaves neither delivered nor abandoned, with its feature
+`state`, empty before one is recorded. A project that is still draining cannot
+be listed again: a reload that lists it is refused with `validation`.
 
 `/config` reports each active project's `charter_state`: `ready`, the number of
 `rules`, the recorded `revision` and numbering `diagnostics`. Reading it records
@@ -469,9 +480,8 @@ pending or running `conflict`, naming the extraction to wait for.
 ## Reload
 
 `POST /v1/reload` (`osmia reload`) reads the top-level `config.toml` and the
-`config.toml` of every registered project (the active projects, and the
-projects `active_projects` lists when they differ) and validates them as one
-candidate. If any file fails, nothing changes: the loaded configuration and
+`config.toml` of every project `active_projects` lists and validates them as
+one candidate. If any file fails, nothing changes: the loaded configuration and
 its digest stay in force, the request fails with `validation` and a message
 naming the file, the field and why (a file that is not valid TOML is named
 with the line, never its text), and `/config` reports the failure as
@@ -487,14 +497,18 @@ the new configuration. An operation already running, such as a turn, finishes
 on the configuration it started with, and a queued turn keeps the profile it
 was queued with.
 
+The project list applies too: a project `active_projects` newly lists opens
+its trace, recovers its interrupted work and starts its loop as at startup,
+and a project it no longer lists [drains](#projects) as `DELETE /v1/projects`
+drains it. Listing a project that is still draining fails the reload with
+`validation` on `active_projects`.
+
 Some settings keep their loaded values until the service restarts; the
 response lists each one the files change in `restart_required`, and `/config`
 reports them in a `restart_required` diagnostic: `listen.socket`,
-`listen.web`, which keeps the bound listener, `listen.tailnet`, which keeps
-the joined node and its hostname, and
-`active_projects`, which in a running service only `project add` and
-`project remove` change. The root is an option of the service, not a setting
-of the files.
+`listen.web`, which keeps the bound listener, and `listen.tailnet`, which
+keeps the joined node and its hostname. The root is an option of the service,
+not a setting of the files.
 
 `runtime.json` is not read or written: pauses, priorities and profile
 overrides stay as they were. They are resolved against the new configuration,
@@ -2692,6 +2706,10 @@ project in `active_projects` order and in trace manifest order within one, excep
 | `workspaces` | The workstream's [workspace backend](#workspace-backends), `git` or `jujutsu` |
 | `agents` | Service-owned execution facts from durable thread snapshots, ordered by agent ID. One entry per active or parked waiting turn; empty for idle and completed threads. Each has `role`, `unit` (empty without a unit), `state` (`running`, `captured`, `waiting`, or `interrupted`), `started_at` (RFC 3339 timestamp of the turn claim), `elapsed` (whole wall-clock seconds since the claim, measured at the read for active or interrupted turns and through the response time for captured or waiting turns), and `profile` (the effective profile name). `attempt` (number) and `path` (`resume` or `replay`) appear when an attempt is recorded. A parked waiting turn also has `question_id`, the durable trace question number it asked. These facts do not alter the chief of staff's `status.agents` prose. |
 | `status` | `null` until the chief of staff writes one; otherwise `goal`, `attention` (empty when nothing needs the owner), `note`, `agents`, `revision` and `updated_at` |
+
+`GET /v1/status` also carries `draining`, the removed projects still
+[draining](#projects), in order of removal, omitted when there are none;
+`osmia status` prints one `Draining:` line for each.
 
 `GET /v1/status` also carries `daily_budget`, today's spend against
 `budget.per_day` ([daily budget](#daily-budget)), or `null` without one.
