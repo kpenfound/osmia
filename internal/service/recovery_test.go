@@ -57,7 +57,7 @@ func TestStartupRecoversClaimedAndUnclaimedSessionsForEveryRole(t *testing.T) {
 	// A prior startup may have recorded the interruption and stopped before
 	// it could queue the chief's continuation.
 	must(t, repo.AbandonTurn(ctx, stream, trace.ChiefOfStaff, "turn_"+trace.ChiefOfStaff, demoStart.Add(1)))
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: []config.WorkstreamID{stream}})
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{stream}}})
 	must(t, err)
 	defer store.Close()
 	s := &Service{cfg: cfg, store: store, options: opts}

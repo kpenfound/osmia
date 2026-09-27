@@ -108,7 +108,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	p := openBrowser(t)
 	f := newPageFixture(t)
 	ctx := context.Background()
-	live := f.s.active.repository
+	live := f.s.sole().repository
 	at := time.Now().UTC()
 	header := func(schema, id string, actor trace.Actor) trace.Header {
 		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, At: at, Actor: actor, Cause: "planted"}

@@ -78,7 +78,7 @@ func approveAmendment(t *testing.T, f *shedFixture, repository *trace.Repository
 		document("amendment_1_affected", "amendments/1/affected.json", string(affected)), document("amendment-1-presented-packet", amendmentPacketPath("1"), `{"round":1}`+"\n"),
 	}, trace.Transaction{Transition: trace.Transition{Header: header("osmia.trace.transition", "amendment-1-presented", shedActor), Subject: amendmentSubject("1"), To: amendmentPresented, Reason: "presented"}})
 	must(t, err)
-	f.s.active = &activeProject{repository: repository}
+	f.s.setSole(&activeProject{repository: repository})
 	out, api := f.s.decideAmendment(ctx, string(stream), "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Note: "Checkpoints are what we meant.", Packet: 1})
 	if api != nil || out.State != amendmentApproved {
 		t.Fatalf("approval %+v %v", out, api)

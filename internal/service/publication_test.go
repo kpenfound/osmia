@@ -154,7 +154,7 @@ func (p *publicationFixture) reopen(t *testing.T) {
 	t.Cleanup(func() { reopened.Close() })
 	p.repository = reopened
 	p.s.mu.Lock()
-	p.s.active = &activeProject{repository: reopened}
+	p.s.setSole(&activeProject{repository: reopened})
 	p.s.mu.Unlock()
 }
 

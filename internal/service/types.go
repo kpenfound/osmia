@@ -80,13 +80,16 @@ type Diagnostic struct {
 }
 
 // ConfigResponse contains validated fields only, never raw configuration text.
-// Project is null until a project is registered. LastError is the last failed
-// reload, until a reload succeeds.
+// Project is the only active project: null until a project is registered and
+// while several are active. Projects lists every active project, in
+// active_projects order. LastError is the last failed reload, until a reload
+// succeeds.
 type ConfigResponse struct {
 	Root        string         `json:"root"`
 	Digest      string         `json:"digest"`
 	Effective   *config.Config `json:"effective"`
 	Project     *ProjectView   `json:"project"`
+	Projects    []ProjectView  `json:"projects,omitempty"`
 	Diagnostics []Diagnostic   `json:"diagnostics"`
 	LastError   *ReloadError   `json:"last_error,omitempty"`
 	// Drift compares the configuration files on disk with the loaded
@@ -105,7 +108,7 @@ const (
 	ConfigInvalid   = "invalid"
 )
 
-// ConfigDrift lists the top-level configuration file, then the active
+// ConfigDrift lists the top-level configuration file, then each active
 // project's, and any other file a reload would refuse. Differs is true when
 // any of them is not unchanged.
 type ConfigDrift struct {

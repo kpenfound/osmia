@@ -22,7 +22,7 @@ import (
 func (f *pageFixture) answerChief(t *testing.T, ws config.WorkstreamID, turn, final string) {
 	t.Helper()
 	ctx := context.Background()
-	repo := f.s.active.repository
+	repo := f.s.sole().repository
 	thread, err := repo.ChiefOfStaffThread(ws)
 	must(t, err)
 	i := slices.IndexFunc(thread.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == turn })
@@ -81,7 +81,7 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 
 	// The chief of staff takes the message and answers it; the page follows
 	// each step without a reload.
-	q, err := f.s.active.repository.ClaimTurn(ctx, quiet, trace.ChiefOfStaff, "token_message", t.TempDir(), time.Now().UTC())
+	q, err := f.s.sole().repository.ClaimTurn(ctx, quiet, trace.ChiefOfStaff, "token_message", t.TempDir(), time.Now().UTC())
 	must(t, err)
 	if q.Request.TurnID != turn {
 		t.Fatalf("claimed %s, not the message's turn %s", q.Request.TurnID, turn)

@@ -48,7 +48,7 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s, _, repo, clock := dailyBudgetService(t, 0, &adaptertest.Turns{})
-	must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: []config.WorkstreamID{stream, sibling}}))
+	must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{stream, sibling}}}))
 	cfg := *s.cfg
 	cfg.Capacity = config.Capacity{Masons: 1, Reviewers: 1, Committee: 3, PerWorkstream: 5}
 	cfg.Project.Capacity.PerWorkstream = 2
@@ -211,7 +211,7 @@ func TestStatusReportsProviderUsage(t *testing.T) {
 	cfg.Roles[reviewerRole] = config.Role{Profile: "solo"}
 	cfg.Roles[trace.ChiefOfStaff] = config.Role{Profile: "other"}
 	s.cfg = &cfg
-	must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: []config.WorkstreamID{stream}}))
+	must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{stream}}}))
 	limit := runtime.ProviderLimit{Backend: "claude", Status: "rejected", Kind: "five_hour", SetAt: clock.Now(), ResetsAt: clock.Now().Add(time.Hour)}
 	must(t, s.store.SetProviderLimit(limit))
 

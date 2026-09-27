@@ -122,7 +122,7 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	_, err = repo.ClaimTurn(ctx, stream, masonAgent("resume"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), masonAgent("resume"), masonTurnID("resume")), f.clock.Now())
 	must(t, err)
 	must(t, repo.Close())
-	store, _, err := runtime.Open(runtime.Inputs{Config: f.s.cfg, Workstreams: []config.WorkstreamID{stream}})
+	store, _, err := runtime.Open(runtime.Inputs{Config: f.s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{f.s.cfg.Project.ID: []config.WorkstreamID{stream}}})
 	must(t, err)
 	must(t, store.SetProfile(masonRole, "other"))
 	f.s.store = store

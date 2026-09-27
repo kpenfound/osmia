@@ -287,7 +287,7 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 	if len(calls) != 2 || calls[0].Profile.Name != "default" || calls[1].Profile.Name != "other" {
 		t.Fatalf("turn profiles: %+v", calls)
 	}
-	if got := s.active.pipeline.current.Load().cfg; got != s.current() {
+	if got := s.sole().pipeline.current.Load().cfg; got != s.current() {
 		t.Fatal("the running project's passes do not use the reloaded configuration")
 	}
 }

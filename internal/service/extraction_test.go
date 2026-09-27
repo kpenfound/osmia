@@ -53,8 +53,8 @@ func awaitExtractionAcknowledged(t *testing.T, s *Service) {
 	t.Helper()
 	deadline := time.Now().Add(demoTimeout)
 	for {
-		if s.active != nil {
-			ops, err := s.active.repository.Operations(librarianWorkstream(s.active.repository.Project()))
+		if s.sole() != nil {
+			ops, err := s.sole().repository.Operations(librarianWorkstream(s.sole().repository.Project()))
 			must(t, err)
 			extractions, acknowledged := 0, 0
 			for _, o := range ops {
@@ -289,7 +289,7 @@ func checkLibrarianBoundary(ctx context.Context, req agent.Request, verified *ag
 
 func operationsOf(t *testing.T, s *Service, id config.ProjectID) []trace.OperationRecord {
 	t.Helper()
-	ops, err := s.active.repository.Operations(librarianWorkstream(id))
+	ops, err := s.sole().repository.Operations(librarianWorkstream(id))
 	must(t, err)
 	var out []trace.OperationRecord
 	for _, o := range ops {
@@ -367,7 +367,7 @@ func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 	// The write is keyed by the operation: applying the operation again, as a
 	// retry after a stop between recording and the result would, records
 	// nothing and reports the recorded result.
-	again := &extractor{s: s, repository: s.active.repository}
+	again := &extractor{s: s, repository: s.sole().repository}
 	sameResult := func(got *coreadapter.OperationResult) bool {
 		var a, b struct{ Subsystems, Removed []string }
 		return got != nil && got.Outcome == ops[0].Result.Outcome && got.Evidence == ops[0].Result.Evidence &&
@@ -684,7 +684,7 @@ func TestExtractionSurvivesRestart(t *testing.T) {
 	if runs := f.runs(); !slices.Equal(runs, []string{"extract-1-1", "extract-1-3"}) {
 		t.Fatalf("backend runs %v", runs)
 	}
-	th, err = s.active.repository.Thread(stream, librarianAgent)
+	th, err = s.sole().repository.Thread(stream, librarianAgent)
 	must(t, err)
 	if len(th.Turns) != 3 || th.Turns[1].Status() != "interrupted" || th.Turns[1].Response.Failure == "" || th.Turns[2].Status() != "idle" || th.Active != "" {
 		t.Fatalf("thread after recovery: %+v", th)
@@ -819,8 +819,8 @@ func TestSchedulerLeavesLibrarianTurnsToTheExtractor(t *testing.T) {
 	if x := awaitExtraction(t, c); x.Extraction != 1 || x.State != "succeeded" {
 		t.Fatalf("first extraction: %+v", x)
 	}
-	must(t, s.active.repository.CreateWorkstream(ctx, stream, f.clock.Now(), ownerActor))
-	gate := s.admit(s.current(), s.active.repository)
+	must(t, s.sole().repository.CreateWorkstream(ctx, stream, f.clock.Now(), ownerActor))
+	gate := s.admit(s.current(), s.sole().repository)
 	if admitted, err := gate(ctx, scheduler.Candidate{Workstream: librarianWorkstream(id)}); err != nil || admitted {
 		t.Fatalf("librarian workstream admitted: %t %v", admitted, err)
 	}
@@ -850,7 +850,7 @@ func TestSchedulerLeavesLibrarianTurnsToTheExtractor(t *testing.T) {
 	if runs := f.runs(); !slices.Equal(runs, []string{"extract-1-1", "extract-2-1"}) {
 		t.Fatalf("backend runs %v", runs)
 	}
-	ops, err := s.active.repository.Operations(librarianWorkstream(id))
+	ops, err := s.sole().repository.Operations(librarianWorkstream(id))
 	must(t, err)
 	for _, o := range ops {
 		if o.Operation.Action != ExtractAction {
@@ -919,7 +919,7 @@ func TestExtractionRecordsPersistedOutputAfterRestart(t *testing.T) {
 			if runs := f.runs(); !slices.Equal(runs, []string{"extract-1-1"}) {
 				t.Fatalf("backend runs %v", runs)
 			}
-			th, err := s.active.repository.Thread(stream, librarianAgent)
+			th, err := s.sole().repository.Thread(stream, librarianAgent)
 			must(t, err)
 			if len(th.Turns) != 2 || th.Turns[1].Status() != "idle" || th.Active != "" {
 				t.Fatalf("thread after recovery: %+v", th)

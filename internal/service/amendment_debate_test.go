@@ -86,7 +86,7 @@ func TestAmendmentShedPresentation(t *testing.T) {
 			repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 			must(t, err)
 			defer repo.Close()
-			f.s.active = &activeProject{repository: repo}
+			f.s.setSole(&activeProject{repository: repo})
 			proposedAmendment(t, f, repo, stream)
 			a := amendmentDebate{&debate{s: f.s, repository: repo}}
 			must(t, a.Pass(context.Background()))
@@ -183,7 +183,7 @@ func TestAmendmentRoundResumesCompletedMember(t *testing.T) {
 	f.stop(t)
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
-	f.s.active = &activeProject{repository: repo}
+	f.s.setSole(&activeProject{repository: repo})
 	proposedAmendment(t, f, repo, stream)
 	a := amendmentDebate{&debate{s: f.s, repository: repo}}
 	must(t, a.Pass(context.Background()))
@@ -197,7 +197,7 @@ func TestAmendmentRoundResumesCompletedMember(t *testing.T) {
 	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	defer repo.Close()
-	f.s.active = &activeProject{repository: repo}
+	f.s.setSole(&activeProject{repository: repo})
 	a = amendmentDebate{&debate{s: f.s, repository: repo}}
 	_, err = a.Apply(context.Background(), round)
 	must(t, err)
@@ -218,7 +218,7 @@ func TestAmendmentRoundResumesCompletedMember(t *testing.T) {
 	must(t, repo.Close())
 	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
-	f.s.active = &activeProject{repository: repo}
+	f.s.setSole(&activeProject{repository: repo})
 	a = amendmentDebate{&debate{s: f.s, repository: repo}}
 	_, err = a.Apply(context.Background(), reply)
 	must(t, err)
@@ -285,7 +285,7 @@ func TestAmendmentRoundsOfTwoWorkstreamsRunAtTheSameTime(t *testing.T) {
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	defer repo.Close()
-	f.s.active = &activeProject{repository: repo}
+	f.s.setSole(&activeProject{repository: repo})
 	f.s.options.Committee = committee
 	streams := []config.WorkstreamID{first, second}
 	for _, stream := range streams {

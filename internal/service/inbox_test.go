@@ -456,7 +456,7 @@ func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
 	_, err = repo.SetFeatureState(ctx, h, AbandonedState, "gone")
 	must(t, err)
 
-	s := &Service{cfg: cfg, active: &activeProject{repository: repo}, options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}}
+	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}}
 	inbox, api := s.inbox(ctx)
 	if api != nil || len(inbox.Entries) != 1 || inbox.Entries[0].Number != 2 || inbox.Entries[0].Workstream != quiet {
 		t.Fatalf("inbox: %+v %v", inbox, api)

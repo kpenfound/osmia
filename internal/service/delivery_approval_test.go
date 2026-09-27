@@ -75,7 +75,7 @@ func deliveryFixtureWith(t *testing.T, extra string) (*shedFixture, config.Works
 	}
 	record(report, 1)
 	f.s.mu.Lock()
-	f.s.active = &activeProject{repository: repository}
+	f.s.setSole(&activeProject{repository: repository})
 	f.s.mu.Unlock()
 	return f, stream, repository, report
 }
@@ -144,7 +144,7 @@ func TestDeliveryApprovalAcceptEditRetryAndInvalidation(t *testing.T) {
 	must(t, err)
 	defer reopened.Close()
 	f.s.mu.Lock()
-	f.s.active = &activeProject{repository: reopened}
+	f.s.setSole(&activeProject{repository: reopened})
 	f.s.mu.Unlock()
 	after, api := f.s.deliveryPresentation(ctx, string(stream))
 	if api != nil || after.Approval == nil || after.Approval.Description != editedText {

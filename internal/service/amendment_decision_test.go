@@ -515,7 +515,7 @@ func TestAmendmentDecisionIsCompletedOnceAfterARestart(t *testing.T) {
 	f.stop(t)
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
-	f.s.active = &activeProject{repository: repo}
+	f.s.setSole(&activeProject{repository: repo})
 	out, api := f.s.decideAmendment(ctx, string(stream), "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1})
 	if api != nil || out.State != amendmentApproved {
 		t.Fatalf("decision %+v %v", out, api)
@@ -568,7 +568,7 @@ func TestChiefOfStaffRecordsTheOwnersAmendmentDecision(t *testing.T) {
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
 	defer func() { _ = repo.Close() }()
-	f.s.active = &activeProject{repository: repo}
+	f.s.setSole(&activeProject{repository: repo})
 	_, err = repo.EnsureChiefOfStaff(ctx, stream, demoStart, serviceActor)
 	must(t, err)
 	profile := coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}
@@ -598,7 +598,7 @@ func TestChiefOfStaffRecordsTheOwnersAmendmentDecision(t *testing.T) {
 	must(t, repo.Close())
 	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 	must(t, err)
-	f.s.active = &activeProject{repository: repo}
+	f.s.setSole(&activeProject{repository: repo})
 	must(t, repo.AbandonTurn(ctx, stream, trace.ChiefOfStaff, "events_1", demoStart))
 	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token-message", filepath.Join(t.TempDir(), "message"), demoStart)
 	must(t, err)

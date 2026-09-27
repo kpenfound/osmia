@@ -18,7 +18,7 @@ func traceService(t *testing.T, f *walkFixture) *Service {
 	opts := fixture(t)
 	cfg, err := config.Load(opts.Config)
 	must(t, err)
-	return &Service{cfg: cfg, active: &activeProject{repository: f.repo}}
+	return &Service{cfg: cfg, projects: []*activeProject{runtimeFor(f.repo)}}
 }
 
 func TestTraceAPIAndClient(t *testing.T) {

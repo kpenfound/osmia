@@ -96,7 +96,7 @@ func TestZeroProjectStart(t *testing.T) {
 	if !hasDiagnostic(rt.Diagnostics, NoProject) || len(rt.Effective.Profiles) != 7 || rt.Projects == nil || len(rt.Projects) != 0 {
 		t.Fatalf("%+v", rt)
 	}
-	if s.active != nil {
+	if s.sole() != nil {
 		t.Fatal("idle service opened a trace")
 	}
 	_, err = c.RemoveProject(ctx, project)
@@ -179,8 +179,8 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	if cfg.Project == nil || cfg.Project.ID != id || cfg.Effective.Project.ID != id || len(cfg.Diagnostics) != 0 {
 		t.Fatalf("%+v", cfg)
 	}
-	if len(bound) != 1 || bound[0] != id || s.active == nil || s.active.repository.Project() != id {
-		t.Fatalf("activation: bound=%v active=%v", bound, s.active)
+	if len(bound) != 1 || bound[0] != id || s.sole() == nil || s.sole().repository.Project() != id {
+		t.Fatalf("activation: bound=%v active=%v", bound, s.sole())
 	}
 	// Registration starts the librarian's extraction; without a runner it
 	// fails, is reported, and leaves the project usable.
@@ -235,7 +235,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	}
 	cfg, err = c.Configuration(ctx)
 	must(t, err)
-	if cfg.Project != nil || cfg.Effective.HasProject() || !hasDiagnostic(cfg.Diagnostics, NoProject) || hasDiagnostic(cfg.Diagnostics, RestartRequired) || s.active != nil {
+	if cfg.Project != nil || cfg.Effective.HasProject() || !hasDiagnostic(cfg.Diagnostics, NoProject) || hasDiagnostic(cfg.Diagnostics, RestartRequired) || s.sole() != nil {
 		t.Fatalf("%+v", cfg)
 	}
 	rt, err = c.Runtime(ctx)
@@ -268,7 +268,7 @@ func TestProjectAddActivatesAndRemoveRetains(t *testing.T) {
 	s, c = start(t, opts)
 	cfg, err = c.Configuration(ctx)
 	must(t, err)
-	if cfg.Project == nil || cfg.Project.ID != readded.Project.ID || s.active == nil {
+	if cfg.Project == nil || cfg.Project.ID != readded.Project.ID || s.sole() == nil {
 		t.Fatalf("%+v", cfg)
 	}
 }
@@ -391,7 +391,7 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				}
 				cfg, err := c.Configuration(ctx)
 				must(t, err)
-				if cfg.Project == nil || cfg.Project.ID != id || len(cfg.Diagnostics) != 0 || s.active == nil || s.active.repository.Project() != id {
+				if cfg.Project == nil || cfg.Project.ID != id || len(cfg.Diagnostics) != 0 || s.sole() == nil || s.sole().repository.Project() != id {
 					t.Fatalf("not completed: %+v", cfg)
 				}
 				if names := projectDirectories(t, root); !reflect.DeepEqual(names, []string{string(id)}) {
@@ -430,7 +430,7 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				s, c = start(t, opts)
 				cfg, err = c.Configuration(ctx)
 				must(t, err)
-				if cfg.Project == nil || cfg.Project.ID != id || len(cfg.Diagnostics) != 0 || s.active == nil {
+				if cfg.Project == nil || cfg.Project.ID != id || len(cfg.Diagnostics) != 0 || s.sole() == nil {
 					t.Fatalf("after restart: %+v", cfg)
 				}
 			})
@@ -501,7 +501,7 @@ func TestStartupRecoveryFailureIsDiagnosed(t *testing.T) {
 	must(t, os.Remove(filepath.Join(root, "projects")))
 	result, err := c.AddProject(ctx, request(clone))
 	must(t, err)
-	if result.Project.ID != journal.Project.ID || s.active == nil {
+	if result.Project.ID != journal.Project.ID || s.sole() == nil {
 		t.Fatalf("%+v", result)
 	}
 	cfg, err = c.Configuration(ctx)
@@ -545,7 +545,7 @@ func TestJournalForAnotherProjectIsRefused(t *testing.T) {
 	s, c = start(t, opts)
 	cfg, err := c.Configuration(ctx)
 	must(t, err)
-	if cfg.Project == nil || cfg.Project.ID != active || !hasDiagnostic(cfg.Diagnostics, Internal) || s.active == nil {
+	if cfg.Project == nil || cfg.Project.ID != active || !hasDiagnostic(cfg.Diagnostics, Internal) || s.sole() == nil {
 		t.Fatalf("%+v", cfg)
 	}
 	if !reflect.DeepEqual(activeProjects(t, root), []string{string(active)}) {
@@ -582,7 +582,7 @@ func TestStartupRecoveryReloadFailureIsDiagnosed(t *testing.T) {
 	s, c = start(t, opts)
 	cfg, err := c.Configuration(ctx)
 	must(t, err)
-	if cfg.Project != nil || !hasDiagnostic(cfg.Diagnostics, NoProject) || !hasDiagnostic(cfg.Diagnostics, Internal) || s.active != nil {
+	if cfg.Project != nil || !hasDiagnostic(cfg.Diagnostics, NoProject) || !hasDiagnostic(cfg.Diagnostics, Internal) || s.sole() != nil {
 		t.Fatalf("%+v", cfg)
 	}
 	if names := projectDirectories(t, root); len(names) != 1 {

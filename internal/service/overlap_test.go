@@ -255,7 +255,7 @@ func TestOverlapAdvisoriesWarnEachChiefOncePerSeal(t *testing.T) {
 	}
 	check := func(want map[config.WorkstreamID][]string, active map[config.WorkstreamID][]OverlapAdvisory) {
 		t.Helper()
-		repo := p.service.active.repository
+		repo := p.service.sole().repository
 		for _, stream := range []config.WorkstreamID{a, b, c, paused, delivered} {
 			if got := p.advisories(repo, stream); !reflect.DeepEqual(got, slices.Sorted(slices.Values(want[stream]))) {
 				t.Fatalf("advisories of %s:\n%q\nwant:\n%q", stream, got, want[stream])

@@ -38,10 +38,10 @@ func TestAgentStatusFromDurableTurns(t *testing.T) {
 	must(t, err)
 	attempt := trace.TurnAttempt{Number: 1, Profile: profile, Path: "replay", Reason: "new thread", At: started}
 	must(t, repo.RecordAttempt(ctx, stream, actor.ID, "one", "token_one", attempt))
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: []config.WorkstreamID{stream}})
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{stream}}})
 	must(t, err)
 	defer store.Close()
-	s := &Service{cfg: cfg, active: &activeProject{repository: repo}, store: store}
+	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, store: store}
 	check := func(now time.Time, state string, elapsed int64, question string) {
 		t.Helper()
 		got, err := agentStatuses(repo, stream, now)
@@ -78,7 +78,7 @@ func TestAgentStatusFromDurableTurns(t *testing.T) {
 	repo, err = trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
 	defer repo.Close()
-	s.active.repository = repo
+	s.sole().repository = repo
 	got, err := agentStatuses(repo, stream, started.Add(9*time.Second))
 	must(t, err)
 	if len(got) != 1 || got[0].State != "interrupted" || got[0].Elapsed != 5 || got[0].Profile != profile.Name || got[0].Attempt != 0 {

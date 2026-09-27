@@ -73,24 +73,28 @@ func (s *Service) configuration() ConfigResponse {
 	cfg, pending, reloadErr := s.cfg, s.pending, s.reloadErr
 	s.mu.Unlock()
 	out := ConfigResponse{Root: cfg.Root.String(), Digest: digest(cfg), Effective: cfg, Diagnostics: []Diagnostic{}, LastError: reloadErr}
-	if cfg.HasProject() {
-		view := projectView(cfg.Root, cfg.Project)
+	for _, p := range cfg.Projects {
+		view := projectView(cfg.Root, p)
 		// A project without a trace, or removed since the snapshot, has no
 		// charter to report.
-		state, err := s.charterState(cfg.Project.ID)
+		state, err := s.charterState(p.ID)
 		if err == nil {
 			view.CharterState = &state
 		} else if !errors.Is(err, errNoTrace) && !errors.Is(err, errNoActiveProject) {
 			out.Diagnostics = append(out.Diagnostics, Diagnostic{"charter", Internal, "cannot read or record the charter; check " + view.Charter + " and the trace repository"})
 		}
-		extraction, err := s.projectExtraction(cfg.Project.ID)
+		extraction, err := s.projectExtraction(p.ID)
 		if err == nil {
 			view.Extraction = extraction
 		} else if !errors.Is(err, errNoTrace) && !errors.Is(err, errNoActiveProject) {
 			out.Diagnostics = append(out.Diagnostics, Diagnostic{"extraction", Internal, "cannot read the knowledge-base extraction state; check the trace repository at " + view.Trace})
 		}
-		out.Project = &view
-	} else {
+		out.Projects = append(out.Projects, view)
+	}
+	if len(out.Projects) == 1 {
+		out.Project = &out.Projects[0]
+	}
+	if len(out.Projects) == 0 {
 		out.Diagnostics = append(out.Diagnostics, noProject("active_projects"))
 	}
 	out.Diagnostics = append(out.Diagnostics, s.notifier.diagnostics()...)
@@ -115,9 +119,10 @@ func (s *Service) runtimeView() RuntimeResponse {
 	state, ds := s.effective()
 	cfg := s.current()
 	out := RuntimeResponse{Effective: state, Profiles: s.effectiveProfiles(state), Projects: []ProjectRuntime{}, Diagnostics: []Diagnostic{}}
-	if cfg.HasProject() {
-		out.Projects = append(out.Projects, ProjectRuntime{cfg.Project.ID, s.Context().Mode(cfg.Project.ID)})
-	} else {
+	for _, id := range cfg.ProjectIDs() {
+		out.Projects = append(out.Projects, ProjectRuntime{id, s.Context().Mode(id)})
+	}
+	if len(out.Projects) == 0 {
 		out.Diagnostics = append(out.Diagnostics, noProject("project"))
 	}
 	for _, d := range ds {

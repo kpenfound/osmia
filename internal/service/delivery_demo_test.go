@@ -133,7 +133,7 @@ func TestM3DeliveryDemonstration(t *testing.T) {
 			must(t, err)
 			defer repository.Close()
 			f.s.mu.Lock()
-			f.s.active = &activeProject{repository: repository}
+			f.s.setSole(&activeProject{repository: repository})
 			f.s.cfg.Project.Landing = style
 			f.s.mu.Unlock()
 			home := filepath.Dir(f.clone)

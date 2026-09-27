@@ -545,7 +545,7 @@ func TestAnswersAreNotDeliveredToAbandonedWorkstreams(t *testing.T) {
 	_, err = repo.SetFeatureState(ctx, h, AbandonedState, "gone")
 	must(t, err)
 
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: []config.WorkstreamID{stream, quiet}})
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{stream, quiet}}})
 	must(t, err)
 	defer store.Close()
 	s := &Service{options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}, store: store}

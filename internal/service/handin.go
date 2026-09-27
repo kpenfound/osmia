@@ -47,11 +47,14 @@ func HandInWorkstream(project config.ProjectID, key string) config.WorkstreamID 
 }
 
 // handIn checks that the project is active and its charter has rules, then
-// copies the input into a new workstream and moves it to the handed state.
+// copies the input into a new workstream and moves it to the handed state. The
+// project may be left out while exactly one project is active.
 func (s *Service) handIn(ctx context.Context, req HandInRequest) (HandInResponse, *APIError) {
-	if err := config.CheckProjectIDs(req.Project); err != nil {
-		return HandInResponse{}, &APIError{Validation, "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
+	project, api := s.projectFor(req.Project)
+	if api != nil {
+		return HandInResponse{}, api
 	}
+	req.Project = project
 	cfg := s.current()
 	_, c, err := s.loadCharter(ctx, req.Project)
 	if errors.Is(err, errNoActiveProject) {
