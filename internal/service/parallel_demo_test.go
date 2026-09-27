@@ -30,10 +30,10 @@ const demoPlan = `{"version": 1, "units": [
 ]}
 `
 
-// TestM4ParallelUnitsDemonstration builds two workstreams of one project on
+// TestParallelUnitsDemonstration builds two workstreams of one project on
 // two shared mason slots through the local API, with fake masons and chief of
-// staff. See docs/m4-parallel-units.md.
-func TestM4ParallelUnitsDemonstration(t *testing.T) {
+// staff. See docs/parallel-units-demonstration.md.
+func TestParallelUnitsDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, masons := newParallelMasonFixture(t, 2, 3, demoPlan)

@@ -3,10 +3,10 @@
 ## Design and scope
 
 - Read [docs/design.md](docs/design.md) before proposing, planning or implementing a feature. It is the source of truth; issues describe outcomes and do not override it.
-- Follow the milestone order in the design and the active `filter.milestone` in `bees.toml`. Leave work-item decomposition to the development factory.
+- Follow the feature dependencies in the design and the active scope in `bees.toml`. Leave work-item decomposition to the development factory.
 - Keep behavior changes and the design consistent. Surface a conflict with the design instead of silently changing product scope.
 - Repository bootstrap, the Go module, initial Dagger checks and factory configuration are already initialized. Do not create work items to repeat them.
-- Hearsay is optional and scheduled last. File-based context must support every earlier milestone.
+- Hearsay is optional. File-based context must support the complete workflow without it.
 
 ## Architecture guardrails
 
@@ -62,5 +62,6 @@
 ## Comments and documentation
 
 - Comments and documentation always represent the current state. Its never helpful to reference a change in behavior or how things used to work
+- Name code, tests, documentation and user-facing messages after product features and behavior, without development phase labels.
 - Comments and documentation should never reference github issues, pull requests, or commits
 - Comment blocks can describe a function API or specific behavior of nearby code, but never a whole feature. That belongs in actual documentation

@@ -1,4 +1,4 @@
-# Development factory for Osmia. Run one milestone at a time.
+# Development factory for Osmia.
 version = 4
 
 #===============================================================================
@@ -171,7 +171,7 @@ profile = "default"
 prompt = """
 docs/design.md is the source of truth for feature scope and behavior.
 docs/design.md is large and you should search for keywords rather than using cat.
-Work only within the configured milestone; do not bring later milestones forward.
+Work only within the configured feature scope and preserve the design's dependencies.
 NEVER run go test on the host, in any role and for any reason: reproducing a
 flake, a mutation check and a single test included. Tests start processes that
 leak onto the machine the factory runs on. Tests run only inside Dagger: dagger

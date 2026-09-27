@@ -1,8 +1,8 @@
-# M2 onboarding demonstration
+# Project onboarding demonstration
 
 Onboarding takes a project from a local clone to a ready charter and a local
 knowledge base. The [getting-started guide](getting-started.md) is the way to do
-it for real; this document explains what the test checks at each step. `TestM2ProjectOnboarding` in `internal/cli/onboarding_test.go`
+it for real; this document explains what the test checks at each step. `TestProjectOnboarding` in `internal/cli/onboarding_test.go`
 runs every step through the CLI entry point and the API client against a real
 service on its Unix socket. The librarian is a scripted fake execution engine
 and MCP transport. The test makes no provider or GitHub calls and pushes

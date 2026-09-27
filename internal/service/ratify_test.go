@@ -23,6 +23,8 @@ import (
 // point has no packet until the pass that presents it records one.
 func (f *shedFixture) awaitPacket(t *testing.T, stream config.WorkstreamID, recommendation string) shed.Packet {
 	t.Helper()
+	wait, close := serviceChanges(t, f.s)
+	defer close()
 	deadline := time.Now().Add(demoTimeout)
 	for {
 		out, err := f.c.Packet(context.Background(), stream)
@@ -38,7 +40,7 @@ func (f *shedFixture) awaitPacket(t *testing.T, stream config.WorkstreamID, reco
 		if time.Now().After(deadline) {
 			t.Fatalf("the packet of workstream %s is %+v %v, want the recommendation %q", stream, out.Packet, err, recommendation)
 		}
-		time.Sleep(100 * time.Millisecond)
+		wait()
 	}
 }
 

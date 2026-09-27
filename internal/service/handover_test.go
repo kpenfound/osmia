@@ -26,7 +26,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// handoverChief is the fake chief of staff of the M2 demonstration. It
+// handoverChief is the fake chief of staff for the hand-in demonstration. It
 // records the prompt of every event turn and, once a turn tells it a
 // workstream was sketched, writes that workstream's status.
 type handoverChief struct {
@@ -65,9 +65,9 @@ func (h *handoverChief) turn(ctx context.Context, req agent.Request, _ *agent.Tu
 	return &agent.Result{ClaudeID: "session-chief", ResultText: "Noted", SessionDir: req.SessionDir, NumTurns: 1}, nil
 }
 
-// TestM2HandInToSketchedPlan demonstrates the M2 hand-in: see
-// docs/m2-demonstration.md.
-func TestM2HandInToSketchedPlan(t *testing.T) {
+// TestHandInToSketchedPlan demonstrates feature hand-in: see
+// docs/hand-in-demonstration.md.
+func TestHandInToSketchedPlan(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts, clone, engine, sessions, clock := newArchitectOptions(t)

@@ -1,11 +1,11 @@
-# M4 upstream drift demonstration
+# Upstream drift demonstration
 
 Two tests in `internal/service/drift_demo_test.go` show
 [drift rebases](service.md#drift-rebases) end to end:
 
-- `TestM4DriftCadenceDemonstration` keeps two building workstreams of one
+- `TestDriftCadenceDemonstration` keeps two building workstreams of one
   project current on the project's `upstream_rebase` cadence.
-- `TestM4DriftConflictDemonstration` covers an owner-requested drift rebase
+- `TestDriftConflictDemonstration` covers an owner-requested drift rebase
   whose feature branch conflicts with upstream, and a restart in the middle of
   it.
 
@@ -22,7 +22,7 @@ Run them with `dagger check`, or run just the demonstrations inside Dagger:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
-  with-exec --args=go,test,-count=1,-run,'TestM4Drift.*Demonstration',-v,./internal/service \
+  with-exec --args=go,test,-count=1,-run,'TestDrift.*Demonstration',-v,./internal/service \
   combined-output
 ```
 

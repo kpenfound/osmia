@@ -82,6 +82,8 @@ func (f *shedFixture) landedCommits(t *testing.T, stream config.WorkstreamID, ba
 // merges.
 func (f *shedFixture) awaitMerged(t *testing.T, stream config.WorkstreamID, unit string) {
 	t.Helper()
+	wait, close := serviceChanges(t, f.s)
+	defer close()
 	deadline := time.Now().Add(demoTimeout)
 	for {
 		got, err := f.repository().Workflow(stream, trace.UnitSubject(unit))
@@ -94,7 +96,7 @@ func (f *shedFixture) awaitMerged(t *testing.T, stream config.WorkstreamID, unit
 			data, _ := json.MarshalIndent(landOperations(t, f.repository(), stream), "", "  ")
 			t.Fatalf("unit %s of %s is %q, never merged; landings %s", unit, stream, got.Value, data)
 		}
-		time.Sleep(50 * time.Millisecond)
+		wait()
 	}
 }
 

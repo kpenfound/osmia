@@ -92,7 +92,7 @@ func awaitRefresh(t *testing.T, f *shedFixture) trace.OperationRecord {
 	return trace.OperationRecord{}
 }
 
-func TestRefreshResultFollowsSlowLibrarianTurn(t *testing.T) {
+func TestRefreshResultWaitsForLibrarianTurn(t *testing.T) {
 	t.Parallel()
 	f, _ := refreshFixture(t, "# Internal\n\nPrevious project knowledge.\n\nTrace snapshots require a clean worktree.\n", false)
 	defer f.stop(t)
@@ -130,9 +130,25 @@ func TestRefreshResultFollowsSlowLibrarianTurn(t *testing.T) {
 	if pending == nil || pending.Claim == nil || !pending.EffectStarted || pending.Result != nil {
 		t.Fatalf("expected an in-flight refresh: %+v", ops)
 	}
-	// Keep the effect in flight past the former short polling deadline.
-	timer := time.AfterFunc(21*time.Second, func() { release <- struct{}{} })
-	defer timer.Stop()
+	// Reconciliation must leave the running refresh in flight without
+	// requesting a second one or treating its missing result as a failure.
+	r := &refresher{extractor: &extractor{s: f.s, repository: f.repository()}}
+	must(t, r.Pass(context.Background()))
+	again, err := f.repository().Operations(librarianWorkstream(f.project))
+	must(t, err)
+	refreshes := 0
+	for _, op := range again {
+		if op.Operation.Action == RefreshAction {
+			refreshes++
+			if op.Operation.ID != pending.Operation.ID || op.Result != nil {
+				t.Fatalf("running refresh changed: %+v", op)
+			}
+		}
+	}
+	if refreshes != 1 {
+		t.Fatalf("running refresh has %d operations", refreshes)
+	}
+	release <- struct{}{}
 	op := awaitRefresh(t, f)
 	if op.Operation.ID != pending.Operation.ID || op.Result.Outcome != "succeeded" {
 		t.Fatalf("in-flight refresh did not reconcile: %+v", op)

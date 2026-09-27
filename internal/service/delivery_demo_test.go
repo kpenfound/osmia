@@ -21,9 +21,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestM3DeliveryDemonstration follows one feature from ordinary unit turns
+// TestDeliveryDemonstration follows one feature from ordinary unit turns
 // through final review, a follow-up, the owner's decision and publication.
-func TestM3DeliveryDemonstration(t *testing.T) {
+func TestDeliveryDemonstration(t *testing.T) {
 	for _, style := range []string{"commit-per-unit", "squash"} {
 		t.Run(style, func(t *testing.T) {
 			ctx := context.Background()

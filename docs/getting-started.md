@@ -3,9 +3,9 @@
 This guide takes you from nothing to a pull request on your fork that you
 approved. Follow the steps in order.
 
-## What the first release supports
+## Supported features
 
-- One project at a time.
+- Multiple projects, each with its own clone, configuration and trace.
 - Git worktrees, or Jujutsu workspaces on your clone's Git store: the service
   builds each workstream's feature branch in them and pushes it to your fork
   itself.
@@ -13,9 +13,9 @@ approved. Follow the steps in order.
   agents as files.
 - The web page on your tailnet, beside the command line on the local socket.
 
-Several projects and the optional Hearsay context source come later
-(see the [design](design.md#18-implementation-milestones)). Nothing in this guide
-depends on them.
+This walkthrough uses one project. The optional Hearsay context source is a
+planned integration (see the [design](design.md#18-feature-guarantees)); the
+workflow uses file-based context.
 
 You need `git`, a clone of the project you contribute to whose remotes include
 the upstream repository, a fork of it that you can push to, and the agent CLI
@@ -137,7 +137,7 @@ There is nothing further to ratify: the service records your edit as a new
 charter revision the next time it reads the file, and `osmia status` then shows
 `Charter: ready (2 rules, revision 2)`. Rules later proposed by the chief of
 staff are decided with `osmia charter`. See [charter](charter.md) for the
-format. The [onboarding demonstration](m2-onboarding.md) shows these steps run
+format. The [onboarding demonstration](onboarding-demonstration.md) shows these steps run
 end to end with fake agents.
 
 ## 5. Hand in a workstream and decide
@@ -193,15 +193,15 @@ ends `delivered`.
 
 ## Where to go next
 
-The milestone guides are reference material for what each part does and how it
+The feature demonstrations are reference material for what each part does and how it
 is tested:
 
 - [Command line](cli.md), [configuration](configuration.md), [service API](service.md) and [charter](charter.md).
 - [Turn isolation](isolation.md) for sandboxes.
 - The demonstrations run the whole path with fake agents:
-  [first release](m5-first-release.md), [web page](m5-web-page.md),
-  [onboarding](m2-onboarding.md), [hand-in](m2-demonstration.md),
-  [chief of staff](m2-chief-of-staff.md), [exit](m2-exit.md),
-  [implementation and landing](m3-exit.md), [parallel units](m4-parallel-units.md),
-  [upstream drift](m4-upstream-drift.md), [amendments](m4-amendments.md) and
-  [reliability](m4-reliability.md).
+  [owner notifications](owner-notifications-demonstration.md), [web page](web-demonstration.md),
+  [onboarding](onboarding-demonstration.md), [hand-in](hand-in-demonstration.md),
+  [chief of staff](chief-of-staff-demonstration.md), [plan ratification](plan-ratification-demonstration.md),
+  [implementation and landing](implementation-demonstration.md), [parallel units](parallel-units-demonstration.md),
+  [upstream drift](upstream-drift-demonstration.md), [amendments](amendments-demonstration.md) and
+  [reliability](reliability-demonstration.md).

@@ -38,6 +38,8 @@ func (f *architectFixture) upstream(t *testing.T) string {
 // awaitFeature waits until the workstream's feature state is the wanted one.
 func (f *architectFixture) awaitFeature(t *testing.T, stream config.WorkstreamID, want string) {
 	t.Helper()
+	wait, close := serviceChanges(t, f.s)
+	defer close()
 	deadline := time.Now().Add(demoTimeout)
 	for {
 		state, err := f.repository().Workflow(stream, trace.FeatureSubject)
@@ -48,7 +50,7 @@ func (f *architectFixture) awaitFeature(t *testing.T, stream config.WorkstreamID
 		if time.Now().After(deadline) {
 			t.Fatalf("workstream %s stayed %q, want %q", stream, state.Value, want)
 		}
-		time.Sleep(50 * time.Millisecond)
+		wait()
 	}
 }
 

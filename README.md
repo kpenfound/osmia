@@ -25,7 +25,7 @@ osmia inbox
 ```
 
 Osmia is under construction. The [design](docs/design.md) defines the intended
-behavior and milestone order; the guides describe implemented behavior.
+behavior and feature dependencies; the guides describe implemented behavior.
 
 ## How it works
 
@@ -56,4 +56,4 @@ keeps the documents, decisions and turns through restarts. See the
 | Build or install a release | [Release](docs/release.md) |
 
 The [design](docs/design.md) is the source of truth for product scope. The
-[demonstrations](docs/m5-first-release.md) show complete flows with fake agents.
+[demonstrations](docs/owner-notifications-demonstration.md) show complete flows with fake agents.

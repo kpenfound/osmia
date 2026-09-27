@@ -56,10 +56,10 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 	for _, turn := range []struct {
 		stream      config.WorkstreamID
 		agent, role string
-	}{{stream, "m1", masonRole}, {stream, "m2", masonRole}, {stream, "m3", masonRole}, {stream, "r1", reviewerRole}, {stream, "c1", committeeRole}, {sibling, "s1", masonRole}} {
+	}{{stream, "mason-1", masonRole}, {stream, "mason-2", masonRole}, {stream, "mason-3", masonRole}, {stream, "r1", reviewerRole}, {stream, "c1", committeeRole}, {sibling, "s1", masonRole}} {
 		queueRoleTurn(t, repo, turn.stream, turn.agent, turn.role, "u-"+turn.agent, clock.Now())
 	}
-	_, err := repo.ClaimTurn(ctx, stream, "m1", "token", t.TempDir(), clock.Now())
+	_, err := repo.ClaimTurn(ctx, stream, "mason-1", "token", t.TempDir(), clock.Now())
 	must(t, err)
 
 	got := s.statusList()
@@ -68,13 +68,13 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 	}
 	// The reviewer takes the free reviewer slot and the workstream's second
 	// slot, so the workstream's masons wait for the workstream; the sibling's
-	// mason waits for m1's mason slot. The committee's turns run in shed
+	// mason waits for mason-1's mason slot. The committee's turns run in shed
 	// rounds and never wait here.
 	want := &CapacityStatus{PerWorkstream: 2, Roles: []RoleCapacity{
 		{Role: masonRole, Used: 1, Limit: 1, Waiting: []SlotWait{
 			{Workstream: sibling, Unit: "u-s1", Agent: "s1", Turn: "s1-turn", Reason: DeferCapacity},
-			{Workstream: stream, Unit: "u-m2", Agent: "m2", Turn: "m2-turn", Reason: DeferWorkstreamCap},
-			{Workstream: stream, Unit: "u-m3", Agent: "m3", Turn: "m3-turn", Reason: DeferWorkstreamCap}}},
+			{Workstream: stream, Unit: "u-mason-2", Agent: "mason-2", Turn: "mason-2-turn", Reason: DeferWorkstreamCap},
+			{Workstream: stream, Unit: "u-mason-3", Agent: "mason-3", Turn: "mason-3-turn", Reason: DeferWorkstreamCap}}},
 		{Role: reviewerRole, Used: 0, Limit: 1, Waiting: []SlotWait{}},
 		{Role: committeeRole, Used: 0, Limit: 3, Waiting: []SlotWait{}},
 	}}
@@ -83,7 +83,7 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 	}
 
 	// Pausing the workstream holds its queued turns, which no longer wait,
-	// and frees nothing: m1 is in flight and keeps its slot.
+	// and frees nothing: mason-1 is in flight and keeps its slot.
 	must(t, s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Hold", SetAt: clock.Now()}))
 	got = s.statusList()
 	mason := roleCapacity(t, got.Capacity, masonRole)

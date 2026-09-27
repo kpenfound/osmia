@@ -22,14 +22,14 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// TestBrowserM5WebPageDemonstration takes one workstream from a hand-in
+// TestBrowserOwnerWorkflowDemonstration takes one workstream from a hand-in
 // through the local API to a delivered pull request, with every owner
 // decision on the way made on the embedded page over listen.web: the
 // ratification, an escalated question, an amendment, a contested unit, a
 // pause and its resume, and the delivery approval. The page is opened once
 // and follows the workstream through its event stream. See
-// docs/m5-web-page.md.
-func TestBrowserM5WebPageDemonstration(t *testing.T) {
+// docs/web-demonstration.md.
+func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	p := openBrowser(t)
 	ctx := context.Background()
 	f, masons := newMasonFixture(t, 1, validPlan)

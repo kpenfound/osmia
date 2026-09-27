@@ -1,7 +1,7 @@
 # Contributing to Osmia
 
 Read [the design](docs/design.md) before proposing or changing behavior. It is
-the source of truth for product scope and milestone order. Keep changes focused,
+the source of truth for product scope and feature dependencies. Keep changes focused,
 and keep target-project factory state outside the repository Osmia works on.
 
 ## Check a change

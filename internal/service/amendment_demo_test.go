@@ -16,9 +16,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestM4AmendmentDemonstration follows a mason's request through drafting,
+// TestAmendmentDemonstration follows a mason's request through drafting,
 // one shed round, the owner gate, recovery, and the next unit turns.
-func TestM4AmendmentDemonstration(t *testing.T) {
+func TestAmendmentDemonstration(t *testing.T) {
 	t.Parallel()
 	for _, decision := range []string{AmendmentApprove, AmendmentReject} {
 		t.Run(decision, func(t *testing.T) {
@@ -98,9 +98,9 @@ func TestM4AmendmentDemonstration(t *testing.T) {
 	}
 }
 
-// TestM4CharterDemonstration starts with a chief-of-staff proposal made from
+// TestCharterDemonstration starts with a chief-of-staff proposal made from
 // an owner ruling and checks the next bundle of another live workstream.
-func TestM4CharterDemonstration(t *testing.T) {
+func TestCharterDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newCharterFixture(t)

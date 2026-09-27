@@ -40,3 +40,44 @@ command in [AGENTS.md](../AGENTS.md#validation). Host `gofmt`, `go build` and
 The [review](review.md) describes what was inspected and which risks remain.
 Test counts are useful for finding the suite, but assertions and exercised
 boundaries determine confidence.
+
+## Keep service tests focused
+
+Service lifecycle tests start real reconcilers and write durable traces in local
+Git repositories. Each workflow read verifies and decodes trace records; frequent
+polling competes with the controllers doing the work. Parallel tests also share
+the container's CPU and filesystem, so adding parallelism can increase contention.
+
+- Keep the end-to-end demonstrations for lifecycle, recovery and wiring coverage.
+- For controller tests, seed the state immediately before the behavior under
+  test. The final-review and delivery fixtures record a sealed plan and create
+  its build state without running the earlier agent turns.
+- In running-service fixtures, use `serviceChanges` before the first predicate
+  read and release the subscription when finished. Notifications are hints: read
+  the durable state after each wake. The helper has a timer fallback for changes
+  the event stream does not announce.
+- Coordinate blocked fake turns with channels. Use elapsed-time assertions only
+  when a timeout is the behavior being tested, with a small configured budget.
+
+## Profile inside Dagger
+
+Measure the same tests with the same container, race setting and parallelism.
+Use `-count=1` to bypass Go's test-result cache and `-parallel=1` to isolate the
+cost of a lifecycle from contention with other tests. Compilation, image pulls
+and engine startup are separate from the durations printed by `go test`.
+
+For example, this profiles a Git-backed service test and prints CPU and blocking
+summaries. The binary and profiles stay in the container:
+
+```sh
+dagger core container from --address golang:1.26-bookworm \
+  with-directory --path /src --source . --exclude .git,.bees \
+  with-workdir --path /src \
+  with-exec --args=sh,-c,'go test -count=1 -parallel=1 -timeout=10m -run=TestDisjointUnitsImplementConcurrently -v -o /tmp/service.test -cpuprofile=/tmp/service.cpu -blockprofile=/tmp/service.block ./internal/service && go tool pprof -top -cum /tmp/service.cpu && go tool pprof -top /tmp/service.block' \
+  combined-output
+```
+
+Use the pinned `jj` installation from the focused-test command in
+[AGENTS.md](../AGENTS.md#validation) when profiling Jujutsu tests. Cumulative CPU
+percentages overlap along call stacks; blocking profiles aggregate time across
+goroutines. Neither should be added up as wall-clock time.

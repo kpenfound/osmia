@@ -1,6 +1,6 @@
-# M4 reliability demonstration
+# Reliability demonstration
 
-`TestM4ReliabilityDemonstration` and `TestM4ReliabilityDemonstrationOpenCode`
+`TestReliabilityDemonstration` and `TestReliabilityDemonstrationOpenCode`
 in `internal/service/reliability_demo_test.go`
 takes one workstream from ratification to a landed unit through the service's
 local API client, the same API used by the `osmia` commands. On the way, the
@@ -17,7 +17,7 @@ Run it with `dagger check`, or run just the demonstration inside Dagger:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
-  with-exec --args=go,test,-count=1,-run,TestM4ReliabilityDemonstration,-v,./internal/service \
+  with-exec --args=go,test,-count=1,-run,TestReliabilityDemonstration,-v,./internal/service \
   combined-output
 ```
 

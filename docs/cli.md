@@ -45,11 +45,11 @@ osmia reload
 osmia status --json
 ```
 
-The [onboarding walkthrough](m2-onboarding.md) runs `project add`, `handin`,
+The [onboarding walkthrough](onboarding-demonstration.md) runs `project add`, `handin`,
 `status` and `project remove` in order for a new project. The
-[chief-of-staff walkthrough](m2-chief-of-staff.md) runs `send`,
+[chief-of-staff walkthrough](chief-of-staff-demonstration.md) runs `send`,
 `conversation`, `status`, `inbox` and `answer` on an onboarded project, across
-a service restart. The [M2 exit demonstration](m2-exit.md) runs
+a service restart. The [plan ratification demonstration](plan-ratification-demonstration.md) runs
 `handin` (with and without `--skip-debate`), `abandon`, `shed overrule`, `ratify`, `inbox` and
 `answer` through their API calls, from hand-in to a sealed feature branch.
 
@@ -471,7 +471,7 @@ never raw file contents.
 For exit 3, start the service and verify matching root/socket and permissions.
 For exit 6, check configuration and runtime validity and permissions, stop any
 existing owner, and ensure the socket path is unused or stale. Do not delete a
-live-owned socket. Unsupported responses identify the M1 limit; restart-required
+live-owned socket. Unsupported responses identify unavailable operations; restart-required
 responses instruct the operator to stop and start the service.
 
 Detached management, install/upgrade commands and completion are

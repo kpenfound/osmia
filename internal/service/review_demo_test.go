@@ -18,8 +18,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestM3ExactReviewDemonstration exercises review through the local API and trace.
-func TestM3ExactReviewDemonstration(t *testing.T) {
+// TestExactReviewDemonstration exercises review through the local API and trace.
+func TestExactReviewDemonstration(t *testing.T) {
 	t.Parallel()
 	p := &faults{}
 	f, masons, chief := newAskingMasonFixture(t, 1, independentPlan, p)

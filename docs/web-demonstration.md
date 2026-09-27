@@ -1,6 +1,6 @@
-# M5 web page demonstration
+# Web page demonstration
 
-`TestBrowserM5WebPageDemonstration` in `internal/service/web_demo_test.go`
+`TestBrowserOwnerWorkflowDemonstration` in `internal/service/web_demo_test.go`
 takes one workstream from hand-in to a delivered pull request. The design
 is handed in through the service's local API client, the same API
 `osmia handin --skip-debate` uses. Every owner decision after that is made

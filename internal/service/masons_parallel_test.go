@@ -79,11 +79,14 @@ func starts(t *testing.T, f *shedFixture, stream config.WorkstreamID) []string {
 	return out
 }
 
-// Slow status reads in the mason fixtures keep their API and service available.
-func TestMasonFixtureSlowStatusKeepsServiceReachable(t *testing.T) {
+// Mason fixtures give the client and server the same extended status budget.
+func TestMasonFixtureStatusUsesConfiguredTimeout(t *testing.T) {
 	t.Parallel()
 	f, _ := newParallelMasonFixture(t, 2, 3, disjointPlan)
 	defer f.stop(t)
+	if f.s.server.WriteTimeout != time.Minute || f.c.defaultTimeout != f.s.server.WriteTimeout {
+		t.Fatalf("status budgets: server %s, client %s", f.s.server.WriteTimeout, f.c.defaultTimeout)
+	}
 	entered := make(chan struct{}, 1)
 	ctx := httptrace.WithClientTrace(context.Background(), &httptrace.ClientTrace{
 		WroteRequest: func(httptrace.WroteRequestInfo) {
@@ -105,7 +108,6 @@ func TestMasonFixtureSlowStatusKeepsServiceReachable(t *testing.T) {
 		f.s.mu.Unlock()
 		t.Fatal("status request never connected")
 	}
-	time.Sleep(16 * time.Second)
 	f.s.mu.Unlock()
 	select {
 	case err := <-result:

@@ -33,7 +33,7 @@ func fail(w http.ResponseWriter, code Code) {
 	case Conflict:
 		status, message = 409, "runtime file changed externally; restore it or restart the service"
 	case Unsupported:
-		status, message = 501, "operation is unsupported in M1"
+		status, message = 501, "operation is unsupported"
 	case RestartRequired:
 		status, message = 409, "operation requires a service restart"
 	case Unavailable:

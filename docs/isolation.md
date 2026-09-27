@@ -49,7 +49,7 @@ executor; an engine that cannot verify a saved session selects replay.
 ## Capabilities
 
 The service must explicitly grant a role its tool names and write/execute/network
-permissions. A missing role grant fails. The M1 workspace-write ceiling permits
+permissions. A missing role grant fails. The workspace-write ceiling permits
 `mason` and `librarian`; other known roles are read-only and have no execute or
 fetch permission. Some tools belong to one role: `set_status`, `prioritise`, `decide_amendment`, `decide_charter`, `answer`,
 `escalate`, `relay_ruling`, `route_amendment` and `propose_charter` are removed from every
@@ -60,8 +60,7 @@ of staff cannot. `object`, `concede` and `final_report` are removed from every
 grant but the `committee`'s, `reply` from every grant but the `architect`'s, and `verdict`
 from every grant but the `reviewer`'s. The selector's
 optional `Narrow` request intersects the grant. Neither prompts nor profiles
-grant tools. The full workflow role-tool catalogue is outside this M1
-implementation.
+grant tools.
 
 The service registry classifies each tool as read, write, memory, execute, fetch
 or VCS. Memory tools change only service-owned records bound to the turn, such as

@@ -1,6 +1,6 @@
-# M4 amendments and standing rulings
+# Amendments and standing rulings
 
-`TestM4AmendmentDemonstration` in `internal/service/amendment_demo_test.go`
+`TestAmendmentDemonstration` in `internal/service/amendment_demo_test.go`
 starts with a sealed, building workstream. A fake mason calls `amend` with
 `spec#1`, a proposed change and a reason. Its unit waits while another unit
 continues. The fake architect drafts a revised criterion, the committee runs
@@ -19,7 +19,7 @@ and seal in force. Either decision delivers the owner's words to the requester
 and resumes its waiting unit. A later round requires an explicit owner
 decision; automatic debate runs once per presentation.
 
-`TestM4CharterDemonstration` starts with the chief of staff's `propose_charter`
+`TestCharterDemonstration` starts with the chief of staff's `propose_charter`
 call on an owner ruling. `osmia charter` lists the open proposal. The owner
 ratifies or declines it with `osmia charter <workstream> <question> ratify`
 or `decline` (or the corresponding API request). Ratification appends a

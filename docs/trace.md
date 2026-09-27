@@ -8,14 +8,14 @@ repository with an exclusive directory creation and preserves an existing
 paths. `Repository` is a trace handle; it does not implement a target workspace
 or provide delivery operations.
 
-The local API review demonstration is `TestM3ExactReviewDemonstration` in
+The local API review demonstration is `TestExactReviewDemonstration` in
 `internal/service/review_demo_test.go`. Run it inside Dagger with:
 
 ```sh
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
-  with-exec --args=go,test,-count=1,-run,TestM3ExactReviewDemonstration,-v,./internal/service \
+  with-exec --args=go,test,-count=1,-run,TestExactReviewDemonstration,-v,./internal/service \
   combined-output
 ```
 
@@ -29,7 +29,7 @@ review explains the path and approves the current candidate. Inspect
 `agents/reviewer-resume/log.jsonl`, `questions/1/`, and `events.jsonl` to follow
 the requests, results, ruling, footprint refusal and exact approval.
 
-The bidirectional navigation demonstration is `TestM3TraceNavigationDemonstration`
+The bidirectional navigation demonstration is `TestTraceNavigationDemonstration`
 in `internal/service/trace_demo_test.go`. It uses a temporary local trace
 repository with fake agent records, a local API socket and the built `osmia`
 command. Run it inside Dagger with:
@@ -38,7 +38,7 @@ command. Run it inside Dagger with:
 dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
-  with-exec --args=go,test,-count=1,-run,TestM3TraceNavigationDemonstration,-v,./internal/service \
+  with-exec --args=go,test,-count=1,-run,TestTraceNavigationDemonstration,-v,./internal/service \
   combined-output
 ```
 

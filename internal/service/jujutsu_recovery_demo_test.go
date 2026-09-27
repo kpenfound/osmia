@@ -48,7 +48,7 @@ var (
 	recoveryReports = map[string]CriterionReport{"resume": resumeReport, "dedupe": dedupeReport, "audit": auditReport}
 )
 
-// recoveryDemo plays the agents of TestM6JujutsuRecoveryDemonstration and
+// recoveryDemo plays the agents of TestJujutsuRecoveryDemonstration and
 // records what they saw.
 type recoveryDemo struct {
 	units   *landingDemo
@@ -204,12 +204,12 @@ func (d *recoveryDemo) review(ctx context.Context, unit string, req agent.Reques
 	return d.units.review(ctx, unit, req, tools)
 }
 
-// TestM6JujutsuRecoveryDemonstration takes a workstream on Jujutsu workspaces
+// TestJujutsuRecoveryDemonstration takes a workstream on Jujutsu workspaces
 // through a mason turn a hard pause stops, a service restart in the middle
 // of a landing, and upstream drift that conflicts with the feature branch
 // and with both units in flight, to an owner-approved pull request on the
-// fork. See docs/m6-jujutsu-recovery.md.
-func TestM6JujutsuRecoveryDemonstration(t *testing.T) {
+// fork. See docs/jujutsu-recovery-demonstration.md.
+func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	requireJJ(t)
 	t.Parallel()
 	ctx := context.Background()

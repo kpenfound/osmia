@@ -1,6 +1,6 @@
-# M1 local service API
+# Local service API
 
-`internal/service.Run` loads the M1 configuration and runtime store, then serves
+`internal/service.Run` loads the service configuration and runtime store, then serves
 HTTP/JSON over the configured Unix socket, and over the optional loopback
 [web listener](#web-listener) and [tailnet listener](#tailnet-listener), until
 its context is cancelled.
@@ -216,7 +216,7 @@ validated schema fields. Diagnostics identify the affected field and a stable co
 | `malformed_input` | 400 | Malformed, ambiguous, unknown-field or oversized JSON |
 | `validation` | 422 | Invalid override or unavailable reference |
 | `conflict` | 409 | Runtime file changed outside the store, an extraction requested while one is pending or running, or a hand-in key reused for other input |
-| `unsupported` | 501 | Unknown path/method or later-milestone operation |
+| `unsupported` | 501 | Unknown path/method or unsupported operation |
 | `restart_required` | 409 | PUT `/config/root` or `/config/listen` |
 | `unavailable` | 503 | Service shutting down, or a hand-in under `workspaces = "jujutsu"` without a supported `jj`; also the client's code for transport failure |
 | `internal` | 500 | Storage or other internal failure, including an interrupted project registration |
@@ -236,7 +236,7 @@ response before caller's context deadline`, and an unreachable or closed socket
 reports `cannot reach Osmia Unix socket`.
 
 Health readiness means the loaded stores can serve requests; disk diagnostics do
-not discard that valid view. Lifecycle endpoints are outside M1. Pauses hold queued turns, capacity
+not discard that valid view. Pauses hold queued turns, capacity
 bounds dispatch, and a `waiting` turn parks its thread, as described with the
 queued-turn scheduler below.
 
@@ -419,7 +419,7 @@ everything again.
 `dagger check` runs browser tests of the page (the `browser:test` check):
 headless Chromium opens it through the web listener of a service whose
 state is planted in its trace or made by fake agents. The
-[M5 web page demonstration](m5-web-page.md) drives one workstream from
+[Web page demonstration](web-demonstration.md) drives one workstream from
 hand-in to delivery on the page. They need a Chromium binary named by
 `OSMIA_BROWSER` and skip under `go test` without one.
 
@@ -3192,7 +3192,7 @@ runner operation except the librarian's `kb-extract` and `kb-refresh`, the
 architect's `architect-draft` and the shed's `shed-round` and `shed-reply` actions, which
 the service reconciles itself. The [thread dispatcher](trace.md#turn-dispatch) is the
 intended binding; it receives the service-owned repository handle, which callers
-must not close. The [M1 demonstration](m1-demonstration.md) uses this path with
+must not close. The [thread continuity demonstration](thread-continuity-demonstration.md) uses this path with
 fake engines.
 
 `Options.Librarian` supplies the execution engine and MCP host factory the

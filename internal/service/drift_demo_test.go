@@ -86,10 +86,10 @@ func (f *shedFixture) awaitMasonSettled(t *testing.T, stream config.WorkstreamID
 	}
 }
 
-// TestM4DriftCadenceDemonstration keeps two building workstreams of one
+// TestDriftCadenceDemonstration keeps two building workstreams of one
 // project current with upstream on the project's upstream_rebase cadence,
-// through the local API with fake masons. See docs/m4-upstream-drift.md.
-func TestM4DriftCadenceDemonstration(t *testing.T) {
+// through the local API with fake masons. See docs/upstream-drift-demonstration.md.
+func TestDriftCadenceDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, masons := newMasonFixture(t, 2, independentPlan)
@@ -196,7 +196,7 @@ func TestM4DriftCadenceDemonstration(t *testing.T) {
 }
 
 // driftDemo plays the unit reviewers, the drift mason and the drift reviewer
-// of TestM4DriftConflictDemonstration, and records what they saw.
+// of TestDriftConflictDemonstration, and records what they saw.
 type driftDemo struct {
 	units   *landingDemo
 	owner   *Client
@@ -318,12 +318,12 @@ func (d *driftDemo) reviewDrift(ctx context.Context, req agent.Request, _ *agent
 	return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 }
 
-// TestM4DriftConflictDemonstration asks for a drift rebase through the local
+// TestDriftConflictDemonstration asks for a drift rebase through the local
 // API while an approved unit waits to land, resolves the feature branch's
 // conflict with upstream through a drift mason across a restart and a drift
 // reviewer, and sends the approval back to review before it lands. See
-// docs/m4-upstream-drift.md.
-func TestM4DriftConflictDemonstration(t *testing.T) {
+// docs/upstream-drift-demonstration.md.
+func TestDriftConflictDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, masons := newMasonFixture(t, 1, driftPlan)

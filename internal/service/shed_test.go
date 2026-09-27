@@ -96,6 +96,8 @@ func (f *shedFixture) member(round, i, attempt int, run func(ctx context.Context
 // round, its failure, and for a conclusion, the next round.
 func (f *shedFixture) awaitShed(t *testing.T, stream config.WorkstreamID, want string, never ...string) {
 	t.Helper()
+	wait, close := serviceChanges(t, f.s)
+	defer close()
 	deadline := time.Now().Add(demoTimeout)
 	if kind, n, ok := shedState(want); ok && kind == "heard" && len(never) == 0 {
 		never = []string{fmt.Sprintf("failed-%d", n)}
@@ -119,7 +121,7 @@ func (f *shedFixture) awaitShed(t *testing.T, stream config.WorkstreamID, want s
 			feature, _ := f.repository().Workflow(stream, trace.FeatureSubject)
 			t.Fatalf("workstream %s stayed %q with shed %v, want %q", stream, feature.Value, reached, want)
 		}
-		time.Sleep(100 * time.Millisecond)
+		wait()
 	}
 }
 

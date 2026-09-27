@@ -174,6 +174,8 @@ func (f *architectFixture) runs() []string {
 // them.
 func (f *architectFixture) await(t *testing.T, stream config.WorkstreamID, want func(feature, draft string) bool) {
 	t.Helper()
+	wait, close := serviceChanges(t, f.s)
+	defer close()
 	deadline := time.Now().Add(demoTimeout)
 	for {
 		feature, err := f.repository().Workflow(stream, trace.FeatureSubject)
@@ -186,7 +188,7 @@ func (f *architectFixture) await(t *testing.T, stream config.WorkstreamID, want 
 		if time.Now().After(deadline) {
 			t.Fatalf("workstream %s stayed %q with draft %q", stream, feature.Value, draft.Value)
 		}
-		time.Sleep(100 * time.Millisecond)
+		wait()
 	}
 }
 

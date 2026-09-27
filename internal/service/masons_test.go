@@ -196,6 +196,8 @@ func masonTransitions(t *testing.T, f *shedFixture, stream config.WorkstreamID) 
 // awaitMasonRan waits until the unit's first mason turn completed.
 func (f *shedFixture) awaitMasonRan(t *testing.T, stream config.WorkstreamID, unit string) trace.Thread {
 	t.Helper()
+	wait, close := serviceChanges(t, f.s)
+	defer close()
 	deadline := time.Now().Add(demoTimeout)
 	for {
 		select {
@@ -216,7 +218,7 @@ func (f *shedFixture) awaitMasonRan(t *testing.T, stream config.WorkstreamID, un
 		if time.Now().After(deadline) {
 			t.Fatalf("the mason of unit %s of %s never ran: %+v", unit, stream, th)
 		}
-		time.Sleep(50 * time.Millisecond)
+		wait()
 	}
 }
 
