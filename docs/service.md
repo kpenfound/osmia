@@ -2997,7 +2997,7 @@ raises the notice once.
 | Case | Error |
 | --- | --- |
 | A decision other than `ratify` or `decline` | `validation`: `a charter decision is ratify or decline` |
-| The workstream is not in the active project | `validation` |
+| The workstream is not in an active project | `validation` |
 | No proposal for the question | `not_found`: `workstream <id> has no charter proposal for question <n>` |
 | The workstream is abandoned | `conflict`: `workstream <id> is abandoned and its charter proposals take no decision` |
 | The proposal was decided the other way | `conflict`: `the charter proposal of question <n> is already decided: <decision>` |

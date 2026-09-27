@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -102,13 +103,20 @@ func (s *Service) ruleContested(ctx context.Context, rawStream, unit string, req
 	if req.Decision != "review" && req.Decision != "revise" || strings.TrimSpace(req.Note) == "" {
 		return ContestedRulingResponse{}, &APIError{Validation, "a contested ruling requires review or revise and a note"}
 	}
-	s.mu.Lock()
-	active := s.active
-	s.mu.Unlock()
-	if active == nil {
+	_, projects := s.runtimes()
+	if len(projects) == 0 {
 		return ContestedRulingResponse{}, &APIError{NoProject, "no active project"}
 	}
-	repo := active.repository
+	repo := projects[0].repository
+	for _, p := range projects[1:] {
+		streams, err := p.repository.Workstreams()
+		if err != nil {
+			return ContestedRulingResponse{}, &APIError{Internal, "cannot read the workstream state"}
+		}
+		if slices.Contains(streams, stream) {
+			repo = p.repository
+		}
+	}
 	if gone, err := abandoned(repo, stream); err != nil {
 		return ContestedRulingResponse{}, &APIError{Internal, "cannot read the workstream state"}
 	} else if gone {
@@ -170,7 +178,7 @@ func (s *Service) ruleContested(ctx context.Context, rawStream, unit string, req
 		}
 		return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: ruling}, nil
 	}
-	r := &reviewers{masons: &masons{s: s, cfg: s.current(), repository: repo}}
+	r := &reviewers{masons: &masons{s: s, cfg: s.about(repo), repository: repo}}
 	result, ok, err := r.storedResult(stream, unit, state)
 	if err != nil || !ok || result.Verdict.Decision != "material_findings" {
 		return ContestedRulingResponse{}, &APIError{Internal, "contested unit has no material review result"}

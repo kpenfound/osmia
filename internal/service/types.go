@@ -640,6 +640,9 @@ type InboxQuestion struct {
 // AnswerRequest is the owner's ruling on an inbox entry.
 type AnswerRequest struct {
 	Text string `json:"text"`
+	// Project names the project whose inbox numbers the entry. It may be
+	// left out while exactly one project is active.
+	Project config.ProjectID `json:"project,omitempty"`
 }
 
 // AnswerResponse reports a recorded ruling and the questions it covers.

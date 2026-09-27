@@ -161,7 +161,7 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 
 	unknown := "w_00000000000000000000000000000009"
 	code, out, diag := invoke(t, root, "status", unknown)
-	if code != 4 || out != "" || diag != "not_found: workstream "+unknown+" is not in the active project; list workstreams with osmia status\n" {
+	if code != 4 || out != "" || diag != "not_found: workstream "+unknown+" is not in an active project; list workstreams with osmia status\n" {
 		t.Fatalf("unknown workstream: %d %q %q", code, out, diag)
 	}
 	for _, args := range [][]string{{"status", "not-a-workstream"}, {"status", project}, {"status", stream, quiet}} {

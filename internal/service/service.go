@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -112,9 +114,10 @@ type Options struct {
 	checkJJ jjCheck
 }
 
-// activeProject is the runtime state of the configured project: its open trace
+// activeProject is the runtime state of one active project: its open trace
 // and the reconciliation loop running against it.
 type activeProject struct {
+	id         config.ProjectID
 	repository *trace.Repository
 	controller *reconcile.Controller
 	pipeline   *pipeline
@@ -123,9 +126,13 @@ type activeProject struct {
 }
 
 type Service struct {
-	mu        sync.Mutex // guards cfg, active, pending and reloadErr
-	cfg       *config.Config
-	active    *activeProject
+	mu  sync.Mutex // guards cfg, projects, pending and reloadErr
+	cfg *config.Config
+	// projects holds the runtime of every active project that has a trace, in
+	// active_projects order.
+	projects []*activeProject
+	// pool is the role capacity the schedulers of every project draw on.
+	pool      *scheduler.Shared
 	pending   error
 	reloadErr *ReloadError
 	projectMu sync.Mutex // serializes project registration, removal and reload
@@ -160,7 +167,9 @@ type Service struct {
 
 // Start loads state and binds before returning. Wait joins shutdown and cleanup.
 // A configuration without an active project starts an idle service that accepts
-// project registration; an interrupted registration is completed first.
+// project registration; an interrupted registration is completed first. Every
+// active project gets its own runtime: its trace, its reconciliation loop and
+// its restart recovery. Their schedulers share one pool of role capacity.
 func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	root, err := config.ResolveRoot(opts.Config.Root, opts.Config.Home)
 	if err != nil {
@@ -197,30 +206,27 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, err
 	}
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub()}
+	s.pool = &scheduler.Shared{Traces: s.traces}
 	if opts.controls != nil {
 		opts.controls.service.Store(s)
 	}
 	cfg, s.pending = s.recoverPending(ctx, cfg)
-	active, err := s.open(cfg)
+	projects, err := s.openAll(cfg)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if err != nil && active != nil {
-			active.repository.Close()
+		if err != nil {
+			for _, p := range projects {
+				p.repository.Close()
+			}
 		}
 	}()
-	workstreams := opts.Workstreams
-	if active != nil {
-		workstreams, err = active.repository.Workstreams()
-		if err != nil {
-			return nil, err
-		}
+	inputs, err := s.runtimeInputs(cfg, projects)
+	if err != nil {
+		return nil, err
 	}
-	if !cfg.HasProject() {
-		workstreams = nil
-	}
-	st, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: workstreams})
+	st, _, err := runtime.Open(inputs)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +253,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		listener.Close()
 		return nil, err
 	}
-	s.cfg, s.active, s.store, s.listener, s.socketInfo = cfg, active, st, listener, info
+	s.cfg, s.projects, s.store, s.listener, s.socketInfo = cfg, projects, st, listener, info
 	if err = os.Chmod(cfg.Listen.Socket, 0600); err != nil {
 		s.cleanupSocket()
 		return nil, err
@@ -290,13 +296,14 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			s.tailnet.set(node, "")
 		}
 	}
-	if active != nil {
-		if err = s.recoverWorkspaces(ctx, cfg); err != nil {
+	for _, p := range projects {
+		view := cfg.For(p.id)
+		if err = s.recoverWorkspaces(ctx, view); err != nil {
 			s.cleanupSocket()
 			st.Close()
 			return nil, fmt.Errorf("recover interrupted workspace operations: %w", err)
 		}
-		if err = s.recoverSessions(ctx, cfg, active.repository); err != nil {
+		if err = s.recoverSessions(ctx, view, p.repository); err != nil {
 			s.cleanupSocket()
 			st.Close()
 			return nil, fmt.Errorf("recover thread sessions: %w", err)
@@ -327,7 +334,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}), ReadHeaderTimeout: opts.ReadHeaderTimeout, ReadTimeout: opts.ReadTimeout, WriteTimeout: opts.WriteTimeout,
 		BaseContext: func(net.Listener) context.Context { return s.lifetime }, ConnContext: connContext}
 	s.ready.Store(true)
-	s.launch(active)
+	for _, p := range projects {
+		s.launch(p)
+	}
 	s.notifier = newNotifier(s, opts.NotifyRetry, opts.notifyInbox)
 	go s.notifier.run(s.lifetime)
 	go func() {
@@ -373,10 +382,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 		s.requests.Wait()
 		s.mu.Lock()
-		active := s.active
-		s.active = nil
+		projects := s.projects
+		s.projects = nil
 		s.mu.Unlock()
-		s.err = errors.Join(s.err, s.stop(active))
+		s.err = errors.Join(s.err, s.stop(projects...))
 		s.cleanupSocket()
 		s.store.Close()
 		unlock(s.lock)
@@ -431,6 +440,80 @@ func (s *Service) current() *config.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cfg
+}
+
+// about returns the loaded configuration about the project of repository. Its
+// Project is zero once that project is no longer active.
+func (s *Service) about(repository *trace.Repository) *config.Config {
+	return s.current().For(repository.Project())
+}
+
+// runtimes returns the loaded configuration and the runtime of every active
+// project that has a trace, in active_projects order.
+func (s *Service) runtimes() (*config.Config, []*activeProject) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg, slices.Clone(s.projects)
+}
+
+// runtimeOf returns the loaded configuration about project id and the
+// project's runtime, which is nil when the project has no trace. The
+// configuration has no project when id is not active.
+func (s *Service) runtimeOf(id config.ProjectID) (*config.Config, *activeProject) {
+	cfg, projects := s.runtimes()
+	cfg = cfg.For(id)
+	for _, p := range projects {
+		if p.id == id {
+			return cfg, p
+		}
+	}
+	return cfg, nil
+}
+
+// traces returns the open traces of the active projects, whose turns in
+// flight share the role capacity.
+func (s *Service) traces() []*trace.Repository {
+	_, projects := s.runtimes()
+	out := make([]*trace.Repository, len(projects))
+	for i, p := range projects {
+		out[i] = p.repository
+	}
+	return out
+}
+
+// projectFor resolves the project a project-scoped request names. A request
+// may leave the project out only while exactly one project is active; the
+// errors list the active projects.
+func (s *Service) projectFor(id config.ProjectID) (config.ProjectID, *APIError) {
+	ids := s.current().ProjectIDs()
+	if id == "" {
+		switch len(ids) {
+		case 0:
+			return "", &APIError{NoProject, "no project is configured; add one with osmia project add"}
+		case 1:
+			return ids[0], nil
+		}
+		return "", &APIError{Validation, "several projects are active; name one of " + projectList(ids)}
+	}
+	if err := config.CheckProjectIDs(id); err != nil {
+		return "", &APIError{Validation, "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
+	}
+	if !slices.Contains(ids, id) {
+		if len(ids) == 0 {
+			return "", &APIError{NotFound, fmt.Sprintf("project %s is not an active project; no project is active", id)}
+		}
+		return "", &APIError{NotFound, fmt.Sprintf("project %s is not an active project; the active projects are %s", id, projectList(ids))}
+	}
+	return id, nil
+}
+
+// projectList joins project IDs with commas.
+func projectList(ids []config.ProjectID) string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = string(id)
+	}
+	return strings.Join(out, ", ")
 }
 
 // Run serves in the foreground until cancellation, including full cleanup.
@@ -492,9 +575,29 @@ func (s *Service) cleanupSocket() {
 	}
 }
 
-// open opens the configured project's existing trace and its reconciliation
-// controller. Without a configured project, or without a trace for it, the
-// service runs idle: trace creation belongs to project registration.
+// openAll opens the runtime of every active project of cfg that has a trace,
+// in active_projects order. On failure it opens none.
+func (s *Service) openAll(cfg *config.Config) ([]*activeProject, error) {
+	var out []*activeProject
+	for _, id := range cfg.ProjectIDs() {
+		p, err := s.open(cfg.For(id))
+		if err != nil {
+			for _, opened := range out {
+				opened.repository.Close()
+			}
+			return nil, err
+		}
+		if p != nil {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// open opens the existing trace of the project cfg is about and its
+// reconciliation controller. Without a configured project, or without a trace
+// for it, the project runs idle: trace creation belongs to project
+// registration.
 func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	if !cfg.HasProject() {
 		return nil, nil
@@ -511,7 +614,7 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 		repository.Close()
 		return nil, err
 	}
-	return &activeProject{repository: repository, controller: controller, pipeline: p, done: make(chan error, 1)}, nil
+	return &activeProject{id: cfg.Project.ID, repository: repository, controller: controller, pipeline: p, done: make(chan error, 1)}, nil
 }
 
 // admit is the scheduler's gate. It declines every turn of the librarian's
@@ -614,20 +717,36 @@ func (s *Service) launch(active *activeProject) {
 	}()
 }
 
-// stop joins the controller and releases the trace. It reports loop failures
-// other than cancellation.
-func (s *Service) stop(active *activeProject) error {
-	if active == nil {
+// halt cancels the project's controller and joins it. It reports loop
+// failures other than cancellation.
+func (s *Service) halt(active *activeProject) error {
+	if active.cancel == nil {
 		return nil
 	}
-	var err error
-	if active.cancel != nil {
-		active.cancel()
-		if e := <-active.done; e != nil && !errors.Is(e, context.Canceled) {
-			err = e
+	active.cancel()
+	if e := <-active.done; e != nil && !errors.Is(e, context.Canceled) {
+		return e
+	}
+	return nil
+}
+
+// stop joins every project's controller, then releases their traces, so no
+// scheduler pass reads a trace that is closing. It reports loop failures
+// other than cancellation.
+func (s *Service) stop(projects ...*activeProject) error {
+	for _, p := range projects {
+		if p.cancel != nil {
+			p.cancel()
 		}
 	}
-	return errors.Join(err, active.repository.Close())
+	var err error
+	for _, p := range projects {
+		err = errors.Join(err, s.halt(p))
+	}
+	for _, p := range projects {
+		err = errors.Join(err, p.repository.Close())
+	}
+	return err
 }
 
 // openReconciliation leaves trace creation to project registration; an existing
@@ -733,7 +852,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		runner.turns = abandonable{Reconciler: bound, s: s, repository: repository}
 		limits := cfg.Capacity
 		limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
-		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg, repository), Capacity: &limits, Priorities: s.priorities})
+		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg, repository), Capacity: &limits, Priorities: s.priorities, Shared: s.pool})
 		if err != nil {
 			return nil, err
 		}

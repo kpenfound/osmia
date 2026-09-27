@@ -97,7 +97,7 @@ func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (an
 		// A recorded commit may no longer be present in the clone, so the
 		// trace walk still searches its durable records in that case.
 		message := ""
-		if g, readErr := featureWorkspaces(s.current(), repository).of(stream); readErr == nil {
+		if g, readErr := featureWorkspaces(s.about(repository), repository).of(stream); readErr == nil {
 			if commit, readErr := g.Commit(ctx, selector); readErr == nil {
 				message = commit.Message
 			}
@@ -105,7 +105,7 @@ func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (an
 		// On Jujutsu a unit's commits carry the unit's change ID, which
 		// finds the unit of a commit no record names.
 		change := ""
-		if g, readErr := newUnitWorkspaces(s.current(), repository).of(stream); readErr == nil {
+		if g, readErr := newUnitWorkspaces(s.about(repository), repository).of(stream); readErr == nil {
 			read, cancel := context.WithTimeout(ctx, changeReadTimeout)
 			if c, readErr := g.ChangeOf(read, selector); readErr == nil {
 				change = c

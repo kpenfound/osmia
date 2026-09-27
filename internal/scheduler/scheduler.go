@@ -46,6 +46,29 @@ type Options struct {
 	// Priorities returns the runtime priority order of workstreams, read once
 	// per pass. Nil gives every workstream the same priority.
 	Priorities func() []runtime.Priority
+	// Shared is the pool of role slots this scheduler shares with the
+	// schedulers of other projects. Nil keeps the slots to this trace.
+	Shared *Shared
+}
+
+// Shared is one pool of role slots that the schedulers of several projects,
+// one per trace, draw from. Their passes run one at a time, and each counts
+// the turns in flight on every trace Traces returns against the role slots of
+// Capacity, so the limits hold across projects. PerWorkstream and the one
+// turn per workstream of the other roles stay per workstream.
+type Shared struct {
+	mu sync.Mutex
+	// Traces returns the open traces of every project that draws on the
+	// pool. A scheduler's own trace may be among them.
+	Traces func() []*trace.Repository
+}
+
+// Hold runs fn while no pass of a scheduler drawing on the pool is in
+// progress, so a trace fn takes out of Traces is not read once Hold returns.
+func (p *Shared) Hold(fn func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	fn()
 }
 
 // Scheduler publishes the intent to run each thread's next queued turn. The
@@ -61,12 +84,24 @@ type Options struct {
 // A turn holds its slots while it is in flight, so a slot is free again once
 // the turn completes, whatever its outcome, and once the turn is interrupted
 // by a restart. Slots are counted from the trace on each pass, and passes of
-// one Scheduler run one at a time; passes of a second scheduler on the same
-// trace can run concurrently with them and overbook.
+// one Scheduler, or of the schedulers sharing one pool, run one at a time;
+// passes of a second scheduler on the same trace can run concurrently with
+// them and overbook.
 type Scheduler struct {
 	mu         sync.Mutex
 	repository *trace.Repository
 	options    Options
+}
+
+// lock serializes the passes of the scheduler, or of every scheduler of its
+// shared pool.
+func (s *Scheduler) lock() func() {
+	mu := &s.mu
+	if s.options.Shared != nil {
+		mu = &s.options.Shared.mu
+	}
+	mu.Lock()
+	return mu.Unlock
 }
 
 func New(repository *trace.Repository, options Options) (*Scheduler, error) {
@@ -94,8 +129,7 @@ func New(repository *trace.Repository, options Options) (*Scheduler, error) {
 // finds no free slot or that Admit declines is not dispatched and leaves its
 // workstream's place in the rotation unchanged.
 func (s *Scheduler) Pass(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.lock()()
 	r, err := s.read()
 	if err != nil {
 		return err
@@ -160,6 +194,7 @@ type Slots struct {
 // whatever the capacity, such as a pause; a candidate it holds is not waiting
 // for a slot.
 func (s *Scheduler) Slots(holds func(Candidate) (bool, error)) (Slots, error) {
+	defer s.lock()()
 	r, err := s.read()
 	if err != nil {
 		return Slots{}, err
@@ -197,18 +232,64 @@ type reading struct {
 	served     map[rotation]time.Time
 }
 
-// read reads every workstream's threads, then its turn operations.
+// read reads every workstream's threads, then its turn operations. With a
+// shared pool it also counts the turns in flight on the pool's other traces.
 func (s *Scheduler) read() (reading, error) {
 	project := s.repository.Project()
-	streams, err := s.repository.Workstreams()
+	own, err := load(s.repository)
 	if err != nil {
 		return reading{}, err
+	}
+	used := usage{roles: map[string]int{}, streams: map[streamKey]int{}, local: map[localKey]int{}}
+	own.count(used)
+	if s.options.Shared != nil && s.options.Shared.Traces != nil {
+		for _, other := range s.options.Shared.Traces() {
+			if other == s.repository {
+				continue
+			}
+			l, err := load(other)
+			if err != nil {
+				return reading{}, fmt.Errorf("project %s: %w", other.Project(), err)
+			}
+			l.count(used)
+		}
+	}
+	var candidates []Candidate
+	for _, stream := range own.streams {
+		for _, t := range own.threads[stream] {
+			q, ok := next(t)
+			if !ok || own.dispatched[turnKey{stream, t.Identity.ID, q.Request.TurnID}] {
+				continue
+			}
+			candidates = append(candidates, Candidate{Project: project, Workstream: stream, Thread: t, Turn: q})
+		}
+	}
+	return reading{used: used, candidates: candidates, served: own.served}, nil
+}
+
+// loaded is one trace's workstreams, their threads, the turns its turn
+// operations name and each stage's last dispatch.
+type loaded struct {
+	project    config.ProjectID
+	streams    []config.WorkstreamID
+	threads    map[config.WorkstreamID][]trace.Thread
+	dispatched map[turnKey]bool
+	served     map[rotation]time.Time
+}
+
+// load reads every workstream's threads of repository, then its turn
+// operations.
+func load(repository *trace.Repository) (loaded, error) {
+	project := repository.Project()
+	streams, err := repository.Workstreams()
+	if err != nil {
+		return loaded{}, err
 	}
 	threads := map[config.WorkstreamID][]trace.Thread{}
 	roles := map[localKey]string{}
 	for _, stream := range streams {
-		if threads[stream], err = s.repository.Threads(stream); err != nil {
-			return reading{}, fmt.Errorf("workstream %s: %w", stream, err)
+		if threads[stream], err = repository.Threads(stream); err != nil {
+			return loaded{}, fmt.Errorf("workstream %s: %w", stream, err)
 		}
 		for _, t := range threads[stream] {
 			roles[localKey{project, stream, t.Identity.ID}] = t.Identity.Role
@@ -217,9 +298,9 @@ func (s *Scheduler) read() (reading, error) {
 	dispatched := map[turnKey]bool{}
 	served := map[rotation]time.Time{}
 	for _, stream := range streams {
-		records, err := s.repository.Operations(stream)
+		records, err := repository.Operations(stream)
 		if err != nil {
-			return reading{}, fmt.Errorf("workstream %s: %w", stream, err)
+			return loaded{}, fmt.Errorf("workstream %s: %w", stream, err)
 		}
 		for _, record := range records {
 			// The dispatcher refuses input it cannot decode, and the controller
@@ -237,25 +318,18 @@ func (s *Scheduler) read() (reading, error) {
 			}
 		}
 	}
-	used := usage{roles: map[string]int{}, streams: map[streamKey]int{}, local: map[localKey]int{}}
-	var candidates []Candidate
-	for _, stream := range streams {
-		for _, t := range threads[stream] {
-			if inFlight(t, stream, dispatched) {
-				used.add(project, stream, t.Identity.Role)
+	return loaded{project, streams, threads, dispatched, served}, nil
+}
+
+// count adds the trace's turns in flight to used.
+func (l loaded) count(used usage) {
+	for _, stream := range l.streams {
+		for _, t := range l.threads[stream] {
+			if inFlight(t, stream, l.dispatched) {
+				used.add(l.project, stream, t.Identity.Role)
 			}
 		}
 	}
-	for _, stream := range streams {
-		for _, t := range threads[stream] {
-			q, ok := next(t)
-			if !ok || dispatched[turnKey{stream, t.Identity.ID, q.Request.TurnID}] {
-				continue
-			}
-			candidates = append(candidates, Candidate{Project: project, Workstream: stream, Thread: t, Turn: q})
-		}
-	}
-	return reading{used: used, candidates: candidates, served: served}, nil
 }
 
 // order is the order candidates are offered in, given each stage's last

@@ -128,7 +128,7 @@ func TestSendAndConversation(t *testing.T) {
 	unknown := "w_00000000000000000000000000000009"
 	for _, args := range [][]string{{"send", unknown, "hello"}, {"conversation", unknown}} {
 		code, out, diag := invoke(t, root, args...)
-		if code != 4 || out != "" || diag != "validation: workstream "+unknown+" is not in the active project; list workstreams with osmia status\n" {
+		if code != 4 || out != "" || diag != "validation: workstream "+unknown+" is not in an active project; list workstreams with osmia status\n" {
 			t.Fatalf("%v: %d %q %q", args, code, out, diag)
 		}
 	}

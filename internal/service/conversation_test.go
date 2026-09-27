@@ -230,9 +230,9 @@ func TestConversationRejections(t *testing.T) {
 		}
 	}
 	_, err := c.Send(ctx, unknown, "hello")
-	expect(err, Validation, "workstream "+string(unknown)+" is not in the active project")
+	expect(err, Validation, "workstream "+string(unknown)+" is not in an active project")
 	_, err = c.Conversation(ctx, unknown)
-	expect(err, Validation, "workstream "+string(unknown)+" is not in the active project")
+	expect(err, Validation, "workstream "+string(unknown)+" is not in an active project")
 	_, err = c.Send(ctx, "w_bad", "hello")
 	expect(err, Validation, "workstream must be a workstream ID")
 	_, err = c.Conversation(ctx, "w_bad")
@@ -254,9 +254,9 @@ func TestConversationRejections(t *testing.T) {
 	librarian, err := ensureLibrarianThread(ctx, s.active.repository, demoStart, ownerActor)
 	must(t, err)
 	_, err = c.Send(ctx, librarian, "hello")
-	expect(err, Validation, "workstream "+string(librarian)+" is not in the active project")
+	expect(err, Validation, "workstream "+string(librarian)+" is not in an active project")
 	_, err = c.Conversation(ctx, librarian)
-	expect(err, Validation, "workstream "+string(librarian)+" is not in the active project")
+	expect(err, Validation, "workstream "+string(librarian)+" is not in an active project")
 	th, err = s.active.repository.ChiefOfStaffThread(librarian)
 	must(t, err)
 	if len(th.Turns) != 0 {
@@ -267,7 +267,7 @@ func TestConversationRejections(t *testing.T) {
 	unbound := fixture(t)
 	_, c = start(t, unbound)
 	_, err = c.Send(ctx, stream, "hello")
-	expect(err, Validation, "workstream "+string(stream)+" is not in the active project")
+	expect(err, Validation, "workstream "+string(stream)+" is not in an active project")
 
 	empty, _ := projectFixture(t)
 	_, c = start(t, empty)

@@ -162,18 +162,18 @@ func (f *foreman) askDrift(ctx context.Context, stream config.WorkstreamID, at t
 }
 
 // rebaseProject records the owner's request for a drift rebase of every
-// building or assembled workstream of the active project that is not
-// paused. The foreman asks for each on the project's lander, whether or not
+// building or assembled workstream of the project the request names that is
+// not paused; the project may be left out while exactly one is active. The foreman asks for each on the project's lander, whether or not
 // scheduled drift rebases are enabled. It returns once every request is
 // durable, with the workstreams the request covers and those it skips.
 func (s *Service) rebaseProject(ctx context.Context, req ProjectRebaseRequest) (ProjectRebaseResponse, *APIError) {
-	if err := config.CheckProjectIDs(req.Project); err != nil {
-		return ProjectRebaseResponse{}, &APIError{Validation, "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
+	id, api := s.projectFor(req.Project)
+	if api != nil {
+		return ProjectRebaseResponse{}, api
 	}
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
-	if !cfg.HasProject() || cfg.Project.ID != req.Project {
+	req.Project = id
+	cfg, active := s.runtimeOf(id)
+	if !cfg.HasProject() {
 		return ProjectRebaseResponse{}, &APIError{NotFound, fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
 	if active == nil {

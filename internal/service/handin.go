@@ -176,7 +176,7 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		} else {
 			// A new workstream records the backend its workspaces use; it
 			// keeps it until it is delivered or abandoned.
-			backend, checkErr := h.s.newWorkspaces(ctx, h.s.current())
+			backend, checkErr := h.s.newWorkspaces(ctx, h.s.about(h.repository))
 			if checkErr != nil {
 				return HandInResponse{}, false, &APIError{Unavailable, fmt.Sprintf("workstream %s cannot start: %v", stream, checkErr)}
 			}
@@ -188,7 +188,7 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		// The workstream may be new: the runtime store learns it before the
 		// input is copied, so a retried hand-in resolves it again and a
 		// priority or pause may name it as soon as this hand-in finishes.
-		if err := h.s.resolveRuntime(h.s.current(), repository); err != nil {
+		if err := h.s.refreshRuntime(); err != nil {
 			return h.failed("resolving the runtime workstreams of")
 		}
 		doc = &trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: handedDocument, Revision: 1, Project: req.Project, Workstream: stream, At: now, Actor: ownerActor, Cause: handInTransition},

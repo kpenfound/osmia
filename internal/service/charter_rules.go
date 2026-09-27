@@ -80,31 +80,31 @@ func findCharterProposal(repository *trace.Repository, stream config.WorkstreamI
 	return proposals[i], true, nil
 }
 
-// charterProposals lists the active project's charter proposals that wait
-// for the owner, leaving out those of abandoned workstreams.
+// charterProposals lists the charter proposals of every active project that
+// wait for the owner, leaving out those of abandoned workstreams.
 func (s *Service) charterProposals() (CharterProposalsResponse, *APIError) {
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
+	cfg, projects := s.runtimes()
 	out := CharterProposalsResponse{Proposals: []CharterProposalView{}}
-	if !cfg.HasProject() || active == nil {
-		return out, nil
-	}
-	failed := &APIError{Internal, fmt.Sprintf("cannot read the charter proposals of project %s; check the trace repository", cfg.Project.ID)}
-	proposals, err := active.repository.CharterProposals()
-	if err != nil {
-		return CharterProposalsResponse{}, failed
-	}
-	for _, p := range proposals {
-		if p.State.Value != trace.CharterProposed {
+	for _, active := range projects {
+		if !cfg.Active(active.id) {
 			continue
 		}
-		gone, err := abandoned(active.repository, p.Workstream)
+		failed := &APIError{Internal, fmt.Sprintf("cannot read the charter proposals of project %s; check the trace repository", active.id)}
+		proposals, err := active.repository.CharterProposals()
 		if err != nil {
 			return CharterProposalsResponse{}, failed
 		}
-		if !gone {
-			out.Proposals = append(out.Proposals, charterProposalView(p, ""))
+		for _, p := range proposals {
+			if p.State.Value != trace.CharterProposed {
+				continue
+			}
+			gone, err := abandoned(active.repository, p.Workstream)
+			if err != nil {
+				return CharterProposalsResponse{}, failed
+			}
+			if !gone {
+				out.Proposals = append(out.Proposals, charterProposalView(p, ""))
+			}
 		}
 	}
 	return out, nil

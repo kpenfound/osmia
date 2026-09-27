@@ -83,7 +83,7 @@ func (a amendmentDebate) application(stream config.WorkstreamID, id string) (ame
 }
 
 func (a amendmentDebate) masons() *masons {
-	return &masons{s: a.s, cfg: a.s.current(), repository: a.repository}
+	return &masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}
 }
 
 // apply records, in one commit, what a resealed amendment does to the

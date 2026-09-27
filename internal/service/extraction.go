@@ -113,11 +113,9 @@ func requestExtraction(ctx context.Context, r *trace.Repository, n int, at time.
 // creating the librarian's thread first. It uses the active project's open
 // trace, or opens the trace when the project is not active yet.
 func (s *Service) ensureExtraction(ctx context.Context, root config.Root, p config.Project) error {
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
+	cfg, active := s.runtimeOf(p.ID)
 	var r *trace.Repository
-	if active != nil && cfg.HasProject() && cfg.Project.ID == p.ID {
+	if active != nil && cfg.HasProject() {
 		r = active.repository
 	} else {
 		var err error
@@ -219,10 +217,8 @@ func progress(record trace.OperationRecord) (state, reason string, at time.Time)
 
 // projectExtraction reports the active project's latest extraction.
 func (s *Service) projectExtraction(id config.ProjectID) (*ExtractionState, error) {
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
-	if !cfg.HasProject() || cfg.Project.ID != id {
+	cfg, active := s.runtimeOf(id)
+	if !cfg.HasProject() {
 		return nil, errNoActiveProject
 	}
 	if active == nil {
@@ -231,18 +227,19 @@ func (s *Service) projectExtraction(id config.ProjectID) (*ExtractionState, erro
 	return extractionState(active.repository)
 }
 
-// extractProject starts a new extraction pass of the active project. One that
+// extractProject starts a new extraction pass of the project the request
+// names, which may be left out while exactly one project is active. One that
 // is still pending or running is not doubled.
 func (s *Service) extractProject(ctx context.Context, req ProjectExtractRequest) (ExtractionResponse, *APIError) {
-	if err := config.CheckProjectIDs(req.Project); err != nil {
-		return ExtractionResponse{}, &APIError{Validation, "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
-	}
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
-	if !cfg.HasProject() || cfg.Project.ID != req.Project {
+	id, api := s.projectFor(req.Project)
+	if api != nil {
+		return ExtractionResponse{}, api
+	}
+	req.Project = id
+	cfg, active := s.runtimeOf(id)
+	if !cfg.HasProject() {
 		return ExtractionResponse{}, &APIError{NotFound, fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
 	if active == nil {
@@ -479,7 +476,7 @@ func (e *extractor) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if len(docs) > 0 {
 		return extractionResult(docs), nil
 	}
-	cfg := e.s.current()
+	cfg := e.s.about(e.repository)
 	if !cfg.HasProject() || cfg.Project.ID != e.repository.Project() {
 		return coreadapter.OperationResult{}, errors.New("the project is not active")
 	}
@@ -577,7 +574,7 @@ func (e *extractor) turnDirectory(turn string) string {
 
 // dispatch runs the turn through the thread dispatcher and runner.
 func (e *extractor) dispatch(ctx context.Context, stream config.WorkstreamID, turn string) (coreadapter.OperationResult, error) {
-	d := thread.Dispatcher{Runner: e.s.threadRunner(e.s.current(), e.repository, e.turns(), e.s.now), Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	d := thread.Dispatcher{Runner: e.s.threadRunner(e.s.about(e.repository), e.repository, e.turns(), e.s.now), Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(e.turnDirectory(in.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 	}}
@@ -631,7 +628,7 @@ func (stagedWorkspaces) Acquire(ctx context.Context, req coreadapter.WorkspaceRe
 // selectView stages the librarian's workspace for the claimed turn and selects
 // all of it: repo/, kb/, seed/ and the empty output/.
 func (e *extractor) selectView(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
-	cfg := e.s.current()
+	cfg := e.s.about(e.repository)
 	if scope.Role != librarianRole || scope.Project != string(e.repository.Project()) || !cfg.HasProject() || cfg.Project.ID != e.repository.Project() {
 		return isolation.Selection{}, errors.New("view selection denied")
 	}

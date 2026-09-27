@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -102,8 +103,8 @@ func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (Projec
 		return ProjectResponse{}, &APIError{Internal, "the project registration journal is unreadable; inspect project-add.json under the root"}
 	}
 	if pending != nil {
-		if active := s.current(); active.HasProject() && active.Project.ID != pending.Project.ID {
-			return ProjectResponse{}, journalMismatch(pending.Project.ID, active.Project.ID)
+		if active := s.current(); len(active.Projects) > 0 && !active.Active(pending.Project.ID) {
+			return ProjectResponse{}, journalMismatch(pending.Project.ID, active.Projects[0].ID)
 		}
 		p, err := s.complete(ctx, *pending, true)
 		if err != nil {
@@ -116,12 +117,14 @@ func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (Projec
 	}
 	cfg := s.current()
 	p, api := s.validateAdd(req)
-	if cfg.HasProject() {
+	if len(cfg.Projects) > 0 {
 		// The same registration again is the retry of a finished add.
-		if api == nil && sameRegistration(p, cfg.Project) {
-			return s.added(cfg.Project), nil
+		for _, active := range cfg.Projects {
+			if api == nil && sameRegistration(p, active) {
+				return s.added(active), nil
+			}
 		}
-		return ProjectResponse{}, activeError(cfg.Project.ID)
+		return ProjectResponse{}, activeError(cfg.Projects[0].ID)
 	}
 	if api != nil {
 		return ProjectResponse{}, api
@@ -319,19 +322,44 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 	return p, s.step("journal-removed")
 }
 
-// resolveRuntime points the runtime store at cfg and the workstreams of
-// repository, re-reading the trace so overrides may name workstreams created
-// since the last resolve. Without a repository the configured identities
-// stand in. Callers hold their own ordering against configuration changes.
-func (s *Service) resolveRuntime(cfg *config.Config, repository *trace.Repository) error {
-	workstreams := s.options.Workstreams
-	if repository != nil {
-		var err error
-		if workstreams, err = repository.Workstreams(); err != nil {
-			return err
-		}
+// resolveRuntime points the runtime store at cfg and the workstreams of the
+// traces of projects, re-reading them so overrides may name workstreams
+// created since the last resolve. For an active project without a trace the
+// configured identities stand in. Callers hold their own ordering against
+// configuration changes.
+func (s *Service) resolveRuntime(cfg *config.Config, projects []*activeProject) error {
+	in, err := s.runtimeInputs(cfg, projects)
+	if err != nil {
+		return err
 	}
-	return s.store.Resolve(runtime.Inputs{Config: cfg, Workstreams: workstreams})
+	return s.store.Resolve(in)
+}
+
+// refreshRuntime resolves the runtime store against the loaded configuration
+// and the open traces.
+func (s *Service) refreshRuntime() error {
+	cfg, projects := s.runtimes()
+	return s.resolveRuntime(cfg, projects)
+}
+
+// runtimeInputs returns the runtime store's inputs for cfg: the workstreams
+// of every active project, read from its trace among projects.
+func (s *Service) runtimeInputs(cfg *config.Config, projects []*activeProject) (runtime.Inputs, error) {
+	workstreams := map[config.ProjectID][]config.WorkstreamID{}
+	for _, id := range cfg.ProjectIDs() {
+		workstreams[id] = s.options.Workstreams
+	}
+	for _, p := range projects {
+		if !cfg.Active(p.id) {
+			continue
+		}
+		streams, err := p.repository.Workstreams()
+		if err != nil {
+			return runtime.Inputs{}, err
+		}
+		workstreams[p.id] = streams
+	}
+	return runtime.Inputs{Config: cfg, Workstreams: workstreams}, nil
 }
 
 // activate loads the project into the running configuration and opens its
@@ -339,11 +367,11 @@ func (s *Service) resolveRuntime(cfg *config.Config, repository *trace.Repositor
 func (s *Service) activate(id config.ProjectID) (config.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active != nil {
+	if len(s.projects) > 0 {
 		if s.cfg.Project.ID == id {
 			return s.cfg.Project, nil
 		}
-		return config.Project{}, fmt.Errorf("project %s is active", s.cfg.Project.ID)
+		return config.Project{}, fmt.Errorf("project %s is active", s.projects[0].id)
 	}
 	cfg, err := s.cfg.WithProject(id, s.options.Config.Home)
 	if err != nil {
@@ -353,18 +381,20 @@ func (s *Service) activate(id config.ProjectID) (config.Project, error) {
 	if err != nil {
 		return config.Project{}, err
 	}
-	var repository *trace.Repository
+	var projects []*activeProject
 	if active != nil {
-		repository = active.repository
+		projects = append(projects, active)
 	}
-	if err := s.resolveRuntime(cfg, repository); err != nil {
+	if err := s.resolveRuntime(cfg, projects); err != nil {
 		if active != nil {
 			active.repository.Close()
 		}
 		return config.Project{}, err
 	}
-	s.cfg, s.active, s.pending = cfg, active, nil
-	s.launch(active)
+	s.cfg, s.projects, s.pending = cfg, projects, nil
+	if active != nil {
+		s.launch(active)
+	}
 	s.hub.publish(Event{Kind: EventResync})
 	return cfg.Project, nil
 }
@@ -383,8 +413,8 @@ func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*conf
 	if pending == nil {
 		return cfg, nil
 	}
-	if cfg.HasProject() && cfg.Project.ID != pending.Project.ID {
-		return cfg, fmt.Errorf("journal names %s while %s is active", pending.Project.ID, cfg.Project.ID)
+	if len(cfg.Projects) > 0 && !cfg.Active(pending.Project.ID) {
+		return cfg, fmt.Errorf("journal names %s while %s is active", pending.Project.ID, cfg.Projects[0].ID)
 	}
 	if _, err := s.complete(ctx, *pending, false); err != nil {
 		return cfg, err
@@ -396,21 +426,26 @@ func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*conf
 	return loaded, nil
 }
 
-// removeProject takes the active project out of configuration and closes its
-// runtime state. Its trace and the owner's clone stay where they are.
+// removeProject takes an active project out of configuration and closes its
+// runtime state; the other active projects keep running. Its trace and the
+// owner's clone stay where they are.
 func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *APIError) {
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
 	cfg := s.current()
-	if !cfg.HasProject() {
+	if len(cfg.Projects) == 0 {
 		return ProjectResponse{}, &APIError{NoProject, "no project is configured; add one with osmia project add"}
 	}
 	if err := config.CheckProjectIDs(req.Project); err != nil {
 		return ProjectResponse{}, &APIError{Validation, "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
 	}
-	if req.Project != cfg.Project.ID {
-		return ProjectResponse{}, &APIError{Validation, fmt.Sprintf("project %s is not active; the active project is %s", req.Project, cfg.Project.ID)}
+	if !cfg.Active(req.Project) {
+		if len(cfg.Projects) == 1 {
+			return ProjectResponse{}, &APIError{Validation, fmt.Sprintf("project %s is not active; the active project is %s", req.Project, cfg.Projects[0].ID)}
+		}
+		return ProjectResponse{}, &APIError{Validation, fmt.Sprintf("project %s is not active; the active projects are %s", req.Project, projectList(cfg.ProjectIDs()))}
 	}
+	removed := cfg.For(req.Project).Project
 	configPath, err := cfg.Root.Config()
 	if err == nil {
 		err = config.RemoveActiveProject(configPath, req.Project)
@@ -419,14 +454,30 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 		return ProjectResponse{}, &APIError{Internal, "cannot edit active_projects in config.toml; check the file and its permissions"}
 	}
 	s.mu.Lock()
-	active := s.active
-	s.active = nil
-	s.cfg = cfg.WithoutProject()
+	var active *activeProject
+	for _, p := range s.projects {
+		if p.id == req.Project {
+			active = p
+		}
+	}
+	s.cfg = cfg.WithoutProjectID(req.Project)
 	s.mu.Unlock()
-	if err := errors.Join(s.stop(active), s.store.Resolve(runtime.Inputs{Config: s.current()})); err != nil {
+	var closed error
+	if active != nil {
+		// The loop stops before the trace leaves the pool, and no scheduler
+		// pass reads the trace once it has left, so it closes unread.
+		closed = s.halt(active)
+		s.pool.Hold(func() {
+			s.mu.Lock()
+			s.projects = slices.DeleteFunc(s.projects, func(p *activeProject) bool { return p == active })
+			s.mu.Unlock()
+		})
+		closed = errors.Join(closed, active.repository.Close())
+	}
+	if err := errors.Join(closed, s.refreshRuntime()); err != nil {
 		return ProjectResponse{}, &APIError{Internal, "the project is removed from configuration but its runtime state did not close cleanly; restart the service"}
 	}
 	s.hub.publish(Event{Kind: EventResync})
-	view := projectView(cfg.Root, cfg.Project)
+	view := projectView(cfg.Root, removed)
 	return ProjectResponse{Project: view, NextStep: "The trace at " + view.Trace + " and the clone are retained; adding the project again starts a new trace under a new ID."}, nil
 }

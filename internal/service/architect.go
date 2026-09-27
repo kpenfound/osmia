@@ -419,7 +419,7 @@ func (d *drafter) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 		}
 		return *result, nil
 	}
-	cfg := d.s.current()
+	cfg := d.s.about(d.repository)
 	if !cfg.HasProject() || cfg.Project.ID != d.repository.Project() {
 		return coreadapter.OperationResult{}, errors.New("the project is not active")
 	}
@@ -654,7 +654,7 @@ func (d *drafter) turnDirectory(stream config.WorkstreamID, turn string) string 
 func (d *drafter) dispatch(ctx context.Context, stream config.WorkstreamID, turn string) (coreadapter.OperationResult, error) {
 	ctx, release := d.s.stoppable(ctx, d.repository.Project(), stream)
 	defer release()
-	dispatcher := thread.Dispatcher{Runner: d.s.threadRunner(d.s.current(), d.repository, &questions.Turns{Turns: d.turns(stream), Repository: d.repository}, d.s.now), Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	dispatcher := thread.Dispatcher{Runner: d.s.threadRunner(d.s.about(d.repository), d.repository, &questions.Turns{Turns: d.turns(stream), Repository: d.repository}, d.s.now), Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(d.turnDirectory(in.Workstream, in.Turn), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 	}}
@@ -760,7 +760,7 @@ func (d *drafter) draftTool(scope coreadapter.Scope, attempt string) coreadapter
 // selectView stages the architect's view for the claimed turn and selects all
 // of it, read-only.
 func (d *drafter) selectView(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
-	cfg := d.s.current()
+	cfg := d.s.about(d.repository)
 	if scope.Role != architectRole || scope.Project != string(d.repository.Project()) || !cfg.HasProject() || cfg.Project.ID != d.repository.Project() {
 		return isolation.Selection{}, errors.New("view selection denied")
 	}

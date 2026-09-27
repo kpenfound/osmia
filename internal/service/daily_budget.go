@@ -5,15 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // dailyBudget pauses the factory with a soft pause attributed to the daily
-// budget once the known spend of the current local calendar day reaches
-// budget.per_day. The pause expires at the next local day boundary. The
+// budget once the known spend of the current local calendar day, across every
+// active project, reaches budget.per_day. The pause expires at the next local day boundary. The
 // budget pauses at most once per local day, so an owner who clears or
 // replaces its pause keeps the factory running for the rest of that day.
 type dailyBudget struct {
@@ -47,7 +49,11 @@ func (d dailyBudget) Pass(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("invalid per-day budget %q", limitText)
 	}
-	spend, err := daySpend(d.repository, day)
+	repositories := d.s.traces()
+	if !slices.Contains(repositories, d.repository) {
+		repositories = append(repositories, d.repository)
+	}
+	spend, err := daySpend(day, repositories...)
 	if err != nil {
 		return err
 	}
@@ -90,36 +96,47 @@ func (s *Service) localDay() calendarDay {
 	return calendarDay{date: start.Format(runtime.DayLayout), start: start, end: time.Date(y, m, day+1, 0, 0, 0, 0, location), location: location}
 }
 
-// daySpend sums the costs of every workstream's attempts that started on day.
-func daySpend(repository *trace.Repository, day calendarDay) (spendTotal, error) {
-	costs, err := repository.Costs()
-	if err != nil {
-		return spendTotal{}, err
-	}
+// daySpend sums the costs of every workstream's attempts that started on day
+// in the repositories.
+func daySpend(day calendarDay, repositories ...*trace.Repository) (spendTotal, error) {
 	var today []trace.Cost
-	for _, c := range costs {
-		if !c.Entry.At.Before(day.start) && c.Entry.At.Before(day.end) {
-			today = append(today, c)
+	for _, repository := range repositories {
+		costs, err := repository.Costs()
+		if err != nil {
+			return spendTotal{}, err
+		}
+		for _, c := range costs {
+			if !c.Entry.At.Before(day.start) && c.Entry.At.Before(day.end) {
+				today = append(today, c)
+			}
 		}
 	}
 	return sumCosts(today)
 }
 
-// dailyBudgetStatus reports today's known spend against budget.per_day, or
-// nil when no daily budget is configured.
+// dailyBudgetStatus reports today's known spend across every active project
+// against budget.per_day, or nil when no daily budget is configured.
 func (s *Service) dailyBudgetStatus() (*DailyBudgetStatus, *Diagnostic) {
-	s.mu.Lock()
-	active, cfg := s.active, s.cfg
-	s.mu.Unlock()
+	cfg, projects := s.runtimes()
 	if cfg == nil || cfg.Budget.PerDay == "" {
 		return nil, nil
 	}
 	day := s.localDay()
 	spend := spendTotal{known: new(big.Rat)}
-	if cfg.HasProject() && active != nil {
+	var repositories []*trace.Repository
+	for _, p := range projects {
+		if cfg.Active(p.id) {
+			repositories = append(repositories, p.repository)
+		}
+	}
+	if len(repositories) > 0 {
 		var err error
-		if spend, err = daySpend(active.repository, day); err != nil {
-			return nil, &Diagnostic{"daily_budget", Internal, fmt.Sprintf("cannot read today's spend in project %s; check the trace repository", cfg.Project.ID)}
+		if spend, err = daySpend(day, repositories...); err != nil {
+			ids := make([]config.ProjectID, len(repositories))
+			for i, r := range repositories {
+				ids[i] = r.Project()
+			}
+			return nil, &Diagnostic{"daily_budget", Internal, fmt.Sprintf("cannot read today's spend in project %s; check the trace repository", projectList(ids))}
 		}
 	}
 	return &DailyBudgetStatus{Day: day.date, SpendUSD: spend.String(), LimitUSD: cfg.Budget.PerDay, UnknownCosts: spend.unknown, LowerBound: spend.unknown > 0}, nil

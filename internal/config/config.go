@@ -35,7 +35,12 @@ type Config struct {
 	Mason          Mason              `toml:"mason" json:"mason"`
 	Events         Events             `toml:"events" json:"events"`
 	Notify         Notify             `toml:"notify" json:"notify"`
-	Project        Project            `toml:"-" json:"project"`
+	// Project is the project this configuration is about: the only active
+	// project of a loaded configuration, or the project For selected. It is
+	// zero when no project, or more than one, is active.
+	Project Project `toml:"-" json:"project"`
+	// Projects holds every active project, in active_projects order.
+	Projects []Project `toml:"-" json:"projects,omitempty"`
 }
 type Listen struct {
 	Socket string `toml:"socket" json:"socket"`
@@ -166,33 +171,36 @@ func fieldError(path, field, reason string) error {
 }
 
 // Load returns nil on every failure. The top-level file is required, and only
-// the explicitly active project is read; archived directories are not activated.
+// the explicitly active projects are read, each of which must load and
+// validate; archived directories are not activated.
 func Load(options Options) (*Config, error) {
 	c, err := LoadTopLevel(options)
 	if err != nil {
 		return nil, err
 	}
-	if len(c.ActiveProjects) == 0 {
-		return c, nil
+	for _, s := range c.ActiveProjects {
+		id, err := ParseProjectID(s)
+		if err != nil {
+			return nil, err
+		}
+		p, err := loadProject(c.Root, id, options.Home, c.Capacity.PerWorkstream)
+		if err != nil {
+			return nil, err
+		}
+		if err := c.validateClassifier(p); err != nil {
+			return nil, err
+		}
+		c.Projects = append(c.Projects, p)
 	}
-	id, err := ParseProjectID(c.ActiveProjects[0])
-	if err != nil {
-		return nil, err
-	}
-	p, err := loadProject(c.Root, id, options.Home, c.Capacity.PerWorkstream)
-	if err != nil {
-		return nil, err
-	}
-	c.Project = p
-	if err := c.validateClassifier(); err != nil {
-		return nil, err
+	if len(c.Projects) == 1 {
+		c.Project = c.Projects[0]
 	}
 	return c, nil
 }
 
 // LoadTopLevel loads and validates the top-level file alone, as Load does,
-// and returns nil on every failure. It reads no project file: Project stays
-// zero whatever active_projects lists.
+// and returns nil on every failure. It reads no project file: Project and
+// Projects stay zero whatever active_projects lists.
 func LoadTopLevel(options Options) (*Config, error) {
 	root, err := ResolveRoot(options.Root, options.Home)
 	if err != nil {
@@ -220,9 +228,6 @@ func LoadTopLevel(options Options) (*Config, error) {
 	}
 	if err := CheckProjectIDs(ids...); err != nil {
 		return nil, fieldError(path, "active_projects", err.Error())
-	}
-	if len(ids) > 1 {
-		return nil, fieldError(path, "active_projects", "at most one active project is supported; multi-project operation is unsupported")
 	}
 	if !md.IsDefined("listen", "socket") {
 		c.Listen.Socket, err = root.Socket()
@@ -290,9 +295,40 @@ func LoadTopLevel(options Options) (*Config, error) {
 	return c, nil
 }
 
-// HasProject reports whether an active project is configured. Without one the
-// Project field is zero and project-scoped operations are unavailable.
+// HasProject reports whether the configuration is about one project: the only
+// active project, or the one For selected. Without one the Project field is
+// zero.
 func (c *Config) HasProject() bool { return c.Project.ID != "" }
+
+// ProjectIDs returns the IDs of the active projects, in active_projects order.
+func (c *Config) ProjectIDs() []ProjectID {
+	ids := make([]ProjectID, len(c.Projects))
+	for i, p := range c.Projects {
+		ids[i] = p.ID
+	}
+	return ids
+}
+
+// Active reports whether id is an active project.
+func (c *Config) Active(id ProjectID) bool {
+	return slices.ContainsFunc(c.Projects, func(p Project) bool { return p.ID == id })
+}
+
+// For returns a copy of c about the active project id: its Project is that
+// project, or zero when id is not active. The receiver is unchanged.
+func (c *Config) For(id ProjectID) *Config {
+	out := *c
+	if c.Project.ID == id {
+		return &out
+	}
+	out.Project = Project{}
+	for _, p := range c.Projects {
+		if p.ID == id {
+			out.Project = p
+		}
+	}
+	return &out
+}
 
 // WithProject returns a copy of c whose only active project is id, loaded and
 // validated from its configuration file. The receiver is unchanged.
@@ -301,25 +337,49 @@ func (c *Config) WithProject(id ProjectID, home string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := c.validateClassifier(p); err != nil {
+		return nil, err
+	}
 	out := *c
 	out.ActiveProjects = []string{string(id)}
 	out.Project = p
-	if err := out.validateClassifier(); err != nil {
-		return nil, err
+	out.Projects = []Project{p}
+	return &out, nil
+}
+
+// WithProjects returns a copy of c whose active projects are ids, in that
+// order, each loaded and validated from its configuration file. The receiver
+// is unchanged.
+func (c *Config) WithProjects(ids []ProjectID, home string) (*Config, error) {
+	out := *c
+	out.ActiveProjects, out.Projects, out.Project = []string{}, nil, Project{}
+	for _, id := range ids {
+		p, err := loadProject(c.Root, id, home, c.Capacity.PerWorkstream)
+		if err != nil {
+			return nil, err
+		}
+		if err := c.validateClassifier(p); err != nil {
+			return nil, err
+		}
+		out.ActiveProjects = append(out.ActiveProjects, string(id))
+		out.Projects = append(out.Projects, p)
+	}
+	if len(out.Projects) == 1 {
+		out.Project = out.Projects[0]
 	}
 	return &out, nil
 }
 
-func (c *Config) validateClassifier() error {
-	if c.Project.Classifier == "" {
+func (c *Config) validateClassifier(p Project) error {
+	if p.Classifier == "" {
 		return nil
 	}
-	if _, ok := c.Profiles[c.Project.Classifier]; !ok {
-		path, _ := c.Root.ProjectConfig(c.Project.ID)
-		return fieldError(path, "classifier", "unknown profile "+c.Project.Classifier)
+	if _, ok := c.Profiles[p.Classifier]; !ok {
+		path, _ := c.Root.ProjectConfig(p.ID)
+		return fieldError(path, "classifier", "unknown profile "+p.Classifier)
 	}
-	if c.Roles["mason"].Sandbox == "claude" && c.Profiles[c.Project.Classifier].Agent != "claude" {
-		path, _ := c.Root.ProjectConfig(c.Project.ID)
+	if c.Roles["mason"].Sandbox == "claude" && c.Profiles[p.Classifier].Agent != "claude" {
+		path, _ := c.Root.ProjectConfig(p.ID)
 		return fieldError(path, "classifier", "mason claude sandbox requires a claude classifier profile")
 	}
 	return nil
@@ -330,6 +390,24 @@ func (c *Config) WithoutProject() *Config {
 	out := *c
 	out.ActiveProjects = []string{}
 	out.Project = Project{}
+	out.Projects = nil
+	return &out
+}
+
+// WithoutProjectID returns a copy of c without the active project id; the
+// other active projects stay, in order.
+func (c *Config) WithoutProjectID(id ProjectID) *Config {
+	out := *c
+	out.ActiveProjects, out.Projects, out.Project = []string{}, nil, Project{}
+	for _, p := range c.Projects {
+		if p.ID != id {
+			out.ActiveProjects = append(out.ActiveProjects, string(p.ID))
+			out.Projects = append(out.Projects, p)
+		}
+	}
+	if len(out.Projects) == 1 {
+		out.Project = out.Projects[0]
+	}
 	return &out
 }
 

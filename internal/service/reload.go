@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // scheduleHook is one step of the schedule a pass runs before it reconciles
@@ -72,9 +72,7 @@ func (a stagedAdapter) Apply(ctx context.Context, op coreadapter.Operation) (cor
 func (s *Service) reload() (ReloadResponse, *APIError) {
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
-	s.mu.Lock()
-	cfg, active := s.cfg, s.active
-	s.mu.Unlock()
+	cfg, projects := s.runtimes()
 	next, restart, err := s.candidate(cfg)
 	if err != nil {
 		failed := reloadError(err, s.now())
@@ -85,54 +83,49 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		return ReloadResponse{}, &APIError{Validation, failed.Message + "; the loaded configuration is unchanged"}
 	}
 	unchanged := &APIError{Internal, "cannot apply the reloaded configuration to the running project; the loaded configuration is unchanged"}
-	var (
-		staged     *stages
-		repository *trace.Repository
-	)
-	if active != nil {
-		repository = active.repository
-		if staged, err = s.stages(next, repository); err != nil {
+	staged := make([]*stages, len(projects))
+	for i, p := range projects {
+		if staged[i], err = s.stages(next.For(p.id), p.repository); err != nil {
 			return ReloadResponse{}, unchanged
 		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.resolveRuntime(next, repository); err != nil {
+	if err := s.resolveRuntime(next, projects); err != nil {
 		return ReloadResponse{}, unchanged
 	}
 	s.cfg, s.reloadErr = next, nil
-	if staged != nil {
-		active.pipeline.next.Store(staged)
+	for i, p := range projects {
+		p.pipeline.next.Store(staged[i])
 	}
 	// The runtime's effective profiles and the daily budget's limit follow the
 	// configuration.
-	var project config.ProjectID
-	if next.HasProject() {
-		project = next.Project.ID
+	events := []Event{{Kind: EventConfig}, {Kind: EventRuntime}}
+	for _, id := range next.ProjectIDs() {
+		events = append(events, Event{Kind: EventSpend, Project: id})
 	}
-	s.hub.publish(Event{Kind: EventConfig}, Event{Kind: EventRuntime}, Event{Kind: EventSpend, Project: project})
+	if len(next.Projects) == 0 {
+		events = append(events, Event{Kind: EventSpend})
+	}
+	s.hub.publish(events...)
 	return ReloadResponse{Digest: digest(next), RestartRequired: restart}, nil
 }
 
 // candidate loads the configuration on disk as a reload applies it over cfg.
 // Changed settings that need a restart keep cfg's values and are named: the
 // listen socket, the web and tailnet listeners, and the active project list, which only
-// project add and remove change in a running service. The loaded project's
-// file is validated even when the disk lists another project.
+// project add and remove change in a running service. The loaded projects'
+// files are validated even when the disk lists other projects.
 func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error) {
 	next, err := config.Load(s.options.Config)
 	if err != nil {
 		return nil, nil, err
 	}
 	restart := []string{}
-	if next.Project.ID != cfg.Project.ID {
+	if !slices.Equal(next.ProjectIDs(), cfg.ProjectIDs()) {
 		restart = append(restart, "active_projects")
-		if cfg.HasProject() {
-			if next, err = next.WithProject(cfg.Project.ID, s.options.Config.Home); err != nil {
-				return nil, nil, err
-			}
-		} else {
-			next = next.WithoutProject()
+		if next, err = next.WithProjects(cfg.ProjectIDs(), s.options.Config.Home); err != nil {
+			return nil, nil, err
 		}
 	}
 	if next.Listen.Socket != cfg.Listen.Socket {
