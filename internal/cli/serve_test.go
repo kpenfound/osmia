@@ -194,7 +194,7 @@ func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream stri
 	if work := turn.Request.Workspace.Directory(); filepath.Dir(work) != turn.Request.SessionDir {
 		t.Fatalf("working directory %s is not the session's own", work)
 	}
-	granted := append([]string{status.ToolName, "prioritise", "pause", "resume", "decide_amendment", "decide_charter"}, questions.ChiefTools...)
+	granted := append([]string{status.ToolName, "notify", "capacity", "inspect_code", "prioritise", "pause", "resume", "decide_amendment", "decide_charter"}, questions.ChiefTools...)
 	var tools []string
 	for _, allowed := range turn.Request.Profile.AllowedTools {
 		server, tool, ok := strings.Cut(strings.TrimPrefix(allowed, "mcp__"), "__")
@@ -216,7 +216,7 @@ func TestServeBuildsCoreEnforcement(t *testing.T) {
 		t.Fatalf("engine %#v", e.Engine)
 	}
 	host, ok := e.Hosts.(*coreadapter.MCPHost)
-	if !ok || !reflect.DeepEqual(host.Transport, coreadapter.CoreTransport{}) || host.Container == nil {
+	if !ok || !reflect.DeepEqual(host.Transport, coreadapter.CoreTransport{}) || host.Container == nil || !reflect.DeepEqual(host.Sbx, coreadapter.SbxTransport()) {
 		t.Fatalf("hosts %#v", e.Hosts)
 	}
 	opts := service.Enforce(service.Options{}, e)

@@ -14,6 +14,8 @@ type Section struct {
 }
 
 var attribution = map[string]string{
+	"project_notice":  "chief of staff information",
+	"hearsay_context": "external evidence from Hearsay",
 	"question":        "asker (copied by Osmia)",
 	"answer":          "chief of staff",
 	"owner_response":  "owner (copied by Osmia)",

@@ -1,7 +1,6 @@
 package trace
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -47,6 +46,8 @@ type Repository struct {
 	tree     map[string]string
 	treeHead string
 	synced   map[string]bool
+	// recordFiles holds decoded JSONL keyed by exact bytes, under mu.
+	recordFiles map[string]recordFile
 }
 
 func location(root config.Root, project config.Project) (string, error) {
@@ -136,6 +137,7 @@ func (r *Repository) Close() error {
 		err = errors.Join(syscall.Flock(int(r.lock.Fd()), syscall.LOCK_UN), r.lock.Close())
 		r.lock = nil
 	}
+	r.recordFiles = nil
 	return errors.Join(err, r.dir.Close())
 }
 func (r *Repository) Project() config.ProjectID { return r.project }
@@ -607,6 +609,8 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 		}
 	}
 	var records []Record
+	files := map[string]recordFile{}
+	cacheBytes := 0
 	latest := map[string]Record{}
 	documents := map[string]string{}
 	err = r.walk(func(name string, entry fs.DirEntry) error {
@@ -617,23 +621,15 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 		if len(parts) == 4 && parts[0] == "workstreams" && parts[2] == "handed" {
 			return nil // Handed documents retain their original name and content.
 		}
-		data, err := r.readFile(name)
+		data, err := r.readCheckedFile(name)
 		if err != nil {
 			diagnostics = append(diagnostics, fmt.Errorf("%s: %w", name, err))
 			return nil
 		}
-		lines := bytes.Split(data, []byte{'\n'})
-		for i, line := range lines {
-			if i == len(lines)-1 && len(line) == 0 {
-				continue
-			}
-			v, err := decodeRecord(line)
-			if err == nil && i == len(lines)-1 {
-				err = fmt.Errorf("incomplete JSONL record (missing newline)")
-			}
-			if err == nil {
-				err = validate(v)
-			}
+		cached := r.decodedRecords(name, data)
+		valid := true
+		for i, decoded := range cached.records {
+			v, err := cloneRecord(decoded.record), decoded.err
 			if err == nil {
 				h := v.header()
 				if h.Project != r.project || (h.Workstream != "" && !known[h.Workstream]) || recordPath(v) != name {
@@ -653,14 +649,20 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 				}
 			}
 			if err != nil {
+				valid = false
 				diagnostics = append(diagnostics, fmt.Errorf("%s:%d: %w", name, i+1, err))
 				continue
 			}
 			latest[recordKey(v)] = v
 			records = append(records, v)
 		}
+		if valid && len(cached.data) <= maxRecordCacheBytes-cacheBytes {
+			files[name] = cached
+			cacheBytes += len(cached.data)
+		}
 		return nil
 	})
+	r.recordFiles = files
 	diagnostics = append(diagnostics, err)
 	return records, streams, errors.Join(diagnostics...)
 }

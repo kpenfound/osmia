@@ -13,9 +13,8 @@ approved. Follow the steps in order.
   agents as files.
 - The web page on your tailnet, beside the command line on the local socket.
 
-This walkthrough uses one project. The optional Hearsay context source is a
-planned integration (see the [design](design.md#18-feature-guarantees)); the
-workflow uses file-based context.
+This walkthrough uses one project and file-based context. Optional
+[Hearsay memory](hearsay.md) can be configured separately.
 
 You need `git`, a clone of the project you contribute to whose remotes include
 the upstream repository, a fork of it that you can push to, and the agent CLI

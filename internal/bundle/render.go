@@ -102,7 +102,7 @@ func (b Bundle) Render() string {
 
 	line("")
 	line("## Notices")
-	if len(b.Notices) == 0 && len(b.CharterNotices) == 0 {
+	if len(b.Notices) == 0 && len(b.CharterNotices) == 0 && len(b.CharterEdits) == 0 && len(b.ProjectNotices) == 0 {
 		line("No project-wide notices.")
 	}
 	for _, n := range b.Notices {
@@ -116,6 +116,28 @@ func (b Bundle) Render() string {
 	for _, n := range b.CharterNotices {
 		line("- %s (record %s revision %d, workstream %s): the owner ratified charter#%d, recorded in charter.md revision %d, from %s revision %d", n.Source, n.Record, n.Revision, n.Workstream, n.Number, n.Charter, n.Ruling, n.RulingRevision)
 		section, err := envelope.Render(envelope.Section{Name: "owner_response", Text: n.OwnerResponse}, envelope.Section{Name: "charter_rule", Text: n.Rule})
+		if err != nil {
+			panic(err)
+		}
+		w.WriteString(section)
+	}
+	for _, d := range b.CharterEdits {
+		line("- The owner edited charter.md: record %s revision %d. Recheck the current charter before proceeding.", d.ID, d.Revision)
+	}
+	for _, n := range b.ProjectNotices {
+		line("- %s (record %s revision %d, workstream %s, thread %s, turn %s): informational chief-of-staff notice", n.Source, n.Record, n.Revision, n.Scope.Workstream, n.Scope.Thread, n.Scope.Turn)
+		section, err := envelope.Render(envelope.Section{Name: "project_notice", Text: n.Text})
+		if err != nil {
+			panic(err)
+		}
+		w.WriteString(section)
+	}
+	if b.MemoryProblem != "" {
+		line("\nExternal memory is degraded: %s. Authoritative local context remains available.", b.MemoryProblem)
+	}
+	for _, data := range b.Memory {
+		line("\n## Hearsay context (external evidence)")
+		section, err := envelope.Render(envelope.Section{Name: "hearsay_context", Text: string(data)})
 		if err != nil {
 			panic(err)
 		}

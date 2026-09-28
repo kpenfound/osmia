@@ -93,6 +93,9 @@ func (f *foreman) history(stream config.WorkstreamID) (driftHistory, error) {
 // project's upstream_rebase interval has elapsed since its latest drift
 // rebase, final rebase or, before either, its sealing.
 func (f *foreman) driftDue(stream config.WorkstreamID, now time.Time) (string, error) {
+	if changed, err := dependentBaseChanged(context.Background(), f.cfg, f.repository, stream); err != nil || changed {
+		return "the base workstream branch moved", err
+	}
 	h, err := f.history(stream)
 	if err != nil || h.Since.IsZero() {
 		return "", err

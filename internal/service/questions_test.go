@@ -179,6 +179,9 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		{stream, demoAgent, demoThread, "mason", "build"}, {stream, "agent_mason2", "thread_mason2", "mason", "build2"}, {stream, "agent_reviewer", "thread_reviewer", "reviewer", "review"},
 	})
 	opts, clock, engine, lives, ticks := f.opts, f.clock, f.engine, f.lives, f.ticks
+	// Keep operations in the pass so a held fake turn establishes the
+	// answered-but-undelivered checkpoint before the service restarts.
+	opts.Reconciliation.Concurrent = func(coreadapter.Operation) bool { return false }
 	settle := func(s *Service) { t.Helper(); f.settle(t, s) }
 	mu, results, problem, use, result := &f.mu, f.results, f.problem, f.use, questionResult
 	var repo *trace.Repository
@@ -349,6 +352,11 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	// stays open and the chief of staff hears nothing.
 	s, err := Start(ctx, opts)
 	must(t, err)
+	defer func() {
+		if s != nil {
+			s.Close()
+		}
+	}()
 	repo = <-lives
 	settle(s)
 	if got := states(repo); !reflect.DeepEqual(got, map[string]string{"1": trace.QuestionOpen, "2": trace.QuestionOpen}) {

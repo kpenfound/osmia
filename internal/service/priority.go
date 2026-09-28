@@ -22,7 +22,7 @@ const prioritiseTool = "prioritise"
 
 // priorityGuidance tells the chief of staff when and how to use prioritise.
 // It belongs in the system prompt of every owner message turn.
-const priorityGuidance = "When the owner asks you to change which workstreams go first, call prioritise with the IDs of the project's active workstreams in the order the owner wants, highest priority first. " +
+const priorityGuidance = "When the owner asks you to change which workstreams go first, call prioritise with the IDs of the target project's active workstreams in the order the owner wants, highest priority first. Set project to another active project ID for a factory-wide request. " +
 	"Workstreams you leave out come after the ones you name. Name each workstream once, and never a delivered or abandoned one. " +
 	"prioritise changes the order only: it does not pause, resume or abandon work, and it is the same order the owner sets with osmia priority."
 
@@ -37,12 +37,13 @@ type runtimeControls struct{ service atomic.Pointer[Service] }
 // {"recorded":false,"reason":...}, and changes nothing.
 func (c *runtimeControls) prioritise(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: prioritiseTool, Effect: coreadapter.ToolMemory,
-		Description: "Set the project's workstream priority order when the owner asks for it in a message. workstreams: the IDs of active workstreams of this project, highest priority first, each once; workstreams left out come after them. " +
+		Description: "Set the project's workstream priority order when the owner asks for it in a message. workstreams: the IDs of active workstreams of the target project, highest priority first, each once; workstreams left out come after them. " +
 			"Delivered and abandoned workstreams cannot be ordered. The order replaces the previous one and is what osmia status shows; it does not pause, resume or abandon anything.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"workstreams":{"type":"array","items":{"type":"string"}}},"required":["workstreams"],"additionalProperties":false}`)}
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"project":{"type":"string"},"workstreams":{"type":"array","items":{"type":"string"}}},"required":["workstreams"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
-			Workstreams []string `json:"workstreams"`
+			Project     config.ProjectID `json:"project"`
+			Workstreams []string         `json:"workstreams"`
 		}
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
@@ -56,8 +57,15 @@ func (c *runtimeControls) prioritise(repository *trace.Repository, scope coreada
 		if s == nil {
 			return nil, errors.New("the runtime priority is unavailable")
 		}
-		project := config.ProjectID(scope.Project)
-		order, reason, err := checkPriority(repository, project, input.Workstreams)
+		project := input.Project
+		if project == "" {
+			project = repository.Project()
+		}
+		target, err := s.repository(project)
+		if err != nil {
+			return priorityRefusal("the requested project is not active")
+		}
+		order, reason, err := checkPriority(target, project, input.Workstreams)
 		if err != nil {
 			return nil, err
 		}
@@ -66,7 +74,11 @@ func (c *runtimeControls) prioritise(repository *trace.Repository, scope coreada
 		}
 		previous, stored := storedPriority(s.store, project)
 		applied := false
-		change, err := repository.SetPriority(ctx, trace.ChiefOfStaff, scope, now(), func() ([]config.WorkstreamID, error) {
+		targetProject := project
+		if project == repository.Project() {
+			targetProject = ""
+		}
+		change, err := repository.SetProjectPriority(ctx, trace.ChiefOfStaff, scope, targetProject, now(), func() ([]config.WorkstreamID, error) {
 			if err := s.store.SetPriority(runtime.Priority{Project: project, Workstreams: order}); err != nil {
 				switch {
 				case errors.Is(err, runtime.ErrValidation):

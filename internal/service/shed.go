@@ -1154,7 +1154,7 @@ func (d *debate) turns(stream config.WorkstreamID, in roundInput) *isolation.Tur
 	if c := d.s.options.Committee; c != nil {
 		engine, hosts = c.Engine, c.Hosts
 	}
-	return &isolation.Turns{
+	turns := &isolation.Turns{
 		Workspaces: stagedWorkspaces{},
 		Views:      isolation.Views{Directory: filepath.Join(d.s.current().Root.String(), "views")},
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
@@ -1170,6 +1170,7 @@ func (d *debate) turns(stream config.WorkstreamID, in roundInput) *isolation.Tur
 		Hosts:  hosts,
 		Engine: engine,
 	}
+	return memoryTurns(turns, d.s.about(d.repository), d.repository)
 }
 
 // tools binds the object, concede and ask tools to the claimed turn: the
@@ -1322,7 +1323,7 @@ func (d *debate) stage(ctx context.Context, clone string, stream config.Workstre
 	if err != nil {
 		return nil, err
 	}
-	b, err := d.s.Context().Assemble(ctx, d.repository.Project(), bundle.Scope{Workstream: stream})
+	b, err := d.s.contextFor(d.repository).Assemble(ctx, d.repository.Project(), bundle.Scope{Role: "committee", Workstream: stream})
 	if err != nil {
 		return nil, err
 	}

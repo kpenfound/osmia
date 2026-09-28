@@ -590,7 +590,7 @@ func (a amendmentDebate) replyTurns(stream config.WorkstreamID, id string, n int
 		engine = a.s.options.Architect.Engine
 		hosts = a.s.options.Architect.Hosts
 	}
-	return &isolation.Turns{Workspaces: stagedWorkspaces{}, Views: isolation.Views{Directory: filepath.Join(cfg.Root.String(), "views")}, Grants: map[string]coreadapter.Capabilities{architectRole: {Tools: []string{"file_read", shed.ReplyTool}}}, Hosts: hosts, Engine: engine,
+	turns := &isolation.Turns{Workspaces: stagedWorkspaces{}, Views: isolation.Views{Directory: filepath.Join(cfg.Root.String(), "views")}, Grants: map[string]coreadapter.Capabilities{architectRole: {Tools: []string{"file_read", shed.ReplyTool}}}, Hosts: hosts, Engine: engine,
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			if scope.Workstream != string(stream) || scope.Role != architectRole {
 				return isolation.Selection{}, errors.New("turn scope denied")
@@ -628,6 +628,7 @@ func (a amendmentDebate) replyTurns(stream config.WorkstreamID, id string, n int
 				return os.Rename(file+".tmp", file)
 			}})
 		}}
+	return memoryTurns(turns, a.s.about(a.repository), a.repository)
 }
 func (a amendmentDebate) present(ctx context.Context, stream config.WorkstreamID, req trace.Amendment, round int, state trace.WorkflowState) error {
 	docs, err := trace.Read[trace.Document](a.repository, stream)

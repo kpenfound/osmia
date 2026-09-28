@@ -220,12 +220,13 @@ type CharterState struct {
 // workstream. SkipDebate asks for the workstream's debate to be skipped: its
 // spec and plan go to the owner's ratification without a committee.
 type HandInRequest struct {
-	Project    config.ProjectID `json:"project"`
-	Key        string           `json:"key"`
-	Path       string           `json:"path,omitempty"`
-	URL        string           `json:"url,omitempty"`
-	Stdin      *string          `json:"stdin,omitempty"`
-	SkipDebate bool             `json:"skip_debate,omitempty"`
+	Base       config.WorkstreamID `json:"base,omitempty"`
+	Project    config.ProjectID    `json:"project"`
+	Key        string              `json:"key"`
+	Path       string              `json:"path,omitempty"`
+	URL        string              `json:"url,omitempty"`
+	Stdin      *string             `json:"stdin,omitempty"`
+	SkipDebate bool                `json:"skip_debate,omitempty"`
 }
 
 // HandInResponse names the workstream a hand-in created. Handed is the path

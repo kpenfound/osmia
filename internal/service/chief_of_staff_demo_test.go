@@ -249,7 +249,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		prompts[req.Name] = req
-		tools(ctx, req.Name, session, "answer", "decide_amendment", "decide_charter", "escalate", "pause", "prioritise", "propose_charter", "relay_ruling", "resume", "route_amendment", "set_status")
+		tools(ctx, req.Name, session, "answer", "capacity", "decide_amendment", "decide_charter", "escalate", "inspect_code", "notify", "pause", "prioritise", "propose_charter", "relay_ruling", "resume", "route_amendment", "set_status")
 		switch {
 		case len(sent) > 0 && req.Name == sent[0].Turn:
 			// A status naming an agent by its ID is refused; one in words is
@@ -537,7 +537,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	notice := "## Notices\n- workstreams/" + string(stream) + "/questions/2/rulings.jsonl (record 2 revision 2, workstream " + string(stream) + ")\n" + section
-	if first := prompts[sent[0].Turn].SystemPrompt; !strings.Contains(first, "## Notices\nNo project-wide notices.\n") {
+	if first := prompts[sent[0].Turn].SystemPrompt; strings.Contains(first, "questions/2/rulings.jsonl") || !strings.Contains(first, "The owner edited charter.md") {
 		t.Fatalf("a notice before the ruling:\n%s", first)
 	}
 	if later := prompts[sent[2].Turn].SystemPrompt; !strings.Contains(later, notice) {

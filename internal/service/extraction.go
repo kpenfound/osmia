@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
@@ -305,7 +306,7 @@ func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (c
 	if op.Action == ReplyAction || op.Action == RedraftAction {
 		return replier{a.rounds}.Inspect(ctx, op)
 	}
-	if op.Action == FinalReviewAction {
+	if op.Action == FinalReviewAction || op.Action == deliveryReviewAction {
 		return a.finals.Inspect(ctx, op)
 	}
 	if a.turns == nil {
@@ -335,7 +336,7 @@ func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (cor
 	if op.Action == ReplyAction || op.Action == RedraftAction {
 		return replier{a.rounds}.Apply(ctx, op)
 	}
-	if op.Action == FinalReviewAction {
+	if op.Action == FinalReviewAction || op.Action == deliveryReviewAction {
 		return a.finals.Apply(ctx, op)
 	}
 	if a.turns == nil {
@@ -594,7 +595,7 @@ func (e *extractor) turns() *isolation.Turns {
 	if l := e.s.options.Librarian; l != nil {
 		engine, hosts = l.Engine, l.Hosts
 	}
-	return &isolation.Turns{
+	turns := &isolation.Turns{
 		Workspaces: stagedWorkspaces{},
 		Views:      isolation.Views{Directory: filepath.Join(e.s.current().Root.String(), "views")},
 		Select:     e.selectView,
@@ -606,6 +607,7 @@ func (e *extractor) turns() *isolation.Turns {
 		Engine:  engine,
 		Capture: e.capture,
 	}
+	return memoryTurns(turns, e.s.about(e.repository), e.repository)
 }
 
 // stagedWorkspaces lends a service-staged directory as a turn's workspace.
@@ -648,7 +650,14 @@ func (e *extractor) selectView(ctx context.Context, scope coreadapter.Scope) (is
 			return isolation.Selection{}, err
 		}
 	}
-	paths := []string{"repo", "kb", "seed", kb.OutputDirectory}
+	contextBundle, err := e.s.contextFor(e.repository).Assemble(ctx, cfg.Project.ID, bundle.Scope{Role: librarianRole})
+	if err != nil {
+		return isolation.Selection{}, err
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "context.md"), []byte(contextBundle.Render()), 0600); err != nil {
+		return isolation.Selection{}, err
+	}
+	paths := []string{"repo", "kb", "seed", kb.OutputDirectory, "context.md"}
 	if strings.HasPrefix(scope.Turn, "refresh-") {
 		paths = append(paths, "source")
 	}

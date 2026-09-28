@@ -450,6 +450,13 @@ const replayName = ".replay"
 // is. The replay runs in a temporary detached worktree under Directory, which
 // it removes, so no branch moves; the same arguments make the same commit.
 func (g *Git) Replay(ctx context.Context, head, onto string, at time.Time) (string, []string, error) {
+	return g.ReplayFrom(ctx, "", head, onto, at)
+}
+
+// ReplayFrom replays only commits after base onto onto. An empty base uses
+// the histories' merge base. This excludes an integrated dependency even
+// when upstream used a squash merge.
+func (g *Git) ReplayFrom(ctx context.Context, base, head, onto string, at time.Time) (string, []string, error) {
 	descends, err := g.Ancestor(ctx, onto, head)
 	if err != nil || descends {
 		return head, nil, err
@@ -465,7 +472,11 @@ func (g *Git) Replay(ctx context.Context, head, onto string, at time.Time) (stri
 	if _, err := g.run(ctx, "worktree", "add", "--quiet", "--detach", dir, head); err != nil {
 		return "", nil, err
 	}
-	if _, err := g.runIn(ctx, dir, replayEnvironment(at), "rebase", "--quiet", "--no-autostash", onto); err != nil {
+	args := []string{"rebase", "--quiet", "--no-autostash", onto}
+	if base != "" {
+		args = []string{"rebase", "--quiet", "--no-autostash", "--onto", onto, base}
+	}
+	if _, err := g.runIn(ctx, dir, replayEnvironment(at), args...); err != nil {
 		conflicts, unmergedErr := g.unmerged(ctx, dir)
 		if unmergedErr != nil || len(conflicts) == 0 {
 			return "", nil, errors.Join(err, unmergedErr)
@@ -516,6 +527,15 @@ func (g *Git) unmerged(ctx context.Context, dir string) ([]string, error) {
 // worktree that already descends from onto is left as it is.
 func (g *Git) ReplayIn(ctx context.Context, w Worktree, onto string, at time.Time) (string, []string, error) {
 	return g.replayStep(ctx, w, at, "rebase", "--quiet", "--no-autostash", onto)
+}
+
+// ReplayInFrom continues to use the explicit dependency boundary when a
+// replay needs conflict resolution in a persistent workspace.
+func (g *Git) ReplayInFrom(ctx context.Context, w Worktree, base, onto string, at time.Time) (string, []string, error) {
+	if base == "" {
+		return g.ReplayIn(ctx, w, onto, at)
+	}
+	return g.replayStep(ctx, w, at, "rebase", "--quiet", "--no-autostash", "--onto", onto, base)
 }
 
 // ContinueReplay stages every file of the worktree, as Snapshot does, and

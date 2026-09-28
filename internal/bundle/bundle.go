@@ -4,6 +4,7 @@ package bundle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -34,6 +35,7 @@ type Provider interface {
 // Scope narrows a bundle. Entities are footprint entity IDs or aliases; none
 // means the whole project. A Workstream limits decisions to its own rulings.
 type Scope struct {
+	Role       string              `json:"role,omitempty"`
 	Entities   []string            `json:"entities,omitempty"`
 	Workstream config.WorkstreamID `json:"workstream,omitempty"`
 }
@@ -41,18 +43,31 @@ type Scope struct {
 // Bundle is one assembled context. Every part names the path and record it
 // was read from.
 type Bundle struct {
-	Project   config.ProjectID `json:"project"`
-	Mode      Mode             `json:"mode"`
-	Scope     Scope            `json:"scope"`
-	Charter   Charter          `json:"charter"`
-	Knowledge []Prose          `json:"knowledge"`
-	Missing   []MissingProse   `json:"missing"`
-	Entities  Entities         `json:"entities"`
-	Decisions []Decision       `json:"decisions"`
-	Notices   []Notice         `json:"notices"`
+	Memory        []json.RawMessage `json:"memory,omitempty"`
+	MemoryProblem string            `json:"memory_problem,omitempty"`
+	Project       config.ProjectID  `json:"project"`
+	Mode          Mode              `json:"mode"`
+	Scope         Scope             `json:"scope"`
+	Charter       Charter           `json:"charter"`
+	Knowledge     []Prose           `json:"knowledge"`
+	Missing       []MissingProse    `json:"missing"`
+	Entities      Entities          `json:"entities"`
+	Decisions     []Decision        `json:"decisions"`
+	Notices       []Notice          `json:"notices"`
 	// CharterNotices are the charter rules the owner ratified from rulings,
 	// in the order they were recorded in the charter.
 	CharterNotices []CharterNotice `json:"charter_notices"`
+	// CharterEdits identify direct owner edits so in-flight roles notice revised policy.
+	CharterEdits   []trace.Document `json:"charter_edits"`
+	ProjectNotices []ProjectNotice  `json:"project_notices"`
+}
+
+type ProjectNotice struct {
+	Source   string    `json:"source"`
+	Record   string    `json:"record"`
+	Revision int       `json:"revision"`
+	At       time.Time `json:"at"`
+	trace.ProjectNotice
 }
 
 // Charter is the recorded charter revision and its citable rules.
@@ -146,6 +161,8 @@ type CharterNotice struct {
 // It keeps nothing between calls, so edits to the charter or the knowledge
 // base apply to the next assembly.
 type Files struct {
+	Provider Provider
+	Role     string
 	// Repository returns the open trace of an active project. Files never
 	// closes it.
 	Repository func(config.ProjectID) (*trace.Repository, error)
@@ -218,6 +235,22 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 		}
 		b.CharterNotices = append(b.CharterNotices, CharterNotice{Source: "workstreams/" + string(p.Workstream) + "/" + p.Latest.Path, Workstream: p.Workstream, Record: p.Latest.ID, Revision: p.Latest.Revision, At: p.Latest.At,
 			Number: p.Proposal.Number, Rule: p.Proposal.Rule, Charter: p.Proposal.Charter, Ruling: p.Proposal.Ruling, RulingRevision: p.Proposal.RulingRevision, OwnerResponse: p.Proposal.OwnerResponse})
+	}
+	documents, err := trace.Read[trace.Document](repo, "")
+	if err != nil {
+		return Bundle{}, err
+	}
+	for _, d := range documents {
+		if d.Path == "charter.md" && d.Cause == "owner-edit" && d.Revision > 1 {
+			b.CharterEdits = append(b.CharterEdits, d)
+		}
+		if strings.HasPrefix(d.Path, "notices/") {
+			var n trace.ProjectNotice
+			if err := json.Unmarshal([]byte(d.Content), &n); err != nil {
+				return Bundle{}, err
+			}
+			b.ProjectNotices = append(b.ProjectNotices, ProjectNotice{Source: d.Path, Record: d.ID, Revision: d.Revision, At: d.At, ProjectNotice: n})
+		}
 	}
 	slices.SortStableFunc(b.CharterNotices, func(x, y CharterNotice) int { return x.At.Compare(y.At) })
 	return b, nil

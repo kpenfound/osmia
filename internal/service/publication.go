@@ -47,6 +47,7 @@ const (
 // delivery style, fork, upstream and base branch configured when it was
 // asked for, so a retry publishes the same way.
 type publishInput struct {
+	Maintenance     bool   `json:"maintenance,omitempty"`
 	Approval        int    `json:"approval"`
 	Commit          string `json:"commit"`
 	DescriptionHash string `json:"description_hash"`
@@ -63,6 +64,7 @@ type publishInput struct {
 // name the pull request opened against Base of Upstream with Title and the
 // approved Description once Status is opened.
 type DeliveryPublication struct {
+	PriorURL        string `json:"prior_url,omitempty"`
 	Approval        int    `json:"approval"`
 	Operation       string `json:"operation"`
 	Status          string `json:"status"`
@@ -123,8 +125,17 @@ func (p *publisher) Pass(ctx context.Context) error {
 
 func (p *publisher) request(ctx context.Context, stream config.WorkstreamID) error {
 	feature, err := p.repository.Workflow(stream, trace.FeatureSubject)
-	if err != nil || feature.Value != AssembledState {
+	if err != nil {
 		return err
+	}
+	if feature.Value != AssembledState {
+		if feature.Value != DeliveredState {
+			return nil
+		}
+		pending, err := upstreamDeliveryPending(p.repository, p.s.about(p.repository), stream)
+		if err != nil || !pending {
+			return err
+		}
 	}
 	_, decision, approval, err := deliveryDocuments(p.repository, stream)
 	if err != nil || approval == nil {
@@ -135,7 +146,7 @@ func (p *publisher) request(ctx context.Context, stream config.WorkstreamID) err
 		return err
 	}
 	for _, o := range ops {
-		if o.Operation.Action != PublishAction {
+		if o.Operation.Action != PublishAction && o.Operation.Action != publishUpstreamAction {
 			continue
 		}
 		in, err := decodePublish(o.Operation)
@@ -158,7 +169,15 @@ func (p *publisher) request(ctx context.Context, stream config.WorkstreamID) err
 	if !cfg.HasProject() || cfg.Project.ID != p.repository.Project() {
 		return nil
 	}
-	in := publishInput{Approval: decision.Revision, Commit: approval.Commit, DescriptionHash: approval.DescriptionHash, Style: cfg.Project.Landing, Fork: cfg.Project.Fork, Upstream: cfg.Project.Upstream, Base: cfg.Project.BaseBranch}
+	in := publishInput{Maintenance: feature.Value == DeliveredState, Approval: decision.Revision, Commit: approval.Commit, DescriptionHash: approval.DescriptionHash, Style: cfg.Project.Landing, Fork: cfg.Project.Fork, Upstream: cfg.Project.Upstream, Base: cfg.Project.BaseBranch}
+	report, _, err := latestFinalReport(p.repository, stream)
+	if err != nil {
+		return err
+	}
+	if report.Upstream != nil && report.Upstream.Workstream != "" {
+		in.Upstream = cfg.Project.Fork
+		in.Base = report.Upstream.Branch
+	}
 	input, err := json.Marshal(in)
 	if err != nil {
 		return err
@@ -168,12 +187,16 @@ func (p *publisher) request(ctx context.Context, stream config.WorkstreamID) err
 		return err
 	}
 	transition, event := publishIDs(in.Approval)
-	op := coreadapter.Operation{ID: trace.OperationID(p.repository.Project(), stream, event), Boundary: coreadapter.RepositoryBoundary, Action: PublishAction, Input: input}
+	action := PublishAction
+	if in.Maintenance {
+		action = publishUpstreamAction
+	}
+	op := coreadapter.Operation{ID: trace.OperationID(p.repository.Project(), stream, event), Boundary: coreadapter.RepositoryBoundary, Action: action, Input: input}
 	reason := fmt.Sprintf("the owner approved description %s for %s at %s; publication pushes it (%s) to %s of %s and opens a pull request against %s of %s", in.DescriptionHash, featureBranch(stream), in.Commit, in.Style, featureBranch(stream), in.Fork, in.Base, in.Upstream)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: transition, Revision: 1, Project: p.repository.Project(), Workstream: stream, At: p.s.now(), Actor: foremanActor, Cause: decision.Cause}
 	tx := trace.Transaction{ExpectedVersion: subject.Version,
 		Transition: trace.Transition{Header: h, Subject: publicationSubject, From: subject.Value, To: fmt.Sprintf("requested-%d", in.Approval), Reason: reason},
-		Events:     []trace.Event{{ID: event, Kind: PublishAction, Body: fmt.Sprintf("Publish owner approval %d", in.Approval), Operation: &op}}}
+		Events:     []trace.Event{{ID: event, Kind: action, Body: fmt.Sprintf("Publish owner approval %d", in.Approval), Operation: &op}}}
 	if _, err := p.repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return err
 	}
@@ -182,13 +205,16 @@ func (p *publisher) request(ctx context.Context, stream config.WorkstreamID) err
 
 func decodePublish(op coreadapter.Operation) (publishInput, error) {
 	var in publishInput
-	if op.Boundary != coreadapter.RepositoryBoundary || op.Action != PublishAction {
+	if op.Boundary != coreadapter.RepositoryBoundary || (op.Action != PublishAction && op.Action != publishUpstreamAction) {
 		return in, fmt.Errorf("unsupported repository operation %q", op.Action)
 	}
 	dec := json.NewDecoder(bytes.NewReader(op.Input))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil {
 		return in, fmt.Errorf("invalid publish operation input: %w", err)
+	}
+	if in.Maintenance != (op.Action == publishUpstreamAction) {
+		return in, errors.New("publication action differs from delivery maintenance intent")
 	}
 	if in.Approval < 1 || in.Commit == "" || in.DescriptionHash == "" || in.Style == "" || in.Fork == "" || in.Upstream == "" || in.Base == "" {
 		return in, errors.New("publish operation requires a positive approval revision, a commit, a description hash, a style, a fork, an upstream and a base branch")
@@ -312,7 +338,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	if feature.Value != AssembledState {
+	if feature.Value != AssembledState && !(feature.Value == DeliveredState && in.Maintenance) {
 		return p.refuse(ctx, stream, in, fmt.Sprintf("the workstream is %s, not assembled", featureState(feature.Value)))
 	}
 	latest, reason, err := p.s.deliveryGate(ctx, p.repository, stream, approval.Description)
@@ -328,6 +354,9 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	report, _, err := latestFinalReport(p.repository, stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
+	}
+	if in.Maintenance && (!report.Maintenance || in.Upstream != cfg.Project.Upstream || in.Base != cfg.Project.BaseBranch || report.Upstream == nil || report.Upstream.Workstream != "") {
+		return p.refuse(ctx, stream, in, "upstream publication requires a fresh delivery maintenance review of the integrated base")
 	}
 	g, err := featureWorkspaces(cfg, p.repository).of(stream)
 	if err != nil {
@@ -353,6 +382,18 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	if report.Upstream != nil && report.Upstream.Workstream != "" {
+		if in.Upstream != cfg.Project.Fork || in.Base != report.Upstream.Branch {
+			return p.refuse(ctx, stream, in, "the dependent pull request target changed; refresh owner approval")
+		}
+		baseTip, exists, err := g.RemoteBranch(ctx, remote, in.Base)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if !exists || baseTip != report.Upstream.Commit {
+			return p.refuse(ctx, stream, in, "the fork's base branch differs from the reviewed base; refresh the base and review")
+		}
+	}
 	record := DeliveryPublication{Approval: in.Approval, Operation: op.ID, Status: publicationPushing, Style: in.Style, Fork: in.Fork, Remote: remote, Branch: branch, Reviewed: in.Commit, Commit: published,
 		Upstream: in.Upstream, Base: in.Base, Title: title, Description: approval.Description, DescriptionHash: approval.DescriptionHash}
 	prior, err := publications(p.repository, stream)
@@ -360,6 +401,9 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		return coreadapter.OperationResult{}, err
 	}
 	for _, d := range prior {
+		if in.Maintenance && d.Status == publicationOpened && d.Upstream == cfg.Project.Fork {
+			record.PriorURL = d.URL
+		}
 		if d.Operation == op.ID && (d.Approval != in.Approval || d.Reviewed != in.Commit || d.Commit != published || d.DescriptionHash != in.DescriptionHash || d.Description != approval.Description || d.Style != in.Style || d.Fork != in.Fork || d.Remote != remote || d.Branch != branch || d.Upstream != in.Upstream || d.Base != in.Base) {
 			return p.refuse(ctx, stream, in, "the recorded publication does not match this owner approval and delivery")
 		}
@@ -538,6 +582,13 @@ func (p *publisher) deliver(ctx context.Context, stream config.WorkstreamID, in 
 			Events:     []trace.Event{trace.Notice(DeliveredState, "state", fmt.Sprintf("Workstream delivered: pull request #%d is open at %s.", record.PullRequest, record.URL))}},
 		{ExpectedVersion: subject.Version,
 			Transition: trace.Transition{Header: header(transition + "-published"), Subject: publicationSubject, From: subject.Value, To: fmt.Sprintf("published-%d", in.Approval), Reason: reason}},
+	}
+	if in.Maintenance {
+		if feature.Value != DeliveredState {
+			return coreadapter.OperationResult{}, errors.New("delivery maintenance requires a delivered feature")
+		}
+		txs = txs[1:]
+		txs[0].Events = []trace.Event{trace.Notice(transition, "delivery", fmt.Sprintf("Upstream pull request opened at %s; dependent request retained at %s. The feature remains delivered.", record.URL, record.PriorURL))}
 	}
 	if _, err := p.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, txs...); err != nil {
 		if errors.Is(err, trace.ErrConflict) {

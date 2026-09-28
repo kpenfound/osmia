@@ -30,6 +30,8 @@ type Selection struct {
 // Grants, Tools, Select and Hosts are service configuration, never repo input.
 // Tools are trusted handlers; they must enforce their declared effects and scope.
 type Turns struct {
+	// Audit records a call before execution and returns its completion recorder.
+	Audit      func(context.Context, coreadapter.Scope, coreadapter.Tool, json.RawMessage) (func(context.Context, json.RawMessage, error) error, error)
 	Workspaces coreadapter.Workspaces
 	Views      Views
 	// PreserveMasonViews makes mason views identifiable by durable turn ID so
@@ -73,7 +75,7 @@ func narrow(grant coreadapter.Capabilities, request *coreadapter.Capabilities) c
 }
 
 // roleTools names tools only one role may hold, whatever the service grant says.
-var roleTools = map[string]string{"set_status": "chief_of_staff", "prioritise": "chief_of_staff", "decide_amendment": "chief_of_staff", "decide_charter": "chief_of_staff", "answer": "chief_of_staff", "escalate": "chief_of_staff", "relay_ruling": "chief_of_staff", "route_amendment": "chief_of_staff", "propose_charter": "chief_of_staff",
+var roleTools = map[string]string{"inspect_code": "chief_of_staff", "capacity": "chief_of_staff", "notify": "chief_of_staff", "set_status": "chief_of_staff", "prioritise": "chief_of_staff", "decide_amendment": "chief_of_staff", "decide_charter": "chief_of_staff", "answer": "chief_of_staff", "escalate": "chief_of_staff", "relay_ruling": "chief_of_staff", "route_amendment": "chief_of_staff", "propose_charter": "chief_of_staff",
 	"object": "committee", "concede": "committee", "final_report": "committee", "reply": "architect", "verdict": "reviewer"}
 
 // deniedTools names tools one role may never hold, whatever the service grant says.
@@ -210,7 +212,19 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 					records++
 				}
 				countMu.Unlock()
-				return original(ctx, raw)
+				var finish func(context.Context, json.RawMessage, error) error
+				if r.Audit != nil {
+					var err error
+					finish, err = r.Audit(ctx, input.Scope, tool, raw)
+					if err != nil {
+						return nil, err
+					}
+				}
+				output, err := original(ctx, raw)
+				if finish != nil {
+					err = errors.Join(err, finish(context.WithoutCancel(ctx), output, err))
+				}
+				return output, err
 			}
 			approved = append(approved, tool)
 			names = append(names, name)

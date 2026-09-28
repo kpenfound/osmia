@@ -14,6 +14,7 @@ import (
 
 	"github.com/kpenfound/busybees/core/vcs"
 
+	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/followup"
@@ -61,12 +62,14 @@ var finalReviewActor = trace.Actor{Kind: "service", ID: "final-review"}
 // asked for, the feature branch commit and the seal, spec, plan and charter
 // revisions that governed the workstream then.
 type finalReviewInput struct {
-	Review  int    `json:"review"`
-	Commit  string `json:"commit"`
-	Seal    int    `json:"seal"`
-	Spec    int    `json:"spec"`
-	Plan    int    `json:"plan"`
-	Charter int    `json:"charter"`
+	Maintenance bool   `json:"maintenance,omitempty"`
+	BaseCheck   int    `json:"base_check,omitempty"`
+	Review      int    `json:"review"`
+	Commit      string `json:"commit"`
+	Seal        int    `json:"seal"`
+	Spec        int    `json:"spec"`
+	Plan        int    `json:"plan"`
+	Charter     int    `json:"charter"`
 }
 
 // FinalRebase is the document final/rebase.json: the rebase of the feature
@@ -89,24 +92,26 @@ type FinalRebase struct {
 // the sealed spec. A failed report says why no such report exists; it never
 // authorises approval or delivery.
 type FinalReport struct {
-	Review    int              `json:"review"`
-	Operation string           `json:"operation"`
-	Outcome   string           `json:"outcome"`
-	Failure   string           `json:"failure,omitempty"`
-	Branch    string           `json:"branch"`
-	Before    string           `json:"before"`
-	Commit    string           `json:"commit,omitempty"`
-	Upstream  *seal.Base       `json:"upstream,omitempty"`
-	Conflicts []string         `json:"conflicts,omitempty"`
-	Seal      int              `json:"seal"`
-	SpecHash  string           `json:"spec_hash"`
-	Spec      int              `json:"spec"`
-	Plan      int              `json:"plan"`
-	Charter   int              `json:"charter"`
-	Reader    string           `json:"reader,omitempty"`
-	Turn      string           `json:"turn,omitempty"`
-	Summary   string           `json:"summary,omitempty"`
-	Criteria  []FinalCriterion `json:"criteria"`
+	Maintenance bool             `json:"maintenance,omitempty"`
+	BaseCheck   int              `json:"base_check,omitempty"`
+	Review      int              `json:"review"`
+	Operation   string           `json:"operation"`
+	Outcome     string           `json:"outcome"`
+	Failure     string           `json:"failure,omitempty"`
+	Branch      string           `json:"branch"`
+	Before      string           `json:"before"`
+	Commit      string           `json:"commit,omitempty"`
+	Upstream    *seal.Base       `json:"upstream,omitempty"`
+	Conflicts   []string         `json:"conflicts,omitempty"`
+	Seal        int              `json:"seal"`
+	SpecHash    string           `json:"spec_hash"`
+	Spec        int              `json:"spec"`
+	Plan        int              `json:"plan"`
+	Charter     int              `json:"charter"`
+	Reader      string           `json:"reader,omitempty"`
+	Turn        string           `json:"turn,omitempty"`
+	Summary     string           `json:"summary,omitempty"`
+	Criteria    []FinalCriterion `json:"criteria"`
 }
 
 // FinalCriterion is the final reader's account of one sealed criterion:
@@ -175,6 +180,12 @@ func (a *finalReviewer) Pass(ctx context.Context) error {
 			err = a.assemble(ctx, stream)
 		case AssembledState:
 			err = a.request(ctx, stream)
+		case DeliveredState:
+			var pending bool
+			pending, err = upstreamDeliveryPending(a.repository, a.s.about(a.repository), stream)
+			if err == nil && pending {
+				err = a.request(ctx, stream)
+			}
 		}
 		if err != nil {
 			return fmt.Errorf("workstream %s final review: %w", stream, err)
@@ -186,7 +197,7 @@ func (a *finalReviewer) Pass(ctx context.Context) error {
 // assemble moves a building workstream to assembled once every unit of its
 // sealed plan has merged, and does nothing while any has not.
 func (a *finalReviewer) assemble(ctx context.Context, stream config.WorkstreamID) error {
-	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).read(stream)
+	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).readSealed(stream)
 	if err != nil || !found {
 		return err
 	}
@@ -259,7 +270,15 @@ func (a *finalReviewer) governing(ctx context.Context, stream config.WorkstreamI
 	if err != nil {
 		return finalReviewInput{}, seal.Seal{}, err
 	}
-	return finalReviewInput{Commit: tip, Seal: latest.Seal, Spec: latest.Revision.Spec, Plan: latest.Revision.Plan, Charter: charter.Revision}, latest, nil
+	_, baseCheck, err := baseObservationAt(a.repository, stream)
+	if err != nil {
+		return finalReviewInput{}, seal.Seal{}, err
+	}
+	feature, err := a.repository.Workflow(stream, trace.FeatureSubject)
+	if err != nil {
+		return finalReviewInput{}, seal.Seal{}, err
+	}
+	return finalReviewInput{BaseCheck: baseCheck, Maintenance: feature.Value == DeliveredState, Commit: tip, Seal: latest.Seal, Spec: latest.Revision.Spec, Plan: latest.Revision.Plan, Charter: charter.Revision}, latest, nil
 }
 
 // reads reports whether a review asked for with in, or recorded as report,
@@ -270,7 +289,7 @@ func (in finalReviewInput) reads(now finalReviewInput) bool {
 }
 
 func (r FinalReport) input() finalReviewInput {
-	return finalReviewInput{Commit: r.Commit, Seal: r.Seal, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter}
+	return finalReviewInput{Maintenance: r.Maintenance, BaseCheck: r.BaseCheck, Commit: r.Commit, Seal: r.Seal, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter}
 }
 
 // request asks for the next final review of an assembled workstream unless
@@ -279,6 +298,10 @@ func (r FinalReport) input() finalReviewInput {
 // reads, the current branch, seal, spec, plan and charter. A review that
 // failed is asked for again only once one of them changes.
 func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID) error {
+	observed, _, err := baseObservationAt(a.repository, stream)
+	if err != nil || observed.Unavailable {
+		return err
+	}
 	if a.s.options.Committee == nil {
 		return nil
 	}
@@ -286,7 +309,7 @@ func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID)
 	if scheduler.Paused(state.Pauses, a.repository.Project(), stream) {
 		return nil
 	}
-	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).read(stream)
+	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).readSealed(stream)
 	if err != nil || !found {
 		return err
 	}
@@ -299,7 +322,7 @@ func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID)
 	}
 	var asked []finalReviewInput
 	for _, o := range ops {
-		if o.Operation.Action != FinalReviewAction {
+		if o.Operation.Action != FinalReviewAction && o.Operation.Action != deliveryReviewAction {
 			continue
 		}
 		if o.Result == nil {
@@ -326,7 +349,11 @@ func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID)
 	if err != nil {
 		return err
 	}
-	baseCurrent := found && !baseStale
+	baseChanged, err := dependentBaseChanged(ctx, a.s.about(a.repository), a.repository, stream)
+	if err != nil {
+		return err
+	}
+	baseCurrent := found && !baseStale && !baseChanged
 	if (!found || baseCurrent) && slices.ContainsFunc(asked, func(in finalReviewInput) bool { return in.reads(now) }) {
 		return nil
 	}
@@ -343,12 +370,16 @@ func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID)
 	if err != nil {
 		return err
 	}
-	op := coreadapter.Operation{ID: trace.OperationID(a.repository.Project(), stream, event), Boundary: coreadapter.RunnerBoundary, Action: FinalReviewAction, Input: input}
+	action := FinalReviewAction
+	if now.Maintenance {
+		action = deliveryReviewAction
+	}
+	op := coreadapter.Operation{ID: trace.OperationID(a.repository.Project(), stream, event), Boundary: coreadapter.RunnerBoundary, Action: action, Input: input}
 	reason := fmt.Sprintf("the workstream is assembled; final review %d rebases %s, at %s, onto upstream and reads it against seal %d: spec revision %d, plan revision %d and charter revision %d", now.Review, featureBranch(stream), now.Commit, now.Seal, now.Spec, now.Plan, now.Charter)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: transition, Revision: 1, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: finalReviewActor, Cause: AssembledState}
 	tx := trace.Transaction{ExpectedVersion: subject.Version,
 		Transition: trace.Transition{Header: h, Subject: finalReviewSubject, From: subject.Value, To: fmt.Sprintf("requested-%d", now.Review), Reason: reason},
-		Events:     []trace.Event{{ID: event, Kind: FinalReviewAction, Body: fmt.Sprintf("Run final review %d", now.Review), Operation: &op}}}
+		Events:     []trace.Event{{ID: event, Kind: action, Body: fmt.Sprintf("Run final review %d", now.Review), Operation: &op}}}
 	if _, err := a.repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return err
 	}
@@ -357,13 +388,16 @@ func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID)
 
 func decodeFinalReview(op coreadapter.Operation) (finalReviewInput, error) {
 	var in finalReviewInput
-	if op.Boundary != coreadapter.RunnerBoundary || op.Action != FinalReviewAction {
+	if op.Boundary != coreadapter.RunnerBoundary || (op.Action != FinalReviewAction && op.Action != deliveryReviewAction) {
 		return in, fmt.Errorf("unsupported runner operation %q", op.Action)
 	}
 	dec := json.NewDecoder(bytes.NewReader(op.Input))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil {
 		return in, fmt.Errorf("invalid final review operation input: %w", err)
+	}
+	if in.Maintenance != (op.Action == deliveryReviewAction) {
+		return in, errors.New("final review action differs from delivery maintenance intent")
 	}
 	if in.Review < 1 || in.Commit == "" || in.Seal < 1 || in.Spec < 1 || in.Plan < 1 || in.Charter < 1 {
 		return in, errors.New("final review operation requires a positive review number, a commit and the seal, spec, plan and charter revisions")
@@ -501,7 +535,7 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if !found {
 		return coreadapter.OperationResult{}, fmt.Errorf("workstream %s has no seal", stream)
 	}
-	report := FinalReport{Review: in.Review, Operation: op.ID, Outcome: finalFailed, Branch: featureBranch(stream), Before: in.Commit, Seal: in.Seal, SpecHash: latest.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Criteria: []FinalCriterion{}}
+	report := FinalReport{Maintenance: in.Maintenance, BaseCheck: in.BaseCheck, Review: in.Review, Operation: op.ID, Outcome: finalFailed, Branch: featureBranch(stream), Before: in.Commit, Seal: in.Seal, SpecHash: latest.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Criteria: []FinalCriterion{}}
 	fail := func(reason string) (coreadapter.OperationResult, error) {
 		report.Failure = reason
 		return a.record(ctx, stream, report)
@@ -510,8 +544,17 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	if feature.Value != AssembledState {
+	if feature.Value != AssembledState && !(feature.Value == DeliveredState && in.Maintenance) {
 		return fail(fmt.Sprintf("the workstream is %s, not assembled", featureState(feature.Value)))
+	}
+	if in.Maintenance {
+		pending, err := upstreamDeliveryPending(a.repository, cfg, stream)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if !pending {
+			return fail("upstream delivery maintenance is not pending")
+		}
 	}
 	now, _, err := a.governing(ctx, stream)
 	if errors.Is(err, errNoFeatureBranch) {
@@ -524,7 +567,7 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	if now.Seal != in.Seal || now.Spec != in.Spec || now.Plan != in.Plan || now.Charter != in.Charter {
+	if now.BaseCheck != in.BaseCheck || now.Seal != in.Seal || now.Spec != in.Spec || now.Plan != in.Plan || now.Charter != in.Charter {
 		return fail(fmt.Sprintf("the governing documents changed since the review was asked for: seal %d, spec revision %d, plan revision %d and charter revision %d are current", now.Seal, now.Spec, now.Plan, now.Charter))
 	}
 	g, err := featureWorkspaces(cfg, a.repository).of(stream)
@@ -539,25 +582,25 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		remote, err := g.Remote(ctx, cfg.Project.Upstream)
+		upstream, err := a.s.resolveBase(ctx, cfg, a.repository, stream, g)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		fetched, err := g.Fetch(ctx, remote, cfg.Project.BaseBranch)
-		if err != nil {
-			return coreadapter.OperationResult{}, fmt.Errorf("fetch %s of %s: %w", cfg.Project.BaseBranch, remote, err)
-		}
-		upstream := seal.Base{Remote: remote, Branch: cfg.Project.BaseBranch, Commit: fetched}
+		fetched := upstream.Commit
 		if err := a.s.step("final-rebase-replaying"); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		commit, conflicts, err := g.Replay(ctx, in.Commit, fetched, requested)
+		currentBase, err := branchBase(ctx, a.repository, stream, g, in.Commit)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		commit, conflicts, err := g.ReplayFrom(ctx, currentBase.Commit, in.Commit, fetched, requested)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 		if len(conflicts) > 0 {
 			report.Upstream, report.Conflicts = &upstream, conflicts
-			return fail(fmt.Sprintf("feature branch %s does not rebase cleanly onto %s/%s at %s: %s conflicted; the branch is left at %s", report.Branch, remote, upstream.Branch, fetched, strings.Join(conflicts, ", "), in.Commit))
+			return fail(fmt.Sprintf("feature branch %s does not rebase cleanly onto %s/%s at %s: %s conflicted; the branch is left at %s", report.Branch, upstream.Remote, upstream.Branch, fetched, strings.Join(conflicts, ", "), in.Commit))
 		}
 		rebase = FinalRebase{Review: in.Review, Operation: op.ID, Branch: report.Branch, Upstream: upstream, Before: in.Commit, Commit: commit}
 		if err := a.recordRebase(ctx, stream, rebase); err != nil {
@@ -830,7 +873,7 @@ func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, r
 	if c := a.s.options.Committee; c != nil {
 		engine, hosts = c.Engine, c.Hosts
 	}
-	return &isolation.Turns{
+	turns := &isolation.Turns{
 		Workspaces: stagedWorkspaces{},
 		Views:      isolation.Views{Directory: filepath.Join(a.s.current().Root.String(), "views")},
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
@@ -849,6 +892,7 @@ func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, r
 		Hosts:  hosts,
 		Engine: engine,
 	}
+	return memoryTurns(turns, a.s.about(a.repository), a.repository)
 }
 
 // sealedCriteria returns the criteria of the review's sealed spec revision,
@@ -1018,6 +1062,13 @@ func (a *finalReviewer) stage(ctx context.Context, cfg *config.Config, stream co
 	}
 	files := map[string]string{"branch.diff": diff, plan.SpecPath: spec.Content, plan.PlanPath: graph.Content, "charter.md": project[i].Content}
 	paths := []string{"branch", "branch.diff", plan.SpecPath, plan.PlanPath, "charter.md"}
+	contextBundle, err := a.s.contextFor(a.repository).Assemble(ctx, cfg.Project.ID, bundle.Scope{Workstream: stream, Role: committeeRole})
+	if err != nil {
+		return nil, err
+	}
+	files["context.md"] = contextBundle.Render()
+	paths = append(paths, "context.md")
+
 	docs, err := trace.Read[trace.Document](a.repository, stream)
 	if err != nil {
 		return nil, err
@@ -1088,7 +1139,7 @@ func (a *finalReviewer) record(ctx context.Context, stream config.WorkstreamID, 
 		Events:     []trace.Event{trace.Notice(id, "chief", body)}}
 	documents := []trace.Document{doc}
 	txs := []trace.Transaction{tx}
-	if report.Outcome == finalReviewed {
+	if report.Outcome == finalReviewed && !report.Maintenance {
 		added, err := a.followups(stream, report, revision)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
@@ -1259,6 +1310,33 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 	if err != nil {
 		return report, "", err
 	}
+	dependency, err := a.repository.WorkstreamBase(stream)
+	if err != nil {
+		return report, "", err
+	}
+	if dependency.Base != "" {
+		cfg := a.s.about(a.repository)
+		g, err := featureWorkspaces(cfg, a.repository).of(stream)
+		if err != nil {
+			return report, "", err
+		}
+		selected, err := a.s.resolveBase(ctx, cfg, a.repository, stream, g)
+		if err != nil {
+			return report, "base workstream is unavailable; publication waits", nil
+		}
+		if selected.Workstream != "" {
+			parent, err := a.repository.Workflow(selected.Workstream, trace.FeatureSubject)
+			if err != nil {
+				return report, "", err
+			}
+			if parent.Value != DeliveredState {
+				return report, "the base workstream must be delivered to the fork before its dependent pull request can open", nil
+			}
+		}
+		if report.Upstream == nil || *report.Upstream != selected {
+			return report, "the base workstream moved or integrated upstream; a new final review and owner approval are required", nil
+		}
+	}
 	docs, err := trace.Read[trace.Document](a.repository, stream)
 	if err != nil {
 		return report, "", err
@@ -1273,6 +1351,8 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 		current  any
 	}{
 		{"feature branch commit", report.Commit, now.Commit},
+		{"dependency observation", report.BaseCheck, now.BaseCheck},
+		{"delivery maintenance", report.Maintenance, now.Maintenance},
 		{"seal", report.Seal, now.Seal},
 		{"spec hash", report.SpecHash, latest.SpecHash},
 		{"spec revision", report.Spec, revisions[plan.SpecDocument]},
@@ -1290,10 +1370,13 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 	}
 	for _, c := range report.Criteria {
 		if c.Gap != "" {
+			if report.Maintenance {
+				return report, fmt.Sprintf("final review %d has an unresolved gap for %s; upstream delivery is blocked and repairs require a new workstream", report.Review, c.Criterion), nil
+			}
 			return report, fmt.Sprintf("final review %d has an unresolved gap for %s; follow-up units must land and a new final review is required", report.Review, c.Criterion), nil
 		}
 	}
-	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).read(stream)
+	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).readSealed(stream)
 	if err != nil {
 		return report, "", err
 	}
@@ -1315,6 +1398,7 @@ Your view holds:
 - branch.diff: the whole change the branch makes to upstream.
 - spec.md and plan.json: the sealed spec and plan. Cite a criterion as spec#<n>.
 - charter.md: the owner's rules for contributing to this project.
+- context.md: local decisions, knowledge and notices, plus optional scoped external memory.
 - units/<unit>/report.json and landing.json: each unit's last report and how it landed.
 
 Read the whole branch, not unit by unit. For every criterion of spec.md, call %s once with all of them: evidence names what in the branch shows the criterion holds, such as files, tests and behaviour; a gap says what is missing, wrong or not shown, including anything that breaks a charter rule. Then end your turn.

@@ -8,10 +8,10 @@
   // page shows. Kinds the page does not show are ignored; every stream starts
   // with a resync.
   const reads = {
-    resync: ['status', 'runtime', 'config', 'inbox', 'conversations'],
+    resync: ['status', 'runtime', 'config', 'inbox', 'charter', 'conversations'],
     workstream: ['status'],
     conversation: ['conversation'],
-    inbox: ['inbox'],
+    inbox: ['inbox', 'charter'],
     runtime: ['runtime', 'status'],
     config: ['config'],
     spend: ['status'],
@@ -340,9 +340,13 @@
     }
   }
 
-  function project() {
-    const config = views.config;
-    return config && config.project ? config.project.id : null;
+  function projects() {
+    return views.config ? views.config.projects || [] : [];
+  }
+
+  function projectName(id) {
+    const p = projects().find((p) => p.id === id);
+    return p && p.name ? p.name : id;
   }
 
   function goal(w) {
@@ -399,14 +403,14 @@
   }
 
   // pauseTargets are the scopes the pause form offers: the factory, the
-  // project and each of its workstreams.
+  // active projects and each project's workstreams.
   function pauseTargets() {
-    const targets = [['factory', 'The factory']];
-    const id = project();
-    if (id) {
-      targets.push(['project:' + id, 'Project ' + id]);
-      for (const w of views.status ? views.status.workstreams : []) {
-        targets.push(['workstream:' + w.workstream, 'Workstream ' + goal(w)]);
+    const targets = [['factory', 'The factory', { scope: 'factory' }]];
+    for (const p of projects()) {
+      targets.push(['project:' + p.id, 'Project ' + projectName(p.id), { scope: 'project', project: p.id }]);
+      for (const w of views.status ? views.status.workstreams.filter((w) => w.project === p.id) : []) {
+        targets.push(['workstream:' + w.workstream, projectName(p.id) + ': ' + goal(w),
+          { scope: 'workstream', project: p.id, workstream: w.workstream }]);
       }
     }
     return targets;
@@ -420,20 +424,14 @@
     event.preventDefault();
     const form = byId('pause-form');
     const result = byId('pause-result');
-    const [kind, id] = form.elements.target.value.split(':');
-    const target = { scope: kind };
-    if (kind === 'project' || kind === 'workstream') {
-      target.project = project();
-    }
-    if (kind === 'workstream') {
-      target.workstream = id;
-    }
+    const selected = pauseTargets().find(([value]) => value === form.elements.target.value);
     const mode = form.elements.mode.value;
     const reason = form.elements.reason.value.trim();
-    if (!kind || !pauseTargets().some(([value]) => value === form.elements.target.value)) {
+    if (!selected) {
       show(result, 'error', 'Choose what to pause.');
       return;
     }
+    const target = selected[2];
     if (reason === '') {
       show(result, 'error', 'Give a reason for the pause.');
       return;
@@ -579,7 +577,7 @@
       el('div', { class: 'line' },
         el('h3', { 'data-field': 'goal' }, status ? status.goal : 'No status yet'),
         w.state ? el('span', { class: 'tag', 'data-field': 'state' }, w.state) : null),
-      el('div', { class: 'id' }, w.workstream, ' · ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
+      el('div', { class: 'id' }, el('span', { 'data-field': 'project' }, projectName(w.project)), ' · ', w.workstream, ' · ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
       status && status.attention ? el('p', { class: 'attention', 'data-field': 'attention' }, status.attention) : null,
       status ? el('p', { 'data-field': 'note' }, status.note) : el('p', { class: 'meta' }, 'The chief of staff has not written a status.'),
       el('h4', {}, 'Units'),
@@ -935,27 +933,39 @@
   // whenever that changes.
   const priority = { inForce: null, order: [], chosen: new Set(), shown: null };
 
+  function priorityProject() {
+    const id = byId('priority-project').value;
+    return projects().some((p) => p.id === id) ? id : null;
+  }
+
   function renderPriority() {
     const current = byId('priority-current');
     const list = byId('priority-list');
-    const id = project();
     if (!views.status || !views.runtime || !views.config) {
       return;
     }
+    setOptions(byId('priority-project'), projects().map((p) => [p.id, projectName(p.id)]));
+    const id = priorityProject();
+    block(byId('priority-form').querySelector('button[type=submit]'), !id);
+    block(byId('priority-clear'), !id);
     if (!id) {
       current.textContent = 'No project is configured.';
       list.replaceChildren();
+      priority.inForce = null;
+      priority.shown = null;
+      priority.order = [];
+      priority.chosen.clear();
       return;
     }
     const record = (views.runtime.effective.priorities || []).find((p) => p.project === id);
     const inForce = record ? record.workstreams : [];
-    const key = JSON.stringify(inForce);
+    const key = JSON.stringify([id, inForce]);
     if (priority.inForce !== key) {
       priority.inForce = key;
       priority.order = [...inForce];
       priority.chosen = new Set(inForce);
     }
-    const workstreams = views.status.workstreams;
+    const workstreams = views.status.workstreams.filter((w) => w.project === id);
     const ids = workstreams.map((w) => w.workstream);
     priority.order = priority.order.filter((w) => ids.includes(w)).concat(ids.filter((w) => !priority.order.includes(w)));
     for (const w of [...priority.chosen]) {
@@ -967,7 +977,7 @@
     current.textContent = inForce.length === 0
       ? 'No order is set; free slots go to workstreams without preference.'
       : 'In force: ' + inForce.map((w) => goals.get(w) || w).join(', then ') + '.';
-    const shown = JSON.stringify([priority.order, [...priority.chosen], [...goals]]);
+    const shown = JSON.stringify([id, priority.order, [...priority.chosen], [...goals]]);
     if (priority.shown === shown) {
       return;
     }
@@ -1002,7 +1012,7 @@
   function setPriority(event) {
     event.preventDefault();
     const result = byId('priority-result');
-    const id = project();
+    const id = priorityProject();
     const workstreams = priority.order.filter((w) => priority.chosen.has(w));
     if (!id) {
       show(result, 'error', 'No project is configured.');
@@ -1018,7 +1028,7 @@
 
   function clearPriority() {
     const result = byId('priority-result');
-    const id = project();
+    const id = priorityProject();
     if (!id) {
       show(result, 'error', 'No project is configured.');
       return;
@@ -1107,6 +1117,14 @@
     }));
   }
 
+  function clearProviderLimit(provider) {
+    const button = el('button', {type: 'button'}, 'Clear provider limit');
+    button.addEventListener('click', () => act(byId('provider-result'), button,
+      () => request('DELETE', '/runtime/provider-limit', {backend: provider}),
+      () => { mark(['status', 'runtime']); return 'Provider limit cleared.'; }));
+    return button;
+  }
+
   function renderProviders() {
     const list = byId('providers');
     const usage = views.status ? views.status.provider_usage : null;
@@ -1116,7 +1134,7 @@
     }
     const rows = usage.providers.map((p) => el('li', { 'data-provider': p.provider },
       el('div', { class: 'line' }, el('strong', {}, p.provider), el('span', { 'data-field': 'spend' }, money(p))),
-      p.limit ? el('div', { class: 'attention', 'data-field': 'limit' }, limitText(p.limit)) : null,
+      p.limit ? el('div', { class: 'attention', 'data-field': 'limit' }, limitText(p.limit), clearProviderLimit(p.provider)) : null,
       ...p.fallbacks.map((f) => el('div', { class: 'meta' }, f.role + ' runs ' + f.profile + ' instead of ' + f.configured)),
       p.paused_roles.length > 0 ? el('div', { class: 'meta' }, 'Paused: ' + p.paused_roles.join(', ')) : null));
     if (usage.unattributed) {
@@ -1163,7 +1181,206 @@
     });
   }
 
+
+  let charterRead = null;
+  let draftRead = null;
+  let baseRead = null;
+  let handinRetry = null;
+
+  function formAction(form, button, operation, done) {
+    return act(form.querySelector('.result'), button, operation, (out) => {
+      mark(['status', 'config', 'inbox', 'charter']);
+      return done(out);
+    });
+  }
+
+  function renderOwnerForms() {
+    const options = [['', 'Choose a project'], ...projects().map(p => [p.id, projectName(p.id)])];
+    for (const select of document.querySelectorAll('[data-project-select]')) {
+      setOptions(select, options);
+    }
+    const streams = views.status ? views.status.workstreams : [];
+    const handin = byId('handin-form');
+    setOptions(handin.elements.base, [['', 'Project upstream'], ...streams.filter(w => w.project === handin.elements.project.value && w.state !== 'abandoned').map(w => [w.workstream, goal(w)])]);
+    for (const id of ['documents-form', 'base-form', 'workstream-action', 'trace-form']) {
+      setOptions(byId(id).elements.workstream, [['', 'Choose a workstream'], ...streams.map(w => [w.workstream, projectName(w.project) + ': ' + goal(w)])]);
+    }
+    const charter = byId('project-edit');
+    block(charter.querySelector('[type=submit]'), !charterRead || charterRead.project !== charter.elements.project.value);
+    const form = byId('documents-form');
+    const w = streams.find(w => w.workstream === form.elements.workstream.value);
+    block(form.querySelector('[type=submit]'), !draftRead || draftRead.workstream !== form.elements.workstream.value || !w || !['sketched', 'in-shed'].includes(w.state));
+    const baseForm = byId('base-form');
+    const based = streams.find(w => w.workstream === baseForm.elements.workstream.value);
+    setOptions(baseForm.elements.base, [['', 'Project upstream'], ...streams.filter(w => based && w.project === based.project && w.workstream !== based.workstream && w.state !== 'abandoned').map(w => [w.workstream, goal(w)])]);
+    block(baseForm.querySelector('[type=submit]'), !based || !baseRead || baseRead.workstream !== based.workstream || !['handed', 'sketched', 'in-shed'].includes(based.state));
+    const proposals = views.charter ? views.charter.proposals : [];
+    byId('charter-decisions').replaceChildren(...proposals.map(p => {
+      const decide = decision => {
+        const button = el('button', {type: 'button'}, decision === 'ratify' ? 'Ratify rule' : 'Decline rule');
+        button.addEventListener('click', () => act(byId('charter-result'), button,
+          () => request('POST', '/charter/' + p.workstream + '/' + p.question, {decision}),
+          () => { mark(['charter', 'config']); return 'Charter decision recorded.'; }));
+        return button;
+      };
+      return el('article', {class: 'control'}, el('h3', {}, workstreamName(p.workstream)),
+        el('p', {class: 'text'}, p.rule), el('p', {class: 'meta'}, 'From your ruling: ' + p.owner_response),
+        el('div', {class: 'actions'}, decide('ratify'), decide('decline')));
+    }));
+  }
+
+  function setupOwnerForms() {
+    const add = byId('project-add');
+    add.addEventListener('submit', event => {
+      event.preventDefault();
+      const body = Object.fromEntries(new FormData(add));
+      formAction(add, event.submitter, () => request('POST', '/projects', body), out => 'Registered ' + out.project.name + '. Read and write its charter before handing in work.');
+    });
+    const handin = byId('handin-form');
+    handin.elements.project.addEventListener('change', renderOwnerForms);
+    handin.addEventListener('submit', event => {
+      event.preventDefault();
+      const body = {project: handin.elements.project.value, base: handin.elements.base.value, skip_debate: handin.elements.skip_debate.checked};
+      body[handin.elements.source.value === 'url' ? 'url' : 'stdin'] = handin.elements.content.value;
+      const input = JSON.stringify(body);
+      if (!handinRetry || handinRetry.input !== input) {
+        handinRetry = {input, key: 'web-' + Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('')};
+      }
+      body.key = handinRetry.key;
+      formAction(handin, event.submitter, () => request('POST', '/handin', body), out => {
+        handinRetry = null;
+        handin.elements.content.value = '';
+        return 'Handed in ' + out.workstream + '.';
+      });
+    });
+    const charter = byId('project-edit');
+    charter.elements.project.addEventListener('change', () => {
+      charterRead = null;
+      charter.elements.content.value = '';
+      renderOwnerForms();
+    });
+    charter.querySelector('[data-action=read-charter]').addEventListener('click', event => {
+      const project = charter.elements.project.value;
+      if (!project) { show(charter.querySelector('.result'), 'error', 'Choose a project.'); return; }
+      formAction(charter, event.target, () => request('GET', '/projects/charter/' + project), out => {
+        if (charter.elements.project.value === project) {
+          charterRead = {project, revision: out.revision};
+          charter.elements.content.value = out.content;
+        }
+        renderOwnerForms();
+        return 'Read charter revision ' + out.revision + '.';
+      });
+    });
+    charter.addEventListener('submit', event => {
+      event.preventDefault();
+      if (!charterRead || charterRead.project !== charter.elements.project.value) { return; }
+      const pin = charterRead;
+      formAction(charter, event.submitter, () => request('PUT', '/projects/charter/' + pin.project,
+        {revision: pin.revision, content: charter.elements.content.value}), out => {
+          if (charterRead === pin) { charterRead = {project: pin.project, revision: out.revision}; }
+          return 'Saved charter revision ' + out.revision + '.';
+        });
+    });
+    for (const action of ['extract', 'rebase', 'remove']) {
+      charter.querySelector('[data-action=' + action + ']').addEventListener('click', event => {
+        const project = charter.elements.project.value;
+        if (!project) { show(charter.querySelector('.result'), 'error', 'Choose a project.'); return; }
+        formAction(charter, event.target, () => request(action === 'remove' ? 'DELETE' : 'POST',
+          action === 'remove' ? '/projects' : '/projects/' + action, {project}),
+          () => action === 'remove' ? 'Project removed; its trace and clone are retained.' : 'Project ' + action + ' requested.');
+      });
+    }
+    const documents = byId('documents-form');
+    documents.elements.workstream.addEventListener('change', () => {
+      draftRead = null;
+      documents.elements.spec.value = '';
+      documents.elements.plan.value = '';
+      byId('document-revisions').textContent = '';
+      renderOwnerForms();
+    });
+    documents.querySelector('[data-action=read]').addEventListener('click', event => {
+      const workstream = documents.elements.workstream.value;
+      if (!workstream) { return; }
+      formAction(documents, event.target, () => request('GET', '/documents/' + workstream), out => {
+        if (documents.elements.workstream.value === workstream) {
+          documents.elements.spec.value = out.spec ? out.spec.content : '';
+          documents.elements.plan.value = out.plan ? out.plan.content : '';
+          draftRead = out.spec && out.plan ? {workstream, spec_revision: out.spec.revision, plan_revision: out.plan.revision} : null;
+          byId('document-revisions').textContent = draftRead ? 'Spec revision ' + out.spec.revision + '; plan revision ' + out.plan.revision + '.' : 'The architect has not drafted both documents yet.';
+        }
+        renderOwnerForms();
+        return 'Documents loaded. Drafts can be edited before ratification; sealed documents require an amendment.';
+      });
+    });
+    documents.addEventListener('submit', event => {
+      event.preventDefault();
+      if (!draftRead || draftRead.workstream !== documents.elements.workstream.value) { return; }
+      const pin = draftRead;
+      formAction(documents, event.submitter, () => request('PUT', '/documents/' + pin.workstream,
+        {spec_revision: pin.spec_revision, plan_revision: pin.plan_revision, spec: documents.elements.spec.value, plan: documents.elements.plan.value}), out => {
+          if (draftRead === pin) {
+            draftRead = {workstream: pin.workstream, spec_revision: out.spec.revision, plan_revision: out.plan.revision};
+            byId('document-revisions').textContent = 'Spec revision ' + out.spec.revision + '; plan revision ' + out.plan.revision + '.';
+          }
+          return 'Draft documents saved for debate.';
+        });
+    });
+    const baseForm = byId('base-form');
+    baseForm.elements.workstream.addEventListener('change', () => { baseRead = null; renderOwnerForms(); });
+    baseForm.querySelector('[data-action=read]').addEventListener('click', event => {
+      const workstream = baseForm.elements.workstream.value;
+      if (!workstream) { return; }
+      formAction(baseForm, event.target, () => request('GET', '/base/' + workstream), out => {
+        if (baseForm.elements.workstream.value === workstream) { baseRead = out; renderOwnerForms(); baseForm.elements.base.value = out.base || ''; }
+        return 'Dependency revision ' + out.revision + ' loaded.';
+      });
+    });
+    baseForm.addEventListener('submit', event => {
+      event.preventDefault();
+      if (!baseRead || baseRead.workstream !== baseForm.elements.workstream.value) { return; }
+      const pin = baseRead;
+      formAction(baseForm, event.submitter, () => request('PUT', '/base/' + pin.workstream, {base: baseForm.elements.base.value, revision: pin.revision}), out => {
+        if (baseRead === pin) { baseRead = out; }
+        return 'Dependency revision ' + out.revision + ' saved.';
+      });
+    });
+    const action = byId('workstream-action');
+    action.addEventListener('submit', event => {
+      event.preventDefault();
+      const kind = action.elements.action.value;
+      const workstream = action.elements.workstream.value;
+      const note = action.elements.note.value.trim();
+      const bodies = {object: {argument: note}, more: {rounds: 1}, redraft: {note}, skip: {}, abandon: {reason: note}};
+      formAction(action, event.submitter, () => request('POST', (kind === 'abandon' ? '/abandon/' : '/shed/' + kind + '/') + workstream, bodies[kind]),
+        () => 'Workstream action recorded.');
+    });
+    const trace = byId('trace-form');
+    trace.addEventListener('submit', event => {
+      event.preventDefault();
+      const kind = trace.elements.kind.value;
+      const selector = trace.elements.selector.value.trim();
+      if (kind && !selector) { show(trace.querySelector('.result'), 'error', 'Name the unit, criterion, or commit.'); return; }
+      const path = '/trace/' + trace.elements.workstream.value + (kind ? '/' + kind + '/' + encodeURIComponent(selector) : '');
+      formAction(trace, event.submitter, () => request('GET', path), out => {
+        byId('trace-content').replaceChildren(traceTree(out));
+        return 'Trace loaded.';
+      });
+    });
+  }
+
+  function traceTree(value) {
+    if (value === null || typeof value !== 'object') {
+      return el('span', {class: 'text'}, value === null ? 'None' : String(value));
+    }
+    if (Array.isArray(value)) {
+      return el('ol', {}, ...value.map(item => el('li', {}, traceTree(item))));
+    }
+    return el('dl', {}, ...Object.entries(value).flatMap(([name, content]) => [
+      el('dt', {}, name.replaceAll('_', ' ')), el('dd', {}, traceTree(content))]));
+  }
+
   function render() {
+    renderOwnerForms();
     renderProblems();
     renderInbox();
     renderPauses();
@@ -1176,8 +1393,13 @@
     renderConfig();
   }
 
+  setupOwnerForms();
   byId('pause-form').addEventListener('submit', pause);
   byId('priority-form').addEventListener('submit', setPriority);
+  byId('priority-project').addEventListener('change', () => {
+    byId('priority-result').textContent = '';
+    renderPriority();
+  });
   byId('priority-clear').addEventListener('click', clearPriority);
   byId('reload').addEventListener('click', reload);
   setInterval(() => {

@@ -243,8 +243,8 @@ func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
 	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, f.deferred(t, stream, "dedupe", overlapping("resume"))})
-	if runs := fakes.requests(stream); len(runs) != 1 {
-		t.Fatalf("mason turns %d", len(runs))
+	if runs := implementationRuns(fakes, stream); len(runs) != 1 {
+		t.Fatalf("implementation turns %d", len(runs))
 	}
 	// Resuming is no start: the workstream last started a unit when the unit
 	// first moved to implementing, which orders it among equal workstreams.

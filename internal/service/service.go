@@ -21,6 +21,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/events"
+	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/reconcile"
@@ -126,8 +127,9 @@ type activeProject struct {
 }
 
 type Service struct {
-	mu  sync.Mutex // guards cfg, projects, pending and reloadErr
-	cfg *config.Config
+	memory hearsay.Health
+	mu     sync.Mutex // guards cfg, projects, pending and reloadErr
+	cfg    *config.Config
 	// projects holds the runtime of every active project that has a trace, in
 	// active_projects order.
 	projects []*activeProject
@@ -442,10 +444,19 @@ func (s *Service) current() *config.Config {
 	return s.cfg
 }
 
-// about returns the loaded configuration about the project of repository. Its
-// Project is zero once that project is no longer active.
+// about returns the project's configuration. A draining project keeps the
+// configuration its in-flight work started with.
 func (s *Service) about(repository *trace.Repository) *config.Config {
-	return s.current().For(repository.Project())
+	cfg, projects := s.runtimes()
+	if cfg.Active(repository.Project()) {
+		return cfg.For(repository.Project())
+	}
+	for _, p := range projects {
+		if p.repository == repository && p.pipeline != nil && p.pipeline.current.Load() != nil {
+			return p.pipeline.current.Load().cfg
+		}
+	}
+	return cfg.For(repository.Project())
 }
 
 // runtimes returns the loaded configuration and the runtime of every active
@@ -652,6 +663,11 @@ func (s *Service) holds(project config.ProjectID, librarian config.WorkstreamID,
 	if gone, err := abandoned(repository, c.Workstream); err != nil || gone {
 		return gone, err
 	}
+	if c.Thread.Identity.Role != trace.ChiefOfStaff {
+		if waiting, err := baseWaiting(repository, c.Workstream); err != nil || waiting {
+			return waiting, err
+		}
+	}
 	st, _ := s.effective()
 	return scheduler.Held(st.Pauses, project, c), nil
 }
@@ -706,8 +722,21 @@ func (s *Service) launch(active *activeProject) {
 	ctx, cancel := context.WithCancel(s.lifetime)
 	active.cancel = cancel
 	go func() {
+		watchDone := make(chan error, 1)
+		go func() {
+			err := s.watchMemory(ctx, active.repository)
+			if err != nil {
+				cancel()
+			}
+			watchDone <- err
+		}()
 		err := active.controller.Run(ctx)
+		cancel()
+		if watchErr := <-watchDone; watchErr != nil {
+			err = watchErr
+		}
 		active.done <- err
+		close(active.done)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			select {
 			case s.failures <- err:
@@ -840,7 +869,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	budget := budgetSignals{s: s, repository: repository}
 	daily := dailyBudget{s: s, repository: repository}
 	runner := runnerAdapter{turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals}
-	hooks := []scheduleHook{{"daily-budget", daily.Pass}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
+	hooks := []scheduleHook{{"base-refresh", (&baseRefresher{s: s, repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})
 	}

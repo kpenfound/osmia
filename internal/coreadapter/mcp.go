@@ -23,9 +23,9 @@ type MCPTransport interface {
 	Start(context.Context, *mcp.Server) (Endpoint, Lease, error)
 }
 
-// MCPHost serves a turn's scoped tools with Transport, or with Container for
-// a turn in the container mode when Container is set.
-type MCPHost struct{ Transport, Container MCPTransport }
+// MCPHost selects a transport for the turn's execution mode. Sbx requires its
+// own transport because its proxy reaches host loopback on every platform.
+type MCPHost struct{ Transport, Container, Sbx MCPTransport }
 
 var _ MCPHosts = (*MCPHost)(nil)
 
@@ -40,6 +40,9 @@ func (h *MCPHost) Host(ctx context.Context, req HostRequest) (HostedMCP, error) 
 	transport := h.Transport
 	if req.Execution.Mode == agent.SandboxContainer && h.Container != nil {
 		transport = h.Container
+	}
+	if req.Execution.Mode == agent.SandboxSbx {
+		transport = h.Sbx
 	}
 	if transport == nil {
 		return HostedMCP{}, unsupported("MCP transport", "no transport supplied")
@@ -142,6 +145,10 @@ func (t CoreTransport) Start(ctx context.Context, server *mcp.Server) (Endpoint,
 // ContainerHost is the name a container turn reaches the host by. Core's
 // container sessions resolve it on macOS and Linux.
 const ContainerHost = "host.docker.internal"
+
+// SbxTransport serves on loopback and advertises the sandbox proxy's host
+// name. It never inspects a Docker bridge or opens a wildcard listener.
+func SbxTransport() CoreTransport { return CoreTransport{Via: ContainerHost} }
 
 // hostOS is the platform ContainerTransport listens for.
 var hostOS = runtime.GOOS

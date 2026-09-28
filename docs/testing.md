@@ -17,8 +17,11 @@ dagger check
 The factory supplies the pinned experimental Dagger release through
 `DAGGER_X_RELEASE`. Outside that environment, set it to `v1.0.0-beta.14`.
 The Go check runs the complete suite in a Go container and installs the pinned
-`jj` binary. The browser check installs Chromium and runs the page tests with
-`OSMIA_BROWSER` set. The release check builds and exercises the versioned
+`jj` binary. The Go test command and all its child processes run on at most
+four available CPUs, including on larger local engines. CPU affinity constrains
+Git and Jujutsu as well as Go; limiting only `GOMAXPROCS` does not do that. The
+check prints the selected CPUs. The browser check installs Chromium and runs
+the page tests with `OSMIA_BROWSER` set. The release check builds and exercises the versioned
 archive. See [dagger.toml](../dagger.toml) for the registered checks.
 
 Never run `go test` on the host. Tests can leave processes behind on the
@@ -50,8 +53,11 @@ and are discarded when the command ends. This exercises real Git, Jujutsu and
 filesystem operations, including the service's durability calls, without paying
 for container-layer disk writes on every fixture transaction.
 
-Each workflow read verifies and decodes trace records; frequent
-polling competes with the controllers doing the work. Parallel tests also share
+Each workflow read verifies trace files. Decoded JSONL records are reused only
+when the file bytes match, and callers receive independent copies of mutable
+fields. Each project retains at most 16 MiB of encoded JSONL in this cache,
+along with its decoded records; larger files are decoded without retention. Changes, including same-size edits with unchanged timestamps, are
+validated again. Frequent polling competes with the controllers doing the work. Parallel tests also share
 the container's CPU and filesystem, so adding parallelism can increase contention.
 
 - Keep one end-to-end journey for each distinct integration contract. Exercise
@@ -103,7 +109,12 @@ workflow decisions belong in the tests responsible for those decisions.
 
 ## Profile inside Dagger
 
-Measure the same tests with the same container, race setting and parallelism.
+Measure the same tests with the same container, CPU affinity, race setting and
+parallelism. The standard Go check uses at most four CPUs; for an isolated
+comparison, use `taskset -c` with four CPUs from `/proc/self/status` inside the
+container and `GOMAXPROCS=4`, `-p=4` and `-parallel=4`. Affinity applies to child
+Git and Jujutsu processes too. Compare complete-package times as well as small
+fixtures; large histories make repeated trace work more expensive.
 Use `-count=1` to bypass Go's test-result cache and `-parallel=1` to isolate the
 cost of a lifecycle from contention with other tests. Compilation, image pulls
 and engine startup are separate from the durations printed by `go test`.
@@ -124,3 +135,19 @@ Use the pinned `jj` installation from the focused-test command in
 [AGENTS.md](../AGENTS.md#validation) when profiling Jujutsu tests. Cumulative CPU
 percentages overlap along call stacks; blocking profiles aggregate time across
 goroutines. Neither should be added up as wall-clock time.
+
+The trace decoding benchmark compares repeated decoding with reuse of verified
+file content, including copying mutable record fields. Run it inside Dagger:
+
+```sh
+dagger core container from --address golang:1.26-bookworm \
+  with-directory --path /src --source . --exclude .git,.bees \
+  with-workdir --path /src \
+  with-mounted-temp --path /tmp \
+  with-exec --args=go,test,-run=^$,-bench=BenchmarkRecordDecoding,-benchmem,./internal/trace \
+  combined-output
+```
+
+A passing local run on four CPUs is a reproducible performance check, but is
+not a measurement of the CI engine's processor speed or competing workload.
+Use the CI package durations to verify performance after publication.

@@ -201,6 +201,15 @@ func (r *Repository) Statuses() ([]WorkstreamStatus, error) {
 
 func ownerGates(records []Record, stream config.WorkstreamID, view *workflowView) []OwnerGate {
 	gates := []OwnerGate{}
+	if view.states["base-wait"].Value == "waiting" {
+		gate := OwnerGate{Kind: "base", Reference: string(stream)}
+		for _, r := range records {
+			if t, ok := r.(Transition); ok && t.Workstream == stream && t.Subject == "base-wait" {
+				gate.Reason = t.Reason
+			}
+		}
+		gates = append(gates, gate)
+	}
 	states := view.states
 	if states[FeatureSubject].Value != "abandoned" {
 		for _, entry := range escalations(questions(records, view, stream)) {

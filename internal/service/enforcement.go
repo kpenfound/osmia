@@ -31,13 +31,13 @@ type Enforcement struct {
 func CoreEnforcement() Enforcement {
 	return Enforcement{
 		Engine: coreadapter.CoreEngine{},
-		Hosts:  &coreadapter.MCPHost{Transport: coreadapter.CoreTransport{}, Container: coreadapter.ContainerTransport(agent.ContainerEngine)},
+		Hosts:  &coreadapter.MCPHost{Transport: coreadapter.CoreTransport{}, Container: coreadapter.ContainerTransport(agent.ContainerEngine), Sbx: coreadapter.SbxTransport()},
 	}
 }
 
 // chiefGrant is what a chief-of-staff thread turn may call: status, runtime
 // controls, owner decisions and question tools.
-var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName, prioritiseTool, pauseTool, resumeTool, decideAmendmentTool, decideCharterTool}, questions.ChiefTools...)}
+var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName, "notify", "capacity", "inspect_code", prioritiseTool, pauseTool, resumeTool, decideAmendmentTool, decideCharterTool}, questions.ChiefTools...)}
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
 // its view of its unit's workspace, ask the chief of staff, file an amendment
@@ -148,7 +148,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					return nil, err
 				}
 				chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
-				return append([]coreadapter.Tool{set, controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope)}, chief...), err
+				return append([]coreadapter.Tool{set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope)}, chief...), err
 			},
 			Hosts:  e.Hosts,
 			Engine: e.Engine,
@@ -162,6 +162,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				return units.capture(ctx, scope, view, result)
 			},
 		}
+		turns = memoryTurns(turns, cfg, r)
 		runner := threadRunner(cfg, r, &questions.Turns{Turns: &verdictTurns{Turns: &reportingTurns{Turns: &retriedTurns{Turns: turns, units: units, repository: r}, reports: reports}, reports: verdicts}, Repository: r}, now)
 		if service := controls.service.Load(); service != nil {
 			runner.OnProviderLimit = service.recordProviderLimit

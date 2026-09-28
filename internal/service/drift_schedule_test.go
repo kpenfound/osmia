@@ -157,7 +157,13 @@ func TestScheduledDriftRebasesFollowTheIntervalAcrossRestart(t *testing.T) {
 
 	// A final rebase after the drift rebase restarts the interval.
 	finalAt := second.At.Add(30 * time.Minute)
-	content, err := json.Marshal(FinalRebase{Review: 1, Operation: "planted-final-review", Branch: featureBranch(stream), Before: "before", Commit: "after"})
+	g, err := featureWorkspaces(f.s.about(repository), repository).of(stream)
+	must(t, err)
+	tip, _, err := g.Branch(ctx, featureBranch(stream))
+	must(t, err)
+	base, err := branchBase(ctx, repository, stream, g, tip)
+	must(t, err)
+	content, err := json.Marshal(FinalRebase{Review: 1, Operation: "planted-final-review", Branch: featureBranch(stream), Before: tip, Commit: tip, Upstream: base})
 	must(t, err)
 	revision, err := nextRevision(repository, stream, finalRebaseDocument)
 	must(t, err)

@@ -34,6 +34,7 @@ type DeliveryPresentation struct {
 	// Delivered whether the workstream is delivered.
 	Publication *DeliveryPublication `json:"publication,omitempty"`
 	Delivered   bool                 `json:"delivered,omitempty"`
+	Maintenance bool                 `json:"maintenance,omitempty"`
 }
 
 // DeliveryApproval preserves the exact text and reviewed identity the owner
@@ -156,7 +157,14 @@ func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID,
 	if len(published) > 0 {
 		publication = &published[len(published)-1]
 	}
+	maintenance := false
 	if feature.Value == DeliveredState {
+		maintenance, err = upstreamDeliveryPending(repository, s.about(repository), stream)
+		if err != nil {
+			return DeliveryPresentation{}, &APIError{Internal, "cannot read dependency integration"}
+		}
+	}
+	if feature.Value == DeliveredState && !maintenance {
 		report, _, err := latestFinalReport(repository, stream)
 		if err != nil {
 			return DeliveryPresentation{}, &APIError{Internal, "cannot read final review"}
@@ -167,7 +175,7 @@ func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID,
 		}
 		return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Approval: approval, Publication: publication, Delivered: true}, nil
 	}
-	if feature.Value != AssembledState {
+	if feature.Value != AssembledState && !maintenance {
 		return DeliveryPresentation{}, &APIError{Conflict, "the workstream is not assembled"}
 	}
 	report, reason, err := (&finalReviewer{s: s, repository: repository}).finalGate(ctx, stream)
@@ -202,7 +210,7 @@ func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID,
 	if approval != nil && (approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter || approval.Seal != report.Seal) {
 		approval = nil
 	}
-	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Draft: draft, DraftHash: descriptionHash(draft), Approval: approval, Publication: publication}, nil
+	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Draft: draft, DraftHash: descriptionHash(draft), Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance}, nil
 }
 
 func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryDecision) (DeliveryApproval, *APIError) {
@@ -210,7 +218,7 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 	if api != nil {
 		return DeliveryApproval{}, api
 	}
-	if presented.Delivered {
+	if presented.Delivered && !presented.Maintenance {
 		return DeliveryApproval{}, &APIError{Conflict, "the workstream is delivered"}
 	}
 	if req.Review != presented.Report.Review || req.ReviewRevision != presented.ReviewRevision || req.Commit != presented.Report.Commit || req.DraftHash != presented.DraftHash {

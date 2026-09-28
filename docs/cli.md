@@ -16,11 +16,13 @@ osmia trace w_0123456789abcdef0123456789abcdef criterion spec#1
 osmia trace w_0123456789abcdef0123456789abcdef unit parser
 osmia trace w_0123456789abcdef0123456789abcdef commit 0123456789abcdef0123456789abcdef01234567
 osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
+osmia project memory p_0123456789abcdef0123456789abcdef
 osmia project extract p_0123456789abcdef0123456789abcdef
 osmia project rebase p_0123456789abcdef0123456789abcdef
 osmia project remove p_0123456789abcdef0123456789abcdef
 osmia handin p_0123456789abcdef0123456789abcdef design.md
 osmia handin p_0123456789abcdef0123456789abcdef small-fix.md --skip-debate
+osmia handin p_0123456789abcdef0123456789abcdef dependent.md --base w_0123456789abcdef0123456789abcdef
 osmia send w_0123456789abcdef0123456789abcdef "Start with the upload API."
 osmia conversation w_0123456789abcdef0123456789abcdef
 osmia inbox
@@ -55,7 +57,9 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
 
 ## Commands and flags
 
-- `serve [--root PATH]` validates and starts the foreground service. SIGINT and
+- `serve [--detach] [--root PATH]` validates and starts the service. Detached
+  mode waits for readiness and appends output to the private root `service.log`.
+  `stop` requests local shutdown over the Unix socket. SIGINT and
   SIGTERM drain requests and release ownership and the socket. A live owner is
   refused; a provably stale socket is recovered automatically. The service
   runs the librarian, architect, committee and chief-of-staff turns in each role's
@@ -480,3 +484,13 @@ inbox, answered inline, the active work, each workstream's conversation and
 the controls. The command examples in
 the design describe the eventual product; this reference lists the implemented
 surface.
+
+`project memory <project-id>` prints a read-only Hearsay setup export as JSON:
+configuration fragments, scope/entity mappings and anchor artifact handles.
+It uses the local trace and contacts no memory service. Merge and validate the
+fragments when configuring Hearsay; see [memory setup](hearsay.md).
+
+A hand-in's `--base <workstream-id>` selects an available feature on the same
+project. Dependent requests open on the fork. After the dependency integrates,
+delivery maintenance requires a fresh review and owner approval before opening
+the upstream request. Both request relationships remain in the trace.

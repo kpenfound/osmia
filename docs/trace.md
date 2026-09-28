@@ -1154,3 +1154,21 @@ one of three states:
 | `not-created` | Nothing has started to produce it, or the workstream was delivered or abandoned before it did. |
 
 A walk is complete when it has no gap, including those of its units.
+
+## Tool calls and inspected evidence
+
+Every scoped service tool records intent before invoking its handler and a
+completion afterward under `tools/`. The record retains the turn, role, tool,
+effect, payload sizes and SHA-256 digests. Bodies up to 64 KiB are retained;
+private role-note bodies are excluded. An interrupted call without a completion
+is uncertain and remains visible for reconciliation.
+
+Committed-code inspections are durable evidence addressed by
+`inspection#<id>`. The record pins the commit, path and excerpt used by the
+chief's answer. Subsequent librarian refreshes link back to that evidence.
+
+Workstream dependency choices live in revisioned `base.json` documents. Before
+branch creation, sealing records its selected immutable base in
+`sealing/base-<n>.json`, so a restart cannot select a different parent revision.
+Dependency observations, final reviews and delivery maintenance preserve the
+relationship between the fork request and the later upstream request.

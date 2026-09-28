@@ -319,10 +319,10 @@ func documentPath(p string, stream bool) error {
 		return err
 	}
 	parts := strings.Split(p, "/")
-	if !stream && (p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
+	if !stream && (memoryPath(parts) || p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || (len(parts) == 2 && parts[0] == "notices" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))) || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && (p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || charterProposalPath(parts)) {
+	if stream && ((p == "base.json" || p == "base-observation.json") || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || sealingPath(parts) || charterProposalPath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)
@@ -425,4 +425,16 @@ func recordPath(r Record) string {
 		return prefix + "priority.jsonl"
 	}
 	return ""
+}
+
+func toolPath(parts []string) bool {
+	return len(parts) == 2 && (parts[0] == "tools" || parts[0] == "inspections") && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
+}
+
+func memoryPath(parts []string) bool {
+	return len(parts) == 2 && parts[0] == "memory" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
+}
+
+func sealingPath(parts []string) bool {
+	return len(parts) == 2 && parts[0] == "sealing" && strings.HasPrefix(parts[1], "base-") && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
 }

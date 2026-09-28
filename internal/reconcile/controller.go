@@ -57,8 +57,10 @@ type Controller struct {
 	group   sync.WaitGroup
 	// failure is the first error a concurrent operation returned, and abort
 	// cancels the context Run passes to them.
-	failure error
-	abort   context.CancelCauseFunc
+	failure   error
+	abort     context.CancelCauseFunc
+	drain     chan struct{}
+	drainOnce sync.Once
 }
 
 func New(repository *trace.Repository, options Options) (*Controller, error) {
@@ -79,7 +81,20 @@ func New(repository *trace.Repository, options Options) (*Controller, error) {
 		adapters[k] = v
 	}
 	options.Adapters = adapters
-	return &Controller{repository: repository, options: options, running: map[string]bool{}}, nil
+	return &Controller{repository: repository, options: options, running: map[string]bool{}, drain: make(chan struct{})}, nil
+}
+
+// Drain stops admitting operations and lets operations already in flight
+// finish. Cancellation of Run still interrupts those operations.
+func (c *Controller) Drain() { c.drainOnce.Do(func() { close(c.drain) }) }
+
+func (c *Controller) draining() bool {
+	select {
+	case <-c.drain:
+		return true
+	default:
+		return false
+	}
 }
 
 // Run scans before waiting, then after every coalesced hint or periodic tick.
@@ -98,7 +113,10 @@ func (c *Controller) Run(ctx context.Context) error {
 	c.abort = cancel
 	c.mu.Unlock()
 	err := c.loop(ctx, ticks)
-	cancel(err)
+	if err != nil {
+		cancel(err)
+	}
+	defer cancel(nil)
 	if failure := c.Wait(); failure != nil {
 		return failure
 	}
@@ -107,10 +125,29 @@ func (c *Controller) Run(ctx context.Context) error {
 
 func (c *Controller) loop(ctx context.Context, ticks <-chan time.Time) error {
 	for {
+		if c.draining() {
+			return nil
+		}
 		if err := c.Pass(ctx); err != nil {
 			return err
 		}
-		if err := c.repository.WaitWorkflow(ctx, ticks); err != nil {
+		// A drain wakes a controller even when no workflow event or tick arrives.
+		waitCtx, stop := context.WithCancel(ctx)
+		finished := make(chan struct{})
+		go func() {
+			select {
+			case <-c.drain:
+				stop()
+			case <-finished:
+			}
+		}()
+		err := c.repository.WaitWorkflow(waitCtx, ticks)
+		close(finished)
+		stop()
+		if c.draining() && ctx.Err() == nil {
+			return nil
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -186,6 +223,9 @@ func (c *Controller) Pass(ctx context.Context) error {
 	if err := c.failed(); err != nil {
 		return err
 	}
+	if c.draining() {
+		return nil
+	}
 	if c.options.Schedule != nil {
 		if err := c.repository.Serialize(func() error { return c.options.Schedule(ctx) }); err != nil {
 			return err
@@ -217,6 +257,9 @@ func (c *Controller) Pass(ctx context.Context) error {
 		})
 	}
 	for _, p := range due {
+		if c.draining() {
+			return nil
+		}
 		if err := c.step(ctx, "before-claim"); err != nil {
 			return err
 		}

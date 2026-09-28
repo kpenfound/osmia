@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"sync/atomic"
 	"time"
 
@@ -83,24 +82,73 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		return ReloadResponse{}, &APIError{Validation, failed.Message + "; the loaded configuration is unchanged"}
 	}
 	unchanged := &APIError{Internal, "cannot apply the reloaded configuration to the running project; the loaded configuration is unchanged"}
-	staged := make([]*stages, len(projects))
-	for i, p := range projects {
-		if staged[i], err = s.stages(next.For(p.id), p.repository); err != nil {
+	staged := map[*activeProject]*stages{}
+	var added, removed []*activeProject
+	rollback := func() {
+		for _, p := range added {
+			p.repository.Close()
+		}
+	}
+	for _, p := range projects {
+		if !next.Active(p.id) {
+			removed = append(removed, p)
+			continue
+		}
+		if staged[p], err = s.stages(next.For(p.id), p.repository); err != nil {
 			return ReloadResponse{}, unchanged
 		}
 	}
+	for _, id := range next.ProjectIDs() {
+		present := false
+		for _, p := range projects {
+			present = present || p.id == id
+		}
+		if !present {
+			p, err := s.open(next.For(id))
+			if err != nil {
+				rollback()
+				return ReloadResponse{}, unchanged
+			}
+			if p != nil {
+				added = append(added, p)
+			}
+		}
+	}
+	all := append(projects, added...)
+	projects = nil
+	for _, id := range next.ProjectIDs() {
+		for _, p := range all {
+			if p.id == id {
+				projects = append(projects, p)
+			}
+		}
+	}
+	projects = append(projects, removed...)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err := s.resolveRuntime(next, projects); err != nil {
+		s.mu.Unlock()
+		rollback()
 		return ReloadResponse{}, unchanged
 	}
-	s.cfg, s.reloadErr = next, nil
-	for i, p := range projects {
-		p.pipeline.next.Store(staged[i])
+	s.cfg, s.projects, s.reloadErr = next, projects, nil
+	for p, stage := range staged {
+		p.pipeline.next.Store(stage)
+	}
+	for _, p := range removed {
+		p.controller.Drain()
+	}
+	for _, p := range added {
+		s.launch(p)
+	}
+	s.mu.Unlock()
+	for _, p := range removed {
+		if err := s.finishDraining(p); err != nil {
+			return ReloadResponse{}, &APIError{Internal, "configuration applied but a removed project could not finish draining; restart the service"}
+		}
 	}
 	// The runtime's effective profiles and the daily budget's limit follow the
 	// configuration.
-	events := []Event{{Kind: EventConfig}, {Kind: EventRuntime}}
+	events := []Event{{Kind: EventResync}, {Kind: EventConfig}, {Kind: EventRuntime}}
 	for _, id := range next.ProjectIDs() {
 		events = append(events, Event{Kind: EventSpend, Project: id})
 	}
@@ -113,21 +161,13 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 
 // candidate loads the configuration on disk as a reload applies it over cfg.
 // Changed settings that need a restart keep cfg's values and are named: the
-// listen socket, the web and tailnet listeners, and the active project list, which only
-// project add and remove change in a running service. The loaded projects'
-// files are validated even when the disk lists other projects.
+// listen socket and the web and tailnet listeners.
 func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error) {
 	next, err := config.Load(s.options.Config)
 	if err != nil {
 		return nil, nil, err
 	}
 	restart := []string{}
-	if !slices.Equal(next.ProjectIDs(), cfg.ProjectIDs()) {
-		restart = append(restart, "active_projects")
-		if next, err = next.WithProjects(cfg.ProjectIDs(), s.options.Config.Home); err != nil {
-			return nil, nil, err
-		}
-	}
 	if next.Listen.Socket != cfg.Listen.Socket {
 		restart = append(restart, "listen.socket")
 	}

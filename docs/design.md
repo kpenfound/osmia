@@ -246,7 +246,7 @@ Every role has an `ask` tool. Its question always goes to the chief of staff, ne
 4. **Proposes a charter amendment** when your answer is a standing rule rather than a decision about this feature.
 5. **Rephrases your answer** for the asker and decides its scope: local to the asker, or a notice in every in-flight bundle on the project when it applies wider than the question.
 
-Every question lands in the trace as `questions/<n>/`: the question as asked, the decision, what you were sent, what you said, what went back, and what it changed. With Hearsay enabled, your answer is also asserted under your principal, which authority makes a ratified stance. The local ruling is authoritative and durable before that assertion is attempted.
+Every question lands in the trace as `questions/<n>/`: the question as asked, the decision, what you were sent, what you said, what went back, and what it changed. With Hearsay enabled, your answer is ingested under your principal through the owner source, which authority makes a ratified stance. The local ruling is authoritative and durable before external ingestion. An optional immediate assertion must reconcile to that same ruling.
 
 ### 6.3 Waiting
 
@@ -283,6 +283,15 @@ A project is a clone of your fork with upstream as a second remote. The canonica
 
 Sessions get a plain directory of files. The service performs every version control operation: create workspace, snapshot, rebase, squash, merge, push. A mason improvising a rebase is not acceptable, and an agent that never holds the tool cannot damage history. Enforcement belongs to the execution boundary: agents receive neither VCS tools nor writable VCS metadata nor inherited GitHub credentials. A core profile flag or prompt alone is insufficient. Read-only roles cannot acquire execution or write capabilities through repository-provided tools.
 
+Role execution supports confined host modes (`none` and `claude`), containers,
+and Docker Sandboxes (`sbx`). The same scoped files and tools apply in every
+mode. An sbx role may select an agent-specific template; provider credentials
+and network policy belong to the sandbox proxy, while delivery credentials stay
+with the service. The runner allows each service-owned MCP listener's exact
+port for that sandbox's lifetime; no global localhost allowance is required.
+A sandbox that cannot enforce the requested grants fails the
+turn without silently selecting another mode.
+
 ### 7.3 Workspaces
 
 The feature branch is one workspace on the project's clone. Each unit gets a workspace of its own descending from the feature branch. The first implementation is git worktrees behind a workspace interface. Jujutsu is the second implementation behind the same interface, colocated so plain git still works for reading history: change IDs that survive rebases, snapshot on every command so an interrupted session never loses work, stored rather than blocking conflicts, and an operation log the service can restore from. The design does not depend on it, and the switch is made when rebases and interrupted sessions start to hurt.
@@ -303,9 +312,9 @@ Two units in one workstream are entangled when the plan makes one depend on the 
 
 Footprints resolve through the local entity map even without Hearsay. The review compares actual changed paths with the declared footprint; undeclared scope must be explained and the plan amended when necessary before approval. Unknown or ambiguous mappings cannot be treated as proof of disjointness. Within a workstream the scheduler serializes such units until their footprints are resolved. Across workstreams overlap is advisory by default; the owner can pause or reprioritise the affected work.
 
-A workstream may declare another on the same project as its base. It then rebases onto that workstream's branch instead of upstream until the base change is integrated upstream, and its pull request is opened against that branch. This is how one large change lands as a sequence of pull requests. Stacking inside one workstream is not supported.
+A workstream may declare another on the same project as its base. It then rebases onto that workstream's branch instead of upstream until the base change is integrated upstream. Its dependent pull request is opened on the owner's fork against that branch. Once the base is integrated, the service prepares an upstream pull request from the descendant's branch, refreshing the affected review and owner delivery approval before publishing it. The trace retains both requests and their relationship; Osmia never requires a feature branch on upstream. This is how one large change lands as a sequence of pull requests. Stacking inside one workstream is not supported.
 
-Delivery of a base means its pull request is open, not merged upstream, so descendants continue to use that branch after delivery. Once the base is integrated upstream, the service can rebase descendants onto upstream and update their PR targets, refreshing affected reviews. Base relationships must remain acyclic. An abandoned or unavailable base parks descendants for an owner decision; they are never silently moved to another base. Osmia never merges the upstream pull requests itself.
+Delivery of a base means its pull request is open, not merged upstream, so descendants continue to use that branch after delivery. Once the base is integrated upstream, the service can rebase descendants onto upstream and publish their upstream requests. For an already delivered descendant, this is a separate delivery-maintenance operation: the feature stays terminal and no implementation unit restarts. Conflicts or changed intent requiring implementation need a new owner-requested workstream. Base relationships must remain acyclic. An abandoned or unavailable base parks descendants for an owner decision; they are never silently moved to another base. Osmia never merges the upstream pull requests itself.
 
 ---
 
@@ -380,6 +389,7 @@ The Osmia server, role-scoped:
 | `object`, `concede` | committee | A shed contribution, citing the spec, the charter or the knowledge base. |
 | `verdict` | committee | A review verdict with findings and severities. |
 | `answer`, `escalate`, `route_amendment`, `propose_charter`, `set_status`, `notify` | chief of staff | The five outcomes of a question, the status, and a notice to in-flight bundles. |
+| `inspect_code` | chief of staff | Read a committed code excerpt; a cited answer queues a librarian knowledge-gap refresh. |
 | `pause`, `resume`, `prioritise`, `capacity` | chief of staff | The factory-wide controls. |
 | `decide_amendment` | chief of staff | Record your decision on a presented amendment when you give it in a message. |
 
@@ -438,10 +448,14 @@ Built for a phone as much as a laptop. Embedded in the binary, one page, fed by 
 ### 11.2 Command line
 
 The following is the full design; see the [command line](cli.md) for supported
-commands. The service runs in the foreground; detached serving is not implemented.
+commands. The service runs in the foreground or with `serve --detach`, which
+returns after the service acknowledges readiness. Detached output is appended
+to the private `service.log` under the root. `osmia stop` requests shutdown over
+the local Unix socket.
 
 ```
-osmia serve                          the service, foreground or detached
+osmia serve [--detach]               the service, foreground or detached
+osmia stop                           stop the local service
 osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
 osmia handin dagger ./design.md      a new workstream from a document, an issue URL, or stdin
 osmia status [workstream]            the status, or every workstream's goal and attention
@@ -497,7 +511,7 @@ The chief of staff watches the project scope. A Discord thread that decides some
 
 Osmia runs without it. The null provider uses the charter, knowledge-base prose, local entity map, spec, plan, questions, notices, trace decisions and private role notes. Footprint checks and scheduling still work. File-based context is a supported operating mode, not an error; status reports it explicitly. If Hearsay is configured but unavailable, status reports degraded memory and the same local path continues to work.
 
-Asserts are the fast path and the connector is the durable one: a ruling is written locally before assertion and later ingested and distilled to the same stance, so an outage loses nothing. Historical traces can be ingested when Hearsay becomes available. File-based context is the supported provider. Hearsay integration requires anchors, entity resolution, stance history, assert, agent classes, watch and replayable connector ingestion. Jujutsu and multi-project support must work without Hearsay.
+The connector is the durable ruling path: a ruling is written locally and then ingested under the owner identity, so an outage loses nothing. Optional immediate assertions must reconcile to the connector identity before they can be enabled. Historical traces can be ingested when Hearsay becomes available. File-based context is the supported provider. Hearsay integration requires anchors, entity resolution, stance history, assert, agent classes, watch and replayable connector ingestion. Jujutsu and multi-project support must work without Hearsay.
 
 ---
 
@@ -533,6 +547,8 @@ per_day = "150.00"                   # a pause
 # Optional; omit these settings for file-based context.
 # url = "http://hearsay.local:8080"
 # principal = "kyle"
+# token_env = "HEARSAY_OWNER_TOKEN"
+# Configure hearsay.agents.worker, orchestrator and observer with id and token_env.
 
 [notify]
 webhook = "https://ntfy.sh/..."

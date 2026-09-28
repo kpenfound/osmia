@@ -8,6 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -46,7 +47,7 @@ func (s *Service) repository(id config.ProjectID) (*trace.Repository, error) {
 // Context returns the provider that assembles turn bundles for the active
 // project. Its charter reads record owner edits as loadCharter does.
 func (s *Service) Context() bundle.Provider {
-	return bundle.Files{Repository: s.repository, Now: func() time.Time { return time.Now().UTC() }}
+	return hearsay.Provider{Local: bundle.Files{Repository: s.repository, Now: s.now}, Config: s.current, Health: &s.memory}
 }
 
 func (s *Service) charterState(id config.ProjectID) (CharterState, error) {
@@ -55,4 +56,9 @@ func (s *Service) charterState(id config.ProjectID) (CharterState, error) {
 		return CharterState{}, err
 	}
 	return CharterState{Ready: !c.Empty(), Rules: len(c.Rules), Revision: doc.Revision, Diagnostics: c.Diagnostics}, nil
+}
+
+// contextFor keeps the trace and configuration available to draining operations.
+func (s *Service) contextFor(repo *trace.Repository) bundle.Provider {
+	return hearsay.Provider{Local: bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return repo, nil }, Now: s.now}, Config: func() *config.Config { return s.about(repo) }, Health: &s.memory}
 }

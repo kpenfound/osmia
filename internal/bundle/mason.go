@@ -169,7 +169,11 @@ func (f Files) Mason(ctx context.Context, project config.ProjectID, stream confi
 		}
 		m.Amendments = append(m.Amendments, n)
 	}
-	if m.Context, err = f.Assemble(ctx, project, Scope{Entities: m.Footprint, Workstream: stream}); err != nil {
+	provider := f.Provider
+	if provider == nil {
+		provider = f
+	}
+	if m.Context, err = provider.Assemble(ctx, project, Scope{Role: f.Role, Entities: m.Footprint, Workstream: stream}); err != nil {
 		return Mason{}, err
 	}
 	return m, nil

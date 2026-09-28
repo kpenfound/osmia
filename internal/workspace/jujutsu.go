@@ -605,6 +605,11 @@ func (j *Jujutsu) Advance(ctx context.Context, w Worktree, from, to string) erro
 // when the replay ends. A workspace that already descends from onto is left
 // as it is, and one with changes its branch does not hold is refused.
 func (j *Jujutsu) ReplayIn(ctx context.Context, w Worktree, onto string, at time.Time) (string, []string, error) {
+	return j.ReplayInFrom(ctx, w, "", onto, at)
+}
+
+// ReplayInFrom excludes the dependency history preceding base from replay.
+func (j *Jujutsu) ReplayInFrom(ctx context.Context, w Worktree, base, onto string, at time.Time) (string, []string, error) {
 	meta, err := readMetadata(w.Path)
 	if err != nil {
 		return "", nil, err
@@ -630,7 +635,11 @@ func (j *Jujutsu) ReplayIn(ctx context.Context, w Worktree, onto string, at time
 	if !slices.Equal(current.parents, []string{head}) || !current.empty {
 		return "", nil, fmt.Errorf("workspace %s holds changes its branch %s does not; snapshot it before replaying", w.Path, w.Branch)
 	}
-	out, err := g.run(ctx, "rev-list", "--reverse", "--no-merges", onto+".."+head, "--")
+	boundary := base
+	if boundary == "" {
+		boundary = onto
+	}
+	out, err := g.run(ctx, "rev-list", "--reverse", "--no-merges", boundary+".."+head, "--")
 	if err != nil {
 		return "", nil, err
 	}
@@ -1183,3 +1192,8 @@ func (e *JJError) Error() string {
 	return fmt.Sprintf("jj %s: %v: %s", strings.Join(e.Args, " "), e.Err, e.Stderr)
 }
 func (e *JJError) Unwrap() error { return e.Err }
+
+// ReplayFrom uses the same explicit dependency boundary as Git.
+func (j *Jujutsu) ReplayFrom(ctx context.Context, base, head, onto string, at time.Time) (string, []string, error) {
+	return j.git().ReplayFrom(ctx, base, head, onto, at)
+}

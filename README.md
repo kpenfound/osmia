@@ -51,6 +51,8 @@ keeps the documents, decisions and turns through restarts. See the
 | Operate the service and web page | [Service API](docs/service.md), [runtime controls](docs/runtime.md) |
 | Understand the records and agent boundary | [Trace](docs/trace.md), [turn isolation](docs/isolation.md) |
 | Understand components and review findings | [Architecture](docs/architecture.md), [review](docs/review.md) |
+| Configure optional memory | [Hearsay integration](docs/hearsay.md) |
+| Track design coverage and remaining implementation | [Completion plan](docs/implementation-plan.md) |
 | Run and understand the checks | [Testing](docs/testing.md) |
 | Contribute a change | [Contributing](CONTRIBUTING.md) |
 | Build or install a release | [Release](docs/release.md) |

@@ -415,26 +415,27 @@ func (d drifter) drift(ctx context.Context, operation string, stream config.Work
 		if !exists {
 			return d.skip(ctx, stream, in.Drift, operation, fmt.Sprintf("the clone has no feature branch %s", branch))
 		}
-		sealed, _, found, err := seal.Latest(d.repository, stream)
+		_, _, found, err := seal.Latest(d.repository, stream)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 		if !found {
 			return coreadapter.OperationResult{}, fmt.Errorf("workstream %s has no seal", stream)
 		}
-		remote, err := g.Remote(ctx, d.cfg.Project.Upstream)
+		selected, err := d.s.resolveBase(ctx, d.cfg, d.repository, stream, g)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		fetched, err := g.Fetch(ctx, remote, d.cfg.Project.BaseBranch)
+		currentBase, err := branchBase(ctx, d.repository, stream, g, tip)
 		if err != nil {
-			return coreadapter.OperationResult{}, fmt.Errorf("fetch %s of %s: %w", d.cfg.Project.BaseBranch, remote, err)
+			return coreadapter.OperationResult{}, err
 		}
-		rebase = DriftRebase{Drift: in.Drift, Operation: operation, Branch: branch, Upstream: seal.Base{Remote: remote, Branch: d.cfg.Project.BaseBranch, Commit: fetched}, From: sealed.Base.Commit, Before: tip}
+		fetched := selected.Commit
+		rebase = DriftRebase{Drift: in.Drift, Operation: operation, Branch: branch, Upstream: selected, From: currentBase.Commit, Before: tip}
 		if err := d.s.step("drift-replaying"); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		commit, conflicts, err := g.Replay(ctx, tip, fetched, requested)
+		commit, conflicts, err := g.ReplayFrom(ctx, currentBase.Commit, tip, fetched, requested)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
