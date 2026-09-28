@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/kpenfound/busybees/core/agent"
@@ -33,12 +35,9 @@ func (e CoreEngine) Enforcer(settings ExecutionSettings) (agent.Enforcer, error)
 	return NewEnforcer(e.Runner, settings)
 }
 
-// NewEnforcer builds the enforcer of a role's resolved execution settings:
-// agent.NewHostNone for "none", agent.NewHostClaude for "claude" and
-// agent.NewContainer with the settings' image for "container". A host mode
-// with an image, a container without one, or any other mode is refused with
-// an UnsupportedError. Whether the platform can enforce the mode is decided by
-// the enforcer's Prepare.
+// NewEnforcer builds the enforcer of a role's resolved execution settings.
+// Host images and containers without images are refused. An sbx image is an
+// optional agent-specific template. Prepare checks execution availability.
 func NewEnforcer(r agent.Runner, settings ExecutionSettings) (agent.Enforcer, error) {
 	if err := checkMode(settings); err != nil {
 		return nil, err
@@ -48,13 +47,14 @@ func NewEnforcer(r agent.Runner, settings ExecutionSettings) (agent.Enforcer, er
 		return agent.NewHostClaude(r), nil
 	case agent.SandboxContainer:
 		return agent.NewContainer(r, settings.Image), nil
+	case agent.SandboxSbx:
+		return agent.NewSbx(r, settings.Agent, settings.Image), nil
 	}
 	return agent.NewHostNone(r), nil
 }
 
 // checkMode refuses settings no enforcer is built for: a host mode with an
-// image, a container without one, or a mode other than none, claude and
-// container.
+// image, a container without one, or an unknown mode.
 func checkMode(settings ExecutionSettings) error {
 	switch settings.Mode {
 	case agent.SandboxNone, agent.SandboxClaude:
@@ -67,8 +67,10 @@ func checkMode(settings ExecutionSettings) error {
 			return unsupported("container", "image is required")
 		}
 		return nil
+	case agent.SandboxSbx:
+		return nil
 	}
-	return unsupported("isolation mode", fmt.Sprintf("%q is not none, claude or container", settings.Mode))
+	return unsupported("isolation mode", fmt.Sprintf("%q is not none, claude, container or sbx", settings.Mode))
 }
 
 // CoreExecutor binds one turn to a service-selected isolation and runs it
@@ -181,7 +183,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	if req.SessionDir == "" {
 		return nil, unsupported("execution request", "session directory is required")
 	}
-	grants, err := coreGrants(iso, req.SessionDir, slices.Collect(maps.Keys(req.Profile.MCP)))
+	grants, err := coreGrants(iso, req.SessionDir, settings.Mode, req.Profile.MCP)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +198,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	// fields grants do not describe; they also protect callers that invoke
 	// Run without the normal turn translator.
 	if req.Workspace == nil || req.Workspace.Directory() != iso.Workspace.Directory || req.Workspace.VCS() != nil ||
-		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.ContainerEnv) != 0 || len(req.Profile.Skills) != 0 || req.Profile.ContainerUseEnvironment != "" ||
+		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.VCSContainerPath) != 0 || len(req.ContainerEnv) != 0 || len(req.Profile.Skills) != 0 || req.Profile.ContainerUseEnvironment != "" || req.Profile.Dagger != nil || req.HostMCP != nil ||
 		len(req.Profile.SandboxDomains) != 0 || req.Profile.Sandbox != settings.Mode || req.Profile.SandboxImage != settings.Image ||
 		!maps.Equal(req.Env, iso.Environment) || !slices.Equal(req.Profile.AllowedTools, AllowedTools(slices.Collect(maps.Keys(req.Profile.MCP)), iso.Capabilities.Tools)) ||
 		(req.Grants != nil && !reflect.DeepEqual(*req.Grants, grants)) {
@@ -221,6 +223,10 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 		req.Workspace = vcs.Directory(scratch)
 	}
 	req.Grants = &grants
+	settings.Agent = req.Profile.Agent
+	if settings.Agent == "" {
+		settings.Agent = agent.AgentClaude
+	}
 	enforcer, err := engine.Enforcer(settings)
 	if err != nil {
 		return nil, refusal(err)
@@ -258,7 +264,7 @@ const scratchDirectory = "work"
 // access, the session directory read-only, a writable scratch directory inside
 // it when the view is read-only, the service environment and one MCP server
 // grant per scoped endpoint, without built-in tools or VCS.
-func coreGrants(iso Isolation, sessionDir string, servers []string) (agent.Grants, error) {
+func coreGrants(iso Isolation, sessionDir, mode string, servers map[string]agent.MCPEntry) (agent.Grants, error) {
 	access := agent.ReadOnly
 	if iso.Workspace.Access == ReadWrite {
 		access = agent.ReadWrite
@@ -275,8 +281,21 @@ func coreGrants(iso Isolation, sessionDir string, servers []string) (agent.Grant
 	if access == agent.ReadOnly {
 		grants.Mounts = append(grants.Mounts, agent.Mount{Path: filepath.Join(session, scratchDirectory), Access: agent.ReadWrite})
 	}
-	for _, server := range slices.Sorted(slices.Values(servers)) {
+	for _, server := range slices.Sorted(maps.Keys(servers)) {
 		grants.Tools = append(grants.Tools, "mcp__"+server)
+		if mode == agent.SandboxSbx {
+			endpoint, err := url.Parse(servers[server].URL)
+			if err != nil {
+				return agent.Grants{}, unsupported("MCP", "invalid sandbox endpoint")
+			}
+			host := endpoint.Hostname()
+			ip := net.ParseIP(host)
+			port, err := strconv.Atoi(endpoint.Port())
+			if (host != ContainerHost && host != "localhost" && (ip == nil || !ip.IsLoopback())) || err != nil || port < 1 || port > 65535 {
+				return agent.Grants{}, unsupported("MCP", "sandbox endpoint requires a host loopback address and explicit port")
+			}
+			grants.HostServers = append(grants.HostServers, agent.HostServer{Name: server, Port: port})
+		}
 	}
 	return grants, nil
 }
@@ -287,6 +306,12 @@ func coreGrants(iso Isolation, sessionDir string, servers []string) (agent.Grant
 // granted or a VCS executable left undenied, a built-in tool, or MCP servers
 // other than the granted ones.
 func checkPolicy(p agent.Policy, iso Isolation, settings ExecutionSettings, grants agent.Grants, pinned []string) error {
+	if p.DaggerEngine != "" || !slices.Equal(p.HostServers, grants.HostServers) {
+		return unsupported("session policy", "host services differ from the grants")
+	}
+	if settings.Mode == agent.SandboxSbx && p.Agent != settings.Agent {
+		return unsupported("session policy", "sandbox agent differs from the resolved backend")
+	}
 	if p.Sandbox != settings.Mode || p.Image != settings.Image {
 		return unsupported("session policy", fmt.Sprintf("sandbox %q with image %q differs from the role's", p.Sandbox, p.Image))
 	}

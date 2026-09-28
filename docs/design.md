@@ -283,6 +283,15 @@ A project is a clone of your fork with upstream as a second remote. The canonica
 
 Sessions get a plain directory of files. The service performs every version control operation: create workspace, snapshot, rebase, squash, merge, push. A mason improvising a rebase is not acceptable, and an agent that never holds the tool cannot damage history. Enforcement belongs to the execution boundary: agents receive neither VCS tools nor writable VCS metadata nor inherited GitHub credentials. A core profile flag or prompt alone is insufficient. Read-only roles cannot acquire execution or write capabilities through repository-provided tools.
 
+Role execution supports confined host modes (`none` and `claude`), containers,
+and Docker Sandboxes (`sbx`). The same scoped files and tools apply in every
+mode. An sbx role may select an agent-specific template; provider credentials
+and network policy belong to the sandbox proxy, while delivery credentials stay
+with the service. The runner allows each service-owned MCP listener's exact
+port for that sandbox's lifetime; no global localhost allowance is required.
+A sandbox that cannot enforce the requested grants fails the
+turn without silently selecting another mode.
+
 ### 7.3 Workspaces
 
 The feature branch is one workspace on the project's clone. Each unit gets a workspace of its own descending from the feature branch. The first implementation is git worktrees behind a workspace interface. Jujutsu is the second implementation behind the same interface, colocated so plain git still works for reading history: change IDs that survive rebases, snapshot on every command so an interrupted session never loses work, stored rather than blocking conflicts, and an operation log the service can restore from. The design does not depend on it, and the switch is made when rebases and interrupted sessions start to hurt.

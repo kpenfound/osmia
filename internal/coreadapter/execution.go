@@ -26,6 +26,8 @@ func unsupported(capability, reason string) error { return &UnsupportedError{cap
 type ExecutionSettings struct {
 	Mode, Image     string
 	Domains, Mounts []string
+	// Agent is the resolved backend supplied by the executor when preparing a sandbox.
+	Agent string
 }
 
 // SessionExecutor is the core-facing execution seam. Check must reject boundaries

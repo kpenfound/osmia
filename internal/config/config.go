@@ -663,14 +663,14 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 		if !md.IsDefined("roles", name, "sandbox") {
 			r.Sandbox = "none"
 		}
-		if !slices.Contains([]string{"none", "claude", "container"}, r.Sandbox) {
-			return fieldError(path, prefix+".sandbox", "expected none, claude or container")
+		if !slices.Contains([]string{"none", "claude", "container", "sbx"}, r.Sandbox) {
+			return fieldError(path, prefix+".sandbox", "expected none, claude, container or sbx")
 		}
 		if r.Sandbox == "container" && strings.TrimSpace(r.Image) == "" {
 			return fieldError(path, prefix+".image", "container requires an explicit image")
 		}
-		if r.Sandbox != "container" && r.Image != "" {
-			return fieldError(path, prefix+".image", "image requires container sandbox")
+		if r.Sandbox != "container" && r.Sandbox != "sbx" && r.Image != "" {
+			return fieldError(path, prefix+".image", "image requires container or sbx sandbox")
 		}
 		for next := r.Profile; next != ""; next = c.Profiles[next].Fallback {
 			if r.Sandbox == "claude" && c.Profiles[next].Agent != "claude" {

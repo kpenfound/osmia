@@ -59,7 +59,7 @@ func (f *Engine) Enforcer(settings a.ExecutionSettings) (agent.Enforcer, error) 
 	if f.EnforcerErr != nil {
 		return nil, f.EnforcerErr
 	}
-	fake := &enforcertest.Enforcer{Sandbox: settings.Mode, Image: settings.Image, PrepareErr: f.PrepareErr,
+	fake := &enforcertest.Enforcer{Sandbox: settings.Mode, Image: settings.Image, SandboxAgent: settings.Agent, PrepareErr: f.PrepareErr,
 		Agent: func(ctx context.Context, turn *enforcertest.Turn) (*agent.Result, error) {
 			if err := ctx.Err(); err != nil {
 				return nil, err

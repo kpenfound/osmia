@@ -31,7 +31,7 @@ type Enforcement struct {
 func CoreEnforcement() Enforcement {
 	return Enforcement{
 		Engine: coreadapter.CoreEngine{},
-		Hosts:  &coreadapter.MCPHost{Transport: coreadapter.CoreTransport{}, Container: coreadapter.ContainerTransport(agent.ContainerEngine)},
+		Hosts:  &coreadapter.MCPHost{Transport: coreadapter.CoreTransport{}, Container: coreadapter.ContainerTransport(agent.ContainerEngine), Sbx: coreadapter.SbxTransport()},
 	}
 }
 

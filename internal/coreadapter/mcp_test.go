@@ -247,6 +247,36 @@ func TestMCPHostServesContainerTurnsWithContainerTransport(t *testing.T) {
 	}
 }
 
+func TestSbxMCPUsesSandboxTransportAndLoopback(t *testing.T) {
+	ctx := context.Background()
+	host, container, sandbox := &memoryTransport{}, &memoryTransport{}, &memoryTransport{}
+	req := HostRequest{Scope: Scope{Role: "architect"}, Execution: ExecutionSettings{Mode: agent.SandboxSbx}}
+	hosted, err := (&MCPHost{Transport: host, Container: container, Sbx: sandbox}).Host(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hosted.Lease.Release(ctx)
+	if host.starts != 0 || container.starts != 0 || sandbox.starts != 1 {
+		t.Fatal("sbx used a host or Docker bridge transport")
+	}
+	if _, err := (&MCPHost{Transport: host, Container: container}).Host(ctx, req); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("missing sandbox transport: %v", err)
+	}
+	transport := SbxTransport()
+	if transport.Serve != nil || transport.Via != ContainerHost {
+		t.Fatal("sandbox transport must use core's authenticated loopback listener")
+	}
+	endpoint, lease, err := transport.Start(ctx, mcp.NewServer(&mcp.Implementation{Name: "test", Version: "1"}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release(ctx)
+	parsed, err := url.Parse(endpoint.URL)
+	if err != nil || parsed.Hostname() != ContainerHost || endpoint.Token == "" || endpoint.BearerTokenEnvironment != TokenEnvironment {
+		t.Fatalf("sandbox endpoint %+v: %v", endpoint, err)
+	}
+}
+
 // On macOS a container turn's server listens on the loopback and is named by
 // the container host alias; the engine is not asked.
 func TestContainerTransportOnMacOS(t *testing.T) {

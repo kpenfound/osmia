@@ -8,7 +8,7 @@ returns configured results/errors, records calls, honours pre-cancellation and
 fails when exhausted. It does not emulate an enforcing sandbox or durable store.
 
 The direct dependency is pinned to
-`github.com/kpenfound/busybees/core v0.5.0`.
+`github.com/kpenfound/busybees/core v0.5.2`.
 Only public core packages may be imported inside adapters. No sibling checkout
 or local replacement is needed. The public `vcs.Workspace` compile-time fixture
 keeps the dependency checked by Go without executing a session or repository.
@@ -23,7 +23,7 @@ Capabilities describe this pinned version, based on its public API and README.
 | Osmia port | Core package / primitive | Boundary and upstream gaps |
 |---|---|---|
 | `Turns` | `agent.Runner`, `Request`, `Result`, backend descriptors (`Backends`) and implementations | Runs a prepared turn and returns backend identity, final response, outcome, cost knowledge and failure detail; `Result.Agent` names the backend that answered. Resume is backend-dependent: the pinned Codex path ignores `ResumeID`. Uniform resumable backends are an upstream gap. Osmia owns log replay, turn queues and profile selection. |
-| `Sandboxes` | `agent.Grants`, `agent.Enforcer` (`NewHostNone`, `NewHostClaude`, `NewContainer`, and `RunRestricted` over `SandboxSbx` with `SandboxBoundary`), `Session.Policy`; `vcs.Workspace` | Core prepares a session for the grants only where the platform can enforce them, reports the policy it enforces, and admits a request against its complete grants (environment allowlist, tools, mounts, VCS, and a Dagger engine in `SandboxSbx` only) before starting anything; VCS executables are denied when VCS is not granted. The pinned version additionally offers the Docker Sandbox `SandboxSbx`, restricted sessions (`RunRestricted`) and Dagger engine grants (`Profile.Dagger`, `Grants.DaggerEngine`); Osmia adopts none of them. Osmia's `NewEnforcer` builds enforcers only for `none`, `claude` and `container` and fails closed on `sbx`. The contract separates required isolation from verified isolation; flags or prompts are not verification. Unsupported requirements must fail before launch. |
+| `Sandboxes` | `agent.Grants`, `agent.Enforcer` (`NewHostNone`, `NewHostClaude`, `NewContainer`, `NewSbx`), `Session.Policy`; `vcs.Workspace` | Osmia supports `none`, `claude`, `container` and `sbx` through core's enforcers, with verified mounts, scoped tools and an explicit environment allowlist. An sbx session is bound to the resolved backend, optional template and exact caller-owned MCP ports in `Grants.HostServers`. Osmia checks the prepared policy before execution; core rechecks grants and mount identities on admission. Host Dagger engines and native execution tools are not granted. Core's sbx VCS denial is by command name on PATH; the boundary also withholds metadata, delivery credentials and native tools. See [isolation limits](isolation.md#docker-sandbox-boundary). Unsupported requirements fail before launch. |
 | `MCPHosts` | `mcphost.Registry`, role policies, transports | Hosts supplied role-scoped tools with explicit capabilities. Osmia supplies handlers, fixed routes and outcome validation. No workflow handlers are inherited from busybees. |
 | `Workspaces` | `vcs.Provider`, `Workspace`, `Directory` | Caller owns acquisition and lifetime across turns. Core exposes the provider interface but **no reusable concrete git-worktree provider** in the public module; that implementation is an upstream gap. The lease port neither commits nor rebases nor delivers. |
 | `Reviews` | `review.Runner`, `Bundle`, `ReadArtifact`, findings | Accepts supplied context and diff; retains partial artifacts, findings and session accounting. A run whose agent fell back may disclose `Provider` and `Model` naming the agent that answered. Core does not bind approval to spec/plan/candidate revisions: Osmia carries that identity and owns approval checks. Interactive review threads belong to Osmia. |
@@ -70,7 +70,7 @@ MCP endpoints receive deterministic names, and granted tools are allow-listed
 under those server names (`mcp__<server>__<tool>`), the form the backend matches;
 granted tools without a service endpoint fail translation. Core enforces explicit
 built-in tool grants for writable Codex and OpenCode turns in supported placements,
-including Osmia's container sandbox. Neither backend runs in Claude's host
+including Osmia's container and sbx sandboxes. Neither backend runs in Claude's host
 sandbox; that combination fails before launch. Osmia does not grant all built-in
 tools to make a turn admissible. History is prepended as supplied by the caller,
 and resume requests are rejected for incompatible backends or malformed
@@ -133,7 +133,21 @@ gateway, so `Serve` is `mcphost.StartOn` bound to that address.
 core's container sessions resolve on macOS and Linux, and listens on the
 loopback on macOS and on the gateway the container engine reports for its
 `bridge` network on Linux. `MCPHost.Container`, when set, serves every turn
-whose execution mode is `container`; `MCPHost.Transport` serves the others.
+whose execution mode is `container`. `MCPHost.Sbx` serves `sbx` turns through
+`SbxTransport`, which binds loopback on every platform and advertises
+`host.docker.internal`; it has no host-transport fallback. `MCPHost.Transport`
+serves host turns.
+
+Osmia hosts MCP in the service and passes authenticated HTTP entries through
+`Profile.MCP`. For sbx, it supplies an explicit `Grants.HostServers` grant per
+endpoint, naming the MCP server and its loopback port. Nonlocal endpoints and
+ports outside 1–65535 are refused. Core scopes each rule to the created sandbox
+and port, deduplicates shared ports, and removes rules before removing the sandbox
+on completion, failure or cancellation. Policy setup failures prevent backend
+execution. The listener remains Osmia's resource. A host Dagger engine and an
+MCP subprocess through `Request.HostMCP` are not granted. See
+[configuration](configuration.md#docker-sandboxes-sbx).
+
 Service tests use in-memory SDK transports, and the `CoreTransport` tests serve
 on a loopback port. The Linux `ContainerTransport` test runs a fake engine
 script that reports the loopback as the bridge gateway. Execution and providers

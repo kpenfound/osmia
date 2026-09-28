@@ -31,14 +31,18 @@ func TestRawExecutionRequestCannotWidenBoundary(t *testing.T) {
 		"container env":      func(r *agent.Request) { r.ContainerEnv = map[string]string{"GH_TOKEN": "secret"} },
 		"VCS env":            func(r *agent.Request) { r.VCSEnv = map[string]string{"GH_TOKEN": "secret"} },
 		"VCS container env":  func(r *agent.Request) { r.VCSContainerEnv = map[string]string{"GH_TOKEN": "secret"} },
+		"VCS container path": func(r *agent.Request) { r.VCSContainerPath = []string{r.Workspace.Directory()} },
 		"host MCP":           func(r *agent.Request) { r.HostMCP = &agent.HostMCP{} },
 		"skills":             func(r *agent.Request) { r.Profile.Skills = []string{"repo-plugin"} },
 		"shell":              func(r *agent.Request) { r.Profile.Shell = "/bin/sh" },
 		"container override": func(r *agent.Request) { r.Profile.ContainerUseEnvironment = "other" },
-		"tools":              func(r *agent.Request) { r.Profile.AllowedTools = []string{"Bash"} },
-		"server-wide tools":  func(r *agent.Request) { r.Profile.AllowedTools = []string{"mcp__osmia_0"} },
-		"environment":        func(r *agent.Request) { r.Env["SSH_AUTH_SOCK"] = "/agent" },
-		"MCP command":        func(r *agent.Request) { r.Profile.MCP = map[string]agent.MCPEntry{"rogue": {Command: "git"}} },
+		"Dagger engine": func(r *agent.Request) {
+			r.Profile.Dagger = &agent.Dagger{Engine: "tcp://localhost:1234", Version: "v0.20.5"}
+		},
+		"tools":             func(r *agent.Request) { r.Profile.AllowedTools = []string{"Bash"} },
+		"server-wide tools": func(r *agent.Request) { r.Profile.AllowedTools = []string{"mcp__osmia_0"} },
+		"environment":       func(r *agent.Request) { r.Env["SSH_AUTH_SOCK"] = "/agent" },
+		"MCP command":       func(r *agent.Request) { r.Profile.MCP = map[string]agent.MCPEntry{"rogue": {Command: "git"}} },
 		"MCP headers": func(r *agent.Request) {
 			r.Profile.MCP = map[string]agent.MCPEntry{"rogue": {Type: "http", URL: "http://service", BearerTokenEnv: "OSMIA_MCP_TOKEN", Headers: map[string]string{"Authorization": "secret"}}}
 		},
@@ -81,7 +85,7 @@ func TestRawExecutionRequestCannotWidenBoundary(t *testing.T) {
 }
 
 // coreRefuses names the widening requests that reach core's session.
-var coreRefuses = map[string]bool{"VCS": true, "profile env": true, "host MCP": true, "shell": true}
+var coreRefuses = map[string]bool{"VCS": true, "profile env": true, "shell": true}
 
 func boundaryTurn(t *testing.T, mode string) a.PreparedTurn {
 	t.Helper()
@@ -139,7 +143,7 @@ func TestContainerConstruction(t *testing.T) {
 }
 
 func TestEverySandboxModeReachesRun(t *testing.T) {
-	for _, mode := range []string{"none", "claude", "container"} {
+	for _, mode := range []string{"none", "claude", "container", "sbx"} {
 		t.Run(mode, func(t *testing.T) {
 			turn := toolTurn(t, mode)
 			engine := &adaptertest.Engine{}
@@ -151,7 +155,7 @@ func TestEverySandboxModeReachesRun(t *testing.T) {
 				t.Fatalf("launches=%d released=%v", len(engine.Requests), engine.Released())
 			}
 			req := engine.Requests[0]
-			if req.Profile.Sandbox != mode || req.Profile.Confine != (mode != "container") || req.Profile.SandboxImage != turn.Execution.Image {
+			if req.Profile.Sandbox != mode || req.Profile.Confine != (mode == "none" || mode == "claude") || req.Profile.SandboxImage != turn.Execution.Image {
 				t.Fatalf("admitted profile: %+v", req.Profile)
 			}
 			if req.Grants == nil || !reflect.DeepEqual(req.Grants.Tools, []string{"mcp__osmia_0"}) {
@@ -270,7 +274,7 @@ func TestCoreRefusalNeverStarts(t *testing.T) {
 func TestNewEnforcer(t *testing.T) {
 	runner := agent.Runner{}
 	kinds := map[string]string{}
-	for _, settings := range []a.ExecutionSettings{{Mode: "none"}, {Mode: "claude"}, {Mode: "container", Image: "fixture-image"}} {
+	for _, settings := range []a.ExecutionSettings{{Mode: "none"}, {Mode: "claude"}, {Mode: "container", Image: "fixture-image"}, {Mode: "sbx"}, {Mode: "sbx", Image: "fixture-template"}} {
 		e, err := a.NewEnforcer(runner, settings)
 		if err != nil || e == nil {
 			t.Fatalf("%+v: %v", settings, err)

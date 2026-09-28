@@ -44,7 +44,7 @@ The inspected paths follow the main design boundaries:
 - [Landing](../internal/service/landing.go) ties the landing to the reviewed
   candidate and governing revisions. The service owns
   [publication](../internal/service/publication.go).
-- [go.mod](../go.mod) pins `github.com/kpenfound/busybees/core` at `v0.5.0`.
+- [go.mod](../go.mod) pins `github.com/kpenfound/busybees/core` at `v0.5.2`.
 
 These observations are static. They do not establish that every path is free of
 defects. The suite has 907 `Test` functions, including 427 under service, 92

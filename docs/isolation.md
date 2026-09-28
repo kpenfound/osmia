@@ -89,13 +89,13 @@ it must not give tools general network access or delivery credentials.
 A workspace's `VCS()` access, which names the metadata a provider keeps (the
 clone's `.git` for a git worktree; the Jujutsu repository and the clone's `.git`
 for a Jujutsu workspace), is never granted to a session. A session in a Jujutsu
-workspace sees the workspace's files alone: no `jj` executable, no `.jj`
-directory and no writable Git metadata.
+workspace sees the workspace's files without the `.jj` directory or writable
+Git metadata. The service exposes no VCS tool to runtime agents.
 
 ## Enforced execution
 
 `coreadapter.CoreExecutor` runs a turn through a busybees/core enforcer with
-`agent.Grants` built from the verified isolation alone:
+`agent.Grants` built from the verified isolation and service-owned MCP endpoints:
 
 | Grant | Value |
 |---|---|
@@ -103,31 +103,37 @@ directory and no writable Git metadata.
 | `Env` | the names of the service environment, which is the complete environment |
 | `Tools` | one `mcp__osmia_<i>` server per scoped endpoint and no built-in tool |
 | `VCS` | not granted |
+| `HostServers` | for sbx, each scoped MCP server and its exact host loopback port; absent for other modes |
+| `DaggerEngine` | not granted |
 
 The engine hands out the enforcer of the role's sandbox mode:
 `coreadapter.NewEnforcer` builds `agent.NewHostNone` for `none`,
-`agent.NewHostClaude` for `claude` and `agent.NewContainer` with the role's
-image for `container`. A host mode with an image, a container without one,
+`agent.NewHostClaude` for `claude`, `agent.NewContainer` with the role's
+image for `container`, and `agent.NewSbx` with the resolved backend and optional
+template for `sbx`. A host mode with an image, a container without one,
 extra mounts and domain overrides are rejected. The view is checked again for
 symlinks, special files and VCS metadata before construction.
 
 The enforcer's `Prepare` asks the platform whether it can hold the grants. When
 it cannot (confined `claude` on Linux, or a platform without a confiner), core's
 `ErrUnsupported` is returned, wrapped in `coreadapter.ErrUnsupported` with core's
-reason, and recorded as the turn's failure. The executor then reads the prepared
+reason, and recorded as the turn's failure. For sbx, core checks the grants and
+requires the CLI to answer `sbx version` during preparation; the runner checks the configured sandbox
+and backend before starting the model. The executor reads the prepared
 session's policy and refuses the turn unless it matches the grants: the sandbox
 and image are the role's; the view is always readable, and writable exactly
 when the role writes files; the provider workspace the view was copied from is not
 writable; VCS is not granted and `gh`, `git`, `hg`, `jj` and `svn` are denied;
 no built-in tool is granted; and the MCP servers are exactly the scoped
-endpoints. A mismatch is an `UnsupportedError` with capability
+endpoints. An sbx policy must also name the resolved backend and exact host
+server grants, with no Dagger engine. A mismatch is an `UnsupportedError` with capability
 `session policy`.
 
 The session then admits the request against its grants and refuses a
 variable, tool, MCP server or mount the grants do not name, VCS access, and a
 writable mount holding VCS metadata. A request field the grants do not describe
-(VCS or container environment, skills, container-use environment, network domains, a
-different sandbox or image, a different allow list, or an MCP entry other than a
+(VCS environment or executable paths, container environment, skills, container-use environment, network domains, a
+host Dagger engine, different sandbox or image, a different allow list, or an MCP entry other than a
 service-authenticated HTTP endpoint) is refused before a session is prepared.
 Core's refusals (`ErrNotGranted`, `ErrUnsupported`, `ErrNoGrants`, and
 `ErrPolicyChanged` when the policy no longer describes the turn) are wrapped in
@@ -140,3 +146,31 @@ requests with core's own code and starts no process; they test construction,
 permission checks and durable failures, not actual OS sandboxing.
 `os.Root`, MCP filtering and profile flags are application restrictions and are
 not, by themselves, an OS security sandbox.
+
+## Docker Sandbox boundary
+
+An sbx turn uses the same Osmia grants as other modes. Core's public boundary
+verifies the request, and its runner controls `sbx create`, backend configuration,
+execution and removal. Its enforcer freezes a validated policy and rechecks
+mount identities and grants before running. A released session cannot run again.
+Root mounts and paths containing colons are refused. Only scoped
+MCP tools are granted: no native shell, VCS, delegated host MCP process or host
+Dagger engine. Backend inspection refuses effective tool configurations that
+would widen those grants.
+
+The VM holds filesystem isolation; read-only roles get a read-only view and a
+separate writable scratch directory. Sandbox templates are trusted operator
+inputs. Core's sbx VCS stand-ins deny command names on `PATH`, not executables
+addressed by absolute path inside an image. Osmia therefore also withholds all
+native execution tools, VCS metadata and delivery credentials; it does not rely
+on those stand-ins alone. Do not treat this as executable masking throughout an
+arbitrary template.
+
+MCP uses an authenticated loopback listener through the sandbox proxy on every
+host platform, with no Docker bridge discovery. The provider proxy owns model
+credentials. Core allows the granted MCP ports for the sandbox alone, then
+removes those rules during cleanup; no global localhost allowance is needed.
+Other network policy is configured by the operator. See
+[sbx configuration](configuration.md#docker-sandboxes-sbx) for setup. Tests use fake CLIs and backends in Dagger;
+they verify grants, protocol construction, refusals and cleanup, not live VM
+confinement or provider authentication.

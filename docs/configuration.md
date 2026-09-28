@@ -198,8 +198,8 @@ If there is no profile named `default`, bind all seven roles explicitly. Role ke
 | Role key | Default | Validation/meaning |
 | --- | --- | --- |
 | `profile` | `default` | Must reference an existing named profile |
-| `sandbox` | `none` | `none` (host execution), `claude` or `container` |
-| `image` | empty | Required for `container`; forbidden with other modes |
+| `sandbox` | `none` | `none` (host execution), `claude`, `container` or `sbx` (Docker Sandboxes) |
+| `image` | empty | Required for `container`; optional agent-specific template for `sbx`; forbidden with host modes |
 
 A `claude` sandbox requires Claude in every profile in the role's fallback chain.
 No arbitrary mounts, credentials, environment, tools or capability grants are
@@ -208,6 +208,71 @@ runs in any mode the platform can confine; one it cannot (for example `claude`
 on Linux) fails before launch with core's reason; see
 [enforced execution](isolation.md#enforced-execution). Successful configuration
 loading does not imply that execution is available.
+
+### Docker Sandboxes (`sbx`)
+
+Select `sbx` per role, independently of its profile:
+
+```toml
+[roles.mason]
+profile = "default"
+sandbox = "sbx"
+# Optional; omit to use sbx's template for the resolved agent.
+# image = "example/osmia-claude:1"
+
+[roles.librarian]
+sandbox = "sbx"
+
+[roles.committee]
+sandbox = "sbx"
+```
+
+All seven roles support this mode with `claude`, `codex` or `opencode` profiles.
+An omitted `image` lets each fallback profile select its agent's default template.
+A custom template must support every agent in that role's fallback chain. The
+classifier uses the mason's sandbox and template with its own configured profile.
+Reload applies role settings to subsequent turns; an active turn keeps its grants.
+
+Follow [Docker Sandboxes setup](https://docs.docker.com/ai/sandboxes/get-started/),
+including initial network policy and credential approvals, before unattended
+turns. Put `sbx` on the service's `PATH` and prepare it under the OS account
+running Osmia:
+
+```sh
+sbx version
+sbx login
+sbx secret set anthropic      # for Claude; use the provider your profiles need
+```
+
+For Codex or OpenCode, configure the appropriate provider credentials using
+[Docker's credential setup](https://docs.docker.com/ai/sandboxes/configuration/credentials/).
+Provider secrets belong to the sandbox proxy, not Osmia's role configuration.
+Osmia does not forward host provider tokens, GitHub credentials or SSH agents to
+the VM. Keep delivery credentials in the service, and do not configure a GitHub
+proxy secret for an Osmia sandbox.
+
+Each turn's authenticated MCP listener uses a fresh loopback port, advertised to
+the VM as `host.docker.internal` on Linux and macOS. Osmia explicitly grants the
+listener's name and port to core. After creating the sandbox, core allows that
+port for that sandbox alone, before any backend probes or execution. A policy
+failure prevents the agent from starting. Cleanup removes the port rule before
+removing the sandbox, including after failure or cancellation. The listener stays
+owned by Osmia.
+
+No global `localhost` network allowance is required. Broader operator policy
+remains in effect; per-sandbox rules do not narrow it. Configure other permitted
+destinations through [sbx network policy](https://docs.docker.com/reference/cli/sbx/policy/allow/network/).
+Osmia grants no general network tools to agents.
+
+The sandbox mounts only the scoped view and session paths, honoring read-only
+access. Shared skills are disabled. No host Dagger engine, arbitrary mounts,
+environment variables or native shell tools are exposed. Core creates and removes
+the sandbox for each attempt, including cancellation. If the service is forcibly
+killed, a sandbox may remain; its name is recorded in the turn's session directory
+as `sandbox-name`, and `sbx rm --force <name>` removes it and its rules.
+Core logs cleanup failures; a failed rule removal still attempts sandbox removal.
+Missing CLI, login, template or policy requirements fail the turn without falling back to host
+execution. See [execution boundaries](isolation.md#docker-sandbox-boundary).
 
 ## Project registration
 

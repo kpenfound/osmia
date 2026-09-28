@@ -216,7 +216,7 @@ func TestServeBuildsCoreEnforcement(t *testing.T) {
 		t.Fatalf("engine %#v", e.Engine)
 	}
 	host, ok := e.Hosts.(*coreadapter.MCPHost)
-	if !ok || !reflect.DeepEqual(host.Transport, coreadapter.CoreTransport{}) || host.Container == nil {
+	if !ok || !reflect.DeepEqual(host.Transport, coreadapter.CoreTransport{}) || host.Container == nil || !reflect.DeepEqual(host.Sbx, coreadapter.SbxTransport()) {
 		t.Fatalf("hosts %#v", e.Hosts)
 	}
 	opts := service.Enforce(service.Options{}, e)
