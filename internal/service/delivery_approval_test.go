@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -121,11 +122,11 @@ func TestDeliveryApprovalAcceptEditRetryAndInvalidation(t *testing.T) {
 		t.Fatalf("edit %+v %v", edited, api)
 	}
 	again, api := f.s.approveDelivery(ctx, string(stream), decision)
-	if api != nil || again != edited {
+	if api != nil || !reflect.DeepEqual(again, edited) {
 		t.Fatalf("retry %+v %v", again, api)
 	}
 	acceptRetry, api := f.s.approveDelivery(ctx, string(stream), DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash})
-	if api != nil || acceptRetry != edited {
+	if api != nil || !reflect.DeepEqual(acceptRetry, edited) {
 		t.Fatalf("accept retry replaced the edit: %+v %v", acceptRetry, api)
 	}
 	if docs := streamDocuments(t, repository, stream, deliveryDocument); len(docs) != 2 {

@@ -47,7 +47,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   amendment <workstream-id> <n> [approve|reject|round|overrule [note]] [--json]
   delivery <workstream-id> [--json]
   trace <workstream-id> [unit <id>|criterion <spec#n>|commit <sha>] [--json]
-  approve <workstream-id> [description-file] [--json]
+  approve <workstream-id> [description-file] [--message-file FILE | --messages-file FILE] [--json]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
   inbox [--json]
@@ -66,6 +66,7 @@ serve runs in the foreground unless --detach is set. Detached logs are in root/s
 
 type options struct {
 	root, socket, reason, project, base         string
+	messageFile, messagesFile                   string
 	upstream, fork, clone, baseBranch           string
 	json, hard, reasonSet, help, target, accept bool
 	skipDebate, version, detach                 bool
@@ -86,7 +87,7 @@ func parse(args []string) (o options, err error) {
 		}
 		seen[key] = true
 		switch key {
-		case "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base":
+		case "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -98,6 +99,10 @@ func parse(args []string) (o options, err error) {
 				return o, errors.New("empty value")
 			}
 			switch key {
+			case "--message-file":
+				o.messageFile = value
+			case "--messages-file":
+				o.messagesFile = value
 			case "--root":
 				o.root = value
 			case "--socket":
@@ -237,7 +242,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
-	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && (o.accept || o.project != "") || cmd == "serve" && (o.json || o.socket != "") {
+	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && (o.accept || o.project != "") || cmd == "serve" && (o.json || o.socket != "") {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -599,9 +604,15 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				}
 			}
 			if !presentation.Delivered {
+				for _, m := range presentation.Messages {
+					fmt.Fprintf(stdout, "\nDelivery commit %s:\n%s\n", m.Commit, m.Message)
+				}
 				fmt.Fprintf(stdout, "\nDraft pull request description:\n%s", presentation.Draft)
 			}
 			if presentation.Approval != nil {
+				for _, m := range presentation.Approval.Messages {
+					fmt.Fprintf(stdout, "\nApproved commit %s:\n%s\n", m.Commit, m.Message)
+				}
 				fmt.Fprintf(stdout, "\nApproved description:\n%s", presentation.Approval.Description)
 			}
 			if p := presentation.Publication; p != nil {
@@ -614,6 +625,13 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return 0
 		}
 		decision := service.DeliveryDecision{Review: presentation.Report.Review, ReviewRevision: presentation.ReviewRevision, Commit: presentation.Report.Commit, DraftHash: presentation.DraftHash}
+		description := presentation.Draft
+		decision.Messages = slices.Clone(presentation.Messages)
+		if presentation.Approval != nil {
+			description = presentation.Approval.Description
+			decision.Messages = slices.Clone(presentation.Approval.Messages)
+		}
+		decision.Description = &description
 		if len(a) == 2 {
 			content, err := os.ReadFile(a[1])
 			if err != nil {
@@ -622,6 +640,31 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			}
 			value := string(content)
 			decision.Description = &value
+		}
+		if o.messageFile != "" {
+			if len(presentation.Messages) != 1 {
+				fmt.Fprintln(stderr, "--message-file requires one delivery commit; use --messages-file for multiple commits")
+				return 2
+			}
+			content, err := os.ReadFile(o.messageFile)
+			if err != nil {
+				return fail(err)
+			}
+			decision.Messages = slices.Clone(presentation.Messages)
+			decision.Messages[0].Message = string(content)
+		}
+		if o.messagesFile != "" {
+			content, err := os.ReadFile(o.messagesFile)
+			if err != nil {
+				return fail(err)
+			}
+			if err := json.Unmarshal(content, &decision.Messages); err != nil {
+				return fail(err)
+			}
+			if len(decision.Messages) == 0 {
+				fmt.Fprintln(stderr, "messages file must contain the delivery messages array")
+				return 2
+			}
 		}
 		approved, err := c.ApproveDelivery(ctx, id, decision)
 		if err != nil {

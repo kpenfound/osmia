@@ -48,7 +48,8 @@ go through the same steps:
 
 Throughout, no `.jj` appears anywhere in the owner's clone. At the end the
 test reads the fork. Its only ref is the feature branch, each commit on it has
-only Git's `tree`, `parent`, `author` and `committer` headers, and no tree
+only Git's `tree`, `parent`, `author`, `committer` and `gpgsig` headers,
+with the owner's identity and a signature, and no tree
 holds a `.jj` path. The Jujutsu run's fork matches the Git run's commit for
 commit: the same author, message, tree, parent count and paths. Only the
 workstream ID and the commit and operation IDs in the `Osmia-` trailers

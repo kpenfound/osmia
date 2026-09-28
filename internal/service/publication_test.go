@@ -156,7 +156,7 @@ func (p *publicationFixture) reopen(t *testing.T) {
 	p.s.setSole(&activeProject{repository: reopened})
 }
 
-func TestPublicationCommitPerUnitPushesTheReviewedCommitsAndOpensOnePullRequest(t *testing.T) {
+func TestPublicationCommitPerUnitSignsTheReviewedHistoryAndOpensOnePullRequest(t *testing.T) {
 	t.Parallel()
 	p := newPublicationFixture(t, "commit-per-unit")
 	ctx := context.Background()
@@ -175,9 +175,10 @@ func TestPublicationCommitPerUnitPushesTheReviewedCommitsAndOpensOnePullRequest(
 		t.Fatalf("publication %+v: %v", result, err)
 	}
 	tip, _ := p.forkBranch(t)
-	if tip != p.report.Commit {
-		t.Fatalf("the fork branch is at %s, want the reviewed commit %s", tip, p.report.Commit)
+	if tip == p.report.Commit {
+		t.Fatal("delivery did not amend the reviewed commits")
 	}
+	assertDeliveryTree(t, p, tip)
 	for _, unit := range []string{"resume.go", "dedupe.go"} {
 		if log := demoGit(t, filepath.Dir(p.fork), "-C", p.fork, "log", "--format=%H", tip, "--", unit); strings.Count(log, "\n") != 1 {
 			t.Fatalf("the delivered branch does not keep the commit that landed %s: %q", unit, log)
@@ -196,7 +197,7 @@ func TestPublicationCommitPerUnitPushesTheReviewedCommitsAndOpensOnePullRequest(
 	recorded, err := publications(p.repository, p.stream)
 	must(t, err)
 	last := recorded[len(recorded)-1]
-	want := DeliveryPublication{Approval: 1, Operation: op.ID, Status: publicationOpened, Style: "commit-per-unit", Fork: "owner/dagger", Remote: "origin", Branch: featureBranch(p.stream), Reviewed: p.report.Commit, Commit: p.report.Commit,
+	want := DeliveryPublication{Approval: 1, Operation: op.ID, Status: publicationOpened, Style: "commit-per-unit", Fork: "owner/dagger", Remote: "origin", Branch: featureBranch(p.stream), Reviewed: p.report.Commit, Commit: tip,
 		Upstream: "dagger/dagger", Base: "main", PullRequest: pr.Number, URL: pr.URL, Title: "Resumable uploads", Description: approval.Description, DescriptionHash: approval.DescriptionHash}
 	if last != want {
 		t.Fatalf("publication %+v, want %+v", last, want)
@@ -471,16 +472,27 @@ func TestPublicationKeepsAMatchingBranchAndPullRequest(t *testing.T) {
 	p := newPublicationFixture(t, "commit-per-unit")
 	ctx := context.Background()
 	approval := p.approve(t, nil)
-	demoGit(t, filepath.Dir(p.fork), "-C", p.clone, "push", "--quiet", "origin", p.report.Commit+":refs/heads/"+featureBranch(p.stream))
-	p.pulls.prs = []pulls.PullRequest{{Number: 42, URL: "https://github.com/dagger/dagger/pull/42", State: "open", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", HeadCommit: p.report.Commit, Base: "main", Body: approval.Description}}
 	op := p.request(t)
+	p.s.boundary = func(step string) error {
+		if step == "publish-pushed" {
+			return errors.New("interrupted")
+		}
+		return nil
+	}
+	_, err := p.publisher().Apply(ctx, op)
+	if err == nil {
+		t.Fatal("push was not interrupted")
+	}
+	p.s.boundary = nil
+	tip, _ := p.forkBranch(t)
+	p.pulls.prs = []pulls.PullRequest{{Number: 42, URL: "https://github.com/dagger/dagger/pull/42", State: "open", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", HeadCommit: tip, Base: "main", Body: approval.Description}}
 	result, err := p.publisher().Apply(ctx, op)
 	if err != nil || result.Outcome != "succeeded" || p.pulls.creates != 0 {
 		t.Fatalf("publication %+v: %v; %d creates", result, err, p.pulls.creates)
 	}
 	recorded, err := publications(p.repository, p.stream)
 	must(t, err)
-	if len(recorded) != 1 || recorded[0].PullRequest != 42 || recorded[0].Status != publicationOpened {
+	if len(recorded) != 2 || recorded[1].PullRequest != 42 || recorded[1].Status != publicationOpened {
 		t.Fatalf("publications %+v", recorded)
 	}
 }
@@ -569,11 +581,119 @@ func TestServicePublishesAnApprovedWorkstreamAfterRestart(t *testing.T) {
 	p.start(t)
 	defer p.stop(t)
 	p.awaitFeature(t, p.stream, DeliveredState)
-	if tip, _ := p.forkBranch(t); tip != p.report.Commit || p.pulls.creates != 1 || p.pulls.prs[0].Body != approval.Description {
+	if tip, _ := p.forkBranch(t); tip == p.report.Commit || p.pulls.creates != 1 || p.pulls.prs[0].Body != approval.Description {
 		t.Fatalf("the fork branch is at %s; pull requests %+v", tip, p.pulls.prs)
 	}
 	transition, _ := publishIDs(1)
 	if got := transitionByID(t, p.shedFixture.repository(), p.stream, transition+"-published"); got.To != "published-1" {
 		t.Fatalf("publication outcome %+v", got)
 	}
+}
+
+func configureDeliverySigner(t *testing.T, clone string) string {
+	t.Helper()
+	signer := filepath.Join(t.TempDir(), "fake-gpg")
+	must(t, os.WriteFile(signer, []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '-----BEGIN PGP SIGNATURE-----' 'fixture signature' '-----END PGP SIGNATURE-----'\nprintf '%s\\n' '[GNUPG:] SIG_CREATED D 1 10 00 0 FAKE' >&2\n"), 0700))
+	for k, v := range map[string]string{"user.name": "Delivery Owner", "user.email": "delivery@example.invalid", "user.signingkey": "fixture-key", "gpg.format": "openpgp", "gpg.program": signer, "commit.gpgsign": "false"} {
+		demoGit(t, filepath.Dir(clone), "-C", clone, "config", k, v)
+	}
+	return signer
+}
+
+func assertDeliveryTree(t *testing.T, p *publicationFixture, tip string) {
+	t.Helper()
+	tree := demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "show", "-s", "--format=%T", tip)
+	reviewed := demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "show", "-s", "--format=%T", p.report.Commit)
+	if tree != reviewed {
+		t.Fatal("publication changed reviewed tree")
+	}
+}
+
+func TestPublicationSigningFailureBlocksPushUntilApprovedAgain(t *testing.T) {
+	t.Parallel()
+	p := newPublicationFixture(t, "squash")
+	p.approve(t, nil)
+	demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "config", "gpg.program", "false")
+	result, err := p.publisher().Apply(context.Background(), p.request(t))
+	if err != nil || result.Outcome != "failed" {
+		t.Fatalf("signing failure: %+v %v", result, err)
+	}
+	if _, exists := p.forkBranch(t); exists || p.pulls.finds != 0 || p.pulls.creates != 0 {
+		t.Fatal("signing failure touched publication")
+	}
+	if p.feature(t) != AssembledState {
+		t.Fatal("signing failure delivered the workstream")
+	}
+	configureDeliverySigner(t, p.clone)
+	p.approve(t, nil)
+	result, err = p.publisher().Apply(context.Background(), p.request(t))
+	if err != nil || result.Outcome != "succeeded" {
+		t.Fatalf("retry: %+v %v", result, err)
+	}
+}
+
+func TestPublicationReusesSignedCommitBeforePushAfterRestart(t *testing.T) {
+	t.Parallel()
+	p := newPublicationFixture(t, "squash")
+	p.approve(t, nil)
+	op := p.request(t)
+	p.s.boundary = func(step string) error {
+		if step == "publish-recorded" {
+			return errors.New("interrupted")
+		}
+		return nil
+	}
+	if _, err := p.publisher().Apply(context.Background(), op); err == nil {
+		t.Fatal("publication was not interrupted")
+	}
+	records, err := publications(p.repository, p.stream)
+	must(t, err)
+	if len(records) != 1 {
+		t.Fatalf("records: %+v", records)
+	}
+	signed := records[0].Commit
+	if _, exists := p.forkBranch(t); exists {
+		t.Fatal("pushed before durable record boundary")
+	}
+	p.reopen(t)
+	p.s.boundary = nil
+	demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "config", "gpg.program", "false")
+	result, err := p.publisher().Apply(context.Background(), op)
+	if err != nil || result.Outcome != "succeeded" {
+		t.Fatalf("recovery: %+v %v", result, err)
+	}
+	if tip, _ := p.forkBranch(t); tip != signed {
+		t.Fatal("recovery replaced the signed commit")
+	}
+}
+
+func TestPublicationUsesOwnerMessageAndRejectsSupersededMessage(t *testing.T) {
+	t.Parallel()
+	p := newPublicationFixture(t, "squash")
+	p.approve(t, nil)
+	stale := p.request(t)
+	view, api := p.s.deliveryPresentation(context.Background(), string(p.stream))
+	if api != nil {
+		t.Fatal(api)
+	}
+	messages := slices.Clone(view.Messages)
+	messages[0].Message = "Owner's subject\n\nOwner's explanation.\n\nCo-authored-by: Claude <noreply@anthropic.com>\nCo-authored-by: Human <human@example.invalid>"
+	_, api = p.s.approveDelivery(context.Background(), string(p.stream), DeliveryDecision{Review: view.Report.Review, ReviewRevision: view.ReviewRevision, Commit: view.Report.Commit, DraftHash: view.DraftHash, Messages: messages})
+	if api != nil {
+		t.Fatal(api)
+	}
+	result, err := p.publisher().Apply(context.Background(), stale)
+	if err != nil || result.Outcome != "failed" {
+		t.Fatalf("stale message published: %+v %v", result, err)
+	}
+	result, err = p.publisher().Apply(context.Background(), p.request(t))
+	if err != nil || result.Outcome != "succeeded" {
+		t.Fatalf("publish: %+v %v", result, err)
+	}
+	tip, _ := p.forkBranch(t)
+	msg := demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "show", "-s", "--format=%B", tip)
+	if !strings.HasPrefix(msg, "Owner's subject\n") || strings.Contains(msg, "noreply@anthropic.com") || !strings.Contains(msg, "Co-authored-by: Human") || strings.Count(msg, "Signed-off-by: Delivery Owner <delivery@example.invalid>") != 1 {
+		t.Fatalf("message: %s", msg)
+	}
+	assertDeliveryTree(t, p, tip)
 }

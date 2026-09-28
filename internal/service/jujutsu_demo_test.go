@@ -272,6 +272,9 @@ func deliverOn(t *testing.T, backend string) delivered {
 		header, message, _ := strings.Cut(raw, "\n\n")
 		c := forkCommit{Message: runIndependent(message, stream)}
 		for line := range strings.SplitSeq(header, "\n") {
+			if strings.HasPrefix(line, " ") {
+				continue
+			}
 			key, value, _ := strings.Cut(line, " ")
 			c.Headers = append(c.Headers, key)
 			switch key {
@@ -284,9 +287,12 @@ func deliverOn(t *testing.T, backend string) delivered {
 			}
 		}
 		for _, key := range c.Headers {
-			if !slices.Contains([]string{"tree", "parent", "author", "committer"}, key) {
+			if !slices.Contains([]string{"tree", "parent", "author", "committer", "gpgsig"}, key) {
 				t.Fatalf("commit %s on the fork is not plain Git: header %q\n%s", commit, key, raw)
 			}
+		}
+		if !slices.Contains(c.Headers, "gpgsig") || c.Author != "Delivery Owner <delivery@example.invalid" {
+			t.Fatalf("commit lacks owner attribution or signature: %+v", c)
 		}
 		c.Paths = strings.Fields(demoGit(t, home, "-C", fork, "ls-tree", "-r", "--name-only", commit))
 		for _, path := range c.Paths {

@@ -69,6 +69,7 @@ func newArchitectOptions(t *testing.T) (Options, string, *demoEngine, *demoSessi
 	t.Helper()
 	opts, clone := projectFixture(t)
 	home := filepath.Dir(clone)
+	configureDeliverySigner(t, clone)
 	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 	must(t, err)
 	_, err = configFile.WriteString(architectContainer)

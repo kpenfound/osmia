@@ -173,7 +173,7 @@ func TestHandInToSketchedPlan(t *testing.T) {
 	for _, stream := range streams {
 		f.await(t, stream, sketched)
 		// Draft 1 is recorded and sent back; draft 2 moves the workstream.
-		ops := f.draftOperations(t, stream)
+		ops := f.acknowledgedDraftOperations(t, stream)
 		if len(ops) != 2 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" || ops[1].Result == nil || ops[1].Result.Outcome != "succeeded" {
 			t.Fatalf("draft operations of %s: %+v", stream, ops)
 		}

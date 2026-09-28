@@ -165,8 +165,8 @@ set through `Options` by embedders.
 | GET | `/amendment/<workstream-id>/<n>` | `AmendmentResponse`: amendment `n`'s state, debate round, latest packet and its revision, and the owner's latest decision; see [amendment decisions](#amendment-decisions) |
 | POST | `/amendment/<workstream-id>/<n>` | `AmendmentDecisionRequest`: decision (`approve`, `reject`, `round` or `overrule`), optional note and the packet revision decided; returns `AmendmentResponse` |
 | POST | `/contested/<workstream-id>/<unit-id>` | `ContestedRulingRequest`: decision (`review` or `revise`) and note; records the owner's direction and returns `ContestedRulingResponse` |
-| GET | `/delivery/<workstream-id>` | Current final report, trace-based draft description, any matching approval and the latest publication record |
-| POST | `/delivery/<workstream-id>` | Final review number and report revision, commit, draft hash and optional edited description; records the owner's approval |
+| GET | `/delivery/<workstream-id>` | Current final report, draft description and commit messages, landing style, any matching approval and the latest publication record |
+| POST | `/delivery/<workstream-id>` | Final review number and report revision, commit, draft hash, optional edited description and ordered commit messages; records the owner's approval |
 | POST | `/projects` | `ProjectAddRequest`: name, upstream, fork, clone, optional base_branch; returns `ProjectResponse` |
 | DELETE | `/projects` | `ProjectRemoveRequest`: project; returns `ProjectResponse` |
 | POST | `/projects/extract` | `ProjectExtractRequest`: project; returns `ExtractionResponse` |
@@ -2574,13 +2574,18 @@ whether it is current, reads the same after a restart.
 unshown criteria first, retaining each criterion's evidence or gap, followed
 by a pull request description drafted from the final report and landed-unit
 records. The JSON form includes the reviewed commit, governing revisions,
-draft text and its SHA-256 hash. A report with gaps can be read but cannot be
+draft text, ordered commit `messages`, landing `style`, and a SHA-256 hash
+pinning that presentation. A report with gaps can be read but cannot be
 approved.
 
 `osmia approve <workstream-id>` accepts the draft. To edit it, use
 `osmia approve <workstream-id> <description-file>`. The service requires the
 review number, report revision, commit and draft hash that were presented, then records the
-exact chosen description and its hash in `final/delivery.json`. The record
+exact chosen description and its hash, landing style and commit messages in
+`final/delivery.json`. The optional `messages` request field edits the presented
+array of `{commit, message}` objects; every commit must appear in the presented
+order with nonempty text. The CLI exposes `--message-file` for a single commit
+and `--messages-file` for the array; the web delivery form edits each message. The record
 also pins the final report revision, branch commit, seal, spec hash, spec,
 plan and charter revisions. Its owner workflow transition and document are
 one trace commit. Repeating the same decision returns the recorded ruling.
@@ -2607,10 +2612,21 @@ Each attempt first checks the approval: the workstream must be `assembled`,
 and the current final report, feature branch, governing revisions and latest
 approval must still match approval `k` and its description. Otherwise the
 publication is refused before the fork or GitHub is touched. The delivery
-commit is the reviewed commit with `commit-per-unit`, which keeps each unit's
-reviewed commit. With `squash`, it is one commit on the upstream commit the
-final review rebased onto, holding the reviewed commit's tree, with the
-description's title as its subject. The local feature branch never moves.
+history keeps one commit per unit with `commit-per-unit`, or combines the
+workstream into one commit on the reviewed base with `squash`. After approval,
+the service rewrites that outgoing history using the approved messages and the
+owner's host Git identity. It removes model or runtime-agent co-author trailers,
+preserves human co-authors, adds the owner's `Signed-off-by` trailer, then signs
+each commit using the configured key and signing format. The tree and base are
+preserved; the local feature branch never moves. Signing failure refuses
+publication before any push. Owner approval is required again after correcting
+the signing configuration.
+
+A service-owned Git ref retains the signed history for each publication intent.
+Recovery reuses it if signing completed before the publication record was saved;
+once recorded, `final/publication.json` supplies the signed commit directly.
+Neither path needs the signing key again. Old approvals without commit messages
+and a landing style require a fresh owner approval before publication.
 
 The service then asks the fork remote, the clone's remote whose URL names the
 configured fork, for its `osmia/<workstream-id>` branch. The branch may

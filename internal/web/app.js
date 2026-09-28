@@ -703,9 +703,8 @@
       return;
     }
     if (entry.kind === 'delivery') {
-      if (d.text.value !== d.draft) {
-        body.description = d.text.value;
-      }
+      body.messages = d.messages.map((m) => ({ commit: m.commit, message: m.input.value }));
+      body.description = d.text.value;
       submit(d.submit, entry.answer.method, endpoint(entry), body, (out) => 'Approved the delivery of final review ' + out.review + ' of ' + workstreamName(entry.workstream) + '.');
       return;
     }
@@ -783,7 +782,11 @@
     } else if (entry.kind === 'delivery') {
       d.text = el('textarea', { name: 'description', rows: '8' });
       d.draft = '';
+      d.messages = [];
+      d.messageFields = el('div');
+      fields.push(d.messageFields);
       fields.push(el('label', {}, 'Pull request description', d.text));
+      fields.push(el('p', { class: 'meta' }, 'Approving authorizes publication with your Git identity, signature and sign-off. Agent co-author trailers are removed.'));
     } else {
       d.decision = el('select', { name: 'decision' });
       d.note = el('input', { name: 'note', type: 'text', autocomplete: 'off' });
@@ -839,12 +842,21 @@
     d.detail.replaceChildren(el('ul', { class: 'criteria', 'data-field': 'criteria' }, ...view.report.criteria.map((c) => el('li', { 'data-criterion': c.criterion },
       el('strong', {}, c.criterion), ' ', c.text,
       el('div', { class: 'meta' }, c.evidence ? c.evidence : 'Gap: ' + c.gap)))));
+    const previous = new Map(d.messages.map((m) => [m.commit, m]));
+    d.messages = (view.approval ? view.approval.messages : (view.messages || [])).map((m) => {
+      const old = previous.get(m.commit);
+      const input = old ? old.input : el('textarea', { name: 'commit-message', rows: '4' });
+      if (!old || input.value === old.draft) input.value = m.message;
+      return { commit: m.commit, draft: m.message, input };
+    });
+    d.messageFields.replaceChildren(...d.messages.map((m, i) => el('label', {}, 'Commit message' + (d.messages.length > 1 ? ' ' + (i + 1) : ''), m.input)));
     // The draft replaces the description until the owner edits it.
-    if (view.draft !== d.draft) {
+    const draft = view.approval ? view.approval.description : view.draft;
+    if (draft !== d.draft) {
       if (d.text.value === d.draft) {
-        d.text.value = view.draft;
+        d.text.value = draft;
       }
-      d.draft = view.draft;
+      d.draft = draft;
     }
   }
 

@@ -254,7 +254,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	// 6. The owner approves the drafted description on the page. Publication
 	// waits for the pause, and runs once the owner resumes the workstream.
 	p.awaitText(card+"[data-field=question]", "Deliver Resumable uploads?")
-	p.await("the drafted description", `document.querySelector(`+quote(card+"textarea")+`).value === `+quote(presented.Draft))
+	p.await("the drafted description", `document.querySelector(`+quote(card+`textarea[name="description"]`)+`).value === `+quote(presented.Draft))
 	p.await("Approve enabled", `!document.querySelector(`+quote(card+"button[type=submit]")+`).disabled`)
 	p.click(card + "button[type=submit]")
 	p.awaitText("#inbox-result", "Approved the delivery of final review 1")
