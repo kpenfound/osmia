@@ -243,6 +243,26 @@ against. Raise the version here and in the browser module together.
 let jjInstall: String! = "set -e; v=0.45.1; a=$(uname -m); curl -fsSL https://github.com/jj-vcs/jj/releases/download/v$v/jj-v$v-$a-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin ./jj; jj --version"
 
 """
+Limit tests and their child processes to at most four of the available CPUs.
+"""
+let testCPUs: String! = """
+set -eu
+cpus=$(awk '/^Cpus_allowed_list:/ {
+  n = split($2, ranges, ",")
+  for (i = 1; i <= n && count < 4; i++) {
+    split(ranges[i], bounds, "-")
+    end = bounds[2] == "" ? bounds[1] : bounds[2]
+    for (cpu = bounds[1]; cpu <= end && count < 4; cpu++) {
+      printf "%s%d", count ? "," : "", cpu
+      count++
+    }
+  }
+}' /proc/self/status)
+echo "Go tests: CPU affinity $cpus"
+exec taskset -c "$cpus" "$@"
+"""
+
+"""
 A Go module rooted at a workspace-relative path.
 """
 type GoModule {
@@ -590,7 +610,7 @@ type GoModule {
         # Temporary repositories live in memory for this test process. Service
         # restarts still reopen their files; container-layer fsync is expensive.
         .withMountedTemp("/tmp")
-        .withExec(["otelgotest", "-count=1", "-timeout=30m", "./..."], experimentalPrivilegedNesting: true)
+        .withExec(["sh", "-ec", testCPUs, "osmia-go-tests", "otelgotest", "-count=1", "-timeout=30m", "./..."], experimentalPrivilegedNesting: true)
     }
   }
 
@@ -739,7 +759,7 @@ type GoDirectory {
         # Temporary repositories live in memory for this test process. Service
         # restarts still reopen their files; container-layer fsync is expensive.
         .withMountedTemp("/tmp")
-        .withExec(["otelgotest", "-count=1", "-timeout=30m"], experimentalPrivilegedNesting: true)
+        .withExec(["sh", "-ec", testCPUs, "osmia-go-tests", "otelgotest", "-count=1", "-timeout=30m"], experimentalPrivilegedNesting: true)
     }
   }
 

@@ -12,11 +12,11 @@ import (
 	"path"
 	"strings"
 	"syscall"
+
+	"github.com/go-json-experiment/json/jsontext"
 )
 
-// checked rejects aliases inside the root as well as escapes. os.Root also
-// confines the subsequent operation if an ancestor is replaced concurrently.
-func (r *Repository) checked(name string) error {
+func checkInternalPath(name string) error {
 	if name != "." {
 		// Internal Git paths may start with a dot; callers never supply these paths.
 		if path.IsAbs(name) || path.Clean(name) != name || strings.ContainsAny(name, "\\\x00\r\n") {
@@ -27,6 +27,15 @@ func (r *Repository) checked(name string) error {
 				return fmt.Errorf("invalid trace path %q", name)
 			}
 		}
+	}
+	return nil
+}
+
+// checked rejects aliases inside the root as well as escapes. os.Root also
+// confines the subsequent operation if an ancestor is replaced concurrently.
+func (r *Repository) checked(name string) error {
+	if err := checkInternalPath(name); err != nil {
+		return err
 	}
 	current := ""
 	for _, part := range strings.Split(name, "/") {
@@ -80,6 +89,16 @@ func (r *Repository) readFile(name string) ([]byte, error) {
 	if err := r.checked(name); err != nil {
 		return nil, err
 	}
+	return r.readCheckedFile(name)
+}
+
+// readCheckedFile opens a file whose ancestors were checked by checked or walk.
+// The descriptor is still confined by os.Root; the opened file must be regular
+// and unaliased even if it was replaced since the walk's directory listing.
+func (r *Repository) readCheckedFile(name string) ([]byte, error) {
+	if err := checkInternalPath(name); err != nil {
+		return nil, err
+	}
 	f, err := r.dir.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
@@ -91,6 +110,9 @@ func (r *Repository) readFile(name string) ([]byte, error) {
 	}
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s: expected regular file", name)
+	}
+	if st, ok := info.Sys().(*syscall.Stat_t); ok && st.Nlink > 1 {
+		return nil, fmt.Errorf("%s: hardlink aliases are forbidden", name)
 	}
 	return io.ReadAll(f)
 }
@@ -158,7 +180,8 @@ func (r *Repository) writeFile(name string, data []byte) error {
 }
 
 func decode(data []byte, v any) error {
-	if err := uniqueJSON(json.NewDecoder(bytes.NewReader(data))); err != nil {
+	// Validate object names without allocating a Go value for every JSON token.
+	if _, err := jsontext.NewDecoder(bytes.NewBuffer(data), jsontext.AllowInvalidUTF8(true)).ReadValue(); err != nil {
 		return err
 	}
 	d := json.NewDecoder(bytes.NewReader(data))
@@ -170,42 +193,6 @@ func decode(data []byte, v any) error {
 		return fmt.Errorf("trailing JSON")
 	}
 	return nil
-}
-func uniqueJSON(d *json.Decoder) error {
-	t, err := d.Token()
-	if err != nil {
-		return err
-	}
-	if delim, ok := t.(json.Delim); ok {
-		switch delim {
-		case '{':
-			seen := map[string]bool{}
-			for d.More() {
-				t, err := d.Token()
-				if err != nil {
-					return err
-				}
-				k, ok := t.(string)
-				if !ok || seen[k] {
-					return fmt.Errorf("duplicate or invalid JSON key %q", t)
-				}
-				seen[k] = true
-				if err := uniqueJSON(d); err != nil {
-					return err
-				}
-			}
-		case '[':
-			for d.More() {
-				if err := uniqueJSON(d); err != nil {
-					return err
-				}
-			}
-		default:
-			return fmt.Errorf("unexpected JSON delimiter")
-		}
-		_, err = d.Token()
-	}
-	return err
 }
 func decodeRecord(data []byte) (Record, error) {
 	var marker struct {

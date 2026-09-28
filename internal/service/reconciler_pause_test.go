@@ -265,6 +265,15 @@ func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 	if spec := f.documents(t, paused, plan.SpecDocument); len(spec) != 1 || spec[0].Content != validSpec {
 		t.Fatalf("the spec the stopped turn delivered: %+v", spec)
 	}
+	wait, done := serviceChanges(t, f.s)
+	defer done()
+	deadline := time.Now().Add(demoTimeout)
+	for !draft().Acknowledged {
+		if time.Now().After(deadline) {
+			t.Fatal("the resumed draft operation was not acknowledged")
+		}
+		wait()
+	}
 	if op := draft(); !op.Acknowledged || op.Result == nil || op.Result.Outcome != "succeeded" || retries(op) != 1 {
 		t.Fatalf("draft operation %+v", op)
 	}
