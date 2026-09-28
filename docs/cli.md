@@ -291,10 +291,15 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   approved description and the state of its publication. For a delivered
   workstream it shows the report, the approved description and the pull
   request it was delivered as.
-- `approve <workstream-id> [description-file]` approves the drafted
+- `approve <workstream-id> [description-file] [--message-file FILE | --messages-file FILE]` approves the drafted
   description, or the file's text instead, for the presented final report.
-  The service then pushes the branch to your fork and opens the pull request
-  itself; `delivery` shows its progress. A report with gaps, a presentation
+  `--message-file` supplies the commit message when delivery has one commit.
+  For multiple commits, `--messages-file` reads a JSON array of
+  `{"commit":"<presented revision>","message":"<edited text>"}` objects, in the
+  order returned by `delivery --json` in `messages`. Include every commit.
+  The service attributes the outgoing commits to your Git identity, removes
+  agent co-author trailers, adds your sign-off and signs before pushing the
+  branch to your fork and opening the pull request; `delivery` shows its progress. A report with gaps, a presentation
   that changed and a delivered workstream fail with `conflict` (exit 5). After
   a publication was refused, approving again asks for another one. See
   [owner delivery approval](service.md#owner-delivery-approval) and

@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/workspace"
 )
 
 // PublishAction is the repository-boundary operation action that publishes
@@ -37,8 +38,7 @@ const (
 	// commit, then the pull request is open and the workstream delivered.
 	publicationPushing = "pushing"
 	publicationOpened  = "opened"
-	// squashStyle is the landing style that delivers the reviewed branch as
-	// one commit; every other style delivers its commits as they are.
+	// squashStyle delivers the reviewed branch as one owner-signed commit.
 	squashStyle = "squash"
 )
 
@@ -290,9 +290,8 @@ func (p *publisher) Inspect(_ context.Context, op coreadapter.Operation) (coread
 // Apply publishes owner approval k. The workstream must be assembled and the
 // approval must still pass the delivery gate for the description it records:
 // the feature branch, final review and governing documents unchanged since.
-// The delivery commit is the reviewed commit, or with the squash style one
-// commit holding its tree on the upstream commit the final review rebased
-// onto. The service then reads the fork branch: at the delivery commit it is
+// Delivery amends the approved messages and identity and signs the outgoing
+// commits, preserving the reviewed tree and base; squash produces one commit. The service then reads the fork branch: at the delivery commit it is
 // already pushed; absent, or at a commit an earlier publication of the
 // workstream recorded, it is pushed with that commit as the expected one;
 // at any other commit the publication is refused. An existing pull request
@@ -345,7 +344,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	if reason == "" && (latest.Commit != in.Commit || latest.DescriptionHash != in.DescriptionHash) {
+	if reason == "" && (latest.Commit != in.Commit || latest.DescriptionHash != in.DescriptionHash || latest.Style != approval.Style || !slices.Equal(latest.Messages, approval.Messages)) {
 		reason = "a later owner approval replaced it"
 	}
 	if reason != "" {
@@ -364,18 +363,30 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	}
 	branch := featureBranch(stream)
 	title := deliveryTitle(approval.Description, stream)
-	published := in.Commit
-	if in.Style == squashStyle {
-		if report.Upstream == nil {
-			return p.refuse(ctx, stream, in, fmt.Sprintf("final review %d records no upstream commit to squash onto", report.Review))
+	if approval.Style != in.Style || len(approval.Messages) == 0 {
+		return p.refuse(ctx, stream, in, "delivery messages and style require current owner approval")
+	}
+	if report.Upstream == nil {
+		return p.refuse(ctx, stream, in, "final review records no delivery base")
+	}
+	prior, err := publications(p.repository, stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	published := ""
+	for _, d := range prior {
+		if d.Operation == op.ID {
+			published = d.Commit
 		}
+	}
+	if published == "" {
 		requested, err := (&foreman{masons: &masons{s: p.s, cfg: cfg, repository: p.repository}}).requestedAt(stream, op.ID)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		message := fmt.Sprintf("%s\n\nWorkstream %s as reviewed by final review %d at %s, in one commit.\n\nOsmia-Workstream: %s\nOsmia-Reviewed: %s\n%s: %s\n", title, stream, report.Review, in.Commit, stream, in.Commit, landingTrailer, op.ID)
-		if published, err = g.Squash(ctx, report.Upstream.Commit, in.Commit, message, requested); err != nil {
-			return coreadapter.OperationResult{}, err
+		published, err = (&workspace.Git{Clone: cfg.Project.Clone}).SignDelivery(ctx, op.ID, report.Upstream.Commit, in.Commit, approval.Messages, in.Style == squashStyle, requested)
+		if err != nil {
+			return p.refuse(ctx, stream, in, "pre-publication amendment failed: "+err.Error())
 		}
 	}
 	remote, err := g.Remote(ctx, in.Fork)
@@ -396,10 +407,6 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	}
 	record := DeliveryPublication{Approval: in.Approval, Operation: op.ID, Status: publicationPushing, Style: in.Style, Fork: in.Fork, Remote: remote, Branch: branch, Reviewed: in.Commit, Commit: published,
 		Upstream: in.Upstream, Base: in.Base, Title: title, Description: approval.Description, DescriptionHash: approval.DescriptionHash}
-	prior, err := publications(p.repository, stream)
-	if err != nil {
-		return coreadapter.OperationResult{}, err
-	}
 	for _, d := range prior {
 		if in.Maintenance && d.Status == publicationOpened && d.Upstream == cfg.Project.Fork {
 			record.PriorURL = d.URL

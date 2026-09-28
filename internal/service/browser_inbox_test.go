@@ -443,7 +443,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 		t.Fatalf("delivery entries %+v", entries)
 	}
 	card := decisionCard(entries[0])
-	description := card + "textarea"
+	description := card + `textarea[name="description"]`
 	approve := card + "button[type=submit]"
 	pins := func(revision int, presented DeliveryPresentation) string {
 		return fmt.Sprintf("final review 1 · report revision %d · commit %s · draft %s", revision, report.Commit[:12], presented.DraftHash[:12])
@@ -529,7 +529,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	p.click(approve)
 	p.awaitText("#inbox-result", "Approved the delivery of final review 1")
 	p.awaitGone("the approved delivery", card)
-	if body := sent(); body["description"] != nil || body["review_revision"] != 2.0 || body["draft_hash"] != second.DraftHash {
+	if body := sent(); body["description"] != second.Draft || body["review_revision"] != 2.0 || body["draft_hash"] != second.DraftHash {
 		t.Fatalf("the approval the page sent: %v", body)
 	}
 	after, err := f.c.Delivery(ctx, ws)
@@ -544,6 +544,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	drafted(third)
 	edited := third.Draft + "\nReviewed on the phone.\n"
 	p.setValue(description, edited)
+	p.setValue(card+`textarea[name="commit-message"]`, "Owner edited commit message")
 	p.click(approve)
 	p.awaitText("#inbox-result", "Approved the delivery of final review 1")
 	p.awaitGone("the approved delivery", card)
@@ -552,7 +553,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	}
 	after, err = f.c.Delivery(ctx, ws)
 	must(t, err)
-	if after.Approval == nil || after.Approval.Description != edited || after.Approval.Review != 1 || after.Approval.ReviewRevision != 3 || after.Approval.DraftHash != third.DraftHash {
+	if after.Approval == nil || after.Approval.Description != edited || after.Approval.Messages[0].Message != "Owner edited commit message" || after.Approval.Review != 1 || after.Approval.ReviewRevision != 3 || after.Approval.DraftHash != third.DraftHash {
 		t.Fatalf("the edited approval %+v", after.Approval)
 	}
 	p.await("the same document", `window.notReloaded === true`)

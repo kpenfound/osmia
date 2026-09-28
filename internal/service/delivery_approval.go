@@ -12,6 +12,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/workspace"
 )
 
 const deliveryPath = "final/delivery.json"
@@ -23,13 +24,15 @@ const deliverySubject = "delivery-owner"
 // workstream presents the report, approval and publication it was delivered
 // with, and no draft.
 type DeliveryPresentation struct {
-	Project        config.ProjectID    `json:"project"`
-	Workstream     config.WorkstreamID `json:"workstream"`
-	Report         FinalReport         `json:"report"`
-	ReviewRevision int                 `json:"review_revision"`
-	Draft          string              `json:"draft"`
-	DraftHash      string              `json:"draft_hash"`
-	Approval       *DeliveryApproval   `json:"approval,omitempty"`
+	Project        config.ProjectID            `json:"project"`
+	Workstream     config.WorkstreamID         `json:"workstream"`
+	Report         FinalReport                 `json:"report"`
+	ReviewRevision int                         `json:"review_revision"`
+	Draft          string                      `json:"draft"`
+	DraftHash      string                      `json:"draft_hash"`
+	Messages       []workspace.DeliveryMessage `json:"messages"`
+	Style          string                      `json:"style"`
+	Approval       *DeliveryApproval           `json:"approval,omitempty"`
 	// Publication is the latest record of publishing an approval, and
 	// Delivered whether the workstream is delivered.
 	Publication *DeliveryPublication `json:"publication,omitempty"`
@@ -40,28 +43,31 @@ type DeliveryPresentation struct {
 // DeliveryApproval preserves the exact text and reviewed identity the owner
 // approved. DescriptionHash allows publication to check the text it will send.
 type DeliveryApproval struct {
-	Review          int       `json:"review"`
-	ReviewRevision  int       `json:"review_revision"`
-	Commit          string    `json:"commit"`
-	Seal            int       `json:"seal"`
-	SpecHash        string    `json:"spec_hash"`
-	Spec            int       `json:"spec"`
-	Plan            int       `json:"plan"`
-	Charter         int       `json:"charter"`
-	DraftHash       string    `json:"draft_hash"`
-	Description     string    `json:"description"`
-	DescriptionHash string    `json:"description_hash"`
-	At              time.Time `json:"at"`
+	Review          int                         `json:"review"`
+	ReviewRevision  int                         `json:"review_revision"`
+	Commit          string                      `json:"commit"`
+	Seal            int                         `json:"seal"`
+	SpecHash        string                      `json:"spec_hash"`
+	Spec            int                         `json:"spec"`
+	Plan            int                         `json:"plan"`
+	Charter         int                         `json:"charter"`
+	DraftHash       string                      `json:"draft_hash"`
+	Description     string                      `json:"description"`
+	DescriptionHash string                      `json:"description_hash"`
+	At              time.Time                   `json:"at"`
+	Messages        []workspace.DeliveryMessage `json:"messages"`
+	Style           string                      `json:"style"`
 }
 
 // DeliveryDecision approves the draft as shown, or supplies the owner's edit.
 // The review identity and draft hash are required even when the text is edited.
 type DeliveryDecision struct {
-	Review         int     `json:"review"`
-	ReviewRevision int     `json:"review_revision"`
-	Commit         string  `json:"commit"`
-	DraftHash      string  `json:"draft_hash"`
-	Description    *string `json:"description,omitempty"`
+	Review         int                         `json:"review"`
+	ReviewRevision int                         `json:"review_revision"`
+	Commit         string                      `json:"commit"`
+	DraftHash      string                      `json:"draft_hash"`
+	Description    *string                     `json:"description,omitempty"`
+	Messages       []workspace.DeliveryMessage `json:"messages,omitempty"`
 }
 
 func descriptionHash(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) }
@@ -207,10 +213,20 @@ func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID,
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Internal, "cannot draft the description from trace records"}
 	}
-	if approval != nil && (approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter || approval.Seal != report.Seal) {
+	if approval != nil && (approval.Style != s.about(repository).Project.Landing || len(approval.Messages) == 0 || approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter || approval.Seal != report.Seal) {
 		approval = nil
 	}
-	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Draft: draft, DraftHash: descriptionHash(draft), Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance}, nil
+	style := s.about(repository).Project.Landing
+	messages, err := deliveryMessages(ctx, s.about(repository), report, style)
+	if err != nil {
+		return DeliveryPresentation{}, &APIError{Internal, "cannot read delivery commit messages"}
+	}
+	pinned, _ := json.Marshal(struct {
+		Description string
+		Style       string
+		Messages    []workspace.DeliveryMessage
+	}{draft, style, messages})
+	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Draft: draft, DraftHash: descriptionHash(string(pinned)), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance}, nil
 }
 
 func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryDecision) (DeliveryApproval, *APIError) {
@@ -234,11 +250,29 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 		return DeliveryApproval{}, &APIError{Conflict, reason}
 	}
 	description := presented.Draft
+	if presented.Approval != nil {
+		description = presented.Approval.Description
+	}
 	if req.Description != nil {
 		description = *req.Description
 	}
 	if strings.TrimSpace(description) == "" {
 		return DeliveryApproval{}, &APIError{Validation, "description must not be empty"}
+	}
+	messages := slices.Clone(presented.Messages)
+	if presented.Approval != nil {
+		messages = slices.Clone(presented.Approval.Messages)
+	}
+	if req.Messages != nil {
+		if len(req.Messages) != len(messages) {
+			return DeliveryApproval{}, &APIError{Validation, "supply every delivery commit message"}
+		}
+		for i, m := range req.Messages {
+			if m.Commit != messages[i].Commit || strings.TrimSpace(m.Message) == "" || strings.ContainsRune(m.Message, 0) {
+				return DeliveryApproval{}, &APIError{Validation, "delivery messages must name the presented commits and contain nonempty text"}
+			}
+			messages[i].Message = m.Message
+		}
 	}
 	review, prior, existing, err := deliveryDocuments(repository, stream)
 	if err != nil {
@@ -255,14 +289,14 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 			existing = nil
 		}
 	}
-	if existing != nil && req.Description == nil && existing.ReviewRevision == review.Revision && existing.Commit == req.Commit && existing.DraftHash == req.DraftHash {
+	if existing != nil && req.Description == nil && req.Messages == nil && existing.Style == presented.Style && existing.ReviewRevision == review.Revision && existing.Commit == req.Commit && existing.DraftHash == req.DraftHash {
 		return *existing, nil
 	}
-	if existing != nil && existing.ReviewRevision == review.Revision && existing.Commit == req.Commit && existing.Description == description && existing.DraftHash == req.DraftHash {
+	if existing != nil && existing.ReviewRevision == review.Revision && existing.Commit == req.Commit && existing.Style == presented.Style && slices.Equal(existing.Messages, messages) && existing.Description == description && existing.DraftHash == req.DraftHash {
 		return *existing, nil
 	}
 	r := presented.Report
-	approval := DeliveryApproval{Review: r.Review, ReviewRevision: review.Revision, Commit: r.Commit, Seal: r.Seal, SpecHash: r.SpecHash, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter, DraftHash: req.DraftHash, Description: description, DescriptionHash: descriptionHash(description), At: s.now()}
+	approval := DeliveryApproval{Review: r.Review, ReviewRevision: review.Revision, Commit: r.Commit, Seal: r.Seal, SpecHash: r.SpecHash, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter, DraftHash: req.DraftHash, Description: description, DescriptionHash: descriptionHash(description), Messages: messages, Style: presented.Style, At: s.now()}
 	content, err := json.Marshal(approval)
 	if err != nil {
 		return DeliveryApproval{}, &APIError{Internal, "cannot encode delivery approval"}
@@ -300,8 +334,25 @@ func (s *Service) deliveryGate(ctx context.Context, repository *trace.Repository
 	if approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.Seal != report.Seal || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter {
 		return *approval, "the owner approval is stale; review and approve the current branch", nil
 	}
+	if approval.Style != s.about(repository).Project.Landing || len(approval.Messages) == 0 {
+		return *approval, "delivery messages and style require current owner approval", nil
+	}
 	if approval.DescriptionHash != descriptionHash(approval.Description) || approval.Description != description {
 		return *approval, "the description differs from what the owner approved", nil
 	}
 	return *approval, "", nil
+}
+
+func deliveryMessages(ctx context.Context, cfg *config.Config, report FinalReport, style string) ([]workspace.DeliveryMessage, error) {
+	if report.Upstream == nil {
+		return nil, errors.New("final review has no base")
+	}
+	if style == squashStyle {
+		message := strings.TrimSpace(report.Summary)
+		if message == "" {
+			message = "Deliver feature"
+		}
+		return []workspace.DeliveryMessage{{Commit: report.Commit, Message: message}}, nil
+	}
+	return (&workspace.Git{Clone: cfg.Project.Clone}).DeliveryMessages(ctx, report.Upstream.Commit, report.Commit)
 }

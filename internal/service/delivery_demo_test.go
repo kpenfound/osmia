@@ -161,7 +161,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 	if delivered.Tree != reviewed.Tree || p.pulls.prs[0].Body != edited {
 		t.Fatalf("wrong delivered tree or description: %s, %+v", tip, p.pulls.prs[0])
 	}
-	if tip != approval.Commit {
+	if tip == approval.Commit {
 		t.Fatalf("commit-per-unit tip %s, reviewed %s", tip, approval.Commit)
 	}
 	records, err := publications(p.repository, stream)

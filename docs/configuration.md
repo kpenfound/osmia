@@ -362,6 +362,15 @@ Git branch-name constraints. `landing` accepts `commit-per-unit` (default) or
 [published](service.md#publication) with each unit's commit or as one commit. Project `capacity.per_workstream` is a positive integer overriding the
 global default.
 
+Publication requires the service host's Git `user.name`, `user.email` and
+`user.signingkey`, with repository-local overrides respected. Git's `gpg.format`
+and signing-program settings select OpenPGP, SSH or X.509 signing. Signing is
+required even if `commit.gpgsign` is false. Configure `landing = "squash"` for
+one signed commit per workstream. The service must be able to use the key or
+signing agent; runtime agents do not receive it. Missing identity or signing
+failure refuses publication before pushing. Correct the configuration and
+approve delivery again to retry. Local workstream commits remain unsigned.
+
 `upstream_rebase` is a Go duration string: how long after a workstream's
 latest drift rebase or final rebase (or, before either, its sealing) the
 foreman schedules its next [drift rebase](service.md#drift-rebases) onto
