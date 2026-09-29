@@ -205,11 +205,14 @@ func insertTopLevelLine(text, line string) string {
 // identity fields and explicit defaults, replacing any file at path atomically.
 // Callers own the directory: a fresh project identity never has one.
 func WriteProjectConfig(path string, p Project) error {
-	if !ValidRepository(p.Upstream) || !ValidRepository(p.Fork) || strings.EqualFold(p.Upstream, p.Fork) || !filepath.IsAbs(p.Clone) || !ValidBranch(p.BaseBranch) {
+	if !ValidRepository(p.Upstream) || (p.Fork != "" && !ValidRepository(p.Fork)) || !filepath.IsAbs(p.Clone) || !ValidBranch(p.BaseBranch) {
 		return errors.New("invalid project configuration")
 	}
 	text := fmt.Sprintf("version = 1\nname = %s\nupstream = %s\nfork = %s\nclone = %s\nbase_branch = %s\nlanding = \"commit-per-unit\"\n",
 		tomlString(p.Name), tomlString(p.Upstream), tomlString(p.Fork), tomlString(p.Clone), tomlString(p.BaseBranch))
+	if p.Fork == "" || strings.EqualFold(p.Upstream, p.Fork) {
+		text = strings.Replace(text, "fork = "+tomlString(p.Fork)+"\n", "", 1)
+	}
 	var check Project
 	if _, err := toml.Decode(text, &check); err != nil {
 		return err

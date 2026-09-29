@@ -24,7 +24,7 @@ func TestBrowserRegistersHandsInEditsAndInspectsTrace(t *testing.T) {
 	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.await("connected", `document.body.dataset.connection === 'live'`)
 	p.eval(`document.querySelectorAll('details').forEach(d => d.open = true)`, nil)
-	for name, value := range map[string]string{"name": "Documents", "upstream": "owner/docs", "fork": "fork/docs", "clone": clone} {
+	for name, value := range map[string]string{"name": "Documents", "upstream": "owner/docs", "clone": clone} {
 		p.typeInto("#project-add [name="+name+"]", value)
 	}
 	p.click("#project-add [type=submit]")
@@ -32,6 +32,9 @@ func TestBrowserRegistersHandsInEditsAndInspectsTrace(t *testing.T) {
 	cfg, err := c.Configuration(context.Background())
 	must(t, err)
 	id := cfg.Projects[0].ID
+	if cfg.Projects[0].Fork != "" {
+		t.Fatal("registration unexpectedly configured a fork")
+	}
 	p.await("new project choice", `[...document.querySelector('#project-edit [name=project]').options].some(o => o.value === `+quote(string(id))+`)`)
 	p.choose("#project-edit [name=project]", string(id))
 	p.click("#project-edit [data-action=read-charter]")

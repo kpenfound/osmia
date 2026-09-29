@@ -20,12 +20,14 @@ import (
 // fakePulls is a pull request host in memory. lose makes the next Create
 // open the pull request and then fail, as a response lost in transit does.
 type fakePulls struct {
-	mu      sync.Mutex
-	prs     []pulls.PullRequest
-	finds   int
-	creates int
-	lose    bool
-	fork    func() string
+	mu       sync.Mutex
+	prs      []pulls.PullRequest
+	finds    int
+	syncHead bool
+	updates  int
+	creates  int
+	lose     bool
+	fork     func() string
 }
 
 func (c *fakePulls) Find(_ context.Context, repository, headRepository, branch string) ([]pulls.PullRequest, error) {
@@ -35,6 +37,9 @@ func (c *fakePulls) Find(_ context.Context, repository, headRepository, branch s
 	var out []pulls.PullRequest
 	for _, pr := range c.prs {
 		if pr.HeadRepository == headRepository && pr.Head == branch {
+			if c.syncHead {
+				pr.HeadCommit = c.fork()
+			}
 			out = append(out, pr)
 		}
 	}
@@ -614,4 +619,22 @@ func TestPublicationUsesOwnerMessageAndRejectsSupersededMessage(t *testing.T) {
 		t.Fatalf("message: %s", msg)
 	}
 	assertDeliveryTree(t, p, tip)
+}
+
+func (c *fakePulls) Update(_ context.Context, repository string, number int, change pulls.Update) (pulls.PullRequest, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.updates++
+	for i := range c.prs {
+		if c.prs[i].Number != number {
+			continue
+		}
+		c.prs[i].Base, c.prs[i].Title, c.prs[i].Body = change.Base, change.Title, change.Body
+		if c.lose {
+			c.lose = false
+			return pulls.PullRequest{}, errors.New("connection reset")
+		}
+		return c.prs[i], nil
+	}
+	return pulls.PullRequest{}, errors.New("pull request not found")
 }

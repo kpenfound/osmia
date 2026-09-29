@@ -295,7 +295,6 @@ func TestProjectAddValidation(t *testing.T) {
 		{"name", func(r *ProjectAddRequest) { r.Name = " " }, "name is required"},
 		{"upstream url", func(r *ProjectAddRequest) { r.Upstream = "https://github.com/dagger/dagger" }, "upstream must be owner/repository"},
 		{"fork suffix", func(r *ProjectAddRequest) { r.Fork = "owner/dagger.git" }, "fork must be owner/repository"},
-		{"same fork", func(r *ProjectAddRequest) { r.Fork = "DAGGER/dagger" }, "fork must differ"},
 		{"branch", func(r *ProjectAddRequest) { r.BaseBranch = "bad..name" }, "base_branch"},
 		{"relative clone", func(r *ProjectAddRequest) { r.Clone = "clone" }, "absolute path"},
 		{"missing clone", func(r *ProjectAddRequest) { r.Clone = filepath.Join(home, "missing") }, "does not exist"},

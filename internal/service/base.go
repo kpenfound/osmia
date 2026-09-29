@@ -84,7 +84,7 @@ func (s *Service) resolveBase(ctx context.Context, cfg *config.Config, repo *tra
 			return seal.Base{}, err
 		}
 		for _, publication := range records {
-			if publication.Status != publicationOpened || publication.Upstream != cfg.Project.Upstream {
+			if publication.Status != publicationOpened || !canonicalPublication(publication, cfg) {
 				continue
 			}
 			pulls, err := s.options.PullRequests.Find(ctx, publication.Upstream, publication.Fork, publication.Branch)
@@ -92,7 +92,7 @@ func (s *Service) resolveBase(ctx context.Context, cfg *config.Config, repo *tra
 				return seal.Base{}, err
 			}
 			for _, pr := range pulls {
-				if pr.Number == publication.PullRequest && pr.Merged && pr.HeadCommit == publication.Commit {
+				if pr.Number == publication.PullRequest && pr.Merged && pr.Base == publication.Base && pr.HeadCommit == publication.Commit {
 					return resolved, nil
 				}
 			}

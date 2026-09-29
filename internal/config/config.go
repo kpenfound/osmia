@@ -457,12 +457,15 @@ func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Proje
 		return Project{}, fieldError(projectPath, "version", "must be 1 (no migrations supported)")
 	}
 	for _, value := range []struct{ field, s string }{{"upstream", p.Upstream}, {"fork", p.Fork}} {
+		if value.field == "fork" && value.s == "" {
+			continue
+		}
 		if !ValidRepository(value.s) {
 			return Project{}, fieldError(projectPath, value.field, "expected owner/repository without a URL or .git suffix")
 		}
 	}
 	if strings.EqualFold(p.Upstream, p.Fork) {
-		return Project{}, fieldError(projectPath, "fork", "must differ from upstream")
+		p.Fork = ""
 	}
 	p.Clone, err = resolvePath(p.Clone, home, filepath.Dir(projectPath))
 	if err != nil {
@@ -801,4 +804,12 @@ func ValidBranch(s string) bool {
 		}
 	}
 	return true
+}
+
+// PushRepository names the repository receiving feature branches.
+func (p Project) PushRepository() string {
+	if p.Fork != "" {
+		return p.Fork
+	}
+	return p.Upstream
 }

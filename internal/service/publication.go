@@ -19,7 +19,7 @@ import (
 
 // PublishAction is the repository-boundary operation action that publishes
 // an assembled workstream's owner-approved branch and description: it pushes
-// the delivery commit to the configured fork, opens one pull request against
+// the delivery commit to the push repository, opens one pull request against
 // the upstream base branch and records the workstream delivered.
 const PublishAction = "publish"
 
@@ -34,7 +34,7 @@ const (
 	publicationPath     = "final/publication.json"
 	publicationDocument = "final-publication"
 	// publicationPushing and publicationOpened are the statuses of a
-	// publication record: the fork branch is being moved to the delivery
+	// publication record: the feature branch is being moved to the delivery
 	// commit, then the pull request is open and the workstream delivered.
 	publicationPushing = "pushing"
 	publicationOpened  = "opened"
@@ -42,19 +42,28 @@ const (
 	squashStyle = "squash"
 )
 
+type retargetInput struct {
+	Number      int    `json:"number"`
+	URL         string `json:"url"`
+	Base        string `json:"base"`
+	Description string `json:"description"`
+}
+
 // publishInput names one publication: the approval revision it publishes,
 // the reviewed commit and description hash that approval records, and the
-// delivery style, fork, upstream and base branch configured when it was
+// delivery style, resolved push repository, upstream and base branch when it was
 // asked for, so a retry publishes the same way.
 type publishInput struct {
-	Maintenance     bool   `json:"maintenance,omitempty"`
-	Approval        int    `json:"approval"`
-	Commit          string `json:"commit"`
-	DescriptionHash string `json:"description_hash"`
-	Style           string `json:"style"`
-	Fork            string `json:"fork"`
-	Upstream        string `json:"upstream"`
-	Base            string `json:"base"`
+	BaseWorkstream  config.WorkstreamID `json:"base_workstream,omitempty"`
+	Retarget        *retargetInput      `json:"retarget,omitempty"`
+	Maintenance     bool                `json:"maintenance,omitempty"`
+	Approval        int                 `json:"approval"`
+	Commit          string              `json:"commit"`
+	DescriptionHash string              `json:"description_hash"`
+	Style           string              `json:"style"`
+	Fork            string              `json:"fork"`
+	Upstream        string              `json:"upstream"`
+	Base            string              `json:"base"`
 }
 
 // DeliveryPublication is the document final/publication.json: the delivery
@@ -62,25 +71,28 @@ type publishInput struct {
 // the commit pushed to Branch of Fork through the clone's Remote; with the
 // squash style it is one commit holding Reviewed's tree. PullRequest and URL
 // name the pull request opened against Base of Upstream with Title and the
-// approved Description once Status is opened.
+// approved Description once Status is opened. Fork is the resolved push
+// repository, including upstream when the project has no fork. BaseWorkstream
+// identifies a dependent request; it is empty for the canonical base branch.
 type DeliveryPublication struct {
-	PriorURL        string `json:"prior_url,omitempty"`
-	Approval        int    `json:"approval"`
-	Operation       string `json:"operation"`
-	Status          string `json:"status"`
-	Style           string `json:"style"`
-	Fork            string `json:"fork"`
-	Remote          string `json:"remote"`
-	Branch          string `json:"branch"`
-	Reviewed        string `json:"reviewed"`
-	Commit          string `json:"commit"`
-	Upstream        string `json:"upstream"`
-	Base            string `json:"base"`
-	PullRequest     int    `json:"pull_request,omitempty"`
-	URL             string `json:"url,omitempty"`
-	Title           string `json:"title"`
-	Description     string `json:"description"`
-	DescriptionHash string `json:"description_hash"`
+	BaseWorkstream  config.WorkstreamID `json:"base_workstream,omitempty"`
+	PriorURL        string              `json:"prior_url,omitempty"`
+	Approval        int                 `json:"approval"`
+	Operation       string              `json:"operation"`
+	Status          string              `json:"status"`
+	Style           string              `json:"style"`
+	Fork            string              `json:"fork"`
+	Remote          string              `json:"remote"`
+	Branch          string              `json:"branch"`
+	Reviewed        string              `json:"reviewed"`
+	Commit          string              `json:"commit"`
+	Upstream        string              `json:"upstream"`
+	Base            string              `json:"base"`
+	PullRequest     int                 `json:"pull_request,omitempty"`
+	URL             string              `json:"url,omitempty"`
+	Title           string              `json:"title"`
+	Description     string              `json:"description"`
+	DescriptionHash string              `json:"description_hash"`
 }
 
 func publishIDs(approval int) (transition, event string) {
@@ -169,14 +181,29 @@ func (p *publisher) request(ctx context.Context, stream config.WorkstreamID) err
 	if !cfg.HasProject() || cfg.Project.ID != p.repository.Project() {
 		return nil
 	}
-	in := publishInput{Maintenance: feature.Value == DeliveredState, Approval: decision.Revision, Commit: approval.Commit, DescriptionHash: approval.DescriptionHash, Style: cfg.Project.Landing, Fork: cfg.Project.Fork, Upstream: cfg.Project.Upstream, Base: cfg.Project.BaseBranch}
+	in := publishInput{Maintenance: feature.Value == DeliveredState, Approval: decision.Revision, Commit: approval.Commit, DescriptionHash: approval.DescriptionHash, Style: cfg.Project.Landing, Fork: cfg.Project.PushRepository(), Upstream: cfg.Project.Upstream, Base: cfg.Project.BaseBranch}
 	report, _, err := latestFinalReport(p.repository, stream)
 	if err != nil {
 		return err
 	}
 	if report.Upstream != nil && report.Upstream.Workstream != "" {
-		in.Upstream = cfg.Project.Fork
+		in.Upstream = cfg.Project.PushRepository()
 		in.Base = report.Upstream.Branch
+		in.BaseWorkstream = report.Upstream.Workstream
+	}
+	if in.Maintenance && in.Fork == in.Upstream {
+		records, err := publications(p.repository, stream)
+		if err != nil {
+			return err
+		}
+		for _, d := range records {
+			if d.Status == publicationOpened && d.Upstream == in.Upstream && !canonicalPublication(d, cfg) {
+				in.Retarget = &retargetInput{Number: d.PullRequest, URL: d.URL, Base: d.Base, Description: d.Description}
+			}
+		}
+		if in.Retarget == nil {
+			return fmt.Errorf("delivery maintenance has no dependent pull request to retarget")
+		}
 	}
 	input, err := json.Marshal(in)
 	if err != nil {
@@ -192,7 +219,11 @@ func (p *publisher) request(ctx context.Context, stream config.WorkstreamID) err
 		action = publishUpstreamAction
 	}
 	op := coreadapter.Operation{ID: trace.OperationID(p.repository.Project(), stream, event), Boundary: coreadapter.RepositoryBoundary, Action: action, Input: input}
-	reason := fmt.Sprintf("the owner approved description %s for %s at %s; publication pushes it (%s) to %s of %s and opens a pull request against %s of %s", in.DescriptionHash, featureBranch(stream), in.Commit, in.Style, featureBranch(stream), in.Fork, in.Base, in.Upstream)
+	requestAction := "opens a pull request"
+	if in.Retarget != nil {
+		requestAction = fmt.Sprintf("retargets pull request #%d", in.Retarget.Number)
+	}
+	reason := fmt.Sprintf("the owner approved description %s for %s at %s; publication pushes it (%s) to %s of %s and %s against %s of %s", in.DescriptionHash, featureBranch(stream), in.Commit, in.Style, featureBranch(stream), in.Fork, requestAction, in.Base, in.Upstream)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: transition, Revision: 1, Project: p.repository.Project(), Workstream: stream, At: p.s.now(), Actor: foremanActor, Cause: decision.Cause}
 	tx := trace.Transaction{ExpectedVersion: subject.Version,
 		Transition: trace.Transition{Header: h, Subject: publicationSubject, From: subject.Value, To: fmt.Sprintf("requested-%d", in.Approval), Reason: reason},
@@ -217,7 +248,10 @@ func decodePublish(op coreadapter.Operation) (publishInput, error) {
 		return in, errors.New("publication action differs from delivery maintenance intent")
 	}
 	if in.Approval < 1 || in.Commit == "" || in.DescriptionHash == "" || in.Style == "" || in.Fork == "" || in.Upstream == "" || in.Base == "" {
-		return in, errors.New("publish operation requires a positive approval revision, a commit, a description hash, a style, a fork, an upstream and a base branch")
+		return in, errors.New("publish operation requires a positive approval revision, a commit, a description hash, a style, a push repository, an upstream and a base branch")
+	}
+	if in.Retarget != nil && (!in.Maintenance || in.Fork != in.Upstream || in.BaseWorkstream != "" || in.Retarget.Number < 1 || in.Retarget.URL == "" || in.Retarget.Base == "" || in.Retarget.Base == in.Base) {
+		return in, errors.New("invalid dependent pull request retarget operation")
 	}
 	return in, nil
 }
@@ -266,7 +300,7 @@ func publicationRefused(repository *trace.Repository, stream config.WorkstreamID
 }
 
 // Inspect reads the recorded transitions: a recorded outcome completes the
-// operation; otherwise it is absent, and Apply inspects the fork and its pull
+// operation; otherwise it is absent, and Apply inspects the push repository and its pull
 // requests before acting.
 func (p *publisher) Inspect(_ context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	in, err := decodePublish(op)
@@ -284,25 +318,26 @@ func (p *publisher) Inspect(_ context.Context, op coreadapter.Operation) (coread
 	if result != nil {
 		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "publication " + result.Outcome, Result: result}, nil
 	}
-	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("publication of owner approval %d is not recorded; it inspects the fork and its pull requests before acting", in.Approval)}, nil
+	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("publication of owner approval %d is not recorded; it inspects the push repository and its pull requests before acting", in.Approval)}, nil
 }
 
 // Apply publishes owner approval k. The workstream must be assembled and the
 // approval must still pass the delivery gate for the description it records:
 // the feature branch, final review and governing documents unchanged since.
 // Delivery amends the approved messages and identity and signs the outgoing
-// commits, preserving the reviewed tree and base; squash produces one commit. The service then reads the fork branch: at the delivery commit it is
+// commits, preserving the reviewed tree and base; squash produces one commit. The service then reads the feature branch: at the delivery commit it is
 // already pushed; absent, or at a commit an earlier publication of the
 // workstream recorded, it is pushed with that commit as the expected one;
 // at any other commit the publication is refused. An existing pull request
 // must match the approved base, description and current branch tip before a
 // push. final/publication.json records the delivery commit before the push.
 // After the push the pull request head is checked at the delivery commit; if
-// none exists, one is opened and checked. One commit then records the opened
+// none exists, one is opened and checked. A maintenance retarget instead
+// reconciles the recorded request and updates its base and approved text. One commit then records the opened
 // publication, the workstream's move to delivered with a notice, and the
 // publication's outcome. A refusal records the reason and tells the chief of
 // staff. Git, GitHub and storage errors leave the operation pending for
-// another attempt, which inspects the fork and pull requests again.
+// another attempt, which inspects the push repository and pull requests again.
 func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	in, err := decodePublish(op)
 	if err != nil {
@@ -362,6 +397,9 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		return coreadapter.OperationResult{}, err
 	}
 	branch := featureBranch(stream)
+	if branch == cfg.Project.BaseBranch {
+		return p.refuse(ctx, stream, in, "delivery cannot push to the project base branch")
+	}
 	title := deliveryTitle(approval.Description, stream)
 	if approval.Style != in.Style || len(approval.Messages) == 0 {
 		return p.refuse(ctx, stream, in, "delivery messages and style require current owner approval")
@@ -394,7 +432,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		return coreadapter.OperationResult{}, err
 	}
 	if report.Upstream != nil && report.Upstream.Workstream != "" {
-		if in.Upstream != cfg.Project.Fork || in.Base != report.Upstream.Branch {
+		if in.Upstream != cfg.Project.PushRepository() || in.Base != report.Upstream.Branch {
 			return p.refuse(ctx, stream, in, "the dependent pull request target changed; refresh owner approval")
 		}
 		baseTip, exists, err := g.RemoteBranch(ctx, remote, in.Base)
@@ -402,33 +440,39 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 			return coreadapter.OperationResult{}, err
 		}
 		if !exists || baseTip != report.Upstream.Commit {
-			return p.refuse(ctx, stream, in, "the fork's base branch differs from the reviewed base; refresh the base and review")
+			return p.refuse(ctx, stream, in, "the published base branch differs from the reviewed base; refresh the base and review")
 		}
 	}
-	record := DeliveryPublication{Approval: in.Approval, Operation: op.ID, Status: publicationPushing, Style: in.Style, Fork: in.Fork, Remote: remote, Branch: branch, Reviewed: in.Commit, Commit: published,
+	record := DeliveryPublication{BaseWorkstream: in.BaseWorkstream, Approval: in.Approval, Operation: op.ID, Status: publicationPushing, Style: in.Style, Fork: in.Fork, Remote: remote, Branch: branch, Reviewed: in.Commit, Commit: published,
 		Upstream: in.Upstream, Base: in.Base, Title: title, Description: approval.Description, DescriptionHash: approval.DescriptionHash}
 	for _, d := range prior {
-		if in.Maintenance && d.Status == publicationOpened && d.Upstream == cfg.Project.Fork {
+		if in.Maintenance && d.Status == publicationOpened && d.Upstream == cfg.Project.PushRepository() && !canonicalPublication(d, cfg) {
 			record.PriorURL = d.URL
 		}
-		if d.Operation == op.ID && (d.Approval != in.Approval || d.Reviewed != in.Commit || d.Commit != published || d.DescriptionHash != in.DescriptionHash || d.Description != approval.Description || d.Style != in.Style || d.Fork != in.Fork || d.Remote != remote || d.Branch != branch || d.Upstream != in.Upstream || d.Base != in.Base) {
+		if d.Operation == op.ID && (d.Approval != in.Approval || d.Reviewed != in.Commit || d.Commit != published || d.DescriptionHash != in.DescriptionHash || d.Description != approval.Description || d.Style != in.Style || d.Fork != in.Fork || d.Remote != remote || d.Branch != branch || d.Upstream != in.Upstream || d.Base != in.Base || d.BaseWorkstream != in.BaseWorkstream) {
 			return p.refuse(ctx, stream, in, "the recorded publication does not match this owner approval and delivery")
 		}
+	}
+	if in.Retarget != nil {
+		record.PriorURL = in.Retarget.URL
 	}
 	tip, exists, err := g.RemoteBranch(ctx, remote, branch)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	if exists && tip != published && !slices.ContainsFunc(prior, func(d DeliveryPublication) bool { return d.Commit == tip && d.Branch == branch && d.Fork == in.Fork }) {
-		return p.refuse(ctx, stream, in, fmt.Sprintf("fork branch %s of %s is at %s, which no publication of this workstream pushed", branch, in.Fork, tip))
+		return p.refuse(ctx, stream, in, fmt.Sprintf("feature branch %s of %s is at %s, which no publication of this workstream pushed", branch, in.Fork, tip))
 	}
-	// An open PR at the old owned tip advances when the fork branch is pushed.
+	// An open PR at the old owned tip advances when the feature branch is pushed.
 	// Read it before the push so a closed or edited PR cannot be hidden by that advance.
 	before, err := client.Find(ctx, in.Upstream, in.Fork, branch)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	if len(before) != 0 && (len(before) != 1 || !matchingPublicationPR(before[0], in, branch, approval.Description, tip)) {
+	if in.Retarget != nil && len(before) == 0 {
+		return p.refuse(ctx, stream, in, "the dependent pull request is missing")
+	}
+	if len(before) != 0 && (len(before) != 1 || !matchingPublicationPR(before[0], in, branch, approval.Description, tip) && !matchingRetargetPR(before[0], in, branch, tip)) {
 		return p.refusePR(ctx, stream, in, branch, published, before)
 	}
 	if !exists || tip != published {
@@ -450,6 +494,29 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	found, err := client.Find(ctx, in.Upstream, in.Fork, branch)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
+	}
+	if in.Retarget != nil {
+		if len(found) != 1 || found[0].Number != in.Retarget.Number || found[0].URL != in.Retarget.URL {
+			return p.refusePR(ctx, stream, in, branch, published, found)
+		}
+		if !matchingPublicationPR(found[0], in, branch, approval.Description, published) {
+			if !matchingRetargetPR(found[0], in, branch, published) {
+				return p.refusePR(ctx, stream, in, branch, published, found)
+			}
+			if err := p.s.step("publish-retargeting"); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			if _, err := client.Update(ctx, in.Upstream, in.Retarget.Number, pulls.Update{Base: in.Base, Title: title, Body: approval.Description}); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			if err := p.s.step("publish-retargeted"); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			found, err = client.Find(ctx, in.Upstream, in.Fork, branch)
+			if err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+		}
 	}
 	if len(found) == 0 {
 		created, createErr := client.Create(ctx, in.Upstream, pulls.New{HeadRepository: in.Fork, Head: branch, Base: in.Base, Title: title, Body: approval.Description})
@@ -476,7 +543,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 }
 
 func matchingPublicationPR(pr pulls.PullRequest, in publishInput, branch, description, commit string) bool {
-	return pr.Number > 0 && pr.URL != "" && pr.State == "open" && pr.HeadRepository == in.Fork && pr.Head == branch && pr.Base == in.Base && pr.HeadCommit == commit && pr.Body == description
+	return (in.Retarget == nil || pr.Number == in.Retarget.Number && pr.URL == in.Retarget.URL) && pr.Number > 0 && pr.URL != "" && pr.State == "open" && pr.HeadRepository == in.Fork && pr.Head == branch && pr.Base == in.Base && pr.HeadCommit == commit && pr.Body == description
 }
 
 func (p *publisher) refusePR(ctx context.Context, stream config.WorkstreamID, in publishInput, branch, commit string, found []pulls.PullRequest) (coreadapter.OperationResult, error) {
@@ -633,4 +700,11 @@ func (p *publisher) refuse(ctx context.Context, stream config.WorkstreamID, in p
 		return coreadapter.OperationResult{}, err
 	}
 	return coreadapter.OperationResult{Outcome: "failed", Evidence: recorded}, nil
+}
+
+func matchingRetargetPR(pr pulls.PullRequest, in publishInput, branch, commit string) bool {
+	if in.Retarget == nil {
+		return false
+	}
+	return pr.Number == in.Retarget.Number && pr.URL == in.Retarget.URL && pr.State == "open" && !pr.Merged && pr.HeadRepository == in.Fork && pr.Head == branch && pr.HeadCommit == commit && pr.Base == in.Retarget.Base && pr.Body == in.Retarget.Description
 }

@@ -128,3 +128,28 @@ func TestPauseAndPriorityFindTheProjectOfTheWorkstream(t *testing.T) {
 		t.Fatalf("pause of an unknown workstream: %d %q %q", code, out, diag)
 	}
 }
+
+func TestProjectAddWithoutFork(t *testing.T) {
+	for _, fork := range []string{"", "DAGGER/dagger"} {
+		t.Run(fork, func(t *testing.T) {
+			opts, clone := emptyFixture(t)
+			s, err := service.Start(context.Background(), opts)
+			must(t, err)
+			t.Cleanup(func() { s.Close() })
+			args := []string{"project", "add", "dagger", "--upstream", "dagger/dagger", "--clone", clone, "--json"}
+			if fork != "" {
+				args = append(args, "--fork", fork)
+			}
+			var added service.ProjectResponse
+			must(t, json.Unmarshal([]byte(successful(t, opts.Config.Root, args...)), &added))
+			if added.Project.Fork != "" || added.Project.Upstream != "dagger/dagger" {
+				t.Fatal(added)
+			}
+			var again service.ProjectResponse
+			must(t, json.Unmarshal([]byte(successful(t, opts.Config.Root, args...)), &again))
+			if again.Project.ID != added.Project.ID {
+				t.Fatal("registration was not idempotent")
+			}
+		})
+	}
+}

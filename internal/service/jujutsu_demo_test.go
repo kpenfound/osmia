@@ -95,6 +95,10 @@ func runIndependent(message string, stream config.WorkstreamID) string {
 // final review and the owner's approval to one pull request on a local fork.
 // It returns what the fork then holds.
 func deliverOn(t *testing.T, backend string) delivered {
+	return deliverOnProject(t, backend, false)
+}
+
+func deliverOnProject(t *testing.T, backend string, sameRepository bool) delivered {
 	t.Helper()
 	ctx := context.Background()
 	f, masons := newMasonFixture(t, 1, validPlan)
@@ -118,7 +122,23 @@ func deliverOn(t *testing.T, backend string) delivered {
 	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
 	must(t, os.MkdirAll(filepath.Dir(fork), 0700))
 	demoGit(t, home, "init", "--quiet", "--bare", fork)
-	demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
+	if sameRepository {
+		fork = filepath.Join(home, "remotes", "dagger", "dagger.git")
+		demoGit(t, home, "-C", f.clone, "remote", "rename", "upstream", "origin")
+		projectPath := filepath.Join(f.opts.Config.Root, "projects", string(f.s.cfg.Project.ID), "config.toml")
+		data, err := os.ReadFile(projectPath)
+		must(t, err)
+		var kept []string
+		for _, line := range strings.Split(string(data), "\n") {
+			if !strings.HasPrefix(strings.TrimSpace(line), "fork") {
+				kept = append(kept, line)
+			}
+		}
+		must(t, os.WriteFile(projectPath, []byte(strings.Join(kept, "\n")), 0600))
+	} else {
+		demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
+	}
+	originalBase := strings.TrimSpace(demoGit(t, home, "-C", filepath.Join(home, "remotes", "dagger", "dagger.git"), "rev-parse", "main"))
 	forkBranch := func() string {
 		return strings.TrimSpace(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(stream)))
 	}
@@ -264,7 +284,14 @@ func deliverOn(t *testing.T, backend string) delivered {
 	base := strings.TrimSpace(demoGit(t, home, "-C", filepath.Join(home, "remotes", "dagger", "dagger.git"), "rev-parse", "refs/heads/main"))
 	var out delivered
 	out.Refs = strings.Fields(strings.ReplaceAll(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(refname)"), string(stream), "<workstream>"))
-	if !slices.Equal(out.Refs, []string{"refs/heads/osmia/<workstream>"}) {
+	wantRefs := []string{"refs/heads/osmia/<workstream>"}
+	if sameRepository {
+		wantRefs = []string{"refs/heads/main", "refs/heads/osmia/<workstream>"}
+	}
+	if base != originalBase {
+		t.Fatal("publication changed upstream main")
+	}
+	if !slices.Equal(out.Refs, wantRefs) {
 		t.Fatalf("the fork's refs %v", out.Refs)
 	}
 	for _, commit := range strings.Fields(demoGit(t, home, "-C", fork, "rev-list", "--reverse", "--topo-order", base+".."+forkBranch())) {
@@ -303,4 +330,20 @@ func deliverOn(t *testing.T, backend string) delivered {
 		out.Commits = append(out.Commits, c)
 	}
 	return out
+}
+
+func TestDeliveryWithoutForkOnBothWorkspaceBackends(t *testing.T) {
+	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
+		t.Run(backend, func(t *testing.T) {
+			if backend == config.WorkspacesJujutsu {
+				if _, err := exec.LookPath("jj"); err != nil {
+					if os.Getenv("OSMIA_REQUIRE_JJ") != "" {
+						t.Fatal(err)
+					}
+					t.Skip("jj is not installed")
+				}
+			}
+			deliverOnProject(t, backend, true)
+		})
+	}
 }

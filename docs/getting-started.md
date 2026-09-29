@@ -1,13 +1,13 @@
 # Getting started
 
-This guide takes you from nothing to a pull request on your fork that you
+This guide takes you from nothing to a pull request in your repository or from your fork that you
 approved. Follow the steps in order.
 
 ## Supported features
 
 - Multiple projects, each with its own clone, configuration and trace.
 - Git worktrees, or Jujutsu workspaces on your clone's Git store: the service
-  builds each workstream's feature branch in them and pushes it to your fork
+  builds each workstream's feature branch in them and pushes it to your repository or fork
   itself.
 - File-based context: the charter, the knowledge base and your rulings reach
   agents as files.
@@ -17,7 +17,8 @@ This walkthrough uses one project and file-based context. Optional
 [Hearsay memory](hearsay.md) can be configured separately.
 
 You need `git`, a clone of the project you contribute to whose remotes include
-the upstream repository, a fork of it that you can push to, and the agent CLI
+the upstream repository and, optionally, a fork you can push to. Without a
+fork, you need permission to push feature branches to upstream. You also need the agent CLI
 your profile names (`claude`, `codex` or `opencode`), signed in. For the
 phone page you also need a [Tailscale](https://tailscale.com) tailnet.
 
@@ -118,6 +119,16 @@ editing the file, `osmia reload` applies what it can
 osmia project add myproject --upstream owner/repo --fork you/repo --clone ~/src/repo
 ```
 
+For a repository you can push to directly, omit `--fork`:
+
+```sh
+osmia project add myproject --upstream you/repo --clone ~/src/repo
+```
+
+An `origin` remote pointing to `you/repo` is sufficient. Delivery pushes an
+Osmia feature branch and opens a pull request against the configured base
+branch; it does not push to that base branch or merge the request.
+
 The command prints the project ID (`p_…`). The service creates the project's
 trace repository under `<root>/projects/<project-id>/`, outside your clone, seeds
 a map of the repository's subsystems, and asks the librarian for the first
@@ -187,7 +198,7 @@ When every unit has landed and the final review is done, the workstream's
 delivery entry opens. Read the final report and the drafted pull request
 description; on the page you can edit the description before approving. Approve
 it on the page, or with `osmia approve <workstream-id> [description-file]`. The
-service then pushes the branch to your fork and opens the pull request against
+service then pushes the branch to your repository or fork and opens the pull request against
 the upstream itself, with your description; no agent pushes. `osmia delivery
 <workstream-id>` shows the pull request it was delivered as, and the workstream
 ends `delivered`.

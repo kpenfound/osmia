@@ -251,13 +251,13 @@ func TestBaseIntegrationReleasesUnsealedDependentAfterParentBranchRemoval(t *tes
 	must(t, err)
 	sealed, _, _, err := seal.Latest(repo, parent)
 	must(t, err)
-	publication := DeliveryPublication{Status: publicationOpened, Upstream: p.s.cfg.Project.Upstream, Fork: p.s.cfg.Project.Fork, Branch: sealed.Branch, Commit: sealed.Base.Commit, PullRequest: 7}
+	publication := DeliveryPublication{Status: publicationOpened, Base: "main", Upstream: p.s.cfg.Project.Upstream, Fork: p.s.cfg.Project.Fork, Branch: sealed.Branch, Commit: sealed.Base.Commit, PullRequest: 7}
 	data, err := json.Marshal(publication)
 	must(t, err)
 	h := trace.Header{Schema: "osmia.trace.document", Version: 1, ID: publicationDocument, Revision: 1, Project: repo.Project(), Workstream: parent, At: p.s.now(), Actor: foremanActor, Cause: "delivery"}
 	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: publicationPath, Content: string(data)}}))
 	host := p.s.options.PullRequests.(repositoryPulls)[p.s.cfg.Project.Upstream]
-	host.prs = []pulls.PullRequest{{Number: 7, Merged: true, Head: sealed.Branch, HeadRepository: p.s.cfg.Project.Fork, HeadCommit: sealed.Base.Commit}}
+	host.prs = []pulls.PullRequest{{Number: 7, Merged: true, Base: "main", Head: sealed.Branch, HeadRepository: p.s.cfg.Project.Fork, HeadCommit: sealed.Base.Commit}}
 	demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "branch", "-D", sealed.Branch)
 	ratified, err := shed.EncodeRatification(shed.Ratify(1, shed.Pin{Spec: 1, Plan: 1}, nil))
 	must(t, err)
@@ -288,4 +288,8 @@ func TestBaseIntegrationReleasesUnsealedDependentAfterParentBranchRemoval(t *tes
 	if observed.Unavailable || observed.Base.Workstream != "" || observed.Base.Commit == "" {
 		t.Fatalf("integration observation %+v", observed)
 	}
+}
+
+func (r repositoryPulls) Update(ctx context.Context, repository string, number int, change pulls.Update) (pulls.PullRequest, error) {
+	return r[repository].Update(ctx, repository, number, change)
 }

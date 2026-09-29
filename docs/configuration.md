@@ -287,7 +287,7 @@ execution.
 
 ## Project registration
 
-`osmia project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH`
+`osmia project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH`
 (API: `POST /v1/projects`) registers a project with the running service. The
 client never writes configuration; the service validates the request before
 writing anything, then:
@@ -309,8 +309,8 @@ writing anything, then:
 6. activates the project (opens the trace and starts reconciliation, which
    runs the extraction) and removes the journal.
 
-Validation refuses, each with its own message: a blank name, an upstream or fork
-that is not `owner/repository`, a fork equal to the upstream, an invalid base
+Validation refuses, each with its own message: a blank name, an upstream or a supplied fork
+that is not `owner/repository`, an invalid base
 branch, a relative clone path, a clone that does not exist, is not a directory
 or has no `.git` entry, and a clone nested with the root either way.
 Registration never writes to the clone; seeding only reads it. The service
@@ -354,7 +354,7 @@ to disagree with it.
 version = 1
 name = "My project"                 # optional display metadata, default empty
 upstream = "upstream/repository"    # required owner/repository, not a URL
-fork = "my-account/repository"      # required, distinct from upstream
+fork = "my-account/repository"      # optional; omit to push feature branches to upstream
 clone = "~/src/repository"          # required; may not yet exist
 base_branch = "main"
 landing = "commit-per-unit"
@@ -495,3 +495,16 @@ identity settings select a separate cursor; the first watch begins at Hearsay's
 current position. Existing history remains available through bundles and read
 tools. Feedback on a delivered workstream can produce a notice or question; it
 cannot reopen implementation.
+
+When `fork` is omitted, Osmia pushes its feature branch to `upstream` and
+opens the pull request there against `base_branch`. A fork equal to upstream
+(case-insensitive) is normalized to omission. The clone can have just an
+`origin` remote matching upstream. Existing configurations with a separate
+fork continue to push there. Osmia never pushes to the configured base branch
+or merges the pull request.
+
+For dependent workstreams without a fork, the pull request initially targets
+the parent's feature branch. After the parent integrates, fresh review and
+owner delivery approval authorize retargeting that same pull request to the
+project's base branch with the approved description. Interrupted updates are
+reconciled against the recorded request before retrying.

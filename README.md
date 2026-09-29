@@ -3,7 +3,7 @@
 Osmia is a personal software factory for feature work on repositories you
 contribute to. You give it a feature description and make the decisions that
 need your judgement. It plans, builds and reviews the work, then delivers an
-approved branch and pull request from your fork.
+approved feature branch and pull request in your repository or from your fork.
 
 One service manages workstreams, agent capacity and the durable record. It keeps
 its configuration in `~/.config/osmia` and factory state in

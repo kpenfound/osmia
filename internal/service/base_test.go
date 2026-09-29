@@ -30,7 +30,20 @@ func (g *baseProvider) Ancestor(context.Context, string, string) (bool, error) {
 }
 
 func TestBaseResolverUsesDependencyUntilUpstreamIntegration(t *testing.T) {
+	for _, fork := range []bool{true, false} {
+		name := "without-fork"
+		if fork {
+			name = "with-fork"
+		}
+		t.Run(name, func(t *testing.T) { testBaseResolver(t, fork) })
+	}
+}
+
+func testBaseResolver(t *testing.T, fork bool) {
 	_, cfg := conversationFixture(t, "base-")
+	if !fork {
+		cfg.Project.Fork = ""
+	}
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
 	defer repo.Close()
@@ -69,7 +82,7 @@ func TestBaseResolverUsesDependencyUntilUpstreamIntegration(t *testing.T) {
 	g.integrated = false
 	// A squash publication supplies the actual fork base commit, and the merged
 	// hosting record detects its integration even without an ancestor relation.
-	publication := DeliveryPublication{Status: publicationOpened, Upstream: cfg.Project.Upstream, Fork: cfg.Project.Fork, Branch: featureBranch(stream), Commit: "squashed-base", PullRequest: 5}
+	publication := DeliveryPublication{Status: publicationOpened, Base: "main", Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: featureBranch(stream), Commit: "squashed-base", PullRequest: 5}
 	data, err = json.Marshal(publication)
 	must(t, err)
 	h.ID = publicationDocument
@@ -89,7 +102,7 @@ func TestBaseResolverUsesDependencyUntilUpstreamIntegration(t *testing.T) {
 	if selected.Commit != "squashed-base" || selected.Workstream != stream {
 		t.Fatalf("squash base %+v", selected)
 	}
-	hosting.prs = []pulls.PullRequest{{Number: 5, Merged: true, Head: featureBranch(stream), HeadRepository: cfg.Project.Fork, HeadCommit: "squashed-base"}}
+	hosting.prs = []pulls.PullRequest{{Number: 5, Merged: true, Head: featureBranch(stream), Base: "main", HeadRepository: cfg.Project.PushRepository(), HeadCommit: "squashed-base"}}
 	selected, err = s.resolveBase(ctx, cfg, repo, quiet, g)
 	must(t, err)
 	if selected.Workstream != "" || selected.Commit != g.upstream {
@@ -101,6 +114,12 @@ func TestBaseResolverUsesDependencyUntilUpstreamIntegration(t *testing.T) {
 	if selected.Workstream != "" {
 		t.Fatal("merged dependency required a deleted local branch")
 	}
+	hosting.prs[0].Base = "osmia/another-parent"
+	_, err = s.resolveBase(ctx, cfg, repo, quiet, g)
+	if !errors.Is(err, errBaseUnavailable) {
+		t.Fatalf("merge into another feature was mistaken for upstream integration: %v", err)
+	}
+	hosting.prs[0].Base = "main"
 	hosting.prs[0].Merged = false
 	_, err = s.resolveBase(ctx, cfg, repo, quiet, g)
 	if !errors.Is(err, errBaseUnavailable) {
