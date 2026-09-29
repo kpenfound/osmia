@@ -16,7 +16,7 @@ osmia v0.1.0 (5e8a15b3915095d9e00bbc3ab3e5cc97970f2be1)
 ```
 
 `osmia serve` reports the same values as `build.version` and `build.commit`
-in [`/v1/health`](service.md). A binary built with a plain `go build` is
+in `/v1/health`. A binary built with a plain `go build` is
 unstamped: it reports version `dev` and an empty commit, and `--version`
 prints `osmia dev`.
 

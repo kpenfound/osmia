@@ -9,7 +9,7 @@ and keep target-project factory state outside the repository Osmia works on.
 Run the complete check suite through Dagger from the repository root:
 
 ```sh
-DAGGER_X_RELEASE=v1.0.0-beta.14 dagger check
+dagger check
 ```
 
 The check needs a working Dagger container engine. It runs the Go suite, browser

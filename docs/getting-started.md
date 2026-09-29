@@ -83,13 +83,13 @@ webhook = "https://ntfy.sh/your-private-topic"
   is kept in `<root>/tailnet`, so later starts need neither. There is no login
   of Osmia's own: your tailnet's access rules decide who can reach the page and
   make decisions. Leave `tailnet` out to use the command line alone.
-  See [reach Osmia from your phone](service.md#reach-osmia-from-your-phone).
+  See [reach Osmia from your phone](running.md#reach-osmia-from-your-phone).
 - **`notify.webhook`** is optional. With it set, every decision that opens in
   your inbox, and the daily budget pause, is posted once as plain text to that
   `http` or `https` URL, such as an [ntfy](https://ntfy.sh) topic, with the
   tailnet address to open. The URL is shown in `/v1/config`, so avoid one that
   embeds a secret you do not want there. See
-  [notifications](service.md#notifications).
+  [notifications](running.md#notifications).
 
 ## 3. Run the service
 
@@ -110,7 +110,7 @@ logged in. `/v1/health` returns the service name, API version and
 `build.version` and `build.commit`, the ones `osmia --version` printed. A
 restart-required or reload-required setting appears among the diagnostics; after
 editing the file, `osmia reload` applies what it can
-([reload](service.md#reload)).
+([reload](running.md#reload)).
 
 ## 4. Add a project and write its charter
 
@@ -139,8 +139,7 @@ There is nothing further to ratify: the service records your edit as a new
 charter revision the next time it reads the file, and `osmia status` then shows
 `Charter: ready (2 rules, revision 2)`. Rules later proposed by the chief of
 staff are decided with `osmia charter`. See [charter](charter.md) for the
-format. The [onboarding demonstration](onboarding-demonstration.md) shows these steps run
-end to end with fake agents.
+format.
 
 ## 5. Hand in a workstream and decide
 
@@ -164,7 +163,7 @@ can answer it from either place:
   inbox lists every open decision with its question, the options, the
   recommendation and what waits on it, and each card carries its own controls.
   The page follows the service as it works, so a new decision appears without a
-  reload. See the [web page](service.md#web-page).
+  reload. See the [web page](running.md#web-page).
 - **The command line.** `osmia inbox` lists the same entries, each with the
   command that answers it.
 
@@ -195,15 +194,8 @@ ends `delivered`.
 
 ## Where to go next
 
-The feature demonstrations are reference material for what each part does and how it
-is tested:
-
-- [Command line](cli.md), [configuration](configuration.md), [service API](service.md) and [charter](charter.md).
-- [Turn isolation](isolation.md) for sandboxes.
-- The demonstrations run the whole path with fake agents:
-  [owner notifications](owner-notifications-demonstration.md), [web page](web-demonstration.md),
-  [onboarding](onboarding-demonstration.md), [hand-in](hand-in-demonstration.md),
-  [chief of staff](chief-of-staff-demonstration.md), [plan ratification](plan-ratification-demonstration.md),
-  [implementation and landing](implementation-demonstration.md), [parallel units](parallel-units-demonstration.md),
-  [upstream drift](upstream-drift-demonstration.md), [amendments](amendments-demonstration.md) and
-  [reliability](reliability-demonstration.md).
+- [Command line](cli.md) for every command and flag.
+- [Configuration](configuration.md) for profiles, sandboxes, capacity and budgets.
+- [Running the service](running.md) for the web page, phone access, reload and notifications.
+- [Charter](charter.md) for writing a project's rules.
+- [Hearsay](hearsay.md) for optional memory.

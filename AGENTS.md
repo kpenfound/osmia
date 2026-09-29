@@ -3,15 +3,15 @@
 ## Design and scope
 
 - Read [docs/design.md](docs/design.md) before proposing, planning or implementing a feature. It is the source of truth; issues describe outcomes and do not override it.
-- Follow the feature dependencies in the design and the active scope in `bees.toml`. Leave work-item decomposition to the development factory.
+- Follow the feature dependencies in the design.
 - Keep behavior changes and the design consistent. Surface a conflict with the design instead of silently changing product scope.
-- Repository bootstrap, the Go module, initial Dagger checks and factory configuration are already initialized. Do not create work items to repeat them.
+- Repository bootstrap, the Go module and initial Dagger checks are already initialized. Do not repeat them.
 - Hearsay is optional. File-based context must support the complete workflow without it.
 
 ## Architecture guardrails
 
 - Keep state transitions, scheduling, capacity and owner gates in Go. Models run inside turns, never on the scheduling path.
-- Osmia's service owns version control and delivery credentials. Its runtime agents receive scoped files and tools; they do not commit, rebase or push. This is a product requirement, not a restriction on the development factory's normal branch and pull-request workflow.
+- Osmia's service owns version control and delivery credentials. Its runtime agents receive scoped files and tools; they do not commit, rebase or push. This is a product requirement, not a restriction on the normal branch and pull-request workflow used to develop Osmia.
 - Keep target-project factory state under the Osmia root, outside the target repository. Osmia's own design and development configuration belong here.
 - Preserve the trace, durable threads and explicit owner decisions through restarts and retries. Reconcile side effects before retrying them.
 - Reuse `github.com/kpenfound/busybees/core` through a pinned dependency. Do not require a sibling checkout or copy its internals into this repository.
@@ -20,17 +20,16 @@
 
 - When an Osmia feature needs functionality missing from busybees/core, open an upstream feature request in `kpenfound/busybees`.
 - If the needed logic can be implemented in Osmia while awaiting upstream support, a temporary local implementation is allowed. Leave a `TODO` comment beside that code describing the capability needed and stating that the extra code must be removed when busybees/core provides it.
-- If the Osmia feature is blocked until upstream implements the capability, comment on the blocked Osmia issue explaining the dependency and linking the upstream feature request, and ensure it receives the needs-human label (`bees:needs-human` in this factory) so the upstream request can be prioritized. Use the factory's escalation mechanism when it owns label changes.
+- If the Osmia feature is blocked until upstream implements the capability, comment on the blocked Osmia issue explaining the dependency and linking the upstream feature request, so the upstream request can be prioritized.
 
 ## Validation
 
-- Run `dagger check` before declaring a change complete. Use the pinned experimental release:
+- Run `dagger check` before declaring a change complete:
 
   ```sh
   dagger check
   ```
 
-- The factory exports `DAGGER_X_RELEASE` for its sessions.
 - Never run `go test` on the host, in any role and for any purpose: iterating, a single test, a mutation check and reproducing a flake included. Tests start processes that leak onto the machine they run on, so they run only inside Dagger. `gofmt`, `go build` and `go vet` are fine on the host; `go vet ./...` type-checks test files without running them.
 - Run one package or one test inside a Dagger container:
 
@@ -56,7 +55,7 @@
 
 - Keep changes focused on the issue. Avoid unrelated refactors, generated churn and dependencies without a concrete need.
 - Format Go with `gofmt`; keep module and Dagger lockfiles consistent with dependency changes.
-- Keep `.bees/`, local runtime state, credentials, logs and build artifacts out of version control. Reference secrets through environment variables.
+- Keep local runtime state, credentials, logs and build artifacts out of version control. Reference secrets through environment variables.
 - Update documentation with user-visible behavior and configuration changes. Keep the README concise while the product is under construction.
 - Review the diff for accidental files and secrets. Describe the resulting behavior and validation clearly in pull requests.
 

@@ -47,14 +47,6 @@ osmia reload
 osmia status --json
 ```
 
-The [onboarding walkthrough](onboarding-demonstration.md) runs `project add`, `handin`,
-`status` and `project remove` in order for a new project. The
-[chief-of-staff walkthrough](chief-of-staff-demonstration.md) runs `send`,
-`conversation`, `status`, `inbox` and `answer` on an onboarded project, across
-a service restart. The [plan ratification demonstration](plan-ratification-demonstration.md) runs
-`handin` (with and without `--skip-debate`), `abandon`, `shed overrule`, `ratify`, `inbox` and
-`answer` through their API calls, from hand-in to a sealed feature branch.
-
 ## Commands and flags
 
 - `serve [--detach] [--root PATH]` validates and starts the service. Detached
@@ -63,7 +55,7 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   SIGTERM drain requests and release ownership and the socket. A live owner is
   refused; a provably stale socket is recovered automatically. The service
   runs the librarian, architect, committee and chief-of-staff turns in each role's
-  configured sandbox; see [running turns](service.md#running-turns).
+  configured sandbox.
 - `status` shows health, loaded configuration digest/root, each configuration
   file on disk against the loaded configuration as `config` prints it, the
   active project
@@ -74,18 +66,18 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   waits to retry), diagnostics, the last failed reload (`Last reload failed at
   <time>: <file>: <field>: <reason>`) until a reload succeeds, effective
   runtime controls and the project's
-  context mode (`file`, a normal mode; see [context](context.md)), with
+  context mode (`file`, a normal mode), with
   `budget.per_day` today's known spend against it (`Daily budget: USD <spend>
   of USD <limit> spent on <day>`, marked `at least` with the count of attempts
-  whose cost is unknown; see [daily budget](service.md#daily-budget)), today's
-  [provider usage](service.md#provider-usage) (`Provider usage on <day>:`,
+  whose cost is unknown), today's
+  provider usage (`Provider usage on <day>:`,
   then per provider `<provider>: USD <spend> known spend`, marked `at least`
   like the daily budget, with `Limit: <status> kind=<kind> until <time>` or
   `until cleared` while a usage limit is in force, `Fallback: <role> runs
   <profile> in place of <configured>` and `Paused: <role> has no fallback
   available` for the roles the limit affects, and an `unattributed:` line for
   costs no attempt names a provider for), the
-  [capacity](service.md#capacity) (`Capacity (per workstream <n>):`, then
+  capacity (`Capacity (per workstream <n>):`, then
   `<role>: <used> of <limit> slot(s) in use` for mason, reviewer and
   committee, each followed by `Waiting: <workstream> turn <turn> of <agent>
   (<reason>)` or `Waiting: <workstream> unit <unit> (<reason>)` for the work
@@ -93,7 +85,7 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   role and profile whose latest turn attempts failed with infrastructure
   failures (`Infrastructure failures: <role> on profile <profile> failed <n>
   time(s) in a row; last at <time>: <failure>`), the
-  [workspace backend](service.md#workspace-backends) new workstreams get
+  workspace backend new workstreams get
   (`Workspaces: setting=<setting> new_workstreams=<backend> jj=<version>`,
   `none` when `workspaces = "jujutsu"` finds no supported `jj`, which a
   diagnostic explains), then each
@@ -117,7 +109,7 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   seconds, effective profile, optional attempt number and `resume` or `replay`
   path, and a parked question's trace number. A workstream the project does not hold fails with
   `not_found` (exit 4); with no project configured it fails with `no_project`
-  (exit 4). See [workstream status](service.md#workstream-status).
+  (exit 4).
 - `trace <workstream-id> [unit <id>|criterion <spec#n>|commit <full-sha>]`
   walks the active project's durable trace through the service API. With no
   selector it lists sealed revisions, criteria, units and delivery. Selectors
@@ -133,7 +125,7 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   answered; the next service start completes it as cancelled and
   `conversation` lists it as `failed`. An empty message, or a workstream the active project does
   not hold, fails with `validation` (exit 4); with no project configured it
-  fails with `no_project` (exit 4). See [conversation](service.md#conversation).
+  fails with `no_project` (exit 4).
 - `conversation <workstream-id>` lists the owner's messages to that
   workstream's chief of staff and its final responses, oldest first. Each
   entry shows when it was sent or answered, who wrote it, its turn ID and the
@@ -156,7 +148,7 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   quick reply, `ratify`, `contested`, `amendment`, or `delivery` then
   `approve`. Decided entries, superseded packet revisions and entries of an
   abandoned workstream are left out. Without a project or a trace the inbox is
-  empty. See [inbox and rulings](service.md#inbox-and-rulings).
+  empty.
 - `answer <inbox-number> <ruling>` records your ruling on an inbox entry. The
   ruling is one argument; quote it. The service records it before answering;
   the chief of staff then rephrases it for every asker of the entry, whose
@@ -196,7 +188,7 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   decision; deciding the other way fails with `conflict` (exit 5), as does a
   proposal of an abandoned workstream. An unknown proposal fails with
   `not_found` (exit 4). You can also tell the workstream's chief of staff your
-  decision with `send`. See [charter proposals](service.md#charter-proposals).
+  decision with `send`.
 - `contested <workstream-id> <unit> <review|revise> <note>` records your
   direction for a contested unit shown by `status`. Quote the required note.
   `review` requests another reviewer verdict on the same candidate; `revise`
@@ -213,7 +205,7 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   `handed/` and any branch stay. `status` then shows the state `abandoned`. An
   empty reason, or a workstream the active project does not hold, fails with
   `validation` (exit 4); a delivered or already abandoned workstream fails
-  with `conflict` (exit 5). See [abandoning](service.md#abandoning).
+  with `conflict` (exit 5).
 - `shed object <workstream-id> <argument>` adds your own objection to the
   current round of a workstream's debate. The argument is one argument; quote
   it. It is recorded as yours, stands in the dissent record and blocks, and the
@@ -265,8 +257,7 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   asked for, pending or running, and says which; once it has failed, the same
   command asks for the sealing again, which is how you retry one after putting
   right what failed it. A workstream with no packet yet fails with `not_found`
-  (exit 4). See [the ratification gate](service.md#the-ratification-gate) and
-  [sealing](service.md#sealing).
+  (exit 4).
 - `amendment <workstream-id> <n>` shows amendment `n` of a building or
   assembled workstream: its state, the debate round it reached, the packet the
   chief of staff presented with its revision, and your latest decision.
@@ -284,8 +275,7 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   prints the recorded decision; another decision on it, an amendment that is
   not presented, and a refused approval fail with `conflict` (exit 5). An
   unknown amendment fails with `not_found` (exit 4). You can also tell the
-  workstream's chief of staff your decision with `send`. See
-  [amendment decisions](service.md#amendment-decisions).
+  workstream's chief of staff your decision with `send`.
 - `delivery <workstream-id>` shows an assembled workstream's final report,
   unshown criteria first, and the drafted pull request description, then any
   approved description and the state of its publication. For a delivered
@@ -301,9 +291,7 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   agent co-author trailers, adds your sign-off and signs before pushing the
   branch to your fork and opening the pull request; `delivery` shows its progress. A report with gaps, a presentation
   that changed and a delivered workstream fail with `conflict` (exit 5). After
-  a publication was refused, approving again asks for another one. See
-  [owner delivery approval](service.md#owner-delivery-approval) and
-  [publication](service.md#publication).
+  a publication was refused, approving again asks for another one.
 - Editing the documents needs no command. You edit `spec.md` and `plan.json` in
   the workstream's directory under the trace yourself. The service records what
   you changed as a new revision of yours before any turn reads it, and the next
@@ -311,7 +299,7 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   neither file is recorded and neither is debated, your chief of staff reports
   the problems, and the recorded revisions stay. Until you correct them, a
   redraft by the architect of a file you edited is given up rather than written
-  over your edit. See [the owner in the shed](service.md#the-owner-in-the-shed).
+  over your edit.
 - `project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH
   [--base-branch NAME]` registers a project with the running service: it
   validates the request, generates the project ID, writes
@@ -330,14 +318,14 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   active project. Repeating an active project's exact registration returns it
   again.
 - `project extract <project-id>` starts a new
-  [knowledge-base extraction](knowledge-base.md#extraction) of the active
+  knowledge-base extraction of the active
   project: a librarian turn that rewrites `kb/<subsystem>.md` and
   `kb/entities.json` from the clone. The command returns once the extraction
   is recorded as pending; follow it with `status`. A project ID that is not the
   active project fails with `not_found` (exit 4). While an extraction is still
   pending or running, another is refused with `conflict` (exit 5) naming the
   extraction to wait for.
-- `project rebase <project-id>` asks for a [drift rebase](service.md#drift-rebases)
+- `project rebase <project-id>` asks for a drift rebase
   of every `building` or `assembled` workstream of the active project that is
   not paused, whatever its `upstream_rebase` cadence. The command returns once
   the request is recorded and lists each covered workstream with the number of
@@ -366,9 +354,7 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   fails with `not_found` (exit 4). An unreadable, empty, non-UTF-8 or oversized
   input, or a URL of another shape, fails with `validation` (exit 4); an issue
   the service cannot fetch fails with `internal` (exit 5). A refused hand-in
-  creates nothing. See [service](service.md#hand-in) for what is
-  recorded. The service then asks the architect for the spec and plan; see
-  [architect drafting](service.md#architect-drafting). With `--skip-debate`
+  creates nothing. The service then asks the architect for the spec and plan. With `--skip-debate`
   the hand-in also skips debate, for small work: once the architect's draft is
   valid, the workstream enters the shed without a committee, no round runs, and
   the spec and the plan wait for your `ratify`. The output then ends with
@@ -376,15 +362,14 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
 - `pause <all|project-id|workstream-id> [--hard] [--reason TEXT]` stores an
   owner-attributed pause; the default mode is soft. A soft pause holds new work
   and lets running turns finish; `--hard` also stops the turns running in its
-  scope, which continue after `resume` ([service](service.md#hard-pause)). The
+  scope, which continue after `resume`. The
   status and command output show each pause's source, reason and UTC set time.
 - `resume <all|project-id|workstream-id>` clears that scope's pause. Parent pauses
   still apply; all effective pauses are displayed.
 - `priority set <workstream-id>...` stores the ordered list of the project the
   workstreams belong to; while several projects are active the project is
   found from the first workstream.
-  The chief of staff sets the same list when you ask it to in a message; see
-  [service](service.md#priority-at-the-owners-request).
+  The chief of staff sets the same list when you ask it to in a message.
   `priority clear` removes that preference; while several projects are active
   it fails with `validation` (exit 4) and lists the active project IDs. Both,
   and `pause`/`resume` of a workstream, need an active project and say so
@@ -398,10 +383,10 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
 - `config` shows the loaded configuration's digest and root, then one line
   per configuration file comparing it on disk with the loaded configuration
   (`Config file: <path>[ (project <id>)]: unchanged`, `changed`, or
-  `invalid: <field>: <reason>`; see [disk drift](service.md#disk-drift)),
+  `invalid: <field>: <reason>`; see [disk drift](running.md#disk-drift)),
   the configuration diagnostics and the last failed reload. Reading it applies
   nothing; `reload` does. It takes no argument.
-- `reload` asks the service to [reload its configuration](service.md#reload)
+- `reload` asks the service to [reload its configuration](running.md#reload)
   and prints `Configuration reloaded: <digest>`, followed by `Restart required
   to apply: <settings>` when the files change settings that only a restart
   applies. A file that fails validation fails with `validation` (exit 4),
@@ -447,9 +432,8 @@ the first) and each role's effective profile and source;
 response; `config` returns the API's configuration response; `reload` returns the API's reload response: `digest` and
 `restart_required`. `abandon` returns the API's abandon response: `project`,
 `workstream`, `state` and `reason`. `send` returns the accepted message entry and `conversation` the
-API's conversation response (see [conversation](service.md#conversation)).
-`inbox` returns the API's inbox response and `answer` its answer response (see
-[inbox and rulings](service.md#inbox-and-rulings)).
+API's conversation response.
+`inbox` returns the API's inbox response and `answer` its answer response.
 Mutations return `mutation` (the API acknowledgement) and `runtime`
 (the subsequent effective-state response). Project commands return the API's
 project response: the project view (ID, name, upstream, fork, clone, base
@@ -487,7 +471,7 @@ live-owned socket. Unsupported responses identify unavailable operations; restar
 responses instruct the operator to stop and start the service.
 
 Detached management, install/upgrade commands and completion are
-unavailable; the service serves the [page](service.md#web-page) with the
+unavailable; the service serves the [page](running.md#web-page) with the
 inbox, answered inline, the active work, each workstream's conversation and
 the controls. The command examples in
 the design describe the eventual product; this reference lists the implemented
