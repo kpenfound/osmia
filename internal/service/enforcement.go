@@ -37,9 +37,10 @@ func CoreEnforcement() Enforcement {
 	}
 }
 
-// chiefGrant is what a chief-of-staff thread turn may call: status, runtime
-// controls, owner decisions and question tools.
-var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName, "notify", "capacity", "inspect_code", prioritiseTool, pauseTool, resumeTool, decideAmendmentTool, decideCharterTool}, questions.ChiefTools...)}
+// chiefGrant is what a chief-of-staff thread turn may call: file_read over
+// its read-only view of the workstream's documents, status, runtime controls,
+// owner decisions and question tools.
+var chiefGrant = coreadapter.Capabilities{Tools: append([]string{"file_read", status.ToolName, "notify", "capacity", "inspect_code", prioritiseTool, pauseTool, resumeTool, decideAmendmentTool, decideCharterTool}, questions.ChiefTools...)}
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
 // its view of its unit's workspace, ask the chief of staff, file an amendment
@@ -50,7 +51,8 @@ var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questi
 // Enforce returns opts with Librarian, Architect, Committee and Threads
 // running every role turn through e. Thread turns are granted to the chief of
 // staff, mason and reviewer; a turn of any other role fails with a recorded
-// reason. A mason turn works on a view of its unit's workspace, copied back
+// reason. A chief-of-staff turn reads a view of its workstream's documents,
+// staged afresh for each turn. A mason turn works on a view of its unit's workspace, copied back
 // into the workspace after the turn, and a mason turn whose done the service
 // accepted ends with the outcome done, the mason's report and its card. A
 // drift mason turn works the same way on its workstream's drift resolution
@@ -114,9 +116,20 @@ func Enforce(opts Options, e Enforcement) Options {
 				if scope.Role == reviewerRole && scope.Thread != driftReviewerAgent {
 					return unitReviewerSelection(ctx, cfg, r, scope, execution)
 				}
-				// The chief of staff and drift reviewers are handed an empty
-				// workspace; a drift reviewer may only read it and record
-				// its verdict.
+				if scope.Role == trace.ChiefOfStaff {
+					stream, err := config.ParseWorkstreamID(scope.Workstream)
+					if err != nil {
+						return isolation.Selection{}, err
+					}
+					workspace := filepath.Join(root, "chief_of_staff", project, scope.Workstream)
+					paths, err := stageChiefDocuments(r, stream, workspace)
+					if err != nil {
+						return isolation.Selection{}, err
+					}
+					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: execution}, nil
+				}
+				// A drift reviewer is handed an empty workspace; it may only
+				// read it and record its verdict.
 				workspace := filepath.Join(root, "workspaces", project, scope.Workstream)
 				if err := os.MkdirAll(workspace, 0700); err != nil {
 					return isolation.Selection{}, err

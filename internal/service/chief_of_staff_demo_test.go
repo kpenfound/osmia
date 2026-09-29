@@ -22,6 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/envelope"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/kb"
+	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -49,6 +50,7 @@ image = "fixture-image"
 
 const (
 	chiefDemoCharter  = "# Charter\n\n1. Keep state in files under the root.\n"
+	chiefDemoSpec     = "# Resumable uploads\n"
 	chiefDemoReply    = "Two workers are building the upload work. I will tell you when they need a decision."
 	chiefDemoAnswer   = "In files under the root."
 	chiefDemoRuling   = "Keep the upload API as it is and add a new endpoint."
@@ -112,13 +114,18 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		for _, role := range []string{"mason", "reviewer"} {
 			turns.Grants[role] = coreadapter.Capabilities{Tools: []string{questions.AskTool}}
 		}
-		// The fake workers build no unit: each works in the empty directory
-		// the chief of staff is handed, with no workspace to copy back to.
+		// The fake workers build no unit: each works in an empty directory of
+		// its own, with no workspace to copy back to.
 		turns.Workspaces, turns.Capture = stagedWorkspaces{}, nil
 		selectChief := turns.Select
 		turns.Select = func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
-			scope.Role = trace.ChiefOfStaff
-			return selectChief(ctx, scope)
+			if scope.Role == trace.ChiefOfStaff {
+				return selectChief(ctx, scope)
+			}
+			workspace := filepath.Join(cfg.Root.String(), "workers", scope.Thread)
+			role := cfg.Roles[trace.ChiefOfStaff]
+			return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace},
+				Execution: coreadapter.ExecutionSettings{Mode: role.Sandbox, Image: role.Image}}, os.MkdirAll(workspace, 0700)
 		}
 		chief := turns.Scoped
 		turns.Scoped = func(ctx context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
@@ -153,6 +160,8 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
 	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), ownerActor))
+	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.SpecDocument, Revision: 1, Project: id, Workstream: stream, At: clock.Now(), Actor: architectActor, Cause: "fixture", Depth: 1},
+		Path: plan.SpecPath, Content: chiefDemoSpec}}))
 	for _, w := range []struct{ agent, thread, role, turn string }{
 		{demoAgent, demoThread, "mason", "build"}, {"agent_mason2", "thread_mason2", "mason", "build2"}, {"agent_reviewer", "thread_reviewer", "reviewer", "review"},
 	} {
@@ -249,9 +258,16 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		prompts[req.Name] = req
-		tools(ctx, req.Name, session, "answer", "capacity", "decide_amendment", "decide_charter", "escalate", "inspect_code", "notify", "pause", "prioritise", "propose_charter", "relay_ruling", "resume", "route_amendment", "set_status")
+		tools(ctx, req.Name, session, "answer", "capacity", "decide_amendment", "decide_charter", "escalate", "file_read", "inspect_code", "notify", "pause", "prioritise", "propose_charter", "relay_ruling", "resume", "route_amendment", "set_status")
 		switch {
 		case len(sent) > 0 && req.Name == sent[0].Turn:
+			// The chief of staff reads the workstream's documents in its view.
+			if listed, err := readTool(ctx, session, "."); err != nil || listed != plan.SpecPath {
+				problem("chief of staff view lists", listed, err)
+			}
+			if spec, err := readTool(ctx, session, plan.SpecPath); err != nil || spec != chiefDemoSpec {
+				problem("chief of staff reads spec", spec, err)
+			}
 			// A status naming an agent by its ID is refused; one in words is
 			// stored.
 			refused := map[string]any{"goal": chiefDemoStatus.Goal, "note": chiefDemoStatus.Note, "agents": []string{demoAgent + " is building."}}

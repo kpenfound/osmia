@@ -300,6 +300,13 @@ explicit truncation flag. The check client inherits only PATH and service engine
 selection, not provider, GitHub or SSH credentials. A project without Dagger checks
 returns the check failure as review evidence; there is no command fallback.
 
+The chief of staff receives a read-only view of its workstream's documents at
+their latest revisions: `spec.md`, `plan.json`, the handed input, the shed
+rounds, and the amendment, unit, final review and delivery records once they
+exist. The service stages the view afresh for each turn, under
+`chief_of_staff/<project>/<workstream>` in the root, and leaves out its own
+tool-call and inspection records.
+
 Missing CLI, login, template or policy requirements fail the turn without falling back to host
 execution.
 

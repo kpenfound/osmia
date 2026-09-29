@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,7 +26,7 @@ import (
 
 // launches is the process-launch seam every serve in these tests runs its
 // role turns through: core's fake enforcer, which starts no process.
-var launches = &launchEngine{runs: map[string]*enforcertest.Turn{}}
+var launches = &launchEngine{runs: map[string]*enforcertest.Turn{}, views: map[string]map[string]string{}}
 
 // production is serve's own enforcement, which TestMain replaces.
 var production = enforcement
@@ -51,14 +52,27 @@ type launchEngine struct {
 	turns []string
 	// runs holds the turn the agent ran under each name.
 	runs map[string]*enforcertest.Turn
+	// views holds the files of each chief-of-staff message turn's view, by
+	// path relative to the view, as the agent found them.
+	views map[string]map[string]string
 }
 
 func (e *launchEngine) Enforcer(settings coreadapter.ExecutionSettings) (agent.Enforcer, error) {
 	f := &enforcertest.Enforcer{Sandbox: settings.Mode, Image: settings.Image,
 		Agent: func(_ context.Context, turn *enforcertest.Turn) (*agent.Result, error) {
+			var view map[string]string
+			if strings.HasPrefix(turn.Request.Name, "message_") && turn.Request.Grants != nil {
+				var err error
+				if view, err = viewFiles(turn.Request.Grants.Mounts[0].Path); err != nil {
+					return nil, err
+				}
+			}
 			e.mu.Lock()
 			e.turns = append(e.turns, turn.Request.Name)
 			e.runs[turn.Request.Name] = turn
+			if view != nil {
+				e.views[turn.Request.Name] = view
+			}
 			e.mu.Unlock()
 			return &agent.Result{ClaudeID: "session-" + turn.Request.Name, ResultText: "Noted", NumTurns: 1}, nil
 		}}
@@ -66,6 +80,24 @@ func (e *launchEngine) Enforcer(settings coreadapter.ExecutionSettings) (agent.E
 		f.PrepareErr = fmt.Errorf("%w: %s", agent.ErrUnsupported, refusal)
 	}
 	return f, nil
+}
+
+// viewFiles reads every file under dir by its slash-separated relative path.
+func viewFiles(dir string) (map[string]string, error) {
+	files := map[string]string{}
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		files[filepath.ToSlash(rel)] = string(data)
+		return err
+	})
+	return files, err
 }
 
 // await waits until the agent has run a turn named name and returns it.
@@ -93,6 +125,7 @@ func (e *launchEngine) reset() {
 	defer e.mu.Unlock()
 	e.turns = nil
 	e.runs = map[string]*enforcertest.Turn{}
+	e.views = map[string]map[string]string{}
 }
 
 func (e *launchEngine) ran(name string) bool {
@@ -176,8 +209,9 @@ func TestServeRunsRoleTurns(t *testing.T) {
 }
 
 // chief checks the boundary serve gives a chief-of-staff thread turn: its
-// session directory under the thread's, empty workspaces of its own and
-// only its status, priority and question tools.
+// session directory under the thread's, an empty working directory of its
+// own, the workstream's documents staged for its read-only view, and only
+// file_read with its status, priority and question tools.
 func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream string) {
 	t.Helper()
 	resolved, err := filepath.EvalSymlinks(root)
@@ -186,15 +220,31 @@ func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream stri
 	if !strings.HasPrefix(turn.Request.SessionDir, threads) {
 		t.Fatalf("session directory %s is not under %s", turn.Request.SessionDir, threads)
 	}
-	for _, workspace := range []string{filepath.Join(resolved, "workspaces", project, workstream), turn.Request.Workspace.Directory()} {
-		if entries, err := os.ReadDir(workspace); err != nil || len(entries) != 0 {
-			t.Fatalf("workspace %s is not an empty directory: %v %v", workspace, entries, err)
+	if entries, err := os.ReadDir(turn.Request.Workspace.Directory()); err != nil || len(entries) != 0 {
+		t.Fatalf("working directory %s is not empty: %v %v", turn.Request.Workspace.Directory(), entries, err)
+	}
+	launches.mu.Lock()
+	view := launches.views[turn.Request.Name]
+	launches.mu.Unlock()
+	var handed []string
+	for path, content := range view {
+		if strings.HasPrefix(path, "tools/") || strings.HasPrefix(path, "inspections/") {
+			t.Fatalf("view holds service record %s", path)
 		}
+		if strings.HasPrefix(path, "handed/") && content == "# Design\n" {
+			handed = append(handed, path)
+		}
+	}
+	if len(handed) != 1 {
+		t.Fatalf("view does not hold the handed design: %v", slices.Collect(maps.Keys(view)))
+	}
+	if !strings.Contains(turn.Request.SystemPrompt, "file_read") || !strings.Contains(turn.Request.SystemPrompt, "read-only directory "+turn.Request.Grants.Mounts[0].Path) {
+		t.Fatalf("system prompt does not describe the view: %s", turn.Request.SystemPrompt)
 	}
 	if work := turn.Request.Workspace.Directory(); filepath.Dir(work) != turn.Request.SessionDir {
 		t.Fatalf("working directory %s is not the session's own", work)
 	}
-	granted := append([]string{status.ToolName, "notify", "capacity", "inspect_code", "prioritise", "pause", "resume", "decide_amendment", "decide_charter"}, questions.ChiefTools...)
+	granted := append([]string{"file_read", status.ToolName, "notify", "capacity", "inspect_code", "prioritise", "pause", "resume", "decide_amendment", "decide_charter"}, questions.ChiefTools...)
 	var tools []string
 	for _, allowed := range turn.Request.Profile.AllowedTools {
 		server, tool, ok := strings.Cut(strings.TrimPrefix(allowed, "mcp__"), "__")
@@ -203,7 +253,7 @@ func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream stri
 		}
 		tools = append(tools, tool)
 	}
-	if !slices.Equal(tools, granted) || slices.Contains(tools, "file_read") {
+	if !slices.Equal(tools, granted) || slices.Contains(tools, "file_write") {
 		t.Fatalf("chief tools %v, want %v", tools, granted)
 	}
 }

@@ -201,7 +201,7 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 		}
 	}
 	slices.Sort(names)
-	if wantNames := []string{"answer", "capacity", "decide_amendment", "decide_charter", "escalate", "inspect_code", "notify", "pause", "prioritise", "propose_charter", "relay_ruling", "resume", "route_amendment", "set_status"}; !slices.Equal(names, wantNames) {
+	if wantNames := []string{"answer", "capacity", "decide_amendment", "decide_charter", "escalate", "file_read", "inspect_code", "notify", "pause", "prioritise", "propose_charter", "relay_ruling", "resume", "route_amendment", "set_status"}; !slices.Equal(names, wantNames) {
 		t.Fatalf("chief-of-staff tools %v, want %v", names, wantNames)
 	}
 	for prompt, system := range prompts {
