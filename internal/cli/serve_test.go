@@ -224,7 +224,7 @@ func TestServeBuildsCoreEnforcement(t *testing.T) {
 		t.Fatalf("options %+v", opts)
 	}
 	for _, role := range []any{*opts.Librarian, *opts.Architect, *opts.Committee} {
-		if !reflect.DeepEqual(role, service.Librarian(e)) && !reflect.DeepEqual(role, service.Architect(e)) && !reflect.DeepEqual(role, service.Committee(e)) {
+		if !reflect.DeepEqual(role, service.Librarian{Engine: e.Engine, Hosts: e.Hosts}) && !reflect.DeepEqual(role, service.Architect{Engine: e.Engine, Hosts: e.Hosts}) && !reflect.DeepEqual(role, service.Committee{Engine: e.Engine, Hosts: e.Hosts}) {
 			t.Fatalf("role enforcement %#v", role)
 		}
 	}

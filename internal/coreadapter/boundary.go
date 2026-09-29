@@ -76,8 +76,7 @@ func checkMode(settings ExecutionSettings) error {
 // CoreExecutor binds one turn to a service-selected isolation and runs it
 // through a core enforcer with grants built from that isolation alone: the
 // view as the only mount besides the session's own directory, the service
-// environment as the complete allowlist, the scoped MCP servers as the only
-// tools, and no VCS. Before the turn runs, the prepared session's policy must
+// environment as the complete allowlist, role-selected native tools and scoped MCP servers, and no VCS. Before the turn runs, the prepared session's policy must
 // match those grants and leave every Pinned directory unwritable.
 type CoreExecutor struct {
 	Required Isolation
@@ -183,7 +182,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	if req.SessionDir == "" {
 		return nil, unsupported("execution request", "session directory is required")
 	}
-	grants, err := coreGrants(iso, req.SessionDir, settings.Mode, req.Profile.MCP)
+	grants, err := coreGrants(iso, req.SessionDir, settings.Mode, req.Profile.Agent, req.Profile.MCP)
 	if err != nil {
 		return nil, err
 	}
@@ -263,8 +262,8 @@ const scratchDirectory = "work"
 // coreGrants are the complete capabilities of a turn in iso: the view with its
 // access, the session directory read-only, a writable scratch directory inside
 // it when the view is read-only, the service environment and one MCP server
-// grant per scoped endpoint, without built-in tools or VCS.
-func coreGrants(iso Isolation, sessionDir, mode string, servers map[string]agent.MCPEntry) (agent.Grants, error) {
+// grant per scoped endpoint, with role-selected native tools and no VCS.
+func coreGrants(iso Isolation, sessionDir, mode, backend string, servers map[string]agent.MCPEntry) (agent.Grants, error) {
 	access := agent.ReadOnly
 	if iso.Workspace.Access == ReadWrite {
 		access = agent.ReadWrite
@@ -275,7 +274,7 @@ func coreGrants(iso Isolation, sessionDir, mode string, servers map[string]agent
 	}
 	grants := agent.Grants{
 		Env:    slices.Sorted(maps.Keys(iso.Environment)),
-		Tools:  []string{},
+		Tools:  nativeTools(backend, iso.Capabilities),
 		Mounts: []agent.Mount{{Path: iso.Workspace.Directory, Access: access}, {Path: session, Access: agent.ReadOnly}},
 	}
 	if access == agent.ReadOnly {
@@ -303,7 +302,7 @@ func coreGrants(iso Isolation, sessionDir, mode string, servers map[string]agent
 // checkPolicy refuses a session whose policy is not the one the grants
 // describe: another sandbox or image, a view that is not readable or whose
 // write access differs from the isolation's, a writable pinned directory, VCS
-// granted or a VCS executable left undenied, a built-in tool, or MCP servers
+// granted or a VCS executable left undenied, extra native tools, or MCP servers
 // other than the granted ones.
 func checkPolicy(p agent.Policy, iso Isolation, settings ExecutionSettings, grants agent.Grants, pinned []string) error {
 	if p.DaggerEngine != "" || !slices.Equal(p.HostServers, grants.HostServers) {
@@ -319,6 +318,11 @@ func checkPolicy(p agent.Policy, iso Isolation, settings ExecutionSettings, gran
 	if !p.Reads(view) || p.Writes(view) != (iso.Workspace.Access == ReadWrite) {
 		return unsupported("session policy", "view access differs from the grant")
 	}
+	for _, mount := range grants.Mounts {
+		if !p.Reads(mount.Path) || p.Writes(mount.Path) != (mount.Access == agent.ReadWrite) {
+			return unsupported("session policy", "mount access differs from the grant")
+		}
+	}
 	for _, dir := range pinned {
 		if p.Writes(dir) {
 			return unsupported("session policy", "pinned revision "+dir+" is writable")
@@ -332,12 +336,14 @@ func checkPolicy(p agent.Policy, iso Isolation, settings ExecutionSettings, gran
 			return unsupported("session policy", "VCS executable "+name+" is not denied")
 		}
 	}
-	if p.Tools == nil || len(p.Tools) != 0 {
-		return unsupported("session policy", "built-in tools are granted")
+	if p.Tools == nil || !slices.Equal(p.Tools, nativeTools(settings.Agent, iso.Capabilities)) {
+		return unsupported("session policy", "built-in tools differ from the role grant")
 	}
 	var servers []string
 	for _, tool := range grants.Tools {
-		servers = append(servers, strings.TrimPrefix(tool, "mcp__"))
+		if server, ok := strings.CutPrefix(tool, "mcp__"); ok {
+			servers = append(servers, server)
+		}
 	}
 	if !slices.Equal(p.MCPServers, servers) {
 		return unsupported("session policy", "MCP servers differ from the granted ones")

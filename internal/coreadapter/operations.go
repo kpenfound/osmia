@@ -5,12 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/busybees/core/ops"
 )
+
+// FailureReason preserves the backend diagnostic for a failed execution,
+// including failures that occur before a session ID exists.
+func FailureReason(r SessionResult) string {
+	reason := ops.InfraReason(&agent.Result{TimedOut: r.TimedOut, IsError: r.IsError, ExitCode: r.ExitCode, ErrorSubtype: r.ErrorSubtype, ResultText: r.FinalResponse})
+	if detail := strings.TrimSpace(r.FinalResponse); detail != "" {
+		return reason + ": " + detail
+	}
+	return reason
+}
 
 type RetryAdapter struct{}
 

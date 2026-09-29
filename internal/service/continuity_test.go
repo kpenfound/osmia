@@ -166,7 +166,7 @@ func (e *demoEngine) Run(ctx context.Context, req agent.Request) (*agent.Result,
 }
 
 // checkGrants reports a request whose grants or verified turn reach beyond a
-// private writable view outside clone: another mount, VCS, a built-in tool, a
+// private writable view outside clone: another mount, VCS, an ungranted tool, a
 // VCS executable on PATH, or a variable beyond the request's own.
 func checkGrants(req agent.Request, verified *agent.Turn, clone string, fail func(string, ...any)) {
 	view := req.Workspace.Directory()
@@ -178,8 +178,8 @@ func checkGrants(req agent.Request, verified *agent.Turn, clone string, fail fun
 	if g.VCS || verified.VCS || !slices.Equal(verified.DeniedExecutables, agent.VCSExecutables) {
 		fail("VCS is not denied: %+v", verified)
 	}
-	if !slices.Equal(g.Tools, []string{"mcp__osmia_0"}) || verified.Tools == nil || len(verified.Tools) != 0 {
-		fail("tools %v %v exceed the scoped MCP server", g.Tools, verified.Tools)
+	if !slices.Equal(g.Tools, []string{"Read", "Glob", "Grep", "Write", "Edit", "mcp__osmia_0"}) || !slices.Equal(verified.Tools, []string{"Read", "Glob", "Grep", "Write", "Edit"}) {
+		fail("tools %v %v exceed the role grant", g.Tools, verified.Tools)
 	}
 	for _, kv := range verified.Env {
 		key, value, _ := strings.Cut(kv, "=")

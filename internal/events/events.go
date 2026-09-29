@@ -144,6 +144,9 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 		case turnPending:
 			continue
 		}
+		if d.options.Now().Before(retryAt(e, chief)) {
+			continue
+		}
 		if !free[e.Event.ID] && e.Claim != nil {
 			// A claim of this session whose turn failed, or that has no turn,
 			// still holds the event.
@@ -208,6 +211,39 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 		return err
 	}
 	return nil
+}
+
+// retryAt backs off repeated delivery failures using durable turn results.
+// The first failure is retried immediately; subsequent failures wait from
+// thirty seconds up to fifteen minutes. New events keep their own schedule.
+func retryAt(e trace.OutboxEntry, chief trace.Thread) time.Time {
+	claimed := map[string]bool{}
+	for _, attempt := range e.History {
+		if attempt.Kind == "claim" {
+			claimed[TurnID(attempt.Token)] = true
+		}
+	}
+	failures := 0
+	var last time.Time
+	for _, turn := range chief.Turns {
+		if !claimed[turn.Request.TurnID] || turn.CompletedAt.IsZero() {
+			continue
+		}
+		if turn.Status() == "failed" || turn.Status() == "interrupted" {
+			failures++
+			if turn.CompletedAt.After(last) {
+				last = turn.CompletedAt
+			}
+		}
+	}
+	if failures < 2 {
+		return time.Time{}
+	}
+	delay := 30 * time.Second
+	for i := 2; i < failures && delay < 15*time.Minute; i++ {
+		delay = min(2*delay, 15*time.Minute)
+	}
+	return last.Add(delay)
 }
 
 // settle acknowledges an event whose turn completed. It uses the claim of

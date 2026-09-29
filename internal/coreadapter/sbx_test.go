@@ -24,7 +24,20 @@ import (
 func sbxRunner(t *testing.T, body string) agent.Runner {
 	t.Helper()
 	bin := agenttest.Script(t, "fake-agent", body)
-	return agent.Runner{SbxBin: agenttest.Sbx(t, a.TokenEnvironment), ClaudeBin: bin, CodexBin: bin, OpenCodeBin: bin}
+	sbx := agenttest.Sbx(t, a.TokenEnvironment)
+	// The daemon refuses empty command elements before starting the agent.
+	data := readSbxFile(t, sbx)
+	data = strings.Replace(data, "set -e\n", `set -e
+if [ "$1" = exec ]; then
+  for arg in "$@"; do
+    if [ -z "$arg" ]; then echo 'cmd element is empty' >&2; exit 1; fi
+  done
+fi
+`, 1)
+	if err := os.WriteFile(sbx, []byte(data), 0700); err != nil {
+		t.Fatal(err)
+	}
+	return agent.Runner{SbxBin: sbx, ClaudeBin: bin, CodexBin: bin, OpenCodeBin: bin}
 }
 
 func readSbxFile(t *testing.T, path string) string {
@@ -51,13 +64,20 @@ func TestSbxRunsScopedTurnsThroughCoreWithFakeSandbox(t *testing.T) {
 					turn.Scope.Role = "mason"
 					turn.Sandbox.Verified.Workspace.Access = a.ReadWrite
 					turn.Sandbox.Verified.Capabilities.WriteFiles = true
+					turn.Sandbox.Verified.Capabilities.Execute = true
 				}
 				turn.Sandbox.Verified.Environment[a.TokenEnvironment] = turn.SessionDirectory
 				body := `case "$*" in
 *--version*) echo '2.1.200'; exit 0 ;;
 *--help*) echo '--tools --strict-mcp-config'; exit 0 ;;
 esac
-if [ "$1" = features ]; then echo 'shell_tool stable false'; exit 0; fi
+if [ "$1" = features ]; then
+case "$*" in
+*features.shell_tool=false*) echo 'shell_tool stable false' ;;
+*) echo 'shell_tool stable true' ;;
+esac
+exit 0
+fi
 if [ "$1" = mcp ]; then
   echo '[{"name":"osmia_0","enabled":true,"transport":{"type":"streamable_http","url":"http://host.docker.internal:1/mcp","bearer_token_env_var":"OSMIA_MCP_TOKEN"}}]'
   exit 0

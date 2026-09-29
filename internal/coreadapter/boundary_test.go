@@ -93,7 +93,7 @@ func boundaryTurn(t *testing.T, mode string) a.PreparedTurn {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return a.PreparedTurn{Scope: a.Scope{Role: "committee"}, Profile: a.Profile{Backend: "claude"}, SessionDirectory: t.TempDir(),
+	return a.PreparedTurn{Scope: a.Scope{Role: "committee"}, Profile: a.Profile{Backend: "claude", Model: "fixture-model"}, SessionDirectory: t.TempDir(),
 		Execution: a.ExecutionSettings{Mode: mode, Image: "fixture-image"},
 		Sandbox: a.SandboxLease{Verified: a.Isolation{Workspace: a.Workspace{Directory: dir, Access: a.ReadOnly}, Environment: map[string]string{"LANG": "C"},
 			DenyVCS: true, DenyInheritedEnvironment: true, DenyDeliveryCredentials: true}}}
@@ -115,7 +115,7 @@ func TestContainerConstruction(t *testing.T) {
 	req := engine.Requests[0]
 	view := turn.Sandbox.Verified.Workspace.Directory
 	scratch := filepath.Join(turn.SessionDirectory, "work")
-	want := agent.Grants{Env: []string{"LANG"}, Tools: []string{}, Mounts: []agent.Mount{{Path: view, Access: agent.ReadOnly}, {Path: turn.SessionDirectory, Access: agent.ReadOnly}, {Path: scratch, Access: agent.ReadWrite}}}
+	want := agent.Grants{Env: []string{"LANG"}, Tools: []string{"Read", "Glob", "Grep"}, Mounts: []agent.Mount{{Path: view, Access: agent.ReadOnly}, {Path: turn.SessionDirectory, Access: agent.ReadOnly}, {Path: scratch, Access: agent.ReadWrite}}}
 	if req.Grants == nil || !reflect.DeepEqual(*req.Grants, want) {
 		t.Fatalf("grants: %+v", req.Grants)
 	}
@@ -132,7 +132,7 @@ func TestContainerConstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(verified.Env, []string{"LANG=C", "HOME=/home/agent"}) || verified.VCS || len(verified.Tools) != 0 || !reflect.DeepEqual(verified.DeniedExecutables, agent.VCSExecutables) {
+	if !reflect.DeepEqual(verified.Env, []string{"LANG=C", "HOME=/home/agent"}) || verified.VCS || !reflect.DeepEqual(verified.Tools, []string{"Read", "Glob", "Grep"}) || !reflect.DeepEqual(verified.DeniedExecutables, agent.VCSExecutables) {
 		t.Fatalf("turn: %+v", verified)
 	}
 	for _, bind := range verified.Binds {
@@ -158,7 +158,7 @@ func TestEverySandboxModeReachesRun(t *testing.T) {
 			if req.Profile.Sandbox != mode || req.Profile.Confine != (mode == "none" || mode == "claude") || req.Profile.SandboxImage != turn.Execution.Image {
 				t.Fatalf("admitted profile: %+v", req.Profile)
 			}
-			if req.Grants == nil || !reflect.DeepEqual(req.Grants.Tools, []string{"mcp__osmia_0"}) {
+			if req.Grants == nil || !reflect.DeepEqual(req.Grants.Tools, []string{"Read", "Glob", "Grep", "mcp__osmia_0"}) {
 				t.Fatalf("admitted grants: %+v", req.Grants)
 			}
 		})
@@ -182,10 +182,12 @@ func toolTurn(t *testing.T, mode string) a.PreparedTurn {
 func TestPolicyMismatchNeverStarts(t *testing.T) {
 	pinned := t.TempDir()
 	mutations := map[string]func(*agent.Policy, string){
-		"sandbox":         func(p *agent.Policy, _ string) { p.Sandbox = agent.SandboxNone },
-		"image":           func(p *agent.Policy, _ string) { p.Image = "other-image" },
-		"writable view":   func(p *agent.Policy, view string) { setAccess(p, view, agent.ReadWrite) },
-		"unreadable view": func(p *agent.Policy, view string) { p.Denied = append(p.Denied, view) },
+		"sandbox":           func(p *agent.Policy, _ string) { p.Sandbox = agent.SandboxNone },
+		"image":             func(p *agent.Policy, _ string) { p.Image = "other-image" },
+		"writable view":     func(p *agent.Policy, view string) { setAccess(p, view, agent.ReadWrite) },
+		"unreadable view":   func(p *agent.Policy, view string) { p.Denied = append(p.Denied, view) },
+		"writable session":  func(p *agent.Policy, _ string) { p.Mounts[1].Access = agent.ReadWrite },
+		"read-only scratch": func(p *agent.Policy, _ string) { p.Mounts[2].Access = agent.ReadOnly },
 		"writable pinned": func(p *agent.Policy, _ string) {
 			p.Mounts = append(p.Mounts, agent.Mount{Path: pinned, Access: agent.ReadWrite})
 		},
@@ -356,7 +358,11 @@ func TestWritableCodexAndOpenCodeTurns(t *testing.T) {
 				t.Fatalf("result=%+v err=%v launches=%d", result, err, len(engine.Requests))
 			}
 			req := engine.Requests[0]
-			if req.Profile.Agent != backend || req.Grants == nil || !reflect.DeepEqual(req.Grants.Tools, []string{"mcp__osmia_0"}) || req.Grants.Mounts[0].Access != agent.ReadWrite || !engine.Released() {
+			wantTools := []string{"apply_patch", "shell", "mcp__osmia_0"}
+			if backend == "opencode" {
+				wantTools = []string{"read", "glob", "grep", "list", "edit", "bash", "mcp__osmia_0"}
+			}
+			if req.Profile.Agent != backend || req.Grants == nil || !reflect.DeepEqual(req.Grants.Tools, wantTools) || req.Grants.Mounts[0].Access != agent.ReadWrite || !engine.Released() {
 				t.Fatalf("admitted request=%+v released=%v", req, engine.Released())
 			}
 		})

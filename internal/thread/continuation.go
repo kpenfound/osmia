@@ -132,7 +132,11 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		if !coreadapter.ValidSession(result.Session) {
 			result.Session = coreadapter.BackendSession{}
 			if runErr == nil {
-				runErr = fmt.Errorf("executor returned no valid session reference")
+				if failed(result, nil) {
+					runErr = fmt.Errorf("agent startup failed: %s", coreadapter.FailureReason(result))
+				} else {
+					runErr = fmt.Errorf("executor returned no valid session reference")
+				}
 			}
 		}
 		captured := result

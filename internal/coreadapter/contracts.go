@@ -98,6 +98,9 @@ const (
 	ToolExecute ToolEffect = "execute"
 	ToolFetch   ToolEffect = "fetch"
 	ToolVCS     ToolEffect = "vcs"
+	// ToolCheck runs a service-selected check on a disposable candidate export.
+	// It grants no command, path or environment selection to the caller.
+	ToolCheck ToolEffect = "check"
 	// ToolMemory writes only service-owned records bound to the turn, such as
 	// private role memory or the workstream status. Its handlers enforce their
 	// own scope, so it needs no workspace permission.
@@ -117,7 +120,7 @@ func ToolPermitted(c Capabilities, tool Tool) bool {
 		return false
 	}
 	switch tool.Effect {
-	case ToolRead, ToolMemory:
+	case ToolRead, ToolMemory, ToolCheck:
 		return true
 	case ToolWrite:
 		return c.WriteFiles

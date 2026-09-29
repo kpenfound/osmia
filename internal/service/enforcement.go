@@ -23,6 +23,7 @@ import (
 type Enforcement struct {
 	Engine coreadapter.Engine
 	Hosts  coreadapter.MCPHosts
+	Checks ReviewChecks
 }
 
 // CoreEnforcement is the production Enforcement: core's enforcers run real
@@ -31,6 +32,7 @@ type Enforcement struct {
 func CoreEnforcement() Enforcement {
 	return Enforcement{
 		Engine: coreadapter.CoreEngine{},
+		Checks: DaggerChecks{},
 		Hosts:  &coreadapter.MCPHost{Transport: coreadapter.CoreTransport{}, Container: coreadapter.ContainerTransport(agent.ContainerEngine), Sbx: coreadapter.SbxTransport()},
 	}
 }
@@ -43,7 +45,7 @@ var chiefGrant = coreadapter.Capabilities{Tools: append([]string{status.ToolName
 // its view of its unit's workspace, ask the chief of staff, file an amendment
 // and report its unit done.
 var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, doneTool}, WriteFiles: true, Execute: true}
-var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, questions.AmendTool, verdictTool}}
+var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, questions.AmendTool, verdictTool, runChecksTool}}
 
 // Enforce returns opts with Librarian, Architect, Committee and Threads
 // running every role turn through e. Thread turns are granted to the chief of
@@ -60,6 +62,7 @@ var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questi
 // enforce fails the turn with core's reason. Thread turns take their role's sandbox and the root from the
 // configuration the service has loaded, and record UTC times.
 func Enforce(opts Options, e Enforcement) Options {
+	opts.reviewChecks = e.Checks
 	opts.Librarian = &Librarian{Engine: e.Engine, Hosts: e.Hosts}
 	opts.Architect = &Architect{Engine: e.Engine, Hosts: e.Hosts}
 	opts.Committee = &Committee{Engine: e.Engine, Hosts: e.Hosts}
@@ -108,7 +111,10 @@ func Enforce(opts Options, e Enforcement) Options {
 				if scope.Role == masonRole {
 					return units.selection(ctx, scope, execution)
 				}
-				// The chief of staff and the reviewers are handed an empty
+				if scope.Role == reviewerRole && scope.Thread != driftReviewerAgent {
+					return unitReviewerSelection(ctx, cfg, r, scope, execution)
+				}
+				// The chief of staff and drift reviewers are handed an empty
 				// workspace; a drift reviewer may only read it and record
 				// its verdict.
 				workspace := filepath.Join(root, "workspaces", project, scope.Workstream)
@@ -138,7 +144,11 @@ func Enforce(opts Options, e Enforcement) Options {
 				}
 				if scope.Role == reviewerRole {
 					ask, err := reviewerQuestionTools(r, scope, now)
-					return append(ask, verdicts.tool(scope)), err
+					identity, identityErr := unitReviewerIdentity(r, scope)
+					if identityErr != nil {
+						return nil, identityErr
+					}
+					return append(ask, verdicts.tool(scope), candidateCheckTool(cfg, r, scope, identity.Candidate.Revision, e.Checks)), err
 				}
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil

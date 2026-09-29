@@ -259,7 +259,7 @@ func readTool(ctx context.Context, tools *mcp.ClientSession, path string) (strin
 
 // checkReadOnlyGrants asserts the grants core verified for a read-only turn:
 // the private view read-only, the session read-only with the scratch
-// directory the turn starts in, the scoped MCP server as the only tool, and
+// directory the turn starts in, native reading tools and the scoped MCP server, and
 // no VCS or host environment.
 func checkReadOnlyGrants(req agent.Request, verified *agent.Turn, clone string, fail func(string, ...any)) {
 	g := req.Grants
@@ -275,8 +275,8 @@ func checkReadOnlyGrants(req agent.Request, verified *agent.Turn, clone string, 
 	if g.VCS || verified.VCS || !slices.Equal(verified.DeniedExecutables, agent.VCSExecutables) {
 		fail("VCS is not denied: %+v", verified)
 	}
-	if !slices.Equal(g.Tools, []string{"mcp__osmia_0"}) || verified.Tools == nil || len(verified.Tools) != 0 {
-		fail("tools %v %v exceed the scoped MCP server", g.Tools, verified.Tools)
+	if !slices.Equal(g.Tools, []string{"Read", "Glob", "Grep", "mcp__osmia_0"}) || !slices.Equal(verified.Tools, []string{"Read", "Glob", "Grep"}) {
+		fail("tools %v %v exceed the role grant", g.Tools, verified.Tools)
 	}
 	for _, kv := range verified.Env {
 		key, value, _ := strings.Cut(kv, "=")

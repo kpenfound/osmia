@@ -32,8 +32,9 @@ import (
 )
 
 type Options struct {
-	Config config.Options
-	Build  Identity
+	reviewChecks ReviewChecks
+	Config       config.Options
+	Build        Identity
 	// Workstreams supplies known identities when no trace exists. An existing
 	// trace supplies its validated workstream manifests.
 	Workstreams       []config.WorkstreamID

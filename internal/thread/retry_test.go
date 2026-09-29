@@ -224,3 +224,30 @@ func TestCancelledAttemptIsNotRetried(t *testing.T) {
 		t.Fatalf("retried cancelled attempt: %d %#v %v", calls, q, err)
 	}
 }
+
+func TestStartupFailureKeepsBackendDiagnosticWithoutSession(t *testing.T) {
+	repo, root, project := setup(t)
+	queue(t, repo, "first")
+	const diagnostic = "400 Bad Request: cmd element 21 is empty"
+	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) },
+		Turns: fakeTurns(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+			return coreadapter.SessionResult{IsError: true, ExitCode: 1, FinalResponse: diagnostic}, nil
+		})}
+	q, err := runner.RunNext(context.Background(), stream, "agent", coreadapter.PreparedTurn{SessionDirectory: "/owned/first"})
+	if err == nil || !strings.Contains(err.Error(), diagnostic) {
+		t.Fatalf("startup error: %v", err)
+	}
+	if q.Status() != "failed" || !strings.Contains(q.Response.Failure, diagnostic) || len(q.Attempts) != 1 || !strings.Contains(q.Attempts[0].Failure, diagnostic) {
+		t.Fatalf("lost startup diagnostic: %+v", q)
+	}
+	repo.Close()
+	repo, err = trace.Open(root, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	th, err := repo.Thread(stream, "agent")
+	if err != nil || !strings.Contains(th.Turns[0].Response.Failure, diagnostic) {
+		t.Fatalf("diagnostic after restart: %+v %v", th, err)
+	}
+}

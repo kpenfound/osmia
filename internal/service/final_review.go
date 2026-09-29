@@ -865,8 +865,8 @@ func (a *finalReviewer) dispatch(ctx context.Context, stream config.WorkstreamID
 
 // turns is the final reader's isolated turn path: a read-only private view
 // of the reviewed branch, its diff from upstream, the sealed spec and plan,
-// the charter and the units' reports and landings, the file reading tool and
-// the report tool, and no write, execute, network or VCS capability.
+// the charter and the units' reports and landings, with reading, reporting
+// and fixed candidate checks. It has no native write, shell or VCS capability.
 func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, report FinalReport) *isolation.Turns {
 	var engine coreadapter.Engine
 	var hosts coreadapter.MCPHosts
@@ -879,7 +879,7 @@ func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, r
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			return a.selectView(ctx, scope, stream, report)
 		},
-		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: []string{"file_read", FinalReportTool}}},
+		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: []string{"file_read", FinalReportTool, runChecksTool}}},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Role != committeeRole || scope.Workstream != string(stream) || scope.Project != string(a.repository.Project()) || !strings.HasPrefix(scope.Turn, finalTurnPrefix(in.Review, report.Reader)) {
 				return nil, errors.New("turn scope denied")
@@ -887,7 +887,7 @@ func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, r
 			// The turn that continues one a hard pause stopped replaces the
 			// report that turn recorded.
 			tool, err := a.tool(stream, continuedTurn(scope.Turn), report)
-			return []coreadapter.Tool{tool}, err
+			return []coreadapter.Tool{tool, candidateCheckTool(a.s.about(a.repository), a.repository, scope, report.Commit, a.s.options.reviewChecks)}, err
 		},
 		Hosts:  hosts,
 		Engine: engine,
@@ -1387,7 +1387,7 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 }
 
 func finalSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s): every planned unit has landed on the feature branch, and you read the whole branch against the feature's sealed spec and the project's charter before the owner decides whether it is delivered. You read; you hold no tool that writes, runs or fetches. You record your report with %s: for every criterion, what in the branch shows it holds, or the gap. A criterion you cannot see shown is a gap, never a guess.", p.Name, p.Upstream, FinalReportTool)
+	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s): every planned unit has landed on the feature branch, and you read the whole branch against the feature's sealed spec and the project's charter before the owner decides whether it is delivered. Your candidate files are read-only. Call run_checks to run dagger check on a separate disposable copy of the exact candidate and cite its returned commit and result. You cannot choose a command or modify the review input. You record your report with %s: for every criterion, what in the branch shows it holds, or the gap. A criterion you cannot see shown is a gap, never a guess.", p.Name, p.Upstream, FinalReportTool)
 }
 
 func finalPrompt(report FinalReport) string {

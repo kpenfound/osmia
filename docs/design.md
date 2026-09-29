@@ -273,7 +273,7 @@ Identifiers stay out: commit hashes, branch names, file paths, session ids, mode
 
 ### 6.5 Events
 
-The service tells the chief of staff what happened: a unit finished, a review came back, a question was raised, a landing succeeded, upstream moved. Events are written to a durable outbox in the same transaction as the state change, coalesced over a short window, and delivered as one turn, retried until delivered. Only the chief of staff receives events. Workers receive turns from the scheduler and nothing else, and are never told to wait for another agent.
+The service tells the chief of staff what happened: a unit finished, a review came back, a question was raised, a landing succeeded, upstream moved. Events are written to a durable outbox in the same transaction as the state change, coalesced over a short window, and delivered as one turn, retried until delivered. After the first failed delivery, the service retries immediately; repeated failures wait thirty seconds, doubling up to fifteen minutes. The delay is recovered from durable turn results, does not acknowledge undelivered events, and does not delay new events. Only the chief of staff receives events. Workers receive turns from the scheduler and nothing else, and are never told to wait for another agent.
 
 Events are information, not authorisation. The chief of staff does not dispatch, restart, replace or route around an agent. Transitions are the scheduler's.
 
@@ -384,7 +384,7 @@ Provider limits persist in `runtime.json` by agent backend. New turns of roles b
 
 ### 9.4 What a session sees
 
-A session starts in the unit's workspace, or a read-only clone for a committee member, with the Osmia MCP server and a bundle. It additionally receives a Hearsay MCP server when that integration is enabled and available.
+A session receives a scoped plain-file view with the Osmia MCP server and a bundle. A mason works in a disposable writable copy; the service captures its changes into the unit workspace. A reviewer receives a read-only export of the exact candidate commit and separate writable scratch space. Session records and authoritative repositories remain service-owned. It additionally receives a Hearsay MCP server when that integration is enabled and available.
 
 The Osmia server, role-scoped:
 
@@ -396,6 +396,7 @@ The Osmia server, role-scoped:
 | `amend` | mason, committee | File an amendment request against sealed criteria. |
 | `object`, `concede` | committee | A shed contribution, citing the spec, the charter or the knowledge base. |
 | `verdict` | committee | A review verdict with findings and severities. |
+| `run_checks` | unit and final reviewers | Run `dagger check` on a fresh disposable export of the pinned candidate; record its commit, exit status and bounded output. |
 | `answer`, `escalate`, `route_amendment`, `propose_charter`, `set_status`, `notify` | chief of staff | The five outcomes of a question, the status, and a notice to in-flight bundles. |
 | `inspect_code` | chief of staff | Read a committed code excerpt; a cited answer queues a librarian knowledge-gap refresh. |
 | `pause`, `resume`, `prioritise`, `capacity` | chief of staff | The factory-wide controls. |
@@ -407,7 +408,7 @@ There is no tool that lists agents, messages an arbitrary agent, or creates one.
 
 ### 9.5 Sandboxes
 
-A role runs on the host or in a container, per profile. In a container the workspace is bind-mounted and the MCP servers are reached over HTTP from the host. A read-only role has no tool that writes, runs or fetches.
+A role runs on the host or in a container, per profile. In a container the workspace is bind-mounted and the MCP servers are reached over HTTP from the host. Native tools follow role capabilities: reading tools for read-only roles, editing tools for file writers, and a shell only for implementation turns with execution permission. Native delegation, web tools and arbitrary MCP discovery are not granted. Read-only roles cannot edit their inputs or run arbitrary commands. Unit and final reviewers can request the fixed service-owned `run_checks` tool, which runs `dagger check` on a fresh export of their pinned candidate and discards the copy afterward. It accepts no command, path or environment overrides. The check client receives a temporary home and engine connectivity, without inherited provider, delivery or signing credentials; the agent receives no engine endpoint. Results enter the tool audit trail and inform the review without granting approval or delivery.
 
 ---
 

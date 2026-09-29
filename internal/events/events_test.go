@@ -692,3 +692,50 @@ func TestSkippedWorkstreamKeepsItsEvents(t *testing.T) {
 		t.Fatalf("turns %+v", eventTurns(t, repo))
 	}
 }
+
+func TestRepeatedEventFailuresBackOffAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t)
+	f.notify(t, repo, "first")
+	d := f.deliverer(t, repo, 0)
+	for range 2 {
+		must(t, d.Pass(ctx))
+		f.finish(t, repo, f.claimNext(t, repo), false)
+	}
+	repo = f.reopen(t, repo)
+	defer repo.Close()
+	d = f.deliverer(t, repo, 0)
+	must(t, d.Pass(ctx))
+	if len(eventTurns(t, repo)) != 2 {
+		t.Fatal("retry ignored durable backoff")
+	}
+	f.notify(t, repo, "second")
+	must(t, d.Pass(ctx))
+	if deliveries(t, repo, "first") != 2 || deliveries(t, repo, "second") != 1 {
+		t.Fatal("backoff blocked a new event or retried the old one")
+	}
+	f.finish(t, repo, f.claimNext(t, repo), true)
+	f.clock.Advance(29 * time.Second)
+	must(t, d.Pass(ctx))
+	if deliveries(t, repo, "first") != 2 {
+		t.Fatal("retried before deadline")
+	}
+	f.clock.Advance(time.Second)
+	must(t, d.Pass(ctx))
+	if deliveries(t, repo, "first") != 3 {
+		t.Fatal("did not retry at deadline")
+	}
+	f.finish(t, repo, f.claimNext(t, repo), false)
+	f.clock.Advance(59 * time.Second)
+	must(t, d.Pass(ctx))
+	if deliveries(t, repo, "first") != 3 {
+		t.Fatal("backoff did not increase")
+	}
+	f.clock.Advance(time.Second)
+	must(t, d.Pass(ctx))
+	f.finish(t, repo, f.claimNext(t, repo), true)
+	must(t, d.Pass(ctx))
+	if unacknowledged(t, repo) != 0 {
+		t.Fatal("successful delivery was not acknowledged")
+	}
+}

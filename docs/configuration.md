@@ -273,18 +273,30 @@ owned by Osmia.
 No global `localhost` network allowance is required. Broader operator policy
 remains in effect; per-sandbox rules do not narrow it. Configure other permitted
 destinations through [sbx network policy](https://docs.docker.com/reference/cli/sbx/policy/allow/network/).
-Osmia grants no general network tools to agents.
+Osmia grants no native web or fetch tools. Implementation shell commands follow the selected sandbox's network policy.
 
 The sandbox mounts the scoped view and session paths, honoring read-only
 access. When startup requires it, core supplies a separate temporary primary
 workspace so Docker Sandboxes can write its agent instructions outside protected
 inputs. The agent still runs in its granted working directory, and cleanup removes
-the temporary workspace. Shared skills are disabled. No host Dagger engine,
-arbitrary mounts, environment variables or native shell tools are exposed. Core creates and removes
+the temporary workspace. Shared skills are disabled. Native reading tools are enabled;
+file writers receive editing tools, and implementation turns also receive a shell.
+VCS executables and metadata remain unavailable. No host Dagger engine,
+arbitrary mounts or inherited credentials are exposed. Core creates and removes
 the sandbox for each attempt, including cancellation. If the service is forcibly
 killed, a sandbox may remain; its name is recorded in the turn's session directory
 as `sandbox-name`, and `sbx rm --force <name>` removes it and its rules.
 Core logs cleanup failures; a failed rule removal still attempts sandbox removal.
+
+Unit and final reviewers receive read-only files from the exact candidate commit
+and writable scratch space. Their `run_checks` tool accepts no arguments and runs
+`dagger check` through the service on a separate, fresh candidate export. The copy
+and temporary home are removed afterward. Checks have a fifteen-minute timeout
+and return the candidate commit, exit status and up to 64 KiB of output, with an
+explicit truncation flag. The check client inherits only PATH and service engine
+selection, not provider, GitHub or SSH credentials. A project without Dagger checks
+returns the check failure as review evidence; there is no command fallback.
+
 Missing CLI, login, template or policy requirements fail the turn without falling back to host
 execution.
 
@@ -396,7 +408,7 @@ duration shorter than `1m` is rejected.
 `classifier` names a top-level profile for clean mason turns with no accepted
 outcome. When omitted, code heuristics classify the response without a model
 call. An unknown profile is rejected. The classifier inherits the mason's
-sandbox, uses an empty read-only workspace and receives no tools. A Claude
+sandbox, uses an empty read-only workspace and receives no service tools or native write, shell or web tools. A Claude
 sandbox requires a Claude classifier profile. Its attempts are limited to two,
 each with a 30 second maximum timeout. Invalid or unavailable answers retain
 the code classification.

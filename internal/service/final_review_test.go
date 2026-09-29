@@ -200,7 +200,24 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 
 	upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream moved\n"})
 	var problems []error
+	checked := false
+	f.s.options.reviewChecks = checkFunc(func(_ context.Context, dir string) (CheckResult, error) {
+		checked = true
+		data, err := os.ReadFile(filepath.Join(dir, "UPSTREAM.md"))
+		if err != nil || string(data) != "upstream moved\n" {
+			return CheckResult{}, fmt.Errorf("checks missed rebased candidate: %s %v", data, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "UPSTREAM.md"), []byte("check generated output"), 0600); err != nil {
+			return CheckResult{}, err
+		}
+		return CheckResult{Output: "all proofs passed"}, nil
+	})
 	turn := f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+		result, err := callTool(ctx, tools, runChecksTool, map[string]any{})
+		if err != nil || !strings.Contains(result, "all proofs passed") {
+			return fmt.Errorf("review checks: %s %v", result, err)
+		}
+
 		for path, want := range map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan, "charter.md": shedCharter,
 			"branch/internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n", "branch/UPSTREAM.md": "upstream moved\n"} {
 			if got, err := readTool(ctx, tools, path); err != nil || got != want {
@@ -230,6 +247,9 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 	})
 	result, err := a.Apply(ctx, op)
 	must(t, err)
+	if !checked {
+		t.Fatal("final review did not run candidate checks")
+	}
 	if err := errors.Join(problems...); err != nil {
 		t.Fatal(err)
 	}
