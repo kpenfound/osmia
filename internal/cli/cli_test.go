@@ -226,7 +226,19 @@ func TestServeLifecycle(t *testing.T) {
 			opts := fixture(t)
 			root := opts.Config.Root
 			if defaultRoot {
-				t.Setenv("HOME", filepath.Dir(root))
+				// The default root and its XDG config file under HOME.
+				home := filepath.Dir(root)
+				t.Setenv("HOME", home)
+				t.Setenv("XDG_DATA_HOME", "")
+				t.Setenv("XDG_CONFIG_HOME", "")
+				data := filepath.Join(home, ".local", "share", "osmia")
+				top := filepath.Join(home, ".config", "osmia", "config.toml")
+				must(t, os.MkdirAll(filepath.Dir(data), 0700))
+				must(t, os.MkdirAll(filepath.Dir(top), 0700))
+				must(t, os.Rename(root, data))
+				must(t, os.Rename(filepath.Join(data, "config.toml"), top))
+				root = data
+				opts.Config = config.Options{}
 			}
 			socket := filepath.Join(root, "osmia.sock")
 			// Leave a stale socket for serve to recover.
@@ -251,7 +263,7 @@ func TestServeLifecycle(t *testing.T) {
 					break
 				}
 				if time.Now().After(deadline) {
-					t.Fatal("serve did not start")
+					t.Fatalf("serve did not start: %s", diag.String())
 				}
 				time.Sleep(10 * time.Millisecond)
 			}

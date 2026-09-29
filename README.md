@@ -6,8 +6,8 @@ need your judgement. It plans, builds and reviews the work, then delivers an
 approved branch and pull request from your fork.
 
 One service manages workstreams, agent capacity and the durable record. It keeps
-its configuration and factory state under `~/.osmia` by default, outside the
-repositories it works on. Agents receive scoped files and tools; the service
+its configuration in `~/.config/osmia` and factory state in
+`~/.local/share/osmia` by default, outside the repositories it works on. Agents receive scoped files and tools; the service
 owns version control and delivery credentials.
 
 ## Start here

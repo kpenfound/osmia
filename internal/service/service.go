@@ -173,7 +173,7 @@ type Service struct {
 // active project gets its own runtime: its trace, its reconciliation loop and
 // its restart recovery. Their schedulers share one pool of role capacity.
 func Start(ctx context.Context, opts Options) (_ *Service, err error) {
-	root, err := config.ResolveRoot(opts.Config.Root, opts.Config.Home)
+	root, err := opts.Config.Resolve()
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +196,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return nil, fmt.Errorf("Osmia root is already owned or cannot be locked; stop its service before starting another: %w", err)
 	}
-	opts.Config.Root = root.String()
+	opts.Config = root.Options(opts.Config.Home)
 	if opts.Issues == nil {
 		opts.Issues = issues.GitHub{Token: os.Getenv("GITHUB_TOKEN"), HTTP: &http.Client{Timeout: 30 * time.Second}}
 	}

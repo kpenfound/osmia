@@ -7,9 +7,9 @@ running `osmia` for the first time. To build from source instead, use
 [configuration](configuration.md).
 
 ```sh
-osmia serve --root ~/.osmia
+osmia serve
 # In another terminal:
-osmia status --root ~/.osmia
+osmia status
 osmia status w_0123456789abcdef0123456789abcdef
 osmia trace w_0123456789abcdef0123456789abcdef
 osmia trace w_0123456789abcdef0123456789abcdef criterion spec#1
@@ -407,7 +407,10 @@ a service restart. The [plan ratification demonstration](plan-ratification-demon
   applies. A file that fails validation fails with `validation` (exit 4),
   naming the file and field; the loaded configuration stays in force.
 
-Every command accepts `--root PATH`, defaulting to `~/.osmia`. Flags may occur
+Every command accepts `--root PATH`, defaulting to `~/.local/share/osmia` with
+its top-level file at `~/.config/osmia/config.toml` (see
+[root and identity](configuration.md#root-and-identity)). An explicit root holds
+its own `config.toml`. Flags may occur
 before or after positional arguments; value flags also accept `--flag=value`.
 Duplicate and unknown flags are errors. `--help` prints the supported syntax.
 `--version` prints the stamped [release](release.md) version and commit and
@@ -419,7 +422,7 @@ socket name, pass `--socket PATH` to each client command; relative paths resolve
 against the root. For example, with `listen.socket = "local.sock"`:
 
 ```sh
-osmia status --root ~/.osmia --socket local.sock --json
+osmia status --socket local.sock --json
 ```
 
 Clients never load configuration, runtime, trace or project files. They obtain

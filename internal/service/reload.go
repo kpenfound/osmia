@@ -192,5 +192,5 @@ func reloadError(err error, at time.Time) *ReloadError {
 	if errors.As(err, &field) {
 		return &ReloadError{Path: field.Path, Field: field.Field, Message: field.Error(), At: at}
 	}
-	return &ReloadError{Message: "the configuration files cannot be located or read; check config.toml and projects under the root and their permissions", At: at}
+	return &ReloadError{Message: "the configuration files cannot be located or read; check the top-level config.toml, the project files under the root and their permissions", At: at}
 }

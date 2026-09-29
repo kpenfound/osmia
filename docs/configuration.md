@@ -11,8 +11,19 @@ Migrations are separate work.
 
 ## Root and identity
 
-`Options.Root` takes precedence over the default `~/.osmia`; no environment
-variable overrides it. Relative explicit roots resolve against the process working
+`Options.Root` takes precedence over the default root. An explicit root is
+self-contained: its top-level file is `<root>/config.toml`. The default layout
+follows the XDG base directories:
+
+| File | Default | Base directory |
+| --- | --- | --- |
+| top-level `config.toml` | `~/.config/osmia/config.toml` | `$XDG_CONFIG_HOME/osmia` |
+| root | `~/.local/share/osmia` | `$XDG_DATA_HOME/osmia` |
+
+Each XDG variable is used only when it is an absolute path; there is no
+Osmia-specific environment variable. The default top-level file may be a
+symlink, for example into a dotfiles repository; it is read and edited at its
+target. Relative explicit roots resolve against the process working
 directory. `~` and `~/` use the user's home; `Options.Home` supplies an absolute
 home for embedding and tests. Other users' tilde syntax is rejected. Paths are
 absolute and cleaned, and existing symlink ancestors are resolved without requiring
@@ -30,7 +41,7 @@ workstream identities when creating their directories. Workstream keys are not a
 configuration list; they belong to persisted workstream manifests.
 
 ```text
-<root>/config.toml
+<root>/config.toml                             top-level file of an explicit root; the default is ~/.config/osmia/config.toml
 <root>/runtime.json
 <root>/osmia.sock
 <root>/tailnet/                                embedded Tailscale node state, when listen.tailnet is set
@@ -44,8 +55,9 @@ configuration list; they belong to persisted workstream manifests.
 
 `Root` provides checked helpers for these paths. Managed state paths reject
 symlink aliases, including aliases within the root that could collapse two
-identities. The clone and root must be separate, non-nested directories, including
-after resolving symlinks. Relative clone paths resolve from the project configuration
+identities; an explicit root's `config.toml` is managed the same way. The clone
+and root must be separate, non-nested directories, including after resolving
+symlinks. Relative clone paths resolve from the project configuration
 directory; missing clones are accepted for configuration purposes. Loading
 configuration writes nothing in the clone. Helpers check existing paths, not future filesystem changes;
 state writers must protect against concurrent symlink replacement.

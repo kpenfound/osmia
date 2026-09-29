@@ -45,10 +45,13 @@ osmia --version
 quarantine attribute of a browser download first; see
 [installing from an archive](release.md#installing-from-an-archive).
 
-## 2. Write `~/.osmia/config.toml`
+## 2. Write `~/.config/osmia/config.toml`
 
-Everything Osmia keeps lives under one root, `~/.osmia` by default (every
-command accepts `--root PATH`). Create it and its top-level file:
+The top-level configuration lives at `~/.config/osmia/config.toml`, and
+everything else Osmia keeps lives under one root, `~/.local/share/osmia`; both
+honor `XDG_CONFIG_HOME` and `XDG_DATA_HOME`. Every command accepts
+`--root PATH` for a self-contained root that holds its own `config.toml`.
+Create the top-level file:
 
 ```toml
 version = 1
@@ -98,7 +101,7 @@ The service runs in the foreground; leave it running. In another terminal:
 
 ```sh
 osmia status
-curl --unix-socket ~/.osmia/osmia.sock http://localhost/v1/health
+curl --unix-socket ~/.local/share/osmia/osmia.sock http://localhost/v1/health
 ```
 
 `osmia status` reports the service healthy, `Project: none configured` and,

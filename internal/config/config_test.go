@@ -31,15 +31,24 @@ func fixture(t *testing.T, top, project string) Options {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
-	root := filepath.Join(home, ".osmia")
-	dir := filepath.Join(root, "projects", pid)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		t.Fatal(err)
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	opts := Options{Home: home}
+	dir := filepath.Join(rootDirectory(opts), "projects", pid)
+	for _, d := range []string{dir, filepath.Dir(configFile(opts))} {
+		if err := os.MkdirAll(d, 0700); err != nil {
+			t.Fatal(err)
+		}
 	}
-	write(t, filepath.Join(root, "config.toml"), top)
+	write(t, configFile(opts), top)
 	write(t, filepath.Join(dir, "config.toml"), project)
-	return Options{Home: home}
+	return opts
 }
+
+// rootDirectory and configFile are the fixture's default root and top-level
+// file.
+func rootDirectory(o Options) string { return filepath.Join(o.Home, ".local", "share", "osmia") }
+func configFile(o Options) string    { return filepath.Join(o.Home, ".config", "osmia", "config.toml") }
 func write(t *testing.T, path, data string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
@@ -274,7 +283,7 @@ func TestInvalid(t *testing.T) {
 		{"repository url", "", strings.Replace(projectConfig, "upstream/repo", "https://host/upstream/repo", 1), "upstream:"},
 		{"same fork", "", strings.Replace(projectConfig, "owner/repo", "UPSTREAM/repo", 1), "fork:"},
 		{"missing clone", "", strings.Replace(projectConfig, `clone = "~/clone"`, "", 1), "clone:"},
-		{"clone in root", "", strings.Replace(projectConfig, "~/clone", "~/.osmia/clone", 1), "non-nested"},
+		{"clone in root", "", strings.Replace(projectConfig, "~/clone", "~/.local/share/osmia/clone", 1), "non-nested"},
 		{"root in clone", "", strings.Replace(projectConfig, "~/clone", "~", 1), "non-nested"},
 		{"tilde user", "", strings.Replace(projectConfig, "~/clone", "~other/clone", 1), "home expansion"},
 		{"branch", "", projectConfig + "base_branch = 'bad..branch'\n", "base_branch:"},
@@ -348,10 +357,14 @@ func TestMissingFiles(t *testing.T) {
 	for _, file := range []string{"config.toml", "projects/" + pid + "/config.toml"} {
 		t.Run(file, func(t *testing.T) {
 			opts := fixture(t, topConfig, projectConfig)
-			if err := os.Remove(filepath.Join(opts.Home, ".osmia", file)); err != nil {
+			path := filepath.Join(rootDirectory(opts), file)
+			if file == "config.toml" {
+				path = configFile(opts)
+			}
+			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
 			}
-			if c, err := Load(opts); c != nil || err == nil || !strings.Contains(err.Error(), file) {
+			if c, err := Load(opts); c != nil || err == nil || !strings.Contains(err.Error(), path) {
 				t.Fatalf("%+v %v", c, err)
 			}
 		})
@@ -359,6 +372,8 @@ func TestMissingFiles(t *testing.T) {
 }
 func TestPathsAndIdentity(t *testing.T) {
 	home := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
 	r, err := ResolveRoot("", home)
 	if err != nil {
 		t.Fatal(err)
@@ -397,7 +412,13 @@ func TestPathsAndIdentity(t *testing.T) {
 	if _, err := r.Workstream(p, WorkstreamID("../escape")); err == nil {
 		t.Fatal("workstream traversal")
 	}
-	for _, get := range []func() (string, error){r.Config, r.Runtime, r.Socket, func() (string, error) { return r.ProjectTrace(p) }, func() (string, error) { return r.ProjectConfig(p) }, func() (string, error) { return r.Workstream(p, w) }} {
+	if path, err := r.Config(); err != nil || path != configFile(Options{Home: home}) {
+		t.Fatalf("default config %s %v", path, err)
+	}
+	if path, err := explicit.Config(); err != nil || path != filepath.Join(explicit.String(), "config.toml") {
+		t.Fatalf("explicit config %s %v", path, err)
+	}
+	for _, get := range []func() (string, error){r.Runtime, r.Socket, func() (string, error) { return r.ProjectTrace(p) }, func() (string, error) { return r.ProjectConfig(p) }, func() (string, error) { return r.Workstream(p, w) }} {
 		path, err := get()
 		if err != nil || !beneath(r.String(), path) {
 			t.Fatalf("%s %v", path, err)
@@ -408,7 +429,7 @@ func TestSymlinkBoundaries(t *testing.T) {
 	for _, target := range []string{"outside", "inside"} {
 		t.Run(target, func(t *testing.T) {
 			opts := fixture(t, topConfig, projectConfig)
-			root := filepath.Join(opts.Home, ".osmia")
+			root := rootDirectory(opts)
 			projects := filepath.Join(root, "projects")
 			destination := filepath.Join(opts.Home, "elsewhere")
 			if target == "inside" {
@@ -426,7 +447,7 @@ func TestSymlinkBoundaries(t *testing.T) {
 		})
 	}
 	opts := fixture(t, topConfig, projectConfig)
-	if err := os.Symlink(filepath.Join(opts.Home, ".osmia"), filepath.Join(opts.Home, "clone")); err != nil {
+	if err := os.Symlink(rootDirectory(opts), filepath.Join(opts.Home, "clone")); err != nil {
 		t.Fatal(err)
 	}
 	if c, err := Load(opts); c != nil || err == nil || !strings.Contains(err.Error(), "non-nested") {
@@ -483,7 +504,7 @@ func TestFilesystemErrors(t *testing.T) {
 	for _, name := range []string{"clone file", "root file", "config alias", "dangling clone", "socket file"} {
 		t.Run(name, func(t *testing.T) {
 			opts := fixture(t, topConfig, projectConfig)
-			root := filepath.Join(opts.Home, ".osmia")
+			root := rootDirectory(opts)
 			switch name {
 			case "clone file":
 				write(t, filepath.Join(opts.Home, "clone"), "not a directory")
@@ -491,11 +512,9 @@ func TestFilesystemErrors(t *testing.T) {
 				opts.Root = filepath.Join(opts.Home, "file")
 				write(t, opts.Root, "not a directory")
 			case "config alias":
-				path := filepath.Join(root, "config.toml")
-				if err := os.Rename(path, filepath.Join(opts.Home, "elsewhere.toml")); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Symlink(filepath.Join(opts.Home, "elsewhere.toml"), path); err != nil {
+				// An explicit root's config.toml is managed and must not be a symlink.
+				opts.Root = root
+				if err := os.Symlink(configFile(opts), filepath.Join(root, "config.toml")); err != nil {
 					t.Fatal(err)
 				}
 			case "dangling clone":
@@ -563,5 +582,71 @@ func TestWorkspaces(t *testing.T) {
 	}
 	if _, err := Load(fixture(t, with("1"), projectConfig)); err == nil {
 		t.Fatal("workspaces = 1 loaded")
+	}
+}
+
+func TestXDGDirectories(t *testing.T) {
+	home, data, conf := t.TempDir(), t.TempDir(), t.TempDir()
+	t.Setenv("XDG_DATA_HOME", data)
+	t.Setenv("XDG_CONFIG_HOME", conf)
+	r, err := ResolveRoot("", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path, err := r.Config(); err != nil || r.String() != filepath.Join(data, "osmia") || path != filepath.Join(conf, "osmia", "config.toml") {
+		t.Fatalf("root %s config %s %v", r, path, err)
+	}
+	pinned, err := r.Options(home).Resolve()
+	if err != nil || pinned != r {
+		t.Fatalf("pinned %+v %v, want %+v", pinned, err, r)
+	}
+	explicit, err := ResolveRoot(filepath.Join(home, "explicit"), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path, err := explicit.Config(); err != nil || path != filepath.Join(explicit.String(), "config.toml") {
+		t.Fatalf("explicit root read %s %v", path, err)
+	}
+	// Relative XDG values are ignored.
+	t.Setenv("XDG_DATA_HOME", "data")
+	t.Setenv("XDG_CONFIG_HOME", "config")
+	r, err = ResolveRoot("", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path, err := r.Config(); err != nil || r.String() != rootDirectory(Options{Home: home}) || path != configFile(Options{Home: home}) {
+		t.Fatalf("root %s config %s %v", r, path, err)
+	}
+}
+
+// A default config.toml may be a symlink, and edits reach its target.
+func TestSymlinkedConfig(t *testing.T) {
+	opts := fixture(t, strings.Replace(topConfig, `"`+pid+`"`, "", 1), projectConfig)
+	target := filepath.Join(opts.Home, "dotfiles", "osmia.toml")
+	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(configFile(opts), target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, configFile(opts)); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := c.Root.Config()
+	if err != nil || path != target {
+		t.Fatalf("config %s %v", path, err)
+	}
+	if err := AddActiveProject(path, pid); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(configFile(opts)); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("symlink replaced: %v", err)
+	}
+	if c, err := Load(opts); err != nil || !c.HasProject() {
+		t.Fatalf("edited config: %+v %v", c, err)
 	}
 }

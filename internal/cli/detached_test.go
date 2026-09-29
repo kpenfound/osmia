@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
 )
 
@@ -68,5 +69,23 @@ func TestDetachedServeReadinessDuplicateOwnerAndStop(t *testing.T) {
 			t.Fatal("service did not stop")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// A detached default root starts its child without --root so the child reads
+// the same XDG config file; an explicit root is passed on.
+func TestDetachedRootFlag(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "conf"))
+	root, err := config.ResolveRoot("", "")
+	must(t, err)
+	if flag := rootFlag(root); flag != "" {
+		t.Fatalf("default root flag %q", flag)
+	}
+	explicit, err := config.ResolveRoot(filepath.Join(home, "explicit"), "")
+	must(t, err)
+	if flag := rootFlag(explicit); flag != explicit.String() {
+		t.Fatalf("explicit root flag %q", flag)
 	}
 }

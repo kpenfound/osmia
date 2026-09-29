@@ -123,8 +123,8 @@ The directed graph of units. For each unit: the criteria it addresses, how each 
 ### 4.5 Where they live
 
 ```
-<root>/                          default ~/.osmia
-  config.toml                    profiles, capacity, budget, Hearsay, listen addresses
+~/.config/osmia/config.toml      profiles, capacity, budget, Hearsay, listen addresses
+<root>/                          default ~/.local/share/osmia
   runtime.json                   profile overrides, pause states, workstream priority
   projects/<project-id>/         one git repository per project
     config.toml                  upstream, fork, clone path, landing style, per-project caps
@@ -144,6 +144,8 @@ The directed graph of units. For each unit: the criteria it addresses, how each 
       events.jsonl               every transition, with who and why
       ledger.jsonl               cost per session
 ```
+
+The defaults follow the XDG base directories: the top-level configuration is `osmia/config.toml` under `$XDG_CONFIG_HOME`, and the root is `osmia` under `$XDG_DATA_HOME`, falling back to `~/.config` and `~/.local/share`. Everything else Osmia keeps is in the root. An explicit `--root` is self-contained and holds its own `config.toml`.
 
 The project repository's history is the decision trail. `osmia trace` walks it in either direction: criterion to unit to turns to review to commit, or commit back to the ruling that shaped it.
 
@@ -527,12 +529,12 @@ in [configuration](configuration.md). The examples below describe the full desig
 ### 13.1 User configuration
 
 ```toml
-# ~/.osmia/config.toml
+# ~/.config/osmia/config.toml
 version = 1
 workspaces = "auto"                  # new workstreams: jujutsu when jj is supported, else git
 
 [listen]
-socket = "~/.osmia/osmia.sock"
+socket = "~/.local/share/osmia/osmia.sock"
 web = "127.0.0.1:8484"               # loopback host:port only; empty disables
 tailnet = "osmia"                    # hostname on the tailnet; empty disables
 
@@ -590,7 +592,7 @@ max_bounces = 3
 ### 13.2 Project configuration
 
 ```toml
-# ~/.osmia/projects/<project-id>/config.toml
+# ~/.local/share/osmia/projects/<project-id>/config.toml
 version = 1
 name = "dagger"
 upstream = "dagger/dagger"

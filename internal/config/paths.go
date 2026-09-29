@@ -9,15 +9,27 @@ import (
 
 // Root is resolved without creating any files. Managed paths check existing
 // symlinks on every call; writers must still protect against concurrent changes.
-type Root struct{ directory string }
+// config is the top-level configuration file, which the default root keeps
+// outside its directory.
+type Root struct{ directory, config string }
 
 func (r Root) String() string { return r.directory }
 
-// ResolveRoot uses explicit over ~/.osmia. home is injectable; an empty home
-// consults os.UserHomeDir only when tilde expansion is needed.
+// ResolveRoot uses explicit over the default root. An explicit root holds its
+// own config.toml. The default root is osmia in the XDG data directory and
+// reads osmia/config.toml in the XDG config directory; each XDG variable is
+// used when it is absolute, otherwise ~/.local/share and ~/.config. home is
+// injectable; an empty home consults os.UserHomeDir only when tilde expansion
+// is needed.
 func ResolveRoot(explicit, home string) (Root, error) {
+	config := ""
 	if explicit == "" {
-		explicit = "~/.osmia"
+		explicit = xdgDirectory("XDG_DATA_HOME", "~/.local/share", "osmia")
+		c, err := resolvePath(xdgDirectory("XDG_CONFIG_HOME", "~/.config", "osmia", "config.toml"), home, "")
+		if err != nil {
+			return Root{}, fmt.Errorf("config: %w", err)
+		}
+		config = c
 	}
 	p, err := resolvePath(explicit, home, "")
 	if err != nil {
@@ -26,7 +38,36 @@ func ResolveRoot(explicit, home string) (Root, error) {
 	if info, err := os.Stat(p); err == nil && !info.IsDir() {
 		return Root{}, fmt.Errorf("root: %s is not a directory", p)
 	}
-	return Root{p}, nil
+	if config == filepath.Join(p, "config.toml") {
+		config = ""
+	}
+	return Root{p, config}, nil
+}
+
+// SelfContained reports whether the top-level file is the root's own
+// config.toml, so passing the directory as an explicit root reads the same file.
+func (r Root) SelfContained() bool { return r.config == "" }
+
+// Resolve is the root these options locate, with File as its top-level file
+// when set.
+func (o Options) Resolve() (Root, error) {
+	r, err := ResolveRoot(o.Root, o.Home)
+	if err == nil && o.File != "" {
+		r.config = o.File
+	}
+	return r, err
+}
+
+// Options pins this root's directory and top-level file for later loads.
+func (r Root) Options(home string) Options {
+	return Options{Root: r.directory, Home: home, File: r.config}
+}
+func xdgDirectory(variable, fallback string, parts ...string) string {
+	base := os.Getenv(variable)
+	if !filepath.IsAbs(base) {
+		base = fallback
+	}
+	return filepath.Join(append([]string{base}, parts...)...)
 }
 func resolvePath(p, home, base string) (string, error) {
 	if p == "" || strings.ContainsAny(p, "\x00\r\n") {
@@ -101,7 +142,15 @@ func (r Root) managed(parts ...string) (string, error) {
 	}
 	return p, nil
 }
-func (r Root) Config() (string, error)  { return r.managed("config.toml") }
+
+// Config is the top-level configuration file, resolved through symlinks when
+// it is outside the root.
+func (r Root) Config() (string, error) {
+	if r.config == "" {
+		return r.managed("config.toml")
+	}
+	return canonical(r.config)
+}
 func (r Root) Runtime() (string, error) { return r.managed("runtime.json") }
 func (r Root) Socket() (string, error)  { return r.managed("osmia.sock") }
 

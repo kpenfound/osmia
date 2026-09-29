@@ -25,7 +25,11 @@ func TestLoadFailuresNameTheFileAndField(t *testing.T) {
 			opts := fixture(t, tc.top, tc.project)
 			_, err := Load(opts)
 			root, _ := ResolveRoot("", opts.Home)
-			want := &FieldError{Path: filepath.Join(root.String(), tc.file), Field: tc.field, Reason: tc.reason}
+			path := filepath.Join(root.String(), tc.file)
+			if tc.file == "config.toml" {
+				path = configFile(opts)
+			}
+			want := &FieldError{Path: path, Field: tc.field, Reason: tc.reason}
 			var got *FieldError
 			if !errors.As(err, &got) || got.Path != want.Path || got.Field != want.Field || got.Reason != want.Reason {
 				t.Fatalf("got %#v (%v), want %#v", got, err, want)
