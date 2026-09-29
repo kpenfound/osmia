@@ -388,8 +388,9 @@ func TestSymlinksAndGitRedirection(t *testing.T) {
 func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
 	for _, mode := range []string{"config", "alternates", "hardlink"} {
 		// Records and workflow publications run Git even when the handle has
-		// listed HEAD's tree; a read runs Git once HEAD has moved since then,
-		// and to finish a publication that stopped after its ref moved.
+		// listed HEAD's tree; a read runs Git when the handle has not listed
+		// the tree of HEAD, and to finish a publication that stopped after its
+		// ref moved.
 		for _, op := range []string{"record", "publish", "read", "recover"} {
 			t.Run(mode+"/"+op, func(t *testing.T) {
 				r, _, p := create(t)
@@ -398,6 +399,9 @@ func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
 				switch op {
 				case "read":
 					err = r.Append(ctx, specimens()[0])
+					// A handle that made HEAD knows its tree; one that opened
+					// on it lists the tree with Git.
+					r.tree, r.treeHead = nil, ""
 				case "recover":
 					injected := errors.New("injected publication failure")
 					r.failPublication = func(step string) error {
@@ -488,8 +492,70 @@ func TestCheckedEntryAcceptsAVanishedFile(t *testing.T) {
 	if err := os.Remove(filepath.Join(r.directory, name)); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.checkedEntry(name, entry); err != nil {
+	parent, err := r.dir.OpenRoot(".git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent.Close()
+	if err := checkedEntry(parent, name, entry); err != nil {
 		t.Fatalf("vanished entry: %v", err)
+	}
+}
+
+// A handle keeps the listing of each commit it makes, which must match the
+// listing Git gives for that commit.
+func TestHandleListsTheTreesItCommits(t *testing.T) {
+	r, _, _ := create(t)
+	ctx := context.Background()
+	if _, err := r.Workflow(streamID, FeatureSubject); err != nil {
+		t.Fatal(err)
+	}
+	publish := func(files map[string][]byte, removed []string) {
+		t.Helper()
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if err := r.publishTree(ctx, files, removed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	steps := []func(){
+		func() {
+			if err := r.Append(ctx, specimens()[0]); err != nil {
+				t.Fatal(err)
+			}
+		},
+		func() { publish(map[string][]byte{"notes/a.md": []byte("a\n")}, nil) },
+		func() { publish(map[string][]byte{"notes/b.md": []byte("b\n")}, []string{"notes/a.md"}) },
+		func() {
+			if _, err := r.SetFeatureState(ctx, header("transition", "handed"), "handed", "the owner handed a design"); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for i, step := range steps {
+		step()
+		ref, err := os.ReadFile(filepath.Join(r.directory, ".git", "refs", "heads", "main"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		derived, head := r.tree, r.treeHead
+		if head != strings.TrimSpace(string(ref)) {
+			t.Fatalf("step %d: the handle lists %q, HEAD is %q", i, head, ref)
+		}
+		r.tree, r.treeHead = nil, ""
+		listed, err := r.headTree(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(derived, listed) {
+			t.Fatalf("step %d: the handle lists\n%v\nGit lists\n%v", i, derived, listed)
+		}
+	}
+	if _, ok := r.tree["notes/a.md"]; ok {
+		t.Fatal("a removed path is still listed")
+	}
+	if _, ok := r.tree["notes/b.md"]; !ok {
+		t.Fatal("a published path is not listed")
 	}
 }
 func TestHeadTreeRefusesAnInvalidRef(t *testing.T) {
@@ -772,7 +838,7 @@ func TestCreateSeededRecordsEntityMap(t *testing.T) {
 	if err != nil || string(data) != seed {
 		t.Fatalf("file: %q, %v", data, err)
 	}
-	if err := r.checkHistory(context.Background()); err != nil {
+	if _, err := r.checkHistory(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 }

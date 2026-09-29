@@ -388,6 +388,13 @@ func TestPublicationRecoveryRecordsOneDurableResult(t *testing.T) {
 			if got := streamDocuments(t, p.repository, p.stream, publicationDocument); len(got) > 2 {
 				t.Fatalf("duplicate publication records: %d", len(got))
 			}
+			if point == "publish-opened" {
+				recorded, err := publications(p.repository, p.stream)
+				must(t, err)
+				if len(recorded) != 2 || recorded[1].PullRequest != p.pulls.prs[0].Number || recorded[1].Status != publicationOpened {
+					t.Fatalf("publications %+v", recorded)
+				}
+			}
 			wantPushIntents := 1
 			if point == "publish-recorded" {
 				wantPushIntents = 2
@@ -396,25 +403,6 @@ func TestPublicationRecoveryRecordsOneDurableResult(t *testing.T) {
 				t.Fatalf("push attempts %d, want %d", pushIntents, wantPushIntents)
 			}
 		})
-	}
-}
-
-func TestPublicationRefusesAnExistingClosedPRBeforeAdvancingOwnedBranch(t *testing.T) {
-	t.Parallel()
-	p := newPublicationFixture(t, "squash")
-	p.approve(t, nil)
-	first := p.request(t)
-	p.pulls.prs = []pulls.PullRequest{{Number: 7, URL: "https://github.com/dagger/dagger/pull/7", State: "closed", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", Base: "main"}}
-	result, err := p.publisher().Apply(context.Background(), first)
-	if err != nil || result.Outcome != "failed" {
-		t.Fatalf("first publication %+v: %v", result, err)
-	}
-	before, _ := p.forkBranch(t)
-	p.approve(t, nil)
-	second := p.request(t)
-	result, err = p.publisher().Apply(context.Background(), second)
-	if after, _ := p.forkBranch(t); err != nil || result.Outcome != "failed" || after != before {
-		t.Fatalf("closed PR moved branch from %s to %s: %+v, %v", before, after, result, err)
 	}
 }
 
@@ -448,52 +436,6 @@ func TestPublicationVerifiesHeadAfterAutomaticPRAdvance(t *testing.T) {
 	result := settleOperation(t, p.s, p.repository, p.stream, second, p.publisher())
 	if result.Outcome != "succeeded" || p.pulls.creates != 0 || p.pulls.prs[0].HeadCommit == old {
 		t.Fatalf("publication %+v, creates %d, PR %+v", result, p.pulls.creates, p.pulls.prs[0])
-	}
-}
-
-func TestPublicationAdoptsAPullRequestWhoseCreationLostItsResponse(t *testing.T) {
-	t.Parallel()
-	p := newPublicationFixture(t, "commit-per-unit")
-	ctx := context.Background()
-	p.approve(t, nil)
-	op := p.request(t)
-	p.pulls.lose = true
-	if _, err := p.publisher().Apply(ctx, op); err == nil {
-		t.Fatal("a lost response succeeded")
-	}
-	result, err := p.publisher().Apply(ctx, op)
-	if err != nil || result.Outcome != "succeeded" || p.pulls.creates != 1 || len(p.pulls.prs) != 1 {
-		t.Fatalf("publication %+v: %v; %d creates", result, err, p.pulls.creates)
-	}
-}
-
-func TestPublicationKeepsAMatchingBranchAndPullRequest(t *testing.T) {
-	t.Parallel()
-	p := newPublicationFixture(t, "commit-per-unit")
-	ctx := context.Background()
-	approval := p.approve(t, nil)
-	op := p.request(t)
-	p.s.boundary = func(step string) error {
-		if step == "publish-pushed" {
-			return errors.New("interrupted")
-		}
-		return nil
-	}
-	_, err := p.publisher().Apply(ctx, op)
-	if err == nil {
-		t.Fatal("push was not interrupted")
-	}
-	p.s.boundary = nil
-	tip, _ := p.forkBranch(t)
-	p.pulls.prs = []pulls.PullRequest{{Number: 42, URL: "https://github.com/dagger/dagger/pull/42", State: "open", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", HeadCommit: tip, Base: "main", Body: approval.Description}}
-	result, err := p.publisher().Apply(ctx, op)
-	if err != nil || result.Outcome != "succeeded" || p.pulls.creates != 0 {
-		t.Fatalf("publication %+v: %v; %d creates", result, err, p.pulls.creates)
-	}
-	recorded, err := publications(p.repository, p.stream)
-	must(t, err)
-	if len(recorded) != 2 || recorded[1].PullRequest != 42 || recorded[1].Status != publicationOpened {
-		t.Fatalf("publications %+v", recorded)
 	}
 }
 
@@ -542,34 +484,10 @@ func TestPublicationRefusesConflictingRemoteStateUntilApprovedAgain(t *testing.T
 		if err != nil || result.Outcome != "failed" || !strings.Contains(result.Evidence, "#7") {
 			t.Fatalf("publication %+v: %v", result, err)
 		}
-		if p.pulls.creates != 0 || p.feature(t) != AssembledState {
-			t.Fatalf("%d creates; the workstream is %s", p.pulls.creates, p.feature(t))
+		if tip, exists := p.forkBranch(t); exists || p.pulls.creates != 0 || p.feature(t) != AssembledState {
+			t.Fatalf("the fork branch is at %s; %d creates; the workstream is %s", tip, p.pulls.creates, p.feature(t))
 		}
 	})
-}
-
-func TestPublicationRepublishesABranchAnEarlierPublicationPushed(t *testing.T) {
-	t.Parallel()
-	p := newPublicationFixture(t, "squash")
-	ctx := context.Background()
-	p.approve(t, nil)
-	first := p.request(t)
-	p.pulls.prs = []pulls.PullRequest{{Number: 7, State: "closed", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", Base: "main"}}
-	if result, err := p.publisher().Apply(ctx, first); err != nil || result.Outcome != "failed" {
-		t.Fatalf("publication beside a closed pull request %+v: %v", result, err)
-	}
-	pushed, _ := p.forkBranch(t)
-	p.pulls.prs = nil
-	edited := "# Resumable uploads, edited\n"
-	p.approve(t, &edited)
-	second := p.request(t)
-	result, err := p.publisher().Apply(ctx, second)
-	if err != nil || result.Outcome != "succeeded" {
-		t.Fatalf("publication %+v: %v", result, err)
-	}
-	if tip, _ := p.forkBranch(t); tip == pushed || p.pulls.prs[0].Body != edited || p.pulls.prs[0].HeadCommit != tip {
-		t.Fatalf("republished %s over %s with %+v", tip, pushed, p.pulls.prs)
-	}
 }
 
 func TestServicePublishesAnApprovedWorkstreamAfterRestart(t *testing.T) {

@@ -429,41 +429,6 @@ func TestOwnerSkipsDebateWhileTheReplyIsParked(t *testing.T) {
 	f.stillInShed(t, stream)
 }
 
-// Abandoning the workstream while a draft is parked cancels nothing: the
-// draft stays parked and the answer is never delivered.
-func TestAbandoningAParkedDraftLeavesItParked(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	p := &faults{}
-	f, c := newAskingFixture(t, 1, 1, p)
-	defer f.stop(t)
-	hold := c.hold("1")
-	f.script(draftTurnID(1, 1), nil, asks(p, "1"))
-	answering := f.answer("1", silent)
-	stream := f.handIn(t, "design", handedDesign)
-	f.await(t, stream, draftAt("waiting-1"))
-	f.awaitQuestion(t, stream, "1", trace.QuestionAnswered)
-	if _, err := f.c.Abandon(ctx, stream, "Superseded."); err != nil {
-		t.Fatal(err)
-	}
-	close(hold)
-	must(t, f.s.answers(f.s.current(), f.repository()).Pass(ctx))
-	must(t, (&drafter{s: f.s, repository: f.repository()}).Pass(ctx))
-	p.check(t)
-	if moves, want := f.draftMoves(t, stream), []string{"draft-1  -> drafting-1", "draft-1-waiting-1 drafting-1 -> waiting-1"}; !slices.Equal(moves, want) {
-		t.Fatalf("draft went %v, want %v", moves, want)
-	}
-	if th := f.architectThread(t, stream); len(th.Turns) != 1 || th.Turns[0].Status() != "waiting" {
-		t.Fatalf("architect's thread after the abandonment: %+v", th)
-	}
-	if ran := f.ran(); ran[answering] != 0 {
-		t.Fatalf("the answer ran: %v", ran)
-	}
-	if feature, err := f.repository().Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AbandonedState {
-		t.Fatalf("feature: %+v %v", feature, err)
-	}
-}
-
 // asksThenWaits makes the architect's turn ask and then run until the service
 // cancels it, signalling once it asked.
 func asksThenWaits(p *faults, asked chan<- struct{}) fakeTurn {

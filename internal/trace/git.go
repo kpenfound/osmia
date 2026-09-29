@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"slices"
@@ -28,14 +29,11 @@ func (r *Repository) checkGit() error {
 	if !info.IsDir() {
 		return fmt.Errorf("trace .git must be a dedicated directory, not a linked worktree")
 	}
-	err = fs.WalkDir(r.dir.FS(), ".git", func(name string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
+	err = r.walkDir(".git", func(parent *os.Root, name string, entry fs.DirEntry) error {
 		if name == ".git/commondir" || name == ".git/objects/info/alternates" || name == ".git/objects/info/http-alternates" {
 			return fmt.Errorf("%s: external Git storage is forbidden", name)
 		}
-		return r.checkedEntry(name, entry)
+		return checkedEntry(parent, name, entry)
 	})
 	if err != nil {
 		return err
@@ -108,6 +106,7 @@ func (r *Repository) commitContent(ctx context.Context, paths []string, content 
 	if _, err := r.git(ctx, nil, "read-tree", base); err != nil {
 		return err
 	}
+	blobs := map[string]string{}
 	for _, name := range paths {
 		data, ok := content[name]
 		if !ok {
@@ -115,13 +114,12 @@ func (r *Repository) commitContent(ctx context.Context, paths []string, content 
 				return err
 			}
 		}
-		oid, err := r.git(ctx, data, "hash-object", "-w", "--stdin")
-		if err != nil {
+		if blobs[name], err = r.git(ctx, data, "hash-object", "-w", "--stdin"); err != nil {
 			return err
 		}
-		if _, err := r.git(ctx, nil, "update-index", "--add", "--cacheinfo", "100644,"+oid+","+name); err != nil {
-			return err
-		}
+	}
+	if _, err := r.git(ctx, indexInfo(paths, blobs, nil), "update-index", "-z", "--index-info"); err != nil {
+		return err
 	}
 	tree, err := r.git(ctx, nil, "write-tree")
 	if err != nil {
@@ -135,12 +133,14 @@ func (r *Repository) commitContent(ctx context.Context, paths []string, content 
 	if err != nil {
 		return err
 	}
+	head := old
 	if old == "" {
 		old = strings.Repeat("0", 40)
 	}
 	if _, err = r.git(ctx, nil, "update-ref", "refs/heads/main", oid, old); err != nil {
 		return err
 	}
+	r.advanceTree(head, oid, blobs, nil)
 	r.observed(Commit{Paths: slices.Clone(paths), Content: content})
 	return nil
 }
@@ -149,37 +149,84 @@ func (r *Repository) commitContent(ctx context.Context, paths []string, content 
 // uncommitted file changes without guessing how to reconcile them. The owner
 // edits charter.md and a workstream's spec.md and plan.json directly; Charter
 // and OwnerDocuments record those edits, so a difference there is expected.
-func (r *Repository) checkHistory(ctx context.Context) error {
+// It returns the files it checked, for a scan under the same lock.
+func (r *Repository) checkHistory(ctx context.Context) (*treeFiles, error) {
 	if err := r.recoverPublication(ctx); err != nil {
-		return err
+		return nil, err
 	}
 	blobs, err := r.headTree(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	tracked := map[string]bool{}
-	for name, oid := range blobs {
-		tracked[name] = true
+	matches := func(name string, data []byte) error {
+		hash := sha1.New()
+		fmt.Fprintf(hash, "blob %d\x00", len(data))
+		hash.Write(data)
+		if fmt.Sprintf("%x", hash.Sum(nil)) != blobs[name] {
+			return fmt.Errorf("%s: trace files differ from committed history; reconciliation required", name)
+		}
+		return nil
+	}
+	files := &treeFiles{data: map[string][]byte{}}
+	err = r.walk(func(parent *os.Root, name string, entry fs.DirEntry) error {
+		if entry.IsDir() {
+			return nil
+		}
+		files.names = append(files.names, name)
+		if _, tracked := blobs[name]; !tracked {
+			if strings.HasSuffix(name, ".jsonl") || strings.HasSuffix(name, "/workstream.json") || name == "project.json" || strings.HasSuffix(name, "/workflow.json") {
+				return fmt.Errorf("%s: trace file is not committed; reconciliation required", name)
+			}
+			return nil
+		}
 		if ownerEdited(name) {
+			return nil
+		}
+		data, err := readEntry(parent, name, entry)
+		if err != nil {
+			return fmt.Errorf("trace history %s: %w", name, err)
+		}
+		files.data[name] = data
+		return matches(name, data)
+	})
+	if err != nil {
+		return nil, err
+	}
+	for name := range blobs {
+		if _, ok := files.data[name]; ok || ownerEdited(name) {
 			continue
 		}
 		data, err := r.readFile(name)
 		if err != nil {
-			return fmt.Errorf("trace history %s: %w", name, err)
+			return nil, fmt.Errorf("trace history %s: %w", name, err)
 		}
-		hash := sha1.New()
-		fmt.Fprintf(hash, "blob %d\x00", len(data))
-		hash.Write(data)
-		if fmt.Sprintf("%x", hash.Sum(nil)) != oid {
-			return fmt.Errorf("%s: trace files differ from committed history; reconciliation required", name)
+		if err := matches(name, data); err != nil {
+			return nil, err
 		}
 	}
-	return r.walk(func(name string, entry fs.DirEntry) error {
-		if !entry.IsDir() && !tracked[name] && (strings.HasSuffix(name, ".jsonl") || strings.HasSuffix(name, "/workstream.json") || name == "project.json" || strings.HasSuffix(name, "/workflow.json")) {
-			return fmt.Errorf("%s: trace file is not committed; reconciliation required", name)
+	return files, nil
+}
+
+// advanceTree records the listing of commit, which this handle made from
+// parent by setting each path of blobs to its blob and removing each of
+// removed, when the handle holds the listing of parent.
+func (r *Repository) advanceTree(parent, commit string, blobs map[string]string, removed []string) {
+	r.gitMu.Lock()
+	defer r.gitMu.Unlock()
+	if r.tree == nil || r.treeHead != parent {
+		return
+	}
+	tree := maps.Clone(r.tree)
+	for name, oid := range blobs {
+		if relative(name) != nil {
+			return
 		}
-		return nil
-	})
+		tree[name] = oid
+	}
+	for _, name := range removed {
+		delete(tree, name)
+	}
+	r.tree, r.treeHead = tree, commit
 }
 
 // headTree returns the blob identity of every file committed at HEAD. A

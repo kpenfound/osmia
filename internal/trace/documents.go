@@ -101,10 +101,11 @@ func (r *Repository) documentFiles(ctx context.Context, docs []Document) (map[st
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	if err := r.checkHistory(ctx); err != nil {
+	checked, err := r.checkHistory(ctx)
+	if err != nil {
 		return nil, nil, err
 	}
-	records, streams, err := r.scan()
+	records, streams, err := r.scanFiles(checked)
 	if err != nil {
 		return nil, nil, err
 	}

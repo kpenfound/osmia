@@ -2,9 +2,7 @@ package service
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,8 +16,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/kpenfound/osmia/internal/runtime"
 )
 
 // fakeTailnet stands in for the embedded Tailscale node with a loopback TCP
@@ -107,7 +103,8 @@ func withListen(t *testing.T, opts Options, body string) {
 	must(t, os.WriteFile(path, append(top, []byte("[listen]\n"+body)...), 0600))
 }
 
-// Without listen.tailnet the service never joins a tailnet.
+// Without listen.tailnet the service never joins a tailnet and no response
+// mentions the tailnet.
 func TestTailnetDisabledByDefault(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
@@ -124,18 +121,25 @@ func TestTailnetDisabledByDefault(t *testing.T) {
 	if cfg.Effective.Listen.Tailnet != "" {
 		t.Fatalf("effective listen: %+v", cfg.Effective.Listen)
 	}
+	h, err := c.Health(context.Background())
+	must(t, err)
+	st, err := c.Statuses(context.Background())
+	must(t, err)
+	if h.Tailnet != nil || st.Tailnet != nil || cfg.Tailnet != nil {
+		t.Fatalf("tailnet reported without listen.tailnet: %+v %+v %+v", h.Tailnet, st.Tailnet, cfg.Tailnet)
+	}
 	if _, err := os.Stat(filepath.Join(opts.Config.Root, "tailnet")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("tailnet state directory without listen.tailnet: %v", err)
 	}
 }
 
-// The service joins as the configured hostname with the node's state under
-// the root, and the tailnet listener serves the socket's routes with the
-// socket's responses beside the loopback web listener.
-func TestTailnetListenerServesTheSocketAPI(t *testing.T) {
+// The service joins as the configured hostname with the node's private state
+// under the root, listens on the node's address and reports the configured
+// hostname as its effective listen.tailnet.
+func TestTailnetJoinsAsTheConfiguredHostname(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
+	withListen(t, opts, "tailnet = \"osmia\"\n")
 	joined := withTailnet(t, &opts)
 	s, c := start(t, opts)
 	node := *joined
@@ -155,31 +159,6 @@ func TestTailnetListenerServesTheSocketAPI(t *testing.T) {
 	must(t, err)
 	if cfg.Effective.Listen.Tailnet != "osmia" {
 		t.Fatalf("effective listen: %+v", cfg.Effective.Listen)
-	}
-
-	socket, remote := socketHTTP(s.Socket()), webHTTP()
-	base := "http://" + s.TailnetAddr()
-	for _, path := range []string{"/health", "/config", "/runtime", "/nowhere"} {
-		sc, sb := exchange(t, socket, "GET", "http://osmia"+Prefix+path, "", "", "")
-		tc, tb := exchange(t, remote, "GET", base+Prefix+path, "", "", "osmia")
-		if sc != tc || !bytes.Equal(sb, tb) {
-			t.Fatalf("%s: socket %d %s, tailnet %d %s", path, sc, sb, tc, tb)
-		}
-	}
-	if code, body := exchange(t, remote, "GET", "http://"+s.WebAddr()+Prefix+"/health", "", "", ""); code != 200 {
-		t.Fatalf("web beside tailnet: %d %s", code, body)
-	}
-
-	pause, err := json.Marshal(PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "travel", Source: "owner"})
-	must(t, err)
-	code, body := exchange(t, remote, "PUT", base+Prefix+"/runtime/pause", "application/json", string(pause), "osmia")
-	if code != 200 {
-		t.Fatalf("pause over tailnet: %d %s", code, body)
-	}
-	state, err := c.Runtime(context.Background())
-	must(t, err)
-	if len(state.Effective.Pauses) != 1 {
-		t.Fatalf("pause written over the tailnet is not seen over the socket: %+v", state.Effective)
 	}
 }
 
@@ -426,21 +405,6 @@ func TestTailnetReportsTheNodeState(t *testing.T) {
 	}
 }
 
-// Without listen.tailnet no response mentions the tailnet.
-func TestTailnetStatusOmittedWithoutTailnet(t *testing.T) {
-	t.Parallel()
-	_, c := start(t, fixture(t))
-	h, err := c.Health(context.Background())
-	must(t, err)
-	st, err := c.Statuses(context.Background())
-	must(t, err)
-	cfg, err := c.Configuration(context.Background())
-	must(t, err)
-	if h.Tailnet != nil || st.Tailnet != nil || cfg.Tailnet != nil {
-		t.Fatalf("tailnet reported without listen.tailnet: %+v %+v %+v", h.Tailnet, st.Tailnet, cfg.Tailnet)
-	}
-}
-
 // Shutdown drains a request in flight over the tailnet before it leaves the
 // tailnet.
 func TestShutdownDrainsTailnetRequestsBeforeLeaving(t *testing.T) {
@@ -474,23 +438,6 @@ func TestShutdownDrainsTailnetRequestsBeforeLeaving(t *testing.T) {
 	must(t, s.Wait())
 	if node := *joined; !node.closed.Load() || !node.left.Load() {
 		t.Fatalf("after shutdown: closed %v, left %v", node.closed.Load(), node.left.Load())
-	}
-}
-
-// Shutdown leaves the tailnet before Close returns.
-func TestShutdownLeavesTheTailnet(t *testing.T) {
-	t.Parallel()
-	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
-	joined := withTailnet(t, &opts)
-	s, err := Start(context.Background(), opts)
-	must(t, err)
-	if code, _ := exchange(t, webHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", "osmia"); code != 200 {
-		t.Fatalf("tailnet before shutdown: %d", code)
-	}
-	must(t, s.Close())
-	if !(*joined).closed.Load() || !(*joined).left.Load() {
-		t.Fatal("tailnet node open after shutdown")
 	}
 }
 

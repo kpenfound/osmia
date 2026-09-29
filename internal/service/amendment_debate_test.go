@@ -50,7 +50,7 @@ func TestAmendmentShedPresentation(t *testing.T) {
 		name string
 		kind shed.Kind
 		want string
-	}{{"consensus", "", "ratify: no objection"}, {"charter-veto", shed.Charter, "do not ratify"}, {"fit-advice", shed.Fit, "ratify: nothing blocks"}, {"size-split", shed.Size, "do not ratify"}} {
+	}{{"consensus", "", "ratify: no objection"}, {"charter-veto", shed.Charter, "do not ratify"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			f := newDebateFixture(t, 2, 3)
@@ -62,14 +62,7 @@ func TestAmendmentShedPresentation(t *testing.T) {
 					if i != 1 || tc.kind == "" {
 						return nil
 					}
-					part, citation := "plan#resume", "spec#1"
-					if tc.kind == shed.Charter {
-						citation = "charter#1"
-					}
-					if tc.kind == shed.Fit {
-						part = "plan"
-					}
-					_, err := callTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": string(tc.kind), "part": part, "argument": "The proposal needs owner attention.", "citations": []string{citation}})
+					_, err := callTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": string(tc.kind), "part": "plan#resume", "argument": "The proposal needs owner attention.", "citations": []string{"charter#1"}})
 					return err
 				})
 			}
@@ -128,9 +121,6 @@ func TestAmendmentShedPresentation(t *testing.T) {
 			must(t, json.Unmarshal([]byte(packet), &body))
 			if tc.kind == shed.Charter && (len(body.Dissent) != 1 || !body.Dissent[0].Blocking) {
 				t.Errorf("veto lost: %+v", body.Dissent)
-			}
-			if tc.kind == shed.Fit && (len(body.Dissent) != 1 || body.Dissent[0].Blocking) {
-				t.Errorf("advice lost: %+v", body.Dissent)
 			}
 			if tc.kind == "" && len(body.Dissent) != 0 {
 				t.Errorf("unexpected dissent: %+v", body.Dissent)

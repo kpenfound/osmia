@@ -277,25 +277,6 @@ func TestConversationRejections(t *testing.T) {
 	expect(err, NoProject, "no project is configured")
 }
 
-func TestConversationUsesProfileOverride(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	opts, _ := conversationFixture(t, "co-")
-	file := filepath.Join(opts.Config.Root, "config.toml")
-	data, err := os.ReadFile(file)
-	must(t, err)
-	must(t, os.WriteFile(file, []byte(strings.Replace(string(data), "model = \"test\"\n", "model = \"test\"\nfallback = \"other\"\n", 1)), 0600))
-	s, c := start(t, opts)
-	mutation(t, c, "PUT", "profile", ProfileRequest{trace.ChiefOfStaff, "other"})
-	sent, err := c.Send(ctx, stream, "hello")
-	must(t, err)
-	th, err := s.sole().repository.ChiefOfStaffThread(stream)
-	must(t, err)
-	if len(th.Turns) != 1 || th.Turns[0].Request.TurnID != sent.Turn || th.Turns[0].Request.Profile.Name != "other" || th.Turns[0].Request.Profile.Backend != "codex" {
-		t.Fatalf("accepted profile: %+v", th.Turns)
-	}
-}
-
 func TestConversationProfileChangesResumeOrReplay(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

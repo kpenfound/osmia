@@ -169,10 +169,11 @@ func (r *Repository) loadWorkflow(stream config.WorkstreamID) (workflowLog, *wor
 	if err := config.CheckWorkstreamIDs(stream); err != nil {
 		return log, nil, err
 	}
-	if err := r.checkHistory(context.Background()); err != nil {
+	checked, err := r.checkHistory(context.Background())
+	if err != nil {
 		return log, nil, err
 	}
-	records, _, err := r.scan()
+	records, _, err := r.scanFiles(checked)
 	if err != nil {
 		return log, nil, err
 	}

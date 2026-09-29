@@ -56,6 +56,14 @@ func TestDeferralReasons(t *testing.T) {
 	}
 	busy := stream(first, 1, "resume")
 	behind := stream(second, 1, "upload")
+	// drained has a slot left but no unit it can start: resume is
+	// implementing and the rest are not ready.
+	drained := stream(second, 1, "resume")
+	for subject, state := range drained.states {
+		if state.Value == UnitReady {
+			drained.states[subject] = trace.WorkflowState{Version: 1, Value: UnitPlanned}
+		}
+	}
 	for _, tc := range []struct {
 		name string
 		pass dispatchPass
@@ -80,6 +88,8 @@ func TestDeferralReasons(t *testing.T) {
 		{"capacity", pass(nil, nil, nil, busy, behind), busy, "index",
 			UnitDispatch{Reason: DeferCapacity, Limit: 3, Message: "Waits for a mason slot: all 3 are in use."}},
 		{"capacity behind a capped higher-priority workstream", pass(nil, []runtime.Priority{{Project: project, Workstreams: []config.WorkstreamID{second, first}}}, nil, busy, stream(second, 2, "resume", "upload")), busy, "index",
+			UnitDispatch{Reason: DeferCapacity, Limit: 3, Message: "Waits for a mason slot: all 3 are in use."}},
+		{"capacity behind a higher-priority workstream with nothing ready", pass(nil, []runtime.Priority{{Project: project, Workstreams: []config.WorkstreamID{second, first}}}, nil, busy, drained), busy, "index",
 			UnitDispatch{Reason: DeferCapacity, Limit: 3, Message: "Waits for a mason slot: all 3 are in use."}},
 		{"priority", pass(nil, []runtime.Priority{{Project: project, Workstreams: []config.WorkstreamID{second, first}}}, nil, busy, behind), busy, "index",
 			UnitDispatch{Reason: DeferPriority, Limit: 3, Workstreams: []config.WorkstreamID{second}, Message: "Waits for a mason slot: all 3 are in use, and higher-priority workstreams start first: " + string(second) + "."}},

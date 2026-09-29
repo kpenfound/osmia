@@ -704,7 +704,8 @@ func (m *masons) start(ctx context.Context, b building, unit string) (started, b
 		return false, true, m.block(ctx, b.stream, unit, subject+"-"+UnitReady, fmt.Sprintf("%s: its workspace cannot be opened: %v", stays, err))
 	}
 	if err != nil {
-		return false, false, err
+		// A stop cut the pass short, whatever the workspace reported.
+		return false, false, errors.Join(ctx.Err(), err)
 	}
 	latest, err := latestDispatches(m.repository, b.stream)
 	if err != nil {
@@ -756,7 +757,8 @@ func (m *masons) resume(ctx context.Context, stream config.WorkstreamID, unit st
 	waits := fmt.Sprintf("unit %s is implementing and its mason's first turn is not queued", unit)
 	if _, _, err := newUnitWorkspaces(m.cfg, m.repository).open(ctx, stream, unit); err != nil {
 		if ctx.Err() != nil {
-			return false, err
+			// A stop cut the pass short, whatever the workspace reported.
+			return false, errors.Join(ctx.Err(), err)
 		}
 		return false, m.block(ctx, stream, unit, moved, fmt.Sprintf("%s: its workspace cannot be opened: %v", waits, err))
 	}

@@ -1,7 +1,6 @@
 # Reliability demonstration
 
-`TestReliabilityDemonstration` and `TestReliabilityDemonstrationOpenCode`
-in `internal/service/reliability_demo_test.go`
+`TestReliabilityDemonstration` in `internal/service/reliability_demo_test.go`
 takes one workstream from ratification to a landed unit through the service's
 local API client, the same API used by the `osmia` commands. On the way, the
 daily budget, a hard pause, a live profile switch, a configuration reload, a
@@ -26,9 +25,9 @@ dagger core container from --address golang:1.26-bookworm \
 
 The configuration has one mason slot (`capacity.masons = 1`), a daily budget
 of USD 1.00 (`budget.per_day = "1.00"`) and two profiles: `default` on
-`claude` and `other` on `codex` (or `opencode` in the second test). Every role
-is bound to `default`. The service counts days in UTC. The plan has four
-independent units, started one at a time in plan order:
+`claude` and `other` on `codex`. Every role is bound to `default`. The
+service counts days in UTC. The plan has four independent units, started one
+at a time in plan order:
 
 | Unit | Footprint | What interrupts it |
 | --- | --- | --- |
@@ -37,11 +36,11 @@ independent units, started one at a time in plan order:
 | `dedupe` | `internal.upload` | a live profile switch, then a reload |
 | `resume` | `internal.trace` | a provider usage limit, then a crash while it lands |
 
-Core admits the `codex` and `opencode` turns with the mason's explicit grants
-in the configured container sandbox. The fake engine plays the requested
-backend through core's normal admission path, so the switch and fallback below
-also exercise Osmia's profile selection and owned-log replay. The fake starts
-no model or container.
+Core admits the `codex` turns with the mason's explicit grants in the
+configured container sandbox. The fake engine plays the requested backend
+through core's normal admission path, so the switch and fallback below also
+exercise Osmia's profile selection and owned-log replay. The fake starts no
+model or container.
 
 ## The walkthrough
 

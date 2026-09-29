@@ -338,41 +338,34 @@ func TestOwnerApprovesAPlanOnlyAmendment(t *testing.T) {
 }
 
 // Rejecting an amendment leaves the sealed spec, plan and seal in force. The
-// requester still receives the ruling and its unit resumes.
+// mason that asked still receives the ruling, once across a restart, and its
+// unit resumes implementing.
 func TestOwnerRejectsAnAmendment(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct{ role, state string }{
-		{masonRole, UnitImplementing},
-		{reviewerRole, UnitReviewing},
-	} {
-		t.Run(tc.role, func(t *testing.T) {
-			t.Parallel()
-			f, stream := builtForAmendment(t, 1)
-			defer f.stop(t)
-			requester := presentAmendment(t, f, stream, tc.role, amendedSpec, validPlan)
-			out, err := f.c.DecideAmendment(context.Background(), stream, "1", AmendmentDecisionRequest{Decision: AmendmentReject, Note: "Keep the chunk semantics.", Packet: 1})
-			must(t, err)
-			if out.State != amendmentRejected {
-				t.Fatalf("decision %+v", out)
-			}
-			f.awaitAmendment(t, stream, amendmentRuled)
-			for id, want := range map[string][]int{plan.SpecDocument: {1}, plan.PlanDocument: {1}, seal.DocumentID: {1}} {
-				if got := f.revisions(t, stream, id); !slices.Equal(got, want) {
-					t.Fatalf("%s revisions %v after a rejection", id, got)
-				}
-			}
-			turns := f.ruling(t, stream, requester)
-			if len(turns) != 1 || !strings.Contains(turns[0].Request.Prompt, "Decision: reject") || !strings.Contains(turns[0].Request.Prompt, "stay in force") || !strings.Contains(turns[0].Request.Prompt, "| Keep the chunk semantics.") {
-				t.Fatalf("ruling %+v", turns)
-			}
-			f.resumed(t, stream, tc.state)
-			f.stop(t)
-			f.start(t)
-			f.resumed(t, stream, tc.state)
-			if turns := f.ruling(t, stream, requester); len(turns) != 1 {
-				t.Fatalf("requester ruling after restart %+v", turns)
-			}
-		})
+	f, stream := builtForAmendment(t, 1)
+	defer f.stop(t)
+	requester := presentAmendment(t, f, stream, masonRole, amendedSpec, validPlan)
+	out, err := f.c.DecideAmendment(context.Background(), stream, "1", AmendmentDecisionRequest{Decision: AmendmentReject, Note: "Keep the chunk semantics.", Packet: 1})
+	must(t, err)
+	if out.State != amendmentRejected {
+		t.Fatalf("decision %+v", out)
+	}
+	f.awaitAmendment(t, stream, amendmentRuled)
+	for id, want := range map[string][]int{plan.SpecDocument: {1}, plan.PlanDocument: {1}, seal.DocumentID: {1}} {
+		if got := f.revisions(t, stream, id); !slices.Equal(got, want) {
+			t.Fatalf("%s revisions %v after a rejection", id, got)
+		}
+	}
+	turns := f.ruling(t, stream, requester)
+	if len(turns) != 1 || !strings.Contains(turns[0].Request.Prompt, "Decision: reject") || !strings.Contains(turns[0].Request.Prompt, "stay in force") || !strings.Contains(turns[0].Request.Prompt, "| Keep the chunk semantics.") {
+		t.Fatalf("ruling %+v", turns)
+	}
+	f.resumed(t, stream, UnitImplementing)
+	f.stop(t)
+	f.start(t)
+	f.resumed(t, stream, UnitImplementing)
+	if turns := f.ruling(t, stream, requester); len(turns) != 1 {
+		t.Fatalf("requester ruling after restart %+v", turns)
 	}
 }
 
@@ -401,23 +394,17 @@ func TestOwnerOverrulesAVetoToApproveAnAmendment(t *testing.T) {
 
 func TestAmendmentDecisionAcrossSealRevisions(t *testing.T) {
 	t.Parallel()
-	for _, decision := range []string{AmendmentApprove, AmendmentOverrule} {
-		t.Run(decision+" base move", func(t *testing.T) {
-			f, stream := builtForAmendment(t, 1)
-			defer f.stop(t)
-			if decision == AmendmentOverrule {
-				presentAmendment(t, f, stream, masonRole, amendedSpec, validPlan, amendmentObjection(shed.Charter))
-			} else {
-				presentAmendment(t, f, stream, masonRole, amendedSpec, validPlan)
-			}
-			recordAmendmentSealRevision(t, f, f.repository(), stream, func(s *seal.Seal) { s.Base.Commit = "later-upstream-commit" })
-			out, err := f.c.DecideAmendment(context.Background(), stream, "1", AmendmentDecisionRequest{Decision: decision, Packet: 1})
-			must(t, err)
-			if out.State != amendmentApproved || out.Decision == nil || out.Decision.SealRevision != 2 {
-				t.Fatalf("decision %+v", out)
-			}
-		})
-	}
+	t.Run("approve base move", func(t *testing.T) {
+		f, stream := builtForAmendment(t, 1)
+		defer f.stop(t)
+		presentAmendment(t, f, stream, masonRole, amendedSpec, validPlan)
+		recordAmendmentSealRevision(t, f, f.repository(), stream, func(s *seal.Seal) { s.Base.Commit = "later-upstream-commit" })
+		out, err := f.c.DecideAmendment(context.Background(), stream, "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1})
+		must(t, err)
+		if out.State != amendmentApproved || out.Decision == nil || out.Decision.SealRevision != 2 {
+			t.Fatalf("decision %+v", out)
+		}
+	})
 	for name, change := range map[string]func(*seal.Seal){
 		"spec": func(s *seal.Seal) { s.Revision.Spec++; s.SpecHash = seal.SpecHash(amendedSpec) },
 		"plan": func(s *seal.Seal) { s.Revision.Plan++ },

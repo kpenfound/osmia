@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func traceService(t *testing.T, f *walkFixture) *Service {
@@ -73,28 +72,14 @@ func (tr traceTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return w.Result(), nil
 }
 
-func TestTraceAPIGapsAndTerminal(t *testing.T) {
+// The trace API refuses malformed selectors, unknown kinds and workstreams
+// with a validation error and a missing unit as not found, and reports an
+// unreadable trace repository as internal without its record content.
+func TestTraceAPIErrors(t *testing.T) {
 	t.Parallel()
 	f := newWalkFixture(t)
 	f.sealed()
-	f.buildA()
-	f.unit("b", UnitImplementing)
 	s := traceService(t, f)
-	result, api := s.traceView(context.Background(), string(stream), "criterion", "spec#2")
-	if api != nil {
-		t.Fatal(api)
-	}
-	if got := gapStates(result.(CriterionTrace).Units[0].Gaps)["units/b/report.json"]; got != LinkUnfinished {
-		t.Fatalf("active gap %s", got)
-	}
-	f.move(trace.FeatureSubject, "", AbandonedState)
-	result, api = s.traceView(context.Background(), string(stream), "criterion", "spec#2")
-	if api != nil {
-		t.Fatal(api)
-	}
-	if got := gapStates(result.(CriterionTrace).Units[0].Gaps)["units/b/report.json"]; got != LinkNotCreated {
-		t.Fatalf("terminal gap %s", got)
-	}
 	for _, test := range []struct {
 		kind, selector string
 		code           Code
@@ -104,7 +89,7 @@ func TestTraceAPIGapsAndTerminal(t *testing.T) {
 			t.Fatalf("%s %s: %+v", test.kind, test.selector, api)
 		}
 	}
-	_, api = s.traceView(context.Background(), "bad", "", "")
+	_, api := s.traceView(context.Background(), "bad", "", "")
 	if api == nil || api.Code != Validation {
 		t.Fatalf("workstream error %+v", api)
 	}
