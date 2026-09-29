@@ -23,6 +23,11 @@ type CharterEdit struct {
 	Content  string `json:"content"`
 }
 
+type BaseEdit struct {
+	Base     config.WorkstreamID `json:"base"`
+	Revision int                 `json:"revision"`
+}
+
 func validDocument(content string) bool {
 	return len(content) <= MaxHandedBytes && utf8.ValidString(content) && !strings.ContainsRune(content, 0)
 }
@@ -55,10 +60,7 @@ func (s *Service) documentRequest(w http.ResponseWriter, r *http.Request) bool {
 		case http.MethodGet:
 			out, err = repo.WorkstreamBase(stream)
 		case http.MethodPut:
-			var in struct {
-				Base     config.WorkstreamID `json:"base"`
-				Revision int                 `json:"revision"`
-			}
+			var in BaseEdit
 			if !decode(w, r, &in) {
 				return true
 			}

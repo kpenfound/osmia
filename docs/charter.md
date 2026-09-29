@@ -50,7 +50,7 @@ A charter is **empty** when it has no rules. Guidance alone is empty.
 
 ## Owner edits and revisions
 
-The charter is a trace document (see [trace](trace.md#charter)). Creation
+The charter is a trace document. Creation
 records the template as revision 1. Whenever the service reads the charter
 (`osmia status` and hand-in), it compares `charter.md` with the latest recorded
 revision. If they differ, it first records the file as a new revision with the
@@ -63,7 +63,7 @@ reader sees it.
 When a ruling you gave a workstream is a standing rule for the project, its
 chief of staff proposes the rule for the charter. You ratify or decline it with
 `osmia charter` or by telling the chief of staff (see the
-[command line](cli.md) and [charter proposals](service.md#charter-proposals)).
+[command line](cli.md)).
 A ratified rule is appended to `charter.md` by the service, not by you: it
 takes the number after your highest rule and goes under a `## Standing rulings`
 heading at the end, which is added when the charter does not already end under

@@ -3,10 +3,10 @@
 `internal/config.Load` reads and validates the entire declarative configuration.
 It returns a configuration only when the top-level file and the active project's
 file pass. It creates no directories, repositories, sockets or state and does
-not launch agents. The [local service](service.md) owns startup and the Unix
+not launch agents. The local service owns startup and the Unix
 socket. Project registration through `osmia project add` writes the project
 file and edits `active_projects`; see [project registration](#project-registration).
-A running service applies edited files through [reload](service.md#reload).
+A running service applies edited files through [reload](running.md#reload).
 Migrations are separate work.
 
 ## Root and identity
@@ -36,7 +36,7 @@ only the canonical format, so traversal, absolute names and case aliases cannot
 become identities. `CheckProjectIDs`/`CheckWorkstreamIDs` reject duplicates with
 `ErrCollision`; constructors also accept existing IDs to check. Generation does
 not reserve a key: persistence callers must reserve it atomically and retry
-generation on collision. The [trace repository](trace.md) reserves project and
+generation on collision. The trace repository reserves project and
 workstream identities when creating their directories. Workstream keys are not a
 configuration list; they belong to persisted workstream manifests.
 
@@ -140,8 +140,8 @@ Unix socket; the loader neither binds nor removes it. `listen.web` is
 free port). An empty host, any other address or hostname, and a missing or
 named port are errors that name `listen.web`. The listener has no
 authentication: anyone who can connect to the host's loopback interface can
-use the API ([web listener](service.md#web-listener)). A browser on the
-same machine opens the [page](service.md#web-page) at `http://<listen.web>/`. `listen.tailnet` is
+use the API ([web listener](running.md#web-listener)). A browser on the
+same machine opens the [page](running.md#web-page) at `http://<listen.web>/`. `listen.tailnet` is
 one DNS label of 1 to 63 lowercase letters, digits and hyphens that neither
 starts nor ends with a hyphen, such as `osmia`; anything else is an error that
 names `listen.tailnet`. With it set, the service joins your tailnet through
@@ -149,11 +149,11 @@ embedded Tailscale, keeps the node's state in `<root>/tailnet`, and logs in
 with the auth key in the `TS_AUTHKEY` environment variable or, without one,
 prints a login URL on first run. The auth key never belongs in these files.
 Tailnet membership is the boundary: there is no in-app authentication
-([tailnet listener](service.md#tailnet-listener)). All capacity and shed values
+([tailnet listener](running.md#tailnet-listener)). All capacity and shed values
 must be positive integers. `events.window` is a positive Go duration: how long
 the oldest undelivered event of a workstream waits before the service delivers
 it, with every other ready event, as one
-[chief-of-staff turn](service.md#event-delivery). A workstream cap may exceed global mason capacity:
+chief-of-staff turn. A workstream cap may exceed global mason capacity:
 the global pool still limits concurrent execution.
 
 `workspaces` picks the backend of the workspaces the agents work in for each
@@ -165,20 +165,20 @@ Git store when a `jj` of the supported release or later is on the service's
 does not start and status says why. Any other value is an error that names
 `workspaces`. A workstream keeps the backend it was created on until it is
 delivered or abandoned, so a changed value, reloaded or not, applies to new
-workstreams alone ([workspace backends](service.md#workspace-backends)).
+workstreams alone.
 
 `shed.max_rounds` caps the rounds the service debates a workstream's spec and
 plan for on its own. Debate that reaches it
-[concludes with its dissent open](service.md#concluding-the-debate): the cap
+concludes with its dissent open: the cap
 approves nothing. The service reads it when a round's reply is recorded, so a
 changed value applies to debates still running. It also bounds how many
-[further rounds](service.md#more-debate) the owner may ask for after a
+further rounds the owner may ask for after a
 conclusion; from the first such request the rounds the owner asked for replace
 the cap as the debate's round limit.
 
 `capacity.committee` is the size of each workstream's committee, not a pool
 shared across workstreams: a workstream that
-[enters the shed](service.md#entering-the-shed) for debate gets that many committee
+enters the shed for debate gets that many committee
 members, and all of them run at the same time in every round, whatever other
 workstreams run and outside `capacity.per_workstream`. Two workstreams in the
 shed run two committees at once. The committee is fixed when the workstream
@@ -188,7 +188,7 @@ enters the shed, so a later change applies to workstreams that enter after it.
 [ntfy](https://ntfy.sh) topic; a relative URL, one without a host and any other
 scheme are errors that name `notify.webhook` without quoting the URL. With it
 set, every entry that opens in the inbox is posted to it once
-([notifications](service.md#notifications)). The URL is shown in
+([notifications](running.md#notifications)). The URL is shown in
 `/v1/config`, so treat a URL that embeds a token like any other value there.
 
 Profiles use lowercase names starting with a letter and containing letters,
@@ -217,8 +217,7 @@ A `claude` sandbox requires Claude in every profile in the role's fallback chain
 No arbitrary mounts, credentials, environment, tools or capability grants are
 accepted from these files. Sandbox settings describe requested execution. A turn
 runs in any mode the platform can confine; one it cannot (for example `claude`
-on Linux) fails before launch with core's reason; see
-[enforced execution](isolation.md#enforced-execution). Successful configuration
+on Linux) fails before launch with core's reason. Successful configuration
 loading does not imply that execution is available.
 
 ### Docker Sandboxes (`sbx`)
@@ -284,7 +283,7 @@ killed, a sandbox may remain; its name is recorded in the turn's session directo
 as `sandbox-name`, and `sbx rm --force <name>` removes it and its rules.
 Core logs cleanup failures; a failed rule removal still attempts sandbox removal.
 Missing CLI, login, template or policy requirements fail the turn without falling back to host
-execution. See [execution boundaries](isolation.md#docker-sandbox-boundary).
+execution.
 
 ## Project registration
 
@@ -298,14 +297,14 @@ writing anything, then:
 2. writes `projects/<id>/config.toml` with `name`, `upstream`, `fork`, the
    absolute `clone`, `base_branch` (default `main`) and
    `landing = "commit-per-unit"`; capacity is inherited from the top level;
-3. seeds the [local entity map](knowledge-base.md#seeding) from the clone's
+3. seeds the local entity map from the clone's
    tracked CODEOWNERS and directory structure, and creates the trace repository with
    a [charter](charter.md) template in `charter.md` and the seed as the first
    revisions of the charter and `kb/entities.json`;
 4. adds the ID to `active_projects` in the top-level `config.toml` as a text
    edit, so the owner's comments, ordering and formatting survive;
 5. creates the librarian's workstream and thread in the trace and requests
-   the first [knowledge-base extraction](knowledge-base.md#extraction) as a
+   the first knowledge-base extraction as a
    durable operation;
 6. activates the project (opens the trace and starts reconciliation, which
    runs the extraction) and removes the journal.
@@ -316,7 +315,7 @@ branch, a relative clone path, a clone that does not exist, is not a directory
 or has no `.git` entry, and a clone nested with the root either way.
 Registration never writes to the clone; seeding only reads it. The service
 writes to the clone once a workstream is ratified, when its
-[sealing](service.md#sealing) fetches upstream, creates the feature branch and
+sealing fetches upstream, creates the feature branch and
 its workspace, and forgets that workspace alone when its directory is gone.
 
 Registration is recoverable. If the service stops at any step, the journal makes
@@ -371,7 +370,7 @@ ASCII letters, digits, `.`, `_` and `-`, beginning with a letter or digit, witho
 a `.git` suffix. Fork and upstream must differ ignoring case. `base_branch` follows
 Git branch-name constraints. `landing` accepts `commit-per-unit` (default) or
 `squash`: it chooses whether an approved workstream is
-[published](service.md#publication) with each unit's commit or as one commit. Project `capacity.per_workstream` is a positive integer overriding the
+published with each unit's commit or as one commit. Project `capacity.per_workstream` is a positive integer overriding the
 global default.
 
 Publication requires the service host's Git `user.name`, `user.email` and
@@ -385,7 +384,7 @@ approve delivery again to retry. Local workstream commits remain unsigned.
 
 `upstream_rebase` is a Go duration string: how long after a workstream's
 latest drift rebase or final rebase (or, before either, its sealing) the
-foreman schedules its next [drift rebase](service.md#drift-rebases) onto
+foreman schedules its next drift rebase onto
 upstream. It defaults to `"6h"`. `"0"` (or `"0s"`) disables scheduled drift
 rebases; `osmia project rebase` still asks for them. A value that does not
 parse as a Go duration, a TOML number, a negative duration, or a nonzero
@@ -405,10 +404,10 @@ Loading accepts profiles, bindings, capacity, budgets, shed limits, repository i
 and landing preferences as declarative inputs. Review slot
 configuration is `capacity.reviewers`; no separate review-policy schema is defined.
 Runtime profile overrides, pauses and priorities belong in `runtime.json`, never
-these files; see [runtime overrides](runtime.md) for persistence and resolution.
+these files.
 `osmia config` shows whether each file on disk differs from what is loaded
-([disk drift](service.md#disk-drift)), and `osmia reload` applies edited files
-to a running service after validating all of them ([reload](service.md#reload)). The root, `listen.socket`,
+([disk drift](running.md#disk-drift)), and `osmia reload` applies edited files
+to a running service after validating all of them ([reload](running.md#reload)). The root, `listen.socket`,
 `listen.web` and `listen.tailnet` keep their loaded values until the service
 restarts. The `active_projects` list applies live: additions start their retained
 traces and removals drain in-flight operations before stopping.
@@ -420,7 +419,7 @@ the service files one amendment request for that workstream and continues its
 normal workflow. The request states the known spend as a lower bound and counts
 attempts whose cost is unknown. When known spend on the service host's local
 calendar day reaches `per_day`, the service pauses factory dispatch until the
-next local day ([daily budget](service.md#daily-budget)).
+next local day.
 Missing values impose no cap. Unknown cost does not establish that a cap was reached.
 
 Representative errors include the file and offending field:

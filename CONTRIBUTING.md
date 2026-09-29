@@ -9,7 +9,7 @@ and keep target-project factory state outside the repository Osmia works on.
 Run the complete check suite through Dagger from the repository root:
 
 ```sh
-DAGGER_X_RELEASE=v1.0.0-beta.14 dagger check
+dagger check
 ```
 
 The check needs a working Dagger container engine. It runs the Go suite, browser
@@ -28,6 +28,9 @@ Tests must not launch live model sessions or perform remote pushes or delivery.
 ## Review the change
 
 - Format Go with `gofmt` and document user-visible behavior or configuration.
+- After changing an API route or its request or response types, update
+  `service.Routes` and run `dagger generate` to refresh `docs/openapi.json`.
+  `dagger check` fails while the committed file is stale.
 - Check the diff for local state, secrets, generated files and unrelated edits.
 - Report each check actually run and its result. If a check cannot run, give the
   exact blocker.

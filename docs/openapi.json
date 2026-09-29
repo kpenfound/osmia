@@ -1,0 +1,5713 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Osmia local API",
+    "description": "The Osmia service serves this API over its Unix socket and, when configured,\non a loopback address (listen.web) and on the tailnet (listen.tailnet). There is\nno authentication: the socket, the loopback interface and tailnet membership are\nthe boundaries. On the web and tailnet listeners, requests must carry a Host\nnaming the listener, and requests other than GET and HEAD must send\nContent-Type: application/json.\n\nRequest bodies are one JSON object with known, unique fields. Every failure\nreturns an error object with a code and a message.",
+    "version": "1"
+  },
+  "servers": [
+    {
+      "url": "http://{host}",
+      "variables": {
+        "host": {
+          "default": "osmia",
+          "description": "The listen.web address, such as localhost:8080, or the listen.tailnet hostname."
+        }
+      }
+    }
+  ],
+  "paths": {
+    "/v1/abandon/{workstream}": {
+      "post": {
+        "summary": "Abandon an undelivered workstream",
+        "operationId": "postAbandonByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AbandonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AbandonResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/amendment/{workstream}/{amendment}": {
+      "get": {
+        "summary": "Show an amendment",
+        "operationId": "getAmendmentByWorkstreamByAmendment",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "amendment",
+            "in": "path",
+            "description": "Amendment number within the workstream.",
+            "required": true,
+            "schema": {
+              "description": "Amendment number within the workstream.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AmendmentResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Decide an amendment",
+        "operationId": "postAmendmentByWorkstreamByAmendment",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "amendment",
+            "in": "path",
+            "description": "Amendment number within the workstream.",
+            "required": true,
+            "schema": {
+              "description": "Amendment number within the workstream.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AmendmentDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AmendmentResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/base/{workstream}": {
+      "get": {
+        "summary": "Show a workstream's base",
+        "operationId": "getBaseByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceWorkstreamBase"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Set a workstream's base before ratification",
+        "operationId": "putBaseByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BaseEdit"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceWorkstreamBase"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/charter": {
+      "get": {
+        "summary": "List charter proposals",
+        "operationId": "getCharter",
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CharterProposalsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/charter/{workstream}/{question}": {
+      "get": {
+        "summary": "Show a charter proposal",
+        "operationId": "getCharterByWorkstreamByQuestion",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "question",
+            "in": "path",
+            "description": "Question number whose ruling the charter proposal comes from.",
+            "required": true,
+            "schema": {
+              "description": "Question number whose ruling the charter proposal comes from.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CharterProposalView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Ratify or decline a charter proposal",
+        "operationId": "postCharterByWorkstreamByQuestion",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "question",
+            "in": "path",
+            "description": "Question number whose ruling the charter proposal comes from.",
+            "required": true,
+            "schema": {
+              "description": "Question number whose ruling the charter proposal comes from.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CharterDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CharterProposalView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config": {
+      "get": {
+        "summary": "Show the loaded configuration, its disk drift and diagnostics",
+        "operationId": "getConfig",
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config/listen": {
+      "put": {
+        "summary": "Always refused with restart_required: listeners change only on restart",
+        "operationId": "putConfigListen",
+        "responses": {
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config/root": {
+      "put": {
+        "summary": "Always refused with restart_required: the root changes only on restart",
+        "operationId": "putConfigRoot",
+        "responses": {
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/contested/{workstream}/{unit}": {
+      "post": {
+        "summary": "Direct a contested unit",
+        "operationId": "postContestedByWorkstreamByUnit",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "unit",
+            "in": "path",
+            "description": "Unit ID from the workstream's plan.",
+            "required": true,
+            "schema": {
+              "description": "Unit ID from the workstream's plan.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContestedRulingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContestedRulingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversation/{workstream}": {
+      "get": {
+        "summary": "List a workstream's conversation with the chief of staff",
+        "operationId": "getConversationByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Send a message to a workstream's chief of staff",
+        "operationId": "postConversationByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationEntry"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery/{workstream}": {
+      "get": {
+        "summary": "Show the final report and pull request draft",
+        "operationId": "getDeliveryByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryPresentation"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Approve delivery",
+        "operationId": "postDeliveryByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryDecision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryApproval"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{workstream}": {
+      "get": {
+        "summary": "Read a workstream's handed document, spec and plan",
+        "operationId": "getDocumentsByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/TraceDocument"
+                  },
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save edits to a workstream's spec and plan",
+        "operationId": "putDocumentsByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftEdit"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/TraceDocument"
+                  },
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "summary": "Follow the event stream",
+        "description": "A text/event-stream of frames \"event: \u003ckind\u003e\" with a JSON data line\nholding the event. The first event is resync, which asks the client to read\nevery view again; it also replaces events a slow subscriber missed. A comment\nline keeps an idle stream open.",
+        "operationId": "getEvents",
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/Event"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/handin": {
+      "post": {
+        "summary": "Hand in a workstream",
+        "operationId": "postHandin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HandInRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandInResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "summary": "Report readiness, API version and build identity",
+        "operationId": "getHealth",
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/inbox": {
+      "get": {
+        "summary": "List open owner decisions",
+        "operationId": "getInbox",
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/inbox/{number}": {
+      "post": {
+        "summary": "Answer an inbox entry",
+        "operationId": "postInboxByNumber",
+        "parameters": [
+          {
+            "name": "number",
+            "in": "path",
+            "description": "Inbox entry number.",
+            "required": true,
+            "schema": {
+              "description": "Inbox entry number.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnswerResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/packet/{workstream}": {
+      "get": {
+        "summary": "Show the ratification packet",
+        "operationId": "getPacketByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PacketResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects": {
+      "post": {
+        "summary": "Register a project",
+        "operationId": "postProjects",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectAddRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove a project from active work",
+        "operationId": "deleteProjects",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectRemoveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/charter/{project}": {
+      "get": {
+        "summary": "Read a project's charter",
+        "operationId": "getProjectsCharterByProject",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "description": "Project ID.",
+            "required": true,
+            "schema": {
+              "description": "Project ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceDocument"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save a project's charter",
+        "operationId": "putProjectsCharterByProject",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "description": "Project ID.",
+            "required": true,
+            "schema": {
+              "description": "Project ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CharterEdit"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/extract": {
+      "post": {
+        "summary": "Start a knowledge-base extraction",
+        "operationId": "postProjectsExtract",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectExtractRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/memory/{project}": {
+      "get": {
+        "summary": "Export a project's Hearsay setup",
+        "operationId": "getProjectsMemoryByProject",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "description": "Project ID.",
+            "required": true,
+            "schema": {
+              "description": "Project ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySetup"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/rebase": {
+      "post": {
+        "summary": "Ask for a drift rebase of a project's workstreams",
+        "operationId": "postProjectsRebase",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectRebaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRebaseResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ratify/{workstream}": {
+      "post": {
+        "summary": "Ratify the spec and plan",
+        "operationId": "postRatifyByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RatifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatifyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/reload": {
+      "post": {
+        "summary": "Reload the configuration files",
+        "operationId": "postReload",
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReloadResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runtime": {
+      "get": {
+        "summary": "Show pauses, priorities, profiles and provider limits in effect",
+        "operationId": "getRuntime",
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runtime/pause": {
+      "put": {
+        "summary": "Pause the factory, a project, a workstream or a role",
+        "operationId": "putRuntimePause",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimePause"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Resume a paused target",
+        "operationId": "deleteRuntimePause",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeTarget"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runtime/priority": {
+      "put": {
+        "summary": "Set a project's workstream priority order",
+        "operationId": "putRuntimePriority",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimePriority"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear a project's priority order",
+        "operationId": "deleteRuntimePriority",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearPriorityRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runtime/profile": {
+      "put": {
+        "summary": "Override a role's profile",
+        "operationId": "putRuntimeProfile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Restore a role's configured profile",
+        "operationId": "deleteRuntimeProfile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearProfileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runtime/provider-limit": {
+      "delete": {
+        "summary": "Clear a provider usage limit",
+        "operationId": "deleteRuntimeProviderLimit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearProviderLimitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/shed/more/{workstream}": {
+      "post": {
+        "summary": "Ask for more debate rounds",
+        "operationId": "postShedMoreByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShedMoreRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/shed/object/{workstream}": {
+      "post": {
+        "summary": "Add an owner objection to the current debate round",
+        "operationId": "postShedObjectByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShedObjectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/shed/overrule/{workstream}": {
+      "post": {
+        "summary": "Overrule an objection",
+        "operationId": "postShedOverruleByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShedOverruleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/shed/redraft/{workstream}": {
+      "post": {
+        "summary": "Ask the architect for a redraft",
+        "operationId": "postShedRedraftByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShedRedraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/shed/rule/{workstream}": {
+      "post": {
+        "summary": "Sustain or dismiss an objection",
+        "operationId": "postShedRuleByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShedRuleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/shed/skip/{workstream}": {
+      "post": {
+        "summary": "Skip debate and go to ratification",
+        "operationId": "postShedSkipByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/status": {
+      "get": {
+        "summary": "List workstreams with capacity, usage and diagnostics",
+        "operationId": "getStatus",
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/status/{workstream}": {
+      "get": {
+        "summary": "Show one workstream",
+        "operationId": "getStatusByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkstreamStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/stop": {
+      "post": {
+        "summary": "Stop the service; refused on the web and tailnet listeners",
+        "operationId": "postStop",
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StopResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/{workstream}": {
+      "get": {
+        "summary": "Summarize a workstream's trace",
+        "operationId": "getTraceByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/{workstream}/commit/{commit}": {
+      "get": {
+        "summary": "Trace one commit",
+        "operationId": "getTraceByWorkstreamCommitByCommit",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "commit",
+            "in": "path",
+            "description": "Full lowercase commit ID.",
+            "required": true,
+            "schema": {
+              "description": "Full lowercase commit ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitTrace"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/{workstream}/criterion/{criterion}": {
+      "get": {
+        "summary": "Trace one criterion",
+        "operationId": "getTraceByWorkstreamCriterionByCriterion",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "criterion",
+            "in": "path",
+            "description": "Criterion cited as spec#\u003cn\u003e.",
+            "required": true,
+            "schema": {
+              "description": "Criterion cited as spec#\u003cn\u003e.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CriterionTrace"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/{workstream}/unit/{unit}": {
+      "get": {
+        "summary": "Trace one unit",
+        "operationId": "getTraceByWorkstreamUnitByUnit",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "unit",
+            "in": "path",
+            "description": "Unit ID from the workstream's plan.",
+            "required": true,
+            "schema": {
+              "description": "Unit ID from the workstream's plan.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitTrace"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "APIError": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AbandonRequest": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AbandonResponse": {
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AgentStatus": {
+        "properties": {
+          "attempt": {
+            "type": "integer"
+          },
+          "elapsed": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "question_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AmendmentDecision": {
+        "properties": {
+          "decision": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "overruled": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "packet": {
+            "type": "integer"
+          },
+          "plan": {
+            "type": "integer"
+          },
+          "round": {
+            "type": "integer"
+          },
+          "seal_revision": {
+            "type": "integer"
+          },
+          "spec": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "AmendmentDecisionRequest": {
+        "properties": {
+          "decision": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "packet": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "AmendmentResponse": {
+        "properties": {
+          "amendment": {
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/AmendmentDecision"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "packet": {},
+          "project": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "round": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AnswerRequest": {
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AnswerResponse": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "batch": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "questions": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "ruling": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "BaseEdit": {
+        "properties": {
+          "base": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "CapacityStatus": {
+        "properties": {
+          "per_workstream": {
+            "type": "integer"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/RoleCapacity"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "CharterDecisionRequest": {
+        "properties": {
+          "decision": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CharterDiagnostic": {
+        "properties": {
+          "line": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CharterEdit": {
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "CharterProposalView": {
+        "properties": {
+          "charter": {
+            "type": "integer"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "owner_response": {
+            "type": "string"
+          },
+          "proposed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string"
+          },
+          "ruling": {
+            "type": "string"
+          },
+          "ruling_revision": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CharterProposalsResponse": {
+        "properties": {
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/CharterProposalView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "CharterState": {
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/CharterDiagnostic"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "rules": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ClearPriorityRequest": {
+        "properties": {
+          "project": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClearProfileRequest": {
+        "properties": {
+          "role": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClearProviderLimitRequest": {
+        "properties": {
+          "backend": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CommitLanding": {
+        "properties": {
+          "criteria": {
+            "items": {
+              "$ref": "#/components/schemas/TraceCriterion"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "landing": {
+            "$ref": "#/components/schemas/TraceLanding"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "report": {
+            "$ref": "#/components/schemas/TraceReport"
+          },
+          "review": {
+            "$ref": "#/components/schemas/TraceReview"
+          },
+          "rulings": {
+            "items": {
+              "$ref": "#/components/schemas/TraceRuling"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "seal": {
+            "$ref": "#/components/schemas/TraceSeal"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CommitRecord": {
+        "properties": {
+          "ref": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "role": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CommitTrace": {
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/TraceDelivery"
+          },
+          "feature": {
+            "type": "string"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/TraceGap"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "landings": {
+            "items": {
+              "$ref": "#/components/schemas/CommitLanding"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "operation": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/CommitRecord"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Config": {
+        "properties": {
+          "active_projects": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "budget": {
+            "$ref": "#/components/schemas/ConfigBudget"
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/ConfigCapacity"
+          },
+          "events": {
+            "$ref": "#/components/schemas/ConfigEvents"
+          },
+          "hearsay": {
+            "$ref": "#/components/schemas/ConfigHearsay"
+          },
+          "listen": {
+            "$ref": "#/components/schemas/ConfigListen"
+          },
+          "mason": {
+            "$ref": "#/components/schemas/ConfigMason"
+          },
+          "notify": {
+            "$ref": "#/components/schemas/ConfigNotify"
+          },
+          "profiles": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigProfile"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "project": {
+            "$ref": "#/components/schemas/ConfigProject"
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigProject"
+            },
+            "type": "array"
+          },
+          "roles": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigRole"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "shed": {
+            "$ref": "#/components/schemas/ConfigShed"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "workspaces": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigBudget": {
+        "properties": {
+          "per_day": {
+            "type": "string"
+          },
+          "per_session": {
+            "type": "string"
+          },
+          "per_unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigCapacity": {
+        "properties": {
+          "committee": {
+            "type": "integer"
+          },
+          "masons": {
+            "type": "integer"
+          },
+          "per_workstream": {
+            "type": "integer"
+          },
+          "reviewers": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigDrift": {
+        "properties": {
+          "differs": {
+            "type": "boolean"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigFile"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ConfigEvents": {
+        "properties": {
+          "window": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigFile": {
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigHearsay": {
+        "properties": {
+          "agents": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigHearsayAgent"
+            },
+            "type": "object"
+          },
+          "principal": {
+            "type": "string"
+          },
+          "token_env": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigHearsayAgent": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "token_env": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigListen": {
+        "properties": {
+          "socket": {
+            "type": "string"
+          },
+          "tailnet": {
+            "type": "string"
+          },
+          "web": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigMason": {
+        "properties": {
+          "max_clean_turns": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigNotify": {
+        "properties": {
+          "webhook": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigProfile": {
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "effort": {
+            "type": "string"
+          },
+          "fallback": {
+            "type": "string"
+          },
+          "max_turns": {
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "timeout": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigProject": {
+        "properties": {
+          "base_branch": {
+            "type": "string"
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/ConfigProjectCapacity"
+          },
+          "classifier": {
+            "type": "string"
+          },
+          "clone": {
+            "type": "string"
+          },
+          "fork": {
+            "type": "string"
+          },
+          "hearsay_entities": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "hearsay_scope": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "landing": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "upstream": {
+            "type": "string"
+          },
+          "upstream_rebase": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigProjectCapacity": {
+        "properties": {
+          "per_workstream": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigResponse": {
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/Diagnostic"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "digest": {
+            "type": "string"
+          },
+          "drift": {
+            "$ref": "#/components/schemas/ConfigDrift"
+          },
+          "effective": {
+            "$ref": "#/components/schemas/Config"
+          },
+          "last_error": {
+            "$ref": "#/components/schemas/ReloadError"
+          },
+          "project": {
+            "$ref": "#/components/schemas/ProjectView"
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectView"
+            },
+            "type": "array"
+          },
+          "root": {
+            "type": "string"
+          },
+          "tailnet": {
+            "$ref": "#/components/schemas/TailnetStatus"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigRole": {
+        "properties": {
+          "image": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "sandbox": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigShed": {
+        "properties": {
+          "max_bounces": {
+            "type": "integer"
+          },
+          "max_rounds": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ContestedRuling": {
+        "properties": {
+          "bounces": {
+            "type": "integer"
+          },
+          "candidate": {
+            "type": "string"
+          },
+          "contest": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "reset_turn": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ContestedRulingRequest": {
+        "properties": {
+          "decision": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ContestedRulingResponse": {
+        "properties": {
+          "ruling": {
+            "$ref": "#/components/schemas/ContestedRuling"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConversationEntry": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConversationResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CoreadapterCandidate": {
+        "type": "object"
+      },
+      "CoreadapterCard": {
+        "properties": {
+          "happened": {
+            "type": "string"
+          },
+          "headline": {
+            "type": "string"
+          },
+          "needs_you": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CriterionReport": {
+        "properties": {
+          "criterion": {
+            "type": "string"
+          },
+          "done": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "proof": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CriterionTrace": {
+        "properties": {
+          "complete": {
+            "type": "boolean"
+          },
+          "criterion": {
+            "type": "string"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/TraceDelivery"
+          },
+          "feature": {
+            "type": "string"
+          },
+          "final": {
+            "$ref": "#/components/schemas/FinalCriterion"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/TraceGap"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "plan": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "project": {
+            "type": "string"
+          },
+          "rulings": {
+            "items": {
+              "$ref": "#/components/schemas/TraceRuling"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "seal": {
+            "$ref": "#/components/schemas/TraceSeal"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "text": {
+            "type": "string"
+          },
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/UnitTrace"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DailyBudgetStatus": {
+        "properties": {
+          "day": {
+            "type": "string"
+          },
+          "limit_usd": {
+            "type": "string"
+          },
+          "lower_bound": {
+            "type": "boolean"
+          },
+          "spend_usd": {
+            "type": "string"
+          },
+          "unknown_costs": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "DeliveryApproval": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "charter": {
+            "type": "integer"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "description_hash": {
+            "type": "string"
+          },
+          "draft_hash": {
+            "type": "string"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceDeliveryMessage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "plan": {
+            "type": "integer"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "review_revision": {
+            "type": "integer"
+          },
+          "seal": {
+            "type": "integer"
+          },
+          "spec": {
+            "type": "integer"
+          },
+          "spec_hash": {
+            "type": "string"
+          },
+          "style": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DeliveryDecision": {
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "draft_hash": {
+            "type": "string"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceDeliveryMessage"
+            },
+            "type": "array"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "review_revision": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "DeliveryPresentation": {
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/DeliveryApproval"
+          },
+          "delivered": {
+            "type": "boolean"
+          },
+          "draft": {
+            "type": "string"
+          },
+          "draft_hash": {
+            "type": "string"
+          },
+          "maintenance": {
+            "type": "boolean"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceDeliveryMessage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "project": {
+            "type": "string"
+          },
+          "publication": {
+            "$ref": "#/components/schemas/DeliveryPublication"
+          },
+          "report": {
+            "$ref": "#/components/schemas/FinalReport"
+          },
+          "review_revision": {
+            "type": "integer"
+          },
+          "style": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DeliveryPublication": {
+        "properties": {
+          "approval": {
+            "type": "integer"
+          },
+          "base": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "description_hash": {
+            "type": "string"
+          },
+          "fork": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "prior_url": {
+            "type": "string"
+          },
+          "pull_request": {
+            "type": "integer"
+          },
+          "remote": {
+            "type": "string"
+          },
+          "reviewed": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "style": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "upstream": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Diagnostic": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DraftEdit": {
+        "properties": {
+          "plan": {
+            "type": "string"
+          },
+          "plan_revision": {
+            "type": "integer"
+          },
+          "spec": {
+            "type": "string"
+          },
+          "spec_revision": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "DriftCoverage": {
+        "properties": {
+          "drift": {
+            "type": "integer"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DriftSkip": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DriftStatus": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "drift": {
+            "type": "integer"
+          },
+          "moved": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "EffectiveProfile": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/APIError"
+          }
+        },
+        "type": "object"
+      },
+      "Event": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ExtractionResponse": {
+        "properties": {
+          "extraction": {
+            "$ref": "#/components/schemas/ExtractionState"
+          },
+          "project": {
+            "$ref": "#/components/schemas/ProjectView"
+          }
+        },
+        "type": "object"
+      },
+      "ExtractionState": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "extraction": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FailureStreak": {
+        "properties": {
+          "consecutive": {
+            "type": "integer"
+          },
+          "last_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_failure": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalCriterion": {
+        "properties": {
+          "criterion": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "gap": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalReport": {
+        "properties": {
+          "base_check": {
+            "type": "integer"
+          },
+          "before": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "charter": {
+            "type": "integer"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "conflicts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "criteria": {
+            "items": {
+              "$ref": "#/components/schemas/FinalCriterion"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "failure": {
+            "type": "string"
+          },
+          "maintenance": {
+            "type": "boolean"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "integer"
+          },
+          "reader": {
+            "type": "string"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "seal": {
+            "type": "integer"
+          },
+          "spec": {
+            "type": "integer"
+          },
+          "spec_hash": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "string"
+          },
+          "upstream": {
+            "$ref": "#/components/schemas/SealBase"
+          }
+        },
+        "type": "object"
+      },
+      "HandInRequest": {
+        "properties": {
+          "base": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "skip_debate": {
+            "type": "boolean"
+          },
+          "stdin": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "HandInResponse": {
+        "properties": {
+          "handed": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "skip_debate": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "api_version": {
+            "type": "integer"
+          },
+          "build": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "service": {
+            "type": "string"
+          },
+          "tailnet": {
+            "$ref": "#/components/schemas/TailnetStatus"
+          }
+        },
+        "type": "object"
+      },
+      "Identity": {
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "InboxAnswer": {
+        "properties": {
+          "body": {
+            "additionalProperties": {},
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "method": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "InboxEntry": {
+        "properties": {
+          "amendment": {
+            "type": "string"
+          },
+          "answer": {
+            "$ref": "#/components/schemas/InboxAnswer"
+          },
+          "asked": {
+            "items": {
+              "$ref": "#/components/schemas/InboxQuestion"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "batch": {
+            "type": "string"
+          },
+          "blocked": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "opened_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "project": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "quick_reply": {
+            "type": "string"
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "InboxQuestion": {
+        "properties": {
+          "asked_by": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "InboxResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/InboxEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "MemoryAnchor": {
+        "properties": {
+          "artifact": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MemorySetup": {
+        "properties": {
+          "anchors": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryAnchor"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "files": {
+            "additionalProperties": {},
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "hearsay_entities": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "hearsay_scope": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MutationResponse": {
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "OverlapAdvisory": {
+        "properties": {
+          "entities": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "other_seal": {
+            "type": "integer"
+          },
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "seal": {
+            "type": "integer"
+          },
+          "subsystems": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PacketResponse": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "packet": {
+            "$ref": "#/components/schemas/ShedPacket"
+          },
+          "project": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PlanProof": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PlanStartBlocker": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProfileRequest": {
+        "properties": {
+          "profile": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectAddRequest": {
+        "properties": {
+          "base_branch": {
+            "type": "string"
+          },
+          "clone": {
+            "type": "string"
+          },
+          "fork": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "upstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectExtractRequest": {
+        "properties": {
+          "project": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectRebaseRequest": {
+        "properties": {
+          "project": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectRebaseResponse": {
+        "properties": {
+          "covered": {
+            "items": {
+              "$ref": "#/components/schemas/DriftCoverage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "project": {
+            "type": "string"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/DriftSkip"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ProjectRemoveRequest": {
+        "properties": {
+          "project": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectResponse": {
+        "properties": {
+          "next_step": {
+            "type": "string"
+          },
+          "project": {
+            "$ref": "#/components/schemas/ProjectView"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectRuntime": {
+        "properties": {
+          "context_mode": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectView": {
+        "properties": {
+          "base_branch": {
+            "type": "string"
+          },
+          "charter": {
+            "type": "string"
+          },
+          "charter_state": {
+            "$ref": "#/components/schemas/CharterState"
+          },
+          "clone": {
+            "type": "string"
+          },
+          "extraction": {
+            "$ref": "#/components/schemas/ExtractionState"
+          },
+          "fork": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "trace": {
+            "type": "string"
+          },
+          "upstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProviderSpend": {
+        "properties": {
+          "lower_bound": {
+            "type": "boolean"
+          },
+          "spend_usd": {
+            "type": "string"
+          },
+          "unknown_costs": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ProviderUsage": {
+        "properties": {
+          "fallbacks": {
+            "items": {
+              "$ref": "#/components/schemas/RoleFallback"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "limit": {
+            "$ref": "#/components/schemas/RuntimeProviderLimit"
+          },
+          "lower_bound": {
+            "type": "boolean"
+          },
+          "paused_roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "spend_usd": {
+            "type": "string"
+          },
+          "unknown_costs": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ProviderUsageStatus": {
+        "properties": {
+          "day": {
+            "type": "string"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderUsage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "unattributed": {
+            "$ref": "#/components/schemas/ProviderSpend"
+          }
+        },
+        "type": "object"
+      },
+      "RatifyRequest": {
+        "properties": {
+          "plan": {
+            "type": "integer"
+          },
+          "spec": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "RatifyResponse": {
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "integer"
+          },
+          "project": {
+            "type": "string"
+          },
+          "round": {
+            "type": "integer"
+          },
+          "sealing": {
+            "type": "string"
+          },
+          "spec": {
+            "type": "integer"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReloadError": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReloadResponse": {
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ReviewEvidence": {
+        "properties": {
+          "criterion": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReviewFinding": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "criterion": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RoleCapacity": {
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "role": {
+            "type": "string"
+          },
+          "used": {
+            "type": "integer"
+          },
+          "waiting": {
+            "items": {
+              "$ref": "#/components/schemas/SlotWait"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RoleFallback": {
+        "properties": {
+          "configured": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RuntimePause": {
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "set_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/RuntimeTarget"
+          }
+        },
+        "type": "object"
+      },
+      "RuntimePriority": {
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "workstreams": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RuntimeProviderLimit": {
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "resets_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "set_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RuntimeResponse": {
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/Diagnostic"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "effective": {
+            "$ref": "#/components/schemas/RuntimeState"
+          },
+          "profiles": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/EffectiveProfile"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectRuntime"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RuntimeState": {
+        "properties": {
+          "budget_paused_on": {
+            "type": "string"
+          },
+          "pauses": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimePause"
+            },
+            "type": "array"
+          },
+          "priorities": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimePriority"
+            },
+            "type": "array"
+          },
+          "profiles": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "provider_limits": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeProviderLimit"
+            },
+            "type": "array"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "RuntimeTarget": {
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SealBase": {
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "remote": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SendRequest": {
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ShedEntry": {
+        "properties": {
+          "argument": {
+            "type": "string"
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "citations": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "disposition": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "member": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "part": {
+            "type": "string"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/ShedPin"
+          },
+          "round": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ShedMoreRequest": {
+        "properties": {
+          "rounds": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ShedObjectRequest": {
+        "properties": {
+          "argument": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ShedOverruleRequest": {
+        "properties": {
+          "objection": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ShedPacket": {
+        "properties": {
+          "conclusion": {
+            "type": "string"
+          },
+          "dissent": {
+            "items": {
+              "$ref": "#/components/schemas/ShedEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/ShedPin"
+          },
+          "round": {
+            "type": "integer"
+          },
+          "skipped": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ShedPin": {
+        "properties": {
+          "plan": {
+            "type": "integer"
+          },
+          "spec": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ShedRedraftRequest": {
+        "properties": {
+          "note": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ShedResponse": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "objection": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "round": {
+            "type": "integer"
+          },
+          "rounds": {
+            "type": "integer"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ShedRuleRequest": {
+        "properties": {
+          "disposition": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "objection": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SlotWait": {
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "StatusResponse": {
+        "properties": {
+          "capacity": {
+            "$ref": "#/components/schemas/CapacityStatus"
+          },
+          "daily_budget": {
+            "$ref": "#/components/schemas/DailyBudgetStatus"
+          },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/Diagnostic"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "failure_streaks": {
+            "items": {
+              "$ref": "#/components/schemas/FailureStreak"
+            },
+            "type": "array"
+          },
+          "profiles": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/EffectiveProfile"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "provider_limits": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeProviderLimit"
+            },
+            "type": "array"
+          },
+          "provider_usage": {
+            "$ref": "#/components/schemas/ProviderUsageStatus"
+          },
+          "tailnet": {
+            "$ref": "#/components/schemas/TailnetStatus"
+          },
+          "workspaces": {
+            "$ref": "#/components/schemas/WorkspacesStatus"
+          },
+          "workstreams": {
+            "items": {
+              "$ref": "#/components/schemas/WorkstreamStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "StatusView": {
+        "properties": {
+          "agents": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "attention": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "StopResponse": {
+        "properties": {
+          "stopping": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "TailnetStatus": {
+        "properties": {
+          "login_url": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceActor": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceAddress": {
+        "properties": {
+          "criterion": {
+            "type": "string"
+          },
+          "proof": {
+            "$ref": "#/components/schemas/PlanProof"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceCriterion": {
+        "properties": {
+          "criterion": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceDelivery": {
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "approved": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "publication": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "published": {
+            "type": "string"
+          },
+          "pull_request": {
+            "type": "integer"
+          },
+          "report": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "reviewed": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "upstream": {
+            "$ref": "#/components/schemas/SealBase"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceDocument": {
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/TraceActor"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cause": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "depth": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceEvent": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "ref": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceGap": {
+        "properties": {
+          "link": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceLanding": {
+        "properties": {
+          "approval": {
+            "type": "string"
+          },
+          "base": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "candidate": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "criteria": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "string"
+          },
+          "ref": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "seal": {
+            "type": "integer"
+          },
+          "spec": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceOwnerGate": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceRebase": {
+        "properties": {
+          "base": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "conflicts": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "onto": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "rebase": {
+            "type": "integer"
+          },
+          "ref": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "report": {
+            "type": "integer"
+          },
+          "snapshot": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceRef": {
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/TraceActor"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cause": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "TraceReport": {
+        "properties": {
+          "base": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "candidate": {
+            "type": "string"
+          },
+          "criteria": {
+            "items": {
+              "$ref": "#/components/schemas/CriterionReport"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "ref": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "seal": {
+            "type": "integer"
+          },
+          "turn": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceReview": {
+        "properties": {
+          "bounces": {
+            "type": "integer"
+          },
+          "candidate": {
+            "$ref": "#/components/schemas/CoreadapterCandidate"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "diff_sha256": {
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewEvidence"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewFinding"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "ref": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "report": {
+            "type": "string"
+          },
+          "seal": {
+            "type": "integer"
+          },
+          "turn": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceRuling": {
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "question": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "ref": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceSeal": {
+        "properties": {
+          "base": {
+            "$ref": "#/components/schemas/SealBase"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "ref": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "round": {
+            "type": "integer"
+          },
+          "seal": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "TraceSummary": {
+        "properties": {
+          "complete": {
+            "type": "boolean"
+          },
+          "criteria": {
+            "items": {
+              "$ref": "#/components/schemas/TraceCriterion"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/TraceDelivery"
+          },
+          "feature": {
+            "type": "string"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/TraceGap"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "plan": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "project": {
+            "type": "string"
+          },
+          "seal": {
+            "$ref": "#/components/schemas/TraceSeal"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/UnitTrace"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceTurn": {
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "cost_usd": {
+            "format": "double",
+            "type": "number"
+          },
+          "failure": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "response": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "role": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stop": {
+            "$ref": "#/components/schemas/TraceTurnStop"
+          },
+          "turn": {
+            "type": "string"
+          },
+          "unknown_costs": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "TraceTurnStop": {
+        "properties": {
+          "cause": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceWorkstreamBase": {
+        "properties": {
+          "base": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UnitDispatch": {
+        "properties": {
+          "blocked": {
+            "type": "string"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/PlanStartBlocker"
+            },
+            "type": "array"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "pause": {
+            "$ref": "#/components/schemas/RuntimePause"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "version": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "workstreams": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "UnitLanding": {
+        "properties": {
+          "approval": {
+            "type": "string"
+          },
+          "base": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "candidate": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "criteria": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "string"
+          },
+          "seal": {
+            "type": "integer"
+          },
+          "spec": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UnitStatus": {
+        "properties": {
+          "card": {
+            "$ref": "#/components/schemas/CoreadapterCard"
+          },
+          "deferral": {
+            "$ref": "#/components/schemas/UnitDispatch"
+          },
+          "landing": {
+            "$ref": "#/components/schemas/UnitLanding"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UnitTrace": {
+        "properties": {
+          "addresses": {
+            "items": {
+              "$ref": "#/components/schemas/TraceAddress"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "cost_usd": {
+            "format": "double",
+            "type": "number"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "feature": {
+            "type": "string"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/TraceGap"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/TraceEvent"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "landings": {
+            "items": {
+              "$ref": "#/components/schemas/TraceLanding"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "project": {
+            "type": "string"
+          },
+          "rebases": {
+            "items": {
+              "$ref": "#/components/schemas/TraceRebase"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "reports": {
+            "items": {
+              "$ref": "#/components/schemas/TraceReport"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "reviews": {
+            "items": {
+              "$ref": "#/components/schemas/TraceReview"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "rulings": {
+            "items": {
+              "$ref": "#/components/schemas/TraceRuling"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/TraceTurn"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "unit": {
+            "type": "string"
+          },
+          "unknown_costs": {
+            "type": "integer"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkspaceDeliveryMessage": {
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkspacesStatus": {
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "jj": {
+            "type": "string"
+          },
+          "problem": {
+            "type": "string"
+          },
+          "setting": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkstreamStatus": {
+        "properties": {
+          "advisories": {
+            "items": {
+              "$ref": "#/components/schemas/OverlapAdvisory"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/AgentStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "context_mode": {
+            "type": "string"
+          },
+          "drift": {
+            "$ref": "#/components/schemas/DriftStatus"
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/TraceOwnerGate"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "open_questions": {
+            "type": "integer"
+          },
+          "project": {
+            "type": "string"
+          },
+          "state": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/StatusView"
+          },
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/UnitStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "workspaces": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  }
+}

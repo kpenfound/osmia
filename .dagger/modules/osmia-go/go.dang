@@ -191,7 +191,7 @@ type Go {
   Run tests in every discovered Go module.
   Modules configured to skip tests are skipped.
   """
-  pub testAll(ws: Workspace!): Container! @check {
+  pub testAll(ws: Workspace!): Void @check {
     let mods = modules(ws, includeSkipTest: false)
     let layers = mods.reduce(directory) { layers, mod =>
       layers.withDirectory(
@@ -203,7 +203,8 @@ type Go {
     # parallel. For now, merge one file from each module's test container into
     # a directory so the check depends on every module test command.
 
-    base.withDirectory("/results", layers)
+    base.withDirectory("/results", layers).sync
+    null
   }
 
   """
@@ -556,8 +557,9 @@ type GoModule {
   Run tests in this module.
   If this module is configured to skip tests, no tests are run.
   """
-  pub test(ws: Workspace!): Container! @check {
-    testExec(ws)
+  pub test(ws: Workspace!): Void @check {
+    testExec(ws).sync
+    null
   }
 
   """

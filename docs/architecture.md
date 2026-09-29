@@ -2,8 +2,7 @@
 
 Osmia runs as one long-lived Go service. The command line and embedded web page
 call its local API; agents do not drive the workflow. This page is a map for
-operators and contributors. The [design](design.md) defines product behavior,
-and the [review](review.md) records the architecture assessment.
+operators and contributors. The [design](design.md) defines product behavior.
 
 ## From hand-in to delivery
 
@@ -40,8 +39,7 @@ an event wakes a pass early but does not carry the state transition.
 
 The service uses a pinned `busybees/core` dependency for reusable execution,
 MCP, sandbox and VCS primitives. Osmia keeps its state machine, owner decisions
-and recovery policy in this repository. The [core adapter](core-adapter.md)
-describes the boundary in detail.
+and recovery policy in this repository.
 
 ## Decisions and side effects
 
@@ -49,8 +47,7 @@ An owner decision changes the workflow only through the service API. The trace
 commits its transition and any outbox intent as one recoverable publication.
 Reconciliation inspects durable intent and the external result before retrying
 an operation. This matters for branch changes and publication, where repeating
-an effect blindly could duplicate or invalidate work. See [trace](trace.md) and
-[service recovery](service.md).
+an effect blindly could duplicate or invalidate work.
 
 The scheduler reads queued turns and capacity from trace state. Its `Pass`
 method publishes dispatch intent without running a model. Reconciliation hands
@@ -65,8 +62,7 @@ The service selects a workspace and copies only approved files into a private
 turn view. It chooses the role's tools and environment and checks the prepared
 execution policy before the agent runs. Agents receive no VCS tool or delivery
 credential. Writable output is captured by service code before the turn view is
-removed; the service then updates the target workspace. The detailed contract
-and platform limits are in [turn isolation](isolation.md).
+removed; the service then updates the target workspace.
 
 ## Storage and deployment
 

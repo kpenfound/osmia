@@ -386,6 +386,9 @@ type ClearProviderLimitRequest struct {
 type MutationResponse struct {
 	Applied bool `json:"applied"`
 }
+type StopResponse struct {
+	Stopping bool `json:"stopping"`
+}
 
 // StatusResponse lists every workstream of the active project and every role's
 // effective profile. Workstreams is empty without an active project or trace,

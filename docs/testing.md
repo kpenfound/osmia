@@ -14,8 +14,6 @@ From the repository root, with the Dagger engine available:
 dagger check
 ```
 
-The factory supplies the pinned experimental Dagger release through
-`DAGGER_X_RELEASE`. Outside that environment, set it to `v1.0.0-beta.14`.
 The Go check runs the complete suite in a Go container and installs the pinned
 `jj` binary. The Go test command and all its child processes run on at most
 four available CPUs, including on larger local engines. CPU affinity constrains
@@ -40,7 +38,6 @@ command in [AGENTS.md](../AGENTS.md#validation). Host `gofmt`, `go build` and
 | Workspaces | [workspace](../internal/workspace), service Jujutsu demonstrations | Git and Jujutsu behavior, rebase and recovery using local repositories |
 | Operator interface | [cli](../internal/cli), service browser tests | Commands, API behavior, owner decisions and live page updates |
 
-The [review](review.md) describes what was inspected and which risks remain.
 Test counts are useful for finding the suite, but assertions and exercised
 boundaries determine confidence.
 

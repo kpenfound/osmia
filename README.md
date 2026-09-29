@@ -48,14 +48,12 @@ keeps the documents, decisions and turns through restarts. See the
 | --- | --- |
 | Install and complete a first workstream | [Getting started](docs/getting-started.md) |
 | Commands and settings | [CLI](docs/cli.md), [configuration](docs/configuration.md) |
-| Operate the service and web page | [Service API](docs/service.md), [runtime controls](docs/runtime.md) |
-| Understand the records and agent boundary | [Trace](docs/trace.md), [turn isolation](docs/isolation.md) |
-| Understand components and review findings | [Architecture](docs/architecture.md), [review](docs/review.md) |
+| Run the service, web page and notifications | [Running the service](docs/running.md) |
+| Write a project's charter | [Charter](docs/charter.md) |
+| Understand the components | [Architecture](docs/architecture.md) |
 | Configure optional memory | [Hearsay integration](docs/hearsay.md) |
-| Track design coverage and remaining implementation | [Completion plan](docs/implementation-plan.md) |
 | Run and understand the checks | [Testing](docs/testing.md) |
 | Contribute a change | [Contributing](CONTRIBUTING.md) |
 | Build or install a release | [Release](docs/release.md) |
 
-The [design](docs/design.md) is the source of truth for product scope. The
-[demonstrations](docs/owner-notifications-demonstration.md) show complete flows with fake agents.
+The [design](docs/design.md) is the source of truth for product scope.
