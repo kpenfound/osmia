@@ -76,6 +76,43 @@ func TestMCPRoleScopedCalls(t *testing.T) {
 		t.Fatalf("handler calls: %d", calls)
 	}
 }
+func TestMCPResultIsTheToolTextAlone(t *testing.T) {
+	ctx := context.Background()
+	handler := func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		return json.Marshal("# spec\n\nfile contents")
+	}
+	request := HostRequest{Scope: Scope{Role: "committee"}, Capabilities: Capabilities{Tools: []string{"file_read"}}, Tools: []Tool{
+		{Name: "file_read", Effect: ToolRead, InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}`), Handle: handler},
+	}}
+	transport := &memoryTransport{}
+	hosted, err := (&MCPHost{Transport: transport}).Host(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hosted.Lease.Release(ctx)
+	listed, err := transport.client.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Tools) != 1 || listed.Tools[0].OutputSchema != nil {
+		t.Fatalf("tool advertises an output schema: %+v", listed.Tools)
+	}
+	result, err := transport.client.CallTool(ctx, &mcp.CallToolParams{Name: "file_read", Arguments: map[string]any{"path": "spec.md"}})
+	if err != nil || result.IsError {
+		t.Fatalf("%v %v", result, err)
+	}
+	if result.StructuredContent != nil {
+		t.Fatalf("structured content hides the text result: %#v", result.StructuredContent)
+	}
+	if len(result.Content) != 1 {
+		t.Fatalf("content: %+v", result.Content)
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok || text.Text != `"# spec\n\nfile contents"` {
+		t.Fatalf("content: %#v", result.Content[0])
+	}
+}
+
 func TestMCPRejectsInvalidBeforeHosting(t *testing.T) {
 	for _, req := range []HostRequest{
 		{},

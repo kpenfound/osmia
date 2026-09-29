@@ -281,6 +281,9 @@ workspace so Docker Sandboxes can write its agent instructions outside protected
 inputs. The agent still runs in its granted working directory, and cleanup removes
 the temporary workspace. Shared skills are disabled. Native reading tools are enabled;
 file writers receive editing tools, and implementation turns also receive a shell.
+A turn with a read-only view starts in an empty scratch directory, and its
+instructions name the view's path. The `file_read` tool reads a file in the view
+or lists a directory's entries, with `.` naming the view's root.
 VCS executables and metadata remain unavailable. No host Dagger engine,
 arbitrary mounts or inherited credentials are exposed. Core creates and removes
 the sandbox for each attempt, including cancellation. If the service is forcibly

@@ -114,6 +114,42 @@ func TestViewsRejectTraversalSymlinksAndMetadataWrites(t *testing.T) {
 	}
 }
 
+func TestViewsListDirectories(t *testing.T) {
+	source, outside := t.TempDir(), t.TempDir()
+	put(t, source, "spec.md", "spec")
+	put(t, source, "handed/stdin", "handed in")
+	put(t, source, "handed/notes/design.md", "design")
+	put(t, source, "shed/round-1/agent_committee_1.json", "{}")
+	views := Views{Directory: t.TempDir()}
+	v, err := views.Create(context.Background(), a.Workspace{Directory: source, Access: a.ReadOnly}, []string{"spec.md", "handed", "shed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Release(context.Background())
+	if err := os.Symlink(outside, filepath.Join(v.workspace.Directory, "handed", "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(v.workspace.Directory, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{
+		".":            "handed/\nshed/\nspec.md",
+		"handed":       "notes/\nstdin",
+		"handed/":      "notes/\nstdin",
+		"shed/round-1": "agent_committee_1.json",
+		"handed/stdin": "handed in",
+	} {
+		if data, err := v.Read(path); err != nil || string(data) != want {
+			t.Fatalf("read %s: %q %v", path, data, err)
+		}
+	}
+	for _, path := range []string{"..", "/", "./handed", ".git", "handed/escape", "missing"} {
+		if data, err := v.Read(path); err == nil {
+			t.Fatalf("read %s: %q", path, data)
+		}
+	}
+}
+
 // A selected directory's symlinks are left out of the view at every depth,
 // whether they point inside the source, outside it or at a directory; the
 // view holds the rest. Selecting one of them explicitly still fails.

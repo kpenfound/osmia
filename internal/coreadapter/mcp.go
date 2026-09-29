@@ -86,8 +86,11 @@ func scopedServer(req HostRequest) (server *mcp.Server, err error) {
 		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil || schema == nil {
 			return nil, fmt.Errorf("MCP tool %q requires an object schema", tool.Name)
 		}
+		// The output is untyped so the SDK advertises no output schema and sets
+		// no structured content: clients show structured content in place of
+		// the text result, which carries the tool's JSON.
 		mcphost.AddTool(registry, &mcp.Tool{Name: tool.Name, Description: tool.Description, InputSchema: schema},
-			func(ctx context.Context, _ *mcp.CallToolRequest, input map[string]any) (*mcp.CallToolResult, map[string]any, error) {
+			func(ctx context.Context, _ *mcp.CallToolRequest, input map[string]any) (*mcp.CallToolResult, any, error) {
 				raw, err := json.Marshal(input)
 				if err != nil {
 					return nil, nil, err

@@ -272,7 +272,7 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 
 func fileTools(view *FileView) []coreadapter.Tool {
 	return []coreadapter.Tool{
-		{Name: "file_read", Description: "Read a file in this turn's view", Effect: coreadapter.ToolRead,
+		{Name: "file_read", Description: "Read a file in this turn's view, or list a directory's entries; \".\" is the view's root", Effect: coreadapter.ToolRead,
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}`),
 			Handle: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 				var input struct{ Path string }

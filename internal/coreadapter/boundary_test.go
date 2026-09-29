@@ -104,6 +104,7 @@ func TestContainerConstruction(t *testing.T) {
 		t.Setenv(key, "host-secret")
 	}
 	turn := boundaryTurn(t, "container")
+	turn.SystemPrompt = "You are a committee member."
 	engine := &adaptertest.Engine{}
 	runner := a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}
 	if _, err := runner.Run(context.Background(), turn); err != nil {
@@ -121,6 +122,9 @@ func TestContainerConstruction(t *testing.T) {
 	}
 	if req.Workspace.Directory() != scratch {
 		t.Fatalf("read-only view is the working directory: %s", req.Workspace.Directory())
+	}
+	if !strings.HasPrefix(req.SystemPrompt, turn.SystemPrompt+"\n\n") || !strings.Contains(req.SystemPrompt, "read-only directory "+view+".") {
+		t.Fatalf("system prompt does not name the view: %q", req.SystemPrompt)
 	}
 	if info, err := os.Stat(scratch); err != nil || !info.IsDir() {
 		t.Fatalf("scratch directory: %v", err)
@@ -231,6 +235,9 @@ func TestWritableViewPolicyIsAccepted(t *testing.T) {
 	executor := a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}
 	if _, err := (&a.TurnRunner{Executor: executor}).Run(context.Background(), turn); err != nil || len(engine.Requests) != 1 {
 		t.Fatalf("err=%v launches=%d", err, len(engine.Requests))
+	}
+	if req := engine.Requests[0]; req.Workspace.Directory() != turn.Sandbox.Verified.Workspace.Directory || req.SystemPrompt != turn.SystemPrompt {
+		t.Fatalf("writable view: dir=%s prompt=%q", req.Workspace.Directory(), req.SystemPrompt)
 	}
 	// A writable view whose session reads it only is a mismatch too.
 	view := turn.Sandbox.Verified.Workspace.Directory

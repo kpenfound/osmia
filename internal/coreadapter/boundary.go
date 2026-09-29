@@ -220,6 +220,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 			return nil, err
 		}
 		req.Workspace = vcs.Directory(scratch)
+		req.SystemPrompt = strings.TrimSpace(req.SystemPrompt + "\n\n" + viewLocation(iso.Workspace.Directory))
 	}
 	req.Grants = &grants
 	settings.Agent = req.Profile.Agent
@@ -258,6 +259,12 @@ func refusal(err error) error {
 
 // scratchDirectory is the session subdirectory a read-only turn starts in.
 const scratchDirectory = "work"
+
+// viewLocation tells a read-only turn where its view is, since the turn starts
+// in the scratch directory and the view keeps its host path in every sandbox.
+func viewLocation(view string) string {
+	return fmt.Sprintf("Your view is the read-only directory %s. The paths your instructions name are relative to it. You start in a separate, empty scratch directory.", view)
+}
 
 // coreGrants are the complete capabilities of a turn in iso: the view with its
 // access, the session directory read-only, a writable scratch directory inside

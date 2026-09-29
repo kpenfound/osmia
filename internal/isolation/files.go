@@ -176,16 +176,43 @@ func within(root, path string) bool {
 	return err == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))))
 }
 
+// Read returns a file's contents. For a directory, including the view's root
+// ".", it returns the entry names in order, one per line, with a trailing slash
+// on each directory. A directory path may end in a slash.
 func (v *FileView) Read(name string) ([]byte, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.closed {
 		return nil, os.ErrClosed
 	}
-	if err := checkPath(v.root, name, false); err != nil {
+	name = strings.TrimSuffix(name, "/")
+	if name != "." {
+		if err := checkPath(v.root, name, false); err != nil {
+			return nil, err
+		}
+	}
+	info, err := v.root.Lstat(name)
+	if err != nil {
 		return nil, err
 	}
-	return v.root.ReadFile(name)
+	if !info.IsDir() {
+		return v.root.ReadFile(name)
+	}
+	entries, err := fs.ReadDir(v.root.FS(), name)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, entry := range entries {
+		switch {
+		case VCSMetadata(entry.Name()):
+		case entry.IsDir():
+			names = append(names, entry.Name()+"/")
+		case entry.Type().IsRegular():
+			names = append(names, entry.Name())
+		}
+	}
+	return []byte(strings.Join(names, "\n")), nil
 }
 
 func (v *FileView) Write(name string, data []byte) error {
