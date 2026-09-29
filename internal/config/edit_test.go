@@ -160,7 +160,11 @@ func TestWriteProjectConfigLoads(t *testing.T) {
 	if err := WriteProjectConfig(path, p); err != nil || read(t, path) != before {
 		t.Fatalf("rewrite is not idempotent: %v", err)
 	}
-	if err := AddActiveProject(filepath.Join(root.String(), "config.toml"), pid2); err != nil {
+	top, err := root.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AddActiveProject(top, pid2); err != nil {
 		t.Fatal(err)
 	}
 	c, err := Load(opts)

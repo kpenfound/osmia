@@ -70,8 +70,11 @@ and platform limits are in [turn isolation](isolation.md).
 
 ## Storage and deployment
 
-The root defaults to `~/.osmia`. Configuration, runtime overrides, project trace
-repositories and workspaces live there; the target clone remains separate. The
+The root defaults to `~/.local/share/osmia` and the top-level configuration to
+`~/.config/osmia/config.toml`, following the XDG base directories; an explicit
+root holds its own `config.toml`. Runtime overrides, project configuration,
+project trace repositories and workspaces live in the root; the target clone
+remains separate. The
 service binds a Unix socket for local clients and can serve the same API on a
 loopback listener or an embedded tailnet node. Tailnet membership controls access
 to the remote page; there is no separate Osmia login. See

@@ -28,12 +28,11 @@ See [getting started](getting-started.md#3-run-the-service) for running the
 service.
 
 ```sh
-osmia serve --root ~/.osmia
-osmia status --root ~/.osmia
+osmia serve
+osmia status
 ```
 
-The root holds a top-level `config.toml` with profiles and
-`active_projects = []`. Status reports `Project: none configured`.
+The top-level `config.toml` holds profiles and `active_projects = []`. Status reports `Project: none configured`.
 
 ### 2. Add the project
 

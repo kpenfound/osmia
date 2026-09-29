@@ -20,7 +20,9 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-type Options struct{ Root, Home string }
+// Options locates the configuration. File, when set, is the top-level file in
+// place of the one ResolveRoot chooses; Root.Options pins both.
+type Options struct{ Root, Home, File string }
 type Config struct {
 	Root           Root               `toml:"-" json:"-"`
 	Version        int                `toml:"version" json:"version"`
@@ -205,7 +207,7 @@ func Load(options Options) (*Config, error) {
 // and returns nil on every failure. It reads no project file: Project and
 // Projects stay zero whatever active_projects lists.
 func LoadTopLevel(options Options) (*Config, error) {
-	root, err := ResolveRoot(options.Root, options.Home)
+	root, err := options.Resolve()
 	if err != nil {
 		return nil, err
 	}

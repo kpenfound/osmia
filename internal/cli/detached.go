@@ -19,15 +19,31 @@ import (
 const readinessEnv = "OSMIA_SERVICE_READY_FD"
 
 // detachedCommand is the process boundary; tests launch an idle fake service.
+// An empty root serves the default root.
 var detachedCommand = func(root string) (*exec.Cmd, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
+	if root == "" {
+		return exec.Command(executable, "serve"), nil
+	}
 	return exec.Command(executable, "serve", "--root", root), nil
 }
 
+// rootFlag is the --root argument that selects root again, empty for the
+// default root.
+func rootFlag(root config.Root) string {
+	if root.SelfContained() {
+		return root.String()
+	}
+	return ""
+}
+
 func runService(ctx context.Context, root config.Root, detached bool, stdout io.Writer) error {
+	if err := os.MkdirAll(root.String(), 0700); err != nil {
+		return err
+	}
 	if detached {
 		return detach(ctx, root, stdout)
 	}
@@ -38,7 +54,7 @@ func runService(ctx context.Context, root config.Root, detached bool, stdout io.
 		pipe = os.NewFile(3, "service-readiness")
 		defer pipe.Close()
 	}
-	s, err := service.Start(ctx, service.Enforce(service.Options{Config: config.Options{Root: root.String()}, Build: build()}, enforcement()))
+	s, err := service.Start(ctx, service.Enforce(service.Options{Config: root.Options(""), Build: build()}, enforcement()))
 	if err != nil {
 		return err
 	}
@@ -54,9 +70,6 @@ func runService(ctx context.Context, root config.Root, detached bool, stdout io.
 // detach acknowledges startup only through the child's private readiness pipe.
 // Root ownership and socket recovery remain the service's responsibility.
 func detach(ctx context.Context, root config.Root, stdout io.Writer) error {
-	if err := os.MkdirAll(root.String(), 0700); err != nil {
-		return err
-	}
 	logPath := filepath.Join(root.String(), "service.log")
 	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0600)
 	if err != nil {
@@ -76,7 +89,7 @@ func detach(ctx context.Context, root config.Root, stdout io.Writer) error {
 	}
 	defer read.Close()
 	defer write.Close()
-	cmd, err := detachedCommand(root.String())
+	cmd, err := detachedCommand(rootFlag(root))
 	if err != nil {
 		return err
 	}
@@ -112,7 +125,11 @@ func detach(ctx context.Context, root config.Root, stdout io.Writer) error {
 			stop()
 			return errors.New("detached service did not become ready")
 		}
-		fmt.Fprintf(stdout, "Osmia is ready; log: %s\nStop with osmia stop --root %s\n", logPath, root.String())
+		command := "osmia stop"
+		if flag := rootFlag(root); flag != "" {
+			command += " --root " + flag
+		}
+		fmt.Fprintf(stdout, "Osmia is ready; log: %s\nStop with %s\n", logPath, command)
 		return nil
 	case err := <-exited:
 		return fmt.Errorf("detached service exited before readiness: %w", err)

@@ -288,3 +288,41 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 		t.Fatal("the running project's passes do not use the reloaded configuration")
 	}
 }
+
+// The default root reads its top-level file from the XDG config directory at
+// startup and on every reload.
+func TestDefaultRootReloadsXDGConfig(t *testing.T) {
+	ctx := context.Background()
+	opts := fixture(t)
+	home := filepath.Dir(opts.Config.Root)
+	data, conf := filepath.Join(home, "data"), filepath.Join(home, "conf")
+	t.Setenv("XDG_DATA_HOME", data)
+	t.Setenv("XDG_CONFIG_HOME", conf)
+	must(t, os.MkdirAll(data, 0700))
+	must(t, os.MkdirAll(filepath.Join(conf, "osmia"), 0700))
+	root := filepath.Join(data, "osmia")
+	must(t, os.Rename(opts.Config.Root, root))
+	top := filepath.Join(conf, "osmia", "config.toml")
+	must(t, os.Rename(filepath.Join(root, "config.toml"), top))
+	opts.Config = config.Options{}
+	_, c := start(t, opts)
+	text, err := os.ReadFile(top)
+	must(t, err)
+	must(t, os.WriteFile(top, append(text, "[capacity]\nmasons = 7\n"...), 0600))
+	now, err := c.Configuration(ctx)
+	must(t, err)
+	if len(now.Drift.Files) == 0 || now.Drift.Files[0].Path != top || now.Drift.Files[0].State != ConfigChanged {
+		t.Fatalf("drift: %+v", now.Drift)
+	}
+	if _, err := c.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now, err = c.Configuration(ctx)
+	must(t, err)
+	if now.Effective.Capacity.Masons != 7 {
+		t.Fatalf("after reload: %+v", now.Effective.Capacity)
+	}
+	if _, err := os.Stat(filepath.Join(root, "config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("root config.toml: %v", err)
+	}
+}
