@@ -7,7 +7,7 @@ require (
 	github.com/chromedp/cdproto v0.0.0-20260321001828-e3e3800016bc
 	github.com/chromedp/chromedp v0.15.1
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433
-	github.com/kpenfound/busybees/core v0.5.2
+	github.com/kpenfound/busybees/core v0.5.3
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/swaggest/jsonschema-go v0.3.78
 	github.com/swaggest/openapi-go v0.2.61

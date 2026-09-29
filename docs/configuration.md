@@ -275,9 +275,12 @@ remains in effect; per-sandbox rules do not narrow it. Configure other permitted
 destinations through [sbx network policy](https://docs.docker.com/reference/cli/sbx/policy/allow/network/).
 Osmia grants no general network tools to agents.
 
-The sandbox mounts only the scoped view and session paths, honoring read-only
-access. Shared skills are disabled. No host Dagger engine, arbitrary mounts,
-environment variables or native shell tools are exposed. Core creates and removes
+The sandbox mounts the scoped view and session paths, honoring read-only
+access. When startup requires it, core supplies a separate temporary primary
+workspace so Docker Sandboxes can write its agent instructions outside protected
+inputs. The agent still runs in its granted working directory, and cleanup removes
+the temporary workspace. Shared skills are disabled. No host Dagger engine,
+arbitrary mounts, environment variables or native shell tools are exposed. Core creates and removes
 the sandbox for each attempt, including cancellation. If the service is forcibly
 killed, a sandbox may remain; its name is recorded in the turn's session directory
 as `sandbox-name`, and `sbx rm --force <name>` removes it and its rules.

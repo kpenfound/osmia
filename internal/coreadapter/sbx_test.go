@@ -104,6 +104,24 @@ cat >/dev/null
 					t.Fatalf("template: %s", created)
 				}
 				args := readSbxFile(t, filepath.Join(turn.SessionDirectory, "sbx-exec-args.txt"))
+				if image == "" {
+					// The writable scratch directory has a read-only parent;
+					// sbx needs a separate primary workspace for startup writes.
+					_, workspaces, ok := strings.Cut(created, backend+"\n")
+					if !ok {
+						t.Fatalf("missing backend in create arguments: %s", created)
+					}
+					primary := strings.Split(workspaces, "\n")[0]
+					if primary == "" || strings.HasSuffix(primary, ":ro") || strings.HasPrefix(primary, turn.SessionDirectory+string(filepath.Separator)) || primary == view {
+						t.Fatalf("startup workspace is not separate from protected inputs: %s", created)
+					}
+					if _, err := os.Stat(primary); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("startup workspace remains after cleanup: %s: %v", primary, err)
+					}
+					if !strings.Contains(args, "--workdir\n"+filepath.Join(turn.SessionDirectory, "work")+"\n") {
+						t.Fatalf("agent did not run in its granted scratch directory: %s", args)
+					}
+				}
 				for _, forbidden := range []string{"GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "_EXPERIMENTAL_DAGGER_RUNNER_HOST"} {
 					if strings.Contains(args, forbidden) {
 						t.Fatalf("sandbox receives %s", forbidden)
