@@ -180,7 +180,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			fail(w, Forbidden)
 			return
 		}
-		respond(w, http.StatusAccepted, map[string]bool{"stopping": true})
+		respond(w, http.StatusAccepted, StopResponse{true})
 		s.cancel()
 		return
 	}

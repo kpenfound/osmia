@@ -4,7 +4,8 @@
 socket, and optionally on a loopback address and your tailnet. The
 [command line](cli.md) talks to it over the socket; the page and your phone
 use the other listeners. [Configuration](configuration.md) describes the
-settings named here.
+settings named here, and the [API reference](#api-reference) describes every
+endpoint.
 
 ## Web listener
 
@@ -207,3 +208,16 @@ changed or removed webhook.
 
 While a notification problem stands, `osmia status` and `osmia config` show a
 `notify` diagnostic describing it. They never show the webhook's URL.
+
+## API reference
+
+[`openapi.json`](openapi.json) is an OpenAPI 3.1 description of every endpoint
+under `/v1`, with its path parameters, request body, response and error shape.
+Open it in any OpenAPI viewer, such as Swagger UI, Redoc or Scalar, or generate
+a client from it. The command line's `--json` output is built from these
+responses; see the [command line](cli.md) for each command's shape.
+
+Every failure returns `{"error": {"code": ..., "message": ...}}`. `GET
+/v1/events` is a `text/event-stream`: each frame names the event's kind and
+carries the event as JSON, and the first event of every stream is `resync`,
+which asks the client to read every view again.

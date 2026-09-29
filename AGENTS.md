@@ -55,6 +55,7 @@
 
 - Keep changes focused on the issue. Avoid unrelated refactors, generated churn and dependencies without a concrete need.
 - Format Go with `gofmt`; keep module and Dagger lockfiles consistent with dependency changes.
+- List every API endpoint in `service.Routes`. After changing a route or a request or response type, run `dagger generate` and commit the updated `docs/openapi.json`; `dagger check` fails while it is stale.
 - Keep local runtime state, credentials, logs and build artifacts out of version control. Reference secrets through environment variables.
 - Update documentation with user-visible behavior and configuration changes. Keep the README concise while the product is under construction.
 - Review the diff for accidental files and secrets. Describe the resulting behavior and validation clearly in pull requests.
