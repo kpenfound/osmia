@@ -281,7 +281,6 @@ func TestInvalid(t *testing.T) {
 		{"short upstream rebase", "", projectConfig + "upstream_rebase = '59s'\n", "upstream_rebase:"},
 		{"integer upstream rebase", "", projectConfig + "upstream_rebase = 0\n", "upstream_rebase"},
 		{"repository url", "", strings.Replace(projectConfig, "upstream/repo", "https://host/upstream/repo", 1), "upstream:"},
-		{"same fork", "", strings.Replace(projectConfig, "owner/repo", "UPSTREAM/repo", 1), "fork:"},
 		{"missing clone", "", strings.Replace(projectConfig, `clone = "~/clone"`, "", 1), "clone:"},
 		{"clone in root", "", strings.Replace(projectConfig, "~/clone", "~/.local/share/osmia/clone", 1), "non-nested"},
 		{"root in clone", "", strings.Replace(projectConfig, "~/clone", "~", 1), "non-nested"},

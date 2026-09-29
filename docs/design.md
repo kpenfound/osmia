@@ -1,6 +1,6 @@
 # Osmia design doc
 
-A personal software factory for long-running feature work on repositories you contribute to but do not own. It is configured at the user level, keeps its factory state outside the repository it works on, is driven by a person through one aide, and shares one pool of agent capacity across several workstreams on several projects.
+A personal software factory for long-running feature work on repositories you own or contribute to. It is configured at the user level, keeps its factory state outside the repository it works on, is driven by a person through one aide, and shares one pool of agent capacity across several workstreams on several projects.
 
 Status: design v0.2, 2026-09-15. This document is the source of truth for feature proposals and implementation; an issue does not override the design. Osmia uses `github.com/kpenfound/busybees/core` as a Go dependency and defines an optional Hearsay memory integration. Section 17 defines those boundaries and section 18 summarizes the feature guarantees.
 
@@ -8,7 +8,7 @@ Status: design v0.2, 2026-09-15. This document is the source of truth for featur
 
 ## 1. Purpose
 
-You want to land a large feature in a project like dagger. You are a contributor, so you cannot install a factory in the repository, label its issues, or push to its main branch. You have a design in your head or in a document, you want agents to plan it, argue about the plan, build it in pieces, review each piece, and hand you one branch on your fork with a pull request you are happy to put your name on. You want to be asked when something needs your judgement, and otherwise left alone. You want the same machine working on three dagger features and a feature for another project at the same time, from one process, from your phone.
+You want to land a large feature in a project like dagger. You are a contributor, so you cannot install a factory in the repository, label its issues, or push to its main branch. You have a design in your head or in a document, you want agents to plan it, argue about the plan, build it in pieces, review each piece, and hand you one feature branch on your repository or fork with a pull request you are happy to put your name on. You want to be asked when something needs your judgement, and otherwise left alone. You want the same machine working on three dagger features and a feature for another project at the same time, from one process, from your phone.
 
 Osmia is that machine. It does not decide what to build. You hand it a feature. It does not run on the repository's issue tracker. It runs on a directory under your home. It does not push to anyone's main. It delivers a branch and a pull request, and stops.
 
@@ -23,7 +23,7 @@ That is the tool. It moves into an existing repository without changing it, is d
 Four choices give the design its shape.
 
 1. A feature starts as a written specification: what must be true when it is done, drafted from what you hand in, debated by adversarial reviewers with you in the room, and ratified by you. It lives beside the factory's state, never in the repository. The plan that breaks it into units says how each part of it will be shown to hold, before anything is built.
-2. Units are built in parallel where the plan allows and land one at a time on one feature branch, each reviewed against the specification before it lands. When a reviewer has read the whole branch against the specification and you accept that report, the feature is delivered as a pull request from your fork.
+2. Units are built in parallel where the plan allows and land one at a time on one feature branch, each reviewed against the specification before it lands. When a reviewer has read the whole branch against the specification and you accept that report, the feature is delivered as a pull request from your repository or fork.
 3. Every agent talks upward to one role, the chief of staff, which answers what it can from the record and asks you the rest. You talk to the chief of staff and to nothing else.
 4. The transitions are code. No model runs on the scheduling path. Agents are durable threads that receive turns and never hold a version control tool.
 
@@ -35,7 +35,7 @@ Four choices give the design its shape.
 
 | Term | Meaning |
 |---|---|
-| project | A repository you contribute to, with your fork, your clone, your rules for it and the factory's knowledge of it. One directory under the Osmia root. |
+| project | A repository you contribute to, with your optional fork, your clone, your rules for it and the factory's knowledge of it. One directory under the Osmia root. |
 | workstream | One feature on one project, from handing in to delivery. Its own branch, its own agents, its own record. |
 | charter | Your rules as a contributor to a project. One per project, human-owned, grows over time. |
 | knowledge base | What the factory knows about a project's architecture that the repository's own documents do not say. Prose by subsystem, a local entity map and trace decisions, enriched by Hearsay when enabled. |
@@ -74,7 +74,7 @@ Roles take names from the trade. All but the owner are agents.
 
 ## 3. Principles
 
-1. **No factory state is committed to the target repository.** No configuration, no specification, no workflow labels, no comments by bots. The repository sees the feature's code and tests on a branch on your fork and a pull request under your name. This rule concerns repositories Osmia works on; Osmia's own source repository carries its design and development configuration.
+1. **No factory state is committed to the target repository.** No configuration, no specification, no workflow labels, no comments by bots. The repository sees the feature's code and tests on a feature branch in your repository or fork and a pull request under your name. This rule concerns repositories Osmia works on; Osmia's own source repository carries its design and development configuration.
 2. **Work is handed, not mined.** The factory builds what you give it. It has no backlog of its own and idles when you give it nothing.
 3. **The owner talks to one role.** Every question, status, ratification and ruling passes through the chief of staff. No other agent addresses you and you address no other agent.
 4. **The outer machine is Go.** States, transitions, readiness, entanglement checks, landing order, capacity and pause are code. What happens inside a turn is a model. Nothing on the scheduling path waits on a model.
@@ -127,7 +127,7 @@ The directed graph of units. For each unit: the criteria it addresses, how each 
 <root>/                          default ~/.local/share/osmia
   runtime.json                   profile overrides, pause states, workstream priority
   projects/<project-id>/         one git repository per project
-    config.toml                  upstream, fork, clone path, landing style, per-project caps
+    config.toml                  upstream, optional fork, clone path, landing style, per-project caps
     charter.md
     kb/<subsystem>.md
     kb/entities.json             local footprint entities and path mappings
@@ -173,7 +173,7 @@ terminal: delivered, abandoned
 | ratified | Consensus or your explicit disposition of remaining objections, plus your ratification of the current spec and plan. The seal is recorded: upstream main commit and spec hash. Footprints are taken from the plan, entanglement advisories issued, the feature branch created. | owner, foreman |
 | building | Units move through their own states below. Amendments may arrive. | mason, committee, foreman |
 | assembled | Every unit has merged. One committee member reads the whole branch against the spec and the charter and reports, criterion by criterion, what shows it holds and what does not. The chief of staff presents the report with anything unshown on top, and you accept it or send the gaps back as units. | committee, owner |
-| delivered | The branch is pushed to your fork and the pull request opened under your name, with a description the chief of staff drafted and you approved. Terminal. | foreman, chief of staff, owner |
+| delivered | The branch is pushed to your repository or fork and the pull request opened under your name, with a description the chief of staff drafted and you approved. Terminal. | foreman, chief of staff, owner |
 
 The feature states move forward. Amendments revise the documents without moving the feature backward. An assembled feature whose final review finds gaps remains assembled while explicit follow-up units use the normal implementation, review and landing loop; its final review runs again after those units land. Changes to the ratified intent or plan still require the amendment gate. Neither a failed final review nor the end of a debate cap authorises delivery.
 
@@ -224,7 +224,7 @@ The architect drafts a proposed revision from the sealed documents, request, cha
 
 ### 5.5 Delivery
 
-At assembled, the foreman rebases the feature branch onto upstream main one last time, the committee's final read runs against that, and the chief of staff drafts the pull request description from the trace. You approve the description, or edit it. The foreman pushes the branch to your fork and opens the pull request as you. Per project, the branch lands either with one commit per unit, the default because reviewers on a large project want reviewable commits, or squashed to one.
+At assembled, the foreman rebases the feature branch onto upstream main one last time, the committee's final read runs against that, and the chief of staff drafts the pull request description from the trace. You approve the description, or edit it. The foreman pushes the branch to your repository or fork and opens the pull request as you. Per project, the branch lands either with one commit per unit, the default because reviewers on a large project want reviewable commits, or squashed to one.
 
 Local snapshots, unit commits and the delivery candidate presented to the owner may use Osmia's unsigned identity. With `landing = "squash"`, the delivery candidate combines the whole workstream into one commit on the reviewed base. The owner can edit the delivery commit message as well as the PR description. Squashing and owner review do not require signing credentials.
 
@@ -283,7 +283,9 @@ Events are information, not authorisation. The chief of staff does not dispatch,
 
 ### 7.1 Fork and upstream
 
-A project is a clone of your fork with upstream as a second remote. The canonical base is upstream's main. Your fork is the push target. Osmia never pushes a protected branch and never merges a pull request.
+A project names an upstream repository, a local clone and an optional fork. The canonical base is upstream's configured base branch. When a fork is configured it receives feature branches and pull requests target upstream. Without a fork, feature branches and pull requests live in upstream. An explicitly identical fork is normalized to omission. The clone needs remotes matching the configured repositories by URL; a single origin remote is sufficient without a fork.
+
+Delivery records the resolved push repository, target repository and base branch before publication so retries preserve the approved destination. Osmia pushes only its feature branches, never the project's base branch or a protected branch, and never merges a pull request. Delivery credentials remain with the service.
 
 ### 7.2 Agents hold no tool
 
@@ -318,7 +320,7 @@ Two units in one workstream are entangled when the plan makes one depend on the 
 
 Footprints resolve through the local entity map even without Hearsay. The review compares actual changed paths with the declared footprint; undeclared scope must be explained and the plan amended when necessary before approval. Unknown or ambiguous mappings cannot be treated as proof of disjointness. Within a workstream the scheduler serializes such units until their footprints are resolved. Across workstreams overlap is advisory by default; the owner can pause or reprioritise the affected work.
 
-A workstream may declare another on the same project as its base. It then rebases onto that workstream's branch instead of upstream until the base change is integrated upstream. Its dependent pull request is opened on the owner's fork against that branch. Once the base is integrated, the service prepares an upstream pull request from the descendant's branch, refreshing the affected review and owner delivery approval before publishing it. The trace retains both requests and their relationship; Osmia never requires a feature branch on upstream. This is how one large change lands as a sequence of pull requests. Stacking inside one workstream is not supported.
+A workstream may declare another on the same project as its base. It then rebases onto that workstream's branch instead of upstream until the base change is integrated upstream. Its dependent pull request is opened in the push repository against that branch. Once the base is integrated, the service prepares an upstream pull request from the descendant's branch, refreshing the affected review and owner delivery approval before publishing it. With a separate fork, the trace retains both requests and their relationship. Without a fork, the service retargets the existing pull request to the configured base branch and updates its approved description after fresh review and owner delivery approval. The operation records the prior request identity and expected contents, reconciles interruptions before retrying, and refuses an unexpectedly edited or closed request. The trace retains both publication records and the request relationship. This is how one large change lands as a sequence of pull requests. Stacking inside one workstream is not supported.
 
 Delivery of a base means its pull request is open, not merged upstream, so descendants continue to use that branch after delivery. Once the base is integrated upstream, the service can rebase descendants onto upstream and publish their upstream requests. For an already delivered descendant, this is a separate delivery-maintenance operation: the feature stays terminal and no implementation unit restarts. Conflicts or changed intent requiring implementation need a new owner-requested workstream. Base relationships must remain acyclic. An abandoned or unavailable base parks descendants for an owner decision; they are never silently moved to another base. Osmia never merges the upstream pull requests itself.
 
@@ -596,7 +598,7 @@ max_bounces = 3
 version = 1
 name = "dagger"
 upstream = "dagger/dagger"
-fork = "kpenfound/dagger"
+fork = "kpenfound/dagger"             # optional; omit to push feature branches to upstream
 clone = "~/github.com/dagger/dagger"
 base_branch = "main"
 landing = "commit-per-unit"          # or "squash"
@@ -615,7 +617,7 @@ Every key has a default, validation, a documented meaning and a test. The config
 
 ### 14.1 Adding a project
 
-`osmia project add` records the upstream, fork and clone, creates the project trace repository under the root with an empty charter template, and runs the librarian's extraction pass: an inventory of subsystems with their tests and conventions as knowledge-base prose, and the local entity map that can later seed Hearsay. You then write the charter. The command refuses to hand in work to a project whose charter is empty, because debate has nothing to cite.
+`osmia project add` records the upstream, optional fork and clone, creates the project trace repository under the root with an empty charter template, and runs the librarian's extraction pass: an inventory of subsystems with their tests and conventions as knowledge-base prose, and the local entity map that can later seed Hearsay. You then write the charter. The command refuses to hand in work to a project whose charter is empty, because debate has nothing to cite.
 
 ### 14.2 Handing in a workstream
 
@@ -679,7 +681,7 @@ The workflow builds on durable local state, planning and owner ratification befo
 ## Appendix A. Glossary card
 
 ```
-project      a repository you contribute to; fork, clone, charter, knowledge base
+project      a repository you contribute to; optional fork, clone, charter, knowledge base
 workstream   one feature on one project; its own branch, agents and trace
 charter      your rules as a contributor; one per project; grows by ratified rulings
 spec         what must be true when the feature is done; numbered criteria; ratified by you; amended in the shed

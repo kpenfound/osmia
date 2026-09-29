@@ -148,7 +148,7 @@ type ProjectView struct {
 	ID         config.ProjectID `json:"id"`
 	Name       string           `json:"name"`
 	Upstream   string           `json:"upstream"`
-	Fork       string           `json:"fork"`
+	Fork       string           `json:"fork,omitempty"`
 	Clone      string           `json:"clone"`
 	BaseBranch string           `json:"base_branch"`
 	Trace      string           `json:"trace"`
@@ -331,11 +331,12 @@ type ShedResponse struct {
 }
 
 // ProjectAddRequest registers a project. Clone is an absolute path to an
-// existing local Git repository; base_branch defaults to main.
+// existing local Git repository; base_branch defaults to main. Omitting Fork
+// delivers feature branches and pull requests within Upstream.
 type ProjectAddRequest struct {
 	Name       string `json:"name"`
 	Upstream   string `json:"upstream"`
-	Fork       string `json:"fork"`
+	Fork       string `json:"fork,omitempty"`
 	Clone      string `json:"clone"`
 	BaseBranch string `json:"base_branch,omitempty"`
 }

@@ -30,7 +30,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   serve [--detach]
   stop
   status [workstream-id] [--json]
-  project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH [--base-branch NAME] [--json]
+  project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
   project memory <project-id>
@@ -239,7 +239,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "overrule" && (len(a) == 3 || len(a) == 4) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3 ||
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
-		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.fork != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
+		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && (o.accept || o.project != "") || cmd == "serve" && (o.json || o.socket != "") {
@@ -403,7 +403,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if a[0] == "remove" {
 			verb = "removed"
 		}
-		fmt.Fprintf(stdout, "Project %s (%s) %s\nUpstream: %s fork: %s clone: %s\nTrace: %s\nNext: %s\n", result.Project.ID, result.Project.Name, verb, result.Project.Upstream, result.Project.Fork, result.Project.Clone, result.Project.Trace, result.NextStep)
+		fmt.Fprintf(stdout, "Project %s (%s) %s\nUpstream: %s push repository: %s clone: %s\nTrace: %s\nNext: %s\n", result.Project.ID, result.Project.Name, verb, result.Project.Upstream, (config.Project{Upstream: result.Project.Upstream, Fork: result.Project.Fork}).PushRepository(), result.Project.Clone, result.Project.Trace, result.NextStep)
 		return 0
 	}
 	if cmd == "handin" {
@@ -1057,10 +1057,10 @@ func projectOf(ctx context.Context, c *service.Client, cfg service.ConfigRespons
 
 func showProject(w io.Writer, p *service.ProjectView) {
 	if p == nil {
-		fmt.Fprintln(w, "Project: none configured; add one with osmia project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH")
+		fmt.Fprintln(w, "Project: none configured; add one with osmia project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH")
 		return
 	}
-	fmt.Fprintf(w, "Project: %s (%s) upstream=%s fork=%s clone=%s\nTrace: %s\n", p.ID, p.Name, p.Upstream, p.Fork, p.Clone, p.Trace)
+	fmt.Fprintf(w, "Project: %s (%s) upstream=%s push-repository=%s clone=%s\nTrace: %s\n", p.ID, p.Name, p.Upstream, (config.Project{Upstream: p.Upstream, Fork: p.Fork}).PushRepository(), p.Clone, p.Trace)
 	if c := p.CharterState; c != nil {
 		state := "ready"
 		if !c.Ready {

@@ -59,3 +59,39 @@ func TestGitHubFindsAndCreatesPullRequestsWithTheToken(t *testing.T) {
 		t.Fatalf("a missing repository: %v", err)
 	}
 }
+
+func TestGitHubSameRepositoryCreateAndRetarget(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer secret" {
+			t.Error("missing service credentials")
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		switch r.Method {
+		case http.MethodPost:
+			if r.URL.Path != "/repos/owner/repo/pulls" || body["head"] != "osmia/child" || body["base"] != "osmia/parent" {
+				t.Errorf("create %s %v", r.URL.Path, body)
+			}
+			w.WriteHeader(http.StatusCreated)
+		case http.MethodPatch:
+			if r.URL.Path != "/repos/owner/repo/pulls/7" || body["base"] != "main" || body["body"] != "Approved" || body["title"] != "Ready" {
+				t.Errorf("update %s %v", r.URL.Path, body)
+			}
+		default:
+			t.Errorf("unexpected method %s", r.Method)
+		}
+		io.WriteString(w, `{"number":7,"state":"open","base":{"ref":"`+body["base"]+`"}}`)
+	}))
+	defer server.Close()
+	g := GitHub{BaseURL: server.URL, HTTP: server.Client(), Token: "secret"}
+	pr, err := g.Create(context.Background(), "owner/repo", New{HeadRepository: "owner/repo", Head: "osmia/child", Base: "osmia/parent"})
+	if err != nil || pr.Number != 7 || pr.Base != "osmia/parent" {
+		t.Fatalf("create %+v %v", pr, err)
+	}
+	pr, err = g.Update(context.Background(), "owner/repo", 7, Update{Base: "main", Title: "Ready", Body: "Approved"})
+	if err != nil || pr.Number != 7 || pr.Base != "main" {
+		t.Fatalf("update %+v %v", pr, err)
+	}
+}

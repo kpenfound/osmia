@@ -1,4 +1,4 @@
-// Package pulls finds and opens pull requests for the service. Credentials
+// Package pulls finds, opens and updates pull requests for the service. Credentials
 // stay in the service process: callers hold them in a Client and no session
 // receives them.
 package pulls
@@ -41,19 +41,28 @@ type New struct {
 	Body           string
 }
 
-// Client finds and opens pull requests.
+// Update describes an approved change to a pull request's target and text.
+type Update struct {
+	Base  string `json:"base"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+// Client finds, opens and updates pull requests.
 type Client interface {
 	// Find returns every pull request of repository, open or closed, whose
 	// head is branch of headRepository.
 	Find(ctx context.Context, repository, headRepository, branch string) ([]PullRequest, error)
 	// Create opens a pull request on repository.
 	Create(ctx context.Context, repository string, pr New) (PullRequest, error)
+	// Update changes the base branch, title and body of an existing request.
+	Update(ctx context.Context, repository string, number int, change Update) (PullRequest, error)
 }
 
 // MaxResponse bounds the API response GitHub reads.
 const MaxResponse = 8 << 20
 
-// GitHub finds and opens pull requests through the GitHub REST API. Token,
+// GitHub finds, opens and updates pull requests through the GitHub REST API. Token,
 // when set, is sent as a bearer token.
 type GitHub struct {
 	BaseURL string // defaults to https://api.github.com
@@ -116,14 +125,26 @@ func (g GitHub) Find(ctx context.Context, repository, headRepository, branch str
 }
 
 // Create opens the pull request from owner:head, where owner is
-// pr.HeadRepository's owner.
+// pr.HeadRepository's owner. Within one repository, head is unqualified.
 func (g GitHub) Create(ctx context.Context, repository string, pr New) (PullRequest, error) {
 	body := map[string]any{"title": pr.Title, "head": owner(pr.HeadRepository) + ":" + pr.Head, "base": pr.Base, "body": pr.Body}
+	if strings.EqualFold(repository, pr.HeadRepository) {
+		body["head"] = pr.Head
+	}
 	var created githubPull
 	if err := g.do(ctx, http.MethodPost, "/repos/"+repository+"/pulls", body, http.StatusCreated, &created); err != nil {
 		return PullRequest{}, fmt.Errorf("open a pull request on %s from %s:%s: %w", repository, pr.HeadRepository, pr.Head, err)
 	}
 	return created.pull(), nil
+}
+
+// Update retargets an existing pull request and applies its approved text.
+func (g GitHub) Update(ctx context.Context, repository string, number int, change Update) (PullRequest, error) {
+	var updated githubPull
+	if err := g.do(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/pulls/%d", repository, number), change, http.StatusOK, &updated); err != nil {
+		return PullRequest{}, fmt.Errorf("update pull request %s#%d: %w", repository, number, err)
+	}
+	return updated.pull(), nil
 }
 
 func (g GitHub) do(ctx context.Context, method, path string, in any, want int, out any) error {

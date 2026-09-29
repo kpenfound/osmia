@@ -212,7 +212,7 @@ func (b *baseRefresher) Apply(ctx context.Context, op coreadapter.Operation) (co
 }
 
 // upstreamDeliveryPending allows only delivery maintenance of a terminal
-// feature with a recorded fork request, after its dependency integrated.
+// feature with a recorded dependent request, after its dependency integrated.
 func upstreamDeliveryPending(repo *trace.Repository, cfg *config.Config, stream config.WorkstreamID) (bool, error) {
 	observed, revision, err := baseObservationAt(repo, stream)
 	if err != nil || revision == 0 || observed.Unavailable || observed.Base.Workstream != "" {
@@ -222,17 +222,22 @@ func upstreamDeliveryPending(repo *trace.Repository, cfg *config.Config, stream 
 	if err != nil {
 		return false, err
 	}
-	fork := false
+	dependent := false
 	for _, p := range publications {
 		if p.Status != publicationOpened {
 			continue
 		}
-		if p.Upstream == cfg.Project.Upstream {
+		if canonicalPublication(p, cfg) {
 			return false, nil
 		}
-		if p.Upstream == cfg.Project.Fork {
-			fork = true
+		if p.Upstream == cfg.Project.PushRepository() {
+			dependent = true
 		}
 	}
-	return fork, nil
+	return dependent, nil
+}
+
+// canonicalPublication identifies delivery against the project's base branch.
+func canonicalPublication(p DeliveryPublication, cfg *config.Config) bool {
+	return p.BaseWorkstream == "" && p.Upstream == cfg.Project.Upstream && p.Base == cfg.Project.BaseBranch
 }

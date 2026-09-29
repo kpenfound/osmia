@@ -3359,6 +3359,9 @@
           "base": {
             "type": "string"
           },
+          "base_workstream": {
+            "type": "string"
+          },
           "branch": {
             "type": "string"
           },

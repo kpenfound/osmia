@@ -54,9 +54,50 @@ func TestSeveralActiveProjectsLoad(t *testing.T) {
 }
 
 func TestOneBadProjectFailsTheLoad(t *testing.T) {
-	c, err := Load(twoProjects(t, strings.Replace(projectConfig, `fork = "owner/repo"`, `fork = "upstream/repo"`, 1)))
+	c, err := Load(twoProjects(t, strings.Replace(projectConfig, `fork = "owner/repo"`, `fork = "invalid"`, 1)))
 	var field *FieldError
 	if c != nil || !errors.As(err, &field) || field.Field != "fork" || !strings.Contains(field.Path, pidOther) {
 		t.Fatalf("load: %v %v", c, err)
+	}
+}
+
+func TestOptionalForkRoundTrips(t *testing.T) {
+	for _, fork := range []string{"", "UPSTREAM/repo", "owner/repo"} {
+		t.Run(fork, func(t *testing.T) {
+			opts := fixture(t, topConfig, strings.Replace(projectConfig, `fork = "owner/repo"`, `fork = "`+fork+`"`, 1))
+			c, err := Load(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := fork
+			if strings.EqualFold(fork, c.Project.Upstream) {
+				want = ""
+			}
+			if c.Project.Fork != want {
+				t.Fatalf("fork %q, want %q", c.Project.Fork, want)
+			}
+			target := want
+			if target == "" {
+				target = c.Project.Upstream
+			}
+			if c.Project.PushRepository() != target {
+				t.Fatal(c.Project)
+			}
+			path := filepath.Join(c.Root.String(), "projects", pid, "config.toml")
+			if err := WriteProjectConfig(path, c.Project); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want == "" && strings.Contains(string(data), "fork =") {
+				t.Fatalf("fork persisted: %s", data)
+			}
+			reloaded, err := Load(opts)
+			if err != nil || reloaded.Project.Fork != want {
+				t.Fatalf("reload %v: %v", reloaded, err)
+			}
+		})
 	}
 }

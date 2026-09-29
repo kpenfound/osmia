@@ -174,7 +174,7 @@ func TestWriteProjectConfigLoads(t *testing.T) {
 	if c.Project.ID != pid2 || c.Project.Name != p.Name || c.Project.Clone != clone || c.Project.BaseBranch != "develop" || c.Project.Landing != "commit-per-unit" || c.Project.Capacity.PerWorkstream != 2 {
 		t.Fatalf("%+v", c.Project)
 	}
-	for _, bad := range []Project{{Upstream: "up/repo", Fork: "up/repo", Clone: clone, BaseBranch: "main"}, {Upstream: "up/repo", Fork: "me/repo", Clone: "relative", BaseBranch: "main"}, {Upstream: "up/repo", Fork: "me/repo", Clone: clone, BaseBranch: "bad..branch"}, {Upstream: "up/repo.git", Fork: "me/repo", Clone: clone, BaseBranch: "main"}} {
+	for _, bad := range []Project{{Upstream: "up/repo", Fork: "me/repo", Clone: "relative", BaseBranch: "main"}, {Upstream: "up/repo", Fork: "me/repo", Clone: clone, BaseBranch: "bad..branch"}, {Upstream: "up/repo.git", Fork: "me/repo", Clone: clone, BaseBranch: "main"}} {
 		if err := WriteProjectConfig(filepath.Join(t.TempDir(), "config.toml"), bad); err == nil {
 			t.Fatalf("invalid project written: %+v", bad)
 		}

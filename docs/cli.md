@@ -289,7 +289,7 @@ osmia status --json
   order returned by `delivery --json` in `messages`. Include every commit.
   The service attributes the outgoing commits to your Git identity, removes
   agent co-author trailers, adds your sign-off and signs before pushing the
-  branch to your fork and opening the pull request; `delivery` shows its progress. A report with gaps, a presentation
+  branch to your repository or fork and opening the pull request; `delivery` shows its progress. A report with gaps, a presentation
   that changed and a delivered workstream fail with `conflict` (exit 5). After
   a publication was refused, approving again asks for another one.
 - Editing the documents needs no command. You edit `spec.md` and `plan.json` in
@@ -300,7 +300,7 @@ osmia status --json
   the problems, and the recorded revisions stay. Until you correct them, a
   redraft by the architect of a file you edited is given up rather than written
   over your edit.
-- `project add <name> --upstream OWNER/REPO --fork OWNER/REPO --clone PATH
+- `project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH
   [--base-branch NAME]` registers a project with the running service: it
   validates the request, generates the project ID, writes
   `projects/<id>/config.toml`, creates the trace repository with a charter
@@ -483,6 +483,20 @@ It uses the local trace and contacts no memory service. Merge and validate the
 fragments when configuring Hearsay; see [memory setup](hearsay.md).
 
 A hand-in's `--base <workstream-id>` selects an available feature on the same
-project. Dependent requests open on the fork. After the dependency integrates,
+project. Dependent requests open in the push repository. After the dependency integrates,
 delivery maintenance requires a fresh review and owner approval before opening
-the upstream request. Both request relationships remain in the trace.
+the upstream request, or retargeting the existing request when no fork is
+configured. Publication relationships remain in the trace.
+
+When `fork` is omitted, Osmia pushes its feature branch to `upstream` and
+opens the pull request there against `base_branch`. A fork equal to upstream
+(case-insensitive) is normalized to omission. The clone can have just an
+`origin` remote matching upstream. Existing configurations with a separate
+fork continue to push there. Osmia never pushes to the configured base branch
+or merges the pull request.
+
+For dependent workstreams without a fork, the pull request initially targets
+the parent's feature branch. After the parent integrates, fresh review and
+owner delivery approval authorize retargeting that same pull request to the
+project's base branch with the approved description. Interrupted updates are
+reconciled against the recorded request before retrying.

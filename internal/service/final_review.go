@@ -1330,7 +1330,7 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 				return report, "", err
 			}
 			if parent.Value != DeliveredState {
-				return report, "the base workstream must be delivered to the fork before its dependent pull request can open", nil
+				return report, "the base workstream must be delivered to the push repository before its dependent pull request can open", nil
 			}
 		}
 		if report.Upstream == nil || *report.Upstream != selected {

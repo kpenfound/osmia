@@ -55,11 +55,11 @@ func (s *Service) validateAdd(req ProjectAddRequest) (config.Project, *APIError)
 	if !config.ValidRepository(req.Upstream) {
 		return invalid("upstream must be owner/repository without a URL or .git suffix")
 	}
-	if !config.ValidRepository(req.Fork) {
+	if req.Fork != "" && !config.ValidRepository(req.Fork) {
 		return invalid("fork must be owner/repository without a URL or .git suffix")
 	}
 	if strings.EqualFold(req.Upstream, req.Fork) {
-		return invalid("fork must differ from upstream")
+		req.Fork = ""
 	}
 	branch := req.BaseBranch
 	if branch == "" {
