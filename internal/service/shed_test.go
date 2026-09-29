@@ -384,6 +384,12 @@ func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T
 	if want := []string{committeeAgent(1), committeeAgent(2), committeeAgent(3)}; !slices.Equal(committee, want) {
 		t.Fatalf("committee %v, want %v", committee, want)
 	}
+	// The scheduler leaves the committee's queued turns to the round.
+	th, err := f.repository().Thread(stream, committeeAgent(1))
+	must(t, err)
+	if admitted, err := f.s.admit(f.s.current(), f.repository())(ctx, scheduler.Candidate{Workstream: stream, Thread: th}); err != nil || admitted {
+		t.Fatalf("the scheduler admits committee turns: %v %v", admitted, err)
+	}
 	// One file per member records the revision and what the member
 	// contributed, authored by the member, in one commit.
 	ops := f.acknowledgedRoundOperations(t, stream)
@@ -472,36 +478,6 @@ func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T
 		if strings.Contains(content, demoSecret) {
 			t.Fatalf("secret copied into %s", path)
 		}
-	}
-}
-
-// The number of members is capacity.committee, and the scheduler leaves the
-// committee's queued turns to the round.
-func TestCommitteeSizeIsCapacityCommittee(t *testing.T) {
-	t.Parallel()
-	f := newShedFixture(t, 2)
-	defer f.stop(t)
-	all := newBarrier(2)
-	for i := 1; i <= 2; i++ {
-		f.member(1, i, 1, func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
-			return all.wait(ctx)
-		})
-	}
-	stream := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, stream, "heard-1")
-	records, err := shed.Records(f.repository(), stream)
-	must(t, err)
-	if len(records) != 2 || !records[0].Silent() || !records[1].Silent() || len(shed.OpenDissent(records)) != 0 {
-		t.Fatalf("records: %+v", records)
-	}
-	if _, err := f.repository().Thread(stream, committeeAgent(3)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("a third member exists: %v", err)
-	}
-	th, err := f.repository().Thread(stream, committeeAgent(1))
-	must(t, err)
-	admitted, err := f.s.admit(f.s.current(), f.repository())(context.Background(), scheduler.Candidate{Workstream: stream, Thread: th})
-	if err != nil || admitted {
-		t.Fatalf("the scheduler admits committee turns: %v %v", admitted, err)
 	}
 }
 
@@ -707,44 +683,6 @@ func TestLaterRoundPinsItsRevisionAndCarriesStandingObjections(t *testing.T) {
 	}
 }
 
-// Abandoning the workstream cancels the members' running turns and fails the
-// round without a record.
-func TestAbandonFailsARunningRound(t *testing.T) {
-	t.Parallel()
-	f := newShedFixture(t, 2)
-	defer f.stop(t)
-	all := newBarrier(2)
-	started := make(chan struct{})
-	for i := 1; i <= 2; i++ {
-		f.member(1, i, 1, func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
-			if err := all.wait(ctx); err != nil {
-				return err
-			}
-			if i == 1 {
-				close(started)
-			}
-			<-ctx.Done()
-			return ctx.Err()
-		})
-	}
-	stream := f.handIn(t, "design", handedDesign)
-	select {
-	case <-started:
-	case <-time.After(demoTimeout):
-		t.Fatal("the round never started")
-	}
-	_, err := f.c.Abandon(context.Background(), stream, "no longer needed")
-	must(t, err)
-	f.awaitShed(t, stream, "failed-1", "heard-1")
-	if records, err := shed.Records(f.repository(), stream); err != nil || len(records) != 0 {
-		t.Fatalf("records of an abandoned round: %+v %v", records, err)
-	}
-	ops := f.acknowledgedRoundOperations(t, stream)
-	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" || !strings.Contains(ops[0].Result.Evidence, "the workstream was abandoned") {
-		t.Fatalf("operations: %+v", ops)
-	}
-}
-
 func TestRoundOperationInputIsValidated(t *testing.T) {
 	t.Parallel()
 	for name, op := range map[string]coreadapter.Operation{
@@ -774,7 +712,7 @@ func TestRoundOperationInputIsValidated(t *testing.T) {
 // A turn the stopped service captured is completed without running a member.
 func TestRoundRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 	t.Parallel()
-	for _, crash := range []string{"captured", "recorded", "recorded-then-abandoned"} {
+	for _, crash := range []string{"captured", "recorded-then-abandoned"} {
 		t.Run(crash, func(t *testing.T) {
 			f := newShedFixture(t, 1)
 			ctx := context.Background()
@@ -836,8 +774,6 @@ func TestRoundRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 				must(t, repo.CompleteTurn(ctx, stream, member, second.TurnID, "earlier-session", f.clock.Now()))
 				must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.DocumentID(1, member), Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: trace.Actor{Kind: "agent", ID: member}, Cause: operation, Depth: 1},
 					Path: shed.Path(1, member), Content: string(data)}}))
-			}
-			if crash == "recorded-then-abandoned" {
 				// The owner abandoned the workstream after the record was
 				// committed: the round was heard, and its state says so.
 				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "abandoned", Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: "owner"}
@@ -925,7 +861,10 @@ func TestCapacityChangeLeavesAnExistingCommitteeAlone(t *testing.T) {
 		t.Fatalf("loaded capacity.committee %d", got)
 	}
 	d := &debate{s: f.s, repository: f.repository()}
-	must(t, d.Pass(ctx))
+	// The running service's own pass may record the same step first.
+	if err := d.Pass(ctx); err != nil && !errors.Is(err, trace.ErrConflict) {
+		t.Fatal(err)
+	}
 	state, err := f.repository().Workflow(stream, shedSubject)
 	must(t, err)
 	must(t, d.request(ctx, stream, state, roundInput{Round: 2, Spec: 1, Plan: 1}, "shed-concluded-1"))

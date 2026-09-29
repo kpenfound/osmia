@@ -249,8 +249,9 @@ plumbing commands, bypassing attributes and filters. Only trace-owned files ente
 its commits; project configuration is left in place. Linked worktrees, redirected
 object stores, Git symlinks and changes to the isolated `.git/config` are rejected.
 These checks walk `.git` once before each operation's Git commands. The handle
-keeps the file list of the commit HEAD names, so a read that finds HEAD
-unchanged since that listing runs no Git and does not walk `.git`.
+keeps the file list of the commit HEAD names, including a commit it made itself,
+so a read that finds HEAD unchanged since that listing runs no Git and does not
+walk `.git`.
 A local Git executable is required for trace and workflow operations. The service owns
 this executable access; runtime agents receive no trace-repository handle.
 
@@ -324,7 +325,8 @@ writes immutable Git objects using a private index, syncs the objects the handle
 has not synced yet (every object on its first publication), writes and
 syncs a recovery journal under `.git`, then atomically replaces and syncs the
 branch ref. That ref is the visibility boundary. Ordinary workflow, transition,
-question and owned agent files are materialized from the committed objects before the journal is removed.
+question and owned agent files are then materialized with the bytes just committed before the journal is removed;
+recovery materializes them from the committed objects.
 Before publication, recovery retains the prior state; after publication, recovery
 finishes materializing the complete new state. Store reads and writes finish any
 pending publication before inspecting the files. Direct filesystem readers must

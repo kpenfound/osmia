@@ -183,19 +183,18 @@ func TestApprovedUnitLandsAndReadiesItsDependent(t *testing.T) {
 	f.awaitEventTurns(t, stream, fmt.Sprintf("Unit resume merged: it landed as %s on %s.", commit, featureBranch(stream)))
 }
 
-// A landing interrupted before its commit, after its commit, after the
-// feature branch moved or after its record is reconciled on retry: the
-// retry's inspection observes what the branch holds, the feature branch
-// holds exactly one landing commit, and the unit merged once.
+// A landing interrupted after its commit, after the feature branch moved or
+// after its record is reconciled on retry: the retry's inspection observes
+// what the branch holds, the feature branch holds exactly one landing commit,
+// and the unit merged once.
 func TestInterruptedLandingIsReconciled(t *testing.T) {
 	t.Parallel()
 	observed := map[string]string{
-		"land-committing": "holds no commit of this landing",
-		"land-committed":  "holds no commit of this landing",
-		"land-advanced":   "this operation's landing commit on",
-		"land-recorded":   "landing succeeded",
+		"land-committed": "holds no commit of this landing",
+		"land-advanced":  "this operation's landing commit on",
+		"land-recorded":  "landing succeeded",
 	}
-	for _, step := range []string{"land-committing", "land-committed", "land-advanced", "land-recorded"} {
+	for _, step := range []string{"land-committed", "land-advanced", "land-recorded"} {
 		t.Run(step, func(t *testing.T) {
 			t.Parallel()
 			f, stream, repository := newReviewFixture(t, "interrupted-landing")

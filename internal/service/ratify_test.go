@@ -373,7 +373,9 @@ func TestRedraftIsAskedForOncePerConclusionAndWaitsForARunner(t *testing.T) {
 
 // A sketched workstream whose debate is not skipped is ratified nowhere, and
 // it has no packet. Without a committee it stays sketched until the owner
-// skips its debate through the shed.
+// skips its debate through the shed. That skip is not part of the hand-in: a
+// retry of the key returns the same workstream, and a retry that skips debate
+// is refused.
 func TestSketchedWorkstreamIsNotRatified(t *testing.T) {
 	t.Parallel()
 	f := newDebateFixture(t, 1, 1)
@@ -403,45 +405,16 @@ func TestSketchedWorkstreamIsNotRatified(t *testing.T) {
 	}) {
 		t.Fatalf("the chief of staff was not told of the skipped debate: %+v", outbox)
 	}
-}
-
-// Debate the owner skipped at hand-in is a decision point of its own, with a
-// committee configured: the packet says so, and a passing ratification asks
-// for the sealing, which seals it.
-func TestSkippedDebateIsRatifiedAndSeals(t *testing.T) {
-	t.Parallel()
-	f := newDebateFixture(t, 1, 1)
-	defer f.stop(t)
-	ctx := context.Background()
-	f.upstream(t)
-	stream := f.handInSkipping(t, "design")
-
-	packet := f.awaitPacket(t, stream, "ratify: no objection stands")
-	if !packet.Skipped || packet.Round != 1 || packet.Revision != (shed.Pin{Spec: 1, Plan: 1}) || len(packet.Dissent) != 0 {
-		t.Fatalf("the packet of a skipped debate %+v", packet)
-	}
-	if want := f.transition(t, stream, skipTransition).Reason; packet.Conclusion != want {
-		t.Fatalf("conclusion %q, want %q", packet.Conclusion, want)
-	}
-	// The chief of staff is asked to present it, as it is at a conclusion.
-	f.awaitFeature(t, stream, InShedState)
-	if notice := f.notice(t, stream, InShedState); !strings.Contains(notice, presentation("ratify: no objection stands")) {
-		t.Fatalf("the notice of the skipped debate %q", notice)
-	}
-
-	ratified, err := f.c.Ratify(ctx, stream, 1, 1)
+	content := handedDesign
+	out, err := f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: "design", Stdin: &content})
 	must(t, err)
-	if ratified.Sealing != "requested" || ratified.Round != 1 || ratified.Spec != 1 || ratified.Plan != 1 {
-		t.Fatalf("ratification %+v", ratified)
+	if out.Workstream != stream || out.SkipDebate {
+		t.Fatalf("retry %+v", out)
 	}
-	if record := f.ratification(t, stream, 1); record.Revision != (shed.Pin{Spec: 1, Plan: 1}) || len(record.Dissent) != 0 {
-		t.Fatalf("the ratification %+v", record)
+	_, err = f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: "design", Stdin: &content, SkipDebate: true})
+	if !failed(err, Conflict) || !strings.Contains(err.Error(), "key design already handed in workstream "+string(stream)+" without skipping debate; use a new key") {
+		t.Fatalf("retry with the skip: %v", err)
 	}
-	f.awaitFeature(t, stream, BuildingState)
-	if docs := f.documents(t, stream, shed.RatificationDocumentID(1)); len(docs) != 1 {
-		t.Fatalf("the ratification was recorded %d times", len(docs))
-	}
-	f.debatedNothing(t, stream)
 }
 
 // A skip waits for the architect's redraft: the turn is dispatched and runs to

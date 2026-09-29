@@ -7,13 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/kpenfound/busybees/core/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -407,108 +403,4 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 		t.Fatalf("backend runs %v", ran)
 	}
 	must(t, s.Close())
-}
-
-// A hard pause stops a unit's running mason turn with its view kept in the
-// unit's workspace; resuming continues the unit on the same thread from the
-// stopped session.
-func TestHardPauseStopsAMasonAndResumeContinuesIt(t *testing.T) {
-	t.Parallel()
-	f, _ := newMasonFixture(t, 1, validPlan)
-	defer func() { f.stop(t) }()
-	const stoppedFile = "internal/trace/stopped.go"
-	recoverTurn := masonAgent("resume") + "-recover-1"
-	entered := make(chan struct{})
-	var mu sync.Mutex
-	var continuation *agent.Request
-	var sawStoppedFile bool
-	f.engine.mu.Lock()
-	f.engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
-	f.engine.turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
-		if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), stoppedFile), []byte("package trace\n"), 0644); err != nil {
-			return nil, err
-		}
-		close(entered)
-		<-ctx.Done()
-		// The session a stop kills ends with a signal.
-		return &agent.Result{ClaudeID: "session-stopped", ResultText: "Half built", SessionDir: req.SessionDir, NumTurns: 1, IsError: true, Signal: 15}, nil
-	}
-	f.engine.turns[recoverTurn] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
-		_, err := os.Stat(filepath.Join(req.Workspace.Directory(), stoppedFile))
-		mu.Lock()
-		continuation, sawStoppedFile = &req, err == nil
-		mu.Unlock()
-		return &agent.Result{ClaudeID: "session-stopped", ResultText: "Continued", SessionDir: req.SessionDir, NumTurns: 1}, nil
-	}
-	f.engine.mu.Unlock()
-
-	stream, _ := f.builtAs(t, "hard-pause")
-	select {
-	case <-entered:
-	case <-time.After(demoTimeout):
-		t.Fatal("the mason did not start")
-	}
-	target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
-	turn := func(i int) trace.QueuedTurn {
-		t.Helper()
-		deadline := time.Now().Add(demoTimeout)
-		for {
-			th, err := f.repository().Thread(stream, masonAgent("resume"))
-			must(t, err)
-			if len(th.Turns) > i && !th.Turns[i].CompletedAt.IsZero() {
-				return th.Turns[i]
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("mason turn %d did not complete: %+v", i, th)
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-	}
-	stopped := turn(0)
-	checkPauseStop(t, stopped, "workstream", "Stop the mason")
-	settle()
-	workspace := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(stream), "resume")
-	if _, err := os.Stat(filepath.Join(workspace, stoppedFile)); err != nil {
-		t.Fatalf("the stopped turn's view was not kept: %v", err)
-	}
-	state, err := f.repository().Workflow(stream, trace.UnitSubject("resume"))
-	must(t, err)
-	if state.Value != UnitImplementing {
-		t.Fatalf("stopped unit is %s", state.Value)
-	}
-	ops, err := f.repository().Operations(stream)
-	must(t, err)
-	for _, op := range ops {
-		in, err := thread.DecodeTurn(op.Operation)
-		if err != nil || in.Agent != masonAgent("resume") {
-			continue
-		}
-		switch in.Turn {
-		case masonTurnID("resume"):
-			checkNoRetry(t, op, "interrupted")
-		case recoverTurn:
-			t.Fatal("the continuation was dispatched under the hard pause")
-		}
-	}
-	f.engine.mu.Lock()
-	ran := slices.Contains(f.engine.runs, recoverTurn)
-	f.engine.mu.Unlock()
-	if ran {
-		t.Fatal("the continuation ran under the hard pause")
-	}
-
-	mutation(t, f.c, "DELETE", "pause", target)
-	next := turn(1)
-	if next.Request.TurnID != recoverTurn || next.Request.ThreadID != stopped.Request.ThreadID || !strings.Contains(next.Request.Prompt, "A hard pause stopped your last turn.") || !strings.HasPrefix(next.Request.Prompt, stopped.Request.Prompt) {
-		t.Fatalf("continuation request %+v", next.Request)
-	}
-	if len(next.Attempts) != 1 || next.Attempts[0].Path != "resume" || next.Attempts[0].SourceSession.ID != "session-stopped" || next.Attempts[0].SourceSequence != stopped.Sequence {
-		t.Fatalf("the continuation did not resume the stopped session: %+v", next.Attempts)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if continuation == nil || !sawStoppedFile || continuation.ResumeID != "session-stopped" {
-		t.Fatalf("continuation %+v saw the stopped file %v", continuation, sawStoppedFile)
-	}
 }

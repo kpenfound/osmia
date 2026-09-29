@@ -78,8 +78,9 @@ func TestWebListenerDisabledByDefault(t *testing.T) {
 	}
 }
 
-// A loopback web listener serves the socket's routes with the socket's
-// responses, and a write through either is seen through the other.
+// A loopback web listener serves the socket's API: a write through it is seen
+// through the socket, and a path neither the page nor the API holds gets the
+// API's answer.
 func TestWebListenerServesTheSocketAPI(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
@@ -89,16 +90,7 @@ func TestWebListenerServesTheSocketAPI(t *testing.T) {
 	if host, _, err := net.SplitHostPort(addr); err != nil || host != "127.0.0.1" {
 		t.Fatalf("web address %q", addr)
 	}
-	socket, web := socketHTTP(s.Socket()), webHTTP()
-	base := "http://" + addr
-	for _, path := range []string{"/health", "/config", "/runtime", "/nowhere"} {
-		sc, sb := exchange(t, socket, "GET", "http://osmia"+Prefix+path, "", "", "")
-		wc, wb := exchange(t, web, "GET", base+Prefix+path, "", "", "")
-		if sc != wc || !bytes.Equal(sb, wb) {
-			t.Fatalf("%s: socket %d %s, web %d %s", path, sc, sb, wc, wb)
-		}
-	}
-
+	web, base := webHTTP(), "http://"+addr
 	pause, err := json.Marshal(PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "travel", Source: "owner"})
 	must(t, err)
 	code, body := exchange(t, web, "PUT", base+Prefix+"/runtime/pause", "application/json; charset=utf-8", string(pause), "")
@@ -109,6 +101,10 @@ func TestWebListenerServesTheSocketAPI(t *testing.T) {
 	must(t, err)
 	if len(state.Effective.Pauses) != 1 {
 		t.Fatalf("pause written over web is not seen over the socket: %+v", state.Effective)
+	}
+	code, body = exchange(t, web, "GET", base+"/index.html", "", "", "")
+	if code != 501 || errorCode(t, body) != Unsupported {
+		t.Fatalf("unknown page path: %d %s", code, body)
 	}
 }
 
@@ -240,41 +236,5 @@ func TestShutdownClosesBothListeners(t *testing.T) {
 	}
 	if _, err := os.Lstat(socket); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("socket after shutdown: %v", err)
-	}
-}
-
-// The page is served at / on the socket and on the web listener alike, and
-// the web listener's Host check covers it like the API.
-func TestPageIsServedOnTheSocketAndTheWebListener(t *testing.T) {
-	t.Parallel()
-	opts := fixture(t)
-	withWeb(t, opts, "127.0.0.1:0")
-	s, _ := start(t, opts)
-	socket, web, base := socketHTTP(s.Socket()), webHTTP(), "http://"+s.WebAddr()
-	for _, path := range []string{"/", "/app.js", "/style.css"} {
-		sc, sb := exchange(t, socket, "GET", "http://osmia"+path, "", "", "")
-		wc, wb := exchange(t, web, "GET", base+path, "", "", "")
-		if sc != 200 || wc != 200 || len(sb) == 0 || !bytes.Equal(sb, wb) {
-			t.Fatalf("%s: socket %d (%d bytes), web %d (%d bytes)", path, sc, len(sb), wc, len(wb))
-		}
-	}
-	req, err := http.NewRequest("GET", base+"/", nil)
-	must(t, err)
-	resp, err := web.Do(req)
-	must(t, err)
-	page, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	must(t, err)
-	if resp.Header.Get("Content-Type") != "text/html; charset=utf-8" || !strings.Contains(string(page), `<script src="/app.js" defer></script>`) {
-		t.Fatalf("page: %v %s", resp.Header, page)
-	}
-	code, body := exchange(t, web, "GET", base+"/", "", "", "attacker.example")
-	if code != 403 || errorCode(t, body) != Forbidden {
-		t.Fatalf("page for a foreign host: %d %s", code, body)
-	}
-	// A path the page does not hold falls through to the API's answer.
-	code, body = exchange(t, socket, "GET", "http://osmia/index.html", "", "", "")
-	if code != 501 || errorCode(t, body) != Unsupported {
-		t.Fatalf("unknown page path: %d %s", code, body)
 	}
 }

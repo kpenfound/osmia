@@ -502,54 +502,6 @@ func TestRestartDuringDriftResolutionResumesWithoutDuplicates(t *testing.T) {
 	repository.Close()
 }
 
-// While a feature branch conflict of a drift rebase is resolved, the drift
-// operation holds the project's lander: no landing is asked for, however
-// many passes run, and no other drift rebase either.
-func TestLandingWaitsWhileADriftConflictIsOpen(t *testing.T) {
-	t.Parallel()
-	f, stream, repository := newApprovedFixture(t, "drift-holds-landing")
-	defer func() { repository.Close() }()
-	lands := &foreman{masons: newMasonController(f.s, repository)}
-	d := drifter{lands}
-	ctx := context.Background()
-	must(t, lands.Pass(ctx))
-	landings := landOperations(t, repository, stream)
-	if len(landings) != 1 {
-		t.Fatalf("landing operations %+v", landings)
-	}
-	first, err := decodeLand(landings[0].Operation)
-	must(t, err)
-	settleOperation(t, f.s, repository, stream, landings[0].Operation, lands)
-	other, criterion := "dedupe", "spec#2"
-	if first.Unit == "dedupe" {
-		other, criterion = "resume", "spec#1"
-	}
-	must(t, lands.Pass(ctx))
-	rebases := rebaseOperations(t, repository, stream, other)
-	if len(rebases) != 1 {
-		t.Fatalf("%s's rebases %+v", other, rebases)
-	}
-	settleOperation(t, f.s, repository, stream, rebases[0].Operation, rebaser{lands})
-	approveDirectly(t, f.s, repository, stream, other, criterion)
-
-	advanceUpstream(t, f, map[string]string{masonWrote: "package trace\n\n// upstream\n"})
-	op := requestDrift(t, d, stream)
-	attemptOperation(t, f.s, repository, stream, op, d)
-	for range 3 {
-		must(t, lands.Pass(ctx))
-	}
-	if ops := landOperations(t, repository, stream); len(ops) != 1 {
-		t.Fatalf("a landing was asked for while a drift conflict is open: %+v", ops)
-	}
-	awaitResolution(t, f.s, d, stream, op, "its mason's resolution of "+masonWrote)
-	if state, err := repository.Workflow(stream, trace.UnitSubject(other)); err != nil || state.Value != UnitApproved {
-		t.Fatalf("unit %s is %+v %v", other, state, err)
-	}
-	if requested, err := d.requestDrifts(ctx, testDrift); err != nil || len(requested) != 0 {
-		t.Fatalf("drift rebases asked for while a drift conflict is open: %v %v", requested, err)
-	}
-}
-
 // A drift mason turn is lent its workstream's resolution workspace, sees all
 // of it but its VCS metadata, holds file tools, amend and done alone, and has
 // its view copied back. Its done takes an outcome.

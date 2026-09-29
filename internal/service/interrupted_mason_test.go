@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -83,8 +85,11 @@ func checkReviewedEdits(t *testing.T, f *shedFixture, stream config.WorkstreamID
 }
 
 // A mason turn a hard pause stops keeps the files it changed in its unit's
-// workspace, and the continuation's prompt says so. On Jujutsu workspaces
-// it names the files the stopped turn changed; on git worktrees it does not.
+// workspace, and its unit stays implementing: the turn is not retried and
+// nothing continues it while the pause holds. Lifting the pause continues
+// the unit on the same thread by resuming the stopped session, and the
+// continuation's prompt says the files were kept. On Jujutsu workspaces it
+// names the files the stopped turn changed; on git worktrees it does not.
 // The continuation's view holds the edits, and its candidate carries them.
 func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) {
 	t.Parallel()
@@ -96,9 +101,10 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 			recoverTurn := masonAgent("resume") + "-recover-1"
 			entered := make(chan struct{})
 			var mu sync.Mutex
-			var continuation string
+			var continuation, resumed string
 			var sawEdits bool
 			f.engine.mu.Lock()
+			f.engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 			f.engine.turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 				if err := writeEdits(req.Workspace.Directory()); err != nil {
 					return nil, err
@@ -109,7 +115,7 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 			}
 			f.engine.turns[recoverTurn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				mu.Lock()
-				continuation, sawEdits = req.Prompt, holdsEdits(inDirectory(req.Workspace.Directory()))
+				continuation, resumed, sawEdits = req.Prompt, req.ResumeID, holdsEdits(inDirectory(req.Workspace.Directory()))
 				mu.Unlock()
 				if err := reportDone("Continued")(ctx, req, tools); err != nil {
 					return nil, err
@@ -136,17 +142,47 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 			if !holdsEdits(inDirectory(workspace)) {
 				t.Fatal("the stopped turn's edits are not in the unit's workspace")
 			}
+			if state, err := f.unitState(stream, "resume"); err != nil || state != UnitImplementing {
+				t.Fatalf("stopped unit is %q: %v", state, err)
+			}
+			ops, err := f.repository().Operations(stream)
+			must(t, err)
+			for _, op := range ops {
+				in, err := thread.DecodeTurn(op.Operation)
+				if err != nil || in.Agent != masonAgent("resume") {
+					continue
+				}
+				switch in.Turn {
+				case masonTurnID("resume"):
+					checkNoRetry(t, op, "interrupted")
+				case recoverTurn:
+					t.Fatal("the continuation was dispatched under the hard pause")
+				}
+			}
+			f.engine.mu.Lock()
+			ran := slices.Contains(f.engine.runs, recoverTurn)
+			f.engine.mu.Unlock()
+			if ran {
+				t.Fatal("the continuation ran under the hard pause")
+			}
 
 			mutation(t, f.c, "DELETE", "pause", target)
 			checkReviewedEdits(t, f, stream, "resume")
+			next := f.awaitCompleted(t, stream, masonAgent("resume"), recoverTurn)
+			if next.Request.ThreadID != stopped.Request.ThreadID || !strings.HasPrefix(next.Request.Prompt, stopped.Request.Prompt) {
+				t.Fatalf("continuation request %+v", next.Request)
+			}
+			if len(next.Attempts) != 1 || next.Attempts[0].Path != "resume" || next.Attempts[0].SourceSession.ID != "session-stopped" || next.Attempts[0].SourceSequence != stopped.Sequence {
+				t.Fatalf("the continuation did not resume the stopped session: %+v", next.Attempts)
+			}
 			want := "A hard pause stopped your last turn. Your workspace includes the files left by that turn. Continue from those files"
 			if backend == config.WorkspacesJujutsu {
 				want = "A hard pause stopped your last turn. " + strings.Replace(keptOnJujutsu, "%s", "that turn", 1) + " Continue from those files"
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			if !strings.Contains(continuation, want) || !sawEdits {
-				t.Fatalf("the continuation saw the edits %t with prompt %q, want %q", sawEdits, continuation, want)
+			if !strings.Contains(continuation, want) || !sawEdits || resumed != "session-stopped" {
+				t.Fatalf("the continuation resuming %q saw the edits %t with prompt %q, want %q", resumed, sawEdits, continuation, want)
 			}
 		})
 	}

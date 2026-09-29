@@ -34,6 +34,10 @@ func TestResumeCapabilityAndMetadata(t *testing.T) {
 	if err := runner.CheckResume(context.Background(), p, next, s); err != nil || executor.calls != 1 {
 		t.Fatalf("same-backend profile: %v", err)
 	}
+	opencode := Profile{Name: "a", Backend: "opencode", Model: "model"}
+	if err := runner.CheckResume(context.Background(), opencode, opencode, BackendSession{Backend: "opencode", ID: "session"}); err != nil || executor.calls != 2 {
+		t.Fatalf("same-backend opencode profile: %v", err)
+	}
 	next.Model = "changed"
 	if err := runner.CheckResume(context.Background(), p, next, s); !errors.Is(err, ErrResumeUnavailable) {
 		t.Fatal(err)

@@ -14,10 +14,11 @@ import (
 func (r *Repository) EditCharter(ctx context.Context, revision int, content string, at time.Time) (Document, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := r.checkHistory(ctx); err != nil {
+	checked, err := r.checkHistory(ctx)
+	if err != nil {
 		return Document{}, err
 	}
-	records, _, err := r.scan()
+	records, _, err := r.scanFiles(checked)
 	if err != nil {
 		return Document{}, err
 	}

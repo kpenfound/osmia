@@ -60,29 +60,6 @@ func awaitEvents(t *testing.T, events <-chan Event, want ...Event) []Event {
 	return seen
 }
 
-func TestEventStreamStartsEveryConnectionWithAResync(t *testing.T) {
-	t.Parallel()
-	_, c := start(t, fixture(t))
-	events, _ := eventStream(t, c)
-	if e := nextEvent(t, events); e != (Event{Kind: EventResync}) {
-		t.Fatalf("first event: %+v", e)
-	}
-	mutation(t, c, "PUT", "profile", ProfileRequest{"mason", "other"})
-	awaitEvents(t, events, Event{Kind: EventRuntime})
-
-	// Changes made while no stream is open are covered by the next stream's
-	// resync, which comes before anything that follows.
-	mutation(t, c, "DELETE", "profile", ClearProfileRequest{"mason"})
-	again, _ := eventStream(t, c)
-	if e := nextEvent(t, again); e != (Event{Kind: EventResync}) {
-		t.Fatalf("first event after reconnecting: %+v", e)
-	}
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft"})
-	if e := nextEvent(t, again); e != (Event{Kind: EventRuntime}) {
-		t.Fatalf("event after the reconnect's resync: %+v", e)
-	}
-}
-
 // Adding and removing a project each ask open streams to read everything.
 func TestEventStreamResyncsWhenTheProjectChanges(t *testing.T) {
 	t.Parallel()
@@ -99,15 +76,17 @@ func TestEventStreamResyncsWhenTheProjectChanges(t *testing.T) {
 	awaitEvents(t, events, Event{Kind: EventResync})
 }
 
-// Every runtime override announces a runtime change; a reload announces the
-// configuration and the views that follow it, and a failed reload the
-// configuration's last error.
+// A stream starts with a resync. After it, every runtime override announces a
+// runtime change; a reload announces the configuration and the views that
+// follow it, and a failed reload the configuration's last error.
 func TestEventStreamAnnouncesRuntimeAndConfigurationChanges(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	_, c := start(t, opts)
 	events, _ := eventStream(t, c)
-	nextEvent(t, events)
+	if e := nextEvent(t, events); e != (Event{Kind: EventResync}) {
+		t.Fatalf("first event: %+v", e)
+	}
 	for _, m := range []struct {
 		method, kind string
 		input        any

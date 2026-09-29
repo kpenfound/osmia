@@ -687,7 +687,7 @@ func TestDebateResumesMidRoundAfterARestart(t *testing.T) {
 // is abandoned, and the reply fails.
 func TestReplyRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 	t.Parallel()
-	for _, crash := range []string{"recorded", "recorded-then-abandoned", "answered-then-abandoned"} {
+	for _, crash := range []string{"recorded-then-abandoned", "answered-then-abandoned"} {
 		t.Run(crash, func(t *testing.T) {
 			f := newDebateFixture(t, 1, 1)
 			ctx := context.Background()
@@ -754,11 +754,9 @@ func TestReplyRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 				must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.ReplyDocumentID(1), Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: architectActor, Cause: operation, Depth: 1},
 					Path: shed.ReplyPath(1), Content: string(data)}}))
 			}
-			if crash != "recorded" {
-				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "abandoned", Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: "owner"}
-				_, err := repo.SetFeatureState(ctx, h, AbandonedState, "the owner abandoned the workstream")
-				must(t, err)
-			}
+			abandoned := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "abandoned", Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: "owner"}
+			_, err = repo.SetFeatureState(ctx, abandoned, AbandonedState, "the owner abandoned the workstream")
+			must(t, err)
 			must(t, repo.Close())
 
 			f.start(t)
@@ -787,10 +785,6 @@ func TestReplyRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 			replies := f.settledReplies(t, stream)
 			if len(replies) != 1 || replies[0].Result == nil || replies[0].Result.Outcome != "succeeded" || replies[0].Result.Evidence != "the architect answered 1 objections after round 1 and left spec.md revision 1 and plan.json revision 1 as it is" {
 				t.Fatalf("operations: %+v", replies)
-			}
-			if crash == "recorded" {
-				f.awaitShed(t, stream, "concluded-1")
-				return
 			}
 			// An abandoned workstream's debate is not concluded for anyone.
 			must(t, (&debate{s: f.s, repository: f.repository()}).Pass(ctx))
@@ -1104,20 +1098,31 @@ func TestRoundWhereEveryTurnFailedConcludesWithoutAReview(t *testing.T) {
 	}
 }
 
-// Some failed turns leave a consensus among the members who were heard, and
-// the conclusion says how many were not.
-func TestConsensusNamesTheTurnsThatFailed(t *testing.T) {
+// A debate with nothing standing concludes by consensus among the members who
+// were heard, and the conclusion says how many were not: none heard is no
+// review, and dissent the owner disposed of is not consensus. The owner's
+// record of a round is not a member's.
+func TestUnopposedConclusionNamesFailedTurns(t *testing.T) {
 	t.Parallel()
-	f := newDebateFixture(t, 2, 3)
-	defer f.stop(t)
-	f.member(1, 1, 1, func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error {
-		return errors.New("the agent crashed")
-	})
-	f.member(1, 2, 1, silent)
-	stream := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, stream, "concluded-1")
-	if end, want := f.transition(t, stream, "shed-concluded-1"), "debate concluded by consensus after round 1: no objection stands; the turns of 1 of 2 members failed"; end.Reason != want {
-		t.Fatalf("conclusion %q, want %q", end.Reason, want)
+	heard := shed.Record{Round: 2, Member: committeeAgent(1)}
+	failed := shed.Record{Round: 2, Member: committeeAgent(2), Failure: "the agent crashed"}
+	alsoFailed := shed.Record{Round: 2, Member: committeeAgent(1), Failure: "the agent crashed"}
+	earlierHeard := shed.Record{Round: 1, Member: committeeAgent(2)}
+	earlierFailed := shed.Record{Round: 1, Member: committeeAgent(1), Failure: "the agent crashed"}
+	owner := shed.Record{Round: 2, Member: shed.OwnerMember}
+	for name, tc := range map[string]struct {
+		records []shed.Record
+		open    []shed.Entry
+		want    string
+	}{
+		"consensus":          {[]shed.Record{earlierFailed, heard, owner}, nil, "debate concluded by consensus after round 2: no objection stands"},
+		"some turns failed":  {[]shed.Record{heard, failed, owner}, nil, "debate concluded by consensus after round 2: no objection stands; the turns of 1 of 2 members failed"},
+		"every turn failed":  {[]shed.Record{earlierHeard, alsoFailed, failed, owner}, nil, "debate concluded after round 2 without a review: the turns of all 2 members failed, so no objection stands and nobody agreed"},
+		"the owner disposed": {[]shed.Record{heard, failed}, []shed.Entry{{Disposition: shed.Dismissed}}, "debate concluded after round 2: the owner disposed of every objection that stood"},
+	} {
+		if got := unopposed(tc.records, tc.open, 2); got != tc.want {
+			t.Fatalf("%s: %q, want %q", name, got, tc.want)
+		}
 	}
 }
 

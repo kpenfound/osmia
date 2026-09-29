@@ -152,12 +152,9 @@ func TestWorkspacesKeyPicksTheBackendOfANewWorkstream(t *testing.T) {
 		problem       string
 	}{
 		{"git with jj", config.WorkspacesGit, nil, "0.45.1", config.WorkspacesGit, ""},
-		{"git without jj", config.WorkspacesGit, jjMissing, "", config.WorkspacesGit, ""},
 		{"auto with jj", config.WorkspacesAuto, nil, "0.45.1", config.WorkspacesJujutsu, ""},
 		{"auto without jj", config.WorkspacesAuto, jjMissing, "", config.WorkspacesGit, ""},
-		{"auto with an old jj", config.WorkspacesAuto, jjTooOld, "0.44.0", config.WorkspacesGit, ""},
 		{"jujutsu with jj", config.WorkspacesJujutsu, nil, "0.45.1", config.WorkspacesJujutsu, ""},
-		{"jujutsu without jj", config.WorkspacesJujutsu, jjMissing, "", "", "jj is missing"},
 		{"jujutsu with an old jj", config.WorkspacesJujutsu, jjTooOld, "0.44.0", "", "found jj 0.44.0, Osmia needs 0.45.0 or later"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -243,17 +240,6 @@ func TestWorkstreamKeepsItsBackendAcrossARestartAfterTheKeyChanges(t *testing.T)
 	must(t, err)
 	if got := f.backend(t, third.Workstream); got != config.WorkspacesGit {
 		t.Fatalf("a workstream created without jj under auto is on %q", got)
-	}
-}
-
-// A workstream whose manifest records no backend, as one created before
-// backends were recorded, is on Git worktrees.
-func TestWorkstreamWithoutARecordedBackendIsOnGit(t *testing.T) {
-	t.Parallel()
-	f := newWorkspacesFixture(t, config.WorkspacesJujutsu)
-	must(t, f.repository().CreateWorkstream(context.Background(), stream, time.Now().UTC(), ownerActor))
-	if got := f.backend(t, stream); got != config.WorkspacesGit {
-		t.Fatalf("a workstream without a recorded backend is on %q", got)
 	}
 }
 

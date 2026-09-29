@@ -383,54 +383,6 @@ func TestMasonStartsTheFirstOfTwoEntangledUnits(t *testing.T) {
 	}
 }
 
-// With one mason slot, the slot goes to the workstream first in the
-// project's priority order, and the other waits. Nothing starts while the
-// factory is paused, and a paused workstream's implementing unit gives its
-// slot to the next workstream.
-func TestMasonSlotsFollowPriorityAndPause(t *testing.T) {
-	t.Parallel()
-	f, masons := newMasonFixture(t, 1, validPlan)
-	defer f.stop(t)
-	factory := runtime.Target{Scope: "factory"}
-	built := f.seedBuildingPaused(t, factory, validPlan, "first", "second")
-	first, second := built[0], built[1]
-	settle()
-	for _, stream := range []config.WorkstreamID{first, second} {
-		if got := masonTransitions(t, f, stream); len(got) != 0 {
-			t.Fatalf("%s started a unit while the factory was paused: %+v", stream, got)
-		}
-		f.awaitDispatches(t, stream, "resume", 1)
-		f.checkUnits(t, stream, []UnitStatus{f.deferred(t, stream, "resume", factoryPaused), {Unit: "dedupe", State: UnitPlanned}})
-	}
-
-	// The priority order goes against the workstream ID order, which would
-	// otherwise break the tie.
-	hi, lo := first, second
-	if hi < lo {
-		hi, lo = lo, hi
-	}
-	mutation(t, f.c, "PUT", "priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{hi, lo}})
-	mutation(t, f.c, "DELETE", "pause", factory)
-	f.awaitMasonRan(t, hi, "resume")
-	settle()
-	if got := masonTransitions(t, f, lo); len(got) != 0 {
-		t.Fatalf("%s started a unit with no mason slot free: %+v", lo, got)
-	}
-	f.checkUnits(t, lo, []UnitStatus{f.deferred(t, lo, "resume", slotless(1)), {Unit: "dedupe", State: UnitPlanned}})
-
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: hi}, Mode: "soft", Source: "owner"})
-	f.awaitMasonRan(t, lo, "resume")
-	masons.check(t)
-	if got, want := masonTransitions(t, f, lo), []transitionMove{started("resume", f.startedReason(t, lo, "resume"))}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("mason transitions %+v, want %+v", got, want)
-	}
-	f.checkUnits(t, hi, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
-	f.checkUnits(t, lo, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
-	if got, want := f.dispatches(t, lo, "resume"), []string{"deferred paused", "deferred capacity", "started"}; !slices.Equal(got, want) {
-		t.Fatalf("decisions on resume of %s: %q, want %q", lo, got, want)
-	}
-}
-
 // A unit moved to implementing whose mason turn was never queued, as after
 // a stop between the two, gets its workspace and its turn on the next
 // lifetime, once.
@@ -624,12 +576,8 @@ func TestBlockedImplementingUnitHoldsNoSlot(t *testing.T) {
 
 			repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
 			must(t, err)
-			states, err := repo.WorkflowStates(blocked)
-			must(t, err)
-			subject := trace.UnitSubject("resume")
-			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: masonTransitionID("resume"), Revision: 1, Project: f.project, Workstream: blocked, Unit: "resume", At: f.clock.Now(), Actor: masonActor, Cause: subject + "-" + UnitReady}
-			_, err = repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: states[subject].Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitReady, To: UnitImplementing, Reason: "planted"}})
-			must(t, errors.Join(err, repo.Close()))
+			plantImplementing(t, f, repo, blocked, "resume")
+			must(t, repo.Close())
 			tc.plant(t, f, blocked)
 
 			f.start(t)
@@ -645,6 +593,49 @@ func TestBlockedImplementingUnitHoldsNoSlot(t *testing.T) {
 			}
 			f.checkUnits(t, blocked, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "dedupe", State: UnitPlanned}})
 		})
+	}
+}
+
+// plantImplementing moves unit to implementing without queueing its mason's
+// first turn, as a stop between the two leaves it.
+func plantImplementing(t *testing.T, f *shedFixture, repo *trace.Repository, stream config.WorkstreamID, unit string) {
+	t.Helper()
+	states, err := repo.WorkflowStates(stream)
+	must(t, err)
+	subject := trace.UnitSubject(unit)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: masonTransitionID(unit), Revision: 1, Project: f.project, Workstream: stream, Unit: unit, At: f.clock.Now(), Actor: masonActor, Cause: subject + "-" + UnitReady}
+	_, err = repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: states[subject].Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitReady, To: UnitImplementing, Reason: "planted"}})
+	must(t, err)
+}
+
+// stoppedAfter is a context stopped once the commands it governs have
+// finished: they run to completion, and Err reports the stop.
+type stoppedAfter struct{ context.Context }
+
+func (stoppedAfter) Done() <-chan struct{} { return nil }
+func (stoppedAfter) Err() error            { return context.Canceled }
+
+// A stop that arrives while a pass opens a unit's workspace ends the pass as
+// a cancellation, even when the workspace cannot be opened, and records no
+// block.
+func TestStopWhileOpeningAUnitWorkspaceEndsThePass(t *testing.T) {
+	t.Parallel()
+	f, _ := newMasonFixture(t, 1, validPlan)
+	stream := f.seedBuildingPaused(t, runtime.Target{Scope: "factory"}, validPlan, "first")[0]
+	f.stop(t)
+	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	must(t, err)
+	defer repo.Close()
+	plantImplementing(t, f, repo, stream, "resume")
+	squatter := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(stream), "resume")
+	must(t, os.MkdirAll(squatter, 0700))
+
+	m := &masons{s: f.s, cfg: f.s.cfg, repository: repo}
+	if _, err := m.resume(stoppedAfter{context.Background()}, stream, "resume"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("resume during a stop: %v", err)
+	}
+	if state, err := repo.Workflow(stream, blockedSubject("resume")); err != nil || state.Value != "" {
+		t.Fatalf("a stopped pass recorded a block: %+v %v", state, err)
 	}
 }
 

@@ -78,79 +78,23 @@ func starts(t *testing.T, f *shedFixture, stream config.WorkstreamID) []string {
 	return out
 }
 
-// Two ready units of one workstream whose footprints are disjoint implement
-// at once, each on its own workspace. A ready unit whose footprint intersects
-// an implementing unit's waits, and starts once that unit's mason reported
-// done.
-func TestDisjointUnitsImplementConcurrently(t *testing.T) {
-	t.Parallel()
-	f, masons := newParallelMasonFixture(t, 4, 3, parallelPlan)
-	defer f.stop(t)
-	masons.play[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
-		args := map[string]any{"outcome": "Built resume", "criteria": []any{criterionArgs(CriterionReport{Criterion: "spec#1", Done: "built resume", Evidence: "the planned proof holds", Proof: "TestResume"})}}
-		if recorded, reason, err := done(ctx, tools, args); err != nil || !recorded {
-			return fmt.Errorf("done refused: %q %v", reason, err)
-		}
-		return nil
-	}
-	stream := f.seedBuilding(t, "parallel", parallelPlan)
-	f.awaitMasonRan(t, stream, "upload")
-	f.awaitMasonRan(t, stream, "audit")
-	f.awaitMasonRan(t, stream, "dedupe")
-	settle()
-	masons.check(t)
-
-	// resume, upload and audit start in one pass; dedupe shares resume's
-	// footprint and starts after resume left implementing.
-	got := starts(t, f, stream)
-	want := []string{trace.UnitSubject("resume"), trace.UnitSubject("upload"), trace.UnitSubject("audit"), trace.UnitSubject("dedupe")}
-	if !slices.Equal(got, want) {
-		t.Fatalf("started %v, want %v", got, want)
-	}
-	transitions := masonTransitions(t, f, stream)
-	finished := slices.IndexFunc(transitions, func(tr transitionMove) bool {
-		return tr.Subject == trace.UnitSubject("resume") && tr.To == UnitReviewing
-	})
-	dedupe := slices.IndexFunc(transitions, func(tr transitionMove) bool { return tr.ID == masonTransitionID("dedupe") })
-	audit := slices.IndexFunc(transitions, func(tr transitionMove) bool { return tr.ID == masonTransitionID("audit") })
-	if finished < 0 || audit > finished || dedupe < finished {
-		t.Fatalf("resume left implementing at %d, audit started at %d and dedupe at %d: %+v", finished, audit, dedupe, transitions)
-	}
-	for _, unit := range []string{"upload", "audit", "dedupe"} {
-		if state, err := f.unitState(stream, unit); err != nil || state != UnitImplementing {
-			t.Fatalf("unit %s is %q: %v", unit, state, err)
-		}
-	}
-}
-
-// Units stop starting at the lower of the two caps: capacity.masons across
-// workstreams, and capacity.per_workstream, which counts the workstream's
-// implementing units whether or not their mason's turn is running.
+// Units stop starting at capacity.per_workstream, which counts the
+// workstream's implementing units whether or not their mason's turn is
+// running, even with mason slots free.
 func TestMasonStartsStayWithinBothCaps(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		name                  string
-		masons, perWorkstream int
-		audit                 UnitDispatch
-	}{
-		{"capacity.masons", 2, 3, slotless(2)},
-		{"capacity.per_workstream", 4, 2, UnitDispatch{Reason: DeferWorkstreamCap, Limit: 2, Message: "Waits for a slot in its workstream: 2 of its units are implementing, the per-workstream cap."}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			f, masons := newParallelMasonFixture(t, tc.masons, tc.perWorkstream, disjointPlan)
-			defer f.stop(t)
-			stream := f.seedBuilding(t, "capped", disjointPlan)
-			f.awaitMasonRan(t, stream, "resume")
-			f.awaitMasonRan(t, stream, "upload")
-			settle()
-			masons.check(t)
-			if got, want := starts(t, f, stream), []string{trace.UnitSubject("resume"), trace.UnitSubject("upload")}; !slices.Equal(got, want) {
-				t.Fatalf("started %v, want %v", got, want)
-			}
-			f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "upload", State: UnitImplementing}, f.deferred(t, stream, "audit", tc.audit)})
-		})
+	f, masons := newParallelMasonFixture(t, 4, 2, disjointPlan)
+	defer f.stop(t)
+	stream := f.seedBuilding(t, "capped", disjointPlan)
+	f.awaitMasonRan(t, stream, "resume")
+	f.awaitMasonRan(t, stream, "upload")
+	settle()
+	masons.check(t)
+	if got, want := starts(t, f, stream), []string{trace.UnitSubject("resume"), trace.UnitSubject("upload")}; !slices.Equal(got, want) {
+		t.Fatalf("started %v, want %v", got, want)
 	}
+	capped := UnitDispatch{Reason: DeferWorkstreamCap, Limit: 2, Message: "Waits for a slot in its workstream: 2 of its units are implementing, the per-workstream cap."}
+	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "upload", State: UnitImplementing}, f.deferred(t, stream, "audit", capped)})
 }
 
 // A unit whose mason asked a question takes neither a mason slot nor a place

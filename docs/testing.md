@@ -97,13 +97,12 @@ the container's CPU and filesystem, so adding parallelism can increase contentio
 | Landing and rebase | Landing, parallel-work and drift demonstrations check controller wiring | Landing interruption cases start with an approved candidate and drive the production reconciler with a controlled clock. Git and Jujutsu rebase fixtures prepare unit reports and local workspace changes. |
 | Final review and delivery | `TestDeliveryDemonstration` follows a final-review gap through a follow-up unit to approved publication | Final-review tests cover report decisions. Delivery and publication tests start with an assembled, reviewed feature and cover styles, approval invalidation and side-effect recovery. |
 | Amendments | `TestAmendmentDemonstration` follows a mason request through approval and continuation across restarts | Draft, debate, decision and application tests cover the respective stage, including rejection and stale owner decisions. |
-| Runtime controls | Reliability demonstrations combine pause, budget, profile changes, provider limits and recovery | Capacity, classification, turn failure and interrupted-mason tests start with sealed builds. |
+| Runtime controls | The reliability demonstration combines pause, budget, profile changes, provider limits and recovery | Capacity, classification, turn failure and interrupted-mason tests start with sealed builds. |
 | Workspace backend compatibility | The Jujutsu delivery demonstration compares the delivered branch from both backends | Workspace and Jujutsu recovery tests cover backend operations and interruption points. |
 | Interfaces | Browser, notification and trace demonstrations check their actual transport and presentation paths | API, inbox and trace tests use records appropriate to the requested view. |
 
 Retain a matrix at the journey level when the comparison itself is the
-contract: Git/Jujutsu delivered-branch equivalence and the reliability
-demonstrations' cross-provider continuation histories are examples. A fixture
+contract: Git/Jujutsu delivered-branch equivalence is an example. A fixture
 should establish its starting state and fail clearly if setup fails; unrelated
 workflow decisions belong in the tests responsible for those decisions.
 
@@ -127,7 +126,7 @@ dagger core container from --address golang:1.26-bookworm \
   with-directory --path /src --source . --exclude .git,.bees \
   with-workdir --path /src \
   with-mounted-temp --path /tmp \
-  with-exec --args=sh,-c,'go test -count=1 -parallel=1 -timeout=10m -run=TestDisjointUnitsImplementConcurrently -v -o /tmp/service.test -cpuprofile=/tmp/service.cpu -blockprofile=/tmp/service.block ./internal/service && go tool pprof -top -cum /tmp/service.cpu && go tool pprof -top /tmp/service.block' \
+  with-exec --args=sh,-c,'go test -count=1 -parallel=1 -timeout=10m -run=TestMasonSessionsWithinCapacityRunAtOnce -v -o /tmp/service.test -cpuprofile=/tmp/service.cpu -blockprofile=/tmp/service.block ./internal/service && go tool pprof -top -cum /tmp/service.cpu && go tool pprof -top /tmp/service.block' \
   combined-output
 ```
 

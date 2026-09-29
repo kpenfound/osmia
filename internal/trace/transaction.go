@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -67,19 +68,14 @@ func (r *Repository) publishTree(ctx context.Context, files map[string][]byte, r
 	if _, err := git(nil, "read-tree", p.Parent); err != nil {
 		return err
 	}
+	blobs := map[string]string{}
 	for _, name := range p.Paths {
-		oid, err := git(files[name], "hash-object", "-w", "--stdin")
-		if err != nil {
-			return err
-		}
-		if _, err := git(nil, "update-index", "--add", "--cacheinfo", "100644,"+oid+","+name); err != nil {
+		if blobs[name], err = git(files[name], "hash-object", "-w", "--stdin"); err != nil {
 			return err
 		}
 	}
-	for _, name := range p.Removed {
-		if _, err := git(nil, "update-index", "--force-remove", name); err != nil {
-			return err
-		}
+	if _, err := git(indexInfo(p.Paths, blobs, p.Removed), "update-index", "-z", "--index-info"); err != nil {
+		return err
 	}
 	tree, err := git(nil, "write-tree")
 	if err != nil {
@@ -129,16 +125,31 @@ func (r *Repository) publishTree(ctx context.Context, files map[string][]byte, r
 		return err
 	}
 	// After publication cancellation cannot roll back a committed transaction.
-	if err := r.recoverPublication(context.WithoutCancel(ctx)); err != nil {
+	if err := r.finishPublication(context.WithoutCancel(ctx), &published{commit: p.Commit, files: files}); err != nil {
 		return err
 	}
+	r.advanceTree(p.Parent, p.Commit, blobs, p.Removed)
 	r.observed(Commit{Paths: append(p.Paths, p.Removed...), Content: files})
 	return nil
 }
 
+// indexInfo is the NUL-terminated update-index --index-info input that sets
+// each of paths to its blob and removes each of removed, in that order.
+func indexInfo(paths []string, blobs map[string]string, removed []string) []byte {
+	var b bytes.Buffer
+	for _, name := range paths {
+		fmt.Fprintf(&b, "100644 %s\t%s\x00", blobs[name], name)
+	}
+	for _, name := range removed {
+		fmt.Fprintf(&b, "0 %s\t%s\x00", strings.Repeat("0", 40), name)
+	}
+	return b.Bytes()
+}
+
 // syncObjects flushes every object this handle has not flushed yet, and the
 // directories that hold them. The first call flushes the whole store, which
-// covers objects an earlier process wrote without publishing them.
+// covers objects an earlier process wrote without publishing them. It follows
+// checkGit in the same publication, so it inspects only the objects it flushes.
 func (r *Repository) syncObjects() error {
 	r.gitMu.Lock()
 	defer r.gitMu.Unlock()
@@ -147,21 +158,19 @@ func (r *Repository) syncObjects() error {
 	}
 	var dirs, files []string
 	changed := map[string]bool{}
-	err := fs.WalkDir(r.dir.FS(), ".git/objects", func(name string, e fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if err := r.checkedEntry(name, e); err != nil {
-			return err
-		}
+	err := r.walkDir(".git/objects", func(parent *os.Root, name string, e fs.DirEntry) error {
 		if e.IsDir() {
 			dirs = append(dirs, name)
 			return nil
 		}
+		// The publication's checkGit inspected the objects already flushed.
 		if r.synced[name] {
 			return nil
 		}
-		f, err := r.dir.Open(name)
+		if err := checkedEntry(parent, name, e); err != nil {
+			return err
+		}
+		f, err := parent.Open(e.Name())
 		if err != nil {
 			return err
 		}
@@ -194,6 +203,20 @@ func (r *Repository) syncObjects() error {
 var objectID = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 func (r *Repository) recoverPublication(ctx context.Context) error {
+	return r.finishPublication(ctx, nil)
+}
+
+// published is a publication this handle has just committed, with the bytes
+// of each file it committed.
+type published struct {
+	commit string
+	files  map[string][]byte
+}
+
+// finishPublication completes the journaled publication. When the journal
+// records own, the committed bytes come from own; otherwise they are read
+// from Git.
+func (r *Repository) finishPublication(ctx context.Context, own *published) error {
 	data, err := r.readFile(publicationFile)
 	if os.IsNotExist(err) {
 		return nil
@@ -233,13 +256,27 @@ func (r *Repository) recoverPublication(ctx context.Context) error {
 		if err := r.boundary("recovery-ref-synced"); err != nil {
 			return err
 		}
-		if err := r.checkGit(); err != nil {
-			return err
+		files := map[string][]byte{}
+		if own != nil && own.commit == p.Commit {
+			files = own.files
 		}
 		for _, name := range p.Paths {
-			data, err := r.gitBytes(ctx, nil, "", "cat-file", "blob", p.Commit+":"+name)
-			if err != nil {
+			if _, ok := files[name]; !ok {
+				files = nil
+				break
+			}
+		}
+		if files == nil {
+			if err := r.checkGit(); err != nil {
 				return err
+			}
+		}
+		for _, name := range p.Paths {
+			data, ok := files[name]
+			if !ok {
+				if data, err = r.gitBytes(ctx, nil, "", "cat-file", "blob", p.Commit+":"+name); err != nil {
+					return err
+				}
 			}
 			if err := r.writeFile(name, data); err != nil {
 				return err

@@ -199,6 +199,10 @@ func TestAnAbandonedRoundFailsThoughTheOwnerObjected(t *testing.T) {
 	if reason := f.transition(t, stream, "shed-round-1-failed").Reason; !strings.Contains(reason, "the committee is not heard") {
 		t.Fatalf("failure %q", reason)
 	}
+	ops := f.acknowledgedRoundOperations(t, stream)
+	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" || !strings.Contains(ops[0].Result.Evidence, "the workstream was abandoned") {
+		t.Fatalf("operations: %+v", ops)
+	}
 }
 
 // A dismissed objection stays in the dissent record with the owner's
@@ -327,7 +331,9 @@ func TestDismissingEveryObjectionConcludesTheDebate(t *testing.T) {
 }
 
 // Skipping debate runs no round, in this service and in the next, and leaves
-// the workstream in the shed for ratification.
+// the workstream in the shed for ratification. The skip is the recorded
+// transition, not the owner subject's latest value: a ruling and a reported
+// invalid edit both move the subject on, and neither resumes the debate.
 func TestOwnerSkipsDebateAcrossARestart(t *testing.T) {
 	t.Parallel()
 	f := newDebateFixture(t, 1, 1)
@@ -358,9 +364,24 @@ func TestOwnerSkipsDebateAcrossARestart(t *testing.T) {
 			}
 		}
 	}
+	// An objection a stopped service recorded before the skip is still the
+	// owner's to dispose of.
+	objection := shed.ObjectionID(1, committeeAgent(1), 1)
+	record := shed.Record{Version: shed.Version, Round: 1, Member: committeeAgent(1), Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: roundTurnID(1, committeeAgent(1), 1),
+		Objections: []shed.Objection{{ID: objection, Kind: shed.Size, Part: "plan#resume", Argument: "It does too much.", Citations: []string{"spec#1"}}}}
+	content, err := shed.Encode(record)
+	must(t, err)
+	must(t, f.repository().RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.DocumentID(1, committeeAgent(1)), Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: trace.Actor{Kind: "agent", ID: committeeAgent(1)}, Cause: "planted"}, Path: shed.Path(1, committeeAgent(1)), Content: string(content)}}))
+	if _, err := f.c.ShedRule(ctx, stream, objection, "dismiss", "Small enough."); err != nil {
+		t.Fatal(err)
+	}
+	// An invalid owner edit is reported, which moves the subject again.
+	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.PlanPath), []byte(cyclicPlan), 0600))
+	f.awaitOwnerState(t, stream, "invalid-edit")
 	f.stop(t)
 
-	// A service that can run the committee starts no round either.
+	// A service that can run the committee starts no round either: the skip
+	// stands.
 	f.opts.Committee = runner
 	f.start(t)
 	defer f.stop(t)
@@ -371,8 +392,13 @@ func TestOwnerSkipsDebateAcrossARestart(t *testing.T) {
 	if ran := f.ran(); ran[roundTurnID(1, committeeAgent(1), 1)] != 0 {
 		t.Fatalf("a member ran: %v", ran)
 	}
-	if moves := f.ownerMoves(t, stream); !slices.Equal(moves, []string{skippedValue}) {
-		t.Fatalf("owner subject went %v", moves)
+	threads, err := f.repository().Threads(stream)
+	must(t, err)
+	if slices.ContainsFunc(threads, func(th trace.Thread) bool { return th.Identity.Role == committeeRole }) {
+		t.Fatalf("a committee was created for a skipped debate: %+v", threads)
+	}
+	if moves, want := f.ownerMoves(t, stream), []string{skippedValue, "ruled-1", "invalid-edit"}; !slices.Equal(moves, want) {
+		t.Fatalf("owner subject went %v, want %v", moves, want)
 	}
 	f.stillInShed(t, stream)
 	// A skipped debate answers no further owner action.
@@ -430,57 +456,6 @@ func TestSkipIsRefusedWhileARoundRunsAndOutsideTheShed(t *testing.T) {
 		if err := call(); !failed(err, Conflict) || !strings.Contains(err.Error(), AbandonedState) {
 			t.Fatalf("%s on an abandoned workstream: %v", name, err)
 		}
-	}
-}
-
-// The skip is the recorded transition, not the owner subject's latest value:
-// a ruling and a reported invalid edit both move the subject on, and neither
-// resumes the debate.
-func TestALaterOwnerActionDoesNotResumeASkippedDebate(t *testing.T) {
-	t.Parallel()
-	f := newDebateFixture(t, 1, 1)
-	ctx := context.Background()
-	runner := f.opts.Committee
-	f.stop(t)
-	f.opts.Committee = nil
-	f.start(t)
-	stream := f.handIn(t, "design", handedDesign)
-	f.await(t, stream, sketched)
-	if _, err := f.c.ShedSkip(ctx, stream); err != nil {
-		t.Fatal(err)
-	}
-
-	// An objection a stopped service recorded before the skip is still the
-	// owner's to dispose of.
-	objection := shed.ObjectionID(1, committeeAgent(1), 1)
-	record := shed.Record{Version: shed.Version, Round: 1, Member: committeeAgent(1), Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: roundTurnID(1, committeeAgent(1), 1),
-		Objections: []shed.Objection{{ID: objection, Kind: shed.Size, Part: "plan#resume", Argument: "It does too much.", Citations: []string{"spec#1"}}}}
-	content, err := shed.Encode(record)
-	must(t, err)
-	must(t, f.repository().RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.DocumentID(1, committeeAgent(1)), Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: trace.Actor{Kind: "agent", ID: committeeAgent(1)}, Cause: "planted"}, Path: shed.Path(1, committeeAgent(1)), Content: string(content)}}))
-	if _, err := f.c.ShedRule(ctx, stream, objection, "dismiss", "Small enough."); err != nil {
-		t.Fatal(err)
-	}
-	// An invalid owner edit is reported, which moves the subject again.
-	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.PlanPath), []byte(cyclicPlan), 0600))
-	f.awaitOwnerState(t, stream, "invalid-edit")
-	if moves, want := f.ownerMoves(t, stream), []string{skippedValue, "ruled-1", "invalid-edit"}; !slices.Equal(moves, want) {
-		t.Fatalf("owner subject went %v, want %v", moves, want)
-	}
-	f.stop(t)
-
-	// The next service still runs no round: the skip stands.
-	f.opts.Committee = runner
-	f.start(t)
-	defer f.stop(t)
-	must(t, (&debate{s: f.s, repository: f.repository()}).Pass(ctx))
-	if moves := f.shedMoves(t, stream); len(moves) != 0 || len(f.roundOperations(t, stream)) != 0 {
-		t.Fatalf("a skipped debate ran %v", moves)
-	}
-	threads, err := f.repository().Threads(stream)
-	must(t, err)
-	if slices.ContainsFunc(threads, func(th trace.Thread) bool { return th.Identity.Role == committeeRole }) {
-		t.Fatalf("a committee was created for a skipped debate: %+v", threads)
 	}
 }
 

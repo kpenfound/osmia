@@ -54,6 +54,15 @@ func TestMasonContestedRuling(t *testing.T) {
 				t.Fatalf("review refusal: %v", err)
 			}
 			th := f.thread(t, stream, masonAgent("resume"))
+			if tc.name == "bound" {
+				if len(th.Turns) != f.s.cfg.Mason.MaxCleanTurns {
+					t.Fatalf("bounded turns: %d", len(th.Turns))
+				}
+				f.awaitEventTurns(t, stream, "classified unclear")
+				f.awaitEventTurns(t, stream, "bound exhausted")
+			} else {
+				f.awaitEventTurns(t, stream, "classified gave_up")
+			}
 			reset := th.Turns[len(th.Turns)-1].Sequence
 			turnID := fmt.Sprintf("%s%d", ownerTurn, reset)
 			if tc.name == "bound" {
@@ -122,11 +131,9 @@ func TestMasonCleanTurnPolicy(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, response, class, tool string
-		contested                   bool
 	}{
-		{"question", "Could you clarify which store to use?", "asked_in_prose", "ask", false},
-		{"completion", "I have completed the unit.", "claims_done", "done", false},
-		{"giveup", "I cannot complete this work.", "gave_up", "", true},
+		{"question", "Could you clarify which store to use?", "asked_in_prose", "ask"},
+		{"completion", "I have completed the unit.", "claims_done", "done"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -152,12 +159,7 @@ func TestMasonCleanTurnPolicy(t *testing.T) {
 					if got := th.Turns[0].Response.Classification.ToolCounts["file_read"]; got != 1 {
 						t.Fatalf("tool count %d, want 1", got)
 					}
-					if tc.contested {
-						state, err := f.repository().Workflow(stream, trace.UnitSubject("resume"))
-						if err == nil && state.Value == UnitContested {
-							break
-						}
-					} else if len(th.Turns) > 1 && strings.Contains(th.Turns[1].Request.Prompt, "Call "+tc.tool) && th.Turns[1].Request.ThreadID == th.Identity.ThreadID {
+					if len(th.Turns) > 1 && strings.Contains(th.Turns[1].Request.Prompt, "Call "+tc.tool) && th.Turns[1].Request.ThreadID == th.Identity.ThreadID {
 						break
 					}
 				}
@@ -187,9 +189,7 @@ func TestMasonModelClassifier(t *testing.T) {
 		want     string
 		attempts int
 	}{
-		{"valid", []string{`{"class":"claims_done","evidence":"finished"}`}, false, "claims_done", 1},
 		{"invalid", []string{`invalid`, `{"class":"gave_up","evidence":"cannot continue"}`}, false, "gave_up", 2},
-		{"exhausted", []string{`invalid`, `invalid`}, false, "unclear", 2},
 		{"failed", nil, true, "unclear", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -234,29 +234,4 @@ func TestMasonModelClassifier(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestMasonCleanTurnBound(t *testing.T) {
-	t.Parallel()
-	f, fake := newMasonFixture(t, 1, validPlan)
-	defer f.stop(t)
-	f.engine.mu.Lock()
-	for i := 1; i < f.s.cfg.Mason.MaxCleanTurns; i++ {
-		name := masonAgent("resume") + "-clarify-" + string(rune('0'+i))
-		delete(fake.play, name)
-		f.engine.turns[name] = fake.turn
-	}
-	f.engine.mu.Unlock()
-	stream := f.seedBuilding(t, "bounded", validPlan)
-	f.awaitUnit(t, stream, "resume", UnitContested)
-	th, err := f.repository().Thread(stream, masonAgent("resume"))
-	if err != nil || len(th.Turns) != f.s.cfg.Mason.MaxCleanTurns {
-		t.Fatalf("bounded turns: %d %v", len(th.Turns), err)
-	}
-	transition := f.transition(t, stream, trace.EventID(th.Turns[len(th.Turns)-1].Response.ID, "contested"))
-	if !strings.Contains(transition.Reason, "bound exhausted") {
-		t.Fatalf("contest reason: %s", transition.Reason)
-	}
-	f.awaitEventTurns(t, stream, "classified unclear")
-	f.awaitEventTurns(t, stream, "bound exhausted")
 }

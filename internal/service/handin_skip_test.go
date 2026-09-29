@@ -114,6 +114,9 @@ func TestHandInSkippingDebateIsRatifiedAndSeals(t *testing.T) {
 		t.Fatalf("ratification %+v", ratified)
 	}
 	f.awaitFeature(t, stream, BuildingState)
+	if record := f.ratification(t, stream, 1); record.Revision != (shed.Pin{Spec: 1, Plan: 1}) || len(record.Dissent) != 0 {
+		t.Fatalf("the ratification %+v", record)
+	}
 	ops := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, stream) })
 	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
 		t.Fatalf("seal operations %+v", ops)
@@ -170,31 +173,4 @@ func TestHandInSkipSurvivesARestart(t *testing.T) {
 	f.awaitFeature(t, stream, BuildingState)
 	awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.sealOperations(t, stream) })
 	f.debatedNothing(t, stream)
-}
-
-// A skip through the shed after a hand-in without one is not part of the
-// hand-in: a retry of the key returns the same workstream.
-func TestHandInRetryAfterAShedSkip(t *testing.T) {
-	t.Parallel()
-	f := newDebateFixture(t, 1, 1)
-	ctx := context.Background()
-	f.stop(t)
-	f.opts.Committee = nil
-	f.start(t)
-	defer f.stop(t)
-	stream := f.handIn(t, "design", handedDesign)
-	f.await(t, stream, sketched)
-	if _, err := f.c.ShedSkip(ctx, stream); err != nil {
-		t.Fatal(err)
-	}
-	content := handedDesign
-	out, err := f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: "design", Stdin: &content})
-	must(t, err)
-	if out.Workstream != stream || out.SkipDebate {
-		t.Fatalf("retry %+v", out)
-	}
-	_, err = f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: "design", Stdin: &content, SkipDebate: true})
-	if !failed(err, Conflict) || !strings.Contains(err.Error(), "key design already handed in workstream "+string(stream)+" without skipping debate; use a new key") {
-		t.Fatalf("retry with the skip: %v", err)
-	}
 }

@@ -385,7 +385,8 @@ func Open(root config.Root, project config.Project) (*Repository, error) {
 		return r, err
 	}
 	_, streams, err := r.scan()
-	return r, errors.Join(err, r.checkHistory(context.Background()), r.checkWorkflows(streams))
+	_, historyErr := r.checkHistory(context.Background())
+	return r, errors.Join(err, historyErr, r.checkWorkflows(streams))
 }
 
 // manifestRecord is a project or workstream manifest. Workspaces is the
@@ -406,6 +407,10 @@ func (r *Repository) readManifest(name, schema string, stream config.WorkstreamI
 	if err != nil {
 		return manifestRecord{}, err
 	}
+	return r.decodeManifest(name, data, schema, stream)
+}
+
+func (r *Repository) decodeManifest(name string, data []byte, schema string, stream config.WorkstreamID) (manifestRecord, error) {
 	var m manifestRecord
 	if err := decode(data, &m); err != nil {
 		return manifestRecord{}, fmt.Errorf("%s: %w", name, err)
@@ -484,10 +489,11 @@ func (r *Repository) CreateWorkstreamOn(ctx context.Context, id config.Workstrea
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := r.checkHistory(ctx); err != nil {
+	checked, err := r.checkHistory(ctx)
+	if err != nil {
 		return err
 	}
-	_, _, err := r.scan()
+	_, _, err = r.scanFiles(checked)
 	if err != nil {
 		return err
 	}
@@ -562,10 +568,30 @@ func revision(previous, next Record) error {
 }
 
 func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
+	return r.scanFiles(nil)
+}
+
+// scanFiles is scan over the files checkHistory returned under the same
+// lock, which it reads rather than walking and reading the trace again.
+func (r *Repository) scanFiles(checked *treeFiles) ([]Record, []config.WorkstreamID, error) {
 	if err := r.recoverPublication(context.Background()); err != nil {
 		return nil, nil, err
 	}
-	if err := r.manifest("project.json", "osmia.trace.project", ""); err != nil {
+	read := func(name string) ([]byte, error) {
+		if data, ok := checked.read(name); ok {
+			return data, nil
+		}
+		return r.readFile(name)
+	}
+	manifest := func(name, schema string, stream config.WorkstreamID) error {
+		data, err := read(name)
+		if err != nil {
+			return err
+		}
+		_, err = r.decodeManifest(name, data, schema, stream)
+		return err
+	}
+	if err := manifest("project.json", "osmia.trace.project", ""); err != nil {
 		return nil, nil, err
 	}
 	if err := r.checked("workstreams"); err != nil {
@@ -588,7 +614,7 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 			err = fmt.Errorf("expected workstream directory")
 		}
 		if err == nil {
-			err = r.manifest(name+"/workstream.json", "osmia.trace.workstream", id)
+			err = manifest(name+"/workstream.json", "osmia.trace.workstream", id)
 		}
 		if err != nil {
 			diagnostics = append(diagnostics, fmt.Errorf("%s: %w", name, err))
@@ -604,7 +630,7 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 		}
 	}
 	for _, name := range required {
-		if _, err := r.readFile(name); err != nil {
+		if _, err := read(name); err != nil {
 			diagnostics = append(diagnostics, fmt.Errorf("%s: %w", name, err))
 		}
 	}
@@ -613,18 +639,15 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 	cacheBytes := 0
 	latest := map[string]Record{}
 	documents := map[string]string{}
-	err = r.walk(func(name string, entry fs.DirEntry) error {
-		if entry.IsDir() || !strings.HasSuffix(name, ".jsonl") {
-			return nil
-		}
+	recordFile := func(name string) bool {
 		parts := strings.Split(name, "/")
-		if len(parts) == 4 && parts[0] == "workstreams" && parts[2] == "handed" {
-			return nil // Handed documents retain their original name and content.
-		}
-		data, err := r.readCheckedFile(name)
+		// Handed documents retain their original name and content.
+		return strings.HasSuffix(name, ".jsonl") && !(len(parts) == 4 && parts[0] == "workstreams" && parts[2] == "handed")
+	}
+	decodeFile := func(name string, data []byte, err error) {
 		if err != nil {
 			diagnostics = append(diagnostics, fmt.Errorf("%s: %w", name, err))
-			return nil
+			return
 		}
 		cached := r.decodedRecords(name, data)
 		valid := true
@@ -660,8 +683,28 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 			files[name] = cached
 			cacheBytes += len(cached.data)
 		}
-		return nil
-	})
+	}
+	if checked != nil {
+		for _, name := range checked.names {
+			if !recordFile(name) {
+				continue
+			}
+			data, ok := checked.read(name)
+			if !ok {
+				data, err = r.readCheckedFile(name)
+			}
+			decodeFile(name, data, err)
+		}
+		err = nil
+	} else {
+		err = r.walk(func(parent *os.Root, name string, entry fs.DirEntry) error {
+			if !entry.IsDir() && recordFile(name) {
+				data, err := readEntry(parent, name, entry)
+				decodeFile(name, data, err)
+			}
+			return nil
+		})
+	}
 	r.recordFiles = files
 	diagnostics = append(diagnostics, err)
 	return records, streams, errors.Join(diagnostics...)
@@ -698,10 +741,11 @@ func (r *Repository) append(ctx context.Context, v Record, writeDocument bool) e
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := r.checkHistory(ctx); err != nil {
+	checked, err := r.checkHistory(ctx)
+	if err != nil {
 		return err
 	}
-	records, streams, err := r.scan()
+	records, streams, err := r.scanFiles(checked)
 	if err != nil {
 		return err
 	}

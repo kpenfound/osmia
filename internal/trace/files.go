@@ -60,13 +60,14 @@ func (r *Repository) checked(name string) error {
 	return nil
 }
 
-// checkedEntry is checked for an entry of fs.WalkDir, which has already
-// checked the entry's ancestors, so only the entry itself is inspected.
-func (r *Repository) checkedEntry(name string, entry fs.DirEntry) error {
+// checkedEntry is checked for an entry of walkDir named name, listed in its
+// open directory parent. The walk has already checked the entry's ancestors,
+// so only the entry itself is inspected, relative to parent.
+func checkedEntry(parent *os.Root, name string, entry fs.DirEntry) error {
 	if entry.IsDir() {
 		return nil
 	}
-	info, err := r.dir.Lstat(name)
+	info, err := parent.Lstat(entry.Name())
 	if os.IsNotExist(err) {
 		// Git removes its temporary files while another handle walks.
 		return nil
@@ -103,6 +104,25 @@ func (r *Repository) readCheckedFile(name string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readOpened(f, name)
+}
+
+// readEntry is readCheckedFile for an entry of walkDir named name, listed in
+// its open directory parent.
+func readEntry(parent *os.Root, name string, entry fs.DirEntry) ([]byte, error) {
+	if err := checkInternalPath(name); err != nil {
+		return nil, err
+	}
+	f, err := parent.OpenFile(entry.Name(), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	return readOpened(f, name)
+}
+
+// readOpened reads and closes f, the file name, which must be regular and
+// unaliased.
+func readOpened(f *os.File, name string) ([]byte, error) {
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
@@ -267,17 +287,90 @@ func decodeRecord(data []byte) (Record, error) {
 	panic("unreachable")
 }
 
-func (r *Repository) walk(fn func(string, fs.DirEntry) error) error {
-	return fs.WalkDir(r.dir.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
+// treeFiles are the trace files outside .git that one walk listed, in
+// lexical order, and the bytes it read from those it read.
+type treeFiles struct {
+	names []string
+	data  map[string][]byte
+}
+
+// read returns the bytes the walk read from name, if any.
+func (t *treeFiles) read(name string) ([]byte, bool) {
+	if t == nil {
+		return nil, false
+	}
+	data, ok := t.data[name]
+	return data, ok
+}
+
+// walk visits the checked trace files and directories outside .git, each
+// with the open directory that lists it.
+func (r *Repository) walk(fn func(parent *os.Root, name string, entry fs.DirEntry) error) error {
+	return r.walkDir(".", func(parent *os.Root, name string, entry fs.DirEntry) error {
 		if name == ".git" {
 			return fs.SkipDir
 		}
-		if err := r.checkedEntry(name, entry); err != nil {
+		if err := checkedEntry(parent, name, entry); err != nil {
 			return err
 		}
-		return fn(name, entry)
+		return fn(parent, name, entry)
 	})
+}
+
+// walkDir visits dir and everything below it in lexical order, as fs.WalkDir
+// does over r.dir, and fn may likewise return fs.SkipDir. Each directory is
+// opened once, confined to the root, and fn receives it as the parent of each
+// entry it lists, so an entry can be inspected relative to it rather than by
+// resolving its whole path again. The parent of dir itself is nil.
+func (r *Repository) walkDir(dir string, fn func(parent *os.Root, name string, entry fs.DirEntry) error) error {
+	info, err := r.dir.Stat(dir)
+	if err != nil {
+		return err
+	}
+	entry := fs.FileInfoToDirEntry(info)
+	if err := fn(nil, dir, entry); err != nil || !entry.IsDir() {
+		if err == fs.SkipDir {
+			return nil
+		}
+		return err
+	}
+	open, err := r.dir.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer open.Close()
+	return walkEntries(open, dir, fn)
+}
+
+func walkEntries(dir *os.Root, name string, fn func(*os.Root, string, fs.DirEntry) error) error {
+	entries, err := fs.ReadDir(dir.FS(), ".")
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		child := path.Join(name, entry.Name())
+		err := fn(dir, child, entry)
+		if err == fs.SkipDir {
+			if entry.IsDir() {
+				continue
+			}
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		sub, err := dir.OpenRoot(entry.Name())
+		if err != nil {
+			return err
+		}
+		err = walkEntries(sub, child, fn)
+		sub.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
