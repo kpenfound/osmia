@@ -63,7 +63,7 @@ Roles take names from the trade. All but the owner are agents.
 | Role | Job |
 |---|---|
 | owner | You. Hands in features, sits in the shed, ratifies specs, answers questions, edits the charter, takes delivery. Talks only to the chief of staff. |
-| chief of staff | The one role facing the owner. Answers every other role's questions from the record and Hearsay, escalates what it cannot, rephrases both ways, presents ratification, keeps the status, drafts the pull request description. Never implements, reviews or dispatches. |
+| chief of staff | The one role facing the owner. Your assistant for the workstream. Answers every other role's questions from the record and Hearsay, rules on contested units on your behalf, escalates what it cannot resolve or is unsure of, rephrases both ways, presents ratification, keeps the status, drafts the pull request description. Never implements, reviews or dispatches. |
 | architect | Drafts the spec and plan from what the owner handed in, answers the committee in the shed, redrafts on amendment. |
 | committee | Adversarial reviewers. In the shed they argue against the spec and plan, citing the spec, the charter and the knowledge base. On a unit one of them is the reviewer, holding the review conversation until the unit lands. At the end one reads the whole branch against the spec and the charter. One role, three prompts. |
 | mason | Builds one unit until its criteria hold and the proofs the plan named are in place. May ask questions and request amendments. |
@@ -82,7 +82,7 @@ Roles take names from the trade. All but the owner are agents.
 6. **Agents are durable threads.** A role on a workstream is one persistent conversation that receives turns and keeps its context, not a fresh session each time.
 7. **The trace is the record.** Files under the Osmia root hold everything that happened and supply context on their own. When enabled, Hearsay distils them into decisions and serves them back as additional memory. It is never required to make progress.
 8. **One session, shared capacity.** One process runs every workstream on every project against one pool of slots. Focus is an ordering, pause is a switch, and neither restarts anything.
-9. **Gates are transitions, not messages.** Agents message each other freely through fixed routes. The owner gates ratification, contested units, amendments and delivery.
+9. **Gates are transitions, not messages.** Agents message each other freely through fixed routes. The owner gates ratification, amendments and delivery. Contested units are gated too: the chief of staff rules on them for the owner and raises the ones it cannot resolve.
 
 ---
 
@@ -198,7 +198,7 @@ any state may also be: waiting (a question is open), contested (review bounces o
 | approved | The reviewer is satisfied. Waiting for the foreman. | scheduler |
 | merged | Squashed to one commit on the feature branch, message generated from the criteria it addresses. Units still in flight are rebased. | foreman |
 | waiting | A sub-state of any of the above: the unit's role asked a question and its turn ended. Nothing else on the unit moves until the answer arrives. Other units continue. | chief of staff, owner |
-| contested | Review bounces reached `max_bounces`, or the mason gave up or exhausted its clean-turn bound. Raised to you through the chief of staff with the reason. Nothing on the unit moves until you rule. | owner |
+| contested | Review bounces reached `max_bounces`, the mason gave up or exhausted its clean-turn bound, a role's turn failed on every retry, or a reviewer's turn ended without a verdict. The chief of staff rules on it first (section 6.6); what it cannot resolve is raised to you with its findings. Nothing on the unit moves until a ruling. | chief of staff, owner |
 
 Waiting and contested preserve the underlying unit stage and any candidate under discussion. An answer or ruling resumes that stage through a recorded transition; it does not bypass review or landing checks. A mason contest has no candidate, so the owner can only return it to implementing with a note and a fresh clean-turn allowance. Plan dependencies must reference existing units and form an acyclic graph. Invalid plans cannot be ratified, and an amendment must preserve those properties.
 
@@ -275,7 +275,15 @@ Identifiers stay out: commit hashes, branch names, file paths, session ids, mode
 
 The service tells the chief of staff what happened: a unit finished, a review came back, a question was raised, a landing succeeded, upstream moved. Events are written to a durable outbox in the same transaction as the state change, coalesced over a short window, and delivered as one turn, retried until delivered. After the first failed delivery, the service retries immediately; repeated failures wait thirty seconds, doubling up to fifteen minutes. The delay is recovered from durable turn results, does not acknowledge undelivered events, and does not delay new events. Only the chief of staff receives events. Workers receive turns from the scheduler and nothing else, and are never told to wait for another agent.
 
-Events are information, not authorisation. The chief of staff does not dispatch, restart, replace or route around an agent. Transitions are the scheduler's.
+Events are information, not authorisation. The chief of staff does not dispatch, restart, replace or route around an agent. Transitions are the scheduler's. What it may do is take a decision you could take, through the same tool, and the service applies it as it applies yours.
+
+### 6.6 Acting for you
+
+The chief of staff is your assistant for the workstream. It takes the workstream decisions you could take when that resolves an issue or a conflict, and raises to you only what it cannot resolve or is not sure of. The service holds it to the same rules as you, records it as the actor, and shows each of its actions in the workstream's conversation.
+
+A contested unit goes to the chief of staff first. Its view shows each started unit's state, its contest and the rulings the contest takes, its recent transitions and block reasons, and its roles' latest turns with their outcomes and the tool calls the service refused. When it is confident, it rules review or revise with a note the resumed role receives. It escalates when it cannot tell what is wrong, when the fix needs a decision you have not made, or when the unit is contested again after its ruling. It may rule on two contests of a unit in a row; after that, the unit's contests are yours until you rule on one. A contest reaches your inbox when it escalates it, when it has no rulings left for the unit, or once it has seen the contest and left it undecided, so no contest waits unseen. You can rule on any contest yourself at any time.
+
+Ratification, amendments, charter changes and delivery stay yours. The chief of staff records those decisions only when you give them in a message.
 
 ---
 
@@ -402,6 +410,7 @@ The Osmia server, role-scoped:
 | `inspect_code` | chief of staff | Read a committed code excerpt; a cited answer queues a librarian knowledge-gap refresh. |
 | `pause`, `resume`, `prioritise`, `capacity` | chief of staff | The factory-wide controls. |
 | `decide_amendment` | chief of staff | Record your decision on a presented amendment when you give it in a message. |
+| `resolve_contested` | chief of staff | Rule review or revise on a contested unit on your behalf, escalate it to you, or record the ruling you gave in a message. |
 
 The Hearsay server: `get_bundle`, `resolve`, `stance_history`, `get_l1`, `get_l0`, `search`, `assert`, filtered by the role's agent class and your principal.
 
@@ -452,7 +461,7 @@ Built for a phone as much as a laptop. Embedded in the binary, one page, fed by 
 
 - **Active work.** Every workstream with its goal, attention and note, its units by state, sessions running with their role and profile, and the capacity view: slots used per role kind, who is waiting, and every pause in force with its reason.
 - **Inbox.** Every open question, contested unit and ratification packet across workstreams and projects, each with the chief of staff's rephrasing, the options and its recommendation, answered inline.
-- **Conversation.** One per workstream, the thread with the chief of staff.
+- **Conversation.** One per workstream, the thread with the chief of staff, with the actions it took on your behalf between the messages.
 - **Controls.** Pause and resume at every level, priority order, the profile switcher with usage per provider beside it, and a reload button that lights when the file on disk differs from what is loaded.
 
 ### 11.2 Command line

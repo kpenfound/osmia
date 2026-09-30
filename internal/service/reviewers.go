@@ -366,8 +366,11 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 			if contested, err := contestFailure(ctx, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, last, r.s.now()); err != nil || contested {
 				return err
 			}
-			if last.Status() != "idle" || last.Response.Result.Outcome == nil || last.Response.Result.Outcome.Status != verdictOutcome {
+			if last.Status() != "idle" {
 				return nil
+			}
+			if last.Response.Result.Outcome == nil || last.Response.Result.Outcome.Status != verdictOutcome {
+				return r.contestMissingVerdict(ctx, stream, unit, state, last)
 			}
 			return r.finishReview(ctx, stream, unit, state, last)
 		}
@@ -417,6 +420,19 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	return err
 }
 
+// contestMissingVerdict contests a unit whose review turn ended without a
+// verdict, so the chief of staff or the owner can have it reviewed again.
+func (r *reviewers) contestMissingVerdict(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, last trace.QueuedTurn) error {
+	id := trace.EventID(last.Response.ID, "contested")
+	reason := fmt.Sprintf("the reviewer's turn %s ended without recording a verdict", last.Request.TurnID)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: last.Response.ID}
+	_, err := r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitReviewing, To: UnitContested, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))}})
+	if errors.Is(err, trace.ErrConflict) {
+		return nil
+	}
+	return err
+}
+
 func (r *reviewers) reviewGuidance(stream config.WorkstreamID, unit, candidate string) (string, error) {
 	asked, err := r.repository.Questions(stream)
 	if err != nil {
@@ -427,10 +443,15 @@ func (r *reviewers) reviewGuidance(stream config.WorkstreamID, unit, candidate s
 	if err != nil {
 		return "", err
 	}
+	ruled := false
 	for i := len(transitions) - 1; i >= 0; i-- {
 		if t := transitions[i]; t.Subject == trace.UnitSubject(unit) {
-			if t.From == UnitReviewing && t.To == UnitReviewing && t.Actor == reviewerActor {
+			switch {
+			case t.From == UnitReviewing && t.To == UnitReviewing && t.Actor == reviewerActor:
 				guidance += "\n\nThe service asked for this review again: " + t.Reason + "."
+			case t.From == UnitContested && t.To == UnitReviewing:
+				guidance += "\n\nThe unit was contested, and the " + t.Reason + "."
+				ruled = true
 			}
 			break
 		}
@@ -453,8 +474,8 @@ func (r *reviewers) reviewGuidance(stream config.WorkstreamID, unit, candidate s
 			}
 		}
 	}
-	if latest.Decision == "review" && latest.Candidate == candidate {
-		guidance += fmt.Sprintf("\n\nThe owner ruled on contested candidate %s: review it again. Owner note: %s", latest.Candidate, latest.Note)
+	if !ruled && latest.Decision == "review" && latest.Candidate == candidate {
+		guidance += fmt.Sprintf("\n\nThe %s ruled on contested candidate %s: review it again. Note: %s", latest.ruler(), latest.Candidate, latest.Note)
 	}
 	return guidance, nil
 }
@@ -890,7 +911,7 @@ func (r *reviewers) enqueueFindings(ctx context.Context, stream config.Workstrea
 		return err
 	}
 	if found && ruling.Decision == "revise" && ruling.Candidate == result.Identity.Candidate.Revision {
-		request.Prompt += "\n\nThe owner ruled that this candidate needs revision: " + ruling.Note
+		request.Prompt += "\n\nThe " + ruling.ruler() + " ruled that this candidate needs revision: " + ruling.Note
 	}
 	_, err = r.repository.EnqueueTurn(ctx, request)
 	return err

@@ -121,8 +121,16 @@ func TestReliabilityDemonstration(t *testing.T) {
 	defer func() { f.stop(t) }()
 	configPath := filepath.Join(f.opts.Config.Root, "config.toml")
 
-	// The owner allows USD 1.00 a day; days follow UTC.
+	// The owner allows USD 1.00 a day; days follow UTC. Each unit has a
+	// reviewer slot, so the reviews no step plays, which stay in progress,
+	// do not hold up resume's.
 	f.stop(t)
+	configText, err := os.ReadFile(configPath)
+	must(t, err)
+	if !strings.Contains(string(configText), "per_workstream = 4\n") {
+		t.Fatalf("config without the fixture's capacity:\n%s", configText)
+	}
+	must(t, os.WriteFile(configPath, []byte(strings.Replace(string(configText), "per_workstream = 4\n", "per_workstream = 4\nreviewers = 4\n", 1)), 0600))
 	configFile, err := os.OpenFile(configPath, os.O_APPEND|os.O_WRONLY, 0)
 	must(t, err)
 	_, err = configFile.WriteString("[budget]\nper_day = \"1.00\"\n")

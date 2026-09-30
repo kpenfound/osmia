@@ -191,6 +191,9 @@ func TestTraceCommitsAnnounceTheirViews(t *testing.T) {
 	workflow := func(chief string) []byte {
 		return []byte(`{"schema":"osmia.workflow","version":1,"transactions":[],"threads":{"` + trace.ChiefOfStaff + `":` + chief + `,"agent_mason":{"turns":[]}}}`)
 	}
+	delivered := func(deliveries string) []byte {
+		return []byte(`{"schema":"osmia.workflow","version":1,"transactions":[],"deliveries":` + deliveries + `,"threads":{"` + trace.ChiefOfStaff + `":{"turns":[{}]},"agent_mason":{"turns":[]}}}`)
+	}
 	librarian := "workstreams/" + string(librarianWorkstream(project)) + "/"
 	for _, c := range []struct {
 		name   string
@@ -201,7 +204,10 @@ func TestTraceCommitsAnnounceTheirViews(t *testing.T) {
 		{"question", trace.Commit{Paths: []string{prefix + "questions/1/question.jsonl", prefix + "questions/1/rulings.jsonl", prefix + "workflow.json"}, Content: map[string][]byte{prefix + "workflow.json": workflow(`{"turns":[]}`)}}, []Event{ws, inbox, chat}},
 		{"unchanged chief thread", trace.Commit{Paths: []string{prefix + "workflow.json"}, Content: map[string][]byte{prefix + "workflow.json": workflow(`{"turns":[]}`)}}, []Event{ws}},
 		{"changed chief thread", trace.Commit{Paths: []string{prefix + "workflow.json"}, Content: map[string][]byte{prefix + "workflow.json": workflow(`{"turns":[{}]}`)}}, []Event{ws, chat}},
-		{"workflow read from disk", trace.Commit{Paths: []string{prefix + "workflow.json"}}, []Event{ws, chat}},
+		// An acknowledged event can raise a contest to the owner's inbox.
+		{"changed deliveries", trace.Commit{Paths: []string{prefix + "workflow.json"}, Content: map[string][]byte{prefix + "workflow.json": delivered(`[{"kind":"acknowledge"}]`)}}, []Event{ws, inbox}},
+		{"unchanged deliveries", trace.Commit{Paths: []string{prefix + "workflow.json"}, Content: map[string][]byte{prefix + "workflow.json": delivered(`[{"kind":"acknowledge"}]`)}}, []Event{ws}},
+		{"workflow read from disk", trace.Commit{Paths: []string{prefix + "workflow.json"}}, []Event{ws, chat, inbox}},
 		{"chief log", trace.Commit{Paths: []string{prefix + "agents/" + trace.ChiefOfStaff + "/log.jsonl", prefix + "agents/agent_mason/log.jsonl"}}, []Event{ws, chat}},
 		{"feature transition", trace.Commit{Paths: []string{prefix + "events.jsonl"}}, []Event{ws, inbox}},
 		{"packet", trace.Commit{Paths: []string{prefix + "documents.jsonl"}}, []Event{ws, inbox}},

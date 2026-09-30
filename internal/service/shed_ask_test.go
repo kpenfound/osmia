@@ -73,6 +73,12 @@ func (c *chief) hold(id string) chan struct{} {
 }
 
 func (c *chief) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	// A review no test plays is still in progress: a review turn that ends
+	// without a verdict contests its unit.
+	if strings.HasPrefix(req.Name, reviewerRole+"-") {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	c.mu.Lock()
 	released, held := maps.Clone(c.released), maps.Clone(c.held)
 	c.mu.Unlock()

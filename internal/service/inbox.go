@@ -186,8 +186,22 @@ func ratificationEntry(repository *trace.Repository, stream config.WorkstreamID)
 	return e, true, nil
 }
 
-// contestedEntry is a contested unit that has no ruling yet, with the rulings
-// its contest takes.
+// contestOptions returns the rulings a contest takes: review alone after a
+// failed review turn, revise alone after a mason contest, and either after
+// review bounces.
+func contestOptions(contest trace.Transition, unit string, mason bool) []string {
+	switch {
+	case failedReview(contest, unit):
+		return []string{"review"}
+	case mason:
+		return []string{"revise"}
+	}
+	return []string{"review", "revise"}
+}
+
+// contestedEntry is a contested unit the chief of staff raised to the owner
+// that has no ruling yet, with the rulings its contest takes and the chief of
+// staff's note.
 func (s *Service) contestedEntry(repository *trace.Repository, stream config.WorkstreamID, unit string) (InboxEntry, bool, error) {
 	state, err := repository.Workflow(stream, trace.UnitSubject(unit))
 	if err != nil || state.Value != UnitContested {
@@ -197,12 +211,15 @@ func (s *Service) contestedEntry(repository *trace.Repository, stream config.Wor
 	if err != nil {
 		return InboxEntry{}, false, err
 	}
-	options := []string{"review", "revise"}
+	// The chief of staff rules on a contest first; it is the owner's once
+	// raised.
+	raised, note, err := contestRaised(repository, stream, unit, contest)
+	if err != nil || !raised {
+		return InboxEntry{}, false, err
+	}
+	options := contestOptions(contest, unit, mason)
 	switch {
-	case failedReview(contest, unit):
-		options = []string{"review"}
-	case mason:
-		options = []string{"revise"}
+	case failedReview(contest, unit), mason:
 	default:
 		r := &reviewers{masons: &masons{s: s, cfg: s.about(repository), repository: repository}}
 		result, ok, err := r.storedResult(stream, unit, state)
@@ -220,6 +237,7 @@ func (s *Service) contestedEntry(repository *trace.Repository, stream config.Wor
 	e.Question = fmt.Sprintf("Unit %s is contested: %s", unit, contest.Reason)
 	e.Blocked = fmt.Sprintf("Unit %s.", unit)
 	e.Options = options
+	e.Recommendation = note
 	return e, true, nil
 }
 

@@ -698,10 +698,12 @@ type ConversationResponse struct {
 	Entries    []ConversationEntry `json:"entries"`
 }
 
-// ConversationEntry is an owner message (kind "message") or the chief of
-// staff's final response to it (kind "response"). Both carry the state of the
-// turn that answers the message, and At is when the message was accepted or
-// the response captured.
+// ConversationEntry is an owner message (kind "message"), the chief of
+// staff's final response to it (kind "response"), or something the chief of
+// staff did on the owner's behalf (kind "action"), such as resolving a
+// contested unit. A message and its response carry the state of the turn that
+// answers the message, and At is when the message was accepted, the response
+// captured or the action recorded.
 type ConversationEntry struct {
 	Turn  string    `json:"turn"`
 	Kind  string    `json:"kind"`

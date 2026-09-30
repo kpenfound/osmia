@@ -578,7 +578,7 @@ func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
 	if err != nil || !slices.Contains(status.Gates, trace.OwnerGate{Kind: UnitContested, Reference: "resume"}) {
 		t.Fatalf("contested gate: %+v %v", status.Gates, err)
 	}
-	if entries := f.inboxEntries(t, stream, InboxContested); len(entries) != 1 || entries[0].Unit != "resume" || !slices.Equal(entries[0].Options, []string{"review", "revise"}) ||
+	if entries := f.raisedContests(t, stream); len(entries) != 1 || entries[0].Unit != "resume" || !slices.Equal(entries[0].Options, []string{"review", "revise"}) ||
 		entries[0].Answer.Path != "/v1/contested/"+string(stream)+"/resume" {
 		t.Fatalf("inbox entries of the contested unit %+v", entries)
 	}

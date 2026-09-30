@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -92,7 +94,7 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 		ThreadID:     trace.ChiefOfStaff,
 		TurnID:       "message_" + id,
 		Profile:      profile,
-		SystemPrompt: fmt.Sprintf(chiefPrompt, stream) + "\n\n" + chiefDocumentsGuidance + "\n\n" + priorityGuidance + "\n\n" + pauseGuidance + "\n\n" + amendmentGuidance + "\n\n" + charterGuidance + "\n\n" + context,
+		SystemPrompt: fmt.Sprintf(chiefPrompt, stream) + "\n\n" + chiefDocumentsGuidance + "\n\n" + priorityGuidance + "\n\n" + pauseGuidance + "\n\n" + amendmentGuidance + "\n\n" + charterGuidance + "\n\n" + contestGuidance + "\n\n" + context,
 		Prompt:       req.Text,
 	})
 	if err != nil {
@@ -129,6 +131,55 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 			}
 		}
 		out.Entries = append(out.Entries, entries...)
+	}
+	actions, err := chiefActions(repository, stream)
+	if err != nil {
+		return ConversationResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the conversation of workstream %s; check the trace repository", stream)}
+	}
+	out.Entries = withActions(out.Entries, actions)
+	return out, nil
+}
+
+// withActions places each action before the first entry recorded after it,
+// in the order they were recorded, so a message stays beside its response.
+func withActions(entries, actions []ConversationEntry) []ConversationEntry {
+	actions = slices.Clone(actions)
+	sort.SliceStable(actions, func(i, j int) bool { return actions[i].At.Before(actions[j].At) })
+	merged := make([]ConversationEntry, 0, len(entries)+len(actions))
+	for _, e := range entries {
+		for len(actions) > 0 && actions[0].At.Before(e.At) {
+			merged, actions = append(merged, actions[0]), actions[1:]
+		}
+		merged = append(merged, e)
+	}
+	return append(merged, actions...)
+}
+
+// chiefActions returns what the chief of staff did on the owner's behalf in
+// the workstream, as action entries: its rulings on contested units and the
+// contests it raised to the owner.
+func chiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	var out []ConversationEntry
+	for _, d := range docs {
+		if d.Unit == "" || !strings.HasPrefix(d.Path, "units/"+trace.UnitSubject(d.Unit)+"/chief-") {
+			continue
+		}
+		var decision ChiefContestDecision
+		if err := json.Unmarshal([]byte(d.Content), &decision); err != nil {
+			return nil, fmt.Errorf("%s: %w", d.Path, err)
+		}
+		text := fmt.Sprintf("Raised contested unit %s to you: %s", d.Unit, decision.Note)
+		switch decision.Decision {
+		case "review":
+			text = fmt.Sprintf("Resolved contested unit %s: its reviewer reviews the candidate again. %s", d.Unit, decision.Note)
+		case "revise":
+			text = fmt.Sprintf("Resolved contested unit %s: its mason revises the unit. %s", d.Unit, decision.Note)
+		}
+		out = append(out, ConversationEntry{Turn: decision.Turn, Kind: "action", Text: text, At: d.At, State: TurnDone})
 	}
 	return out, nil
 }

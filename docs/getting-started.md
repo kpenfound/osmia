@@ -185,14 +185,15 @@ The decisions, in the order a workstream meets them:
 | Ratify the spec and plan (or rule on an objection, or ask for a redraft) | ratification card | `osmia ratify <workstream-id>`, `osmia shed …` |
 | A question a worker escalated | escalation card: answer, accept the recommendation or use an option | `osmia answer <number> "ruling"` or `--accept` |
 | An amendment to the sealed spec or plan | amendment card | `osmia amendment <workstream-id> <n> approve\|reject\|round\|overrule [note]` |
-| A unit that needs your direction | contested card | `osmia contested <workstream-id> <unit> review\|revise "note"` |
+| A contested unit the chief of staff raised to you | contested card, with its findings | `osmia contested <workstream-id> <unit> review\|revise "note"` |
 | Approve delivery | delivery card | `osmia delivery <workstream-id>`, then `osmia approve <workstream-id>` |
 
 Ratifying seals the spec and plan: the service fetches upstream, creates the
 feature branch in a worktree or Jujutsu workspace of your clone, and masons
 build the units, each reviewed and landed in order. You can talk to the workstream's chief of staff
 meanwhile with `osmia send <workstream-id> "…"` or on the page, and hold work
-with `osmia pause`.
+with `osmia pause`. The conversation also shows what the chief of staff did on
+your behalf, such as resolving a contested unit.
 
 When every unit has landed and the final review is done, the workstream's
 delivery entry opens. Read the final report and the drafted pull request

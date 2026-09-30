@@ -192,6 +192,9 @@ osmia status --json
   decision with `send`.
 - `contested <workstream-id> <unit> <review|revise> <note>` records your
   direction for a contested unit shown by `status`. Quote the required note.
+  The workstream's chief of staff rules on a contest first when it is
+  confident, and raises the rest to your inbox with its findings; you can
+  rule on any contested unit yourself.
   `review` requests another reviewer verdict on the same candidate; `revise`
   returns the findings and your note to the mason. For a mason contest,
   `status` shows whether the mason gave up or exhausted the clean-turn bound;

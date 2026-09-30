@@ -639,6 +639,13 @@ svg {
   white-space: pre-wrap;
 }
 
+.entry[data-kind="action"] .text {
+  padding: 0.35rem 0.7rem;
+  border-left: 3px solid var(--accent);
+  color: var(--muted);
+  font-size: 0.92em;
+}
+
 .decisions {
   display: grid;
   gap: 0.75rem;

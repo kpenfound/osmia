@@ -873,7 +873,7 @@
       return;
     }
     c.entries.replaceChildren(el('ol', {}, ...view.entries.map((e) => el('li', { class: 'entry', 'data-kind': e.kind, 'data-turn': e.turn, 'data-state': e.state },
-      el('div', { class: 'meta' }, e.kind === 'message' ? 'You' : 'Chief of staff', ' · ', when(e.at), ' · ', el('span', { 'data-field': 'state' }, e.state)),
+      el('div', { class: 'meta' }, { message: 'You', action: 'Chief of staff acted' }[e.kind] || 'Chief of staff', ' · ', when(e.at), ' · ', el('span', { 'data-field': 'state' }, e.state)),
       el('div', { class: 'text', 'data-field': 'text' }, e.text)))));
   }
 

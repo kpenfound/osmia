@@ -29,13 +29,14 @@ type hub struct {
 	subs   map[*subscriber]struct{}
 	closed bool
 	done   chan struct{}
-	// chief holds, by workstream, a hash of the chief-of-staff thread as the
-	// last commit of the workstream's workflow wrote it.
-	chief map[config.WorkstreamID][32]byte
+	// chief and deliveries hold, by workstream, a hash of the chief-of-staff
+	// thread and of the event deliveries as the last commit of the
+	// workstream's workflow wrote them.
+	chief, deliveries map[config.WorkstreamID][32]byte
 }
 
 func newHub() *hub {
-	return &hub{subs: map[*subscriber]struct{}{}, done: make(chan struct{}), chief: map[config.WorkstreamID][32]byte{}}
+	return &hub{subs: map[*subscriber]struct{}{}, done: make(chan struct{}), chief: map[config.WorkstreamID][32]byte{}, deliveries: map[config.WorkstreamID][32]byte{}}
 }
 
 // subscriber is one stream's queue. It starts with a resync pending, so the
@@ -164,34 +165,46 @@ func (h *hub) traceEvents(project config.ProjectID) func(trace.Commit) {
 				add(EventInbox, stream)
 			case parts[2] == "agents" && len(parts) > 3 && parts[3] == trace.ChiefOfStaff:
 				add(EventConversation, stream)
-			case parts[2] == "workflow.json" && h.chiefChanged(stream, c.Content[name]):
-				add(EventConversation, stream)
+			case parts[2] == "workflow.json":
+				chief, deliveries := h.workflowChanged(stream, c.Content[name])
+				if chief {
+					add(EventConversation, stream)
+				}
+				if deliveries {
+					// The chief of staff seeing a contest can raise it to
+					// the owner's inbox.
+					add(EventInbox, stream)
+				}
 			}
 		}
 		h.publish(out...)
 	}
 }
 
-// chiefChanged reports whether a workstream's workflow, as a commit wrote it,
-// holds a chief-of-staff thread other than the one last seen. A workflow the
-// commit read from the work tree, or one that cannot be decoded, counts as a
-// change.
-func (h *hub) chiefChanged(stream config.WorkstreamID, workflow []byte) bool {
+// workflowChanged reports whether a workstream's workflow, as a commit wrote
+// it, holds a chief-of-staff thread, and event deliveries, other than the ones
+// last seen. A workflow the commit read from the work tree, or one that cannot
+// be decoded, counts as a change of both.
+func (h *hub) workflowChanged(stream config.WorkstreamID, workflow []byte) (chief, deliveries bool) {
 	if h == nil {
-		return false
+		return false, false
 	}
 	var log struct {
-		Threads map[string]json.RawMessage `json:"threads"`
+		Threads    map[string]json.RawMessage `json:"threads"`
+		Deliveries json.RawMessage            `json:"deliveries"`
 	}
 	if workflow == nil || json.Unmarshal(workflow, &log) != nil {
-		return true
+		return true, true
 	}
-	sum := sha256.Sum256(log.Threads[trace.ChiefOfStaff])
+	changed := func(seen map[config.WorkstreamID][32]byte, raw []byte) bool {
+		sum := sha256.Sum256(raw)
+		last, ok := seen[stream]
+		seen[stream] = sum
+		return !ok || last != sum
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	last, seen := h.chief[stream]
-	h.chief[stream] = sum
-	return !seen || last != sum
+	return changed(h.chief, log.Threads[trace.ChiefOfStaff]), changed(h.deliveries, log.Deliveries)
 }
 
 // streamEvents serves the event stream until the client leaves, a write

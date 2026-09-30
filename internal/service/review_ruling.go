@@ -12,10 +12,13 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// ContestedRuling records the owner's direction for a contested unit.
+// ContestedRuling records the direction for a contested unit, given by the
+// owner or by the chief of staff on the owner's behalf.
 type ContestedRuling struct {
-	Decision  string `json:"decision"`
-	Note      string `json:"note"`
+	Decision string `json:"decision"`
+	Note     string `json:"note"`
+	// By names who ruled: "owner", or "chief of staff". Empty is the owner.
+	By        string `json:"by,omitempty"`
 	Bounces   int    `json:"bounces"`
 	Candidate string `json:"candidate"`
 	Contest   string `json:"contest,omitempty"`
@@ -117,6 +120,42 @@ func (s *Service) ruleContested(ctx context.Context, rawStream, unit string, req
 			repo = p.repository
 		}
 	}
+	return s.recordContestedRuling(ctx, repo, stream, unit, req, ownerActor)
+}
+
+// rulerName is how a contested ruling's actor is named to the roles it
+// resumes.
+func rulerName(actor trace.Actor) string {
+	if actor.Kind == ownerActor.Kind {
+		return "owner"
+	}
+	return "chief of staff"
+}
+
+// ruler returns who gave a recorded ruling.
+func (r ContestedRuling) ruler() string {
+	if r.By == "" {
+		return "owner"
+	}
+	return r.By
+}
+
+// actor returns the trace actor of whoever gave the ruling.
+func (r ContestedRuling) actor() trace.Actor {
+	if r.ruler() == "owner" {
+		return ownerActor
+	}
+	return chiefActor
+}
+
+// recordContestedRuling rules on a contested unit as actor: the owner, or the
+// chief of staff on the owner's behalf. The rulings each contest takes, and
+// what they resume, do not depend on who gives them.
+func (s *Service) recordContestedRuling(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, req ContestedRulingRequest, actor trace.Actor) (ContestedRulingResponse, *APIError) {
+	if req.Decision != "review" && req.Decision != "revise" || strings.TrimSpace(req.Note) == "" {
+		return ContestedRulingResponse{}, &APIError{Validation, "a contested ruling requires review or revise and a note"}
+	}
+	by := rulerName(actor)
 	if gone, err := abandoned(repo, stream); err != nil {
 		return ContestedRulingResponse{}, &APIError{Internal, "cannot read the workstream state"}
 	} else if gone {
@@ -138,10 +177,10 @@ func (s *Service) ruleContested(ctx context.Context, rawStream, unit string, req
 		if req.Decision != "review" {
 			return ContestedRulingResponse{}, &APIError{Validation, "the reviewer's turn failed and left no findings; use review"}
 		}
-		ruling := ContestedRuling{Decision: "review", Note: strings.TrimSpace(req.Note), Contest: contest.ID}
+		ruling := ContestedRuling{Decision: "review", Note: strings.TrimSpace(req.Note), By: by, Contest: contest.ID}
 		id := trace.EventID(contest.ID, "ruling")
-		reason := fmt.Sprintf("owner ruled review on contest %s, raised when the reviewer's turn failed; a new review turn runs: %s", contest.ID, ruling.Note)
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.now(), Actor: ownerActor, Cause: contest.ID}
+		reason := fmt.Sprintf("%s ruled review on contest %s, raised when the reviewer's turn failed; a new review turn runs: %s", by, contest.ID, ruling.Note)
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.now(), Actor: actor, Cause: contest.ID}
 		tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitContested, To: UnitReviewing, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", reason)}}
 		if _, err := repo.Transact(ctx, tx); err != nil {
 			if errors.Is(err, trace.ErrConflict) {
@@ -163,12 +202,12 @@ func (s *Service) ruleContested(ctx context.Context, rawStream, unit string, req
 		if last.Response == nil || last.Response.ID != contest.Cause {
 			return ContestedRulingResponse{}, &APIError{Internal, "contested mason turn does not match transition"}
 		}
-		ruling := ContestedRuling{Decision: "revise", Note: strings.TrimSpace(req.Note), Contest: contest.ID, ResetTurn: last.Sequence}
+		ruling := ContestedRuling{Decision: "revise", Note: strings.TrimSpace(req.Note), By: by, Contest: contest.ID, ResetTurn: last.Sequence}
 		data, _ := json.MarshalIndent(ruling, "", "  ")
 		id := fmt.Sprintf("%s-mason-ruling-%d", trace.UnitSubject(unit), last.Sequence)
-		doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.now(), Actor: ownerActor, Cause: contest.ID}, Path: masonRulingPath(unit, last.Sequence), Content: string(data) + "\n"}
-		reason := fmt.Sprintf("owner ruled revise on mason contest %s; clean-turn attempts reset to zero: %s", contest.ID, ruling.Note)
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id + "-implementing", Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.now(), Actor: ownerActor, Cause: id}
+		doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.now(), Actor: actor, Cause: contest.ID}, Path: masonRulingPath(unit, last.Sequence), Content: string(data) + "\n"}
+		reason := fmt.Sprintf("%s ruled revise on mason contest %s; clean-turn attempts reset to zero: %s", by, contest.ID, ruling.Note)
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id + "-implementing", Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.now(), Actor: actor, Cause: id}
 		tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitContested, To: UnitImplementing, Reason: reason}, Events: []trace.Event{trace.Notice(h.ID, "unit", reason)}}
 		if _, err := repo.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
 			if errors.Is(err, trace.ErrConflict) {
@@ -188,10 +227,10 @@ func (s *Service) ruleContested(ctx context.Context, rawStream, unit string, req
 	} else if found {
 		return ContestedRulingResponse{}, &APIError{Conflict, "unit already has a ruling"}
 	}
-	ruling := ContestedRuling{Decision: req.Decision, Note: strings.TrimSpace(req.Note), Bounces: result.Bounces, Candidate: result.Identity.Candidate.Revision}
+	ruling := ContestedRuling{Decision: req.Decision, Note: strings.TrimSpace(req.Note), By: by, Bounces: result.Bounces, Candidate: result.Identity.Candidate.Revision}
 	data, _ := json.MarshalIndent(ruling, "", "  ")
 	id := fmt.Sprintf("%s-ruling-%d", trace.UnitSubject(unit), result.Bounces)
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.now(), Actor: ownerActor, Cause: reviewDocument(unit)}, Path: contestedRulingPath(unit, result.Bounces), Content: string(data) + "\n"}
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: s.now(), Actor: actor, Cause: reviewDocument(unit)}, Path: contestedRulingPath(unit, result.Bounces), Content: string(data) + "\n"}
 	if err := repo.RecordDocuments(ctx, []trace.Document{doc}); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			return ContestedRulingResponse{}, &APIError{Conflict, "unit already has a ruling"}
@@ -224,8 +263,8 @@ func (r *reviewers) resumeContested(ctx context.Context, stream config.Workstrea
 		return errors.New("invalid contested ruling")
 	}
 	id := fmt.Sprintf("%s-%s-ruling-%d", trace.UnitSubject(unit), to, result.Bounces)
-	reason := fmt.Sprintf("owner ruled %s on contested candidate %s after %d material reviews: %s", ruling.Decision, ruling.Candidate, ruling.Bounces, ruling.Note)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: ownerActor, Cause: fmt.Sprintf("%s-ruling-%d", trace.UnitSubject(unit), result.Bounces)}
+	reason := fmt.Sprintf("%s ruled %s on contested candidate %s after %d material reviews: %s", ruling.ruler(), ruling.Decision, ruling.Candidate, ruling.Bounces, ruling.Note)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: ruling.actor(), Cause: fmt.Sprintf("%s-ruling-%d", trace.UnitSubject(unit), result.Bounces)}
 	_, err = r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitContested, To: to, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", reason)}})
 	if errors.Is(err, trace.ErrConflict) {
 		return nil

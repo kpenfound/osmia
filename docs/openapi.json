@@ -3112,6 +3112,9 @@
           "bounces": {
             "type": "integer"
           },
+          "by": {
+            "type": "string"
+          },
           "candidate": {
             "type": "string"
           },

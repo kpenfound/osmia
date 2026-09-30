@@ -313,7 +313,7 @@ func (m *masons) classify(ctx context.Context, stream config.WorkstreamID, unit 
 		}
 		id := trace.EventID(last.Response.ID, "contested")
 		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: last.Response.ID}
-		_, err := m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitImplementing, To: UnitContested, Reason: reason}})
+		_, err := m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitImplementing, To: UnitContested, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))}})
 		if errors.Is(err, trace.ErrConflict) {
 			return false, false, nil
 		}
@@ -361,7 +361,7 @@ func (m *masons) resumeMasonRuling(ctx context.Context, stream config.Workstream
 		return false, err
 	}
 	turnID := fmt.Sprintf("%s-owner-revise-%d", masonAgent(unit), ruling.ResetTurn)
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: ownerActor, Cause: ruling.Contest, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: last.Request.SystemPrompt, Prompt: "The owner ruled that you should revise this unit in your existing workspace. Owner note: " + ruling.Note + "\nCheck the criteria and planned proofs, then call done with a criterion report or ask if you need a decision."}
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: ruling.actor(), Cause: ruling.Contest, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: last.Request.SystemPrompt, Prompt: "The " + ruling.ruler() + " ruled that you should revise this unit in your existing workspace. Note: " + ruling.Note + "\nCheck the criteria and planned proofs, then call done with a criterion report or ask if you need a decision."}
 	_, err = m.repository.EnqueueTurn(ctx, req)
 	return err == nil, err
 }
