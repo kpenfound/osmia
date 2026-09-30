@@ -224,9 +224,15 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 				problems = append(problems, fmt.Errorf("%s holds %q: %v", path, got, err))
 			}
 		}
-		diff, err := readTool(ctx, tools, "branch.diff")
+		diff, err := callTool(ctx, tools, workstreamDiffTool, map[string]any{})
 		if err != nil || !strings.Contains(diff, "internal/trace/resume.go") || !strings.Contains(diff, "internal/trace/dedupe.go") || strings.Contains(diff, "UPSTREAM.md") {
-			problems = append(problems, fmt.Errorf("branch.diff %q: %v", diff, err))
+			problems = append(problems, fmt.Errorf("branch diff %q: %v", diff, err))
+		}
+		if listed, err := callTool(ctx, tools, workstreamDiffTool, map[string]any{"files_only": true, "paths": []string{"internal/trace/dedupe.go"}}); err != nil || !strings.Contains(listed, `"path":"internal/trace/dedupe.go"`) || strings.Contains(listed, "resume.go") {
+			problems = append(problems, fmt.Errorf("branch files %q: %v", listed, err))
+		}
+		if stale, err := readTool(ctx, tools, "branch.diff"); err == nil {
+			problems = append(problems, fmt.Errorf("the view still holds branch.diff %q", stale))
 		}
 		if report, err := readTool(ctx, tools, "units/resume/report.json"); err == nil {
 			problems = append(problems, fmt.Errorf("a unit that never reported shows a report %q", report))

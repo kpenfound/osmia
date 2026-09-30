@@ -259,10 +259,13 @@ func TestDriftConflictIsResolvedByAMasonAndMovesTheBranchOnApproval(t *testing.T
 	if review.Identity.Role != reviewerRole || len(review.Turns) != 1 || review.Turns[0].Request.TurnID != driftReviewTurnID(1, 1) {
 		t.Fatalf("the drift reviewer's thread %+v", review)
 	}
-	for _, want := range []string{candidate, "+/internal/ @upstream @feature", "- CODEOWNERS", "## Sealed spec: spec.md"} {
+	for _, want := range []string{candidate, "- CODEOWNERS", `Change "resolution"`, "## Sealed spec: spec.md"} {
 		if !strings.Contains(review.Turns[0].Request.Prompt, want) {
 			t.Fatalf("the review turn lacks %q:\n%s", want, review.Turns[0].Request.Prompt)
 		}
+	}
+	if resolution := driftResolutionDiff(t, f, repository, stream); !strings.Contains(resolution, "+/internal/ @upstream @feature") || strings.Contains(review.Turns[0].Request.Prompt, "+/internal/ @upstream @feature") {
+		t.Fatalf("the reviewer reads the resolution %q through its prompt or not at all", resolution)
 	}
 
 	completeDriftTurn(t, f, repository, stream, driftReviewerAgent, driftVerdict(t, approvedResolution))
@@ -559,4 +562,17 @@ func TestDriftMasonTurnWorksInTheResolutionWorkspace(t *testing.T) {
 	if got := reports.accepted[turnKey(scope)]; got.Report.Outcome != "Kept both owners" || got.Card != (coreadapter.Card{}) {
 		t.Fatalf("the accepted report %+v", got)
 	}
+}
+
+// driftResolutionDiff reads the resolution change of the workstream's first
+// drift review through the drift reviewer's workstream_diff tool.
+func driftResolutionDiff(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID) string {
+	t.Helper()
+	tool, err := driftDiffTool(context.Background(), f.s.cfg, repository, coreadapter.Scope{Workstream: string(stream), Thread: driftReviewerAgent, Turn: driftReviewTurnID(1, 1), Role: reviewerRole})
+	must(t, err)
+	out, err := tool.Handle(context.Background(), json.RawMessage(`{"change":"resolution"}`))
+	must(t, err)
+	var got struct{ Diff string }
+	must(t, json.Unmarshal(out, &got))
+	return got.Diff
 }

@@ -82,7 +82,8 @@ var roleTools = map[string]string{"inspect_code": "chief_of_staff", "capacity": 
 var deniedTools = map[string]string{"ask": "chief_of_staff"}
 
 func roleRestrictedTool(role, name string) bool {
-	return name == "amend" && role != "mason" && role != "reviewer"
+	return name == "amend" && role != "mason" && role != "reviewer" ||
+		name == "workstream_diff" && role != "reviewer" && role != "committee"
 }
 
 func roleGrant(role string, grant coreadapter.Capabilities) (coreadapter.Capabilities, error) {

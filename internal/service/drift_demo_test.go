@@ -310,6 +310,12 @@ func (d *driftDemo) reviewDrift(ctx context.Context, req agent.Request, _ *agent
 	d.mu.Lock()
 	d.reviewedTip, d.reviewPrompt = tip, req.Prompt
 	d.mu.Unlock()
+	if body, err := callTool(ctx, tools, workstreamDiffTool, map[string]any{"change": "resolution", "paths": []string{masonWrote}}); err != nil || !strings.Contains(body, "+// resume uses the upstream reservation") {
+		return nil, fmt.Errorf("resolution diff %s: %v", body, err)
+	}
+	if body, err := callTool(ctx, tools, workstreamDiffTool, map[string]any{"change": "feature", "files_only": true}); err != nil || !strings.Contains(body, `"path":"`+masonWrote+`"`) {
+		return nil, fmt.Errorf("feature files %s: %v", body, err)
+	}
 	evidence := []ReviewEvidence{{Criterion: "spec#1", Evidence: "The resolution combines the feature's file and upstream reservation"}, {Criterion: "spec#2", Evidence: "Nothing of the feature branch's change was lost"}}
 	body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": evidence, "findings": []ReviewFinding{}})
 	if err != nil || !strings.Contains(body, `"recorded":true`) {
@@ -456,7 +462,7 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	// branch still held resume's landing; only its approval moved the
 	// branch and the seal's base.
 	resolved := records[len(records)-1].Commit
-	if reviewedTip != resume.Commit || !strings.Contains(reviewPrompt, resolved) || !strings.Contains(reviewPrompt, "## Sealed spec: spec.md") {
+	if reviewedTip != resume.Commit || !strings.Contains(reviewPrompt, resolved) || !strings.Contains(reviewPrompt, "## Sealed spec: spec.md") || !strings.Contains(reviewPrompt, `Change "resolution"`) || strings.Contains(reviewPrompt, "+// resume uses the upstream reservation") {
 		t.Fatalf("the drift reviewer read %s with the feature branch at %s", resolved, reviewedTip)
 	}
 	if parentOf(t, f, resolved) != upstream || fileAt(t, f, resolved, masonWrote) != resolvedWrote {

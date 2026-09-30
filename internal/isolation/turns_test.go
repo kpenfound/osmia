@@ -431,6 +431,27 @@ func TestQuestionToolsFollowTheRole(t *testing.T) {
 	}
 }
 
+// Every role is granted workstream_diff and the service registers it for all;
+// only reviewers and the committee, which reads the final review, hold it.
+func TestWorkstreamDiffOnlyReachesReviewers(t *testing.T) {
+	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason", "librarian"} {
+		t.Run(role, func(t *testing.T) {
+			r, _, h, _, input := fixture(t, role, "container")
+			r.Grants[role] = a.Capabilities{Tools: []string{"workstream_diff"}}
+			r.Scoped = func(context.Context, a.Scope) ([]a.Tool, error) {
+				return []a.Tool{{Name: "workstream_diff", Effect: a.ToolRead, Handle: func(context.Context, json.RawMessage) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }}}, nil
+			}
+			if _, err := r.Run(context.Background(), input); err != nil {
+				t.Fatal(err)
+			}
+			held := len(h.requests) != 0 && len(h.requests[0].Tools) == 1
+			if want := role == "reviewer" || role == "committee"; held != want {
+				t.Fatalf("role %s holds workstream_diff: %t", role, held)
+			}
+		})
+	}
+}
+
 // Every role is granted the shed contribution tools by name and the service
 // registers them for all; only the committee holds them, and it holds no tool
 // that writes, runs or fetches.

@@ -579,7 +579,7 @@ func (d drifter) reviewed(ctx context.Context, stream config.WorkstreamID, rebas
 			return UnitVerdict{}, false, err
 		}
 		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: foremanActor, Cause: driftDocument, Depth: 1},
-			AgentID: driftReviewerAgent, ThreadID: driftReviewerAgent, TurnID: turn, Profile: profile, SystemPrompt: "You are the reviewer of a resolution of the conflicts a rebase onto upstream left in a feature branch. Read only the supplied evidence and call verdict with your decision. You cannot edit the candidate.", Prompt: prompt}
+			AgentID: driftReviewerAgent, ThreadID: driftReviewerAgent, TurnID: turn, Profile: profile, SystemPrompt: "You are the reviewer of a resolution of the conflicts a rebase onto upstream left in a feature branch. Read only the supplied evidence: call workstream_diff to read the feature branch's change and the resolution. Call verdict with your decision. You cannot edit the candidate.", Prompt: prompt}
 		_, err = d.repository.EnqueueTurn(ctx, req)
 		return UnitVerdict{}, false, err
 	}
@@ -730,21 +730,17 @@ func (d drifter) reviewPrompt(ctx context.Context, stream config.WorkstreamID, r
 	if err != nil {
 		return "", err
 	}
-	g, err := driftWorkspaces(d.cfg, d.repository).of(stream)
+	diffs, err := driftDiffs(ctx, d.cfg, d.repository, stream, rebase)
 	if err != nil {
 		return "", err
 	}
-	base, err := g.MergeBase(ctx, rebase.Before, rebase.Upstream.Commit)
-	if err != nil {
-		return "", err
-	}
-	before, err := g.Diff(ctx, base, rebase.Before)
-	if err != nil {
-		return "", err
-	}
-	after, err := g.Diff(ctx, rebase.Upstream.Commit, rebase.Candidate)
-	if err != nil {
-		return "", err
+	var changes []string
+	for _, diff := range diffs {
+		text, err := diff.Read(ctx)
+		if err != nil {
+			return "", err
+		}
+		changes = append(changes, fmt.Sprintf("Change %q is %s, from %s to %s:\n%s", diff.Name, diff.About, diff.From, diff.To, changedFiles(text)))
 	}
 	return fmt.Sprintf(`Review the resolution of the conflicts of feature branch %s with upstream against the sealed spec below.
 
@@ -753,11 +749,53 @@ The service rebased feature branch %s from %s onto %s/%s at %s. The rebase confl
 
 A mason resolved the conflicts, and the resolved branch is candidate %s. The feature branch stays at %s until you approve it: a satisfactory verdict moves the feature branch and the seal to the candidate, and material findings return the resolution to the mason with your findings. Check that each conflicted file keeps both what upstream now holds and what the feature branch built, that nothing else of the feature branch's change was lost or altered, and that the sealed criteria still hold. Cite criteria as spec#<n> in your evidence and findings.
 
-The feature branch's change before the rebase, from %s to %s:
-%s
+Read both changes with %s, whole or by file and line range. Their changed files, with added and removed lines:
 
-The candidate's change on upstream, from %s to %s:
 %s
+%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, strings.Join(paths, "\n- "), rebase.Candidate, rebase.Before, workstreamDiffTool, strings.Join(changes, "\n"), spec), nil
+}
 
-%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, strings.Join(paths, "\n- "), rebase.Candidate, rebase.Before, base, rebase.Before, before, rebase.Upstream.Commit, rebase.Candidate, after, spec), nil
+// driftDiffs are the two changes a drift review reads: the feature branch's
+// change before the rebase, from its merge base with upstream, and the
+// resolved candidate's change on upstream.
+func driftDiffs(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, rebase DriftRebase) ([]pinnedDiff, error) {
+	g, err := driftWorkspaces(cfg, repository).of(stream)
+	if err != nil {
+		return nil, err
+	}
+	base, err := g.MergeBase(ctx, rebase.Before, rebase.Upstream.Commit)
+	if err != nil {
+		return nil, err
+	}
+	read := func(from, to string) func(context.Context) (string, error) {
+		return func(ctx context.Context) (string, error) { return g.Diff(ctx, from, to) }
+	}
+	return []pinnedDiff{
+		{Name: "feature", About: "the feature branch's change before the rebase, from its merge base with upstream", From: base, To: rebase.Before, Read: read(base, rebase.Before)},
+		{Name: "resolution", About: "the resolved candidate's change on the upstream commit it was rebased onto", From: rebase.Upstream.Commit, To: rebase.Candidate, Read: read(rebase.Upstream.Commit, rebase.Candidate)},
+	}, nil
+}
+
+// driftDiffTool serves the changes of the drift review a turn belongs to,
+// named by its drift rebase and review in the turn ID.
+func driftDiffTool(ctx context.Context, cfg *config.Config, repository *trace.Repository, scope coreadapter.Scope) (coreadapter.Tool, error) {
+	var k, review int
+	if _, err := fmt.Sscanf(strings.TrimPrefix(scope.Turn, driftReviewerAgent+"-"), "%d-%d", &k, &review); err != nil {
+		return coreadapter.Tool{}, fmt.Errorf("turn %s is not a drift review", scope.Turn)
+	}
+	stream := config.WorkstreamID(scope.Workstream)
+	records, err := driftRebases(repository, stream, k)
+	if err != nil {
+		return coreadapter.Tool{}, err
+	}
+	for i := len(records) - 1; i >= 0; i-- {
+		if records[i].Review == review && records[i].Candidate != "" {
+			diffs, err := driftDiffs(ctx, cfg, repository, stream, records[i])
+			if err != nil {
+				return coreadapter.Tool{}, err
+			}
+			return diffTool(diffs...), nil
+		}
+	}
+	return coreadapter.Tool{}, fmt.Errorf("drift rebase %d records no candidate for review %d", k, review)
 }

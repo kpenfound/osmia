@@ -46,7 +46,7 @@ var chiefGrant = coreadapter.Capabilities{Tools: append([]string{"file_read", st
 // its view of its unit's workspace, ask the chief of staff, file an amendment
 // and report its unit done.
 var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, doneTool}, WriteFiles: true, Execute: true}
-var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, questions.AmendTool, verdictTool, runChecksTool}}
+var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, questions.AmendTool, verdictTool, runChecksTool, workstreamDiffTool}}
 
 // Enforce returns opts with Librarian, Architect, Committee and Threads
 // running every role turn through e. Thread turns are granted to the chief of
@@ -139,17 +139,18 @@ func Enforce(opts Options, e Enforcement) Options {
 					Execution: execution,
 				}
 				if scope.Role == reviewerRole && scope.Thread == driftReviewerAgent {
-					selection.Narrow = &coreadapter.Capabilities{Tools: []string{"file_read", verdictTool}}
+					selection.Narrow = &coreadapter.Capabilities{Tools: []string{"file_read", verdictTool, workstreamDiffTool}}
 				}
 				return selection, nil
 			},
-			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
+			Scoped: func(ctx context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				if scope.Role == masonRole && scope.Thread == driftMasonAgent {
 					amend, err := driftMasonTools(r, scope, now)
 					return append([]coreadapter.Tool{reports.driftTool(scope)}, amend...), err
 				}
 				if scope.Role == reviewerRole && scope.Thread == driftReviewerAgent {
-					return []coreadapter.Tool{verdicts.tool(scope)}, nil
+					diff, err := driftDiffTool(ctx, cfg, r, scope)
+					return []coreadapter.Tool{verdicts.tool(scope, nil), diff}, err
 				}
 				if scope.Role == masonRole {
 					ask, err := questions.Tools(r, masonAgent(scope.Unit), scope, now)
@@ -161,7 +162,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					if identityErr != nil {
 						return nil, identityErr
 					}
-					return append(ask, verdicts.tool(scope), candidateCheckTool(cfg, r, scope, identity.Candidate.Revision, e.Checks)), err
+					return append(ask, verdicts.tool(scope, unitVerdictCheck(r, scope)), candidateCheckTool(cfg, r, scope, identity.Candidate.Revision, e.Checks), reviewDiffTool(cfg, r, scope, identity)), err
 				}
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil

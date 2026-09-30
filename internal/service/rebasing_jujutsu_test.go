@@ -473,7 +473,7 @@ func TestJujutsuDriftConflictIsResolvedInItsWorkspaceBeforeReview(t *testing.T) 
 	}
 	review, err := repository.Thread(stream, driftReviewerAgent)
 	must(t, err)
-	prompt := review.Turns[0].Request.Prompt
+	prompt := review.Turns[0].Request.Prompt + driftResolutionDiff(t, f, repository, stream)
 	if strings.Contains(prompt, "<<<<<<<") || strings.Contains(prompt, ">>>>>>>") || strings.Contains(prompt, "jjconflict") || !strings.Contains(prompt, "+/internal/ @upstream @feature") {
 		t.Fatalf("the drift reviewer reads:\n%s", prompt)
 	}

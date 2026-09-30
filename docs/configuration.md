@@ -293,12 +293,25 @@ Core logs cleanup failures; a failed rule removal still attempts sandbox removal
 
 Unit and final reviewers receive read-only files from the exact candidate commit
 and writable scratch space. Their `run_checks` tool accepts no arguments and runs
-`dagger check` through the service on a separate, fresh candidate export. The copy
-and temporary home are removed afterward. Checks have a fifteen-minute timeout
+`dagger check` through the service on a separate, fresh candidate export, made a
+Git root of its own so Dagger finds the project's workspace. The copy and
+temporary home are removed afterward. Checks have a fifteen-minute timeout
 and return the candidate commit, exit status and up to 64 KiB of output, with an
 explicit truncation flag. The check client inherits only PATH and service engine
 selection, not provider, GitHub or SSH credentials. A project without Dagger checks
 returns the check failure as review evidence; there is no command fallback.
+
+Reviewers read diffs through the `workstream_diff` tool rather than their
+prompts, which list the changed files with added and removed line counts. A unit
+reviewer reads its pinned candidate against its base, and the service refuses a
+diff whose digest differs from the one the review was prepared with. A drift
+reviewer reads two changes, named by `change`: `feature`, the feature branch's
+change before the rebase, and `resolution`, the resolved candidate's change on
+upstream. The final reviewer reads the branch against the upstream commit it was
+rebased onto. Each call returns the whole diff by default, `files_only` for the
+file list, `paths` for chosen files or directories, and `start` and `end` for
+the hunks touching those lines of the named paths. Binary content is not shown,
+and a response over 64 KiB is cut with a truncation flag.
 
 The chief of staff receives a read-only view of its workstream's documents at
 their latest revisions: `spec.md`, `plan.json`, the handed input, the shed

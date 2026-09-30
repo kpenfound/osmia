@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
+	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -152,7 +153,7 @@ func TestReviewerVerdictToolAndOutcome(t *testing.T) {
 	t.Parallel()
 	scope := coreadapter.Scope{Workstream: "stream", Unit: "resume", Thread: "reviewer-resume", Turn: "review-1", Role: reviewerRole}
 	reports := &reviewerReports{}
-	tool := reports.tool(scope)
+	tool := reports.tool(scope, nil)
 	for _, input := range []UnitVerdict{{Decision: "satisfactory"}, {Decision: "material_findings", Evidence: reviewEvidence()}} {
 		data, _ := json.Marshal(input)
 		out, err := tool.Handle(context.Background(), data)
@@ -174,6 +175,111 @@ func TestReviewerVerdictToolAndOutcome(t *testing.T) {
 	var got UnitVerdict
 	if err := json.Unmarshal([]byte(result.Outcome.Report), &got); err != nil || got.Findings[0].Action != good.Findings[0].Action {
 		t.Fatalf("report %+v %v", got, err)
+	}
+}
+
+func TestValidateVerdictNamesTheCriterionProblem(t *testing.T) {
+	t.Parallel()
+	unit := plan.Unit{ID: "errors", Addresses: []plan.Address{{Criterion: "spec#1"}, {Criterion: "spec#2"}}}
+	cite := func(criteria ...string) UnitVerdict {
+		v := UnitVerdict{Decision: "satisfactory", Findings: []ReviewFinding{}}
+		for _, c := range criteria {
+			v.Evidence = append(v.Evidence, ReviewEvidence{Criterion: c, Evidence: "The planned test passes"})
+		}
+		return v
+	}
+	finding := cite("spec#1", "spec#2")
+	finding.Decision = "material_findings"
+	finding.Findings = []ReviewFinding{{Criterion: "footprint", Severity: "material", Evidence: "Touches docs", Action: "Revert docs"}}
+	for _, tc := range []struct {
+		name    string
+		verdict UnitVerdict
+		want    string
+	}{
+		{"valid", cite("spec#1", "spec#2"), ""},
+		{"decorated", cite("spec#1 / plan errors", "spec#2"), `does not address criterion "spec#1 / plan errors"; cite spec#1, spec#2 alone`},
+		{"extra", cite("spec#1", "spec#2", "footprint"), `does not address criterion "footprint"`},
+		{"twice", cite("spec#1", "spec#1", "spec#2"), "criterion spec#1 is cited twice"},
+		{"missing", cite("spec#2"), "the verdict misses spec#1"},
+		{"finding", finding, `a finding cites criterion "footprint"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := validateVerdict(unit, tc.verdict)
+			if tc.want == "" && got != "" || !strings.Contains(got, tc.want) {
+				t.Fatalf("reason %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The unit reviewer's verdict tool refuses a verdict that does not cite the
+// sealed unit's criteria, so the reviewer corrects it within the turn.
+func TestUnitVerdictToolRefusesUnsealedCriteria(t *testing.T) {
+	t.Parallel()
+	_, stream, repo := newReviewFixture(t, "verdict-criteria")
+	scope := coreadapter.Scope{Workstream: string(stream), Unit: "resume", Thread: reviewerAgent("resume"), Turn: "review-1", Role: reviewerRole}
+	reports := &reviewerReports{}
+	tool := reports.tool(scope, unitVerdictCheck(repo, scope))
+	call := func(v UnitVerdict) string {
+		t.Helper()
+		data, _ := json.Marshal(v)
+		out, err := tool.Handle(context.Background(), data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
+	refused := call(UnitVerdict{Decision: "satisfactory", Evidence: []ReviewEvidence{{Criterion: "spec#1 / plan resume", Evidence: "Passes"}, {Criterion: "footprint", Evidence: "In scope"}}})
+	if !strings.Contains(refused, `"recorded":false`) || !strings.Contains(refused, "cite spec#1 alone") {
+		t.Fatalf("decorated criteria accepted: %s", refused)
+	}
+	if out := call(UnitVerdict{Decision: "satisfactory", Evidence: reviewEvidence()}); !strings.Contains(out, `"recorded":true`) {
+		t.Fatalf("corrected verdict refused: %s", out)
+	}
+}
+
+// A completed review turn whose verdict the service refuses sends the unit
+// back through review with the reason, rather than holding it in reviewing.
+func TestRefusedVerdictReviewsTheCandidateAgain(t *testing.T) {
+	t.Parallel()
+	f, stream, repo := newReviewFixture(t, "refused-verdict")
+	r := &reviewers{masons: newMasonController(f.s, repo)}
+	ctx := context.Background()
+	state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
+	must(t, err)
+	must(t, r.one(ctx, stream, "resume", state, false))
+	th, err := repo.Thread(stream, reviewerAgent("resume"))
+	must(t, err)
+	if len(th.Turns) != 1 || !strings.Contains(th.Turns[0].Request.Prompt, "cites exactly these criteria, one evidence entry each: spec#1.") {
+		t.Fatalf("review turns: %+v", th.Turns)
+	}
+	if prompt := th.Turns[0].Request.Prompt; !strings.Contains(prompt, "- "+masonWrote+" (+1 -0)\n") || strings.Contains(prompt, "+package trace") {
+		t.Fatalf("review prompt carries the diff instead of its files:\n%s", prompt)
+	}
+	bad, err := json.Marshal(UnitVerdict{Decision: "satisfactory", Evidence: []ReviewEvidence{{Criterion: "spec#1 / plan resume", Evidence: "Passes"}}, Findings: []ReviewFinding{}})
+	must(t, err)
+	captureTurn(t, f, repo, stream, reviewerAgent("resume"), &coreadapter.Outcome{Status: verdictOutcome, Report: string(bad)})
+
+	for range 2 {
+		must(t, r.one(ctx, stream, "resume", state, false))
+	}
+	refreshed, err := repo.Workflow(stream, trace.UnitSubject("resume"))
+	must(t, err)
+	if refreshed.Value != UnitReviewing || refreshed.Version != state.Version+1 {
+		t.Fatalf("refused verdict left %+v, want reviewing at version %d", refreshed, state.Version+1)
+	}
+	if _, ok, err := r.storedResult(stream, "resume", refreshed); err != nil || ok {
+		t.Fatalf("refused verdict was stored: %v", err)
+	}
+	must(t, r.one(ctx, stream, "resume", refreshed, false))
+	must(t, r.one(ctx, stream, "resume", refreshed, false))
+	th, err = repo.Thread(stream, reviewerAgent("resume"))
+	must(t, err)
+	if len(th.Turns) != 2 || th.Turns[1].Request.TurnID != reviewTurnID("resume", refreshed.Version) {
+		t.Fatalf("review turns after refusal: %+v", th.Turns)
+	}
+	if prompt := th.Turns[1].Request.Prompt; !strings.Contains(prompt, `was refused: unit resume does not address criterion "spec#1 / plan resume"`) {
+		t.Fatalf("fresh review lacks the refusal: %s", prompt)
 	}
 }
 

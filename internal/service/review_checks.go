@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -45,9 +46,17 @@ func (DaggerChecks) Check(ctx context.Context, dir string) (CheckResult, error) 
 		return CheckResult{}, err
 	}
 	defer os.RemoveAll(home)
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + home}
+	// Dagger finds the workspace, and with it dagger.toml, at the enclosing
+	// Git root. The export carries no repository, so it becomes its own root.
+	initialise := exec.CommandContext(ctx, "git", "init", "--quiet", dir)
+	initialise.Env = env
+	if out, err := initialise.CombinedOutput(); err != nil {
+		return CheckResult{}, fmt.Errorf("git init: %w: %s", err, out)
+	}
 	cmd := exec.CommandContext(ctx, "dagger", "check")
 	cmd.Dir = dir
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + home}
+	cmd.Env = slices.Clone(env)
 	// Engine selection belongs to the service. No project or provider secrets
 	// and no SSH agent are inherited by the check client.
 	for _, name := range []string{"DOCKER_HOST", "_EXPERIMENTAL_DAGGER_RUNNER_HOST", "DAGGER_X_RELEASE"} {

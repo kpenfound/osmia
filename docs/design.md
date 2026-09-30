@@ -397,6 +397,7 @@ The Osmia server, role-scoped:
 | `object`, `concede` | committee | A shed contribution, citing the spec, the charter or the knowledge base. |
 | `verdict` | committee | A review verdict with findings and severities. |
 | `run_checks` | unit and final reviewers | Run `dagger check` on a fresh disposable export of the pinned candidate; record its commit, exit status and bounded output. |
+| `workstream_diff` | unit, drift and final reviewers | Read the diff a review is pinned to: the whole diff, the changed files with line counts, chosen files or directories, or the hunks touching a line range. A unit review reads its candidate against its base, a drift review the feature branch's change before the rebase and the resolved candidate's change on upstream, and a final review the branch against upstream. Review prompts list the changed files instead of carrying diffs. |
 | `answer`, `escalate`, `route_amendment`, `propose_charter`, `set_status`, `notify` | chief of staff | The five outcomes of a question, the status, and a notice to in-flight bundles. |
 | `inspect_code` | chief of staff | Read a committed code excerpt; a cited answer queues a librarian knowledge-gap refresh. |
 | `pause`, `resume`, `prioritise`, `capacity` | chief of staff | The factory-wide controls. |

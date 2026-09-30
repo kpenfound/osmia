@@ -132,8 +132,13 @@ func completeMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repositor
 
 func captureMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome *coreadapter.Outcome) trace.QueuedTurn {
 	t.Helper()
+	return captureTurn(t, f, repository, stream, masonAgent(unit), outcome)
+}
+
+// captureTurn completes the agent's latest queued turn with outcome.
+func captureTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent string, outcome *coreadapter.Outcome) trace.QueuedTurn {
+	t.Helper()
 	ctx := context.Background()
-	agent := masonAgent(unit)
 	th, err := repository.Thread(stream, agent)
 	must(t, err)
 	token := "done-" + th.Turns[len(th.Turns)-1].Request.TurnID

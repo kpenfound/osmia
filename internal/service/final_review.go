@@ -864,9 +864,9 @@ func (a *finalReviewer) dispatch(ctx context.Context, stream config.WorkstreamID
 }
 
 // turns is the final reader's isolated turn path: a read-only private view
-// of the reviewed branch, its diff from upstream, the sealed spec and plan,
-// the charter and the units' reports and landings, with reading, reporting
-// and fixed candidate checks. It has no native write, shell or VCS capability.
+// of the reviewed branch, the sealed spec and plan, the charter and the
+// units' reports and landings, with reading, the branch's diff from upstream,
+// reporting and fixed candidate checks. It has no native write, shell or VCS capability.
 func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, report FinalReport) *isolation.Turns {
 	var engine coreadapter.Engine
 	var hosts coreadapter.MCPHosts
@@ -879,7 +879,7 @@ func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, r
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			return a.selectView(ctx, scope, stream, report)
 		},
-		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: []string{"file_read", FinalReportTool, runChecksTool}}},
+		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: []string{"file_read", FinalReportTool, runChecksTool, workstreamDiffTool}}},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Role != committeeRole || scope.Workstream != string(stream) || scope.Project != string(a.repository.Project()) || !strings.HasPrefix(scope.Turn, finalTurnPrefix(in.Review, report.Reader)) {
 				return nil, errors.New("turn scope denied")
@@ -887,7 +887,16 @@ func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, r
 			// The turn that continues one a hard pause stopped replaces the
 			// report that turn recorded.
 			tool, err := a.tool(stream, continuedTurn(scope.Turn), report)
-			return []coreadapter.Tool{tool, candidateCheckTool(a.s.about(a.repository), a.repository, scope, report.Commit, a.s.options.reviewChecks)}, err
+			cfg := a.s.about(a.repository)
+			branch := pinnedDiff{About: "the whole change the reviewed branch makes to the upstream commit it was rebased onto", From: report.Upstream.Commit, To: report.Commit,
+				Read: func(ctx context.Context) (string, error) {
+					g, err := featureWorkspaces(cfg, a.repository).of(stream)
+					if err != nil {
+						return "", err
+					}
+					return g.Diff(ctx, report.Upstream.Commit, report.Commit)
+				}}
+			return []coreadapter.Tool{tool, candidateCheckTool(cfg, a.repository, scope, report.Commit, a.s.options.reviewChecks), diffTool(branch)}, err
 		},
 		Hosts:  hosts,
 		Engine: engine,
@@ -1029,8 +1038,7 @@ func (a *finalReviewer) selectView(ctx context.Context, scope coreadapter.Scope,
 }
 
 // stage builds the view: the reviewed commit's tracked files under branch/,
-// its diff from the upstream commit it was rebased onto as branch.diff, the
-// sealed spec.md and plan.json, the charter revision the review reads as
+// the sealed spec.md and plan.json, the charter revision the review reads as
 // charter.md, and each unit's latest report and landing under units/. It
 // returns the paths to select.
 func (a *finalReviewer) stage(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, report FinalReport, workspace string) ([]string, error) {
@@ -1042,10 +1050,6 @@ func (a *finalReviewer) stage(ctx context.Context, cfg *config.Config, stream co
 		return nil, err
 	}
 	if err := g.Export(ctx, report.Commit, filepath.Join(workspace, "branch")); err != nil {
-		return nil, err
-	}
-	diff, err := g.Diff(ctx, report.Upstream.Commit, report.Commit)
-	if err != nil {
 		return nil, err
 	}
 	spec, graph, err := a.documents(stream, report)
@@ -1060,8 +1064,8 @@ func (a *finalReviewer) stage(ctx context.Context, cfg *config.Config, stream co
 	if i < 0 {
 		return nil, fmt.Errorf("the project records no charter revision %d", report.Charter)
 	}
-	files := map[string]string{"branch.diff": diff, plan.SpecPath: spec.Content, plan.PlanPath: graph.Content, "charter.md": project[i].Content}
-	paths := []string{"branch", "branch.diff", plan.SpecPath, plan.PlanPath, "charter.md"}
+	files := map[string]string{plan.SpecPath: spec.Content, plan.PlanPath: graph.Content, "charter.md": project[i].Content}
+	paths := []string{"branch", plan.SpecPath, plan.PlanPath, "charter.md"}
 	contextBundle, err := a.s.contextFor(a.repository).Assemble(ctx, cfg.Project.ID, bundle.Scope{Workstream: stream, Role: committeeRole})
 	if err != nil {
 		return nil, err
@@ -1395,12 +1399,13 @@ func finalPrompt(report FinalReport) string {
 
 Your view holds:
 - branch/: every tracked file of the reviewed commit.
-- branch.diff: the whole change the branch makes to upstream.
 - spec.md and plan.json: the sealed spec and plan. Cite a criterion as spec#<n>.
 - charter.md: the owner's rules for contributing to this project.
 - context.md: local decisions, knowledge and notices, plus optional scoped external memory.
 - units/<unit>/report.json and landing.json: each unit's last report and how it landed.
 
+Call %s to read the whole change the branch makes to upstream: files_only lists the changed files, and paths and lines narrow the diff.
+
 Read the whole branch, not unit by unit. For every criterion of spec.md, call %s once with all of them: evidence names what in the branch shows the criterion holds, such as files, tests and behaviour; a gap says what is missing, wrong or not shown, including anything that breaks a charter rule. Then end your turn.
-`, report.Review, report.Commit, report.Upstream.Remote, report.Upstream.Branch, report.Upstream.Commit, report.Spec, report.Plan, report.Seal, report.Charter, FinalReportTool)
+`, report.Review, report.Commit, report.Upstream.Remote, report.Upstream.Branch, report.Upstream.Commit, report.Spec, report.Plan, report.Seal, report.Charter, workstreamDiffTool, FinalReportTool)
 }

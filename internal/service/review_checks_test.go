@@ -109,6 +109,7 @@ func TestDaggerChecksBoundOutputAndWithholdCredentials(t *testing.T) {
 [ -d "$HOME" ] && [ "$HOME" = "$TMPDIR" ] || exit 93
 [ -z "$EXPECTED_HOST_HOME" ] || exit 95
 [ -f candidate.txt ] || exit 94
+[ "$(git rev-parse --show-toplevel)" = "$(pwd -P)" ] || exit 96
 printf 'candidate checked\n'
 head -c 70000 /dev/zero | tr '\000' x
 exit 3
