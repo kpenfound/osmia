@@ -53,6 +53,41 @@
   let retries = 0;
   let retryTimer = null;
 
+  // stored reads one of this browser's own preferences, and store writes
+  // one. A browser that refuses storage keeps them for the page's lifetime.
+  function stored(key, fallback) {
+    try {
+      const raw = localStorage.getItem('osmia.' + key);
+      return raw === null ? fallback : JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  }
+
+  function store(key, value) {
+    try {
+      localStorage.setItem('osmia.' + key, JSON.stringify(value));
+    } catch {
+      // The preference lasts until the page closes.
+    }
+  }
+
+  // ui is what the owner is looking at: the selected workstream, the view
+  // the main area shows and the workstream's tab. touched holds when the
+  // owner last interacted with each workstream and seen the activity they
+  // last saw on it. initial holds the workstreams the first status read
+  // listed, whose current activity counts as seen the first time the page
+  // shows them.
+  const ui = {
+    selected: stored('selected', null),
+    view: 'workstream',
+    tab: 'conversation',
+    touched: stored('touched', {}),
+    seen: stored('seen', {}),
+    initial: null,
+    toEnd: true,
+  };
+
   // el builds an element; strings among the children become text nodes.
   function el(tag, attrs, ...children) {
     const node = document.createElement(tag);
@@ -99,8 +134,11 @@
     return out;
   }
 
+  // listedConversations names the conversations the page reads: those of the
+  // workstreams in the list of work, and the selected one's when it is
+  // archived.
   function listedConversations() {
-    return views.status ? views.status.workstreams.map((w) => 'conversation/' + w.workstream) : [];
+    return views.status ? views.status.workstreams.filter((w) => !w.archived || w.workstream === ui.selected).map((w) => 'conversation/' + w.workstream) : [];
   }
 
   // details holds, for each packet and delivery view, the entry it was read
@@ -220,7 +258,8 @@
   function setConnection(state) {
     document.body.dataset.connection = state;
     const label = { connecting: 'Connecting…', live: 'Live', lost: 'Reconnecting…' }[state];
-    byId('connection').textContent = label;
+    byId('connection').title = label;
+    byId('connection').querySelector('.label').textContent = label;
   }
 
   // connect opens the event stream. A lost stream is closed and opened again
@@ -408,7 +447,7 @@
     const targets = [['factory', 'The factory', { scope: 'factory' }]];
     for (const p of projects()) {
       targets.push(['project:' + p.id, 'Project ' + projectName(p.id), { scope: 'project', project: p.id }]);
-      for (const w of views.status ? views.status.workstreams.filter((w) => w.project === p.id) : []) {
+      for (const w of views.status ? views.status.workstreams.filter((w) => w.project === p.id && !w.archived) : []) {
         targets.push(['workstream:' + w.workstream, projectName(p.id) + ': ' + goal(w),
           { scope: 'workstream', project: p.id, workstream: w.workstream }]);
       }
@@ -506,8 +545,265 @@
       ' · ', a.state, ' ', duration(a.elapsed))));
   }
 
+  function streams() {
+    return views.status ? views.status.workstreams : [];
+  }
+
+  // ordered lists the workstreams the owner interacted with most recently
+  // first, and the others after them in the order the status lists them.
+  function ordered() {
+    return streams().map((w, i) => [w, i])
+      .sort(([a, i], [b, j]) => (ui.touched[b.workstream] || 0) - (ui.touched[a.workstream] || 0) || i - j)
+      .map(([w]) => w);
+  }
+
+  // shown is the workstream the main area shows: the selected one while the
+  // status lists it, archived or not, and otherwise the first in the list of
+  // work.
+  function shown() {
+    const list = streams();
+    return list.find((w) => w.workstream === ui.selected) || ordered().find((w) => !w.archived) || null;
+  }
+
+  function terminal(w) {
+    return w.state === 'delivered' || w.state === 'abandoned';
+  }
+
+  function touch(id) {
+    if (!id) {
+      return;
+    }
+    ui.touched[id] = Date.now();
+    store('touched', ui.touched);
+  }
+
+  function inboxOf(id) {
+    return views.inbox ? views.inbox.entries.filter((e) => e.workstream === id) : [];
+  }
+
+  function proposalsOf(id) {
+    return views.charter ? views.charter.proposals.filter((p) => p.workstream === id) : [];
+  }
+
+  // activity is what the owner has seen of a workstream once they look at
+  // it: its state, status and units, what waits on them and its
+  // conversation. It is null until the conversation and inbox are read.
+  function activity(w) {
+    const conversation = views['conversation/' + w.workstream];
+    if (!conversation || !views.inbox) {
+      return null;
+    }
+    const last = conversation.entries[conversation.entries.length - 1];
+    return JSON.stringify([
+      w.state,
+      w.status ? [w.status.goal, w.status.attention, w.status.note] : null,
+      (w.units || []).map((u) => u.unit + ':' + u.state).sort(),
+      inboxOf(w.workstream).map((e) => decisionKey(e) + ':' + e.revision),
+      proposalsOf(w.workstream).map((p) => p.question),
+      conversation.entries.length,
+      last ? last.state : null,
+    ]);
+  }
+
+  // unread reports whether a workstream changed since the owner last looked
+  // at it. One the page has never shown counts as unread unless the first
+  // status read listed it.
+  function unread(w) {
+    const now = activity(w);
+    if (now === null) {
+      return false;
+    }
+    const id = w.workstream;
+    if (!(id in ui.seen)) {
+      if (ui.initial && ui.initial.has(id)) {
+        ui.seen[id] = now;
+        store('seen', ui.seen);
+        return false;
+      }
+      return true;
+    }
+    return ui.seen[id] !== now;
+  }
+
+  // markSeen records the activity of the workstream the owner is looking at.
+  function markSeen() {
+    const w = shown();
+    if (!w || ui.view !== 'workstream' || document.visibilityState !== 'visible' || document.body.dataset.picker === 'open') {
+      return;
+    }
+    const now = activity(w);
+    if (now !== null && ui.seen[w.workstream] !== now) {
+      ui.seen[w.workstream] = now;
+      store('seen', ui.seen);
+    }
+  }
+
+  // forget drops the preferences of workstreams the status no longer lists.
+  function forget() {
+    if (!views.status) {
+      return;
+    }
+    const ids = new Set(streams().map((w) => w.workstream));
+    if (!ui.initial) {
+      ui.initial = ids;
+    }
+    for (const [key, map] of [['touched', ui.touched], ['seen', ui.seen]]) {
+      const gone = Object.keys(map).filter((id) => !ids.has(id));
+      if (gone.length > 0) {
+        gone.forEach((id) => delete map[id]);
+        store(key, map);
+      }
+    }
+  }
+
+  function pausedIn(w) {
+    const pauses = views.runtime ? views.runtime.effective.pauses || [] : [];
+    return pauses.filter((p) => (p.target.scope === 'workstream' && p.target.workstream === w.workstream) ||
+      (p.target.scope === 'project' && p.target.project === w.project));
+  }
+
+  // rows keeps each workstream's row in the list between renders.
+  const rows = new Map();
+
+  function row(id) {
+    let r = rows.get(id);
+    if (r) {
+      return r;
+    }
+    r = {
+      title: el('span', { class: 'title', 'data-field': 'goal' }),
+      project: el('span', { 'data-field': 'project' }),
+      state: el('span', { 'data-field': 'state' }),
+      signals: el('span', { class: 'signals' }),
+    };
+    r.button = el('button', { type: 'button', class: 'row', 'data-select': id },
+      r.title, el('span', { class: 'sub' }, r.project, ' · ', r.state), r.signals);
+    r.button.addEventListener('click', () => select(id));
+    r.node = el('li', {}, r.button);
+    rows.set(id, r);
+    return r;
+  }
+
+  function renderSidebar() {
+    const list = byId('workstream-list');
+    if (!views.status) {
+      place(list, []);
+      return;
+    }
+    const ids = new Set(streams().map((w) => w.workstream));
+    for (const id of rows.keys()) {
+      if (!ids.has(id)) {
+        rows.delete(id);
+      }
+    }
+    const current = shown();
+    const archived = ordered().filter((w) => w.archived);
+    const group = byId('archived');
+    group.hidden = archived.length === 0;
+    byId('archived-count').textContent = String(archived.length);
+    const entry = (w) => {
+      const r = row(w.workstream);
+      const needs = inboxOf(w.workstream).length + proposalsOf(w.workstream).length;
+      const paused = pausedIn(w).length > 0;
+      r.title.textContent = goal(w);
+      r.title.title = goal(w);
+      r.project.textContent = projectName(w.project);
+      r.state.textContent = w.state || 'handed';
+      r.button.setAttribute('aria-current', String(current !== null && current.workstream === w.workstream));
+      r.signals.replaceChildren(...[
+        paused ? el('span', { class: 'paused', 'data-field': 'paused', title: 'Paused' }, 'paused') : null,
+        w.agents && w.agents.length > 0 ? el('span', { class: 'working', 'data-field': 'working', title: w.agents.length + ' running' }) : null,
+        needs > 0 ? el('span', { class: 'needs', 'data-field': 'needs', title: needs + ' waiting for you' }, String(needs)) : null,
+        needs === 0 && unread(w) ? el('span', { class: 'unread', 'data-field': 'unread', title: 'New activity' }) : null,
+      ].filter((node) => node !== null));
+      return r.node;
+    };
+    place(byId('archived-list'), archived.map(entry));
+    const work = ordered().filter((w) => !w.archived);
+    if (work.length === 0) {
+      list.replaceChildren(el('li', { class: 'meta none' }, archived.length === 0 ? 'No workstreams yet.' : 'Every workstream is archived.'));
+      return;
+    }
+    place(list, work.map(entry));
+  }
+
+  // setPicker opens or closes the workstream list at phone widths, where it
+  // covers the page until the owner picks a workstream or closes it.
+  function setPicker(open) {
+    document.body.dataset.picker = open ? 'open' : 'closed';
+    byId('picker-toggle').setAttribute('aria-expanded', String(open));
+  }
+
+  // select shows a workstream in the main area and counts as interacting
+  // with it.
+  function select(id) {
+    const changed = ui.selected !== id;
+    ui.selected = id;
+    store('selected', id);
+    touch(id);
+    setPicker(false);
+    openView('workstream');
+    if (changed) {
+      clearWorkstreamForms();
+      ui.toEnd = true;
+    }
+    if (streams().some((w) => w.workstream === id && w.archived)) {
+      byId('archived').open = true;
+    }
+    render();
+    if (changed && !views['conversation/' + id]) {
+      mark(['conversation/' + id]);
+    }
+    if (changed && ui.tab === 'documents') {
+      readWorkstreamDocuments();
+    }
+  }
+
+  // openView shows a view in the main area: the selected workstream, or one
+  // of the views the header opens.
+  function openView(view) {
+    for (const popover of document.querySelectorAll('[popover]')) {
+      if (popover.matches(':popover-open')) {
+        popover.hidePopover();
+      }
+    }
+    if (view === 'handin') {
+      const w = shown();
+      const project = byId('handin-form').elements.project;
+      if (w && project.value === '') {
+        project.value = w.project;
+      }
+    }
+    const changed = ui.view !== view;
+    ui.view = view;
+    setPicker(false);
+    render();
+    if (changed) {
+      byId('main').scrollTop = view === 'workstream' ? byId('main').scrollHeight : 0;
+    }
+  }
+
+  function setTab(tab) {
+    const changed = ui.tab !== tab;
+    ui.tab = tab;
+    render();
+    if (changed && tab === 'documents') {
+      readWorkstreamDocuments();
+    }
+    if (changed && tab === 'conversation') {
+      ui.toEnd = true;
+      render();
+    }
+  }
+
+  // inboxResult shows the outcome of the last answer to an inbox entry. It
+  // moves to the card of the workstream shown, so it is held here rather
+  // than looked up in the document.
+  const inboxResult = byId('inbox-result');
+
   // cards keeps each workstream's card between renders, so a message being
-  // written survives the events that arrive meanwhile.
+  // written survives the events that arrive meanwhile and a switch to
+  // another workstream and back.
   const cards = new Map();
 
   function send(id, c) {
@@ -516,8 +812,10 @@
       show(c.result, 'error', 'Write a message first.');
       return;
     }
+    touch(id);
     act(c.result, c.button, () => request('POST', '/conversation/' + id, { text }), (entry) => {
       c.text.value = '';
+      ui.toEnd = true;
       mark(['conversation/' + id]);
       return 'Sent; the chief of staff answers in its next turn (' + entry.state + ').';
     });
@@ -529,19 +827,31 @@
       return c;
     }
     c = {
-      summary: el('div', { class: 'summary' }),
+      progress: el('aside', { class: 'progress', 'aria-label': 'Progress' }),
       entries: el('div', { class: 'conversation', 'data-field': 'conversation' }),
-      text: el('textarea', { name: 'text', rows: '2', 'aria-label': 'Message to the chief of staff' }),
-      button: el('button', { type: 'submit' }, 'Send'),
+      heading: el('h3', { class: 'needs-title' }, 'Waiting for you'),
+      decisions: el('div', { class: 'decisions', 'data-field': 'decisions' }),
+      text: el('textarea', { name: 'text', rows: '2', 'aria-label': 'Message to the chief of staff', placeholder: 'Message the chief of staff' }),
+      button: el('button', { type: 'submit', class: 'primary' }, 'Send'),
       result: el('p', { class: 'result', role: 'status' }),
       shown: null,
     };
-    const form = el('form', { class: 'send', 'data-field': 'send' }, c.text, el('div', { class: 'actions' }, c.button), c.result);
+    const form = el('form', { class: 'send composer', 'data-field': 'send' },
+      el('div', { class: 'box' }, c.text, el('div', { class: 'actions' }, c.button)), c.result);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       send(id, c);
     });
-    c.node = el('article', { class: 'workstream', 'data-workstream': id }, c.summary, el('h4', {}, 'Conversation'), c.entries, form);
+    // Enter sends and Shift+Enter starts a new line where there is a
+    // keyboard; on a touch screen Enter starts a new line.
+    c.text.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && window.matchMedia('(pointer: fine)').matches) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    c.node = el('article', { class: 'workstream', 'data-workstream': id }, c.progress,
+      el('div', { class: 'thread' }, c.entries, c.decisions, form));
     cards.set(id, c);
     return c;
   }
@@ -565,7 +875,37 @@
     c.entries.replaceChildren(el('ol', {}, ...view.entries.map((e) => el('li', { class: 'entry', 'data-kind': e.kind, 'data-turn': e.turn, 'data-state': e.state },
       el('div', { class: 'meta' }, e.kind === 'message' ? 'You' : 'Chief of staff', ' · ', when(e.at), ' · ', el('span', { 'data-field': 'state' }, e.state)),
       el('div', { class: 'text', 'data-field': 'text' }, e.text)))));
-    c.entries.scrollTop = c.entries.scrollHeight;
+  }
+
+  // renderDecisions shows what waits for the owner on the workstream above
+  // its message field, with the outcome of the last answer.
+  function renderDecisions(c, id) {
+    const nodes = [...inboxOf(id).map(renderDecision), ...proposalsOf(id).map(renderProposal)];
+    place(c.decisions, [...(nodes.length > 0 ? [c.heading] : []), ...nodes, inboxResult]);
+  }
+
+  function renderHead(w) {
+    const head = byId('workstream-head');
+    const status = w.status;
+    head.dataset.workstream = w.workstream;
+    // The menu offers what the workstream's state allows: abandoning work in
+    // progress, archiving finished work and unarchiving archived work.
+    const offered = {
+      abandon: !terminal(w),
+      'abandon-archive': !terminal(w),
+      archive: terminal(w) && !w.archived,
+      unarchive: !!w.archived,
+    };
+    for (const button of document.querySelectorAll('[data-workstream-action]')) {
+      const action = button.dataset.workstreamAction;
+      button.hidden = action in offered && !offered[action];
+    }
+    head.replaceChildren(
+      el('div', { class: 'line' },
+        el('h2', { 'data-field': 'goal' }, status ? status.goal : 'No status yet'),
+        w.state ? el('span', { class: 'tag', 'data-field': 'state' }, w.state) : '',
+        w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, 'archived') : ''),
+      el('div', { class: 'id' }, el('span', { 'data-field': 'project' }, projectName(w.project)), ' · ', w.workstream, ' · ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')));
   }
 
   function renderWorkstream(w) {
@@ -573,11 +913,7 @@
     const c = card(w.workstream);
     // replaceChildren turns a null child into the text "null", so the absent
     // ones are dropped first.
-    c.summary.replaceChildren(...[
-      el('div', { class: 'line' },
-        el('h3', { 'data-field': 'goal' }, status ? status.goal : 'No status yet'),
-        w.state ? el('span', { class: 'tag', 'data-field': 'state' }, w.state) : null),
-      el('div', { class: 'id' }, el('span', { 'data-field': 'project' }, projectName(w.project)), ' · ', w.workstream, ' · ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
+    c.progress.replaceChildren(...[
       status && status.attention ? el('p', { class: 'attention', 'data-field': 'attention' }, status.attention) : null,
       status ? el('p', { 'data-field': 'note' }, status.note) : el('p', { class: 'meta' }, 'The chief of staff has not written a status.'),
       el('h4', {}, 'Units'),
@@ -585,26 +921,199 @@
       el('h4', {}, 'Sessions'),
       renderAgents(w.agents)].filter((node) => node !== null));
     renderConversation(c, w.workstream);
+    renderDecisions(c, w.workstream);
     return c.node;
   }
 
-  function renderWorkstreams() {
+  function renderWorkstreamView() {
     const box = byId('workstreams');
-    if (!views.status) {
-      place(box, []);
-      return;
-    }
-    const list = views.status.workstreams;
+    const ids = new Set(streams().map((w) => w.workstream));
     for (const id of cards.keys()) {
-      if (!list.some((w) => w.workstream === id)) {
+      if (!ids.has(id)) {
         cards.delete(id);
       }
     }
-    if (list.length === 0) {
-      box.replaceChildren(el('p', { class: 'empty' }, 'No workstreams.'));
+    const w = views.status ? shown() : null;
+    byId('nothing').hidden = w !== null || !views.status;
+    byId('nothing').querySelector('p').textContent = streams().length === 0 ? 'No workstreams yet.' : 'Every workstream is archived.';
+    byId('workstream-top').hidden = w === null;
+    for (const panel of document.querySelectorAll('[data-panel]')) {
+      panel.hidden = w === null || panel.dataset.panel !== ui.tab;
+    }
+    for (const tab of document.querySelectorAll('[data-tab]')) {
+      tab.setAttribute('aria-selected', String(tab.dataset.tab === ui.tab));
+    }
+    if (w === null) {
+      delete byId('workstream-head').dataset.workstream;
+      byId('workstream-head').replaceChildren();
+      place(box, []);
+      box.after(inboxResult);
       return;
     }
-    place(box, list.map(renderWorkstream));
+    const main = byId('main');
+    const atEnd = main.scrollHeight - main.scrollTop - main.clientHeight < 48;
+    renderHead(w);
+    place(box, [renderWorkstream(w)]);
+    if (ui.view === 'workstream' && ui.tab === 'conversation' && (ui.toEnd || atEnd)) {
+      main.scrollTop = main.scrollHeight;
+      ui.toEnd = false;
+    }
+  }
+
+  // renderHeader shows the slots in use per role, the pauses in force and
+  // whether a reload has something to apply.
+  function renderHeader() {
+    const capacity = views.status ? views.status.capacity : null;
+    const meters = byId('meters');
+    if (!capacity) {
+      meters.replaceChildren();
+      byId('meter-total').textContent = '';
+    } else {
+      const used = capacity.roles.reduce((n, r) => n + r.used, 0);
+      const limit = capacity.roles.reduce((n, r) => n + r.limit, 0);
+      meters.replaceChildren(...capacity.roles.map((r) => {
+        const fill = el('span', { class: 'fill' });
+        fill.style.height = (r.limit > 0 ? Math.min(100, Math.round(100 * r.used / r.limit)) : 0) + '%';
+        return el('span', { class: 'meter', 'data-meter': r.role, 'data-full': String(r.used >= r.limit), 'data-waiting': String(r.waiting.length > 0),
+          title: r.role + ': ' + r.used + ' of ' + r.limit + ' slots' + (r.waiting.length > 0 ? ', ' + r.waiting.length + ' waiting' : '') }, fill);
+      }));
+      byId('meter-total').textContent = used + '/' + limit;
+      byId('capacity-button').title = used + ' of ' + limit + ' slots in use';
+    }
+    const pauses = views.runtime ? views.runtime.effective.pauses || [] : [];
+    const button = byId('pause-button');
+    button.dataset.paused = String(pauses.length > 0);
+    button.title = pauses.length === 0 ? 'Nothing is paused' : pauses.length + ' paused';
+    byId('pause-count').textContent = pauses.length > 0 ? String(pauses.length) : '';
+    const lit = views.config ? reloadable(views.config) : false;
+    byId('settings-button').dataset.lit = String(lit);
+    byId('config-lit').hidden = !lit;
+  }
+
+  function renderViews() {
+    for (const view of document.querySelectorAll('#main > .view')) {
+      view.hidden = view.dataset.view !== ui.view;
+    }
+  }
+
+  // position places a popover under the button it belongs to.
+  function position(popover) {
+    const anchor = byId(popover.dataset.anchor);
+    if (!anchor) {
+      return;
+    }
+    const r = anchor.getBoundingClientRect();
+    const width = document.documentElement.clientWidth;
+    popover.style.top = Math.round(r.bottom + 6) + 'px';
+    popover.style.maxHeight = Math.max(160, Math.round(window.innerHeight - r.bottom - 16)) + 'px';
+    if (width < 600) {
+      popover.style.left = '8px';
+      popover.style.right = '8px';
+    } else if (r.left + r.width / 2 > width / 2) {
+      popover.style.left = 'auto';
+      popover.style.right = Math.round(width - r.right) + 'px';
+    } else {
+      popover.style.left = Math.round(r.left) + 'px';
+      popover.style.right = 'auto';
+    }
+  }
+
+  // leaveArchived shows the first workstream of the list of work in place of
+  // one just archived.
+  function leaveArchived(id) {
+    const next = ordered().find((w) => !w.archived && w.workstream !== id);
+    if (next) {
+      select(next.workstream);
+    }
+  }
+
+  // workstreamAction runs an entry of the workstream's menu.
+  function workstreamAction(action) {
+    const w = shown();
+    if (!w) {
+      return;
+    }
+    byId('workstream-menu').hidePopover();
+    touch(w.workstream);
+    if (action === 'pause') {
+      renderPauseForm();
+      byId('pause-form').elements.target.value = 'workstream:' + w.workstream;
+      byId('pause-popover').showPopover();
+      return;
+    }
+    if (action === 'archive' || action === 'unarchive') {
+      const button = document.querySelector('[data-workstream-action="' + action + '"]');
+      act(inboxResult, button, () => request(action === 'archive' ? 'POST' : 'DELETE', '/archive/' + w.workstream), (out) => {
+        if (out.archived) {
+          leaveArchived(w.workstream);
+        }
+        mark(['status', 'runtime']);
+        return out.archived ? 'Archived ' + goal(w) + '; it is listed under Archived.' : goal(w) + ' is back in the list of work.';
+      });
+      return;
+    }
+    setTab('documents');
+    const target = byId(action === 'dependency' ? 'base-form' : 'workstream-action');
+    if (action === 'abandon' || action === 'abandon-archive') {
+      target.elements.action.value = 'abandon';
+      target.elements.archive.checked = action === 'abandon-archive';
+      renderOwnerForms();
+      target.elements.note.focus();
+    } else if (action === 'debate') {
+      target.elements.action.focus();
+    }
+    target.scrollIntoView({ block: 'start' });
+  }
+
+  function setupLayout() {
+    byId('picker-toggle').addEventListener('click', () => {
+      setPicker(document.body.dataset.picker !== 'open');
+      render();
+    });
+    byId('picker-close').addEventListener('click', () => {
+      setPicker(false);
+      render();
+    });
+    for (const id of ['new-workstream', 'sidebar-new']) {
+      byId(id).addEventListener('click', () => openView('handin'));
+    }
+    for (const button of document.querySelectorAll('[data-open]')) {
+      button.addEventListener('click', () => openView(button.dataset.open));
+    }
+    for (const button of document.querySelectorAll('[data-close]')) {
+      button.addEventListener('click', () => openView('workstream'));
+    }
+    for (const button of document.querySelectorAll('[data-tab]')) {
+      button.addEventListener('click', () => setTab(button.dataset.tab));
+    }
+    for (const button of document.querySelectorAll('[data-workstream-action]')) {
+      button.addEventListener('click', () => workstreamAction(button.dataset.workstreamAction));
+    }
+    // The progress beside the conversation sticks below the workstream's
+    // heading and tabs, whose height follows the goal's length.
+    new ResizeObserver(() => {
+      byId('main').style.setProperty('--top', byId('workstream-top').offsetHeight + 'px');
+    }).observe(byId('workstream-top'));
+    for (const popover of document.querySelectorAll('[popover]')) {
+      popover.addEventListener('beforetoggle', (event) => {
+        if (event.newState === 'open') {
+          position(popover);
+        }
+      });
+    }
+    window.addEventListener('resize', () => {
+      for (const popover of document.querySelectorAll('[popover]')) {
+        if (popover.matches(':popover-open')) {
+          position(popover);
+        }
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && document.body.dataset.picker === 'open') {
+        setPicker(false);
+        render();
+      }
+    });
   }
 
   const kinds = {
@@ -673,7 +1182,7 @@
   // submit sends an answer. A refusal reads the inbox again, so the entry
   // shows what the refusal was about; the page never sends it again itself.
   function submit(button, method, path, body, done) {
-    act(byId('inbox-result'), button, () => request(method, path, body), done, () => mark(['inbox']));
+    act(inboxResult, button, () => request(method, path, body), done, () => mark(['inbox']));
   }
 
   function endpoint(entry) {
@@ -682,13 +1191,15 @@
 
   function accept(d) {
     const entry = d.entry;
+    touch(entry.workstream);
     submit(d.accept, entry.answer.method, endpoint(entry), { ...entry.answer.body, text: entry.quick_reply },
       (out) => 'Accepted the recommendation on inbox entry ' + out.number + '.');
   }
 
   function decide(d) {
     const entry = d.entry;
-    const result = byId('inbox-result');
+    touch(entry.workstream);
+    const result = inboxResult;
     const body = { ...entry.answer.body };
     if (entry.kind === 'escalation') {
       const text = d.text.value.trim();
@@ -886,7 +1397,6 @@
       el('div', { class: 'line' },
         el('span', { class: 'tag', 'data-field': 'kind' }, kinds[entry.kind] || entry.kind),
         el('span', { class: 'meta' }, when(entry.opened_at))),
-      el('div', {}, el('strong', { 'data-field': 'workstream' }, workstreamName(entry.workstream)), ' ', el('span', { class: 'id' }, entry.workstream)),
       el('p', { class: 'question', 'data-field': 'question' }, entry.question),
       entry.asked.length === 0 ? null : el('ul', { class: 'asked', 'data-field': 'asked' }, ...entry.asked.map((q) => el('li', {},
         el('span', { class: 'meta' }, q.asked_by + (q.unit ? ' on ' + q.unit : '') + ': '), q.question))),
@@ -920,24 +1430,59 @@
     return d.node;
   }
 
-  function renderInbox() {
-    const box = byId('inbox');
-    if (!views.inbox) {
-      place(box, []);
-      return;
-    }
-    const entries = views.inbox.entries;
-    const keys = new Set(entries.map(decisionKey));
-    for (const key of decisions.keys()) {
-      if (!keys.has(key)) {
-        decisions.delete(key);
+  // pruneInbox forgets the cards of entries and charter proposals the
+  // inbox no longer lists.
+  function pruneInbox() {
+    if (views.inbox) {
+      const keys = new Set(views.inbox.entries.map(decisionKey));
+      for (const key of decisions.keys()) {
+        if (!keys.has(key)) {
+          decisions.delete(key);
+        }
       }
     }
-    if (entries.length === 0) {
-      box.replaceChildren(el('p', { class: 'empty' }, 'Nothing waits for you.'));
-      return;
+    if (views.charter) {
+      const keys = new Set(views.charter.proposals.map(proposalKey));
+      for (const key of proposals.keys()) {
+        if (!keys.has(key)) {
+          proposals.delete(key);
+        }
+      }
     }
-    place(box, entries.map(renderDecision));
+  }
+
+  function proposalKey(p) {
+    return p.workstream + ':' + p.question;
+  }
+
+  // proposals keeps each charter proposal's card between renders.
+  const proposals = new Map();
+
+  function renderProposal(p) {
+    const key = proposalKey(p);
+    let card = proposals.get(key);
+    if (!card) {
+      const decide = (decision) => {
+        const button = el('button', { type: 'button', 'data-field': decision }, decision === 'ratify' ? 'Ratify rule' : 'Decline rule');
+        button.addEventListener('click', () => {
+          touch(p.workstream);
+          act(inboxResult, button, () => request('POST', '/charter/' + p.workstream + '/' + p.question, { decision }),
+            () => {
+              mark(['charter', 'config']);
+              return 'Charter decision recorded.';
+            });
+        });
+        return button;
+      };
+      card = { rule: el('p', { class: 'text', 'data-field': 'rule' }), response: el('p', { class: 'meta' }) };
+      card.node = el('article', { class: 'decision', 'data-proposal': key, 'data-kind': 'charter' },
+        el('div', { class: 'line' }, el('span', { class: 'tag' }, 'Charter rule')),
+        card.rule, card.response, el('div', { class: 'actions' }, decide('ratify'), decide('decline')));
+      proposals.set(key, card);
+    }
+    card.rule.textContent = p.rule;
+    card.response.textContent = 'From your ruling: ' + p.owner_response;
+    return card.node;
   }
 
   // priority is the order being edited: the workstreams in the order shown
@@ -977,7 +1522,7 @@
       priority.order = [...inForce];
       priority.chosen = new Set(inForce);
     }
-    const workstreams = views.status.workstreams.filter((w) => w.project === id);
+    const workstreams = views.status.workstreams.filter((w) => w.project === id && !w.archived);
     const ids = workstreams.map((w) => w.workstream);
     priority.order = priority.order.filter((w) => ids.includes(w)).concat(ids.filter((w) => !priority.order.includes(w)));
     for (const w of [...priority.chosen]) {
@@ -1206,39 +1751,80 @@
     });
   }
 
+  // workstreamForms act on the workstream the main area shows.
+  const workstreamForms = ['documents-form', 'base-form', 'workstream-action', 'trace-form'];
+
+  // clearWorkstreamForms empties what the workstream's forms read of the
+  // workstream shown before.
+  function clearWorkstreamForms() {
+    draftRead = null;
+    baseRead = null;
+    const documents = byId('documents-form');
+    documents.elements.spec.value = '';
+    documents.elements.plan.value = '';
+    byId('document-revisions').textContent = '';
+    byId('trace-content').replaceChildren();
+    for (const id of workstreamForms) {
+      show(byId(id).querySelector('.result'), '', '');
+    }
+    show(inboxResult, '', '');
+  }
+
   function renderOwnerForms() {
     const options = [['', 'Choose a project'], ...projects().map(p => [p.id, projectName(p.id)])];
     for (const select of document.querySelectorAll('[data-project-select]')) {
       setOptions(select, options);
     }
-    const streams = views.status ? views.status.workstreams : [];
+    const all = streams();
     const handin = byId('handin-form');
-    setOptions(handin.elements.base, [['', 'Project upstream'], ...streams.filter(w => w.project === handin.elements.project.value && w.state !== 'abandoned').map(w => [w.workstream, goal(w)])]);
-    for (const id of ['documents-form', 'base-form', 'workstream-action', 'trace-form']) {
-      setOptions(byId(id).elements.workstream, [['', 'Choose a workstream'], ...streams.map(w => [w.workstream, projectName(w.project) + ': ' + goal(w)])]);
+    setOptions(handin.elements.base, [['', 'Project upstream'], ...all.filter(w => w.project === handin.elements.project.value && w.state !== 'abandoned' && !w.archived).map(w => [w.workstream, goal(w)])]);
+    const w = shown();
+    for (const id of workstreamForms) {
+      byId(id).elements.workstream.value = w ? w.workstream : '';
     }
     const charter = byId('project-edit');
     block(charter.querySelector('[type=submit]'), !charterRead || charterRead.project !== charter.elements.project.value);
     const form = byId('documents-form');
-    const w = streams.find(w => w.workstream === form.elements.workstream.value);
-    block(form.querySelector('[type=submit]'), !draftRead || draftRead.workstream !== form.elements.workstream.value || !w || !['sketched', 'in-shed'].includes(w.state));
+    block(form.querySelector('[type=submit]'), !draftRead || !w || draftRead.workstream !== w.workstream || !['sketched', 'in-shed'].includes(w.state));
     const baseForm = byId('base-form');
-    const based = streams.find(w => w.workstream === baseForm.elements.workstream.value);
-    setOptions(baseForm.elements.base, [['', 'Project upstream'], ...streams.filter(w => based && w.project === based.project && w.workstream !== based.workstream && w.state !== 'abandoned').map(w => [w.workstream, goal(w)])]);
-    block(baseForm.querySelector('[type=submit]'), !based || !baseRead || baseRead.workstream !== based.workstream || !['handed', 'sketched', 'in-shed'].includes(based.state));
-    const proposals = views.charter ? views.charter.proposals : [];
-    byId('charter-decisions').replaceChildren(...proposals.map(p => {
-      const decide = decision => {
-        const button = el('button', {type: 'button'}, decision === 'ratify' ? 'Ratify rule' : 'Decline rule');
-        button.addEventListener('click', () => act(byId('charter-result'), button,
-          () => request('POST', '/charter/' + p.workstream + '/' + p.question, {decision}),
-          () => { mark(['charter', 'config']); return 'Charter decision recorded.'; }));
-        return button;
-      };
-      return el('article', {class: 'control'}, el('h3', {}, workstreamName(p.workstream)),
-        el('p', {class: 'text'}, p.rule), el('p', {class: 'meta'}, 'From your ruling: ' + p.owner_response),
-        el('div', {class: 'actions'}, decide('ratify'), decide('decline')));
-    }));
+    setOptions(baseForm.elements.base, [['', 'Project upstream'], ...all.filter(b => w && b.project === w.project && b.workstream !== w.workstream && b.state !== 'abandoned' && !b.archived).map(b => [b.workstream, goal(b)])]);
+    const action = byId('workstream-action');
+    action.querySelector('[data-field=archive-once]').hidden = action.elements.action.value !== 'abandon';
+    block(baseForm.querySelector('[type=submit]'), !w || !baseRead || baseRead.workstream !== w.workstream || !['handed', 'sketched', 'in-shed'].includes(w.state));
+  }
+
+  function readDocuments(button) {
+    const documents = byId('documents-form');
+    const workstream = documents.elements.workstream.value;
+    if (!workstream) { return; }
+    formAction(documents, button, () => request('GET', '/documents/' + workstream), out => {
+      if (documents.elements.workstream.value === workstream) {
+        documents.elements.spec.value = out.spec ? out.spec.content : '';
+        documents.elements.plan.value = out.plan ? out.plan.content : '';
+        draftRead = out.spec && out.plan ? {workstream, spec_revision: out.spec.revision, plan_revision: out.plan.revision} : null;
+        byId('document-revisions').textContent = draftRead ? 'Spec revision ' + out.spec.revision + '; plan revision ' + out.plan.revision + '.' : 'The architect has not drafted both documents yet.';
+      }
+      renderOwnerForms();
+      return 'Documents loaded. Drafts can be edited before ratification; sealed documents require an amendment.';
+    });
+  }
+
+  function readBase(button) {
+    const baseForm = byId('base-form');
+    const workstream = baseForm.elements.workstream.value;
+    if (!workstream) { return; }
+    formAction(baseForm, button, () => request('GET', '/base/' + workstream), out => {
+      if (baseForm.elements.workstream.value === workstream) { baseRead = out; renderOwnerForms(); baseForm.elements.base.value = out.base || ''; }
+      return 'Dependency revision ' + out.revision + ' loaded.';
+    });
+  }
+
+  // readWorkstreamDocuments reads the documents and dependency of the
+  // workstream shown, as the Documents tab opens on it.
+  function readWorkstreamDocuments() {
+    renderOwnerForms();
+    readDocuments(byId('documents-form').querySelector('[data-action=read]'));
+    readBase(byId('base-form').querySelector('[data-action=read]'));
   }
 
   function setupOwnerForms() {
@@ -1246,7 +1832,7 @@
     add.addEventListener('submit', event => {
       event.preventDefault();
       const body = Object.fromEntries(new FormData(add));
-      formAction(add, event.submitter, () => request('POST', '/projects', body), out => 'Registered ' + out.project.name + '. Read and write its charter before handing in work.');
+      formAction(add, event.submitter, () => request('POST', '/projects', body), out => 'Registered ' + out.project.name + '. Read and write its charter in Projects and charters before handing in work.');
     });
     const handin = byId('handin-form');
     handin.elements.project.addEventListener('change', renderOwnerForms);
@@ -1262,6 +1848,7 @@
       formAction(handin, event.submitter, () => request('POST', '/handin', body), out => {
         handinRetry = null;
         handin.elements.content.value = '';
+        select(out.workstream);
         return 'Handed in ' + out.workstream + '.';
       });
     });
@@ -1303,31 +1890,12 @@
       });
     }
     const documents = byId('documents-form');
-    documents.elements.workstream.addEventListener('change', () => {
-      draftRead = null;
-      documents.elements.spec.value = '';
-      documents.elements.plan.value = '';
-      byId('document-revisions').textContent = '';
-      renderOwnerForms();
-    });
-    documents.querySelector('[data-action=read]').addEventListener('click', event => {
-      const workstream = documents.elements.workstream.value;
-      if (!workstream) { return; }
-      formAction(documents, event.target, () => request('GET', '/documents/' + workstream), out => {
-        if (documents.elements.workstream.value === workstream) {
-          documents.elements.spec.value = out.spec ? out.spec.content : '';
-          documents.elements.plan.value = out.plan ? out.plan.content : '';
-          draftRead = out.spec && out.plan ? {workstream, spec_revision: out.spec.revision, plan_revision: out.plan.revision} : null;
-          byId('document-revisions').textContent = draftRead ? 'Spec revision ' + out.spec.revision + '; plan revision ' + out.plan.revision + '.' : 'The architect has not drafted both documents yet.';
-        }
-        renderOwnerForms();
-        return 'Documents loaded. Drafts can be edited before ratification; sealed documents require an amendment.';
-      });
-    });
+    documents.querySelector('[data-action=read]').addEventListener('click', event => readDocuments(event.target));
     documents.addEventListener('submit', event => {
       event.preventDefault();
       if (!draftRead || draftRead.workstream !== documents.elements.workstream.value) { return; }
       const pin = draftRead;
+      touch(pin.workstream);
       formAction(documents, event.submitter, () => request('PUT', '/documents/' + pin.workstream,
         {spec_revision: pin.spec_revision, plan_revision: pin.plan_revision, spec: documents.elements.spec.value, plan: documents.elements.plan.value}), out => {
           if (draftRead === pin) {
@@ -1338,19 +1906,12 @@
         });
     });
     const baseForm = byId('base-form');
-    baseForm.elements.workstream.addEventListener('change', () => { baseRead = null; renderOwnerForms(); });
-    baseForm.querySelector('[data-action=read]').addEventListener('click', event => {
-      const workstream = baseForm.elements.workstream.value;
-      if (!workstream) { return; }
-      formAction(baseForm, event.target, () => request('GET', '/base/' + workstream), out => {
-        if (baseForm.elements.workstream.value === workstream) { baseRead = out; renderOwnerForms(); baseForm.elements.base.value = out.base || ''; }
-        return 'Dependency revision ' + out.revision + ' loaded.';
-      });
-    });
+    baseForm.querySelector('[data-action=read]').addEventListener('click', event => readBase(event.target));
     baseForm.addEventListener('submit', event => {
       event.preventDefault();
       if (!baseRead || baseRead.workstream !== baseForm.elements.workstream.value) { return; }
       const pin = baseRead;
+      touch(pin.workstream);
       formAction(baseForm, event.submitter, () => request('PUT', '/base/' + pin.workstream, {base: baseForm.elements.base.value, revision: pin.revision}), out => {
         if (baseRead === pin) { baseRead = out; }
         return 'Dependency revision ' + out.revision + ' saved.';
@@ -1363,9 +1924,24 @@
       const workstream = action.elements.workstream.value;
       const note = action.elements.note.value.trim();
       const bodies = {object: {argument: note}, more: {rounds: 1}, redraft: {note}, skip: {}, abandon: {reason: note}};
-      formAction(action, event.submitter, () => request('POST', (kind === 'abandon' ? '/abandon/' : '/shed/' + kind + '/') + workstream, bodies[kind]),
-        () => 'Workstream action recorded.');
+      const archive = kind === 'abandon' && action.elements.archive.checked;
+      touch(workstream);
+      formAction(action, event.submitter, async () => {
+        const out = await request('POST', (kind === 'abandon' ? '/abandon/' : '/shed/' + kind + '/') + workstream, bodies[kind]);
+        if (archive) {
+          await request('POST', '/archive/' + workstream);
+        }
+        return out;
+      }, () => {
+        if (!archive) {
+          return 'Workstream action recorded.';
+        }
+        action.elements.archive.checked = false;
+        leaveArchived(workstream);
+        return 'Workstream abandoned and archived.';
+      });
     });
+    action.elements.action.addEventListener('change', renderOwnerForms);
     const trace = byId('trace-form');
     trace.addEventListener('submit', event => {
       event.preventDefault();
@@ -1392,20 +1968,27 @@
   }
 
   function render() {
+    forget();
+    pruneInbox();
+    markSeen();
+    renderViews();
     renderOwnerForms();
     renderProblems();
-    renderInbox();
+    renderHeader();
+    renderSidebar();
+    renderWorkstreamView();
     renderPauses();
     renderPauseForm();
     renderCapacity();
-    renderWorkstreams();
     renderPriority();
     renderProfiles();
     renderProviders();
     renderConfig();
   }
 
+  setupLayout();
   setupOwnerForms();
+  render();
   byId('pause-form').addEventListener('submit', pause);
   byId('priority-form').addEventListener('submit', setPriority);
   byId('priority-project').addEventListener('change', () => {
@@ -1424,6 +2007,7 @@
     if (document.visibilityState === 'visible') {
       reconnectNow();
       mark(['config']);
+      render();
     }
   });
   connect();

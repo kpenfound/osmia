@@ -254,6 +254,14 @@ type AbandonResponse struct {
 	Reason     string              `json:"reason"`
 }
 
+// ArchiveResponse reports whether a workstream is archived after the
+// owner's request.
+type ArchiveResponse struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	Archived   bool                `json:"archived"`
+}
+
 // ShedObjectRequest adds the owner's own objection to the current round.
 type ShedObjectRequest struct {
 	Argument string `json:"argument"`
@@ -549,6 +557,9 @@ type WorkstreamStatus struct {
 	Drift         *DriftStatus        `json:"drift"`
 	Status        *StatusView         `json:"status"`
 	Agents        []AgentStatus       `json:"agents"`
+	// Archived is set when the owner archived the workstream, which takes a
+	// delivered or abandoned workstream out of the list of work.
+	Archived bool `json:"archived,omitempty"`
 }
 
 // AgentStatus is one claimed or parked turn from the durable thread snapshot.

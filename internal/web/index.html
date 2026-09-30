@@ -9,63 +9,198 @@
 <link rel="stylesheet" href="/style.css">
 <script src="/app.js" defer></script>
 </head>
-<body data-connection="connecting">
+<body data-connection="connecting" data-picker="closed">
 <header class="bar">
+  <button type="button" id="picker-toggle" class="icon" aria-label="Workstreams" aria-controls="sidebar" aria-expanded="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+  </button>
   <h1>Osmia</h1>
-  <span id="connection" role="status">Connecting…</span>
+  <span id="connection" role="status" title="Connecting…"><span class="dot"></span><span class="label">Connecting…</span></span>
+  <div class="tools">
+    <button type="button" id="capacity-button" class="meters" popovertarget="capacity-popover" aria-label="Capacity">
+      <span id="meters" class="meter-group"></span><span id="meter-total" class="meter-total"></span>
+    </button>
+    <button type="button" id="pause-button" class="icon" popovertarget="pause-popover" aria-label="Pauses" data-paused="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>
+      <span id="pause-count" class="count"></span>
+    </button>
+    <button type="button" id="new-workstream" class="icon" aria-label="New workstream" title="New workstream">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+    <button type="button" id="settings-button" class="icon" popovertarget="settings-menu" aria-label="Settings" data-lit="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </div>
 </header>
-<main>
-  <section id="problems" class="problems" aria-label="Problems" hidden>
-    <ul id="problem-list"></ul>
-  </section>
-  <section aria-labelledby="inbox-title">
-    <h2 id="inbox-title">Inbox</h2>
-    <p id="inbox-result" class="result" role="status"></p>
-    <div id="inbox" class="inbox"></div>
-  </section>
-  <section aria-labelledby="pauses-title">
-    <h2 id="pauses-title">Pauses</h2>
-    <ul id="pause-list" class="pauses"></ul>
-    <form id="pause-form" class="control">
-      <label>Pause <select name="target"></select></label>
-      <label>Mode <select name="mode">
-        <option value="soft">Soft: running turns finish</option>
-        <option value="hard">Hard: running turns stop</option>
-      </select></label>
-      <label>Reason <input name="reason" type="text" autocomplete="off"></label>
-      <div class="actions"><button type="submit">Pause</button></div>
-      <p id="pause-result" class="result" role="status"></p>
-    </form>
-  </section>
-  <section aria-labelledby="projects-title">
-    <h2 id="projects-title">Projects and new work</h2>
-    <details class="control">
-      <summary>Register a project</summary>
-      <form id="project-add">
-        <label>Name <input name="name" required></label>
-        <label>Upstream repository <input name="upstream" placeholder="owner/repository" required></label>
-        <label>Your fork (optional) <input name="fork" placeholder="Omit to push feature branches to upstream"></label>
-        <label>Clone path on the service machine <input name="clone" required></label>
-        <label>Base branch <input name="base_branch" value="main" required></label>
-        <button type="submit">Register project</button>
+
+<div id="capacity-popover" class="popover" popover data-anchor="capacity-button">
+  <h3>Capacity</h3>
+  <div id="capacity" class="capacity"></div>
+</div>
+
+<div id="pause-popover" class="popover" popover data-anchor="pause-button">
+  <h3>Pauses</h3>
+  <ul id="pause-list" class="pauses"></ul>
+  <form id="pause-form" class="stack">
+    <label>Pause <select name="target"></select></label>
+    <label>Mode <select name="mode">
+      <option value="soft">Soft: running turns finish</option>
+      <option value="hard">Hard: running turns stop</option>
+    </select></label>
+    <label>Reason <input name="reason" type="text" autocomplete="off"></label>
+    <div class="actions"><button type="submit">Pause</button></div>
+    <p id="pause-result" class="result" role="status"></p>
+  </form>
+</div>
+
+<div id="settings-menu" class="popover menu" popover data-anchor="settings-button">
+  <button type="button" data-open="project-add">New project</button>
+  <button type="button" data-open="projects">Projects and charters</button>
+  <button type="button" data-open="priority">Priority</button>
+  <button type="button" data-open="profiles">Profiles and usage</button>
+  <button type="button" data-open="config">Configuration <span id="config-lit" class="lit" hidden></span></button>
+</div>
+
+<div id="workstream-menu" class="popover menu" popover data-anchor="workstream-menu-button">
+  <button type="button" data-workstream-action="pause">Pause or resume…</button>
+  <button type="button" data-workstream-action="dependency">Change dependency</button>
+  <button type="button" data-workstream-action="debate">Debate actions</button>
+  <button type="button" data-workstream-action="abandon">Abandon…</button>
+  <button type="button" data-workstream-action="abandon-archive">Abandon and archive…</button>
+  <button type="button" data-workstream-action="archive">Archive</button>
+  <button type="button" data-workstream-action="unarchive">Unarchive</button>
+</div>
+
+<div class="shell">
+  <nav id="sidebar" aria-label="Workstreams">
+    <div class="sidebar-head">
+      <span>Workstreams</span>
+      <button type="button" id="picker-close" class="icon" aria-label="Close workstreams">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <button type="button" id="sidebar-new" class="new">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> New workstream
+    </button>
+    <ul id="workstream-list" class="rows"></ul>
+    <details id="archived" class="archived" hidden>
+      <summary>Archived <span id="archived-count" class="meta"></span></summary>
+      <ul id="archived-list" class="rows"></ul>
+    </details>
+  </nav>
+
+  <main id="main">
+    <section id="problems" class="problems" aria-label="Problems" hidden>
+      <ul id="problem-list"></ul>
+    </section>
+
+    <section class="view" data-view="workstream" aria-label="Workstream">
+      <div id="nothing" class="nothing" hidden>
+        <p>No workstreams yet.</p>
+        <button type="button" data-open="handin">Hand in a feature</button>
+      </div>
+      <div id="workstream-top" class="workstream-top">
+        <div id="workstream-head" class="workstream-head"></div>
+        <button type="button" id="workstream-menu-button" class="icon" popovertarget="workstream-menu" aria-label="Workstream actions">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
+        </button>
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" data-tab="conversation">Conversation</button>
+          <button type="button" role="tab" data-tab="documents">Documents</button>
+          <button type="button" role="tab" data-tab="trace">Trace</button>
+        </div>
+      </div>
+
+      <div data-panel="conversation" role="tabpanel">
+        <div id="workstreams"></div>
+      </div>
+
+      <div data-panel="documents" role="tabpanel" hidden>
+        <form id="documents-form" class="control">
+          <h3>Specification and plan</h3>
+          <input type="hidden" name="workstream">
+          <p id="document-revisions" class="meta"></p>
+          <label>Specification <textarea name="spec" rows="10"></textarea></label>
+          <label>Plan <textarea name="plan" rows="10"></textarea></label>
+          <div class="actions">
+            <button type="submit" disabled>Save draft documents</button>
+            <button type="button" data-action="read">Read again</button>
+          </div>
+          <p class="result" role="status"></p>
+        </form>
+        <form id="base-form" class="control">
+          <h3>Dependency</h3>
+          <input type="hidden" name="workstream">
+          <label>Base <select name="base"><option value="">Project upstream</option></select></label>
+          <div class="actions">
+            <button type="submit" disabled>Save dependency</button>
+            <button type="button" data-action="read">Read again</button>
+          </div>
+          <p class="meta">Dependencies can be changed before ratification.</p>
+          <p class="result" role="status"></p>
+        </form>
+        <form id="workstream-action" class="control">
+          <h3>Debate and abandonment</h3>
+          <input type="hidden" name="workstream">
+          <label>Action <select name="action">
+            <option value="object">Raise a shed objection</option>
+            <option value="more">Request another debate round</option>
+            <option value="redraft">Request a redraft</option>
+            <option value="skip">Skip debate; ratification still required</option>
+            <option value="abandon">Abandon workstream</option>
+          </select></label>
+          <label>Reason or requested change <textarea name="note" rows="3" required></textarea></label>
+          <label class="check" data-field="archive-once"><input name="archive" type="checkbox"> Archive once abandoned</label>
+          <div class="actions"><button type="submit">Apply action</button></div>
+          <p class="result" role="status"></p>
+        </form>
+      </div>
+
+      <div data-panel="trace" role="tabpanel" hidden>
+        <form id="trace-form" class="control">
+          <input type="hidden" name="workstream">
+          <label>Trace <select name="kind"><option value="">Whole workstream</option><option value="unit">Unit</option><option value="criterion">Criterion</option><option value="commit">Commit</option></select></label>
+          <label>Unit, criterion, or commit <input name="selector" type="text" autocomplete="off"></label>
+          <div class="actions"><button type="submit">Read trace</button></div>
+          <p class="result" role="status"></p>
+          <div id="trace-content" class="trace"></div>
+        </form>
+      </div>
+      <p id="inbox-result" class="result" role="status"></p>
+    </section>
+
+    <section class="view" data-view="handin" aria-labelledby="handin-title" hidden>
+      <div class="view-head"><h2 id="handin-title">New workstream</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <form id="handin-form" class="control">
+        <label>Project <select name="project" data-project-select required></select></label>
+        <label>Base workstream <select name="base"><option value="">Project upstream</option></select></label>
+        <label>Input <select name="source"><option value="text">Written description</option><option value="url">GitHub issue URL</option></select></label>
+        <label>Feature description or issue URL <textarea name="content" rows="8" required></textarea></label>
+        <label class="check"><input name="skip_debate" type="checkbox"> Skip debate; I will still ratify the spec and plan</label>
+        <div class="actions"><button type="submit">Hand in feature</button></div>
         <p class="result" role="status"></p>
       </form>
-    </details>
-    <form id="handin-form" class="control">
-      <label>Project <select name="project" data-project-select required></select></label>
-      <label>Base workstream <select name="base"><option value="">Project upstream</option></select></label>
-      <label>Input <select name="source"><option value="text">Written description</option><option value="url">GitHub issue URL</option></select></label>
-      <label>Feature description or issue URL <textarea name="content" rows="5" required></textarea></label>
-      <label><input name="skip_debate" type="checkbox"> Skip debate; I will still ratify the spec and plan</label>
-      <button type="submit">Hand in feature</button>
-      <p class="result" role="status"></p>
-    </form>
-    <details class="control">
-      <summary>Project charter and maintenance</summary>
-      <form id="project-edit">
+    </section>
+
+    <section class="view" data-view="project-add" aria-labelledby="project-add-title" hidden>
+      <div class="view-head"><h2 id="project-add-title">New project</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <form id="project-add" class="control">
+        <label>Name <input name="name" type="text" required></label>
+        <label>Upstream repository <input name="upstream" type="text" placeholder="owner/repository" required></label>
+        <label>Your fork (optional) <input name="fork" type="text" placeholder="Omit to push feature branches to upstream"></label>
+        <label>Clone path on the service machine <input name="clone" type="text" required></label>
+        <label>Base branch <input name="base_branch" type="text" value="main" required></label>
+        <div class="actions"><button type="submit">Register project</button></div>
+        <p class="result" role="status"></p>
+      </form>
+    </section>
+
+    <section class="view" data-view="projects" aria-labelledby="projects-title" hidden>
+      <div class="view-head"><h2 id="projects-title">Projects and charters</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <form id="project-edit" class="control">
         <label>Project <select name="project" data-project-select required></select></label>
-        <button type="button" data-action="read-charter">Read charter</button>
-        <label>Numbered contributor rules <textarea name="content" rows="8"></textarea></label>
+        <div class="actions"><button type="button" data-action="read-charter">Read charter</button></div>
+        <label>Numbered contributor rules <textarea name="content" rows="10"></textarea></label>
         <div class="actions">
           <button type="submit" disabled>Save charter</button>
           <button type="button" data-action="extract">Extract knowledge</button>
@@ -74,99 +209,50 @@
         </div>
         <p class="result" role="status"></p>
       </form>
-    </details>
-  </section>
-  <section aria-labelledby="charter-decisions-title">
-    <h2 id="charter-decisions-title">Charter proposals</h2>
-    <div id="charter-decisions"></div>
-    <p id="charter-result" class="result" role="status"></p>
-  </section>
-  <section aria-labelledby="documents-title">
-    <h2 id="documents-title">Documents and trace</h2>
-    <form id="documents-form" class="control">
-      <label>Workstream <select name="workstream" required></select></label>
-      <button type="button" data-action="read">Read documents</button>
-      <p id="document-revisions" class="meta"></p>
-      <label>Specification <textarea name="spec" rows="8"></textarea></label>
-      <label>Plan <textarea name="plan" rows="8"></textarea></label>
-      <button type="submit" disabled>Save draft documents</button>
-      <p class="result" role="status"></p>
-    </form>
-    <form id="base-form" class="control">
-      <label>Workstream <select name="workstream" required></select></label>
-      <button type="button" data-action="read">Read dependency</button>
-      <label>Base <select name="base"><option value="">Project upstream</option></select></label>
-      <button type="submit" disabled>Save dependency</button>
-      <p class="meta">Dependencies can be changed before ratification.</p>
-      <p class="result" role="status"></p>
-    </form>
-    <form id="workstream-action" class="control">
-      <label>Workstream <select name="workstream" required></select></label>
-      <label>Action <select name="action">
-        <option value="object">Raise a shed objection</option>
-        <option value="more">Request another debate round</option>
-        <option value="redraft">Request a redraft</option>
-        <option value="skip">Skip debate; ratification still required</option>
-        <option value="abandon">Abandon workstream</option>
-      </select></label>
-      <label>Reason or requested change <textarea name="note" rows="3" required></textarea></label>
-      <button type="submit">Apply action</button>
-      <p class="result" role="status"></p>
-    </form>
-    <form id="trace-form" class="control">
-      <label>Workstream <select name="workstream" required></select></label>
-      <label>Trace <select name="kind"><option value="">Whole workstream</option><option value="unit">Unit</option><option value="criterion">Criterion</option><option value="commit">Commit</option></select></label>
-      <label>Unit, criterion, or commit <input name="selector"></label>
-      <button type="submit">Read trace</button>
-      <p class="result" role="status"></p>
-      <div id="trace-content"></div>
-    </form>
-  </section>
-  <section aria-labelledby="capacity-title">
-    <h2 id="capacity-title">Capacity</h2>
-    <div id="capacity" class="capacity"></div>
-  </section>
-  <section aria-labelledby="work-title">
-    <h2 id="work-title">Active work</h2>
-    <div id="workstreams" class="workstreams"></div>
-  </section>
-  <section aria-labelledby="priority-title">
-    <h2 id="priority-title">Priority</h2>
-    <form id="priority-form" class="control">
-      <label>Project <select id="priority-project" name="project"></select></label>
-      <p id="priority-current" class="meta"></p>
-      <ol id="priority-list" class="priority"></ol>
-      <div class="actions">
-        <button type="submit">Set order</button>
-        <button type="button" id="priority-clear">Clear order</button>
+    </section>
+
+    <section class="view" data-view="priority" aria-labelledby="priority-title" hidden>
+      <div class="view-head"><h2 id="priority-title">Priority</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <form id="priority-form" class="control">
+        <label>Project <select id="priority-project" name="project"></select></label>
+        <p id="priority-current" class="meta"></p>
+        <ol id="priority-list" class="priority"></ol>
+        <div class="actions">
+          <button type="submit">Set order</button>
+          <button type="button" id="priority-clear">Clear order</button>
+        </div>
+        <p id="priority-result" class="result" role="status"></p>
+      </form>
+    </section>
+
+    <section class="view" data-view="profiles" aria-labelledby="profiles-title" hidden>
+      <div class="view-head"><h2 id="profiles-title">Profiles and usage</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="control">
+        <div id="profiles" class="profiles"></div>
+        <p id="profile-result" class="result" role="status"></p>
       </div>
-      <p id="priority-result" class="result" role="status"></p>
-    </form>
-  </section>
-  <section aria-labelledby="profiles-title">
-    <h2 id="profiles-title">Profiles</h2>
-    <div class="control">
-      <div id="profiles" class="profiles"></div>
-      <h4>Provider usage</h4>
-      <ul id="providers" class="providers"></ul>
-      <p id="provider-result" class="result" role="status"></p>
-      <p id="profile-result" class="result" role="status"></p>
-    </div>
-  </section>
-  <section aria-labelledby="config-title">
-    <h2 id="config-title">Configuration</h2>
-    <div id="config" class="control">
-      <div class="line">
-        <span>Loaded <code id="digest"></code></span>
-        <button type="button" id="reload" data-lit="false">Reload</button>
+      <div class="control">
+        <h3>Provider usage</h3>
+        <ul id="providers" class="providers"></ul>
+        <p id="provider-result" class="result" role="status"></p>
       </div>
-      <p id="drift"></p>
-      <ul id="drift-files" class="files"></ul>
-      <p id="last-error" class="attention" hidden></p>
-      <ul id="config-diagnostics" class="notes"></ul>
-      <p id="reload-result" class="result" role="status"></p>
-    </div>
-  </section>
-</main>
+    </section>
+
+    <section class="view" data-view="config" aria-labelledby="config-title" hidden>
+      <div class="view-head"><h2 id="config-title">Configuration</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div id="config" class="control">
+        <div class="line">
+          <span>Loaded <code id="digest"></code></span>
+          <button type="button" id="reload" data-lit="false">Reload</button>
+        </div>
+        <p id="drift"></p>
+        <ul id="drift-files" class="files"></ul>
+        <p id="last-error" class="attention" hidden></p>
+        <ul id="config-diagnostics" class="notes"></ul>
+        <p id="reload-result" class="result" role="status"></p>
+      </div>
+    </section>
+  </main>
+</div>
 </body>
 </html>

@@ -97,32 +97,55 @@ the command line, so an action on the page is validated, recorded and
 announced as the matching command's is. It fits phone and laptop widths and
 updates live from the service's event stream.
 
-The page shows:
+The page is laid out like a chat client:
 
-- Every inbox entry, oldest first: what it asks, what waits on it, its
-  options and the chief of staff's recommendation. A ratification also shows
-  the dissent record; a delivery shows the final report's criteria with their
-  evidence or gaps.
-- Every pause in force, with who set it (you, the daily budget or a provider
-  usage limit), why and when.
-- Capacity: each role's slots in use, the work waiting for a slot and why.
-- Each workstream: its goal and attention note, project, state, units by
-  state, running agents, and its conversation with the chief of staff.
-- The priority order, each role's next profile with its provider's usage
-  today, and the loaded configuration with any [disk drift](#disk-drift) and
-  settings that need a restart.
+- The header shows whether the page is live, the slots in use per role, the
+  number of pauses in force, a button for a new workstream and a settings
+  menu. The slots open to each role's use and the work waiting for a slot and
+  why. The pauses open to every pause with who set it (you, the daily budget
+  or a provider usage limit), why and when, where you resume one or pause the
+  factory, a project or a workstream, softly or hard.
+- The list on the left holds every workstream, the ones you interacted with
+  most recently first. Each row shows its goal, project and state, how many
+  inbox entries wait on it, a dot when it changed since you last looked at
+  it, whether it is working and whether it is paused. Archived workstreams
+  are kept in a collapsed Archived group at the bottom. At phone widths the
+  list is behind the button at the top left and covers the page until you
+  pick a workstream or close it.
+- The main area shows the selected workstream: its goal, state and project,
+  its attention note, status, units by state and running agents, and its
+  conversation with the chief of staff. Its inbox entries sit above the
+  message field: what each asks, what waits on it, its options and the chief
+  of staff's recommendation. A ratification also shows the dissent record; a
+  delivery shows the final report's criteria with their evidence or gaps.
+  The Documents tab reads and edits the draft spec and plan, the dependency,
+  and the debate actions; the Trace tab walks the workstream's record. The
+  `…` menu pauses the workstream or jumps to its dependency, debate actions
+  or abandonment. It also archives a delivered or abandoned workstream,
+  abandons and archives one in progress, and unarchives an archived one.
+  Archiving deletes nothing; see [the command line](cli.md).
+- The settings menu opens new projects, projects and their charters, the
+  priority order, each role's profile with its provider's usage today, and
+  the loaded configuration with any [disk drift](#disk-drift) and settings
+  that need a restart. The settings button is marked while a reload has
+  something to apply.
+
+Which workstream is selected, the order of the list and what you have seen
+are kept in the browser, so another browser has its own.
 
 From the page you can:
 
 - Answer an escalation, accept its quick reply, or pick one of its options.
 - Ratify a plan, sustain or overrule an objection, or ask for a redraft.
-- Decide a contested unit or an amendment.
+- Decide a contested unit, an amendment or a charter proposal.
 - Approve a delivery, editing its pull request description first if you want.
-- Send a message in a workstream's conversation.
+- Send a message in a workstream's conversation. Enter sends where there is a
+  keyboard; Shift+Enter starts a new line.
 - Pause or resume the factory, a project or a workstream, softly or hard.
 - Set or clear a project's priority order and each role's profile.
 - Register a project, read and edit its charter, remove it from active work,
   and hand in new work.
+- Abandon a workstream, archive a finished one and unarchive it.
 - Reload the configuration.
 
 An answer applies to the entry as the page showed it. If the packet, report or

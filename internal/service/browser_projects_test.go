@@ -24,6 +24,7 @@ func TestBrowserControlsEachProjectAndKeepsPriorityOrdersSeparate(t *testing.T) 
 	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.await("both projects in the priority selector", `document.querySelector('#priority-project').options.length === 2`)
 	p.eval(`window.notReloaded = true`, nil)
+	p.openPauses()
 
 	runtimeView := func() RuntimeResponse {
 		t.Helper()
@@ -33,7 +34,7 @@ func TestBrowserControlsEachProjectAndKeepsPriorityOrdersSeparate(t *testing.T) 
 	}
 	for _, id := range []config.ProjectID{project, otherProject} {
 		ws := f.streams[id]
-		p.awaitText(`[data-workstream="`+string(ws)+`"] [data-field=project]`, string(id))
+		p.awaitText(`[data-select="`+string(ws)+`"] [data-field=project]`, string(id))
 		for _, target := range []runtime.Target{
 			{Scope: "project", Project: id},
 			{Scope: "workstream", Project: id, Workstream: ws},
@@ -67,6 +68,7 @@ func TestBrowserControlsEachProjectAndKeepsPriorityOrdersSeparate(t *testing.T) 
 	}
 	// An unsaved selection in one project must not become another project's
 	// order, including when both have no saved priority yet.
+	p.openView("priority")
 	p.click("#priority-list input[type=checkbox]")
 	selectProject(otherProject)
 	p.await("the other project's empty selection", `!document.querySelector('#priority-list input').checked`)

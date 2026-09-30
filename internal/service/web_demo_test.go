@@ -160,6 +160,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	// owner ratifies it there.
 	stream = f.shedAs(t, "web-release")
 	ws := `[data-workstream="` + string(stream) + `"] `
+	p.selectWorkstream(stream)
 	p.awaitText(ws+"[data-field=state]", InShedState)
 	card := decisionCard(entry(InboxRatification))
 	p.awaitText(card+"[data-field=recommendation]", "ratify: no objection stands")
@@ -238,7 +239,10 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	target := "workstream:" + string(stream)
 	shownPause := `[data-pause="` + target + `"] `
 	p.await("the workstream as a pause target", `[...document.querySelectorAll('#pause-form select[name=target] option')].some((o) => o.value === `+quote(target)+`)`)
-	p.choose("#pause-form select[name=target]", target)
+	// The workstream's menu opens the pauses with the workstream chosen.
+	p.click("#workstream-menu-button")
+	p.click(`[data-workstream-action="pause"]`)
+	p.await("the workstream chosen to pause", `document.getElementById('pause-popover').matches(':popover-open') && document.querySelector('#pause-form select[name=target]').value === `+quote(target))
 	p.choose("#pause-form select[name=mode]", "soft")
 	p.typeInto("#pause-form input[name=reason]", "Hold the delivery until I have read it.")
 	p.click("#pause-form button[type=submit]")
@@ -253,6 +257,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 
 	// 6. The owner approves the drafted description on the page. Publication
 	// waits for the pause, and runs once the owner resumes the workstream.
+	p.closePopovers()
 	p.awaitText(card+"[data-field=question]", "Deliver Resumable uploads?")
 	p.await("the drafted description", `document.querySelector(`+quote(card+`textarea[name="description"]`)+`).value === `+quote(presented.Draft))
 	p.await("Approve enabled", `!document.querySelector(`+quote(card+"button[type=submit]")+`).disabled`)
@@ -274,6 +279,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	if opened != 0 {
 		t.Fatal("a pull request was opened while the workstream was paused")
 	}
+	p.openPauses()
 	p.click(shownPause + "[data-field=resume]")
 	p.awaitText("#pause-result", "resumed")
 	p.awaitGone("the resumed pause", shownPause)

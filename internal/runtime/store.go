@@ -44,6 +44,15 @@ type Priority struct {
 	Workstreams []config.WorkstreamID `json:"workstreams"`
 }
 
+// Archive records a delivered or abandoned workstream the owner archived.
+// Archiving takes the workstream out of the owner's list of work and deletes
+// nothing.
+type Archive struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	ArchivedAt time.Time           `json:"archived_at"`
+}
+
 // ProviderLimit records a provider's blocked capacity independently of role bindings.
 type ProviderLimit struct {
 	Backend  string    `json:"backend"`
@@ -58,6 +67,7 @@ type State struct {
 	Priorities     []Priority        `json:"priorities,omitempty"`
 	Profiles       map[string]string `json:"profiles,omitempty"`
 	ProviderLimits []ProviderLimit   `json:"provider_limits,omitempty"`
+	Archived       []Archive         `json:"archived,omitempty"`
 	// BudgetPausedOn is the local calendar day, as YYYY-MM-DD, on which the
 	// daily budget last paused the factory.
 	BudgetPausedOn string `json:"budget_paused_on,omitempty"`
@@ -238,6 +248,7 @@ func (s *Store) Resolve(in Inputs) error {
 func clone(st State) State {
 	st.Pauses = slices.Clone(st.Pauses)
 	st.ProviderLimits = slices.Clone(st.ProviderLimits)
+	st.Archived = slices.Clone(st.Archived)
 	st.Profiles = maps.Clone(st.Profiles)
 	st.Priorities = slices.Clone(st.Priorities)
 	for i := range st.Priorities {
@@ -293,6 +304,13 @@ func resolveAt(st State, in Inputs, at time.Time) (State, []Diagnostic) {
 			}
 		}
 		out.Priorities = append(out.Priorities, valid)
+	}
+	for i, a := range st.Archived {
+		if err := targetReference(Target{Scope: "workstream", Project: a.Project, Workstream: a.Workstream}, in); err != nil {
+			ds = append(ds, Diagnostic{fmt.Sprintf("archived[%d]", i), err.Error()})
+		} else {
+			out.Archived = append(out.Archived, a)
+		}
 	}
 	for _, r := range slices.Sorted(maps.Keys(st.Profiles)) {
 		if err := profileReference(r, st.Profiles[r], in); err != nil {
@@ -450,6 +468,22 @@ func validate(st State) error {
 			return err
 		}
 	}
+	archived := map[config.WorkstreamID]bool{}
+	for _, a := range st.Archived {
+		if err := config.CheckProjectIDs(a.Project); err != nil {
+			return err
+		}
+		if err := config.CheckWorkstreamIDs(a.Workstream); err != nil {
+			return err
+		}
+		if archived[a.Workstream] {
+			return fmt.Errorf("duplicate archived workstream")
+		}
+		archived[a.Workstream] = true
+		if a.ArchivedAt.IsZero() {
+			return fmt.Errorf("archive time must be non-zero")
+		}
+	}
 	for r, p := range st.Profiles {
 		if strings.TrimSpace(r) == "" || strings.TrimSpace(p) == "" {
 			return fmt.Errorf("empty role or profile")
@@ -483,6 +517,9 @@ func (s *Store) mutate(f func(*State, Inputs) error) error {
 		return strings.Compare(a.Target.Scope+string(a.Target.Project)+string(a.Target.Workstream), b.Target.Scope+string(b.Target.Project)+string(b.Target.Workstream))
 	})
 	slices.SortFunc(next.Priorities, func(a, b Priority) int { return strings.Compare(string(a.Project), string(b.Project)) })
+	slices.SortFunc(next.Archived, func(a, b Archive) int {
+		return strings.Compare(string(a.Project)+string(a.Workstream), string(b.Project)+string(b.Workstream))
+	})
 	data, err := s.ops.encode(next)
 	if err != nil {
 		return err
@@ -600,6 +637,39 @@ func (s *Store) ClearPriority(p config.ProjectID) error {
 		return nil
 	})
 }
+
+// SetArchived records a workstream of an active project as archived. The
+// store does not know feature states: the caller checks that the workstream
+// is delivered or abandoned. Archiving an archived workstream keeps the time
+// it was first archived.
+func (s *Store) SetArchived(a Archive) error {
+	if a.ArchivedAt.IsZero() {
+		a.ArchivedAt = time.Now().UTC()
+	}
+	return s.mutate(func(st *State, in Inputs) error {
+		if err := targetReference(Target{Scope: "workstream", Project: a.Project, Workstream: a.Workstream}, in); err != nil {
+			return err
+		}
+		if slices.ContainsFunc(st.Archived, func(v Archive) bool { return v.Workstream == a.Workstream }) {
+			return nil
+		}
+		st.Archived = append(st.Archived, a)
+		return nil
+	})
+}
+
+// ClearArchived returns a workstream to the owner's list of work. Like the
+// other clear operations it accepts a stale workstream.
+func (s *Store) ClearArchived(w config.WorkstreamID) error {
+	return s.mutate(func(st *State, _ Inputs) error {
+		if err := config.CheckWorkstreamIDs(w); err != nil {
+			return err
+		}
+		st.Archived = slices.DeleteFunc(st.Archived, func(v Archive) bool { return v.Workstream == w })
+		return nil
+	})
+}
+
 func (s *Store) SetProfile(role, profile string) error {
 	return s.mutate(func(st *State, in Inputs) error {
 		if err := profileReference(role, profile, in); err != nil {

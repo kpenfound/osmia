@@ -51,6 +51,7 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 
 	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.selectWorkstream(quiet)
 	p.awaitText(card+"[data-field=conversation]", "No messages yet.")
 	p.eval(`window.notReloaded = true`, nil)
 
@@ -93,6 +94,7 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	p.await("the same document", `window.notReloaded === true`)
 
 	// The other workstream's conversation stays its own.
+	p.selectWorkstream(stream)
 	var other string
 	p.eval(textOf(`[data-workstream="`+string(stream)+`"] [data-field=conversation]`), &other)
 	if strings.Contains(other, "Friday") {
@@ -137,6 +139,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 
 	// A profile being chosen and a message being written, still focused,
 	// survive the reads a runtime change causes.
+	p.openView("profiles")
 	p.awaitText(row+"[data-field=source]", "configured")
 	var profile string
 	p.eval(`document.querySelector(`+quote(row+"select")+`).value`, &profile)
@@ -144,6 +147,8 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 		t.Fatalf("the mason's profile select starts with %q chosen", profile)
 	}
 	p.choose(row+"select", "other")
+	p.click(`.view[data-view="profiles"] [data-close]`)
+	p.selectWorkstream(quiet)
 	p.typeInto(draft, "Half a thought")
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Lunch", Source: runtime.PauseOwner})
 	p.awaitText(`[data-pause="factory:"] [data-field=reason]`, "Lunch")
@@ -160,6 +165,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 
 	// A pause needs a scope and a reason; the page refuses one without and
 	// sends nothing.
+	p.openPauses()
 	p.await("the workstream as a pause target", `[...document.querySelectorAll('#pause-form select[name=target] option')].some((o) => o.value === `+quote("workstream:"+string(stream))+`)`)
 	var chosen string
 	p.eval(`document.querySelector('#pause-form select[name=target]').value`, &chosen)
@@ -222,6 +228,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 
 	// The priority order: nothing chosen is refused; quiet then stream is set
 	// and cleared.
+	p.openView("priority")
 	p.click("#priority-form button[type=submit]")
 	p.awaitText("#priority-result", "Choose the workstreams that go first")
 	p.click(`[data-priority="` + string(stream) + `"] [data-field=chosen]`)
@@ -247,6 +254,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 
 	// The mason's profile is overridden and cleared, with the usage of the
 	// profile's provider beside it; an override needs a profile.
+	p.openView("profiles")
 	p.awaitText(row+"[data-field=usage]", "claude: USD")
 	p.await("clear disabled without an override", `document.querySelector(`+quote(row+"[data-field=clear]")+`).disabled`)
 	p.eval(`document.querySelector(`+quote(row+"select")+`).value = ''`, nil)
@@ -286,6 +294,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	data, err := os.ReadFile(file)
 	must(t, err)
 	must(t, os.WriteFile(file, append(data, '\n'), 0600))
+	p.openPauses()
 	p.choose(form+"select[name=target]", "factory")
 	p.typeInto(form+"input[name=reason]", "Overnight")
 	p.click(form + "button[type=submit]")
@@ -322,6 +331,7 @@ func TestBrowserPageReloadLightsOnDiskDriftAndClears(t *testing.T) {
 
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.openView("config")
 	loaded := digest()
 	shownDigest(loaded)
 	p.awaitText("#drift", "matches what is loaded")
@@ -336,6 +346,7 @@ func TestBrowserPageReloadLightsOnDiskDriftAndClears(t *testing.T) {
 	// configuration stays and the error is shown until a reload succeeds.
 	must(t, os.WriteFile(path, append(slices.Clone(original), []byte("masons = \n")...), 0600))
 	lit(true)
+	p.await("the settings button lit", `document.getElementById('settings-button').dataset.lit === 'true'`)
 	p.awaitText(`#drift-files [data-state=invalid]`, "config.toml")
 	p.click("#reload")
 	p.awaitText("#reload-result", "the loaded configuration is unchanged")
@@ -371,5 +382,77 @@ func TestBrowserPageReloadLightsOnDiskDriftAndClears(t *testing.T) {
 	lit(false)
 	p.click("#reload")
 	p.awaitText("#reload-result", "Restart the service to apply listen.web.")
+	p.await("the same document", `window.notReloaded === true`)
+}
+
+// The workstream menu abandons and archives work in progress in one step,
+// and archives finished work. An archived workstream leaves the list of work
+// for the Archived group and the pause targets, the page shows the next
+// workstream in its place, and unarchive returns it.
+func TestBrowserPageArchivesAndUnarchivesWorkstreams(t *testing.T) {
+	p := openBrowser(t)
+	f := newPageFixture(t)
+	ctx := context.Background()
+	row := `[data-select="` + string(quiet) + `"]`
+	menu := func(action string, offered bool) {
+		t.Helper()
+		p.await("the menu offering "+action, `document.querySelector('[data-workstream-action="`+action+`"]').hidden === `+map[bool]string{true: "false", false: "true"}[offered])
+	}
+	archived := func(want bool) {
+		t.Helper()
+		st, err := f.c.Status(ctx, quiet)
+		must(t, err)
+		if st.Archived != want {
+			t.Fatalf("quiet archived %v, want %v: %+v", st.Archived, want, st)
+		}
+	}
+
+	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.eval(`window.notReloaded = true`, nil)
+	p.selectWorkstream(quiet)
+	p.await("no archived group", `document.getElementById('archived').hidden`)
+	menu("archive", false)
+	menu("unarchive", false)
+	menu("abandon-archive", true)
+
+	// Work in progress is abandoned with a reason and archived.
+	p.click("#workstream-menu-button")
+	p.click(`[data-workstream-action="abandon-archive"]`)
+	p.await("the abandonment chosen", `document.querySelector('#workstream-action [name=action]').value === 'abandon' && document.querySelector('#workstream-action [name=archive]').checked`)
+	p.typeInto("#workstream-action [name=note]", "Superseded by the upload design.")
+	p.click("#workstream-action [type=submit]")
+	p.awaitText("#workstream-action .result", "Workstream abandoned and archived.")
+	p.await("the next workstream shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(stream)))
+	p.await("quiet in the archived group", `document.querySelector('#archived-list `+row+`') !== null && document.querySelector('#workstream-list `+row+`') === null`)
+	p.awaitText("#archived-count", "1")
+	p.await("quiet no longer a pause target", `![...document.querySelectorAll('#pause-form select[name=target] option')].some((o) => o.value === `+quote("workstream:"+string(quiet))+`)`)
+	archived(true)
+	if st, _ := f.c.Status(ctx, quiet); st.State == nil || *st.State != AbandonedState {
+		t.Fatalf("quiet was not abandoned: %+v", st)
+	}
+
+	// An archived workstream is still shown when picked from the group, and
+	// unarchive returns it to the list of work.
+	p.click("#archived summary")
+	p.click(`#archived-list ` + row)
+	p.await("quiet shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(quiet)))
+	p.awaitText(`[data-workstream="`+string(quiet)+`"] [data-field=archived]`, "archived")
+	menu("unarchive", true)
+	menu("archive", false)
+	menu("abandon-archive", false)
+	p.click("#workstream-menu-button")
+	p.click(`[data-workstream-action="unarchive"]`)
+	p.awaitText("#inbox-result", "is back in the list of work")
+	p.await("quiet back in the list", `document.querySelector('#workstream-list `+row+`') !== null && document.getElementById('archived').hidden`)
+	archived(false)
+
+	// Finished work is archived directly.
+	menu("archive", true)
+	p.click("#workstream-menu-button")
+	p.click(`[data-workstream-action="archive"]`)
+	p.awaitText("#inbox-result", "it is listed under Archived")
+	p.await("the next workstream shown again", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(stream)))
+	archived(true)
 	p.await("the same document", `window.notReloaded === true`)
 }

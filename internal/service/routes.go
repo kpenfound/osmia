@@ -53,6 +53,8 @@ var Routes = []Route{
 	{Method: http.MethodGet, Path: Prefix + "/status", Summary: "List workstreams with capacity, usage and diagnostics", Response: StatusResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/status/{workstream}", Summary: "Show one workstream", Response: WorkstreamStatus{}},
 	{Method: http.MethodPost, Path: Prefix + "/abandon/{workstream}", Summary: "Abandon an undelivered workstream", Request: AbandonRequest{}, Response: AbandonResponse{}},
+	{Method: http.MethodPost, Path: Prefix + "/archive/{workstream}", Summary: "Archive a delivered or abandoned workstream", Response: ArchiveResponse{}},
+	{Method: http.MethodDelete, Path: Prefix + "/archive/{workstream}", Summary: "Return an archived workstream to the list of work", Response: ArchiveResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/base/{workstream}", Summary: "Show a workstream's base", Response: trace.WorkstreamBase{}},
 	{Method: http.MethodPut, Path: Prefix + "/base/{workstream}", Summary: "Set a workstream's base before ratification", Request: BaseEdit{}, Response: trace.WorkstreamBase{}},
 	{Method: http.MethodGet, Path: Prefix + "/documents/{workstream}", Summary: "Read a workstream's handed document, spec and plan", Response: map[string]trace.Document{}},

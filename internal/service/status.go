@@ -16,12 +16,14 @@ import (
 
 // statuses reports every workstream of every active project, project by
 // project in active_projects order, or none when no project or trace is
-// active. The librarian's workstream carries no feature and is left out. A
+// active. Archived workstreams are reported and marked archived. The
+// librarian's workstream carries no feature and is left out. A
 // workstream whose agent turns, unit states, overlap advisories or drift
 // rebases cannot be read is reported without them and its first such failure
 // in unreadable, by workstream.
 func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagnostic, *APIError) {
 	cfg, projects := s.runtimes()
+	state, _ := s.effective()
 	out := []WorkstreamStatus{}
 	unreadable := map[config.WorkstreamID]Diagnostic{}
 	for _, active := range projects {
@@ -31,6 +33,9 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 		list, api := s.projectStatuses(active, unreadable)
 		if api != nil {
 			return nil, nil, api
+		}
+		for i := range list {
+			list[i].Archived = archivedIn(state, list[i].Workstream)
 		}
 		out = append(out, list...)
 	}

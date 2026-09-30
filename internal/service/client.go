@@ -243,6 +243,20 @@ func (c *Client) Abandon(ctx context.Context, id config.WorkstreamID, reason str
 	return v, err
 }
 
+// Archive archives a delivered or abandoned workstream.
+func (c *Client) Archive(ctx context.Context, id config.WorkstreamID) (ArchiveResponse, error) {
+	var v ArchiveResponse
+	err := c.Do(ctx, "POST", Prefix+"/archive/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
+}
+
+// Unarchive returns an archived workstream to the list of work.
+func (c *Client) Unarchive(ctx context.Context, id config.WorkstreamID) (ArchiveResponse, error) {
+	var v ArchiveResponse
+	err := c.Do(ctx, "DELETE", Prefix+"/archive/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
+}
+
 // ShedObject adds the owner's own objection to a workstream's current round.
 func (c *Client) ShedObject(ctx context.Context, id config.WorkstreamID, argument string) (ShedResponse, error) {
 	return c.shed(ctx, "object", id, ShedObjectRequest{Argument: argument})

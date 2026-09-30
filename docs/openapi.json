@@ -173,6 +173,84 @@
         }
       }
     },
+    "/v1/archive/{workstream}": {
+      "post": {
+        "summary": "Archive a delivered or abandoned workstream",
+        "operationId": "postArchiveByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Return an archived workstream to the list of work",
+        "operationId": "deleteArchiveByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/base/{workstream}": {
       "get": {
         "summary": "Show a workstream's base",
@@ -2388,6 +2466,20 @@
         },
         "type": "object"
       },
+      "ArchiveResponse": {
+        "properties": {
+          "archived": {
+            "type": "boolean"
+          },
+          "project": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "BaseEdit": {
         "properties": {
           "base": {
@@ -4354,6 +4446,21 @@
         },
         "type": "object"
       },
+      "RuntimeArchive": {
+        "properties": {
+          "archived_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "RuntimePause": {
         "properties": {
           "mode": {
@@ -4451,6 +4558,12 @@
       },
       "RuntimeState": {
         "properties": {
+          "archived": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeArchive"
+            },
+            "type": "array"
+          },
           "budget_paused_on": {
             "type": "string"
           },
@@ -5662,6 +5775,9 @@
               "array",
               "null"
             ]
+          },
+          "archived": {
+            "type": "boolean"
           },
           "context_mode": {
             "type": "string"

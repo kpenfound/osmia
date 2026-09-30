@@ -428,8 +428,8 @@ the code classification.
 Loading accepts profiles, bindings, capacity, budgets, shed limits, repository identity
 and landing preferences as declarative inputs. Review slot
 configuration is `capacity.reviewers`; no separate review-policy schema is defined.
-Runtime profile overrides, pauses and priorities belong in `runtime.json`, never
-these files.
+Runtime profile overrides, pauses, priorities and archived workstreams belong
+in `runtime.json`, never these files.
 `osmia config` shows whether each file on disk differs from what is loaded
 ([disk drift](running.md#disk-drift)), and `osmia reload` applies edited files
 to a running service after validating all of them ([reload](running.md#reload)). The root, `listen.socket`,

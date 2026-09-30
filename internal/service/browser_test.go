@@ -17,6 +17,7 @@ import (
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -65,11 +66,18 @@ func openBrowser(t *testing.T) *page {
 	return p
 }
 
+// run runs the actions, and fails with the page's text when one fails.
 func (p *page) run(actions ...chromedp.Action) {
 	p.t.Helper()
 	ctx, cancel := context.WithTimeout(p.ctx, browserTimeout)
 	defer cancel()
-	must(p.t, chromedp.Run(ctx, actions...))
+	if err := chromedp.Run(ctx, actions...); err != nil {
+		var text string
+		shown, cancel := context.WithTimeout(p.ctx, 5*time.Second)
+		defer cancel()
+		chromedp.Run(shown, chromedp.Evaluate("document.body?.innerText ?? ''", &text))
+		p.t.Fatalf("%v; the page shows:\n%s", err, text)
+	}
 }
 
 func (p *page) eval(expression string, out any) {
@@ -116,9 +124,11 @@ func (p *page) awaitText(selector, want string) {
 	p.await(fmt.Sprintf("%q in %s", want, selector), textOf(selector)+".includes("+quote(want)+")")
 }
 
-// click clicks the first element selector matches.
+// click clicks the first element selector matches, once it is scrolled to
+// the middle of the page, clear of the sticky heading and message field.
 func (p *page) click(selector string) {
 	p.t.Helper()
+	p.eval(`document.querySelector(`+quote(selector)+`)?.scrollIntoView({block: 'center'})`, nil)
 	p.run(chromedp.Click(selector, chromedp.ByQuery))
 }
 
@@ -132,6 +142,49 @@ func (p *page) typeInto(selector, text string) {
 func (p *page) choose(selector, value string) {
 	p.t.Helper()
 	p.run(chromedp.SetValue(selector, value, chromedp.ByQuery))
+}
+
+// selectWorkstream picks a workstream from the list the way the owner does,
+// opening the list first where it is collapsed, and waits until the main
+// area shows it.
+func (p *page) selectWorkstream(id config.WorkstreamID) {
+	p.t.Helper()
+	row := `[data-select="` + string(id) + `"]`
+	p.await("the workstream "+string(id)+" in the list", `document.querySelector(`+quote(row)+`) !== null`)
+	var collapsed bool
+	p.eval(`getComputedStyle(document.getElementById('sidebar')).display === 'none'`, &collapsed)
+	if collapsed {
+		p.click("#picker-toggle")
+	}
+	p.click(row)
+	p.await("the workstream "+string(id)+" shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(id))+
+		` && document.body.dataset.picker === 'closed'`)
+}
+
+// closePopovers closes the header's open popovers and menus.
+func (p *page) closePopovers() {
+	p.t.Helper()
+	p.eval(`document.querySelectorAll(':popover-open').forEach((e) => e.hidePopover())`, nil)
+}
+
+// openView opens one of the views the settings menu lists.
+func (p *page) openView(name string) {
+	p.t.Helper()
+	p.closePopovers()
+	p.click("#settings-button")
+	p.click(`#settings-menu [data-open="` + name + `"]`)
+	p.await("the "+name+" view", `!document.querySelector('.view[data-view="`+name+`"]').hidden`)
+}
+
+// openPauses opens the header's pause popover unless it is open.
+func (p *page) openPauses() {
+	p.t.Helper()
+	var open bool
+	p.eval(`document.getElementById('pause-popover').matches(':popover-open')`, &open)
+	if !open {
+		p.click("#pause-button")
+		p.await("the pauses", `document.getElementById('pause-popover').matches(':popover-open')`)
+	}
 }
 
 // paths returns the paths of every URL the page requested.
@@ -310,11 +363,12 @@ func (f *pageFixture) status(t *testing.T, content trace.StatusContent) {
 	must(t, err)
 }
 
-// The page, opened through the web listener, shows each workstream's goal,
-// attention, note, workspace backend, units by state and sessions, the capacity and the pauses
-// from the /v1 views; it follows a status change without a reload, at phone
-// and laptop widths, and after its event stream is lost it reconnects and
-// reads again what changed meanwhile.
+// The page, opened through the web listener, lists the workstreams beside
+// the one it shows, and shows its goal, attention, note, workspace backend,
+// units by state and sessions, with the capacity and the pauses from the
+// /v1 views; it follows a status change without a reload, at phone and
+// laptop widths, and after its event stream is lost it reconnects and reads
+// again what changed meanwhile.
 func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	p := openBrowser(t)
 	f := newPageFixture(t)
@@ -324,8 +378,11 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.awaitText(card+"[data-field=goal]", "Ship resumable uploads.")
+	p.awaitText(`[data-select="`+string(stream)+`"] [data-field=goal]`, "Ship resumable uploads.")
+	p.awaitText(`[data-select="`+string(quiet)+`"] [data-field=paused]`, "paused")
+	p.selectWorkstream(stream)
 	for selector, want := range map[string]string{
+		card + "[data-field=goal]":                               "Ship resumable uploads.",
 		card + "[data-field=state]":                              "building",
 		card + "[data-field=note]":                               "A mason is building the upload unit.",
 		card + "[data-field=workspaces]":                         "git workspaces",
@@ -338,55 +395,85 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 		`#capacity [data-role=mason] [data-field=slots]`:         "1 / 1 slots",
 		`#capacity [data-role=mason] [data-field=waiting]`:       string(stream) + " unit audit: every slot is taken",
 		`#capacity [data-role=reviewer]`:                         "Nothing waits.",
+		`#meter-total`:                                           "/",
 		pause + "[data-field=scope]":                             "Workstream " + string(quiet),
 		pause + "[data-field=reason]":                            "The owner is travelling",
 		pause + "[data-field=source]":                            "the owner",
-		quietCard + "[data-field=goal]":                          "No status yet",
+		`#pause-count`:                                           "1",
 	} {
 		p.awaitText(selector, want)
 	}
+	p.await("the mason meter full", `document.querySelector('[data-meter=mason]').dataset.full === 'true'`)
 	var shown bool
 	p.eval(`document.querySelector(`+quote(card+"[data-field=attention]")+`) !== null || !document.getElementById('problems').hidden`, &shown)
 	if shown {
 		t.Fatal("the page shows an attention or a problem the views do not hold")
 	}
-	// A card without an attention item, and one without a status, show no
-	// "null" text.
-	p.awaitText(quietCard+"[data-field=goal]", "No status yet")
-	p.awaitText(quietCard, "The chief of staff has not written a status.")
-	for _, c := range []string{card, quietCard} {
+	// A workstream without an attention item, and one without a status,
+	// show no "null" text.
+	noNull := func(c string) {
+		t.Helper()
 		var text string
-		p.eval(textOf(c), &text)
+		p.eval(`[...document.querySelectorAll(`+quote(strings.TrimSpace(c))+`)].map((e) => e.textContent).join(' ')`, &text)
 		if strings.Contains(text, "null") {
-			t.Fatalf("the card %s shows null: %q", c, text)
+			t.Fatalf("the workstream %s shows null: %q", c, text)
 		}
 	}
+	noNull(card)
+	p.selectWorkstream(quiet)
+	p.awaitText(quietCard+"[data-field=goal]", "No status yet")
+	p.awaitText(quietCard+".progress", "The chief of staff has not written a status.")
+	noNull(quietCard)
+	p.selectWorkstream(stream)
 
 	// A status change appears without a reload.
 	p.eval(`window.notReloaded = true`, nil)
 	f.status(t, trace.StatusContent{Goal: "Ship resumable uploads with dedupe.", Attention: "Rule on the upload API.", Note: "Upload waits for a ruling.", Agents: []string{"A mason builds upload."}})
 	p.awaitText(card+"[data-field=goal]", "Ship resumable uploads with dedupe.")
+	p.awaitText(`[data-select="`+string(stream)+`"] [data-field=goal]`, "Ship resumable uploads with dedupe.")
 	p.awaitText(card+"[data-field=attention]", "Rule on the upload API.")
 	p.awaitText(card+"[data-field=note]", "Upload waits for a ruling.")
 	p.await("the same document", `window.notReloaded === true`)
 
-	// Laptop widths lay the workstreams side by side and phone widths stack
-	// them; neither scrolls sideways.
-	layout := `(() => {
-		const cards = [...document.querySelectorAll('[data-workstream]')].map((c) => c.getBoundingClientRect());
+	// Laptop widths show the list beside the workstream. Phone widths
+	// collapse the list behind a button; opened, it covers the page until a
+	// workstream is picked. Neither scrolls sideways.
+	type layout struct {
+		Overflow, Fits, SideBySide, ListShown, Covers bool
+	}
+	measure := `(() => {
+		const width = document.documentElement.clientWidth;
+		const list = document.getElementById('sidebar').getBoundingClientRect();
+		const main = document.getElementById('main').getBoundingClientRect();
+		const shown = [...document.querySelectorAll('#workstream-head, #workstreams article')].map((e) => e.getBoundingClientRect());
 		return {
-			overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-			fits: cards.every((r) => r.left >= 0 && r.right <= document.documentElement.clientWidth),
-			sideBySide: cards.length === 2 && cards[0].top === cards[1].top,
+			overflow: document.documentElement.scrollWidth > width,
+			fits: shown.length === 2 && shown.every((r) => r.left >= 0 && r.right <= width),
+			sideBySide: list.width > 0 && list.right <= main.left,
+			listShown: getComputedStyle(document.getElementById('sidebar')).display !== 'none',
+			covers: list.left === 0 && list.top === 0 && Math.round(list.width) === width && Math.round(list.height) === document.documentElement.clientHeight,
 		};
 	})()`
-	var laptop, phone struct{ Overflow, Fits, SideBySide bool }
-	p.eval(layout, &laptop)
-	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile))
-	p.eval(layout, &phone)
-	if laptop.Overflow || !laptop.Fits || !laptop.SideBySide || phone.Overflow || !phone.Fits || phone.SideBySide {
-		t.Fatalf("layout at laptop width %+v, at phone width %+v", laptop, phone)
+	var laptop, phone, picking layout
+	p.eval(measure, &laptop)
+	if laptop.Overflow || !laptop.Fits || !laptop.SideBySide || !laptop.ListShown {
+		t.Fatalf("layout at laptop width %+v", laptop)
 	}
+	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile))
+	p.eval(measure, &phone)
+	if phone.Overflow || !phone.Fits || phone.ListShown {
+		t.Fatalf("layout at phone width %+v", phone)
+	}
+	p.click("#picker-toggle")
+	p.await("the open list", `document.body.dataset.picker === 'open'`)
+	p.eval(measure, &picking)
+	if picking.Overflow || !picking.ListShown || !picking.Covers {
+		t.Fatalf("the open list at phone width %+v", picking)
+	}
+	p.click("#picker-close")
+	p.await("the closed list", `document.body.dataset.picker === 'closed' && getComputedStyle(document.getElementById('sidebar')).display === 'none'`)
+	p.selectWorkstream(quiet)
+	p.selectWorkstream(stream)
 	p.await("the same document", `window.notReloaded === true`)
 
 	// The stream is lost; what changes meanwhile is read once the page
@@ -394,6 +481,7 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	link := newLinkProxy(t, f.s.WebAddr())
 	p.run(chromedp.Navigate("http://" + link.listener.Addr().String() + "/"))
 	p.await("the live connection through the link", `document.body.dataset.connection === 'live'`)
+	p.selectWorkstream(stream)
 	p.awaitText(card+"[data-field=goal]", "Ship resumable uploads with dedupe.")
 	p.eval(`window.notReloaded = true`, nil)
 	link.cut()
@@ -410,6 +498,7 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	p.awaitText(card+"[data-field=note]", "The ruling came; upload continues.")
 	p.await("no attention", `document.querySelector(`+quote(card+"[data-field=attention]")+`) === null`)
 	p.awaitText("#pause-list", "Nothing is paused.")
+	p.await("no pause count", `document.getElementById('pause-count').textContent === ''`)
 	p.await("the same document", `window.notReloaded === true`)
 
 	// A pause set while the stream is live appears without a reload.
@@ -417,6 +506,7 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	livePause := `[data-pause="workstream:` + string(stream) + `"] `
 	p.awaitText(livePause+"[data-field=reason]", "Hold the uploads")
 	p.awaitText(livePause+"[data-field=source]", "the owner")
+	p.awaitText(`[data-select="`+string(stream)+`"] [data-field=paused]`, "paused")
 	p.await("the same document", `window.notReloaded === true`)
 
 	// Everything the page showed came from the page's own files and /v1.
@@ -435,4 +525,51 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 			t.Errorf("the page never requested %s: %v", want, views)
 		}
 	}
+}
+
+// The list puts the workstreams the owner interacted with most recently
+// first. A workstream that changes while the owner looks at another is
+// marked, and looking at it clears the mark. What the page first reads
+// counts as seen, and the order, the selection and what was seen survive a
+// reload.
+func TestBrowserListOrdersByInteractionAndMarksActivity(t *testing.T) {
+	p := openBrowser(t)
+	f := newPageFixture(t)
+	streamRow := `[data-select="` + string(stream) + `"] `
+	first := func(id config.WorkstreamID) {
+		t.Helper()
+		p.await(string(id)+" first in the list", `document.querySelector('#workstream-list [data-select]')?.dataset.select === `+quote(string(id)))
+	}
+
+	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.await("both workstreams listed", `document.querySelectorAll('#workstream-list [data-select]').length === 2`)
+	p.await("the conversations read", `document.querySelector('[data-field=conversation] .meta')?.textContent !== 'Reading the conversation…'`)
+	settle()
+	p.await("nothing marked", `document.querySelector('[data-field=unread]') === null`)
+
+	p.selectWorkstream(quiet)
+	first(quiet)
+	p.selectWorkstream(stream)
+	first(stream)
+	p.selectWorkstream(quiet)
+	first(quiet)
+
+	// A status change on the workstream not shown marks it.
+	f.status(t, trace.StatusContent{Goal: "Ship resumable uploads.", Note: "Upload landed.", Agents: []string{"A mason builds upload."}})
+	p.await("the changed workstream marked", `document.querySelector(`+quote(streamRow+"[data-field=unread]")+`) !== null`)
+	p.await("the shown workstream unmarked", `document.querySelector(`+quote(`[data-select="`+string(quiet)+`"] [data-field=unread]`)+`) === null`)
+	first(quiet)
+
+	// Looking at it clears the mark and puts it first.
+	p.selectWorkstream(stream)
+	p.await("the mark cleared", `document.querySelector('[data-field=unread]') === null`)
+	first(stream)
+
+	p.run(chromedp.Reload())
+	p.await("the live connection after the reload", `document.body.dataset.connection === 'live'`)
+	p.await("the reloaded workstream shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(stream)))
+	first(stream)
+	settle()
+	p.await("nothing marked after the reload", `document.querySelector('[data-field=unread]') === null`)
 }

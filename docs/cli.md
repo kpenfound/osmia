@@ -93,8 +93,9 @@ osmia status --json
   backend (`workspaces=git` or `workspaces=jujutsu`), its latest
   drift rebase (`Drift: rebase <n> <outcome> at <time>`) once it has one, and the
   chief of staff's goal and attention (`Attention: none` when nothing needs
-  you), or `no status yet`. Open owner gates appear under the workstream even
-  before a status is written. Reading the charter records any edit you made to
+  you), or `no status yet`. Archived workstreams are named on one line,
+  `Archived: <workstream-id>...`, instead. Open owner gates appear under the
+  workstream even before a status is written. Reading the charter records any edit you made to
   it; see [charter](charter.md).
 - `status <workstream-id>` shows one workstream of the active project: the same
   facts and owner gates, its latest drift rebase with its reason and one
@@ -206,6 +207,15 @@ osmia status --json
   empty reason, or a workstream the active project does not hold, fails with
   `validation` (exit 4); a delivered or already abandoned workstream fails
   with `conflict` (exit 5).
+- `archive <workstream-id>` archives a delivered or abandoned workstream. It
+  leaves the list of work: `status` names it on its `Archived:` line, the web
+  page moves it to its Archived group, and `status <workstream-id>` marks it
+  `archived=true`. Nothing is deleted: the trace, `handed/` and any branch
+  stay, and the archive is recorded in the root's `runtime.json`. Archiving an
+  archived workstream changes nothing. A workstream in any other state fails
+  with `conflict` (exit 5); abandon it first.
+- `unarchive <workstream-id>` returns an archived workstream to the list of
+  work. A workstream that is not archived is left as it is.
 - `shed object <workstream-id> <argument>` adds your own objection to the
   current round of a workstream's debate. The argument is one argument; quote
   it. It is recorded as yours, stands in the dissent record and blocks, and the

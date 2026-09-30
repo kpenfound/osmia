@@ -177,7 +177,7 @@ terminal: delivered, abandoned
 
 The feature states move forward. Amendments revise the documents without moving the feature backward. An assembled feature whose final review finds gaps remains assembled while explicit follow-up units use the normal implementation, review and landing loop; its final review runs again after those units land. Changes to the ratified intent or plan still require the amendment gate. Neither a failed final review nor the end of a debate cap authorises delivery.
 
-The owner may abandon an undelivered workstream. Abandonment stops new turns, cancels active turns while retaining their recorded work, releases capacity and preserves the trace. It does not delete the owner's branch or close an existing pull request. Delivered and abandoned workstreams are terminal.
+The owner may abandon an undelivered workstream. Abandonment stops new turns, cancels active turns while retaining their recorded work, releases capacity and preserves the trace. It does not delete the owner's branch or close an existing pull request. Delivered and abandoned workstreams are terminal. The owner may archive a terminal workstream to take it out of the list of work, and unarchive it to bring it back. Archiving is a runtime setting, like a pause; it deletes nothing and does not change the feature state.
 
 ### 5.2 Unit states
 
@@ -426,7 +426,7 @@ One long-running process holds the scheduler, the threads, the event bus, the tr
 - Pause and resume at factory, project and workstream level. Priority order.
 - Profile bindings: get, override, clear. Usage per provider.
 - Configuration: what is loaded and its digest, reload, last error.
-- Projects: add, remove, extract the knowledge base. Workstreams: hand in, abandon.
+- Projects: add, remove, extract the knowledge base. Workstreams: hand in, abandon, archive and unarchive.
 - Trace: walk a workstream's record.
 
 ### 10.3 Runtime state is not configuration
@@ -447,7 +447,7 @@ A new question, a contested unit, a delivery or a budget pause can go out throug
 
 ### 11.1 Web
 
-Built for a phone as much as a laptop. Embedded in the binary, one page, fed by the event stream.
+Built for a phone as much as a laptop. Embedded in the binary, one page, fed by the event stream. Workstreams are listed beside the one selected, which takes the main area; each inbox entry shows with its workstream and is counted on that workstream's row, so what needs you is visible from the list.
 
 - **Active work.** Every workstream with its goal, attention and note, its units by state, sessions running with their role and profile, and the capacity view: slots used per role kind, who is waiting, and every pause in force with its reason.
 - **Inbox.** Every open question, contested unit and ratification packet across workstreams and projects, each with the chief of staff's rephrasing, the options and its recommendation, answered inline.
@@ -472,6 +472,7 @@ osmia inbox                          open questions
 osmia answer <n> "..."               a ruling
 osmia send <workstream> "..."        a message to the chief of staff
 osmia pause|resume [all|<project>|<workstream>]
+osmia archive|unarchive <workstream> a delivered or abandoned workstream out of the list, or back
 osmia profiles [set <role> <profile>|clear <role>]
 osmia reload
 osmia trace <workstream> [unit|criterion|commit]

@@ -37,6 +37,8 @@ const usage = `Usage: osmia <command> [--root PATH]
   project rebase <project-id> [--json]
   handin <project-id> <path|issue-url|-> [--base WORKSTREAM] [--skip-debate] [--json]
   abandon <workstream-id> <reason> [--json]
+  archive <workstream-id> [--json]
+  unarchive <workstream-id> [--json]
   shed object <workstream-id> <argument> [--json]
   shed rule <workstream-id> <objection-id> <sustain|dismiss> [note] [--json]
   shed overrule <workstream-id> <objection-id> [reason] [--json]
@@ -206,7 +208,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) <= 1
 	case "send", "abandon":
 		valid = len(a) == 2
-	case "ratify":
+	case "ratify", "archive", "unarchive":
 		valid = len(a) == 1
 	case "amendment":
 		valid = len(a) == 2 || (len(a) == 3 || len(a) == 4) && slices.Contains([]string{service.AmendmentApprove, service.AmendmentReject, service.AmendmentRound, service.AmendmentOverrule}, a[2])
@@ -268,7 +270,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "trace" || cmd == "reload" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "trace" || cmd == "reload" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "stop" {
 		if err := c.Do(ctx, "POST", service.Prefix+"/stop", nil, nil); err != nil {
@@ -477,6 +479,29 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Workstream %s abandoned\nReason: %s\n", result.Workstream, result.Reason)
+		return 0
+	}
+	if cmd == "archive" || cmd == "unarchive" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		call := c.Archive
+		if cmd == "unarchive" {
+			call = c.Unarchive
+		}
+		result, err := call(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		if result.Archived {
+			fmt.Fprintf(stdout, "Workstream %s archived; osmia unarchive %s returns it to the list\n", result.Workstream, result.Workstream)
+		} else {
+			fmt.Fprintf(stdout, "Workstream %s is in the list of work\n", result.Workstream)
+		}
 		return 0
 	}
 	if cmd == "shed" {
@@ -1235,7 +1260,12 @@ func showWorkstreams(w io.Writer, all service.StatusResponse) {
 		fmt.Fprintln(w, "  none")
 	}
 	defer diagnostics(w, all.Diagnostics)
+	var archived []string
 	for _, st := range all.Workstreams {
+		if st.Archived {
+			archived = append(archived, string(st.Workstream))
+			continue
+		}
 		fmt.Fprintf(w, "  %s %s\n", st.Workstream, facts(st))
 		for _, gate := range st.Gates {
 			fmt.Fprintf(w, "    Gate: %s %s\n", gate.Kind, gate.Reference)
@@ -1254,6 +1284,9 @@ func showWorkstreams(w io.Writer, all service.StatusResponse) {
 			continue
 		}
 		fmt.Fprintf(w, "    Goal: %s\n    Attention: %s\n", st.Status.Goal, attention(st.Status.Attention))
+	}
+	if len(archived) > 0 {
+		fmt.Fprintf(w, "  Archived: %s\n", strings.Join(archived, " "))
 	}
 }
 
@@ -1468,7 +1501,11 @@ func facts(st service.WorkstreamStatus) string {
 	if st.State != nil {
 		state = *st.State
 	}
-	return fmt.Sprintf("state=%s open_questions=%d context_mode=%s workspaces=%s", state, st.OpenQuestions, st.ContextMode, st.Workspaces)
+	out := fmt.Sprintf("state=%s open_questions=%d context_mode=%s workspaces=%s", state, st.OpenQuestions, st.ContextMode, st.Workspaces)
+	if st.Archived {
+		out += " archived=true"
+	}
+	return out
 }
 
 func attention(s string) string {

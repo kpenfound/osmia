@@ -172,9 +172,13 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+link.listener.Addr().String()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.eval(`window.notReloaded = true`, nil)
+	// The list counts what waits on each workstream; the entries show with
+	// their workstream.
+	p.awaitText(`[data-select="`+string(stream)+`"] [data-field=needs]`, "4")
+	p.await("nothing waits on the quiet workstream", `document.querySelector(`+quote(`[data-select="`+string(quiet)+`"] [data-field=needs]`)+`) === null`)
+	p.selectWorkstream(stream)
 	for selector, want := range map[string]string{
 		accepted + "[data-field=kind]":            "Question",
-		accepted + "[data-field=workstream]":      "Ship resumable uploads.",
 		accepted + "[data-field=question]":        "Where should upload state live?",
 		accepted + "[data-field=asked]":           "Where does upload state live?",
 		accepted + "[data-field=blocked]":         "The upload unit.",
@@ -225,6 +229,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	p.click(written + "button[type=submit]")
 	p.awaitText("#inbox-result", "Answered inbox entry 2.")
 	p.awaitGone("the written answer's entry", written)
+	p.awaitText(`[data-select="`+string(stream)+`"] [data-field=needs]`, "3")
 	if r := ruling(second.ID); r == nil || r.OwnerResponse != "Keep the history; add a fixup commit." || r.Actor != ownerActor {
 		t.Fatalf("the written answer's ruling: %+v", r)
 	}
@@ -338,6 +343,7 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.eval(`window.notReloaded = true`, nil)
+	p.selectWorkstream(ws)
 	p.awaitText(card+"[data-field=kind]", "Ratification")
 	p.awaitText(card+"[data-field=question]", "Ratify spec.md revision 1 and plan.json revision 1? Debate ended after round 1")
 	p.awaitText(card+"[data-field=recommendation]", "do not ratify yet: ratification is blocked by 2 objections")
@@ -494,6 +500,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 			return send(url, init);
 		};
 	})()`, nil)
+	p.selectWorkstream(ws)
 	p.awaitText(card+"[data-field=kind]", "Delivery")
 	p.awaitText(card+"[data-field=question]", "Deliver Resumable uploads? Final review 1 of commit "+report.Commit)
 	p.awaitText(card+"[data-field=options]", "Options: approve")
