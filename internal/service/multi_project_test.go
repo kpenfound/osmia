@@ -295,6 +295,7 @@ func TestProjectScopedRequestsNameOneOfSeveralProjects(t *testing.T) {
 	for _, w := range status.Workstreams {
 		listed = append(listed, w.Project)
 	}
+	slices.Sort(listed)
 	if !slices.Equal(listed, []config.ProjectID{project, otherProject}) {
 		t.Fatalf("status lists workstreams of %v", listed)
 	}

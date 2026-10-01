@@ -448,11 +448,7 @@ func (r *Repository) Workspaces(stream config.WorkstreamID) (string, error) {
 }
 
 func (r *Repository) workspaces(stream config.WorkstreamID) (string, error) {
-	name := "workstreams/" + string(stream) + "/workstream.json"
-	if err := r.checked(name); err != nil {
-		return "", err
-	}
-	m, err := r.readManifest(name, "osmia.trace.workstream", stream)
+	m, err := r.workstreamManifest(stream)
 	if err != nil {
 		return "", err
 	}
@@ -460,6 +456,16 @@ func (r *Repository) workspaces(stream config.WorkstreamID) (string, error) {
 		return config.WorkspacesGit, nil
 	}
 	return m.Workspaces, nil
+}
+
+// workstreamManifest reads a workstream's creation manifest, whose Header.At
+// is the workstream's creation time.
+func (r *Repository) workstreamManifest(stream config.WorkstreamID) (manifestRecord, error) {
+	name := "workstreams/" + string(stream) + "/workstream.json"
+	if err := r.checked(name); err != nil {
+		return manifestRecord{}, err
+	}
+	return r.readManifest(name, "osmia.trace.workstream", stream)
 }
 
 // CreateWorkstream commits a new workstream that records no workspace
