@@ -58,7 +58,7 @@ func TestExactReviewDemonstration(t *testing.T) {
 				names = append(names, tool.Name)
 			}
 			slices.Sort(names)
-			if !slices.Equal(names, []string{questions.AmendTool, questions.AskTool, "file_read", runChecksTool, verdictTool, workstreamDiffTool}) {
+			if !slices.Equal(names, []string{questions.AskTool, "file_read", runChecksTool, verdictTool, workstreamDiffTool}) {
 				return nil, fmt.Errorf("reviewer tools %+v", listed.Tools)
 			}
 			identity, err := reviewIdentityInPrompt(req.Prompt)
@@ -80,19 +80,12 @@ func TestExactReviewDemonstration(t *testing.T) {
 				}
 				return &agent.Result{ClaudeID: req.Name, ResultText: "Asked", SessionDir: req.SessionDir, NumTurns: 1}, nil
 			}
-			v := UnitVerdict{Decision: "satisfactory", Evidence: reviewEvidence(), Findings: []ReviewFinding{}}
+			v := UnitVerdict{Decision: "satisfactory", Summary: reviewSummary, Findings: []ReviewFinding{}}
 			if n == 1 {
 				v.Decision = "material_findings"
-				v.Findings = []ReviewFinding{{Criterion: "spec#1", Severity: "material", Evidence: "Retry proof fails", Action: "Handle retry token"}}
+				v.Findings = []ReviewFinding{{Severity: "material", Evidence: "Retry proof fails", Action: "Handle retry token"}}
 			}
-			if n == 3 {
-				v.ExtraPaths = []PathExplanation{{Path: "docs/proof.md", Explanation: "Records the planned retry proof"}}
-			}
-			args := map[string]any{"decision": v.Decision, "evidence": v.Evidence, "findings": v.Findings}
-			if len(v.ExtraPaths) != 0 {
-				args["extra_paths"] = v.ExtraPaths
-			}
-			body, err := callTool(ctx, tools, verdictTool, args)
+			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": v.Decision, "summary": v.Summary, "findings": v.Findings})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("verdict %s: %v", body, err)
 			}
@@ -105,8 +98,8 @@ func TestExactReviewDemonstration(t *testing.T) {
 		if !strings.Contains(req.Prompt, relayedRuling) {
 			return fmt.Errorf("reviewer did not receive the ruling")
 		}
-		v := UnitVerdict{Decision: "satisfactory", Evidence: reviewEvidence(), Findings: []ReviewFinding{}}
-		body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": v.Decision, "evidence": v.Evidence, "findings": v.Findings})
+		v := UnitVerdict{Decision: "satisfactory", Summary: reviewSummary, Findings: []ReviewFinding{}}
+		body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": v.Decision, "summary": v.Summary, "findings": v.Findings})
 		if err != nil || !strings.Contains(body, `"recorded":true`) {
 			return fmt.Errorf("answer verdict %s: %v", body, err)
 		}
@@ -141,7 +134,7 @@ func TestExactReviewDemonstration(t *testing.T) {
 	f.awaitUnit(t, stream, "resume", UnitWaiting)
 	f.rule(t, "1")
 	f.awaitUnit(t, stream, "resume", UnitMerged)
-	if reviews.Load() != 3 {
+	if reviews.Load() != 2 {
 		t.Fatalf("review turns: %d", reviews.Load())
 	}
 	if reason := staleReview(old, revised); !strings.HasPrefix(reason, "stale candidate revision") {
@@ -158,25 +151,27 @@ func TestExactReviewDemonstration(t *testing.T) {
 			}
 		}
 	}
-	if len(results) != 3 || results[0].Verdict.Decision != "material_findings" || results[1].Verdict.Decision != "satisfactory" || len(results[1].Verdict.ExtraPaths) != 0 || len(results[2].Verdict.ExtraPaths) != 1 {
+	if len(results) != 2 || results[0].Verdict.Decision != "material_findings" || results[1].Verdict.Decision != "satisfactory" || results[1].Verdict.Summary != reviewSummary {
 		t.Fatalf("review trace: %+v", results)
 	}
-	if results[2].Identity != revised || results[2].Identity.Candidate.SpecRevision == "" || results[2].Identity.Candidate.PlanRevision == "" {
-		t.Fatalf("approved identity: %+v", results[2].Identity)
+	if results[1].Identity != revised || results[1].Identity.Candidate.SpecRevision == "" || results[1].Identity.Candidate.PlanRevision == "" {
+		t.Fatalf("approved identity: %+v", results[1].Identity)
 	}
-	var footprintBlocked, approved bool
+	// The revision also changed docs/proof.md, outside the unit's footprint;
+	// the reviewer's satisfactory verdict approves it as it stands.
+	var refreshed, approved bool
 	for _, move := range allTransitions(t, f.trace, stream) {
 		if move.Subject != trace.UnitSubject("resume") {
 			continue
 		}
-		footprintBlocked = footprintBlocked || strings.Contains(move.Reason, "unexplained changed path docs/proof.md")
+		refreshed = refreshed || move.From == UnitReviewing && move.To == UnitReviewing
 		approved = approved || move.To == UnitApproved && strings.Contains(move.Reason, revised.Candidate.Revision)
 	}
-	if !footprintBlocked || !approved || f.question(t, stream, "1").State != trace.QuestionAnswered {
-		t.Fatalf("missing footprint rejection, exact approval or ruling: blocked %t, approved %t", footprintBlocked, approved)
+	if refreshed || !approved || f.question(t, stream, "1").State != trace.QuestionAnswered {
+		t.Fatalf("missing exact approval or ruling: refreshed %t, approved %t", refreshed, approved)
 	}
 	thread := f.thread(t, stream, reviewerAgent("resume"))
-	if thread.Identity.Role != reviewerRole || len(thread.Turns) != 4 || thread.Turns[1].Status() != questions.Waiting {
+	if thread.Identity.Role != reviewerRole || len(thread.Turns) != 3 || thread.Turns[1].Status() != questions.Waiting {
 		t.Fatalf("reviewer requests and responses: %+v", thread.Turns)
 	}
 	masons.check(t)

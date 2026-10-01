@@ -45,7 +45,7 @@ var (
 		recoveryFiles["dedupe"]: "package trace\n\n// upstream dedupe\n",
 		recoveryFiles["audit"]:  "package audit\n\n// upstream audit\n",
 	}
-	recoveryReports = map[string]CriterionReport{"resume": resumeReport, "dedupe": dedupeReport, "audit": auditReport}
+	recoveryReports = map[string]string{"resume": resumeReport, "dedupe": dedupeReport, "audit": auditReport}
 )
 
 // recoveryDemo plays the agents of TestJujutsuRecoveryDemonstration and
@@ -107,7 +107,7 @@ func (d *recoveryDemo) continued(ctx context.Context, req agent.Request, _ *agen
 	d.mu.Lock()
 	d.continuation, d.sawEdits = req.Prompt, holdsEdits(inDirectory(req.Workspace.Directory()))
 	d.mu.Unlock()
-	if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Resumed from the kept edits", "criteria": []any{criterionArgs(resumeReport)}}); err != nil || !recorded {
+	if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Resumed from the kept edits"}); err != nil || !recorded {
 		return nil, fmt.Errorf("done refused: %q %v", reason, err)
 	}
 	return recoveryResult(req, "Continued"), nil
@@ -127,7 +127,7 @@ func (d *recoveryDemo) build(unit string) func(context.Context, agent.Request, *
 		if unit == "audit" {
 			return recoveryResult(req, "Half built"), nil
 		}
-		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built " + unit, "criteria": []any{criterionArgs(recoveryReports[unit])}}); err != nil || !recorded {
+		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built " + unit}); err != nil || !recorded {
 			return nil, fmt.Errorf("done refused: %q %v", reason, err)
 		}
 		return recoveryResult(req, "Built"), nil
@@ -142,8 +142,8 @@ func clarified(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.Clien
 
 // resolve plays a turn that resolves the conflict in path: it notes what its
 // view holds there, writes resolved and reports done with args, through the
-// unit mason's report when args carry criteria.
-func (d *recoveryDemo) resolve(path, resolved string, args map[string]any) func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
+// unit mason's report, with its card, when unit is set.
+func (d *recoveryDemo) resolve(path, resolved string, unit bool, args map[string]any) func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
 	return func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		file := filepath.Join(req.Workspace.Directory(), path)
 		data, err := os.ReadFile(file)
@@ -156,7 +156,7 @@ func (d *recoveryDemo) resolve(path, resolved string, args map[string]any) func(
 		if err := os.WriteFile(file, []byte(resolved), 0644); err != nil {
 			return nil, err
 		}
-		if _, unit := args["criteria"]; unit {
+		if unit {
 			if recorded, reason, err := done(ctx, tools, args); err != nil || !recorded {
 				return nil, fmt.Errorf("done of %s refused: %q %v", req.Name, reason, err)
 			}
@@ -169,8 +169,7 @@ func (d *recoveryDemo) resolve(path, resolved string, args map[string]any) func(
 
 // reviewDrift plays the drift reviewer, which approves the resolution.
 func reviewDrift(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-	evidence := []ReviewEvidence{{Criterion: "spec#1", Evidence: "The resolution keeps resume's change on upstream's"}, {Criterion: "spec#2", Evidence: "Nothing of the feature branch's change was lost"}}
-	body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": evidence, "findings": []ReviewFinding{}})
+	body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 	if err != nil || !strings.Contains(body, `"recorded":true`) {
 		return nil, fmt.Errorf("drift verdict %s: %v", body, err)
 	}
@@ -243,12 +242,12 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	f.engine.turns[masonAgent("resume")+"-recover-1"] = demo.continued
 	for unit, resolved := range resolutions {
 		f.engine.turns[masonTurnID(unit)] = demo.build(unit)
-		f.engine.turns[resolveTurnID(unit, 1)] = demo.resolve(recoveryFiles[unit], resolved, map[string]any{"outcome": "Kept upstream's file beside " + unit, "criteria": []any{criterionArgs(recoveryReports[unit])}})
+		f.engine.turns[resolveTurnID(unit, 1)] = demo.resolve(recoveryFiles[unit], resolved, true, map[string]any{"outcome": "Kept upstream's file beside " + unit})
 	}
 	for i := 1; i <= 3; i++ {
 		f.engine.turns[fmt.Sprintf("%s-clarify-%d", masonAgent("audit"), i)] = clarified
 	}
-	f.engine.turns[driftResolveTurnID(1, 1)] = demo.resolve(trackedFile, resolvedGit, map[string]any{"outcome": "Kept resume's change on upstream's"})
+	f.engine.turns[driftResolveTurnID(1, 1)] = demo.resolve(trackedFile, resolvedGit, false, map[string]any{"outcome": "Kept resume's change on upstream's"})
 	f.engine.turns[driftReviewTurnID(1, 1)] = reviewDrift
 	chief := f.engine.turns["*"]
 	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {

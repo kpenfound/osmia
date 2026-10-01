@@ -82,7 +82,7 @@ var roleTools = map[string]string{"inspect_code": "chief_of_staff", "capacity": 
 var deniedTools = map[string]string{"ask": "chief_of_staff"}
 
 func roleRestrictedTool(role, name string) bool {
-	return name == "amend" && role != "mason" && role != "reviewer" ||
+	return name == "amend" && role != "mason" ||
 		name == "workstream_diff" && role != "reviewer" && role != "committee"
 }
 

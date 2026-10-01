@@ -18,9 +18,9 @@ import (
 
 const masonSpec = "# Uploads\n\n## Acceptance criteria\n\n1. Uploads resume.\n2. Duplicates are dropped.\n3. Seeds are logged.\n"
 
-const masonPlan = `{"version": 1, "units": [
- {"id": "resume", "title": "Resume uploads", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}, {"criterion": "spec#3", "proof": {"kind": "reviewer-judgement", "name": "log lines"}}], "depends_on": [], "footprint": ["internal.kb.seed"]},
- {"id": "dedupe", "addresses": [{"criterion": "spec#2", "proof": {"kind": "existing-test", "name": "TestDedupe"}}], "depends_on": ["resume"], "footprint": ["cmd"]}
+const masonPlan = `{"version": 2, "units": [
+ {"id": "resume", "title": "Resume uploads", "task": "Resume interrupted uploads and log each seed.", "acceptance": ["TestResume covers an interrupted upload", "Each seed logs one line"], "criteria": ["spec#1", "spec#3"], "depends_on": [], "footprint": ["internal.kb.seed"]},
+ {"id": "dedupe", "task": "Drop duplicate uploads.", "acceptance": ["TestDedupe passes"], "criteria": ["spec#2"], "depends_on": ["resume"], "footprint": ["cmd"]}
 ]}`
 
 func document(id, path, content string) trace.Document {
@@ -69,11 +69,14 @@ func TestMasonBundleHoldsExactlyTheUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []bundle.UnitCriterion{
-		{Citation: "spec#1", Text: "Uploads resume.", Proof: plan.Proof{Kind: plan.NewTest, Name: "TestResume"}},
-		{Citation: "spec#3", Text: "Seeds are logged.", Proof: plan.Proof{Kind: plan.ReviewerJudgement, Name: "log lines"}},
+		{Citation: "spec#1", Text: "Uploads resume."},
+		{Citation: "spec#3", Text: "Seeds are logged."},
 	}
 	if !reflect.DeepEqual(m.Criteria, want) {
 		t.Fatalf("criteria = %#v, want %#v", m.Criteria, want)
+	}
+	if m.Task != "Resume interrupted uploads and log each seed." || !reflect.DeepEqual(m.Acceptance, []string{"TestResume covers an interrupted upload", "Each seed logs one line"}) {
+		t.Fatalf("task = %q acceptance = %v", m.Task, m.Acceptance)
 	}
 	if m.Unit != "resume" || m.Title != "Resume uploads" || len(m.DependsOn) != 0 || !reflect.DeepEqual(m.Footprint, []string{"internal.kb.seed"}) {
 		t.Fatalf("unit = %q %q depends %v footprint %v", m.Unit, m.Title, m.DependsOn, m.Footprint)
@@ -88,12 +91,12 @@ func TestMasonBundleHoldsExactlyTheUnit(t *testing.T) {
 		t.Fatalf("knowledge = %v", got)
 	}
 	r := m.Render()
-	for _, s := range []string{"# Unit resume", "- spec#1: Uploads resume.\n  proof: new-test TestResume", "- spec#3: Seeds are logged.", "## Depends on\nNo units.", "## Footprint\n- internal.kb.seed", "1. Uploads resume.", "charter#1", "# Project context"} {
+	for _, s := range []string{"# Unit resume", "## Task\nResume interrupted uploads and log each seed.", "## Acceptance\n- TestResume covers an interrupted upload\n- Each seed logs one line", "## Criteria served\n- spec#1: Uploads resume.\n- spec#3: Seeds are logged.", "## Depends on\nNo units.", "## Footprint\n- internal.kb.seed", "1. Uploads resume.", "charter#1", "# Project context"} {
 		if !strings.Contains(r, s) {
 			t.Errorf("render lacks %q:\n%s", s, r)
 		}
 	}
-	if strings.Contains(r, "Duplicates are dropped.\n  proof") || strings.Contains(r, "spec#2:") {
+	if strings.Contains(r, "TestDedupe") || strings.Contains(r, "spec#2:") {
 		t.Errorf("render holds another unit's criterion:\n%s", r)
 	}
 

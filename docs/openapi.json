@@ -3228,23 +3228,6 @@
         },
         "type": "object"
       },
-      "CriterionReport": {
-        "properties": {
-          "criterion": {
-            "type": "string"
-          },
-          "done": {
-            "type": "string"
-          },
-          "evidence": {
-            "type": "string"
-          },
-          "proof": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "CriterionTrace": {
         "properties": {
           "complete": {
@@ -4094,17 +4077,6 @@
         },
         "type": "object"
       },
-      "PlanProof": {
-        "properties": {
-          "kind": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "PlanStartBlocker": {
         "properties": {
           "reason": {
@@ -4398,23 +4370,9 @@
         },
         "type": "object"
       },
-      "ReviewEvidence": {
-        "properties": {
-          "criterion": {
-            "type": "string"
-          },
-          "evidence": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "ReviewFinding": {
         "properties": {
           "action": {
-            "type": "string"
-          },
-          "criterion": {
             "type": "string"
           },
           "evidence": {
@@ -4960,20 +4918,6 @@
         },
         "type": "object"
       },
-      "TraceAddress": {
-        "properties": {
-          "criterion": {
-            "type": "string"
-          },
-          "proof": {
-            "$ref": "#/components/schemas/PlanProof"
-          },
-          "text": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "TraceCriterion": {
         "properties": {
           "criterion": {
@@ -5255,15 +5199,6 @@
           "candidate": {
             "type": "string"
           },
-          "criteria": {
-            "items": {
-              "$ref": "#/components/schemas/CriterionReport"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
           "outcome": {
             "type": "string"
           },
@@ -5293,15 +5228,6 @@
           "diff_sha256": {
             "type": "string"
           },
-          "evidence": {
-            "items": {
-              "$ref": "#/components/schemas/ReviewEvidence"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
           "findings": {
             "items": {
               "$ref": "#/components/schemas/ReviewFinding"
@@ -5319,6 +5245,9 @@
           },
           "seal": {
             "type": "integer"
+          },
+          "summary": {
+            "type": "string"
           },
           "turn": {
             "type": "string"
@@ -5618,9 +5547,9 @@
       },
       "UnitTrace": {
         "properties": {
-          "addresses": {
+          "acceptance": {
             "items": {
-              "$ref": "#/components/schemas/TraceAddress"
+              "type": "string"
             },
             "type": [
               "array",
@@ -5633,6 +5562,15 @@
           "cost_usd": {
             "format": "double",
             "type": "number"
+          },
+          "criteria": {
+            "items": {
+              "$ref": "#/components/schemas/TraceCriterion"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "definition": {
             "$ref": "#/components/schemas/TraceRef"
@@ -5719,6 +5657,9 @@
             "type": "string"
           },
           "state": {
+            "type": "string"
+          },
+          "task": {
             "type": "string"
           },
           "title": {

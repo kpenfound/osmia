@@ -190,7 +190,7 @@ func TestReviewerInfrastructureFailureContestsUnit(t *testing.T) {
 		if crashing {
 			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Crashed", SessionDir: req.SessionDir, NumTurns: 1, ExitCode: 1}, nil
 		}
-		body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": reviewEvidence(), "findings": []ReviewFinding{}})
+		body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 		if err != nil || !strings.Contains(body, `"recorded":true`) {
 			return nil, fmt.Errorf("verdict %s: %v", body, err)
 		}

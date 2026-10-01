@@ -43,10 +43,16 @@ func CoreEnforcement() Enforcement {
 var chiefGrant = coreadapter.Capabilities{Tools: append([]string{"file_read", status.ToolName, "notify", "capacity", "inspect_code", prioritiseTool, pauseTool, resumeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool}, questions.ChiefTools...)}
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
-// its view of its unit's workspace, ask the chief of staff, file an amendment
-// and report its unit done.
+// its view, ask the chief of staff, file an amendment and report done. A unit
+// mason is narrowed to unitMasonGrant; the drift mason to the file tools,
+// amend and done.
 var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, doneTool}, WriteFiles: true, Execute: true}
-var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, questions.AmendTool, verdictTool, runChecksTool, workstreamDiffTool}}
+
+// unitMasonGrant is what a unit mason turn may do: read, write and execute in
+// its view of its unit's workspace, ask the chief of staff and report its
+// unit done.
+var unitMasonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, doneTool}, WriteFiles: true, Execute: true}
+var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, verdictTool, runChecksTool, workstreamDiffTool}}
 
 // threadExecution is how a thread turn of role runs: in the role's sandbox
 // and image, and for a mason with the Dagger engine the role configures.
@@ -160,19 +166,19 @@ func Enforce(opts Options, e Enforcement) Options {
 				}
 				if scope.Role == reviewerRole && scope.Thread == driftReviewerAgent {
 					diff, err := driftDiffTool(ctx, cfg, r, scope)
-					return []coreadapter.Tool{verdicts.tool(scope, nil), diff}, err
+					return []coreadapter.Tool{verdicts.tool(scope), diff}, err
 				}
 				if scope.Role == masonRole {
 					ask, err := questions.Tools(r, masonAgent(scope.Unit), scope, now)
 					return append(ask, reports.tool(r, scope)), err
 				}
 				if scope.Role == reviewerRole {
-					ask, err := reviewerQuestionTools(r, scope, now)
+					ask, err := questions.Tools(r, reviewerAgent(scope.Unit), scope, now)
 					identity, identityErr := unitReviewerIdentity(r, scope)
 					if identityErr != nil {
 						return nil, identityErr
 					}
-					return append(ask, verdicts.tool(scope, unitVerdictCheck(r, scope)), candidateCheckTool(cfg, r, scope, identity.Candidate.Revision, e.Checks), reviewDiffTool(cfg, r, scope, identity)), err
+					return append(ask, verdicts.tool(scope), candidateCheckTool(cfg, r, scope, identity.Candidate.Revision, e.Checks), reviewDiffTool(cfg, r, scope, identity)), err
 				}
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil
@@ -251,18 +257,4 @@ func driftMasonTools(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		return nil, err
 	}
 	return questions.DriftTools(r, driftMasonAgent, scope, now, move)
-}
-
-// reviewerQuestionTools returns the question tools of a unit reviewer turn:
-// its amend cites the drift rebase that carried the candidate back to
-// review, when one did.
-func reviewerQuestionTools(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
-	move, drifted, err := unitDrift(r, config.WorkstreamID(scope.Workstream), scope.Unit)
-	if err != nil {
-		return nil, err
-	}
-	if drifted {
-		return questions.DriftTools(r, reviewerAgent(scope.Unit), scope, now, move)
-	}
-	return questions.Tools(r, reviewerAgent(scope.Unit), scope, now)
 }

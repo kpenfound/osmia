@@ -1431,8 +1431,10 @@ Your view holds:
 Apply two tests and one judgement, and call %s once for each thing you find:
 - charter: a part that violates a charter rule. This is a veto on that part; cite the rule.
 - fit: the plan does not realise the handed design, or works against a decision the knowledge base holds. This is advice to the owner.
-- size: a unit that addresses too many criteria or touches too much of the code and must be split by what it addresses. Name the unit as the part.
-- proof: a criterion whose proof the plan cannot name, or names a proof that cannot show it. Name the criterion as the part.
+- size: a unit that takes on too much for one mason, or touches too much of the code, and must be split. Name the unit as the part.
+- acceptance: a unit whose task is unclear, or whose acceptance a reviewer could not verify from the unit's work. Name the unit as the part.
+
+This debate is where units are defined. Once the plan is ratified, each mason builds its unit's task and a reviewer checks its acceptance; nobody reopens how the work is cut. Settle the units here.
 
 An objection that is refused comes back with the reason; correct it and call again. Ending your turn without objecting or conceding says you have no new dissent on this revision, and that you accept it in place of any earlier revision you objected to. Call %s when something you must know to judge the revision is not in your view: the round waits for the answer, which arrives as your next turn.
 `, in.Round, in.pin(), shed.EntityCitation, shed.ObjectTool, questions.AskTool)

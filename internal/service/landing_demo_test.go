@@ -67,8 +67,7 @@ func (d *landingDemo) review(ctx context.Context, unit string, req agent.Request
 	d.mu.Lock()
 	d.reviews[unit] = append(d.reviews[unit], identity)
 	d.mu.Unlock()
-	evidence := []ReviewEvidence{{Criterion: landingUnits[unit].criterion, Evidence: "The planned proof holds on the candidate diff"}}
-	body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": evidence, "findings": []ReviewFinding{}})
+	body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 	if err != nil || !strings.Contains(body, `"recorded":true`) {
 		return nil, fmt.Errorf("verdict %s: %v", body, err)
 	}
@@ -148,9 +147,9 @@ func TestLandingDemonstration(t *testing.T) {
 					return err
 				}
 			}
-			args := map[string]any{"outcome": "Built " + unit, "criteria": []any{criterionArgs(CriterionReport{Criterion: u.criterion, Done: "built " + unit, Evidence: "the planned proof holds", Proof: "reviewer judgement"})}}
+			args := map[string]any{"outcome": "Built " + unit}
 			if unit == "resume" {
-				args["criteria"], args["learnings"] = []any{criterionArgs(resumeReport)}, []string{landingLearning}
+				args["learnings"] = []string{landingLearning}
 			}
 			recorded, reason, err := done(ctx, tools, args)
 			if err != nil || !recorded {

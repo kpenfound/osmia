@@ -254,11 +254,10 @@ func (a *amendmentDrafter) Apply(ctx context.Context, op coreadapter.Operation) 
 type amendmentAffected struct {
 	Criteria []string `json:"criteria"`
 	Units    []string `json:"units"`
-	Proofs   []string `json:"proofs"`
 }
 
 func affectedRevision(oldSpec, newSpec string, oldPlan, newPlan plan.Plan) amendmentAffected {
-	a := amendmentAffected{Criteria: []string{}, Units: []string{}, Proofs: []string{}}
+	a := amendmentAffected{Criteria: []string{}, Units: []string{}}
 	oldCriteria := map[int]string{}
 	for _, c := range plan.ParseSpec(oldSpec).Criteria {
 		oldCriteria[c.Number] = c.Text
@@ -296,14 +295,13 @@ func affectedRevision(oldSpec, newSpec string, oldPlan, newPlan plan.Plan) amend
 	for id := range newUnits {
 		unitIDs[id] = true
 	}
-	proofs := map[string]bool{}
 	for id := range unitIDs {
 		old, was := oldUnits[id]
 		now, is := newUnits[id]
 		touched := !was || !is || !reflect.DeepEqual(old, now)
 		for _, u := range []plan.Unit{old, now} {
-			for _, address := range u.Addresses {
-				if changed[address.Criterion] {
+			for _, c := range u.Criteria {
+				if changed[c] {
 					touched = true
 				}
 			}
@@ -311,31 +309,9 @@ func affectedRevision(oldSpec, newSpec string, oldPlan, newPlan plan.Plan) amend
 		if touched {
 			a.Units = append(a.Units, id)
 		}
-		oldProof := map[string]plan.Proof{}
-		newProof := map[string]plan.Proof{}
-		for _, address := range old.Addresses {
-			oldProof[address.Criterion] = address.Proof
-		}
-		for _, address := range now.Addresses {
-			newProof[address.Criterion] = address.Proof
-		}
-		for citation, proof := range oldProof {
-			if touched || changed[citation] || !reflect.DeepEqual(proof, newProof[citation]) {
-				proofs[id+":"+citation] = true
-			}
-		}
-		for citation, proof := range newProof {
-			if touched || changed[citation] || !reflect.DeepEqual(proof, oldProof[citation]) {
-				proofs[id+":"+citation] = true
-			}
-		}
-	}
-	for proof := range proofs {
-		a.Proofs = append(a.Proofs, proof)
 	}
 	slices.Sort(a.Criteria)
 	slices.Sort(a.Units)
-	slices.Sort(a.Proofs)
 	return a
 }
 

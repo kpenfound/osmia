@@ -15,13 +15,11 @@ var entities = kb.Map{Version: kb.Version, Entities: []kb.Entity{
 	{ID: "docs", Name: "docs"},
 }}
 
-func proof(kind ProofKind) Proof { return Proof{Kind: kind, Name: "check"} }
-
 // sample returns a plan that is valid against validSpec and entities.
 func sample() Plan {
 	return Plan{Version: Version, Units: []Unit{
-		{ID: "parser", Addresses: []Address{{"spec#1", proof(NewTest)}}, Footprint: []string{"trace"}},
-		{ID: "validator", Addresses: []Address{{"spec#2", proof(ExistingTest)}}, DependsOn: []string{"parser"}, Footprint: []string{"internal.kb", "internal.trace"}},
+		{ID: "parser", Task: "Parse the spec.", Acceptance: []string{"TestParseSpec passes"}, Criteria: []string{"spec#1"}, Footprint: []string{"trace"}},
+		{ID: "validator", Task: "Validate plans.", Acceptance: []string{"Invalid plans are refused"}, Criteria: []string{"spec#2"}, DependsOn: []string{"parser"}, Footprint: []string{"internal.kb", "internal.trace"}},
 	}}
 }
 
@@ -33,14 +31,6 @@ func TestValidate(t *testing.T) {
 		wants []Problem
 	}{
 		{name: "valid", edit: func(*Plan) {}, wants: []Problem{}},
-		{
-			name: "every proof kind is accepted",
-			edit: func(p *Plan) {
-				p.Units[0].Addresses[0].Proof = proof(ScriptedCheck)
-				p.Units[1].Addresses[0].Proof = proof(ReviewerJudgement)
-			},
-			wants: []Problem{},
-		},
 		{
 			name:  "unknown dependency",
 			edit:  func(p *Plan) { p.Units[1].DependsOn = []string{"parser", "absent"} },
@@ -61,21 +51,21 @@ func TestValidate(t *testing.T) {
 		{
 			name: "uncovered criterion",
 			edit: func(p *Plan) {
-				p.Units[1].Addresses = nil
+				p.Units[1].Criteria = nil
 			},
-			wants: []Problem{{UncoveredCriterion, "", "spec#2", "no unit addresses this criterion"}},
+			wants: []Problem{{UncoveredCriterion, "", "spec#2", "no unit serves this criterion"}},
 		},
 		{
 			name: "criterion the spec does not have",
 			edit: func(p *Plan) {
-				p.Units[1].Addresses = append(p.Units[1].Addresses, Address{"spec#3", proof(NewTest)})
+				p.Units[1].Criteria = append(p.Units[1].Criteria, "spec#3")
 			},
 			wants: []Problem{{UnknownCriterion, "validator", "spec#3", "the spec has no criterion 3"}},
 		},
 		{
 			name: "malformed citation",
 			edit: func(p *Plan) {
-				p.Units[1].Addresses = append(p.Units[1].Addresses, Address{"charter#1", proof(NewTest)})
+				p.Units[1].Criteria = append(p.Units[1].Criteria, "charter#1")
 			},
 			wants: []Problem{{UnknownCriterion, "validator", "charter#1", "is not a spec#<n> citation"}},
 		},
@@ -86,7 +76,7 @@ func TestValidate(t *testing.T) {
 			wants: []Problem{
 				{SpecProblem, "", "spec#2", "spec.md line 7: criterion 2 is numbered 2 times (lines 6, 7); it cannot be cited until renumbered"},
 				{UnknownCriterion, "validator", "spec#2", "the spec numbers criterion 2 more than once, so it cannot be cited"},
-				{UncoveredCriterion, "", "spec#2", "no unit addresses this criterion"},
+				{UncoveredCriterion, "", "spec#2", "no unit serves this criterion"},
 			},
 		},
 		{
@@ -96,19 +86,14 @@ func TestValidate(t *testing.T) {
 			wants: []Problem{{SpecProblem, "", "", `spec.md: no "Acceptance criteria" section`}},
 		},
 		{
-			name:  "missing proof",
-			edit:  func(p *Plan) { p.Units[0].Addresses[0].Proof = Proof{} },
-			wants: []Problem{{MissingProof, "parser", "spec#1", "no proof is named"}},
+			name:  "missing task",
+			edit:  func(p *Plan) { p.Units[0].Task = " " },
+			wants: []Problem{{MissingTask, "parser", "", "no task is written"}},
 		},
 		{
-			name:  "unnamed proof",
-			edit:  func(p *Plan) { p.Units[0].Addresses[0].Proof = Proof{Kind: NewTest, Name: " "} },
-			wants: []Problem{{MissingProof, "parser", "spec#1", "the new-test proof has no name"}},
-		},
-		{
-			name:  "unknown proof kind",
-			edit:  func(p *Plan) { p.Units[0].Addresses[0].Proof = proof("vibes") },
-			wants: []Problem{{MissingProof, "parser", "spec#1", `proof kind "vibes" is not one of new-test, existing-test, scripted-check or reviewer-judgement`}},
+			name:  "missing acceptance",
+			edit:  func(p *Plan) { p.Units[0].Acceptance = []string{" "} },
+			wants: []Problem{{MissingTask, "parser", "", "no acceptance is written"}},
 		},
 		{
 			name:  "unresolved footprint",
@@ -123,7 +108,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "invalid and duplicate unit ids",
 			edit: func(p *Plan) {
-				p.Units = append(p.Units, Unit{ID: "parser", Footprint: []string{"trace"}}, Unit{ID: "-bad", Footprint: []string{"trace"}})
+				p.Units = append(p.Units, Unit{ID: "parser", Task: "t", Acceptance: []string{"a"}, Footprint: []string{"trace"}}, Unit{ID: "-bad", Task: "t", Acceptance: []string{"a"}, Footprint: []string{"trace"}})
 			},
 			wants: []Problem{
 				{UnitProblem, "parser", "", "duplicate unit id"},
@@ -131,23 +116,24 @@ func TestValidate(t *testing.T) {
 			},
 		},
 		{
-			name:  "criterion addressed twice by one unit",
-			edit:  func(p *Plan) { p.Units[0].Addresses = append(p.Units[0].Addresses, Address{"spec#1", proof(NewTest)}) },
-			wants: []Problem{{UnitProblem, "parser", "spec#1", "addressed more than once"}},
+			name:  "criterion cited twice by one unit",
+			edit:  func(p *Plan) { p.Units[0].Criteria = append(p.Units[0].Criteria, "spec#1") },
+			wants: []Problem{{UnitProblem, "parser", "spec#1", "cited more than once"}},
 		},
 		{
 			name: "several errors at once",
 			edit: func(p *Plan) {
 				p.Units[0].DependsOn = []string{"validator", "ghost"}
-				p.Units[0].Addresses = []Address{{"spec#9", Proof{}}}
+				p.Units[0].Criteria = []string{"spec#9"}
+				p.Units[0].Acceptance = nil
 				p.Units[1].Footprint = []string{"nowhere"}
 			},
 			wants: []Problem{
 				{UnknownDependency, "parser", "", `depends on unit "ghost", which the plan does not have`},
+				{MissingTask, "parser", "", "no acceptance is written"},
 				{UnknownCriterion, "parser", "spec#9", "the spec has no criterion 9"},
-				{MissingProof, "parser", "spec#9", "no proof is named"},
 				{UnresolvedFootprint, "validator", "", `footprint "nowhere" names no entity with a path in kb/entities.json`},
-				{UncoveredCriterion, "", "spec#1", "no unit addresses this criterion"},
+				{UncoveredCriterion, "", "spec#1", "no unit serves this criterion"},
 				{DependencyCycle, "parser", "", "dependency cycle parser -> validator -> parser"},
 			},
 		},
@@ -169,10 +155,10 @@ func TestValidate(t *testing.T) {
 
 func TestProblemError(t *testing.T) {
 	for want, p := range map[string]Problem{
-		`unit "a" spec#1: no proof is named`: {MissingProof, "a", "spec#1", "no proof is named"},
-		`unit "a": declares no footprint`:    {UnresolvedFootprint, "a", "", "declares no footprint"},
-		`spec#2: no unit addresses this`:     {UncoveredCriterion, "", "spec#2", "no unit addresses this"},
-		`spec.md: no section`:                {SpecProblem, "", "", "spec.md: no section"},
+		`unit "a" spec#1: cited more than once`: {UnitProblem, "a", "spec#1", "cited more than once"},
+		`unit "a": declares no footprint`:       {UnresolvedFootprint, "a", "", "declares no footprint"},
+		`spec#2: no unit serves this`:           {UncoveredCriterion, "", "spec#2", "no unit serves this"},
+		`spec.md: no section`:                   {SpecProblem, "", "", "spec.md: no section"},
 	} {
 		if got := p.Error(); got != want {
 			t.Errorf("got %q, want %q", got, want)

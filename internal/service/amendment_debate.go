@@ -114,7 +114,7 @@ func amendmentCommitteeSystemPrompt(project config.Project, in roundInput) strin
 	if in.Amendment == "" {
 		return committeeSystemPrompt(project)
 	}
-	return fmt.Sprintf("You are a member of the committee reviewing an amendment to a sealed spec and plan for the %s project (%s). Apply the shed's charter, fit, size and proof rules. You read only and contribute through %s and %s; cite every objection. The owner decides the amendment.", project.Name, project.Upstream, shed.ObjectTool, shed.ConcedeTool)
+	return fmt.Sprintf("You are a member of the committee reviewing an amendment to a sealed spec and plan for the %s project (%s). Apply the shed's charter, fit, size and acceptance rules. You read only and contribute through %s and %s; cite every objection. The owner decides the amendment.", project.Name, project.Upstream, shed.ObjectTool, shed.ConcedeTool)
 }
 
 func amendmentCommitteePrompt(in roundInput, standing []shed.Dissent, answers []string) string {
@@ -123,9 +123,9 @@ func amendmentCommitteePrompt(in roundInput, standing []shed.Dissent, answers []
 		return p
 	}
 	if in.Round > 1 {
-		return fmt.Sprintf("This is round %d of the shed debate for amendment %s to sealed documents, run because the owner asked for another round. Read request.json and affected.json with the proposed spec.md and plan.json. Apply the normal charter veto, fit advice, size split and proof tests, and concede what the architect's earlier answers settled. The owner alone decides the amendment.\n\n%s", in.Round, in.Amendment, p)
+		return fmt.Sprintf("This is round %d of the shed debate for amendment %s to sealed documents, run because the owner asked for another round. Read request.json and affected.json with the proposed spec.md and plan.json. Apply the normal charter veto, fit advice, size split and acceptance tests, and concede what the architect's earlier answers settled. The owner alone decides the amendment.\n\n%s", in.Round, in.Amendment, p)
 	}
-	return fmt.Sprintf("This is the one automatic shed round for amendment %s to sealed documents. Read request.json and affected.json with the proposed spec.md and plan.json. Apply the normal charter veto, fit advice, size split and proof tests. The owner alone decides the amendment.\n\n%s", in.Amendment, p)
+	return fmt.Sprintf("This is the one automatic shed round for amendment %s to sealed documents. Read request.json and affected.json with the proposed spec.md and plan.json. Apply the normal charter veto, fit advice, size split and acceptance tests. The owner alone decides the amendment.\n\n%s", in.Amendment, p)
 }
 func (a amendmentDebate) Pass(ctx context.Context) error {
 	streams, err := a.repository.Workstreams()
@@ -683,7 +683,7 @@ func (a amendmentDebate) present(ctx context.Context, stream config.WorkstreamID
 	if m := req.Upstream; m != nil {
 		cited += fmt.Sprintf(", after drift rebase %d moved upstream from %s to %s", m.Drift, m.From, m.To)
 	}
-	body := fmt.Sprintf("Present amendment %s to the owner for a decision. Request: %s. Reason: %s. Proposed change: %s. Affected units and proofs: %s. Dissent: %s. Recommendation: %s. The round cap approves nothing. Packet: %s, revision %d, after round %d. The owner approves, rejects, asks for another round or overrules the objections that stand, with osmia amendment %s %s or through you.", req.ID, cited, req.Reason, req.Change, affected, standing(dissent), recommendation, amendmentPacketPath(req.ID), packetRevision, round, stream, req.ID)
+	body := fmt.Sprintf("Present amendment %s to the owner for a decision. Request: %s. Reason: %s. Proposed change: %s. Affected units: %s. Dissent: %s. Recommendation: %s. The round cap approves nothing. Packet: %s, revision %d, after round %d. The owner approves, rejects, asks for another round or overrules the objections that stand, with osmia amendment %s %s or through you.", req.ID, cited, req.Reason, req.Change, affected, standing(dissent), recommendation, amendmentPacketPath(req.ID), packetRevision, round, stream, req.ID)
 	for _, e := range dissent {
 		body += fmt.Sprintf("\n- %s (%s, blocking=%t): %s", e.ID, e.Kind, e.Blocking, e.Argument)
 	}

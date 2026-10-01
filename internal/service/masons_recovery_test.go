@@ -48,7 +48,7 @@ func TestCompletedMasonTurnFinishesAfterRestart(t *testing.T) {
 	directory := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), masonAgent("resume"), masonTurnID("resume"))
 	q, err := repo.ClaimTurn(ctx, stream, masonAgent("resume"), "completed", directory, f.clock.Now())
 	must(t, err)
-	content, err := json.Marshal(MasonReport{Outcome: "Built", Criteria: []CriterionReport{resumeReport}})
+	content, err := json.Marshal(MasonReport{Outcome: "Built"})
 	must(t, err)
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.clock.Now()

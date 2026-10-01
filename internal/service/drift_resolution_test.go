@@ -124,9 +124,9 @@ func driftVerdict(t *testing.T, verdict UnitVerdict) *coreadapter.Outcome {
 }
 
 var (
-	approvedResolution = UnitVerdict{Decision: "satisfactory", Evidence: []ReviewEvidence{{Criterion: "spec#1", Evidence: "Both owners stand"}}}
-	rejectedResolution = UnitVerdict{Decision: "material_findings", Evidence: []ReviewEvidence{{Criterion: "spec#1", Evidence: "The upstream owner is gone"}},
-		Findings: []ReviewFinding{{Criterion: "spec#1", Severity: "major", Evidence: "The resolution drops @upstream.", Action: "Keep @upstream beside @feature."}}}
+	approvedResolution = UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}
+	rejectedResolution = UnitVerdict{Decision: "material_findings", Summary: reviewSummary,
+		Findings: []ReviewFinding{{Severity: "major", Evidence: "The resolution drops @upstream.", Action: "Keep @upstream beside @feature."}}}
 )
 
 // turnIDs returns the turn IDs of the workstream's agent thread, or none

@@ -21,9 +21,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// dedupeReport is a complete report on the one criterion unit dedupe of
-// independentPlan and validPlan addresses.
-var dedupeReport = CriterionReport{Criterion: "spec#2", Done: "skip acknowledged chunks", Evidence: "no chunk is sent twice", Proof: "reviewer judgement"}
+// dedupeReport is the outcome a mason of unit dedupe of independentPlan and
+// validPlan reports.
+var dedupeReport = "skip acknowledged chunks"
 
 // newLandingFixture is a mason fixture over drafted whose resume mason reports
 // done and whose reviewer approves every candidate of resume it reviews.
@@ -36,7 +36,7 @@ func newLandingFixture(t *testing.T, drafted string) (*shedFixture, *fakeMasons)
 	defer f.engine.mu.Unlock()
 	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
-			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": reviewEvidence(), "findings": []ReviewFinding{}})
+			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("verdict %s: %v", body, err)
 			}
@@ -137,7 +137,7 @@ func TestApprovedUnitLandsAndReadiesItsDependent(t *testing.T) {
 	}
 	op := ops[0].Operation.ID
 	approval := fmt.Sprintf("units/resume/review.json revision %d", review.Revision)
-	wantMessage := fmt.Sprintf("An interrupted upload resumes from the last acknowledged chunk\n\nUnit resume (Resume from the last chunk) of workstream %s meets:\n- spec#1: An interrupted upload resumes from the last acknowledged chunk.\n\nOsmia-Workstream: %s\nOsmia-Unit: resume\nOsmia-Candidate: %s\nOsmia-Base: %s\nOsmia-Approval: %s\nOsmia-Operation: %s", stream, stream, candidate, base, approval, op)
+	wantMessage := fmt.Sprintf("Resume from the last chunk\n\nUnit resume (Resume from the last chunk) of workstream %s serves:\n- spec#1: An interrupted upload resumes from the last acknowledged chunk.\n\nOsmia-Workstream: %s\nOsmia-Unit: resume\nOsmia-Candidate: %s\nOsmia-Base: %s\nOsmia-Approval: %s\nOsmia-Operation: %s", stream, stream, candidate, base, approval, op)
 	if landed.Message != wantMessage {
 		t.Fatalf("the landing message:\n%s\nwant\n%s", landed.Message, wantMessage)
 	}
@@ -291,7 +291,7 @@ func approveDirectly(t *testing.T, s *Service, repository *trace.Repository, str
 	_, identity, err := r.prepareUnitReview(ctx, stream, unit)
 	must(t, err)
 	turn := reviewTurnID(unit, state.Version)
-	data, err := json.Marshal(UnitReviewResult{Identity: identity, Turn: turn, Verdict: UnitVerdict{Decision: "satisfactory", Evidence: []ReviewEvidence{{Criterion: criterion, Evidence: "The planned proof holds"}}}})
+	data, err := json.Marshal(UnitReviewResult{Identity: identity, Turn: turn, Verdict: UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}})
 	must(t, err)
 	docs, err := trace.Read[trace.Document](repository, stream)
 	must(t, err)

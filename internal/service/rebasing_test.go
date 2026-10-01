@@ -123,9 +123,9 @@ func latestReport(t *testing.T, repository *trace.Repository, stream config.Work
 
 // completeMasonTurn runs the next queued turn of the unit's mason as a
 // finished turn that reported the unit done.
-func completeMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, criterion CriterionReport) trace.QueuedTurn {
+func completeMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome string) trace.QueuedTurn {
 	t.Helper()
-	content, err := json.Marshal(MasonReport{Outcome: "Built", Criteria: []CriterionReport{criterion}})
+	content, err := json.Marshal(MasonReport{Outcome: outcome})
 	must(t, err)
 	return captureMasonTurn(t, f, repository, stream, unit, &coreadapter.Outcome{Status: masonDone, Report: string(content), Card: &exampleCard})
 }

@@ -32,21 +32,12 @@ const (
 	reportPath = "units/%s/report.json"
 )
 
-// MasonReport is what a mason reports with done: its outcome, one entry for
-// every criterion it addresses, and any reusable project learnings.
+// MasonReport is what a mason reports with done: its outcome, which says
+// what the unit's work now does and how the mason checked its acceptance,
+// and any reusable project learnings.
 type MasonReport struct {
-	Outcome   string            `json:"outcome"`
-	Criteria  []CriterionReport `json:"criteria"`
-	Learnings []string          `json:"learnings,omitempty"`
-}
-
-// CriterionReport is a mason's report on one criterion of its unit: what it
-// did, the evidence that the criterion holds and where the proof lives.
-type CriterionReport struct {
-	Criterion string `json:"criterion"`
-	Done      string `json:"done"`
-	Evidence  string `json:"evidence"`
-	Proof     string `json:"proof"`
+	Outcome   string   `json:"outcome"`
+	Learnings []string `json:"learnings,omitempty"`
 }
 
 // UnitReport is the document units/<unit>/report.json: the mason's report
@@ -58,7 +49,6 @@ type UnitReport struct {
 	Turn      string            `json:"turn"`
 	Seal      int               `json:"seal"`
 	Outcome   string            `json:"outcome"`
-	Criteria  []CriterionReport `json:"criteria"`
 	Learnings []string          `json:"learnings,omitempty"`
 	Card      *coreadapter.Card `json:"card,omitempty"`
 	Branch    string            `json:"branch"`
@@ -97,8 +87,8 @@ func turnKey(scope coreadapter.Scope) string {
 // fixes it and calls done again; its unit does not move.
 func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	done := coreadapter.Tool{Name: doneTool, Effect: coreadapter.ToolMemory,
-		Description: "Report your unit's work done, once every criterion of the unit holds and its recorded proof is in place and passing. Give the outcome, one entry per criterion, and any new project knowledge in learnings. Include an owner-facing headline (64 characters), what happened (140 characters), and needs_you (140 characters, empty unless the owner has an action). Write a single line per card field, in words without IDs, paths or model names. The service records the report, takes your workspace as the unit's candidate and sends it to review; end your turn as soon as this returns.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"criteria":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"done":{"type":"string"},"evidence":{"type":"string"},"proof":{"type":"string"}},"required":["criterion","done","evidence","proof"],"additionalProperties":false}},"learnings":{"type":"array","items":{"type":"string"}},"headline":{"type":"string"},"happened":{"type":"string"},"needs_you":{"type":"string"}},"required":["outcome","criteria"],"additionalProperties":false}`)}
+		Description: "Report your unit's work done, once its task is done and every acceptance item holds. Give the outcome: what the work now does and how you checked the acceptance. Put any new project knowledge in learnings. Include an owner-facing headline (64 characters), what happened (140 characters), and needs_you (140 characters, empty unless the owner has an action). Write a single line per card field, in words without IDs, paths or model names. The service records the report, takes your workspace as the unit's candidate and sends it to review; end your turn as soon as this returns.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"learnings":{"type":"array","items":{"type":"string"}},"headline":{"type":"string"},"happened":{"type":"string"},"needs_you":{"type":"string"}},"required":["outcome"],"additionalProperties":false}`)}
 	done.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
 			MasonReport
@@ -119,10 +109,6 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 		if state.Value != UnitImplementing {
 			return refuseReport("unit %s is %s, not implementing", scope.Unit, state.Value)
 		}
-		unit, err := sealedUnit(repository, scope)
-		if err != nil {
-			return nil, err
-		}
 		known := []string{scope.Project, scope.Workstream, scope.Unit, scope.Thread, scope.Turn}
 		threads, err := repository.Threads(config.WorkstreamID(scope.Workstream))
 		if err != nil {
@@ -141,7 +127,7 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 		if err != nil {
 			return refuseReport("%s", err)
 		}
-		if reason := checkReport(unit, input.MasonReport); reason != "" {
+		if reason := checkReport(input.MasonReport); reason != "" {
 			return refuseReport("%s", reason)
 		}
 		r.mu.Lock()
@@ -239,43 +225,16 @@ func sealedUnit(repository *trace.Repository, scope coreadapter.Scope) (plan.Uni
 	return unit, nil
 }
 
-// checkReport returns why a report does not report on the unit: an empty
-// outcome, a criterion the unit does not address or one reported twice, an
-// entry with an empty field, or a criterion of the unit left out. It returns
-// "" for a report with one complete entry for every criterion of the unit.
-func checkReport(unit plan.Unit, report MasonReport) string {
+// checkReport returns why a report is incomplete: an empty outcome or an
+// empty learning. It returns "" for a complete report.
+func checkReport(report MasonReport) string {
 	if strings.TrimSpace(report.Outcome) == "" {
-		return "outcome is required: say what the unit's work now does"
+		return "outcome is required: say what the unit's work now does and how you checked its acceptance"
 	}
 	for i, learning := range report.Learnings {
 		if strings.TrimSpace(learning) == "" {
 			return fmt.Sprintf("learning %d is empty", i+1)
 		}
-	}
-	var criteria []string
-	for _, a := range unit.Addresses {
-		if !slices.Contains(criteria, a.Criterion) {
-			criteria = append(criteria, a.Criterion)
-		}
-	}
-	reported := map[string]bool{}
-	for _, c := range report.Criteria {
-		if !slices.Contains(criteria, c.Criterion) {
-			return fmt.Sprintf("unit %s does not address criterion %q; report on %s alone", unit.ID, c.Criterion, strings.Join(criteria, ", "))
-		}
-		if reported[c.Criterion] {
-			return fmt.Sprintf("criterion %s is reported twice", c.Criterion)
-		}
-		reported[c.Criterion] = true
-		for _, field := range []struct{ name, value string }{{"done", c.Done}, {"evidence", c.Evidence}, {"proof", c.Proof}} {
-			if strings.TrimSpace(field.value) == "" {
-				return fmt.Sprintf("criterion %s has no %s", c.Criterion, field.name)
-			}
-		}
-	}
-	missing := slices.DeleteFunc(slices.Clone(criteria), func(c string) bool { return reported[c] })
-	if len(missing) != 0 {
-		return fmt.Sprintf("the report misses %s: report on every criterion of unit %s", strings.Join(missing, ", "), unit.ID)
 	}
 	return ""
 }
@@ -407,7 +366,7 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 		}
 	}
 	card := turn.Response.Result.Outcome.Card
-	content, err := json.MarshalIndent(UnitReport{Unit: unit, Turn: turn.Request.TurnID, Seal: latest.Seal, Outcome: report.Outcome, Criteria: report.Criteria, Learnings: report.Learnings, Card: card, Branch: w.Branch, Base: base, Candidate: candidate}, "", "  ")
+	content, err := json.MarshalIndent(UnitReport{Unit: unit, Turn: turn.Request.TurnID, Seal: latest.Seal, Outcome: report.Outcome, Learnings: report.Learnings, Card: card, Branch: w.Branch, Base: base, Candidate: candidate}, "", "  ")
 	if err != nil {
 		return false, false, err
 	}

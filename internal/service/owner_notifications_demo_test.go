@@ -90,20 +90,24 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n// Skip acknowledged chunks.\n"), 0600); err != nil {
 				return err
 			}
-			if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Acknowledged chunks are skipped", "criteria": []any{criterionArgs(dedupeReport)}}); err != nil || !recorded {
+			if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Acknowledged chunks are skipped"}); err != nil || !recorded {
 				return fmt.Errorf("done refused: %q %v", reason, err)
 			}
 			return nil
 		}
 	}
 	masons.mu.Unlock()
+	// The answer shows the spec must change: the mason asks again, and the
+	// chief of staff routes that question to an amendment.
+	masons.chief.route("2", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
 	f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, questions.AmendTool, map[string]any{"citations": []string{"spec#1"}, "change": "Resume from a durable checkpoint", "reason": "Acknowledgements are not durable"})
+		_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": "Acknowledgements are not durable, so resuming from the last one loses chunks. Should the spec say a durable checkpoint?"})
 		return err
 	})
 
 	f.engine.mu.Lock()
-	// resume's mason asks question 1; its answer turn asks for an amendment,
+	// resume's mason asks question 1; its answer turn asks question 2, which
+	// the chief of staff routes to an amendment,
 	// and the turn that brings the owner's ruling spends past the budget.
 	f.engine.turns[masonTurnID("resume")] = masons.asking(p, "", "1")
 	f.engine.turns[rulingTurn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -120,11 +124,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
-			criterion := "spec#2"
-			if strings.HasPrefix(req.Name, reviewerAgent("resume")) {
-				criterion = "spec#1"
-			}
-			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": []ReviewEvidence{{Criterion: criterion, Evidence: "The candidate contains the planned proof"}}, "findings": []ReviewFinding{}})
+			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				problems.report("review %s: %s: %v", req.Name, body, err)
 			}

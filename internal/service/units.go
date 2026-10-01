@@ -240,7 +240,8 @@ func viewPaths(dir string) ([]string, error) {
 }
 
 // selection selects the whole of the turn's unit workspace, but its VCS
-// metadata, as the mason turn's view, run with execution.
+// metadata, as the mason turn's view, run with execution. The turn holds the
+// mason's tools but amend.
 func (u unitWorkspaces) selection(ctx context.Context, scope coreadapter.Scope, execution coreadapter.ExecutionSettings) (isolation.Selection, error) {
 	stream := config.WorkstreamID(scope.Workstream)
 	w, _, found, err := u.find(ctx, stream, scope.Unit)
@@ -254,7 +255,7 @@ func (u unitWorkspaces) selection(ctx context.Context, scope coreadapter.Scope, 
 		return isolation.Selection{}, err
 	}
 	paths, err := u.paths(w)
-	return isolation.Selection{Paths: paths, Execution: execution}, err
+	return isolation.Selection{Paths: paths, Execution: execution, Narrow: &unitMasonGrant}, err
 }
 
 // recordedName names the file, in the directory under views of a mason turn,

@@ -83,7 +83,7 @@ func setup(t *testing.T) fixture {
 	return fixture{repo: repo, dir: dir, root: root, project: p}
 }
 
-func TestFileAmendmentParksAndSurvivesRestart(t *testing.T) {
+func TestRoutedAmendmentParksAndSurvivesRestart(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 	feature := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "building", Revision: 1, Project: project, Workstream: stream, At: start, Actor: owner, Cause: "test"}
@@ -100,8 +100,15 @@ func TestFileAmendmentParksAndSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := f.turn(t, "mason1", "mason", "build1")
-	tool := tools(t, f, "mason1", scope, start)[questions.AmendTool]
-	input := `{"citations":["spec#1","plan#resume"],"change":"Clarify restart behavior","reason":"The proof needs another state"}`
+	if _, has := tools(t, f, "mason1", scope, start)[questions.AmendTool]; has {
+		t.Fatal("a unit mason holds amend")
+	}
+	if got := call(t, tools(t, f, "mason1", scope, start)[questions.AskTool], `{"question":"Restart behavior is not in the spec. Should it be?"}`); !strings.Contains(got, `"question":"1"`) {
+		t.Fatal(got)
+	}
+	chief := f.turn(t, "chief", trace.ChiefOfStaff, "chief1")
+	tool := tools(t, f, "chief", chief, start)[questions.RouteAmendmentTool]
+	input := `{"question":"1","citations":["spec#1","plan#resume"],"change":"Clarify restart behavior","reason":"The task needs another state"}`
 	if got := call(t, tool, input); !strings.Contains(got, `"amendment":"1"`) {
 		t.Fatal(got)
 	}
@@ -155,7 +162,7 @@ func TestFileAmendmentParksAndSurvivesRestart(t *testing.T) {
 	}
 }
 
-func TestReviewerAndRoutedAmendments(t *testing.T) {
+func TestRoutedAmendmentsCheckLifecycleAndCitations(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 	seal := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "seal", Revision: 1, Project: project, Workstream: stream, At: start, Actor: owner, Cause: "test"}, Path: "seal.json", Content: `{"seal":1,"spec_hash":"sha256:test"}`}
@@ -163,10 +170,18 @@ func TestReviewerAndRoutedAmendments(t *testing.T) {
 		t.Fatal(err)
 	}
 	reviewer := f.turn(t, "reviewer1", "reviewer", "review1")
-	tool := tools(t, f, "reviewer1", reviewer, start)[questions.AmendTool]
-	valid := `{"citations":["plan#resume"],"change":"Add a proof","reason":"Review found a gap"}`
+	reviewerTools := tools(t, f, "reviewer1", reviewer, start)
+	if _, has := reviewerTools[questions.AmendTool]; has {
+		t.Fatal("a unit reviewer holds amend")
+	}
+	if got := call(t, reviewerTools[questions.AskTool], `{"question":"The plan names no check for resume. Should it?"}`); !strings.Contains(got, `"question":"1"`) {
+		t.Fatal(got)
+	}
+	chief := f.turn(t, "chief", trace.ChiefOfStaff, "chief1")
+	route := tools(t, f, "chief", chief, start)[questions.RouteAmendmentTool]
+	valid := `{"question":"1","citations":["plan#resume"],"change":"Add a check","reason":"Review found a gap"}`
 	before := f.head(t)
-	if got := call(t, tool, valid); !strings.Contains(got, "building or assembled") {
+	if got := call(t, route, valid); !strings.Contains(got, "building or assembled") {
 		t.Fatal(got)
 	}
 	if got := f.head(t); got != before {
@@ -182,55 +197,33 @@ func TestReviewerAndRoutedAmendments(t *testing.T) {
 		t.Fatal(err)
 	}
 	before = f.head(t)
-	for _, bad := range []string{`{"citations":["spec#9"],"change":"x","reason":"y"}`, `{"citations":["plan#missing"],"change":"x","reason":"y"}`} {
-		if got := call(t, tool, bad); !strings.Contains(got, `"recorded":false`) {
+	for _, bad := range []string{`{"question":"1","citations":["spec#9"],"change":"x","reason":"y"}`, `{"question":"1","citations":["plan#missing"],"change":"x","reason":"y"}`} {
+		if got := call(t, route, bad); !strings.Contains(got, `"recorded":false`) {
 			t.Fatal(got)
 		}
 	}
 	if got := f.head(t); got != before {
 		t.Fatal("invalid citation changed trace")
 	}
-	if got := call(t, tool, valid); !strings.Contains(got, `"amendment":"1"`) {
+	if got := call(t, route, valid); !strings.Contains(got, `"amendment":"1"`) {
 		t.Fatal(got)
 	}
-	state, err := f.repo.Workflow(stream, unit)
-	if err != nil || state.Value != "waiting" {
-		t.Fatalf("reviewer state %+v: %v", state, err)
-	}
-	mason := f.turn(t, "mason1", "mason", "build1")
-	if _, err := f.repo.Ask(ctx, "mason1", mason, "Should criterion 1 change?", start); err != nil {
-		t.Fatal(err)
-	}
-	chief := f.turn(t, "chief", trace.ChiefOfStaff, "chief1")
-	route := tools(t, f, "chief", chief, start)[questions.RouteAmendmentTool]
-	if got := call(t, route, `{"question":"1","citations":["spec#1"],"change":"Clarify restart","reason":"The question requires it"}`); !strings.Contains(got, `"amendment":"2"`) {
-		t.Fatal(got)
-	}
-	if got := call(t, route, `{"question":"1","citations":["spec#1"],"change":"Clarify restart","reason":"The question requires it"}`); !strings.Contains(got, `"amendment":"2"`) {
+	if got := call(t, route, valid); !strings.Contains(got, `"amendment":"1"`) {
 		t.Fatal(got)
 	}
 	requests, err := trace.Read[trace.Amendment](f.repo, stream)
-	if err != nil || len(requests) != 2 {
+	if err != nil || len(requests) != 1 {
 		t.Fatalf("requests %+v: %v", requests, err)
 	}
-	if requests[1].Requester.ID != "mason1" || requests[1].Actor.ID != "chief" || requests[1].QuestionID != "1" || requests[1].Unit != "resume" {
-		t.Fatalf("routed %+v", requests[1])
+	if requests[0].Requester.ID != "reviewer1" || requests[0].Actor.ID != "chief" || requests[0].QuestionID != "1" || requests[0].Unit != "resume" {
+		t.Fatalf("routed %+v", requests[0])
 	}
 	if states(t, f)["1"].State != trace.QuestionRouted {
 		t.Fatal("question was not routed")
 	}
-	transitions, err := trace.Read[trace.Transition](f.repo, stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var routedWait trace.Transition
-	for _, tr := range transitions {
-		if tr.Cause == "amendment_2_filed" && tr.Subject == unit {
-			routedWait = tr
-		}
-	}
-	if routedWait.From != "waiting" || routedWait.To != "waiting" {
-		t.Fatalf("routed unit wait %+v", routedWait)
+	state, err := f.repo.Workflow(stream, unit)
+	if err != nil || state.Value != "waiting" {
+		t.Fatalf("reviewer state %+v: %v", state, err)
 	}
 }
 
@@ -370,9 +363,6 @@ func TestToolsFollowTheRole(t *testing.T) {
 	}
 	for _, role := range []string{"mason", "reviewer", "architect", "committee", "foreman", "librarian"} {
 		want := []string{"ask"}
-		if role == "mason" || role == "reviewer" {
-			want = append(want, "amend")
-		}
 		if got := names(f.turn(t, role+"1", role, "turn_"+role), role+"1"); !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s tools: %v", role, got)
 		}
@@ -939,19 +929,12 @@ func TestDriftAmendmentCitesUpstreamAndIsFiledOnce(t *testing.T) {
 		t.Fatalf("upstream moved events after recovery %+v", moved)
 	}
 
-	reviewer := f.turn(t, "reviewer1", "reviewer", "review1")
-	tools = driftTools("reviewer1", reviewer)
-	if _, ok := tools[questions.AskTool]; !ok || len(tools) != 2 {
-		t.Fatalf("the reviewer's tools %v", tools)
+	// Unit masons and reviewers ask; only the drift mason files an amendment.
+	if _, err := questions.DriftTools(f.repo, "reviewer1", f.turn(t, "reviewer1", "reviewer", "review1"), time.Now, move); err == nil {
+		t.Fatal("a unit reviewer got drift tools")
 	}
-	if got := call(t, tools[questions.AmendTool], input); !strings.Contains(got, `"amendment":"2"`) || !strings.Contains(got, "End your turn now") {
-		t.Fatal(got)
-	}
-	if state, err := f.repo.Workflow(stream, unit); err != nil || state.Value != "waiting" {
-		t.Fatalf("the reviewer's unit is %+v: %v", state, err)
-	}
-	if moved := upstreamMoved(t, f); len(moved) != 2 {
-		t.Fatalf("upstream moved events after the reviewer's request %+v", moved)
+	if _, err := questions.DriftTools(f.repo, "mason1", f.turn(t, "mason1", "mason", "build1"), time.Now, move); err == nil {
+		t.Fatal("a unit mason got drift tools")
 	}
 	if _, err := questions.DriftTools(f.repo, "chief", f.turn(t, "chief", trace.ChiefOfStaff, "chief1"), time.Now, move); err == nil {
 		t.Fatal("the chief of staff got drift tools")

@@ -104,7 +104,7 @@ func TestHandInToSketchedPlan(t *testing.T) {
 
 	// Draft 1 has a dependency cycle and leaves criterion 2 unaddressed;
 	// draft 2 is told why and delivers a valid plan.
-	problems := "- spec#2: no unit addresses this criterion\n- unit \"dedupe\": dependency cycle dedupe -> resume -> dedupe"
+	problems := "- spec#2: no unit serves this criterion\n- unit \"dedupe\": dependency cycle dedupe -> resume -> dedupe"
 	f := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: cyclicPlan}, nil)
 	f.script("draft-2-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan},

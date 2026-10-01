@@ -54,6 +54,20 @@ type chief struct {
 	mu       sync.Mutex
 	released map[string]bool
 	held     map[string]chan struct{}
+	// routes holds, by question ID, the citations, change and reason of
+	// the amendment the chief of staff routes that question to.
+	routes map[string]map[string]any
+}
+
+// route has the chief of staff route question id to an amendment with the
+// given citations, change and reason.
+func (c *chief) route(id string, citations []string, change, reason string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.routes == nil {
+		c.routes = map[string]map[string]any{}
+	}
+	c.routes[id] = map[string]any{"question": id, "citations": citations, "change": change, "reason": reason}
 }
 
 // release has the chief of staff answer question id from the record.
@@ -80,11 +94,13 @@ func (c *chief) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tool
 		return nil, ctx.Err()
 	}
 	c.mu.Lock()
-	released, held := maps.Clone(c.released), maps.Clone(c.held)
+	released, held, routes := maps.Clone(c.released), maps.Clone(c.held), maps.Clone(c.routes)
 	c.mu.Unlock()
 	for _, m := range openQuestion.FindAllStringSubmatch(req.Prompt, -1) {
 		id := m[1]
 		switch {
+		case routes[id] != nil:
+			c.choose(ctx, tools, questions.RouteAmendmentTool, routes[id])
 		case released[id] || held[id] != nil:
 			c.choose(ctx, tools, questions.AnswerTool, map[string]any{"question": id, "text": askedAnswer, "citations": []string{"charter#1"}})
 		default:
@@ -125,7 +141,7 @@ func (c *chief) choose(ctx context.Context, tools *mcp.ClientSession, name strin
 		c.p.report("%s returned %q", name, got)
 		return
 	}
-	if !result.Recorded && !strings.Contains(result.Reason, "is already answered") && !strings.Contains(result.Reason, "is escalated to the owner") && !strings.Contains(result.Reason, "has the owner's ruling") {
+	if !result.Recorded && !strings.Contains(result.Reason, "is already answered") && !strings.Contains(result.Reason, "is escalated to the owner") && !strings.Contains(result.Reason, "has the owner's ruling") && !strings.Contains(result.Reason, "was routed to an amendment") {
 		c.p.report("%s refused: %s", name, result.Reason)
 	}
 }
@@ -339,7 +355,7 @@ func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 		}
 		// The objection made before asking is kept, so the next one is the
 		// second, and both can be conceded.
-		if recorded, id, err := shedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "proof", "part": "spec#2", "argument": "No unit shows it.", "citations": []string{"plan#dedupe"}}); err != nil || !recorded || id != second {
+		if recorded, id, err := shedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "acceptance", "part": "plan#dedupe", "argument": "No unit shows it.", "citations": []string{"spec#2"}}); err != nil || !recorded || id != second {
 			p.report("objection after the answer: %v %q %v", recorded, id, err)
 		}
 		return concedes(p, first, second)(ctx, req, nil, tools)
@@ -659,6 +675,14 @@ func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 	home := filepath.Dir(f.clone)
 	_, err = repo.ClaimTurn(ctx, stream, member, "token_"+reserved, filepath.Join(home, reserved), f.clock.Now())
 	must(t, err)
+	// A chief-of-staff event turn claimed as the service stopped stays
+	// active; the next session would abandon it, so the planted turn is
+	// claimed after it is.
+	chief, err := repo.Thread(stream, trace.ChiefOfStaff)
+	must(t, err)
+	if chief.Active != "" {
+		must(t, repo.AbandonTurn(ctx, stream, trace.ChiefOfStaff, chief.Active, f.clock.Now()))
+	}
 	chiefHeader := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_planted", Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "planted"}
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: chiefHeader, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "planted", Profile: second.Profile, Prompt: "Answer"})
 	must(t, err)
@@ -758,7 +782,7 @@ func TestMemberAsksAgainInItsAnswerTurn(t *testing.T) {
 		return errors.Join(objects(p, shed.Fit, "plan", "spec#1")(ctx, req, verified, tools), asks(p, "1")(ctx, req, verified, tools))
 	})
 	f.answer("1", func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
-		if recorded, id, err := shedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "proof", "part": "spec#2", "argument": "No unit shows it.", "citations": []string{"plan#dedupe"}}); err != nil || !recorded || id != ids[1] {
+		if recorded, id, err := shedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "acceptance", "part": "plan#dedupe", "argument": "No unit shows it.", "citations": []string{"spec#2"}}); err != nil || !recorded || id != ids[1] {
 			p.report("objection in the first answer turn: %v %q %v", recorded, id, err)
 		}
 		return asks(p, "2")(ctx, req, verified, tools)

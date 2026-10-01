@@ -72,23 +72,15 @@ type TraceCriterion struct {
 	Text      string `json:"text"`
 }
 
-// TraceAddress is a criterion a unit addresses and its planned proof.
-type TraceAddress struct {
-	Criterion string     `json:"criterion"`
-	Text      string     `json:"text"`
-	Proof     plan.Proof `json:"proof"`
-}
-
 // TraceReport is one revision of a unit's report.json.
 type TraceReport struct {
-	Ref       TraceRef          `json:"ref"`
-	Turn      string            `json:"turn"`
-	Seal      int               `json:"seal"`
-	Outcome   string            `json:"outcome"`
-	Branch    string            `json:"branch"`
-	Base      string            `json:"base"`
-	Candidate string            `json:"candidate"`
-	Criteria  []CriterionReport `json:"criteria"`
+	Ref       TraceRef `json:"ref"`
+	Turn      string   `json:"turn"`
+	Seal      int      `json:"seal"`
+	Outcome   string   `json:"outcome"`
+	Branch    string   `json:"branch"`
+	Base      string   `json:"base"`
+	Candidate string   `json:"candidate"`
 }
 
 // TraceReview is one revision of a unit's review.json that records a
@@ -102,7 +94,7 @@ type TraceReview struct {
 	Candidate  coreadapter.Candidate `json:"candidate"`
 	DiffSHA256 string                `json:"diff_sha256"`
 	Bounces    int                   `json:"bounces"`
-	Evidence   []ReviewEvidence      `json:"evidence"`
+	Summary    string                `json:"summary"`
 	Findings   []ReviewFinding       `json:"findings"`
 }
 
@@ -162,8 +154,8 @@ type TraceEvent struct {
 	Summary string    `json:"summary"`
 }
 
-// UnitTrace is the walk of one unit: where it is defined and what it
-// addresses, every revision of its reports, verdicts, rebases and landings,
+// UnitTrace is the walk of one unit: where it is defined, its task and
+// acceptance and the criteria it serves, every revision of its reports, verdicts, rebases and landings,
 // the rulings on it, its turns and their cost, and its history in order.
 type UnitTrace struct {
 	Project      config.ProjectID    `json:"project"`
@@ -174,7 +166,9 @@ type UnitTrace struct {
 	State        string              `json:"state"`
 	Source       string              `json:"source"`
 	Definition   *TraceRef           `json:"definition,omitempty"`
-	Addresses    []TraceAddress      `json:"addresses"`
+	Task         string              `json:"task"`
+	Acceptance   []string            `json:"acceptance"`
+	Criteria     []TraceCriterion    `json:"criteria"`
 	DependsOn    []string            `json:"depends_on"`
 	Reports      []TraceReport       `json:"reports"`
 	Reviews      []TraceReview       `json:"reviews"`
@@ -214,7 +208,7 @@ type TraceDelivery struct {
 
 // CriterionTrace is the walk of one sealed criterion: the seal and the spec
 // and plan revisions it pins, the rulings that govern the criterion, every
-// unit that addresses it with its evidence filtered to the criterion, the
+// unit that serves it with its reports and reviews, the
 // final report's account of it and the delivery.
 type CriterionTrace struct {
 	Project    config.ProjectID    `json:"project"`
@@ -590,22 +584,24 @@ func traceUnit(repository *trace.Repository, stream config.WorkstreamID, unit st
 	return u, nil
 }
 
-// unit builds the unit's walk, its evidence restricted to one criterion
-// when criterion is not empty. It reports false for a unit that neither the
+// unit builds the unit's walk, its criteria restricted to one when
+// criterion is not empty. It reports false for a unit that neither the
 // sealed plan nor a follow-up defines and no record names.
 func (w *traceWalk) unit(id, criterion string) (UnitTrace, bool) {
-	t := UnitTrace{Project: w.project, Workstream: w.stream, Feature: w.feature, Unit: id, State: w.states[trace.UnitSubject(id)], Addresses: []TraceAddress{}, DependsOn: []string{}, Reports: []TraceReport{}, Reviews: []TraceReview{}, Rulings: []TraceRuling{}, Rebases: []TraceRebase{}, Landings: []TraceLanding{}, Turns: []TraceTurn{}, History: []TraceEvent{}, Gaps: []TraceGap{}}
+	t := UnitTrace{Project: w.project, Workstream: w.stream, Feature: w.feature, Unit: id, State: w.states[trace.UnitSubject(id)], Acceptance: []string{}, Criteria: []TraceCriterion{}, DependsOn: []string{}, Reports: []TraceReport{}, Reviews: []TraceReview{}, Rulings: []TraceRuling{}, Rebases: []TraceRebase{}, Landings: []TraceLanding{}, Turns: []TraceTurn{}, History: []TraceEvent{}, Gaps: []TraceGap{}}
 	defined, ok := w.findUnit(id)
 	if ok {
 		ref := refOf(defined.def)
 		t.Title, t.Source, t.Definition = defined.unit.Title, defined.source, &ref
 		t.DependsOn = append(t.DependsOn, defined.unit.DependsOn...)
-		for _, a := range defined.unit.Addresses {
-			if criterion != "" && a.Criterion != criterion {
+		t.Task = defined.unit.Task
+		t.Acceptance = append(t.Acceptance, defined.unit.Acceptance...)
+		for _, c := range defined.unit.Criteria {
+			if criterion != "" && c != criterion {
 				continue
 			}
-			text, _ := criterionText(w.spec, a.Criterion)
-			t.Addresses = append(t.Addresses, TraceAddress{Criterion: a.Criterion, Text: text, Proof: a.Proof})
+			text, _ := criterionText(w.spec, c)
+			t.Criteria = append(t.Criteria, TraceCriterion{Criterion: c, Text: text})
 		}
 	} else if w.seal != nil {
 		t.Gaps = append(t.Gaps, TraceGap{Link: "unit definition", Unit: id, State: LinkUnavailable, Reason: fmt.Sprintf("neither plan.json revision %d nor a follow-up defines the unit", w.sealed.Revision.Plan)})
@@ -620,7 +616,7 @@ func (w *traceWalk) unit(id, criterion string) (UnitTrace, bool) {
 	if !ok && !named {
 		return UnitTrace{}, false
 	}
-	w.unitDocuments(&t, criterion)
+	w.unitDocuments(&t)
 	t.Rulings = w.unitRulings(id)
 	w.unitTurns(&t)
 	w.unitHistory(&t)
@@ -629,23 +625,17 @@ func (w *traceWalk) unit(id, criterion string) (UnitTrace, bool) {
 	return t, true
 }
 
-func (w *traceWalk) unitDocuments(t *UnitTrace, criterion string) {
+func (w *traceWalk) unitDocuments(t *UnitTrace) {
 	for _, d := range w.revisions(reportDocument(t.Unit)) {
 		var r UnitReport
 		if err := json.Unmarshal([]byte(d.Content), &r); err != nil {
 			t.Gaps = append(t.Gaps, unreadable(d, t.Unit, err))
 			continue
 		}
-		report := TraceReport{Ref: refOf(d), Turn: r.Turn, Seal: r.Seal, Outcome: r.Outcome, Branch: r.Branch, Base: r.Base, Candidate: r.Candidate, Criteria: []CriterionReport{}}
-		for _, c := range r.Criteria {
-			if criterion == "" || c.Criterion == criterion {
-				report.Criteria = append(report.Criteria, c)
-			}
-		}
-		t.Reports = append(t.Reports, report)
+		t.Reports = append(t.Reports, TraceReport{Ref: refOf(d), Turn: r.Turn, Seal: r.Seal, Outcome: r.Outcome, Branch: r.Branch, Base: r.Base, Candidate: r.Candidate})
 	}
 	for _, d := range w.revisions(reviewDocument(t.Unit)) {
-		review, ok, err := reviewOf(d, criterion)
+		review, ok, err := reviewOf(d)
 		if err != nil {
 			t.Gaps = append(t.Gaps, unreadable(d, t.Unit, err))
 		}
@@ -677,7 +667,7 @@ func unreadable(d trace.Document, unit string, err error) TraceGap {
 
 // reviewOf reads a review.json revision. It reports false for a revision
 // that records only the candidate identity a review was asked for.
-func reviewOf(d trace.Document, criterion string) (TraceReview, bool, error) {
+func reviewOf(d trace.Document) (TraceReview, bool, error) {
 	var r UnitReviewResult
 	if err := json.Unmarshal([]byte(d.Content), &r); err != nil {
 		return TraceReview{}, false, err
@@ -685,17 +675,8 @@ func reviewOf(d trace.Document, criterion string) (TraceReview, bool, error) {
 	if r.Turn == "" {
 		return TraceReview{}, false, nil
 	}
-	review := TraceReview{Ref: refOf(d), Turn: r.Turn, Decision: r.Verdict.Decision, Report: r.Identity.Report, Seal: r.Identity.Seal, Candidate: r.Identity.Candidate, DiffSHA256: r.Identity.DiffSHA256, Bounces: r.Bounces, Evidence: []ReviewEvidence{}, Findings: []ReviewFinding{}}
-	for _, e := range r.Verdict.Evidence {
-		if criterion == "" || e.Criterion == criterion {
-			review.Evidence = append(review.Evidence, e)
-		}
-	}
-	for _, f := range r.Verdict.Findings {
-		if criterion == "" || f.Criterion == criterion {
-			review.Findings = append(review.Findings, f)
-		}
-	}
+	review := TraceReview{Ref: refOf(d), Turn: r.Turn, Decision: r.Verdict.Decision, Report: r.Identity.Report, Seal: r.Identity.Seal, Candidate: r.Identity.Candidate, DiffSHA256: r.Identity.DiffSHA256, Bounces: r.Bounces, Summary: r.Verdict.Summary, Findings: []ReviewFinding{}}
+	review.Findings = append(review.Findings, r.Verdict.Findings...)
 	return review, true, nil
 }
 
@@ -875,7 +856,7 @@ func (w *traceWalk) approval(unit, name string) (TraceReview, bool) {
 	if !ok || !found || path != d.Path {
 		return TraceReview{}, false
 	}
-	review, ok, err := reviewOf(d, "")
+	review, ok, err := reviewOf(d)
 	return review, ok && err == nil && review.Decision == "satisfactory"
 }
 
@@ -917,14 +898,14 @@ func traceCriterion(repository *trace.Repository, stream config.WorkstreamID, cr
 		}
 	}
 	for _, u := range w.units {
-		if !slices.ContainsFunc(u.unit.Addresses, func(a plan.Address) bool { return a.Criterion == criterion }) {
+		if !slices.Contains(u.unit.Criteria, criterion) {
 			continue
 		}
 		unit, _ := w.unit(u.unit.ID, criterion)
 		t.Units = append(t.Units, unit)
 	}
 	if len(t.Units) == 0 && w.planDoc != nil {
-		t.Gaps = append(t.Gaps, TraceGap{Link: "units addressing " + criterion, State: LinkUnavailable, Reason: fmt.Sprintf("no unit of plan.json revision %d or a follow-up addresses the criterion", w.planDoc.Revision)})
+		t.Gaps = append(t.Gaps, TraceGap{Link: "units serving " + criterion, State: LinkUnavailable, Reason: fmt.Sprintf("no unit of plan.json revision %d or a follow-up serves the criterion", w.planDoc.Revision)})
 	}
 	delivery, report, gaps := w.delivery()
 	t.Delivery, t.Gaps = delivery, append(t.Gaps, gaps...)
@@ -1111,7 +1092,7 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 				}
 			}
 		case reviewDocument(d.Unit):
-			if r, ok, _ := reviewOf(d, ""); ok {
+			if r, ok, _ := reviewOf(d); ok {
 				if r.Candidate.Revision == commit {
 					record(commitCandidate, d.Unit, d)
 				} else if r.Candidate.BaseRevision == commit {
@@ -1225,7 +1206,7 @@ func (w *traceWalk) commitLanding(l TraceLanding, gaps *[]TraceGap) CommitLandin
 		if d, ok := w.document(reportDocument(l.Unit), revision); ok {
 			var r UnitReport
 			if json.Unmarshal([]byte(d.Content), &r) == nil {
-				c.Report = &TraceReport{Ref: refOf(d), Turn: r.Turn, Seal: r.Seal, Outcome: r.Outcome, Branch: r.Branch, Base: r.Base, Candidate: r.Candidate, Criteria: r.Criteria}
+				c.Report = &TraceReport{Ref: refOf(d), Turn: r.Turn, Seal: r.Seal, Outcome: r.Outcome, Branch: r.Branch, Base: r.Base, Candidate: r.Candidate}
 			}
 		}
 		if c.Report == nil {

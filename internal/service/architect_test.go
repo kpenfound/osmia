@@ -34,10 +34,10 @@ const (
   {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "no chunk is sent twice"}}], "depends_on": ["resume"], "footprint": ["internal.trace"]}
 ]}
 `
-	// cyclicPlan has a dependency cycle and leaves criterion 2 unaddressed.
-	cyclicPlan = `{"version": 1, "units": [
-  {"id": "resume", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": ["dedupe"], "footprint": ["internal.trace"]},
-  {"id": "dedupe", "addresses": [], "depends_on": ["resume"], "footprint": ["internal.trace"]}
+	// cyclicPlan has a dependency cycle and leaves criterion 2 unserved.
+	cyclicPlan = `{"version": 2, "units": [
+  {"id": "resume", "task": "Resume from the last chunk.", "acceptance": ["TestResume passes"], "criteria": ["spec#1"], "depends_on": ["dedupe"], "footprint": ["internal.trace"]},
+  {"id": "dedupe", "task": "Skip acknowledged chunks.", "acceptance": ["No chunk is sent twice"], "criteria": [], "depends_on": ["resume"], "footprint": ["internal.trace"]}
 ]}
 `
 )
@@ -343,7 +343,7 @@ func checkArchitectBoundary(ctx context.Context, req agent.Request, verified *ag
 			fail("runtime environment exposes %s", key)
 		}
 	}
-	for _, want := range []string{"handed/stdin", "charter.md", "context.md", "intended behaviour", "must not do", `"## Acceptance criteria"`, "numbered list", "spec#<n>", "footprint", "no cycle", "named proof", "How finely the work is cut into units is your call", DraftTool} {
+	for _, want := range []string{"handed/stdin", "charter.md", "context.md", "intended behaviour", "must not do", `"## Acceptance criteria"`, "numbered list", "spec#<n>", "footprint", "no cycle", "at least one acceptance item", "How finely the work is cut into units is your call", DraftTool} {
 		if !strings.Contains(req.Prompt, want) {
 			fail("prompt lacks %q", want)
 		}
@@ -562,7 +562,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 				return err
 			}
 			var problems []error
-			for _, want := range []string{"Draft 2 was not accepted:", `unit "dedupe": dependency cycle dedupe -> resume -> dedupe`, "spec#2: no unit addresses this criterion"} {
+			for _, want := range []string{"Draft 2 was not accepted:", `unit "dedupe": dependency cycle dedupe -> resume -> dedupe`, "spec#2: no unit serves this criterion"} {
 				if !strings.Contains(req.Prompt, want) {
 					problems = append(problems, fmt.Errorf("prompt lacks %q:\n%s", want, req.Prompt))
 				}
@@ -607,7 +607,7 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 		{"draft-1", "", "drafting-1", "the workstream was handed in; the architect is asked for draft 1"},
 		{"draft-1-invalid", "drafting-1", "invalid-1", "draft 1 of the spec and plan is invalid:\n- plan.json is not UTF-8 text"},
 		{"draft-2", "invalid-1", "drafting-2", "draft 1 was invalid; the architect is asked for draft 2"},
-		{"draft-2-invalid", "drafting-2", "invalid-2", "draft 2 of the spec and plan is invalid:\n- spec#2: no unit addresses this criterion\n- unit \"dedupe\": dependency cycle dedupe -> resume -> dedupe"},
+		{"draft-2-invalid", "drafting-2", "invalid-2", "draft 2 of the spec and plan is invalid:\n- spec#2: no unit serves this criterion\n- unit \"dedupe\": dependency cycle dedupe -> resume -> dedupe"},
 		{"draft-3", "invalid-2", "drafting-3", "draft 2 was invalid; the architect is asked for draft 3"},
 	} {
 		tr, ok := byID[want.id]
@@ -671,7 +671,7 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 		}
 	}
 	if len(notices) != 1 || notices[0].Event.Kind != trace.NoticeKind || notices[0].Event.Operation != nil ||
-		!strings.HasPrefix(notices[0].Event.Body, "None of the architect's 3 drafts of the spec and plan was accepted and drafting has stopped; the workstream stays handed. Last draft: draft 3 of the spec and plan is invalid:\n- spec#2: no unit addresses this criterion\n- unit \"dedupe\": dependency cycle") {
+		!strings.HasPrefix(notices[0].Event.Body, "None of the architect's 3 drafts of the spec and plan was accepted and drafting has stopped; the workstream stays handed. Last draft: draft 3 of the spec and plan is invalid:\n- spec#2: no unit serves this criterion\n- unit \"dedupe\": dependency cycle") {
 		t.Fatalf("outbox: %+v", outbox)
 	}
 	var last trace.Transition

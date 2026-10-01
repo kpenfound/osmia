@@ -43,7 +43,9 @@ func Read(repo *trace.Repository, stream config.WorkstreamID) ([]Unit, error) {
 		if err := json.Unmarshal([]byte(doc.Content), &batch); err != nil {
 			return nil, fmt.Errorf("%s revision %d: %w", doc.Path, doc.Revision, err)
 		}
-		units = append(units, batch...)
+		for _, u := range batch {
+			units = append(units, u.withTask())
+		}
 	}
 	return units, nil
 }
@@ -59,4 +61,19 @@ func Find(repo *trace.Repository, stream config.WorkstreamID, id string) (Unit, 
 		return Unit{}, false, nil
 	}
 	return units[i], true, nil
+}
+
+// withTask returns the follow-up with a task, acceptance and criterion drawn
+// from its gap when its unit records none.
+func (u Unit) withTask() Unit {
+	if u.Unit.Task == "" {
+		u.Unit.Task = u.Gap
+	}
+	if len(u.Unit.Acceptance) == 0 {
+		u.Unit.Acceptance = []string{u.Criterion + " holds: " + u.Gap}
+	}
+	if len(u.Unit.Criteria) == 0 && u.Criterion != "" {
+		u.Unit.Criteria = []string{u.Criterion}
+	}
+	return u
 }

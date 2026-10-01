@@ -35,8 +35,8 @@ func (p Pin) governs(q Pin) bool { return p.Seal == q.Seal && p.Spec == q.Spec &
 // Application is the document amendments/<n>/application.json. Its first
 // revision is recorded with the resealing: the revisions the amendment moved
 // the workstream From and To, the request and the owner's note, the changed
-// criteria and affected proofs, and how the amendment's affected units are
-// treated. Rework units address a changed criterion and return to
+// criteria, and how the amendment's affected units are
+// treated. Rework units serve a changed criterion and return to
 // implementing; Notify units had their plan entry changed while their
 // criteria kept their meaning; Added units are new to the plan and Removed
 // units left it. Its second revision adds Applied, what applying it recorded.
@@ -49,7 +49,6 @@ type Application struct {
 	Reason    string   `json:"reason"`
 	Note      string   `json:"note,omitempty"`
 	Criteria  []string `json:"criteria"`
-	Proofs    []string `json:"proofs"`
 	Rework    []string `json:"rework"`
 	Notify    []string `json:"notify"`
 	Added     []string `json:"added"`
@@ -69,13 +68,13 @@ type Applied struct {
 }
 
 // Classify sorts an amendment's affected units into rework, notify, added
-// and removed. A unit that addresses a changed criterion in either plan is
+// and removed. A unit that serves a changed criterion in either plan is
 // reworked, even when the affected set does not list it; any other affected
 // unit in both plans is notified.
 func Classify(criteria, units []string, before, after plan.Plan) (rework, notify, added, removed []string) {
 	rework, notify, added, removed = []string{}, []string{}, []string{}, []string{}
 	changed := func(u plan.Unit) bool {
-		return slices.ContainsFunc(u.Addresses, func(a plan.Address) bool { return slices.Contains(criteria, a.Criterion) })
+		return slices.ContainsFunc(u.Criteria, func(c string) bool { return slices.Contains(criteria, c) })
 	}
 	names := slices.Clone(units)
 	for _, p := range []plan.Plan{before, after} {

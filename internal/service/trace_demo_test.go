@@ -73,9 +73,9 @@ func TestTraceNavigationDemonstration(t *testing.T) {
 		t.Fatal(out)
 	}
 
-	f.report("b", sha('3'), sha('a'), "spec#2", "spec#3")
+	f.report("b", sha('3'), sha('a'))
 	f.unit("b", UnitReviewing)
-	f.review("b", 1, sha('3'), sha('a'), "satisfactory", 0, "spec#2", "spec#3")
+	f.review("b", 1, sha('3'), sha('a'), "satisfactory", 0)
 	f.unit("b", UnitApproved)
 	f.land("b", 2, sha('3'), sha('a'), sha('b'), "spec#2", "spec#3")
 	f.unit("b", UnitMerged)
@@ -86,8 +86,8 @@ func TestTraceNavigationDemonstration(t *testing.T) {
 	criterion, err := client.TraceCriterion(ctx, stream, "spec#1")
 	must(t, err)
 	if !criterion.Complete || criterion.Text != "Specs parse." || criterion.Spec.Revision != 1 || criterion.Plan.Revision != 1 ||
-		criterion.Units[0].Addresses[0].Proof.Name != "TestParse" || len(criterion.Units[0].Reports) != 2 ||
-		criterion.Units[0].Reviews[1].Decision != "satisfactory" || len(criterion.Units[0].Reviews[1].Evidence) != 1 ||
+		criterion.Units[0].Acceptance[0] != "TestParse covers numbered criteria" || len(criterion.Units[0].Reports) != 2 ||
+		criterion.Units[0].Reviews[1].Decision != "satisfactory" || criterion.Units[0].Reviews[1].Summary == "" ||
 		criterion.Units[0].Rulings[0].Owner != "The strict one." || criterion.Units[0].Landings[0].Commit != sha('a') ||
 		criterion.Delivery.Published != sha('d') {
 		t.Fatalf("delivered criterion %+v", criterion)

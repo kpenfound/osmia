@@ -1210,18 +1210,13 @@ func (a *finalReviewer) followups(stream config.WorkstreamID, report FinalReport
 			continue
 		}
 		var footprint []string
-		var proof plan.Proof
 		for _, original := range p.Units {
-			for _, address := range original.Addresses {
-				if address.Criterion == c.Criterion {
-					if proof.Kind == "" {
-						proof = address.Proof
-					}
-					for _, name := range original.Footprint {
-						if !slices.Contains(footprint, name) {
-							footprint = append(footprint, name)
-						}
-					}
+			if !slices.Contains(original.Criteria, c.Criterion) {
+				continue
+			}
+			for _, name := range original.Footprint {
+				if !slices.Contains(footprint, name) {
+					footprint = append(footprint, name)
 				}
 			}
 		}
@@ -1234,7 +1229,7 @@ func (a *finalReviewer) followups(stream config.WorkstreamID, report FinalReport
 			id = fmt.Sprintf("%s-%d", base, n)
 		}
 		known[id] = true
-		out = append(out, followup.Unit{Review: report.Review, Report: revision, Criterion: c.Criterion, Gap: c.Gap, Unit: plan.Unit{ID: id, Title: "Address final review gap", Addresses: []plan.Address{{Criterion: c.Criterion, Proof: proof}}, DependsOn: []string{}, Footprint: footprint}})
+		out = append(out, followup.Unit{Review: report.Review, Report: revision, Criterion: c.Criterion, Gap: c.Gap, Unit: plan.Unit{ID: id, Title: "Address final review gap", Task: c.Gap, Acceptance: []string{"The final review's gap in " + c.Criterion + " is closed"}, Criteria: []string{c.Criterion}, DependsOn: []string{}, Footprint: footprint}})
 	}
 	return out, nil
 }

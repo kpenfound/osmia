@@ -319,7 +319,7 @@ func resolvePrompt(unit string, paths []string, rebase UnitRebase, m bundle.Maso
 The workstream's feature branch moved to %s, and the service rebased your unit's workspace onto it. These files of your view are conflicted:
 %s
 
-%s Resolve every conflict against the sealed spec below, so that what the feature branch holds and what your unit builds both stand, and remove every marker. Then check that each of the unit's criteria holds and its proof is in place and passing, and call done with a report on every criterion of the unit. The service sends the unit to review only once no conflicted file carries a marker.
+%s Resolve every conflict against the sealed spec below, so that what the feature branch holds and what your unit builds both stand, and remove every marker. Then check that the unit's acceptance still holds, and call done with the outcome. The service sends the unit to review only once no conflicted file carries a marker.
 
 %s`, unit, rebase.Onto, "- "+strings.Join(paths, "\n- "), markers, m.Render())
 }
@@ -347,7 +347,7 @@ func (m *masons) remind(ctx context.Context, stream config.WorkstreamID, unit st
 	req.ID = "request_" + req.TurnID
 	req.At = m.s.now()
 	req.Cause = done.Response.ID
-	req.Prompt = fmt.Sprintf("You reported unit %s done, and these files still carry conflict markers from rebasing its workspace onto the feature branch: %s. Resolve each conflict against the sealed spec, remove every marker, check the unit's criteria and proofs, and call done again.", unit, strings.Join(marked, ", "))
+	req.Prompt = fmt.Sprintf("You reported unit %s done, and these files still carry conflict markers from rebasing its workspace onto the feature branch: %s. Resolve each conflict against the sealed spec, remove every marker, check the unit's acceptance, and call done again.", unit, strings.Join(marked, ", "))
 	_, err = m.repository.EnqueueTurn(ctx, req)
 	return err
 }

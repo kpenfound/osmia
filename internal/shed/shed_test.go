@@ -294,7 +294,7 @@ func TestObjectValidatesEveryCitationAndKind(t *testing.T) {
 		in     input
 		reason string
 	}{
-		{"unknown kind", input{"taste", "spec#1", "x", []string{"charter#1"}}, `kind "taste" is not one of charter, fit, size or proof`},
+		{"unknown kind", input{"taste", "spec#1", "x", []string{"charter#1"}}, `kind "taste" is not one of charter, fit, size or acceptance`},
 		{"empty argument", input{"fit", "spec#1", " ", []string{"charter#1"}}, "an objection requires an argument"},
 		{"no citation", input{"fit", "spec#1", "x", []string{}}, "an objection requires at least one citation"},
 		{"charter rule that does not exist", input{"charter", "spec#1", "x", []string{"charter#9"}}, "the charter has no rule numbered 9 exactly once"},
@@ -319,7 +319,7 @@ func TestObjectValidatesEveryCitationAndKind(t *testing.T) {
 		{"part naming a missing unit", input{"size", "plan#upload", "x", []string{"charter#1"}}, `part "plan#upload" names nothing in the pinned revision`},
 		{"size objection on a criterion", input{"size", "spec#1", "x", []string{"charter#1"}}, "a size objection concerns a unit"},
 		{"size objection on the whole plan", input{"size", "plan", "x", []string{"charter#1"}}, "a size objection concerns a unit"},
-		{"proof objection on a unit", input{"proof", "plan#resume", "x", []string{"charter#1"}}, "a proof objection concerns a criterion"},
+		{"acceptance objection on a criterion", input{"acceptance", "spec#1", "x", []string{"charter#1"}}, "an acceptance objection concerns a unit"},
 	}
 	for _, tc := range refused {
 		recorded, reason := call(t, object, tc.in)
@@ -339,7 +339,7 @@ func TestObjectValidatesEveryCitationAndKind(t *testing.T) {
 		{"charter", "spec#2", "Progress has no test.", []string{"charter#1", "spec#2"}},
 		{"fit", "plan", "The plan ignores the store.", []string{"kb/store.md", "kb/entities.json#internal.store", "kb/entities.json#The Store"}},
 		{"size", "plan#resume", "It addresses everything.", []string{"plan#resume"}},
-		{"proof", "spec#2", "No unit shows it.", []string{"spec#2"}},
+		{"acceptance", "plan#resume", "No reviewer could verify it.", []string{"spec#2"}},
 		{"fit", "spec", "It misses the design.", []string{"charter#2"}},
 	}
 	for i, in := range accepted {
@@ -437,7 +437,7 @@ func TestToolsContinueTheContributionsTheTurnIsGiven(t *testing.T) {
 	first := shed.Objection{ID: shed.ObjectionID(1, alice, 1), Kind: shed.Fit, Part: "spec#1", Argument: "It restarts.", Citations: []string{"charter#1"}}
 	turn.Record.Objections = []shed.Objection{first}
 	both := tools(t, turn)
-	if recorded, id := call(t, both[shed.ObjectTool], input{"proof", "spec#2", "No unit shows it.", []string{"spec#2"}}); !recorded || id != shed.ObjectionID(1, alice, 2) {
+	if recorded, id := call(t, both[shed.ObjectTool], input{"acceptance", "plan#resume", "No reviewer could verify it.", []string{"spec#2"}}); !recorded || id != shed.ObjectionID(1, alice, 2) {
 		t.Fatalf("object after a kept objection: %v %q", recorded, id)
 	}
 	if recorded, reason := call(t, both[shed.ConcedeTool], map[string]string{"objection": first.ID, "reason": "The answer settles it."}); !recorded {

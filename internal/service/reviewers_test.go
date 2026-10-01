@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -15,117 +12,13 @@ import (
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func reviewEvidence() []ReviewEvidence {
-	return []ReviewEvidence{{Criterion: "spec#1", Evidence: "The planned proof passes on the candidate diff"}}
-}
-
-func TestReviewFootprintDecisions(t *testing.T) {
-	t.Parallel()
-	mapping := kb.Map{Version: kb.Version, Entities: []kb.Entity{
-		{ID: "planned", Paths: []string{"internal/trace"}},
-		{ID: "extra", Paths: []string{"docs"}},
-	}}
-	footprint := seal.Footprint{Unit: "resume", Entities: []string{"planned"}, Paths: []string{"internal/trace"}}
-	for _, tc := range []struct {
-		name         string
-		paths        []string
-		explanations []PathExplanation
-		want         string
-	}{
-		{"in footprint", []string{"internal/trace/built.go"}, nil, ""},
-		{"unexplained extra", []string{"docs/guide.md"}, nil, "unexplained changed path docs/guide.md"},
-		{"explained extra", []string{"docs/guide.md"}, []PathExplanation{{Path: "docs/guide.md", Explanation: "Documents the criterion"}}, ""},
-		{"unresolved mapping", []string{"other/file.go"}, nil, "unresolved changed paths other/file.go"},
-		{"invalid explanation", []string{"docs/guide.md"}, []PathExplanation{{Path: "docs/guide.md"}}, "invalid explanation"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := footprintReason(mapping, footprint, tc.paths, tc.explanations)
-			if !strings.HasPrefix(got, tc.want) {
-				t.Fatalf("reason %q, want prefix %q", got, tc.want)
-			}
-		})
-	}
-	mapping.Entities = append(mapping.Entities, kb.Entity{ID: "other", Paths: []string{"docs"}})
-	if got := footprintReason(mapping, footprint, []string{"docs/guide.md"}, nil); !strings.Contains(got, "ambiguous mapping") {
-		t.Fatal(got)
-	}
-	mapping.Entities[0].Paths = []string{"internal"}
-	if got := footprintReason(mapping, footprint, []string{"internal/other.go"}, nil); !strings.Contains(got, "unexplained changed path") {
-		t.Fatalf("changed entity map broadened the sealed footprint: %s", got)
-	}
-}
-
-func TestReviewFootprintUsesRecordedCommits(t *testing.T) {
-	t.Parallel()
-	f, stream, repo := newReviewFixture(t, "footprint")
-	r := &reviewers{masons: newMasonController(f.s, repo)}
-	_, identity, err := r.unitReviewEvidence(context.Background(), stream, "resume")
-	if err != nil {
-		t.Fatal(err)
-	}
-	check := func(candidate string, explanations []PathExplanation, want string) {
-		t.Helper()
-		result := UnitReviewResult{Identity: identity, Verdict: UnitVerdict{ExtraPaths: explanations}}
-		result.Identity.Candidate.Revision = candidate
-		got, err := r.checkReviewFootprint(context.Background(), stream, "resume", result)
-		if err != nil || (want == "" && got != "") || (want != "" && !strings.Contains(got, want)) {
-			t.Fatalf("footprint reason %q, want %q: %v", got, want, err)
-		}
-	}
-	check(identity.Candidate.Revision, nil, "")
-
-	worktree := t.TempDir()
-	git := func(args ...string) string {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", f.clone}, args...)...)
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	git("worktree", "add", "--detach", worktree, identity.Candidate.Revision)
-	t.Cleanup(func() { git("worktree", "remove", "--force", worktree) })
-	commit := func(path string) string {
-		t.Helper()
-		full := filepath.Join(worktree, path)
-		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte("scope evidence\n"), 0600); err != nil {
-			t.Fatal(err)
-		}
-		git("-C", worktree, "add", path)
-		git("-C", worktree, "commit", "-m", path)
-		return git("-C", worktree, "rev-parse", "HEAD")
-	}
-	mapNow, err := kb.Load(repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mapNow.Entities = append(mapNow.Entities, kb.Entity{ID: "docs", Name: "Docs", Paths: []string{"docs"}})
-	if err := kb.Store(context.Background(), repo, mapNow, f.clock.Now(), reviewerActor, "test"); err != nil {
-		t.Fatal(err)
-	}
-	extra := commit("docs/guide.md")
-	// The later commit is visible on the unit branch, but the first check still
-	// uses the candidate recorded in the review result.
-	git("update-ref", "refs/heads/"+unitBranch(stream, "resume"), extra)
-	check(identity.Candidate.Revision, nil, "")
-	check(extra, nil, "unexplained changed path docs/guide.md")
-	check(extra, []PathExplanation{{Path: "docs/guide.md", Explanation: "Explains the planned proof"}}, "")
-	unmapped := commit("other/file.go")
-	check(unmapped, []PathExplanation{{Path: "docs/guide.md", Explanation: "Explains the planned proof"}}, "unresolved changed paths other/file.go")
-}
+// reviewSummary is how a fixture reviewer says it verified the acceptance.
+const reviewSummary = "The candidate does the task and its acceptance holds"
 
 func TestStaleReviewIdentifiesEachRevision(t *testing.T) {
 	t.Parallel()
@@ -153,15 +46,15 @@ func TestReviewerVerdictToolAndOutcome(t *testing.T) {
 	t.Parallel()
 	scope := coreadapter.Scope{Workstream: "stream", Unit: "resume", Thread: "reviewer-resume", Turn: "review-1", Role: reviewerRole}
 	reports := &reviewerReports{}
-	tool := reports.tool(scope, nil)
-	for _, input := range []UnitVerdict{{Decision: "satisfactory"}, {Decision: "material_findings", Evidence: reviewEvidence()}} {
+	tool := reports.tool(scope)
+	for _, input := range []UnitVerdict{{Decision: "satisfactory"}, {Decision: "material_findings", Summary: reviewSummary}} {
 		data, _ := json.Marshal(input)
 		out, err := tool.Handle(context.Background(), data)
 		if err != nil || !strings.Contains(string(out), `"recorded":false`) {
 			t.Fatalf("accepted incomplete verdict %s: %s %v", data, out, err)
 		}
 	}
-	good := UnitVerdict{Decision: "material_findings", Evidence: reviewEvidence(), Findings: []ReviewFinding{{Criterion: "spec#1", Severity: "material", Evidence: "The retry fails", Action: "Handle the retry token"}}}
+	good := UnitVerdict{Decision: "material_findings", Summary: reviewSummary, Findings: []ReviewFinding{{Severity: "material", Evidence: "The retry fails", Action: "Handle the retry token"}}}
 	data, _ := json.Marshal(good)
 	out, err := tool.Handle(context.Background(), data)
 	if err != nil || !strings.Contains(string(out), `"recorded":true`) {
@@ -173,68 +66,33 @@ func TestReviewerVerdictToolAndOutcome(t *testing.T) {
 		t.Fatalf("outcome %+v %v", result.Outcome, err)
 	}
 	var got UnitVerdict
-	if err := json.Unmarshal([]byte(result.Outcome.Report), &got); err != nil || got.Findings[0].Action != good.Findings[0].Action {
+	if err := json.Unmarshal([]byte(result.Outcome.Report), &got); err != nil || got.Findings[0].Action != good.Findings[0].Action || got.Summary != reviewSummary {
 		t.Fatalf("report %+v %v", got, err)
 	}
 }
 
-func TestValidateVerdictNamesTheCriterionProblem(t *testing.T) {
+func TestValidateVerdictNamesTheProblem(t *testing.T) {
 	t.Parallel()
-	unit := plan.Unit{ID: "errors", Addresses: []plan.Address{{Criterion: "spec#1"}, {Criterion: "spec#2"}}}
-	cite := func(criteria ...string) UnitVerdict {
-		v := UnitVerdict{Decision: "satisfactory", Findings: []ReviewFinding{}}
-		for _, c := range criteria {
-			v.Evidence = append(v.Evidence, ReviewEvidence{Criterion: c, Evidence: "The planned test passes"})
-		}
-		return v
-	}
-	finding := cite("spec#1", "spec#2")
-	finding.Decision = "material_findings"
-	finding.Findings = []ReviewFinding{{Criterion: "footprint", Severity: "material", Evidence: "Touches docs", Action: "Revert docs"}}
+	finding := ReviewFinding{Severity: "material", Evidence: "The retry fails", Action: "Handle the retry token"}
 	for _, tc := range []struct {
 		name    string
 		verdict UnitVerdict
 		want    string
 	}{
-		{"valid", cite("spec#1", "spec#2"), ""},
-		{"decorated", cite("spec#1 / plan errors", "spec#2"), `does not address criterion "spec#1 / plan errors"; cite spec#1, spec#2 alone`},
-		{"extra", cite("spec#1", "spec#2", "footprint"), `does not address criterion "footprint"`},
-		{"twice", cite("spec#1", "spec#1", "spec#2"), "criterion spec#1 is cited twice"},
-		{"missing", cite("spec#2"), "the verdict misses spec#1"},
-		{"finding", finding, `a finding cites criterion "footprint"`},
+		{"satisfactory", UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}, ""},
+		{"material findings", UnitVerdict{Decision: "material_findings", Summary: reviewSummary, Findings: []ReviewFinding{finding}}, ""},
+		{"unknown decision", UnitVerdict{Decision: "approve", Summary: reviewSummary}, "decision must be satisfactory or material_findings"},
+		{"no summary", UnitVerdict{Decision: "satisfactory", Summary: " "}, "summary is required"},
+		{"material without findings", UnitVerdict{Decision: "material_findings", Summary: reviewSummary}, "material findings are required"},
+		{"satisfactory with findings", UnitVerdict{Decision: "satisfactory", Summary: reviewSummary, Findings: []ReviewFinding{finding}}, "satisfactory verdict cannot carry material findings"},
+		{"finding without action", UnitVerdict{Decision: "material_findings", Summary: reviewSummary, Findings: []ReviewFinding{{Severity: "material", Evidence: "The retry fails"}}}, "each finding needs severity, evidence and action"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := validateVerdict(unit, tc.verdict)
+			got := validateVerdict(tc.verdict)
 			if tc.want == "" && got != "" || !strings.Contains(got, tc.want) {
 				t.Fatalf("reason %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-// The unit reviewer's verdict tool refuses a verdict that does not cite the
-// sealed unit's criteria, so the reviewer corrects it within the turn.
-func TestUnitVerdictToolRefusesUnsealedCriteria(t *testing.T) {
-	t.Parallel()
-	_, stream, repo := newReviewFixture(t, "verdict-criteria")
-	scope := coreadapter.Scope{Workstream: string(stream), Unit: "resume", Thread: reviewerAgent("resume"), Turn: "review-1", Role: reviewerRole}
-	reports := &reviewerReports{}
-	tool := reports.tool(scope, unitVerdictCheck(repo, scope))
-	call := func(v UnitVerdict) string {
-		t.Helper()
-		data, _ := json.Marshal(v)
-		out, err := tool.Handle(context.Background(), data)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(out)
-	}
-	refused := call(UnitVerdict{Decision: "satisfactory", Evidence: []ReviewEvidence{{Criterion: "spec#1 / plan resume", Evidence: "Passes"}, {Criterion: "footprint", Evidence: "In scope"}}})
-	if !strings.Contains(refused, `"recorded":false`) || !strings.Contains(refused, "cite spec#1 alone") {
-		t.Fatalf("decorated criteria accepted: %s", refused)
-	}
-	if out := call(UnitVerdict{Decision: "satisfactory", Evidence: reviewEvidence()}); !strings.Contains(out, `"recorded":true`) {
-		t.Fatalf("corrected verdict refused: %s", out)
 	}
 }
 
@@ -250,13 +108,18 @@ func TestRefusedVerdictReviewsTheCandidateAgain(t *testing.T) {
 	must(t, r.one(ctx, stream, "resume", state, false))
 	th, err := repo.Thread(stream, reviewerAgent("resume"))
 	must(t, err)
-	if len(th.Turns) != 1 || !strings.Contains(th.Turns[0].Request.Prompt, "cites exactly these criteria, one evidence entry each: spec#1.") {
+	if len(th.Turns) != 1 {
 		t.Fatalf("review turns: %+v", th.Turns)
+	}
+	// The reviewer verifies the unit's task and acceptance; the review
+	// carries neither the plan's other units nor a footprint to explain.
+	if prompt := th.Turns[0].Request.Prompt; !strings.Contains(prompt, "unit resume:\n## Task\n") || !strings.Contains(prompt, "## Acceptance\n- ") || strings.Contains(prompt, "footprint") || strings.Contains(prompt, "plan.json:") {
+		t.Fatalf("review prompt does not carry the unit's task alone:\n%s", prompt)
 	}
 	if prompt := th.Turns[0].Request.Prompt; !strings.Contains(prompt, "- "+masonWrote+" (+1 -0)\n") || strings.Contains(prompt, "+package trace") {
 		t.Fatalf("review prompt carries the diff instead of its files:\n%s", prompt)
 	}
-	bad, err := json.Marshal(UnitVerdict{Decision: "satisfactory", Evidence: []ReviewEvidence{{Criterion: "spec#1 / plan resume", Evidence: "Passes"}}, Findings: []ReviewFinding{}})
+	bad, err := json.Marshal(UnitVerdict{Decision: "satisfactory", Summary: " ", Findings: []ReviewFinding{}})
 	must(t, err)
 	captureTurn(t, f, repo, stream, reviewerAgent("resume"), &coreadapter.Outcome{Status: verdictOutcome, Report: string(bad)})
 
@@ -278,7 +141,7 @@ func TestRefusedVerdictReviewsTheCandidateAgain(t *testing.T) {
 	if len(th.Turns) != 2 || th.Turns[1].Request.TurnID != reviewTurnID("resume", refreshed.Version) {
 		t.Fatalf("review turns after refusal: %+v", th.Turns)
 	}
-	if prompt := th.Turns[1].Request.Prompt; !strings.Contains(prompt, `was refused: unit resume does not address criterion "spec#1 / plan resume"`) {
+	if prompt := th.Turns[1].Request.Prompt; !strings.Contains(prompt, "was refused: summary is required: say how you verified the unit's acceptance") {
 		t.Fatalf("fresh review lacks the refusal: %s", prompt)
 	}
 }
@@ -302,7 +165,7 @@ func TestReviewResultReconcilesAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	turn := reviewTurnID("resume", state.Version)
-	result := UnitReviewResult{Identity: identity, Turn: turn, Verdict: UnitVerdict{Decision: "satisfactory", Evidence: reviewEvidence()}}
+	result := UnitReviewResult{Identity: identity, Turn: turn, Verdict: UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}}
 	data, _ := json.Marshal(result)
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
@@ -361,9 +224,9 @@ func TestStaleCandidateReturnsUnitToReview(t *testing.T) {
 	} {
 		reviewed := identity
 		tc.change(&reviewed)
-		verdict := UnitVerdict{Decision: "satisfactory", Evidence: reviewEvidence()}
+		verdict := UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}
 		if tc.name == "plan" {
-			verdict.Evidence[0].Criterion = "spec#99"
+			verdict.Summary = ""
 		}
 		result := UnitReviewResult{Identity: reviewed, Turn: reviewTurnID("resume", state.Version), Verdict: verdict}
 		if err := r.applyReview(context.Background(), stream, "resume", state, result); err != nil {
@@ -469,7 +332,7 @@ func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 						if !strings.Contains(req.Prompt, relayedRuling) {
 							return nil, fmt.Errorf("missing ruling in fresh review")
 						}
-						body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": reviewEvidence(), "findings": []ReviewFinding{}})
+						body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 						if err != nil || !strings.Contains(body, `"recorded":true`) {
 							return nil, fmt.Errorf("verdict %s: %v", body, err)
 						}
@@ -490,7 +353,7 @@ func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 				if !answerVerdict {
 					return nil
 				}
-				body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": reviewEvidence(), "findings": []ReviewFinding{}})
+				body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 				if err != nil || !strings.Contains(body, `"recorded":true`) {
 					return fmt.Errorf("verdict %s: %v", body, err)
 				}
@@ -557,7 +420,7 @@ func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
 	f.engine.mu.Lock()
 	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
-			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "material_findings", "evidence": reviewEvidence(), "findings": []ReviewFinding{{Criterion: "spec#1", Severity: "material", Evidence: "Retry fails", Action: "Handle retry"}}})
+			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "material_findings", "summary": reviewSummary, "findings": []ReviewFinding{{Severity: "material", Evidence: "Retry fails", Action: "Handle retry"}}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("verdict %s: %v", body, err)
 			}

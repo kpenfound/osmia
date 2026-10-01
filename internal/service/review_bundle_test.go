@@ -37,7 +37,7 @@ func TestReviewBundlePinsCandidateAndPersistsIdentity(t *testing.T) {
 	if identity.DiffSHA256 != hex.EncodeToString(sum[:]) {
 		t.Fatalf("diff digest %s", identity.DiffSHA256)
 	}
-	for _, source := range []string{"spec.md", "plan.json", "units/resume/report.json", "seal.json footprint", "local context"} {
+	for _, source := range []string{"unit resume", "spec.md", "units/resume/report.json", "local context"} {
 		found := false
 		for _, c := range first.Context {
 			found = found || c.Source == source && c.Content != ""

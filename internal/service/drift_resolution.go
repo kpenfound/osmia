@@ -708,7 +708,7 @@ func (d drifter) fixPrompt(stream config.WorkstreamID, rebase DriftRebase) (stri
 	var findings []string
 	if rebase.Verdict != nil {
 		for _, f := range rebase.Verdict.Findings {
-			findings = append(findings, fmt.Sprintf("- %s (%s): %s Action: %s", f.Criterion, f.Severity, f.Evidence, f.Action))
+			findings = append(findings, fmt.Sprintf("- (%s) %s Action: %s", f.Severity, f.Evidence, f.Action))
 		}
 	}
 	return fmt.Sprintf(`The reviewer did not approve your resolution of the conflicts of feature branch %s with upstream. Their findings:
@@ -747,7 +747,7 @@ func (d drifter) reviewPrompt(ctx context.Context, stream config.WorkstreamID, r
 The service rebased feature branch %s from %s onto %s/%s at %s. The rebase conflicted in:
 - %s
 
-A mason resolved the conflicts, and the resolved branch is candidate %s. The feature branch stays at %s until you approve it: a satisfactory verdict moves the feature branch and the seal to the candidate, and material findings return the resolution to the mason with your findings. Check that each conflicted file keeps both what upstream now holds and what the feature branch built, that nothing else of the feature branch's change was lost or altered, and that the sealed criteria still hold. Cite criteria as spec#<n> in your evidence and findings.
+A mason resolved the conflicts, and the resolved branch is candidate %s. The feature branch stays at %s until you approve it: a satisfactory verdict moves the feature branch and the seal to the candidate, and material findings return the resolution to the mason with your findings. Check that each conflicted file keeps both what upstream now holds and what the feature branch built, that nothing else of the feature branch's change was lost or altered, and that the sealed criteria still hold. Summarize what you checked in the verdict, citing criteria as spec#<n> where they matter.
 
 Read both changes with %s, whole or by file and line range. Their changed files, with added and removed lines:
 

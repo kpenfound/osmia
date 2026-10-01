@@ -975,8 +975,8 @@ func replyPrompt(in roundInput, latest shed.Pin, open []shed.Entry, problems []s
 	fmt.Fprintf(&b, `
 What each kind asks of you:
 - charter: a veto on the part it names. It blocks until its member concedes it after a redraft, or the owner disposes of it.
-- size: split the unit by what it addresses. It blocks until its member concedes it.
-- proof: name a proof that can show the criterion. It blocks until its member concedes it.
+- size: split the unit. It blocks until its member concedes it.
+- acceptance: make the unit's task clear and its acceptance verifiable. It blocks until its member concedes it.
 - fit: advice to the owner. It never blocks; answer it.
 - owner: the owner's own objection. It blocks until the owner disposes of it; answer it as you would a member's.
 

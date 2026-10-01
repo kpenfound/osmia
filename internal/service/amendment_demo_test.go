@@ -15,7 +15,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestAmendmentDemonstration follows a mason's request through drafting,
+// TestAmendmentDemonstration follows a mason's question, routed to an
+// amendment by the chief of staff, through drafting,
 // one shed round, the owner gate, recovery, and the next unit turns.
 func TestAmendmentDemonstration(t *testing.T) {
 	t.Parallel()
@@ -25,17 +26,18 @@ func TestAmendmentDemonstration(t *testing.T) {
 	f.script("amend-1-1", map[string]string{plan.SpecPath: amendedSpec}, nil)
 	f.script("amend-1-round-1-"+committeeAgent(1)+"-1", nil, nil)
 	f.script("amend-1-reply-1", nil, nil)
-	for unit, criterion := range map[string]string{"upload": "spec#1", "audit": "spec#2"} {
+	for _, unit := range []string{"upload", "audit"} {
 		masons.play[masonTurnID(unit)] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-			recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Proof recorded", "criteria": []any{criterionArgs(CriterionReport{Criterion: criterion, Done: "Built " + unit, Evidence: "The planned proof holds", Proof: "fixture proof"})}})
+			recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Proof recorded"})
 			if err != nil || !recorded {
 				return fmt.Errorf("%s done: %s: %v", unit, reason, err)
 			}
 			return nil
 		}
 	}
+	masons.chief.route("1", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
 	masons.play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, questions.AmendTool, map[string]any{"citations": []string{"spec#1"}, "change": "Resume from a durable checkpoint", "reason": "Acknowledgements are not durable"})
+		_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": "Acknowledgements are not durable. Should the spec say a durable checkpoint?"})
 		return err
 	}
 	stream, _ := f.builtAs(t, "amendment")

@@ -96,7 +96,7 @@ func Tools(t Turn) ([]coreadapter.Tool, error) {
 	}
 	object := coreadapter.Tool{Name: ObjectTool, Effect: coreadapter.ToolMemory, InputSchema: schema,
 		Description: "Object to one part of the spec or the plan. kind: charter (the part violates a charter rule; a veto), fit (the plan does not realise the handed design or works against a recorded decision; advice), " +
-			"size (a unit addresses too much and must be split) or proof (the plan names no proof that can show a criterion holds). part: " + PartForms + "; a size objection names a unit and a proof objection a criterion. " +
+			"size (a unit takes on too much and must be split) or acceptance (a unit's task is unclear, or a reviewer could not verify its acceptance from the unit's work). part: " + PartForms + "; size and acceptance objections name a unit. " +
 			"argument: why. citations: at least one of " + CitationForms + "; each must exist, and a charter objection must cite the charter rule."}
 	object.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
@@ -155,7 +155,7 @@ func Tools(t Turn) ([]coreadapter.Tool, error) {
 // checkObjection returns *Invalid for an objection the round refuses.
 func (t Turn) checkObjection(ctx context.Context, o Objection) error {
 	if !slices.Contains(Kinds, o.Kind) {
-		return invalid("kind %q is not one of charter, fit, size or proof", o.Kind)
+		return invalid("kind %q is not one of charter, fit, size or acceptance", o.Kind)
 	}
 	if strings.TrimSpace(o.Argument) == "" {
 		return invalid("an objection requires an argument")
@@ -178,16 +178,15 @@ func (t Turn) checkObjection(ctx context.Context, o Objection) error {
 }
 
 // checkPart requires part to name the pinned spec or plan, or a criterion or
-// unit of them; a size objection concerns a unit and a proof objection a
-// criterion.
+// unit of them; size and acceptance objections concern a unit.
 func (t Turn) checkPart(kind Kind, part string) error {
 	_, criterion := plan.ParseCitation(part)
 	unit := strings.HasPrefix(part, planCitation)
 	switch {
 	case kind == Size && !unit:
 		return invalid("a size objection concerns a unit: part must be plan#<unit>")
-	case kind == Proof && !criterion:
-		return invalid("a proof objection concerns a criterion: part must be spec#<n>")
+	case kind == Acceptance && !unit:
+		return invalid("an acceptance objection concerns a unit: part must be plan#<unit>")
 	case part == WholeSpec || part == WholePlan:
 		return nil
 	case criterion || unit:

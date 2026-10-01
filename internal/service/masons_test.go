@@ -33,7 +33,7 @@ const masonRoles = chiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = 
 const masonWrote = "internal/trace/built.go"
 
 // fakeMasons plays every mason turn of the fixture. Each turn checks that it
-// holds its view's file tools, ask, amend and done, records what it saw,
+// holds its view's file tools, ask and done, and no amend, records what it saw,
 // writes masonWrote into its view and then plays what play holds for the
 // turn, which ends the turn failed by returning errFailTurn or errCrashTurn.
 type fakeMasons struct {
@@ -43,6 +43,8 @@ type fakeMasons struct {
 	// play holds, by turn ID, what the turn does after writing masonWrote.
 	play     map[string]func(context.Context, agent.Request, *mcp.ClientSession) error
 	response map[string]string
+	// chief plays the fixture's chief-of-staff turns.
+	chief *chief
 }
 
 func (m *fakeMasons) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -56,7 +58,7 @@ func (m *fakeMasons) turn(ctx context.Context, req agent.Request, _ *agent.Turn,
 	for _, tool := range listed.Tools {
 		names = append(names, tool.Name)
 	}
-	if slices.Sort(names); !slices.Equal(names, []string{"amend", "ask", doneTool, "file_read", "file_write"}) {
+	if slices.Sort(names); !slices.Equal(names, []string{"ask", doneTool, "file_read", "file_write"}) {
 		m.problems = append(m.problems, fmt.Sprintf("mason tools %v", names))
 	}
 	view := req.Workspace.Directory()
@@ -174,10 +176,10 @@ func newMasonFixtureOn(t *testing.T, backend, capacity, drafted, classifier stri
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: drafted}, nil)
 	f.upstream(t)
 	fake := &fakeMasons{runs: map[string][]agent.Request{}, play: map[string]func(context.Context, agent.Request, *mcp.ClientSession) error{}}
-	chief := &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
+	fake.chief = &chief{p: &faults{}, released: map[string]bool{}, held: map[string]chan struct{}{}}
 	f.engine.mu.Lock()
 	defer f.engine.mu.Unlock()
-	f.engine.turns["*"] = chief.turn
+	f.engine.turns["*"] = fake.chief.turn
 	f.engine.turns[masonTurnID("resume")] = fake.turn
 	f.engine.turns[masonTurnID("dedupe")] = fake.turn
 	// Most controller fixtures inspect the first turn. A failed follow-up
@@ -356,7 +358,7 @@ func TestMasonStartsTheFirstOfTwoEntangledUnits(t *testing.T) {
 		t.Fatalf("mason turns run %d times", len(runs))
 	}
 	run := runs[0]
-	for _, want := range []string{"Build unit resume of this workstream.", "# Unit resume\n", "title: Resume from the last chunk\n", "seal: 1\n", "- spec#1: ", "  proof: new-test TestResume\n", "## Spec\n", "call done with the outcome of your work and a report on every criterion of the unit", "Add a short headline, what happened in concrete terms, and needs_you only when the owner has a specific action.", "Then end your turn."} {
+	for _, want := range []string{"Build unit resume of this workstream.", "# Unit resume\n", "title: Resume from the last chunk\n", "seal: 1\n", "## Task\nResume from the last chunk\n", "## Acceptance\n- spec#1 holds, shown by TestResume (new-test)\n", "- spec#1: ", "## Spec\n", "call done with the outcome of your work: what it now does and how you checked the acceptance", "Add a short headline, what happened in concrete terms, and needs_you only when the owner has a specific action.", "Then end your turn."} {
 		if !strings.Contains(run.Prompt, want) {
 			t.Fatalf("mason prompt lacks %q:\n%s", want, run.Prompt)
 		}

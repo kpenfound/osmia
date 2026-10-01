@@ -12,11 +12,9 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/scheduler"
-	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -26,28 +24,21 @@ const reviewerRole = "reviewer"
 
 var reviewerActor = trace.Actor{Kind: "service", ID: reviewerRole}
 
-type ReviewEvidence struct {
-	Criterion string `json:"criterion"`
-	Evidence  string `json:"evidence"`
-}
-
+// ReviewFinding is one thing the mason must change before the unit's
+// acceptance holds.
 type ReviewFinding struct {
-	Criterion string `json:"criterion"`
-	Severity  string `json:"severity"`
-	Evidence  string `json:"evidence"`
-	Action    string `json:"action"`
+	Severity string `json:"severity"`
+	Evidence string `json:"evidence"`
+	Action   string `json:"action"`
 }
 
+// UnitVerdict is a unit reviewer's decision on a candidate: whether the
+// unit's acceptance holds, a summary of how the reviewer verified it, and the
+// findings that send it back.
 type UnitVerdict struct {
-	Decision   string            `json:"decision"`
-	Evidence   []ReviewEvidence  `json:"evidence"`
-	Findings   []ReviewFinding   `json:"findings"`
-	ExtraPaths []PathExplanation `json:"extra_paths,omitempty"`
-}
-
-type PathExplanation struct {
-	Path        string `json:"path"`
-	Explanation string `json:"explanation"`
+	Decision string          `json:"decision"`
+	Summary  string          `json:"summary"`
+	Findings []ReviewFinding `json:"findings"`
 }
 
 type UnitReviewResult struct {
@@ -62,46 +53,19 @@ type reviewerReports struct {
 	accepted map[string]UnitVerdict
 }
 
-// tool records one verdict per turn. check, when set, refuses a verdict the
-// service would not accept for the turn's subject, with a reason the reviewer
-// can correct before the turn ends.
-func (r *reviewerReports) tool(scope coreadapter.Scope, check func(UnitVerdict) (string, error)) coreadapter.Tool {
+// tool records one verdict per turn. A verdict the service would not accept
+// is refused with a reason the reviewer can correct before the turn ends.
+func (r *reviewerReports) tool(scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: verdictTool, Effect: coreadapter.ToolMemory,
-		Description: "Record a verdict for the exact candidate in this turn. Give one evidence entry per criterion the unit addresses, keyed by the criterion ID exactly as the plan writes it, such as spec#1; put footprint, charter and check observations inside those entries. Material findings need an action the mason can take. A refused verdict says why; correct it and call again. End your turn after acceptance.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"decision":{"type":"string"},"evidence":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"evidence":{"type":"string"}},"required":["criterion","evidence"],"additionalProperties":false}},"findings":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"severity":{"type":"string"},"evidence":{"type":"string"},"action":{"type":"string"}},"required":["criterion","severity","evidence","action"],"additionalProperties":false}},"extra_paths":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"explanation":{"type":"string"}},"required":["path","explanation"],"additionalProperties":false}}},"required":["decision","evidence","findings"],"additionalProperties":false}`)}
+		Description: "Record a verdict for the exact candidate in this turn. Decide satisfactory when the unit's task is done and every acceptance item holds, or material_findings otherwise. The summary says how you verified the acceptance. Each finding says what is wrong and what the mason should change. A refused verdict says why; correct it and call again. End your turn after acceptance.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"decision":{"type":"string","enum":["satisfactory","material_findings"]},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string"},"evidence":{"type":"string"},"action":{"type":"string"}},"required":["severity","evidence","action"],"additionalProperties":false}}},"required":["decision","summary","findings"],"additionalProperties":false}`)}
 	tool.Handle = func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var verdict UnitVerdict
 		if err := json.Unmarshal(raw, &verdict); err != nil {
 			return nil, err
 		}
-		if verdict.Decision != "satisfactory" && verdict.Decision != "material_findings" {
-			return refuseReport("decision must be satisfactory or material_findings")
-		}
-		if len(verdict.Evidence) == 0 {
-			return refuseReport("criterion-linked evidence is required")
-		}
-		for _, e := range verdict.Evidence {
-			if strings.TrimSpace(e.Criterion) == "" || strings.TrimSpace(e.Evidence) == "" {
-				return refuseReport("each criterion needs evidence")
-			}
-		}
-		if verdict.Decision == "material_findings" && len(verdict.Findings) == 0 {
-			return refuseReport("material findings are required")
-		}
-		if verdict.Decision == "satisfactory" && len(verdict.Findings) != 0 {
-			return refuseReport("satisfactory verdict cannot carry material findings")
-		}
-		for _, f := range verdict.Findings {
-			if strings.TrimSpace(f.Criterion) == "" || strings.TrimSpace(f.Severity) == "" || strings.TrimSpace(f.Evidence) == "" || strings.TrimSpace(f.Action) == "" {
-				return refuseReport("each finding needs criterion, severity, evidence and action")
-			}
-		}
-		if check != nil {
-			if reason, err := check(verdict); err != nil {
-				return nil, err
-			} else if reason != "" {
-				return refuseReport("%s", reason)
-			}
+		if reason := validateVerdict(verdict); reason != "" {
+			return refuseReport("%s", reason)
 		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
@@ -390,18 +354,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 		return err
 	}
 	content, _ := json.MarshalIndent(identity, "", "  ")
-	prompt := fmt.Sprintf("Review this exact candidate against the sealed spec, plan and mason report. Record criterion-linked evidence with verdict. Explain each changed path outside the sealed footprint in extra_paths. Unresolved or ambiguous path mappings require a plan amendment before approval. Material findings must say what the mason should change. The candidate identity is:\n%s\n\nChanged files, with added and removed lines; read the diff with %s:\n%s", content, workstreamDiffTool, changedFiles(req.Diff))
-	planned, err := sealedUnit(r.repository, coreadapter.Scope{Workstream: string(stream), Unit: unit})
-	if err != nil {
-		return err
-	}
-	var criteria []string
-	for _, a := range planned.Addresses {
-		if !slices.Contains(criteria, a.Criterion) {
-			criteria = append(criteria, a.Criterion)
-		}
-	}
-	prompt += fmt.Sprintf("\n\nThe verdict cites exactly these criteria, one evidence entry each: %s.", strings.Join(criteria, ", "))
+	prompt := fmt.Sprintf("Review this exact candidate: verify that it does the unit's task and that every acceptance item holds, then record your verdict. Material findings must say what the mason should change. The candidate identity is:\n%s\n\nChanged files, with added and removed lines; read the diff with %s:\n%s", content, workstreamDiffTool, changedFiles(req.Diff))
 	guidance, err := r.reviewGuidance(stream, unit, identity.Candidate.Revision)
 	if err != nil {
 		return err
@@ -410,12 +363,12 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	if move, drifted, err := unitDrift(r.repository, stream, unit); err != nil {
 		return err
 	} else if drifted {
-		prompt += fmt.Sprintf("\n\nThis candidate was rebased onto the feature branch after drift rebase %d moved its upstream base from %s to %s. If upstream's change alters what a sealed criterion means, call %s with the criteria it changes rather than judging the candidate against a meaning the spec no longer has; the request cites upstream commit %s.", move.Drift, move.From, move.To, questions.AmendTool, move.To)
+		prompt += fmt.Sprintf("\n\nThis candidate was rebased onto the feature branch after drift rebase %d moved its upstream base from %s to %s. If upstream's change alters what the unit's task or acceptance means, call %s to raise it rather than judging the candidate against a meaning the spec no longer has, citing upstream commit %s.", move.Drift, move.From, move.To, questions.AskTool, move.To)
 	}
 	for _, item := range req.Context {
 		prompt += "\n\n" + item.Source + ":\n" + item.Content
 	}
-	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: "You are the unit reviewer. Read only the supplied candidate evidence. Call ask if a decision is needed and end the turn; review resumes when the answer arrives. Call amend with sealed spec or plan citations, proposed change and reason if those documents need to change, then end the turn. Otherwise call verdict with your decision. You cannot edit the candidate. Your read-only view holds its exact files. Call workstream_diff to read the candidate's diff, whole or by file and line range. Call run_checks to run dagger check on a separate disposable copy; cite the returned candidate and result as evidence.", Prompt: prompt}
+	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: "You are the unit reviewer. You verify one unit's work against its task and acceptance, with the sealed spec as background. Judge the candidate against the unit as planned; the plan's shape is settled. Call ask if a decision is needed, including when the task itself looks wrong, and end the turn; review resumes when the answer arrives. Otherwise call verdict with your decision. You cannot edit the candidate. Your read-only view holds its exact files. Call workstream_diff to read the candidate's diff, whole or by file and line range. Call run_checks to run dagger check on a separate disposable copy; cite the returned candidate and result as evidence.", Prompt: prompt}
 	_, err = r.repository.EnqueueTurn(ctx, request)
 	return err
 }
@@ -588,11 +541,7 @@ func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID
 		}
 	}
 	if evidenceErr == nil && staleReview(reviewed, current) == "" {
-		planned, err := sealedUnit(r.repository, coreadapter.Scope{Workstream: string(stream), Unit: unit})
-		if err != nil {
-			return err
-		}
-		if reason := validateVerdict(planned, verdict); reason != "" {
+		if reason := validateVerdict(verdict); reason != "" {
 			return r.refreshReview(ctx, stream, unit, state, "the reviewer's verdict on "+turn.Request.TurnID+" was refused: "+reason+"; the candidate is reviewed again")
 		}
 	}
@@ -629,59 +578,28 @@ func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID
 	return r.applyReview(ctx, stream, unit, state, result)
 }
 
-// validateVerdict returns why v is not a verdict on unit: it must cite each
-// criterion the unit addresses exactly once, by its plan ID, and its findings
-// must match its decision. It returns "" for a valid verdict.
-func validateVerdict(unit plan.Unit, v UnitVerdict) string {
+// validateVerdict returns why v is not a complete verdict: a known decision,
+// a summary, and findings that match the decision, each with a severity,
+// evidence and an action. It returns "" for a valid verdict.
+func validateVerdict(v UnitVerdict) string {
 	if v.Decision != "satisfactory" && v.Decision != "material_findings" {
-		return "invalid review decision"
+		return "decision must be satisfactory or material_findings"
 	}
-	var criteria []string
-	for _, a := range unit.Addresses {
-		if !slices.Contains(criteria, a.Criterion) {
-			criteria = append(criteria, a.Criterion)
-		}
+	if strings.TrimSpace(v.Summary) == "" {
+		return "summary is required: say how you verified the unit's acceptance"
 	}
-	seen := map[string]bool{}
-	for _, e := range v.Evidence {
-		if !slices.Contains(criteria, e.Criterion) {
-			return fmt.Sprintf("unit %s does not address criterion %q; cite %s alone, each by its plan ID", unit.ID, e.Criterion, strings.Join(criteria, ", "))
-		}
-		if seen[e.Criterion] {
-			return fmt.Sprintf("criterion %s is cited twice", e.Criterion)
-		}
-		if strings.TrimSpace(e.Evidence) == "" {
-			return fmt.Sprintf("criterion %s has no evidence", e.Criterion)
-		}
-		seen[e.Criterion] = true
+	if v.Decision == "material_findings" && len(v.Findings) == 0 {
+		return "material findings are required"
 	}
-	if missing := slices.DeleteFunc(slices.Clone(criteria), func(c string) bool { return seen[c] }); len(missing) != 0 {
-		return fmt.Sprintf("the verdict misses %s: cite every criterion of unit %s", strings.Join(missing, ", "), unit.ID)
-	}
-	if v.Decision == "satisfactory" && len(v.Findings) > 0 || v.Decision == "material_findings" && len(v.Findings) == 0 {
-		return "review findings do not match the decision"
+	if v.Decision == "satisfactory" && len(v.Findings) != 0 {
+		return "satisfactory verdict cannot carry material findings"
 	}
 	for _, f := range v.Findings {
-		if !slices.Contains(criteria, f.Criterion) {
-			return fmt.Sprintf("a finding cites criterion %q, which unit %s does not address; use one of %s", f.Criterion, unit.ID, strings.Join(criteria, ", "))
-		}
 		if strings.TrimSpace(f.Severity) == "" || strings.TrimSpace(f.Evidence) == "" || strings.TrimSpace(f.Action) == "" {
-			return "review finding needs an addressed criterion, severity, evidence and action"
+			return "each finding needs severity, evidence and action"
 		}
 	}
 	return ""
-}
-
-// unitVerdictCheck validates a unit reviewer's verdict against the unit as
-// currently sealed.
-func unitVerdictCheck(repository *trace.Repository, scope coreadapter.Scope) func(UnitVerdict) (string, error) {
-	return func(v UnitVerdict) (string, error) {
-		unit, err := sealedUnit(repository, scope)
-		if err != nil {
-			return "", err
-		}
-		return validateVerdict(unit, v), nil
-	}
 }
 
 func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, result UnitReviewResult) error {
@@ -694,19 +612,8 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 	} else if reason != "" {
 		return r.refreshReview(ctx, stream, unit, state, reason)
 	}
-	planned, err := sealedUnit(r.repository, coreadapter.Scope{Workstream: string(stream), Unit: unit})
-	if err != nil {
-		return err
-	}
-	if reason := validateVerdict(planned, result.Verdict); reason != "" {
+	if reason := validateVerdict(result.Verdict); reason != "" {
 		return errors.New(reason)
-	}
-	if result.Verdict.Decision == "satisfactory" {
-		if reason, err := r.checkReviewFootprint(ctx, stream, unit, result); err != nil {
-			return err
-		} else if reason != "" {
-			return r.refreshReview(ctx, stream, unit, state, reason)
-		}
 	}
 	to := UnitApproved
 	if result.Verdict.Decision == "material_findings" {
@@ -721,7 +628,7 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 		reason += fmt.Sprintf("; %d material send-backs reached shed.max_bounces; the owner must rule review or revise before the unit moves", result.Bounces)
 	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit)}
-	_, err = r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitReviewing, To: to, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s review %s: %s.", unit, result.Verdict.Decision, reason))}})
+	_, err := r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitReviewing, To: to, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s review %s: %s.", unit, result.Verdict.Decision, reason))}})
 	if errors.Is(err, trace.ErrConflict) {
 		return nil
 	}
@@ -834,63 +741,6 @@ func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamI
 	return err
 }
 
-func (r *reviewers) checkReviewFootprint(ctx context.Context, stream config.WorkstreamID, unit string, result UnitReviewResult) (string, error) {
-	s, _, found, err := seal.Latest(r.repository, stream)
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return "missing seal", nil
-	}
-	footprint, err := reviewFootprint(r.repository, stream, s, unit)
-	if err != nil || len(footprint.Entities) == 0 {
-		return "missing sealed footprint", nil
-	}
-	git, err := newUnitWorkspaces(r.cfg, r.repository).of(stream)
-	if err != nil {
-		return "", err
-	}
-	paths, err := git.ChangedPaths(ctx, result.Identity.Candidate.BaseRevision, result.Identity.Candidate.Revision)
-	if err != nil {
-		return "", err
-	}
-	mapping, err := kb.Load(r.repository)
-	if err != nil {
-		return "", err
-	}
-	return footprintReason(mapping, footprint, paths, result.Verdict.ExtraPaths), nil
-}
-
-func footprintReason(mapping kb.Map, footprint seal.Footprint, paths []string, explanations []PathExplanation) string {
-	resolved := mapping.ResolvePaths(paths)
-	if len(resolved.Unresolved) != 0 {
-		return "unresolved changed paths " + strings.Join(resolved.Unresolved, ", ") + "; request an owner approved plan amendment"
-	}
-	extras := map[string]bool{}
-	for _, match := range resolved.Matches {
-		if len(match.Entities) != 1 {
-			return "ambiguous mapping for " + match.Path + "; request an owner approved plan amendment"
-		}
-		inSealedPath := slices.ContainsFunc(footprint.Paths, func(pattern string) bool { return kb.MatchPathPattern(pattern, match.Path) })
-		if !slices.Contains(footprint.Entities, match.Entities[0]) || !inSealedPath {
-			extras[match.Path] = true
-		}
-	}
-	explained := map[string]bool{}
-	for _, extra := range explanations {
-		if !extras[extra.Path] || explained[extra.Path] || strings.TrimSpace(extra.Explanation) == "" {
-			return "invalid explanation for changed path " + extra.Path
-		}
-		explained[extra.Path] = true
-	}
-	for _, path := range paths {
-		if extras[path] && !explained[path] {
-			return "unexplained changed path " + path + "; request an owner approved plan amendment when the footprint must change"
-		}
-	}
-	return ""
-}
-
 func (r *reviewers) enqueueFindings(ctx context.Context, stream config.WorkstreamID, unit string, result UnitReviewResult) error {
 	th, err := r.repository.Thread(stream, masonAgent(unit))
 	if err != nil {
@@ -905,7 +755,7 @@ func (r *reviewers) enqueueFindings(ctx context.Context, stream config.Workstrea
 		return err
 	}
 	findings, _ := json.MarshalIndent(result.Verdict.Findings, "", "  ")
-	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: result.Turn, Depth: 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(r.cfg.Project), Prompt: fmt.Sprintf("The reviewer returned candidate %s for revision. Address these criterion-linked findings in your unit workspace, run the planned proofs, then call done with a new criterion report:\n%s", result.Identity.Candidate.Revision, findings)}
+	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: result.Turn, Depth: 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(r.cfg.Project), Prompt: fmt.Sprintf("The reviewer returned candidate %s for revision. Address these findings in your unit workspace, check the unit's acceptance again, then call done:\n%s", result.Identity.Candidate.Revision, findings)}
 	ruling, found, err := latestContestedRuling(r.repository, stream, unit, result.Bounces)
 	if err != nil {
 		return err

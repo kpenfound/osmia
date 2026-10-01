@@ -34,7 +34,7 @@ osmia shed rule w_0123456789abcdef0123456789abcdef agent_committee_1-r1-1 dismis
 osmia shed overrule w_0123456789abcdef0123456789abcdef agent_committee_1-r1-2 "Ship it and note the risk."
 osmia shed skip w_0123456789abcdef0123456789abcdef
 osmia shed more w_0123456789abcdef0123456789abcdef 2
-osmia shed redraft w_0123456789abcdef0123456789abcdef "Split the resume unit by what it addresses."
+osmia shed redraft w_0123456789abcdef0123456789abcdef "Split the resume unit in two."
 osmia ratify w_0123456789abcdef0123456789abcdef
 osmia amendment w_0123456789abcdef0123456789abcdef 1
 osmia amendment w_0123456789abcdef0123456789abcdef 1 approve "Checkpoints are what we meant."
@@ -281,7 +281,7 @@ osmia status --json
   decides it. The command reads the packet first and decides exactly that
   revision, so a packet presented again since is refused. `approve` versions
   the proposed spec and/or plan and reseals; it is refused while a charter
-  veto, size split or proof objection stands. `overrule` approves over the
+  veto, size or acceptance objection stands. `overrule` approves over the
   objections that stand and records them. `reject` leaves the sealed spec and
   plan in force. `round` asks the committee for one more bounded debate round,
   up to `shed.max_rounds` rounds in all, after which the chief of staff

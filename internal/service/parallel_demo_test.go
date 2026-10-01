@@ -38,11 +38,10 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 	ctx := context.Background()
 	f, masons := newParallelMasonFixture(t, 2, 3, demoPlan)
 	defer func() { f.stop(t) }()
-	dedupeReport := CriterionReport{Criterion: "spec#2", Done: "skip acknowledged chunks", Evidence: "no acknowledged chunk is sent again", Proof: "internal/trace/dedupe.go"}
 	recovered := masonAgent("dedupe") + "-recover-1"
 	masons.play[masonTurnID("resume")] = reportDone("Uploads resume")
 	masons.play[recovered] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Acknowledged chunks are skipped", "criteria": []any{criterionArgs(dedupeReport)}}); err != nil || !recorded {
+		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Acknowledged chunks are skipped"}); err != nil || !recorded {
 			return fmt.Errorf("done refused: %q %v", reason, err)
 		}
 		return nil

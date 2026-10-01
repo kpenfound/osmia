@@ -131,7 +131,7 @@ func TestAmendmentShedPresentation(t *testing.T) {
 			for _, entry := range outbox {
 				if entry.TransitionID == "amendment-1-presented" {
 					found = true
-					for _, part := range []string{"Proposed change: Revise the criterion", "Affected units and proofs:", "Recommendation:", "The round cap approves nothing"} {
+					for _, part := range []string{"Proposed change: Revise the criterion", "Affected units:", "Recommendation:", "The round cap approves nothing"} {
 						if !strings.Contains(entry.Event.Body, part) {
 							t.Errorf("presentation misses %q: %s", part, entry.Event.Body)
 						}

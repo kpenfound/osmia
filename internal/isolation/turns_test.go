@@ -417,7 +417,7 @@ func TestQuestionToolsFollowTheRole(t *testing.T) {
 			want := []string{"ask"}
 			if role == "chief_of_staff" {
 				want = chief
-			} else if role == "mason" || role == "reviewer" {
+			} else if role == "mason" {
 				want = []string{"ask", "amend"}
 			}
 			var allowed []string

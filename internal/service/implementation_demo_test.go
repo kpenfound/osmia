@@ -45,7 +45,7 @@ func TestSequentialImplementation(t *testing.T) {
 		t.Fatalf("transitions before answer: %+v, want %+v", got, want)
 	}
 	first := fake.requests(stream)
-	if len(first) != 1 || !strings.Contains(first[0].Prompt, "# Unit resume\n") || !strings.Contains(first[0].Prompt, "seal: 1\n") || !strings.Contains(first[0].Prompt, "proof: new-test TestResume") || strings.Contains(first[0].Prompt, "# Unit dedupe") {
+	if len(first) != 1 || !strings.Contains(first[0].Prompt, "# Unit resume\n") || !strings.Contains(first[0].Prompt, "seal: 1\n") || !strings.Contains(first[0].Prompt, "## Acceptance\n- spec#1 holds, shown by TestResume (new-test)") || strings.Contains(first[0].Prompt, "# Unit dedupe") {
 		t.Fatalf("mason bundle or dispatch: %+v", first)
 	}
 	workspace := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(stream), "resume")
@@ -72,7 +72,7 @@ func TestSequentialImplementation(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(req.Workspace.Directory(), masonWrote)); err != nil {
 			return err
 		}
-		recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Uploads resume at the last acknowledged chunk", "criteria": []any{criterionArgs(resumeReport)}})
+		recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Uploads resume at the last acknowledged chunk"})
 		if err != nil || !recorded {
 			return errors.New("done refused: " + reason)
 		}
@@ -100,7 +100,7 @@ func TestSequentialImplementation(t *testing.T) {
 		must(t, json.Unmarshal([]byte(docs[0].Content), &report))
 	}
 	f.checkCandidate(t, stream, report)
-	wantReport := UnitReport{Unit: "resume", Turn: questions.TurnID("1"), Seal: 1, Outcome: "Uploads resume at the last acknowledged chunk", Criteria: []CriterionReport{resumeReport}, Card: &exampleCard, Branch: unitBranch(stream, "resume"), Base: report.Base, Candidate: report.Candidate}
+	wantReport := UnitReport{Unit: "resume", Turn: questions.TurnID("1"), Seal: 1, Outcome: "Uploads resume at the last acknowledged chunk", Card: &exampleCard, Branch: unitBranch(stream, "resume"), Base: report.Base, Candidate: report.Candidate}
 	if !reflect.DeepEqual(report, wantReport) {
 		t.Fatalf("report %+v, want %+v", report, wantReport)
 	}

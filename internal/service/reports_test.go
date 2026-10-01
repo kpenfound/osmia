@@ -22,19 +22,15 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// resumeReport is a complete report on the one criterion unit resume of
-// independentPlan and validPlan addresses.
-var resumeReport = CriterionReport{Criterion: "spec#1", Done: "resume from the last chunk", Evidence: "TestResume passes", Proof: "internal/trace/built_test.go TestResume"}
+// resumeReport is the outcome a mason of unit resume of independentPlan and
+// validPlan reports.
+var resumeReport = "resume from the last chunk"
 var exampleCard = coreadapter.Card{Headline: "Uploads resume", Happened: "The storage client resumes uploads from the last chunk.", NeedsYou: "Review the candidate."}
 
 // newMasonController returns the mason controller of the service's
 // configuration over repository.
 func newMasonController(s *Service, repository *trace.Repository) *masons {
 	return &masons{s: s, cfg: s.cfg, repository: repository}
-}
-
-func criterionArgs(c CriterionReport) map[string]any {
-	return map[string]any{"criterion": c.Criterion, "done": c.Done, "evidence": c.Evidence, "proof": c.Proof}
 }
 
 // done calls the done tool and returns whether the service accepted the
@@ -64,7 +60,7 @@ func done(ctx context.Context, tools *mcp.ClientSession, args map[string]any) (b
 // whose outcome is outcome.
 func reportDone(outcome string) func(context.Context, agent.Request, *mcp.ClientSession) error {
 	return func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-		recorded, reason, err := done(ctx, tools, map[string]any{"outcome": outcome, "criteria": []any{criterionArgs(resumeReport)}})
+		recorded, reason, err := done(ctx, tools, map[string]any{"outcome": outcome})
 		if err != nil || !recorded {
 			return fmt.Errorf("done refused: %q %v", reason, err)
 		}
@@ -136,9 +132,8 @@ func (f *shedFixture) checkCandidate(t *testing.T, stream config.WorkstreamID, r
 }
 
 // A mason's done is refused, with the reason, for a report with no
-// outcome, one that misses a criterion of the unit, names one the unit does
-// not address or names one twice, or leaves out what was done, the
-// evidence or the proof; input the tool's schema refuses is a tool error.
+// outcome or an empty learning; input the tool's schema refuses, such as a
+// per-criterion report, is a tool error.
 // Either way the unit does not move and the turn does not fail. A complete report is
 // accepted once per turn. Once the turn ends, the service snapshots the
 // unit's workspace as its candidate, records the report with the candidate
@@ -150,23 +145,15 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	t.Parallel()
 	f, masons := newMasonFixture(t, 4, independentPlan)
 	defer func() { f.stop(t) }()
-	blank := resumeReport
-	blank.Evidence = " "
-	other := resumeReport
-	other.Criterion = "spec#2"
-	complete := []any{criterionArgs(resumeReport)}
 	refused := []struct {
 		args   map[string]any
 		reason string
 	}{
-		{map[string]any{"outcome": " ", "criteria": complete}, "outcome is required: say what the unit's work now does"},
-		{map[string]any{"outcome": "Built", "criteria": []any{}}, "the report misses spec#1: report on every criterion of unit resume"},
-		{map[string]any{"outcome": "Built", "criteria": []any{criterionArgs(other)}}, `unit resume does not address criterion "spec#2"; report on spec#1 alone`},
-		{map[string]any{"outcome": "Built", "criteria": []any{criterionArgs(resumeReport), criterionArgs(resumeReport)}}, "criterion spec#1 is reported twice"},
-		{map[string]any{"outcome": "Built", "criteria": []any{criterionArgs(blank)}}, "criterion spec#1 has no evidence"},
+		{map[string]any{"outcome": " "}, "outcome is required: say what the unit's work now does and how you checked its acceptance"},
+		{map[string]any{"outcome": "Built", "learnings": []string{" "}}, "learning 1 is empty"},
 	}
 	masons.play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-		missing, err := callTool(ctx, tools, doneTool, map[string]any{"outcome": "approved", "criteria": complete})
+		missing, err := callTool(ctx, tools, doneTool, map[string]any{"outcome": "approved"})
 		if err != nil || !strings.Contains(missing, `"recorded":false`) || !strings.Contains(missing, `headline is required`) {
 			return fmt.Errorf("missing card: %q %v", missing, err)
 		}
@@ -178,7 +165,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 			{"happened", "Completed " + masonTurnID("resume"), "happened contains an Osmia or backend identifier"},
 			{"needs_you", "See parser.go", "needs_you contains a file name"},
 		} {
-			args := map[string]any{"outcome": "approved", "criteria": complete, bad.field: bad.value}
+			args := map[string]any{"outcome": "approved", bad.field: bad.value}
 			recorded, reason, err := done(ctx, tools, args)
 			if err != nil || recorded || !strings.Contains(reason, bad.reason) {
 				return fmt.Errorf("bad %s: recorded %t reason %q err %v", bad.field, recorded, reason, err)
@@ -191,32 +178,26 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 			}
 		}
 		// Input the schema refuses is a tool error, not a recorded refusal.
-		noProof := criterionArgs(resumeReport)
-		delete(noProof, "proof")
 		for _, args := range []map[string]any{
-			{"outcome": "approved", "criteria": complete, "state": UnitApproved},
-			{"outcome": "Built", "criteria": []any{noProof}},
-			{"outcome": 1, "criteria": complete},
+			{"outcome": "approved", "state": UnitApproved},
+			{"outcome": "Built", "criteria": []any{map[string]any{"criterion": "spec#1"}}},
+			{"outcome": 1},
 		} {
 			if text, err := callTool(ctx, tools, doneTool, args); err == nil {
 				return fmt.Errorf("done %v is no tool error: %s", args, text)
 			}
 		}
-		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "approved", "criteria": complete, "headline": " Uploads   resume ", "happened": " The storage client resumes uploads from the last chunk. ", "needs_you": " Review the candidate. "}); err != nil || !recorded {
+		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "approved", "headline": " Uploads   resume ", "happened": " The storage client resumes uploads from the last chunk. ", "needs_you": " Review the candidate. "}); err != nil || !recorded {
 			return fmt.Errorf("complete report: reason %q (%v)", reason, err)
 		}
 		const again = "this turn already reported its unit done; end the turn"
-		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "again", "criteria": complete}); err != nil || recorded || reason != again {
+		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "again"}); err != nil || recorded || reason != again {
 			return fmt.Errorf("second done: recorded %t, reason %q (%v)", recorded, reason, err)
 		}
 		return nil
 	}
-	dedupeReport := CriterionReport{Criterion: "spec#2", Done: "skip acknowledged chunks", Evidence: "no chunk is sent twice", Proof: "internal/trace/built.go"}
 	masons.play[masonTurnID("dedupe")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built", "criteria": []any{}}); err != nil || recorded || reason != "the report misses spec#2: report on every criterion of unit dedupe" {
-			return fmt.Errorf("incomplete report: recorded %t, reason %q (%v)", recorded, reason, err)
-		}
-		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built", "criteria": []any{criterionArgs(dedupeReport)}}); err != nil || !recorded {
+		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built"}); err != nil || !recorded {
 			return fmt.Errorf("complete report: reason %q (%v)", reason, err)
 		}
 		return errFailTurn
@@ -247,7 +228,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		t.Fatalf("mason turns %+v", th.Turns)
 	}
 	turn := th.Turns[0]
-	wantReport := MasonReport{Outcome: "approved", Criteria: []CriterionReport{resumeReport}}
+	wantReport := MasonReport{Outcome: "approved"}
 	var reported MasonReport
 	if outcome := turn.Response.Result.Outcome; turn.Status() != "idle" || outcome == nil || outcome.Status != masonDone || outcome.Card == nil || *outcome.Card != exampleCard || json.Unmarshal([]byte(outcome.Report), &reported) != nil || !reflect.DeepEqual(reported, wantReport) {
 		t.Fatalf("the mason's turn ended %s with %+v", turn.Status(), turn.Response.Result.Outcome)
@@ -264,7 +245,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	var report UnitReport
 	must(t, json.Unmarshal([]byte(doc.Content), &report))
 	f.checkCandidate(t, stream, report)
-	want := UnitReport{Unit: "resume", Turn: masonTurnID("resume"), Seal: 1, Outcome: "approved", Criteria: []CriterionReport{resumeReport}, Card: &exampleCard, Branch: unitBranch(stream, "resume"), Base: report.Base, Candidate: report.Candidate}
+	want := UnitReport{Unit: "resume", Turn: masonTurnID("resume"), Seal: 1, Outcome: "approved", Card: &exampleCard, Branch: unitBranch(stream, "resume"), Base: report.Base, Candidate: report.Candidate}
 	if !reflect.DeepEqual(report, want) {
 		t.Fatalf("report %+v, want %+v", report, want)
 	}
@@ -311,7 +292,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 
 	// A unit that is no longer implementing takes no report.
 	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "resume", Thread: masonAgent("resume"), Turn: "late", Role: masonRole}
-	raw, err := json.Marshal(map[string]any{"outcome": "Built", "criteria": complete})
+	raw, err := json.Marshal(map[string]any{"outcome": "Built"})
 	must(t, err)
 	out, err := (&masonReports{}).tool(f.repository(), scope).Handle(context.Background(), raw)
 	must(t, err)

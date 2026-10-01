@@ -22,7 +22,7 @@ func TestDissentRecordMarksWhatBlocks(t *testing.T) {
 	}
 	conceded := record(2, alice, one, 0, shed.ObjectionID(1, alice, 3))
 	got := shed.DissentRecord([]shed.Record{r, conceded}, nil)
-	want := map[shed.Kind]bool{shed.Charter: true, shed.Fit: false, shed.Proof: true}
+	want := map[shed.Kind]bool{shed.Charter: true, shed.Fit: false, shed.Acceptance: true}
 	if len(got) != len(want) {
 		t.Fatalf("dissent record %+v", got)
 	}

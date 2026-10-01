@@ -236,7 +236,7 @@ func checkCommitteeBoundary(ctx context.Context, req agent.Request, verified *ag
 			fail("runtime environment exposes %s", key)
 		}
 	}
-	for _, want := range []string{"Round 1 of the shed", "spec.md revision 1 and plan.json revision 1", "charter#<n>", "spec#<n>", "plan#<unit>", "kb/<subsystem>.md", "kb/entities.json#<entity>", "veto", "advice", "split", "proof", shed.ObjectTool, "Call " + questions.AskTool + " when something you must know"} {
+	for _, want := range []string{"Round 1 of the shed", "spec.md revision 1 and plan.json revision 1", "charter#<n>", "spec#<n>", "plan#<unit>", "kb/<subsystem>.md", "kb/entities.json#<entity>", "veto", "advice", "split", "acceptance", shed.ObjectTool, "Call " + questions.AskTool + " when something you must know"} {
 		if !strings.Contains(req.Prompt, want) {
 			fail("prompt lacks %q", want)
 		}
@@ -591,7 +591,7 @@ func TestCommitteeRoundRecordsAFailedMember(t *testing.T) {
 	f := newShedFixture(t, 2)
 	defer f.stop(t)
 	f.member(1, 1, 1, func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		if recorded, id, err := shedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "proof", "part": "spec#2", "argument": "A judgement shows nothing.", "citations": []string{"plan#dedupe"}}); err != nil || !recorded {
+		if recorded, id, err := shedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "acceptance", "part": "plan#dedupe", "argument": "A judgement shows nothing.", "citations": []string{"spec#2"}}); err != nil || !recorded {
 			return fmt.Errorf("proof objection: %q %v", id, err)
 		}
 		return errors.New("the agent crashed")
@@ -601,7 +601,7 @@ func TestCommitteeRoundRecordsAFailedMember(t *testing.T) {
 	f.awaitShed(t, stream, "heard-1")
 	records, err := shed.Records(f.repository(), stream)
 	must(t, err)
-	if len(records) != 2 || !strings.Contains(records[0].Failure, "the agent crashed") || len(records[0].Objections) != 1 || records[0].Objections[0].Kind != shed.Proof || !records[1].Silent() {
+	if len(records) != 2 || !strings.Contains(records[0].Failure, "the agent crashed") || len(records[0].Objections) != 1 || records[0].Objections[0].Kind != shed.Acceptance || !records[1].Silent() {
 		t.Fatalf("records: %+v", records)
 	}
 	ops := f.acknowledgedRoundOperations(t, stream)

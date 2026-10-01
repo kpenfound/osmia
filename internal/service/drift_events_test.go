@@ -271,60 +271,17 @@ func TestDriftCarryReturnsApprovalsAndTheirReviewerMayAmend(t *testing.T) {
 	if want := fmt.Sprintf("drift rebase 1 moved its upstream base from %s to %s", from, upstream); !strings.Contains(review.Request.Prompt, want) {
 		t.Fatalf("the review prompt lacks %q:\n%s", want, review.Request.Prompt)
 	}
-	claim := func(token string) coreadapter.Scope {
-		t.Helper()
-		q, err := repository.ClaimTurn(ctx, stream, agent, token, filepath.Join(f.s.cfg.Root.String(), "threads", token), f.clock.Now())
-		must(t, err)
-		return coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "dedupe", Thread: agent, Turn: q.Request.TurnID, Role: reviewerRole}
+	if !strings.Contains(review.Request.Prompt, "call "+questions.AskTool+" to raise it") || !strings.Contains(review.Request.Prompt, "citing upstream commit "+upstream) {
+		t.Fatalf("the review prompt does not send upstream's change to the chief of staff:\n%s", review.Request.Prompt)
 	}
-	scope := claim("reviewing")
-	tools, err := reviewerQuestionTools(repository, scope, f.s.now)
+	// The reviewer of a carried candidate asks; it files no amendment.
+	q, err := repository.ClaimTurn(ctx, stream, agent, "reviewing", filepath.Join(f.s.cfg.Root.String(), "threads", "reviewing"), f.clock.Now())
 	must(t, err)
-	i := slices.IndexFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == questions.AmendTool })
-	if i < 0 || !strings.Contains(tools[i].Description, upstream) {
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "dedupe", Thread: agent, Turn: q.Request.TurnID, Role: reviewerRole}
+	tools, err := questions.Tools(repository, agent, scope, f.s.now)
+	must(t, err)
+	if len(tools) != 1 || tools[0].Name != questions.AskTool {
 		t.Fatalf("the reviewer's question tools %+v", tools)
-	}
-	input := `{"citations":["spec#2"],"change":"Skip chunks upstream now deduplicates","reason":"Upstream deduplicates chunks itself"}`
-	if got := handle(t, tools[i], input); !strings.Contains(got, `"amendment":"1"`) {
-		t.Fatalf("the reviewer's amend returned %s", got)
-	}
-	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != UnitWaiting {
-		t.Fatalf("dedupe is %+v after its reviewer's amendment: %v", state, err)
-	}
-	moved = upstreamMovedEvents(t, repository, stream)
-	if len(moved) != 3 || moved[2].TransitionID != "amendment_1_filed" {
-		t.Fatalf("upstream moved events after the amendment %+v", moved)
-	}
-	checkMoved(t, moved[2], stream, move, "amendment 1 was filed by the reviewer")
-
-	// A restart interrupts the review; the turn that recovers it files
-	// nothing new.
-	must(t, repository.Close())
-	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	must(t, repository.AbandonTurn(ctx, stream, agent, scope.Turn, f.s.now()))
-	recover := review.Request
-	recover.TurnID = scope.Turn + "-recover-1"
-	recover.ID, recover.At = "request_"+recover.TurnID, f.s.now()
-	_, err = repository.EnqueueTurn(ctx, recover)
-	must(t, err)
-	scope = claim("recovering")
-	tools, err = reviewerQuestionTools(repository, scope, f.s.now)
-	must(t, err)
-	i = slices.IndexFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == questions.AmendTool })
-	if got := handle(t, tools[i], input); !strings.Contains(got, `"amendment":"1"`) {
-		t.Fatalf("the recovering review's amend returned %s", got)
-	}
-	requests, err := trace.Read[trace.Amendment](repository, stream)
-	must(t, err)
-	if len(requests) != 1 || requests[0].Upstream == nil || *requests[0].Upstream != move || requests[0].Unit != "dedupe" {
-		t.Fatalf("amendments after recovery %+v", requests)
-	}
-	if state, err := repository.Workflow(stream, amendmentSubject("1")); err != nil || state.Value != "filed" {
-		t.Fatalf("the amendment is %+v: %v", state, err)
-	}
-	if n := len(upstreamMovedEvents(t, repository, stream)); n != 3 {
-		t.Fatalf("%d upstream moved events after recovery", n)
 	}
 
 	// resume's reviewer reads a carried candidate too.

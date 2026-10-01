@@ -170,13 +170,13 @@ func TestReliabilityDemonstration(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(req.Workspace.Directory(), auditFile)); err != nil {
 			return fmt.Errorf("the continuation lost the stopped turn's file: %v", err)
 		}
-		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Acknowledgements are recorded", "criteria": []any{criterionArgs(dedupeReport)}}); err != nil || !recorded {
+		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Acknowledgements are recorded"}); err != nil || !recorded {
 			return fmt.Errorf("done refused: %q %v", reason, err)
 		}
 		return nil
 	}
 	masons.play[dedupeClarified] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Acknowledged chunks are skipped", "criteria": []any{criterionArgs(dedupeReport)}}); err != nil || !recorded {
+		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Acknowledged chunks are skipped"}); err != nil || !recorded {
 			return fmt.Errorf("done refused: %q %v", reason, err)
 		}
 		return nil
@@ -251,7 +251,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 	chief := f.engine.turns["*"]
 	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
-			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": reviewEvidence(), "findings": []ReviewFinding{}})
+			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("verdict %s: %v", body, err)
 			}

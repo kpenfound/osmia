@@ -15,8 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/followup"
-	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -158,13 +156,6 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	if s.Seal != report.Seal && !amendment.CarriesReport(applications, unit, report.Seal, s.Seal) {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("unit %s report seal %d is not the current seal", unit, report.Seal)
 	}
-	footprint, err := reviewFootprint(m.repository, stream, s, unit)
-	if err != nil {
-		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
-	}
-	if len(footprint.Entities) == 0 || len(footprint.Paths) == 0 {
-		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("seal %d has no resolved footprint for unit %s", s.Seal, unit)
-	}
 	files := bundle.Files{Provider: m.s.contextFor(m.repository), Role: "reviewer", Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }, Now: m.s.now}
 	mason, err := files.Mason(ctx, m.repository.Project(), stream, unit)
 	if err != nil {
@@ -173,18 +164,7 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	if mason.Spec.Revision != s.Revision.Spec || mason.Plan.Revision != s.Revision.Plan || mason.Context.Charter.Revision == 0 || len(mason.Context.Entities.Unresolved) != 0 {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("unit %s lacks sealed revisions, charter or resolved local context", unit)
 	}
-	graph, err := plan.Parse([]byte(mason.Plan.Content))
-	if err != nil {
-		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
-	}
-	planned, ok := graph.Unit(unit)
-	if !ok {
-		planned, err = sealedUnit(m.repository, coreadapter.Scope{Workstream: string(stream), Unit: unit})
-		if err != nil {
-			return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
-		}
-	}
-	if reason := checkReport(planned, MasonReport{Outcome: report.Outcome, Criteria: report.Criteria}); reason != "" {
+	if reason := checkReport(MasonReport{Outcome: report.Outcome, Learnings: report.Learnings}); reason != "" {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("%s: %s", reportDoc.Path, reason)
 	}
 	g, err := newUnitWorkspaces(m.cfg, m.repository).of(stream)
@@ -202,12 +182,10 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	}
 	sum := sha256.Sum256([]byte(diff))
 	identity := UnitReviewIdentity{Subject: string(stream) + "/" + unit, Candidate: coreadapter.Candidate{Revision: report.Candidate, BaseRevision: report.Base, SpecRevision: fmt.Sprint(s.Revision.Spec), PlanRevision: fmt.Sprint(s.Revision.Plan)}, DiffSHA256: hex.EncodeToString(sum[:]), Report: fmt.Sprintf("%s revision %d", reportDoc.Path, reportDoc.Revision), Seal: s.Seal}
-	encodedFootprint, _ := json.Marshal(footprint)
 	items := []coreadapter.ContextItem{
-		{Source: mason.Spec.Source, Content: mason.Spec.Content},
-		{Source: mason.Plan.Source, Content: mason.Plan.Content},
+		{Source: "unit " + unit, Content: mason.RenderTask()},
 		{Source: reportDoc.Path, Content: reportDoc.Content},
-		{Source: "seal.json footprint", Content: string(encodedFootprint)},
+		{Source: mason.Spec.Source, Content: mason.Spec.Content},
 	}
 	if notices := mason.RenderAmendments(); notices != "" {
 		items = append(items, coreadapter.ContextItem{Source: "amendment notices", Content: notices})
@@ -239,50 +217,4 @@ func (m *masons) carried(stream config.WorkstreamID, unit string, reviewed, curr
 		reviewed.Seal, reviewed.Candidate.SpecRevision, reviewed.Candidate.PlanRevision = current.Seal, current.Candidate.SpecRevision, current.Candidate.PlanRevision
 	}
 	return reviewed, nil
-}
-
-func reviewFootprint(repo *trace.Repository, stream config.WorkstreamID, s seal.Seal, unit string) (seal.Footprint, error) {
-	i := slices.IndexFunc(s.Footprints, func(f seal.Footprint) bool { return f.Unit == unit })
-	if i >= 0 {
-		return s.Footprints[i], nil
-	}
-	added, found, err := followup.Find(repo, stream, unit)
-	if err != nil {
-		return seal.Footprint{}, err
-	}
-	if !found {
-		return seal.Footprint{}, fmt.Errorf("follow-up %s is not recorded", unit)
-	}
-	graph, err := sealedPlan(repo, stream, s.Revision.Plan)
-	if err != nil {
-		return seal.Footprint{}, err
-	}
-	p, err := plan.Parse([]byte(graph.Content))
-	if err != nil {
-		return seal.Footprint{}, err
-	}
-	resolved := seal.Footprint{Unit: unit}
-	for _, source := range p.Units {
-		if !slices.ContainsFunc(source.Addresses, func(a plan.Address) bool { return a.Criterion == added.Criterion }) {
-			continue
-		}
-		i := slices.IndexFunc(s.Footprints, func(f seal.Footprint) bool { return f.Unit == source.ID })
-		if i < 0 {
-			return seal.Footprint{}, fmt.Errorf("sealed plan unit %s has no footprint", source.ID)
-		}
-		for _, name := range s.Footprints[i].Entities {
-			if !slices.Contains(resolved.Entities, name) {
-				resolved.Entities = append(resolved.Entities, name)
-			}
-		}
-		for _, path := range s.Footprints[i].Paths {
-			if !slices.Contains(resolved.Paths, path) {
-				resolved.Paths = append(resolved.Paths, path)
-			}
-		}
-	}
-	if len(resolved.Entities) == 0 || len(resolved.Paths) == 0 {
-		return seal.Footprint{}, fmt.Errorf("follow-up %s has no footprint for %s in seal %d; an owner-approved amendment is required", unit, added.Criterion, s.Seal)
-	}
-	return resolved, nil
 }

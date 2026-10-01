@@ -10,14 +10,10 @@ import (
 )
 
 func unit(id string, footprint string, criteria ...string) plan.Unit {
-	u := plan.Unit{ID: id, Footprint: []string{footprint}, DependsOn: []string{}}
-	for _, c := range criteria {
-		u.Addresses = append(u.Addresses, plan.Address{Criterion: c, Proof: plan.Proof{Kind: "new-test", Name: "Test" + id}})
-	}
-	return u
+	return plan.Unit{ID: id, Task: "Build " + id, Acceptance: []string{"Test" + id + " passes"}, Criteria: criteria, Footprint: []string{footprint}, DependsOn: []string{}}
 }
 
-// A unit that addresses a changed criterion in either plan is reworked, even
+// A unit that serves a changed criterion in either plan is reworked, even
 // when the affected set omits it; any other affected unit in both plans is
 // notified; units only in the new plan are added and units only in the old
 // plan removed. Unaffected units are in no class.

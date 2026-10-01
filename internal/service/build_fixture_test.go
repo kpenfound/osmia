@@ -125,7 +125,7 @@ func newReviewFixture(t *testing.T, key string) (*shedFixture, config.Workstream
 }
 
 // seedReview records a completed mason report and snapshots its candidate.
-func seedReview(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, criterion CriterionReport) {
+func seedReview(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome string) {
 	t.Helper()
 	m := newMasonController(f.s, repository)
 	ctx := context.Background()
@@ -142,7 +142,7 @@ func seedReview(t *testing.T, f *shedFixture, repository *trace.Repository, stre
 	w, _, err := newUnitWorkspaces(f.s.cfg, repository).open(ctx, stream, unit)
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(w.Path, masonWrote), []byte("package trace\n"), 0644))
-	completeMasonTurn(t, f, repository, stream, unit, criterion)
+	completeMasonTurn(t, f, repository, stream, unit, outcome)
 	b, _, err = m.read(stream)
 	must(t, err)
 	moved, blocked, err := m.finish(ctx, b, unit)

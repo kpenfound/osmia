@@ -410,7 +410,7 @@ func TestFinalReviewGapBecomesAnAssembledFollowupAndRequiresRereview(t *testing.
 		t.Fatalf("follow-up trace %+v", added)
 	}
 	id := added[0].Unit.ID
-	if len(added[0].Unit.Addresses) != 1 || added[0].Unit.Addresses[0].Criterion != "spec#2" || len(added[0].Unit.Footprint) == 0 {
+	if !slices.Equal(added[0].Unit.Criteria, []string{"spec#2"}) || added[0].Unit.Task != added[0].Gap || len(added[0].Unit.Acceptance) != 1 || len(added[0].Unit.Footprint) == 0 {
 		t.Fatalf("follow-up is not actionable: %+v", added[0])
 	}
 	if plans := streamDocuments(t, repository, stream, plan.PlanDocument); len(plans) != 1 || plans[0].Content != validPlan {
@@ -432,13 +432,6 @@ func TestFinalReviewGapBecomesAnAssembledFollowupAndRequiresRereview(t *testing.
 	must(t, err)
 	if masonBundle.Followup == nil || masonBundle.Followup.Gap != added[0].Gap || !strings.Contains(masonBundle.Render(), added[0].Gap) {
 		t.Fatalf("mason cannot see the gap: %+v", masonBundle.Followup)
-	}
-	sealed, _, _, err := seal.Latest(repository, stream)
-	must(t, err)
-	footprint, err := reviewFootprint(repository, stream, sealed, id)
-	must(t, err)
-	if len(footprint.Entities) == 0 || len(footprint.Paths) == 0 {
-		t.Fatalf("reviewer lacks the follow-up footprint: %+v", footprint)
 	}
 	started, _, err := m.start(ctx, b, id)
 	must(t, err)

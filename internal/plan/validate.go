@@ -16,18 +16,18 @@ const (
 	// SpecProblem is a diagnostic from the spec's criteria list.
 	SpecProblem Kind = "spec"
 	// UnitProblem is a malformed or duplicate unit ID, or a criterion a unit
-	// addresses more than once.
+	// cites more than once.
 	UnitProblem Kind = "unit"
 	// UnknownDependency is a dependency on a unit the plan does not have.
 	UnknownDependency Kind = "unknown-dependency"
 	// DependencyCycle is a cycle in the dependencies.
 	DependencyCycle Kind = "dependency-cycle"
-	// UncoveredCriterion is a spec criterion no unit addresses.
+	// UncoveredCriterion is a spec criterion no unit serves.
 	UncoveredCriterion Kind = "uncovered-criterion"
-	// UnknownCriterion is an addressed criterion the spec does not have.
+	// UnknownCriterion is a cited criterion the spec does not have.
 	UnknownCriterion Kind = "unknown-criterion"
-	// MissingProof is an addressed criterion without a named proof.
-	MissingProof Kind = "missing-proof"
+	// MissingTask is a unit without a task or without acceptance.
+	MissingTask Kind = "missing-task"
 	// UnresolvedFootprint is a footprint that does not resolve against the
 	// entity map.
 	UnresolvedFootprint Kind = "unresolved-footprint"
@@ -97,31 +97,29 @@ func Validate(spec Spec, p Plan, entities kb.Map) []Problem {
 				add(UnknownDependency, u.ID, "", "depends on unit %q, which the plan does not have", dep)
 			}
 		}
+		if strings.TrimSpace(u.Task) == "" {
+			add(MissingTask, u.ID, "", "no task is written")
+		}
+		if !slices.ContainsFunc(u.Acceptance, func(a string) bool { return strings.TrimSpace(a) != "" }) {
+			add(MissingTask, u.ID, "", "no acceptance is written")
+		}
 		seen := map[string]bool{}
-		for _, a := range u.Addresses {
-			n, ok := ParseCitation(a.Criterion)
+		for _, c := range u.Criteria {
+			n, ok := ParseCitation(c)
 			switch {
 			case !ok:
-				add(UnknownCriterion, u.ID, a.Criterion, "is not a spec#<n> citation")
+				add(UnknownCriterion, u.ID, c, "is not a spec#<n> citation")
 			case len(spec.numbered(n)) == 0:
-				add(UnknownCriterion, u.ID, a.Criterion, "the spec has no criterion %d", n)
+				add(UnknownCriterion, u.ID, c, "the spec has no criterion %d", n)
 			case len(spec.numbered(n)) > 1:
-				add(UnknownCriterion, u.ID, a.Criterion, "the spec numbers criterion %d more than once, so it cannot be cited", n)
+				add(UnknownCriterion, u.ID, c, "the spec numbers criterion %d more than once, so it cannot be cited", n)
 			default:
 				covered[n] = true
 			}
-			if seen[a.Criterion] {
-				add(UnitProblem, u.ID, a.Criterion, "addressed more than once")
+			if seen[c] {
+				add(UnitProblem, u.ID, c, "cited more than once")
 			}
-			seen[a.Criterion] = true
-			switch {
-			case strings.TrimSpace(string(a.Proof.Kind)) == "" && strings.TrimSpace(a.Proof.Name) == "":
-				add(MissingProof, u.ID, a.Criterion, "no proof is named")
-			case !a.Proof.Kind.Valid():
-				add(MissingProof, u.ID, a.Criterion, "proof kind %q is not one of %s, %s, %s or %s", a.Proof.Kind, NewTest, ExistingTest, ScriptedCheck, ReviewerJudgement)
-			case strings.TrimSpace(a.Proof.Name) == "":
-				add(MissingProof, u.ID, a.Criterion, "the %s proof has no name", a.Proof.Kind)
-			}
+			seen[c] = true
 		}
 		if len(u.Footprint) == 0 {
 			add(UnresolvedFootprint, u.ID, "", "declares no footprint")
@@ -133,7 +131,7 @@ func Validate(spec Spec, p Plan, entities kb.Map) []Problem {
 
 	for _, n := range spec.numbers() {
 		if !covered[n] {
-			add(UncoveredCriterion, "", Cite(n), "no unit addresses this criterion")
+			add(UncoveredCriterion, "", Cite(n), "no unit serves this criterion")
 		}
 	}
 

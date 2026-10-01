@@ -32,14 +32,15 @@ const (
 	// Fit says the plan does not realise the handed design, or works against
 	// a decision the knowledge base holds. It is advice to the owner.
 	Fit Kind = "fit"
-	// Size says a unit addresses too much and is to be split.
+	// Size says a unit takes on too much and is to be split.
 	Size Kind = "size"
-	// Proof says the plan names no proof that can show a criterion holds.
-	Proof Kind = "proof"
+	// Acceptance says a unit's task is unclear or its acceptance cannot be
+	// verified from the unit's work.
+	Acceptance Kind = "acceptance"
 )
 
 // Kinds lists the objection kinds in the order prompts and schemas give them.
-var Kinds = []Kind{Charter, Fit, Size, Proof}
+var Kinds = []Kind{Charter, Fit, Size, Acceptance}
 
 // Pin is the revision of spec.md and of plan.json a round runs against.
 type Pin struct {
@@ -236,7 +237,7 @@ type Dissent struct {
 }
 
 // Blocking reports whether the dissent stands in the way of ratification: the
-// owner's own objection, a charter veto, or a size or proof objection the
+// owner's own objection, a charter veto, or a size or acceptance objection the
 // architect has to settle. A fit objection is advice and never blocks. The
 // owner's disposition of the objection overrides this.
 func (d Dissent) Blocking() bool { return d.Kind != Fit }

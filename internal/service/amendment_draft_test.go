@@ -35,17 +35,17 @@ func seedAmendment(t *testing.T, f *architectFixture, repo *trace.Repository, st
 func TestArchitectAmendmentDrafts(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name                    string
-		files                   map[string]string
-		want                    string
-		merged                  bool
-		criteria, units, proofs []string
+		name            string
+		files           map[string]string
+		want            string
+		merged          bool
+		criteria, units []string
 	}{
-		{"criterion", map[string]string{plan.SpecPath: strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "An interrupted upload resumes from a durable checkpoint.", 1)}, "proposed", false, []string{"spec#1"}, []string{"resume"}, []string{"resume:spec#1"}},
-		{"plan-only", map[string]string{plan.PlanPath: strings.Replace(validPlan, "TestResume", "TestResumeAfterRestart", 1)}, "proposed", false, []string{}, []string{"resume"}, []string{"resume:spec#1"}},
-		{"invalid", map[string]string{plan.PlanPath: cyclicPlan}, "invalid", false, nil, nil, nil},
-		{"merged", map[string]string{plan.PlanPath: strings.Replace(validPlan, "TestResume", "TestResumeAfterRestart", 1)}, "invalid", true, nil, nil, nil},
-		{"declined", map[string]string{"decline.txt": "The requested change contradicts the charter."}, "declined", false, nil, nil, nil},
+		{"criterion", map[string]string{plan.SpecPath: strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "An interrupted upload resumes from a durable checkpoint.", 1)}, "proposed", false, []string{"spec#1"}, []string{"resume"}},
+		{"plan-only", map[string]string{plan.PlanPath: strings.Replace(validPlan, "TestResume", "TestResumeAfterRestart", 1)}, "proposed", false, []string{}, []string{"resume"}},
+		{"invalid", map[string]string{plan.PlanPath: cyclicPlan}, "invalid", false, nil, nil},
+		{"merged", map[string]string{plan.PlanPath: strings.Replace(validPlan, "TestResume", "TestResumeAfterRestart", 1)}, "invalid", true, nil, nil},
+		{"declined", map[string]string{"decline.txt": "The requested change contradicts the charter."}, "declined", false, nil, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -154,7 +154,7 @@ func TestArchitectAmendmentDrafts(t *testing.T) {
 			must(t, err)
 			var affected amendmentAffected
 			must(t, json.Unmarshal(data, &affected))
-			if !slices.Equal(affected.Criteria, tc.criteria) || !slices.Equal(affected.Units, tc.units) || !slices.Equal(affected.Proofs, tc.proofs) {
+			if !slices.Equal(affected.Criteria, tc.criteria) || !slices.Equal(affected.Units, tc.units) {
 				t.Fatalf("affected %+v", affected)
 			}
 		})
@@ -270,13 +270,13 @@ func readDocs(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, 
 	return docs
 }
 
-func TestAmendmentAffectedSetIncludesEveryAddressingUnit(t *testing.T) {
+func TestAmendmentAffectedSetIncludesEveryServingUnit(t *testing.T) {
 	t.Parallel()
 	graph, err := plan.Parse([]byte(parallelPlan))
 	must(t, err)
 	revised := strings.Replace(validSpec, "1. An interrupted upload resumes from the last acknowledged chunk.", "1. An interrupted upload resumes from a durable checkpoint.", 1)
 	got := affectedRevision(validSpec, revised, graph, graph)
-	if !slices.Equal(got.Criteria, []string{"spec#1"}) || !slices.Equal(got.Units, []string{"resume", "upload"}) || !slices.Equal(got.Proofs, []string{"resume:spec#1", "upload:spec#1"}) {
+	if !slices.Equal(got.Criteria, []string{"spec#1"}) || !slices.Equal(got.Units, []string{"resume", "upload"}) {
 		t.Fatalf("affected set %+v", got)
 	}
 }

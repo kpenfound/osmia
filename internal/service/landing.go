@@ -45,7 +45,7 @@ type landInput struct {
 
 // UnitLanding is the document units/<unit>/landing.json: the approval a
 // unit landed on, with the reviewed candidate and base, the governing spec
-// and plan revisions and seal, the criteria the unit addresses, and the
+// and plan revisions and seal, the criteria the unit serves, and the
 // feature branch commit that landed it with its message.
 type UnitLanding struct {
 	Unit      string   `json:"unit"`
@@ -366,7 +366,7 @@ func landingCommit(ctx context.Context, g workspace.Provider, tip string, in lan
 // current: the unit approved by this review revision, and its candidate,
 // base, report, seal, spec and plan unchanged since. The candidate's tree is
 // then committed once on the base with a message derived from the criteria
-// the unit addresses, and the feature branch and its workspace move to it.
+// the unit serves, and the feature branch and its workspace move to it.
 // One commit then records units/<unit>/landing.json, the unit's move to
 // merged and every dependent unit whose dependencies have all merged moving
 // to ready. A stale approval is refused with the reason as its result, and
@@ -512,21 +512,21 @@ func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in la
 	return "stale approval: " + reason, nil
 }
 
-// landingCriteria returns the criteria the unit addresses, in plan order.
+// landingCriteria returns the criteria the unit serves, in plan order.
 func landingCriteria(unit plan.Unit) []string {
 	var criteria []string
-	for _, a := range unit.Addresses {
-		if !slices.Contains(criteria, a.Criterion) {
-			criteria = append(criteria, a.Criterion)
+	for _, c := range unit.Criteria {
+		if !slices.Contains(criteria, c) {
+			criteria = append(criteria, c)
 		}
 	}
 	return criteria
 }
 
-// message returns the landing commit's message: its subject is the text of
-// the criteria the unit addresses, taken from the sealed spec, its body lists
-// each criterion, and its trailers name the workstream, unit, candidate, base,
-// approval and operation.
+// message returns the landing commit's message: its subject is the unit's
+// title, or else the text of the criteria it serves taken from the sealed
+// spec, its body lists each criterion, and its trailers name the workstream,
+// unit, candidate, base, approval and operation.
 func (f *foreman) message(stream config.WorkstreamID, in landInput, review trace.Document, result UnitReviewResult, operation string) (string, error) {
 	unit, err := sealedUnit(f.repository, coreadapter.Scope{Workstream: string(stream), Unit: in.Unit})
 	if err != nil {
@@ -566,6 +566,11 @@ func landingMessage(stream config.WorkstreamID, unit plan.Unit, spec plan.Spec, 
 		lines = append(lines, fmt.Sprintf("- %s: %s", c, text))
 	}
 	subject := []rune(strings.Join(texts, "; "))
+	if unit.Title != "" {
+		subject = []rune(strings.Join(strings.Fields(unit.Title), " "))
+	} else if len(subject) == 0 {
+		subject = []rune(strings.Join(strings.Fields(unit.Task), " "))
+	}
 	if len(subject) > subjectLength {
 		subject = append(subject[:subjectLength-1], '…')
 	}
@@ -573,7 +578,7 @@ func landingMessage(stream config.WorkstreamID, unit plan.Unit, spec plan.Spec, 
 	if unit.Title != "" {
 		title += " (" + unit.Title + ")"
 	}
-	return fmt.Sprintf("%s\n\nUnit %s of workstream %s meets:\n%s\n\nOsmia-Workstream: %s\nOsmia-Unit: %s\nOsmia-Candidate: %s\nOsmia-Base: %s\nOsmia-Approval: %s\n%s: %s\n",
+	return fmt.Sprintf("%s\n\nUnit %s of workstream %s serves:\n%s\n\nOsmia-Workstream: %s\nOsmia-Unit: %s\nOsmia-Candidate: %s\nOsmia-Base: %s\nOsmia-Approval: %s\n%s: %s\n",
 		string(subject), title, stream, strings.Join(lines, "\n"), stream, unit.ID, in.Candidate, in.Base, approval, landingTrailer, operation)
 }
 

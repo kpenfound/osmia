@@ -31,7 +31,7 @@ func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fake
 	f.start(t)
 	must(t, f.repository().RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-internal", Revision: 1, Project: f.project, At: f.clock.Now(), Actor: librarianActor, Cause: "fixture"}, Path: "kb/internal.md", Content: "# Internal\n\nPrevious project knowledge.\n"}}))
 	masons.play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-		ok, reason, err := done(ctx, tools, map[string]any{"outcome": "Built", "criteria": []any{criterionArgs(resumeReport)}, "learnings": []string{"Trace snapshots require a clean worktree."}})
+		ok, reason, err := done(ctx, tools, map[string]any{"outcome": "Built", "learnings": []string{"Trace snapshots require a clean worktree."}})
 		if err != nil || !ok {
 			return fmt.Errorf("done: %s: %w", reason, err)
 		}

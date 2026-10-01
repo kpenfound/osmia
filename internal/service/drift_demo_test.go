@@ -316,8 +316,7 @@ func (d *driftDemo) reviewDrift(ctx context.Context, req agent.Request, _ *agent
 	if body, err := callTool(ctx, tools, workstreamDiffTool, map[string]any{"change": "feature", "files_only": true}); err != nil || !strings.Contains(body, `"path":"`+masonWrote+`"`) {
 		return nil, fmt.Errorf("feature files %s: %v", body, err)
 	}
-	evidence := []ReviewEvidence{{Criterion: "spec#1", Evidence: "The resolution combines the feature's file and upstream reservation"}, {Criterion: "spec#2", Evidence: "Nothing of the feature branch's change was lost"}}
-	body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": evidence, "findings": []ReviewFinding{}})
+	body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 	if err != nil || !strings.Contains(body, `"recorded":true`) {
 		return nil, fmt.Errorf("drift verdict %s: %v", body, err)
 	}
@@ -334,13 +333,12 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	ctx := context.Background()
 	f, masons := newMasonFixture(t, 1, driftPlan)
 	defer func() { f.stop(t) }()
-	auditReport := CriterionReport{Criterion: "spec#2", Done: "built audit", Evidence: "the planned proof holds", Proof: "reviewer judgement"}
 	masons.play[masonTurnID("resume")] = reportDone("Uploads resume")
 	masons.play[masonTurnID("audit")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal", "trace", "audit.go"), []byte("package trace\n// audit\n"), 0644); err != nil {
 			return err
 		}
-		recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built audit", "criteria": []any{criterionArgs(auditReport)}})
+		recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built audit"})
 		if err != nil || !recorded {
 			return fmt.Errorf("done refused: %q %v", reason, err)
 		}

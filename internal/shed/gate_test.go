@@ -74,7 +74,7 @@ func TestPacketPresentsWhatBlocksFirstAndRecommends(t *testing.T) {
 	advice := entry("a-r1-1", shed.Fit, "")
 	veto := entry("a-r1-2", shed.Charter, "")
 	size := entry("a-r1-3", shed.Size, shed.Sustained)
-	settled := entry("a-r1-4", shed.Proof, shed.Overruled)
+	settled := entry("a-r1-4", shed.Acceptance, shed.Overruled)
 	packet := shed.Present(2, one, false, "debate stopped after round 2", []shed.Entry{advice, veto, size, settled})
 	if ids := packetIDs(packet); !reflect.DeepEqual(ids, []string{"a-r1-2", "a-r1-3", "a-r1-1", "a-r1-4"}) {
 		t.Fatalf("the packet lists %v", ids)

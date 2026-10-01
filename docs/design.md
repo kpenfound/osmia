@@ -22,8 +22,8 @@ That is the tool. It moves into an existing repository without changing it, is d
 
 Four choices give the design its shape.
 
-1. A feature starts as a written specification: what must be true when it is done, drafted from what you hand in, debated by adversarial reviewers with you in the room, and ratified by you. It lives beside the factory's state, never in the repository. The plan that breaks it into units says how each part of it will be shown to hold, before anything is built.
-2. Units are built in parallel where the plan allows and land one at a time on one feature branch, each reviewed against the specification before it lands. When a reviewer has read the whole branch against the specification and you accept that report, the feature is delivered as a pull request from your repository or fork.
+1. A feature starts as a written specification: what must be true when it is done, drafted from what you hand in, debated by adversarial reviewers with you in the room, and ratified by you. It lives beside the factory's state, never in the repository. The plan that breaks it into units is debated and ratified with it: each unit is a task for one builder with the acceptance its reviewer will check, settled before anything is built.
+2. Units are built in parallel where the plan allows and land one at a time on one feature branch, each reviewed against its task and acceptance before it lands. Builders and reviewers work the plan as ratified; they do not reopen how the work is cut. When a reviewer has read the whole branch against the specification and you accept that report, the feature is delivered as a pull request from your repository or fork.
 3. Every agent talks upward to one role, the chief of staff, which answers what it can from the record and asks you the rest. You talk to the chief of staff and to nothing else.
 4. The transitions are code. No model runs on the scheduling path. Agents are durable threads that receive turns and never hold a version control tool.
 
@@ -41,14 +41,14 @@ Four choices give the design its shape.
 | knowledge base | What the factory knows about a project's architecture that the repository's own documents do not say. Prose by subsystem, a local entity map and trace decisions, enriched by Hearsay when enabled. |
 | feature spec (spec) | What must be true when the feature is done: intended behaviour, what it must not do, and acceptance criteria as a numbered list so they can be cited. Drafted by the architect, ratified by you. Not a description of the codebase, and never enforced mechanically. |
 | criterion | One numbered item in a spec's acceptance criteria. Cited in debate and review; a handle, not a key. |
-| proof | The evidence that a criterion holds, named in the plan before the unit is built: a test added in the project's own conventions, an existing test, a scripted check recorded in the trace, or a reviewer's judgement where no test is practical. |
+| acceptance | What a unit's reviewer checks against its work to accept it: behaviour that must hold, tests added in the project's own conventions or kept passing, checks to run. Written in the plan and settled in the shed. |
 | plan | The directed graph of units that realises the spec. Data, produced by the shed, changed only by amendment. |
-| unit | One piece of the plan: the criteria it addresses, the proof it will produce for each, the units it depends on, the code it will touch. Built by one mason, reviewed by one reviewer, landed as one commit on the feature branch. |
-| footprint | The code entities a unit touches, declared in the plan and checked against the diff. Overlap between footprints is entanglement. |
+| unit | One piece of the plan: a task, its acceptance, the criteria it serves, the units it depends on, the code it will touch. Built by one mason, verified against its acceptance by one reviewer, landed as one commit on the feature branch. |
+| footprint | The code entities a unit expects to touch, declared in the plan. Overlap between footprints is entanglement, so footprints decide which units may be built at once. |
 | seal | The pair of the upstream main commit and the spec's hash recorded at ratification. Moves when the feature branch rebases. |
 | bundle | The context a session gets at the start of a turn: the documents it needs, the unit, its questions and answers, local decisions and notices, and an optional Hearsay bundle for its scope. |
-| the shed | Debate. Where a spec and plan go before ratification, and where amendments go. Named for bikeshedding, because cheap debate that repeats without social cost is the centre of the machine rather than its friction. |
-| amendment | A change to a ratified spec or plan, raised from inside the workstream, debated in a short shed round, decided by you. |
+| the shed | Debate. Where a spec and plan go before ratification, and where amendments go. Named for bikeshedding, because cheap debate that repeats without social cost is the centre of the machine rather than its friction. Units are defined there and nowhere else. |
+| amendment | A change to a ratified spec or plan, routed by the chief of staff from a question or filed after upstream moves, debated in a short shed round, decided by you. |
 | question | Anything a role cannot answer from its bundle. Goes to the chief of staff, which answers or asks you. |
 | ruling | Your answer to a question. Recorded locally, rephrased for the asker, and also asserted to Hearsay when enabled. |
 | trace | The complete record of a workstream: documents and their revisions, debate, questions, every agent turn, every transition, every cost. Files in a git repository under the Osmia root. |
@@ -65,8 +65,8 @@ Roles take names from the trade. All but the owner are agents.
 | owner | You. Hands in features, sits in the shed, ratifies specs, answers questions, edits the charter, takes delivery. Talks only to the chief of staff. |
 | chief of staff | The one role facing the owner. Your assistant for the workstream. Answers every other role's questions from the record and Hearsay, rules on contested units on your behalf, escalates what it cannot resolve or is unsure of, rephrases both ways, presents ratification, keeps the status, drafts the pull request description. Never implements, reviews or dispatches. |
 | architect | Drafts the spec and plan from what the owner handed in, answers the committee in the shed, redrafts on amendment. |
-| committee | Adversarial reviewers. In the shed they argue against the spec and plan, citing the spec, the charter and the knowledge base. On a unit one of them is the reviewer, holding the review conversation until the unit lands. At the end one reads the whole branch against the spec and the charter. One role, three prompts. |
-| mason | Builds one unit until its criteria hold and the proofs the plan named are in place. May ask questions and request amendments. |
+| committee | Adversarial reviewers. In the shed they argue against the spec and plan, citing the spec, the charter and the knowledge base. On a unit one of them is the reviewer, verifying the unit's work against its task and acceptance until the unit lands. At the end one reads the whole branch against the spec and the charter. One role, three prompts. |
+| mason | Does one unit's task until its acceptance holds. May ask questions. |
 | foreman | Runs the landing. Merges approved units onto the feature branch, rebases units still in flight, keeps the branch current with upstream, resolves conflicts against the sealed spec, flags entanglement, pushes the branch and opens the pull request. Mostly code, with a session only for conflict resolution. |
 | librarian | Maintains the knowledge base. Extracts it when a project is added, folds in what masons learned when units land. |
 
@@ -114,11 +114,13 @@ It is written by the librarian: an extraction pass over the clone when a project
 
 What must be true when the feature is done: the intended behaviour, what it must not do, and acceptance criteria as a numbered list. The architect drafts it from what you handed in, in the vocabulary the knowledge base gives the project. You edit it freely before ratification. After ratification it changes only by amendment.
 
-This is not a spec in the sense of a description of the codebase's behaviour that the code is held to. The repository does not carry it, nobody upstream maintains it, and it goes stale the day the feature is delivered. It is the statement of intent that everything downstream is argued against: the plan says how each criterion will be shown, the mason builds to it, the reviewer reads the diff against it, and the final read reports on it. The flow is spec, then proof, then implementation, and the order is enforced by the plan being ratified before a mason starts. What is not enforced is coverage as arithmetic. Whether a criterion has been shown to hold is a reviewer's judgement, recorded with its evidence, and yours at delivery.
+This is not a spec in the sense of a description of the codebase's behaviour that the code is held to. The repository does not carry it, nobody upstream maintains it, and it goes stale the day the feature is delivered. It is the statement of intent that everything downstream is argued against: the plan turns it into units with acceptance a reviewer can check, the mason builds its unit against it, and the final read reports on every criterion. The flow is spec, then plan, then implementation, and the order is enforced by the plan being ratified before a mason starts. What is not enforced is coverage as arithmetic. Whether a criterion has been shown to hold is the final reviewer's judgement, recorded with its evidence, and yours at delivery.
 
 ### 4.4 Plan
 
-The directed graph of units. For each unit: the criteria it addresses, how each will be shown to hold, the units it must wait for, and the code entities it will touch. The shed produces it with the spec, and you ratify both together. Naming the proof before the build is the point: a criterion nobody can say how to show is a criterion nobody understands yet, and the shed catches that. Units whose footprints are disjoint and whose dependencies are met may run in parallel. How finely the feature is cut is the factory's concern, not yours, as long as it all lands on one branch.
+The directed graph of units. For each unit: a task, written as a ticket for one developer; its acceptance, what the reviewer will check against the work, including the tests it adds or must keep passing; the spec criteria it serves; the units it must wait for; and the code entities it will touch. Every criterion is served by at least one unit. The shed produces the plan with the spec, and you ratify both together. Writing the acceptance before the build is the point: a unit nobody can say how to accept is a unit nobody understands yet, and the shed catches that.
+
+The shed is where units are argued over. Once the plan is ratified, a mason does its unit's task and a reviewer checks the unit's acceptance against the work, as a developer and a reviewer would with a ticket. Neither reopens how the work is cut. When the task itself looks wrong, they ask the chief of staff, which routes the question to an amendment when the honest answer changes the plan. Units whose footprints are disjoint and whose dependencies are met may run in parallel. How finely the feature is cut is the factory's concern, not yours, as long as it all lands on one branch.
 
 ### 4.5 Where they live
 
@@ -193,10 +195,10 @@ any state may also be: waiting (a question is open), contested (review bounces o
 |---|---|---|
 | planned | In the plan, dependencies not yet merged. | scheduler |
 | ready | Every unit it depends on has merged. Eligible for a slot. | scheduler |
-| implementing | A mason works in the unit's workspace until its criteria hold and the proofs the plan named are in place and passing, then ends its turn with the outcome and a report per criterion. | mason |
-| reviewing | The unit's reviewer runs the review over the unit's diff against the feature branch, with the sealed spec as the reference, and decides. Findings above the severity bar send it back to implementing with the findings. The same reviewer re-reviews the revised candidate, always an exact commit. | committee |
+| implementing | A mason works in the unit's workspace until its task is done and its acceptance holds, then ends its turn with the outcome: what the work does and how it checked the acceptance. | mason |
+| reviewing | The unit's reviewer reads the unit's task and acceptance, the mason's outcome and the unit's diff against the feature branch, with the sealed spec as background, verifies the acceptance and decides. Material findings send it back to implementing with the findings. The same reviewer re-reviews the revised candidate, always an exact commit. | committee |
 | approved | The reviewer is satisfied. Waiting for the foreman. | scheduler |
-| merged | Squashed to one commit on the feature branch, message generated from the criteria it addresses. Units still in flight are rebased. | foreman |
+| merged | Squashed to one commit on the feature branch, message generated from the unit's title and the criteria it serves. Units still in flight are rebased. | foreman |
 | waiting | A sub-state of any of the above: the unit's role asked a question and its turn ended. Nothing else on the unit moves until the answer arrives. Other units continue. | chief of staff, owner |
 | contested | Review bounces reached `max_bounces`, the mason gave up or exhausted its clean-turn bound, a role's turn failed on every retry, or a reviewer's turn ended without a verdict. The chief of staff rules on it first (section 6.6); what it cannot resolve is raised to you with its findings. Nothing on the unit moves until a ruling. | chief of staff, owner |
 
@@ -208,19 +210,21 @@ The shed runs for a new spec and plan, and in a shorter form for amendments. It 
 
 - **Charter compliance is a veto.** A committee member citing a charter rule the spec violates kills that part of the spec. No quorum needed. The architect must redraft or the owner must overrule.
 - **Fit is a judgement.** The committee says whether the plan realises the handed design without painting the project into a corner against the decisions the knowledge base holds. That is advice for you, not a veto.
-- **Size is a split test.** A unit that addresses too many criteria or touches too much of the code gets split by what it addresses, not by estimated effort. A criterion whose proof the plan cannot name gets sent back to the architect.
+- **Size is a split test.** A unit that takes on too much for one mason or touches too much of the code gets split. A unit whose task is unclear, or whose acceptance a reviewer could not verify from the unit's work, gets sent back to the architect.
 
 Committee members run in parallel on the same revision of the spec and plan. The architect answers once per round. Consensus means zero dissent, never a vote and never a self-reported confidence. Debate may conclude early when dissent is resolved. The round cap limits automatic debate; reaching it does not turn remaining objections into approval. The chief of staff presents the spec, plan, dissent record and recommendation. You may request a redraft or further bounded debate, abandon the work, or explicitly overrule the remaining objections and ratify. Every overrule, including a charter veto, is recorded against the document revision. A small feature may skip debate at your explicit request, but still requires your ratification of both documents.
+
+The shed is the only place units are debated. After ratification the plan is the masons' and reviewers' ticket queue, not a further argument.
 
 You are in the shed on purpose. This is the one place the design makes you a blocker, because a wrong spec built on for a week costs more than a day's wait.
 
 ### 5.4 Amendments
 
-A big feature hits a constraint mid-unit that nobody saw at planning. Without an amendment path the mason either improvises or stalls. So a mason or a reviewer may file an amendment request, scoped to the sealed spec: which criteria, what change, why. It gets one short shed round with the same rules, the chief of staff presents it, and you decide. The automatic amendment debate is capped at one round, within `shed.max_rounds`; further debate requires a new owner decision. The round, architect reply and owner packet are recorded under `amendments/<n>/`. The unit that raised it waits. Others continue unless the change touches their footprint, in which case they are notified in their next bundle or, if the meaning of a criterion they address changed, sent back to implementing.
+A big feature hits a constraint mid-unit that nobody saw at planning. Without an amendment path the mason either improvises or stalls. So a mason or a reviewer asks, and when the honest answer changes the sealed spec or plan, the chief of staff routes the question to an amendment request: which criteria or units, what change, why. Masons and reviewers do not file amendments themselves; the drift mason files one when an upstream change alters what a sealed criterion means (section 7.5). It gets one short shed round with the same rules, the chief of staff presents it, and you decide. The automatic amendment debate is capped at one round, within `shed.max_rounds`; further debate requires a new owner decision. The round, architect reply and owner packet are recorded under `amendments/<n>/`. The unit that raised it waits. Others continue unless the change touches their footprint, in which case they are notified in their next bundle or, if the meaning of a criterion they serve changed, sent back to implementing.
 
-An amendment is not a feature-state cycle. The feature stays in building, or assembled if final review has begun. The approved amendment versions the spec and/or plan, updates the seal if the spec changes, and identifies affected units and proofs. It does not directly edit code. A rejected request leaves the prior documents in force and the requester receives the ruling. Any approval or final report based on changed criteria is invalidated before further landing or delivery.
+An amendment is not a feature-state cycle. The feature stays in building, or assembled if final review has begun. The approved amendment versions the spec and/or plan, updates the seal if the spec changes, and identifies the affected units. It does not directly edit code. A rejected request leaves the prior documents in force and the requester receives the ruling. Any approval or final report based on changed criteria is invalidated before further landing or delivery.
 
-The architect drafts a proposed revision from the sealed documents, request, charter and context. The proposal keeps the sealed spec and plan in force until the owner decides. The trace records the proposed spec, plan and an affected set of criteria, units and proofs under the request. Invalid drafts leave the sealed documents untouched.
+The architect drafts a proposed revision from the sealed documents, request, charter and context. The proposal keeps the sealed spec and plan in force until the owner decides. The trace records the proposed spec, plan and an affected set of criteria and units under the request. Invalid drafts leave the sealed documents untouched.
 
 ### 5.5 Delivery
 
@@ -314,7 +318,7 @@ The feature branch is one workspace on the project's clone. Each unit gets a wor
 
 ### 7.4 Landing a unit
 
-On approval the foreman squashes the unit's workspace to one commit on the feature branch with a message generated from the criteria it addresses, then rebases every unit still in flight. A conflict goes to a mason session in the conflicting unit's workspace with the sealed spec and the instruction that the tree carries conflict markers to resolve against it. A session never discovers conflict markers by accident. Reviewers never see them.
+On approval the foreman squashes the unit's workspace to one commit on the feature branch with a message generated from the unit's title and the criteria it serves, then rebases every unit still in flight. A conflict goes to a mason session in the conflicting unit's workspace with the sealed spec and the instruction that the tree carries conflict markers to resolve against it. A session never discovers conflict markers by accident. Reviewers never see them.
 
 An approval records the reviewed candidate, its base and the governing spec and plan revisions. Landing first checks that those inputs are still current. If a rebase changes the candidate or its base, that unit returns to review after any conflict resolution and before landing. The foreman never silently transfers approval to a different candidate. Active file writers must finish or be stopped and snapshotted before their workspace is rebased; the scheduler owns this coordination.
 
@@ -326,7 +330,7 @@ Upstream main moves daily on a busy project. On a cadence per project, and on de
 
 Two units in one workstream are entangled when the plan makes one depend on the other or their code footprints intersect. Entangled units run in sequence. Two workstreams on one project have no shared spec, so their entanglement is code entity overlap, and the foreman warns when both are in the same subsystem before both pull requests are open.
 
-Footprints resolve through the local entity map even without Hearsay. The review compares actual changed paths with the declared footprint; undeclared scope must be explained and the plan amended when necessary before approval. Unknown or ambiguous mappings cannot be treated as proof of disjointness. Within a workstream the scheduler serializes such units until their footprints are resolved. Across workstreams overlap is advisory by default; the owner can pause or reprioritise the affected work.
+Footprints resolve through the local entity map even without Hearsay. They schedule work; they do not bind it. A unit's review does not hold its diff to its footprint: a reviewer who finds the work wandering beyond its task says so as a finding. Unknown or ambiguous mappings cannot be treated as proof of disjointness. Within a workstream the scheduler serializes such units until their footprints are resolved. Across workstreams overlap is advisory by default; the owner can pause or reprioritise the affected work.
 
 A workstream may declare another on the same project as its base. It then rebases onto that workstream's branch instead of upstream until the base change is integrated upstream. Its dependent pull request is opened in the push repository against that branch. Once the base is integrated, the service prepares an upstream pull request from the descendant's branch, refreshing the affected review and owner delivery approval before publishing it. With a separate fork, the trace retains both requests and their relationship. Without a fork, the service retargets the existing pull request to the configured base branch and updates its approved description after fresh review and owner delivery approval. The operation records the prior request identity and expected contents, reconciles interruptions before retrying, and refuses an unexpectedly edited or closed request. The trace retains both publication records and the request relationship. This is how one large change lands as a sequence of pull requests. Stacking inside one workstream is not supported.
 
@@ -401,9 +405,9 @@ The Osmia server, role-scoped:
 | `ask` | all but chief of staff | Raise a question. Ends the turn with outcome `waiting`. |
 | `done` | all | End the turn with an outcome and a report. |
 | `notes_read`, `notes_write` | all | The role's private craft memory for the project. |
-| `amend` | mason, committee | File an amendment request against sealed criteria. |
+| `amend` | drift mason | File an amendment request when an upstream change alters what a sealed criterion means. |
 | `object`, `concede` | committee | A shed contribution, citing the spec, the charter or the knowledge base. |
-| `verdict` | committee | A review verdict with findings and severities. |
+| `verdict` | committee | A review verdict: the decision, how the reviewer verified the acceptance, and findings with severities and the action each asks for. |
 | `run_checks` | unit and final reviewers | Run `dagger check` on a fresh disposable export of the pinned candidate; record its commit, exit status and bounded output. |
 | `workstream_diff` | unit, drift and final reviewers | Read the diff a review is pinned to: the whole diff, the changed files with line counts, chosen files or directories, or the hunks touching a line range. A unit review reads its candidate against its base, a drift review the feature branch's change before the rebase and the resolved candidate's change on upstream, and a final review the branch against upstream. Review prompts list the changed files instead of carrying diffs. |
 | `answer`, `escalate`, `route_amendment`, `propose_charter`, `set_status`, `notify` | chief of staff | The five outcomes of a question, the status, and a notice to in-flight bundles. |
@@ -660,9 +664,9 @@ Git worktrees and Jujutsu share the workspace interface. The service supports mu
 1. Per-role or per-workstream override of profiles. The design has per role, global. Per workstream would let one feature run on a cheaper provider, and complicates the switcher.
 2. Several workstreams in one project when both touch the same subsystem. The default is an advisory, with owner pause and priority controls. Automatic refusal across workstreams is deferred. Within a workstream overlapping or unresolved footprints are serialized.
 3. Committee membership. Per workstream in the design, with project memory arriving through Hearsay. Per project would accumulate arguments in the thread instead. Revisit when the first workstream has run.
-4. What counts as a proof. The plan names one per criterion. New tests, existing tests, scripted checks recorded in the trace, and explicit reviewer judgement are supported forms. The charter determines which are sufficient for a project, and the reviewer records the actual evidence and limitations. There is no mechanical coverage score that substitutes for that judgement.
+4. What counts as acceptance. The plan writes it per unit in plain language: behaviour that must hold, tests added or kept passing, checks to run. The charter determines what a project requires, and the reviewer records how it verified the acceptance. There is no mechanical coverage score that substitutes for that judgement.
 5. Unit-scoped parallelism. A unit is one mason. Whether a wide unit may fan out into several masons with a squash step, as an assembler, is deferred until a real feature needs it.
-6. The spec format. Markdown with a numbered list of criteria, and nothing parsed from it beyond the numbers. The footprint is declared in the plan by the architect and checked against the diff at review, never derived from the spec.
+6. The spec format. Markdown with a numbered list of criteria, and nothing parsed from it beyond the numbers. The footprint is declared in the plan by the architect and used to schedule units, never derived from the spec.
 
 ---
 
@@ -700,12 +704,12 @@ project      a repository you contribute to; optional fork, clone, charter, know
 workstream   one feature on one project; its own branch, agents and trace
 charter      your rules as a contributor; one per project; grows by ratified rulings
 spec         what must be true when the feature is done; numbered criteria; ratified by you; amended in the shed
-plan         DAG of units; criteria, the proof named for each, dependencies, entities; data
-unit         one piece; one mason, one reviewer, one commit on the feature branch
-footprint    code entities a unit touches; overlap is entanglement
-proof        evidence a criterion holds; named in the plan, produced by the mason, judged by the reviewer
+plan         DAG of units; task, acceptance, criteria served, dependencies, entities; data
+unit         one task; one mason, one reviewer checking its acceptance, one commit on the feature branch
+footprint    code entities a unit expects to touch; overlap is entanglement; schedules, never binds
+acceptance   what a reviewer checks to accept a unit; written in the plan, settled in the shed
 seal         (upstream main commit, spec hash); moves on rebase
-the shed     debate; charter veto, size split, fit; consensus or recorded owner overruling, then ratification
+the shed     debate; charter veto, size and acceptance tests, fit; the only place units are argued; then ratification
 question     ask -> chief of staff -> answer | escalate | amend | charter | rephrase
 trace        the workstream's record; files in the project's git repository under the root
 profile      agent, model, effort, fallback; bound per role; switchable while running

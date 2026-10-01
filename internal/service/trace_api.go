@@ -67,9 +67,9 @@ func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (an
 			if w.planDoc != nil {
 				for _, c := range v.Criteria {
 					if !slices.ContainsFunc(v.Units, func(u UnitTrace) bool {
-						return slices.ContainsFunc(u.Addresses, func(a TraceAddress) bool { return a.Criterion == c.Criterion })
+						return slices.ContainsFunc(u.Criteria, func(served TraceCriterion) bool { return served.Criterion == c.Criterion })
 					}) {
-						v.Gaps = append(v.Gaps, TraceGap{Link: "units addressing " + c.Criterion, State: LinkUnavailable, Reason: fmt.Sprintf("no unit of plan.json revision %d or a follow-up addresses the criterion", w.planDoc.Revision)})
+						v.Gaps = append(v.Gaps, TraceGap{Link: "units serving " + c.Criterion, State: LinkUnavailable, Reason: fmt.Sprintf("no unit of plan.json revision %d or a follow-up serves the criterion", w.planDoc.Revision)})
 					}
 				}
 			}

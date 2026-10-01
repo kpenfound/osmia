@@ -53,7 +53,7 @@ func classifyAmendment(req trace.Amendment, d AmendmentDecision, affectedDoc, se
 		return amendment.Application{}, fmt.Errorf("the approved plan does not parse: %v", err)
 	}
 	a := amendment.Application{Amendment: req.ID, From: from, To: to, Citations: req.Citations, Change: req.Change, Reason: req.Reason, Note: d.Note,
-		Criteria: append([]string{}, affected.Criteria...), Proofs: append([]string{}, affected.Proofs...)}
+		Criteria: append([]string{}, affected.Criteria...)}
 	a.Rework, a.Notify, a.Added, a.Removed = amendment.Classify(a.Criteria, affected.Units, before, after)
 	return a, nil
 }
@@ -91,7 +91,7 @@ func (a amendmentDebate) masons() *masons {
 // moves to implementing; each notified unit that is implementing stays
 // there, and one that is reviewing or approved moves to reviewing; units the
 // amended plan adds enter planned, or ready once every unit they depend on
-// has merged; a changed criterion that a merged unit addresses becomes a
+// has merged; a changed criterion that a merged unit serves becomes a
 // follow-up unit, since merged units are never reopened; a final report that
 // read the replaced revisions is named invalidated; and the amendment moves
 // to applied. Waiting and contested units are held and moved once they leave
@@ -245,20 +245,20 @@ func (a amendmentDebate) amendUnit(stream config.WorkstreamID, app amendment.App
 				changed = addressed
 			}
 		}
-		reason = fmt.Sprintf("unit %s returns to implementing from %s: amendment %s changed the meaning of %s, which it addresses; its mason builds it again against seal %d, spec revision %d and plan revision %d", unit, st.Value, app.Amendment, list(changed), app.To.Seal, app.To.Spec, app.To.Plan)
+		reason = fmt.Sprintf("unit %s returns to implementing from %s: amendment %s changed the meaning of %s, which it serves; its mason builds it again against seal %d, spec revision %d and plan revision %d", unit, st.Value, app.Amendment, list(changed), app.To.Seal, app.To.Spec, app.To.Plan)
 	case st.Value == UnitImplementing:
-		reason = fmt.Sprintf("unit %s stays implementing: amendment %s changed its plan entry, and the criteria it addresses keep their meaning; its mason's next turn carries the notice and the amended bundle", unit, app.Amendment)
+		reason = fmt.Sprintf("unit %s stays implementing: amendment %s changed its plan entry, and the criteria it serves keep their meaning; its mason's next turn carries the notice and the amended bundle", unit, app.Amendment)
 	default:
 		to = UnitReviewing
-		reason = fmt.Sprintf("unit %s returns to review from %s: amendment %s changed its plan entry, and the criteria it addresses keep their meaning; its review is taken again against plan revision %d with the notice", unit, st.Value, app.Amendment, app.To.Plan)
+		reason = fmt.Sprintf("unit %s returns to review from %s: amendment %s changed its plan entry, and the criteria it serves keep their meaning; its review is taken again against plan revision %d with the notice", unit, st.Value, app.Amendment, app.To.Plan)
 	}
 	return trace.Transaction{ExpectedVersion: st.Version, Transition: trace.Transition{Header: header(id, unit), Subject: trace.UnitSubject(unit), From: st.Value, To: to, Reason: reason},
 		Events: []trace.Event{trace.Notice(id, "unit", "Unit "+unit+": "+reason+".")}}
 }
 
 // followups returns one follow-up unit for every changed criterion that a
-// merged unit addresses, scoped to the footprints of the plan's units that
-// address it, unless it is recorded already.
+// merged unit serves, scoped to the footprints of the plan's units that
+// serve it, unless it is recorded already.
 func (a amendmentDebate) followups(stream config.WorkstreamID, app amendment.Application, p plan.Plan, merged []string) ([]followup.Unit, error) {
 	previous, err := followup.Read(a.repository, stream)
 	if err != nil {
@@ -274,19 +274,9 @@ func (a amendmentDebate) followups(stream config.WorkstreamID, app amendment.App
 	var out []followup.Unit
 	for _, criterion := range app.Criteria {
 		var by []string
-		var proof plan.Proof
 		for _, id := range merged {
-			u, ok := p.Unit(id)
-			if !ok {
-				continue
-			}
-			for _, address := range u.Addresses {
-				if address.Criterion == criterion {
-					by = append(by, id)
-					if proof.Kind == "" {
-						proof = address.Proof
-					}
-				}
+			if u, ok := p.Unit(id); ok && slices.Contains(u.Criteria, criterion) {
+				by = append(by, id)
 			}
 		}
 		id := fmt.Sprintf("amendment-%s-%s", app.Amendment, strings.ReplaceAll(criterion, "#", "-"))
@@ -295,7 +285,7 @@ func (a amendmentDebate) followups(stream config.WorkstreamID, app amendment.App
 		}
 		var footprint []string
 		for _, u := range p.Units {
-			if slices.ContainsFunc(u.Addresses, func(address plan.Address) bool { return address.Criterion == criterion }) {
+			if slices.Contains(u.Criteria, criterion) {
 				for _, name := range u.Footprint {
 					if !slices.Contains(footprint, name) {
 						footprint = append(footprint, name)
@@ -305,7 +295,7 @@ func (a amendmentDebate) followups(stream config.WorkstreamID, app amendment.App
 		}
 		gap := fmt.Sprintf("amendment %s changed the meaning of %s after %s merged; bring the merged work in line with the amended criterion", app.Amendment, criterion, strings.Join(by, ", "))
 		out = append(out, followup.Unit{Amendment: app.Amendment, Criterion: criterion, Gap: gap,
-			Unit: plan.Unit{ID: id, Title: "Address an amended criterion", Addresses: []plan.Address{{Criterion: criterion, Proof: proof}}, DependsOn: []string{}, Footprint: footprint}})
+			Unit: plan.Unit{ID: id, Title: "Address an amended criterion", Task: gap, Acceptance: []string{"The merged work satisfies " + criterion + " as the amended spec states it"}, Criteria: []string{criterion}, DependsOn: []string{}, Footprint: footprint}})
 	}
 	return out, nil
 }
@@ -407,9 +397,9 @@ func (a amendmentDebate) enqueueAmended(ctx context.Context, stream config.Works
 // amendment: what it means for the unit, then the unit's amended bundle with
 // the amendment's notice.
 func amendedMasonPrompt(app amendment.Application, m bundle.Mason, rework bool) string {
-	what := fmt.Sprintf("The owner approved amendment %s. It changed the meaning of criteria unit %s addresses, so the unit returns to implementing: build it again in your existing workspace against the amended spec and plan below, and put in place and pass the proofs they name.", app.Amendment, m.Unit)
+	what := fmt.Sprintf("The owner approved amendment %s. It changed the meaning of criteria unit %s serves, so the unit returns to implementing: build it again in your existing workspace against the amended task and acceptance below.", app.Amendment, m.Unit)
 	if !rework {
-		what = fmt.Sprintf("The owner approved amendment %s. It changed the entry of unit %s in the plan; the criteria the unit addresses keep their meaning. Continue in your existing workspace against the amended plan below, and stay within its footprint.", app.Amendment, m.Unit)
+		what = fmt.Sprintf("The owner approved amendment %s. It changed the entry of unit %s in the plan; the criteria the unit serves keep their meaning. Continue in your existing workspace against the amended task and acceptance below.", app.Amendment, m.Unit)
 	}
-	return fmt.Sprintf("%s When every criterion of the unit holds and its proof is in place and passing, call done with the outcome of your work and a report on every criterion of the unit, then end your turn.\n\n%s", what, m.Render())
+	return fmt.Sprintf("%s When the task is done and its acceptance holds, call done with the outcome of your work, then end your turn.\n\n%s", what, m.Render())
 }

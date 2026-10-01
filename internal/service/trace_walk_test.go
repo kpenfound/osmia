@@ -116,8 +116,8 @@ func (f *walkFixture) append(r trace.Record) {
 func (f *walkFixture) sealed() {
 	f.doc(plan.SpecDocument, plan.SpecPath, "", walkSpec)
 	graph := plan.Plan{Version: plan.Version, Units: []plan.Unit{
-		{ID: "a", Title: "Parse specs", Addresses: []plan.Address{{Criterion: "spec#1", Proof: plan.Proof{Kind: plan.NewTest, Name: "TestParse"}}}, DependsOn: []string{}, Footprint: []string{"spec"}},
-		{ID: "b", Title: "Validate plans", Addresses: []plan.Address{{Criterion: "spec#2", Proof: plan.Proof{Kind: plan.ExistingTest, Name: "TestValidate"}}, {Criterion: "spec#3", Proof: plan.Proof{Kind: plan.NewTest, Name: "TestEncode"}}}, DependsOn: []string{"a"}, Footprint: []string{"plan"}},
+		{ID: "a", Title: "Parse specs", Task: "Parse the spec's criteria.", Acceptance: []string{"TestParse covers numbered criteria"}, Criteria: []string{"spec#1"}, DependsOn: []string{}, Footprint: []string{"spec"}},
+		{ID: "b", Title: "Validate plans", Task: "Validate and encode plans.", Acceptance: []string{"TestValidate passes", "TestEncode covers the canonical form"}, Criteria: []string{"spec#2", "spec#3"}, DependsOn: []string{"a"}, Footprint: []string{"plan"}},
 	}}
 	encoded, err := plan.Encode(graph)
 	must(f.t, err)
@@ -134,26 +134,20 @@ func (f *walkFixture) sealed() {
 	f.unit("b", UnitPlanned)
 }
 
-func (f *walkFixture) report(unit, candidate, base string, criteria ...string) {
+func (f *walkFixture) report(unit, candidate, base string) {
 	r := UnitReport{Unit: unit, Turn: "mason-" + unit + "-1", Seal: 1, Outcome: "done", Branch: "osmia/unit-" + unit, Base: base, Candidate: candidate}
-	for _, c := range criteria {
-		r.Criteria = append(r.Criteria, CriterionReport{Criterion: c, Done: "implemented", Evidence: "tests pass at " + candidate, Proof: "test of " + c})
-	}
 	f.doc(reportDocument(unit), fmt.Sprintf(reportPath, unit), unit, r)
 }
 
 // review records the identity a review is asked for, then its verdict on
 // the given report revision.
-func (f *walkFixture) review(unit string, report int, candidate, base, decision string, bounces int, criteria ...string) {
+func (f *walkFixture) review(unit string, report int, candidate, base, decision string, bounces int) {
 	identity := UnitReviewIdentity{Subject: string(stream) + "/" + unit, Candidate: coreadapter.Candidate{Revision: candidate, BaseRevision: base, SpecRevision: "1", PlanRevision: "1"}, DiffSHA256: "digest-" + candidate[:4], Report: fmt.Sprintf("units/%s/report.json revision %d", unit, report), Seal: 1}
 	path := fmt.Sprintf("units/%s/review.json", unit)
 	f.doc(reviewDocument(unit), path, unit, identity)
-	verdict := UnitVerdict{Decision: decision, Findings: []ReviewFinding{}}
-	for _, c := range criteria {
-		verdict.Evidence = append(verdict.Evidence, ReviewEvidence{Criterion: c, Evidence: "reviewed " + candidate})
-		if decision == "material_findings" {
-			verdict.Findings = append(verdict.Findings, ReviewFinding{Criterion: c, Severity: "major", Evidence: "missing case", Action: "add it"})
-		}
+	verdict := UnitVerdict{Decision: decision, Summary: "reviewed " + candidate, Findings: []ReviewFinding{}}
+	if decision == "material_findings" {
+		verdict.Findings = append(verdict.Findings, ReviewFinding{Severity: "major", Evidence: "missing case", Action: "add it"})
 	}
 	f.doc(reviewDocument(unit), path, unit, UnitReviewResult{Identity: identity, Turn: fmt.Sprintf("review-%s-%d", unit, report), Verdict: verdict, Bounces: bounces})
 }
@@ -177,13 +171,13 @@ func (f *walkFixture) buildA() {
 	usage := coreadapter.Usage{CostUSD: 0.25, CostKnown: true, Turns: 1}
 	f.append(trace.TurnResponse{Header: f.header("turn-response", "response_mason-a-1", "a", 1, mason), AgentID: "mason-a", ThreadID: "mason-a", TurnID: "mason-a-1", RequestID: request.ID, RequestRevision: 1, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "s1"}, StartedAt: f.at, Usage: usage}})
 	f.append(trace.Cost{Header: f.header("cost", "cost-mason-a-1", "a", 1, ownerActor), Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(project), Workstream: string(stream), Unit: "a", Thread: "mason-a", Turn: "mason-a-1", Role: "mason"}, AttemptID: "attempt-1", At: f.at, Usage: usage}})
-	f.report("a", sha('1'), sha('0'), "spec#1")
+	f.report("a", sha('1'), sha('0'))
 	f.unit("a", UnitReviewing)
-	f.review("a", 1, sha('1'), sha('0'), "material_findings", 1, "spec#1")
+	f.review("a", 1, sha('1'), sha('0'), "material_findings", 1)
 	f.unit("a", UnitImplementing)
-	f.report("a", sha('2'), sha('0'), "spec#1")
+	f.report("a", sha('2'), sha('0'))
 	f.unit("a", UnitReviewing)
-	f.review("a", 2, sha('2'), sha('0'), "satisfactory", 1, "spec#1")
+	f.review("a", 2, sha('2'), sha('0'), "satisfactory", 1)
 	f.unit("a", UnitApproved)
 	f.land("a", 4, sha('2'), sha('0'), sha('a'), "spec#1")
 	f.unit("a", UnitMerged)
@@ -193,9 +187,9 @@ func (f *walkFixture) buildA() {
 // buildB lands unit b as b...b on top of a...a.
 func (f *walkFixture) buildB() {
 	f.unit("b", UnitImplementing)
-	f.report("b", sha('3'), sha('a'), "spec#2", "spec#3")
+	f.report("b", sha('3'), sha('a'))
 	f.unit("b", UnitReviewing)
-	f.review("b", 1, sha('3'), sha('a'), "satisfactory", 0, "spec#2", "spec#3")
+	f.review("b", 1, sha('3'), sha('a'), "satisfactory", 0)
 	f.unit("b", UnitApproved)
 	f.land("b", 2, sha('3'), sha('a'), sha('b'), "spec#2", "spec#3")
 	f.unit("b", UnitMerged)
@@ -266,8 +260,8 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 		t.Fatalf("criterion units %+v", c.Units)
 	}
 	a := c.Units[0]
-	if len(a.Addresses) != 1 || a.Addresses[0].Proof.Name != "TestParse" || a.Addresses[0].Text != "Specs parse." {
-		t.Fatalf("unit a addresses %+v", a.Addresses)
+	if len(a.Criteria) != 1 || a.Criteria[0].Text != "Specs parse." || a.Task != "Parse the spec's criteria." || len(a.Acceptance) != 1 || a.Acceptance[0] != "TestParse covers numbered criteria" {
+		t.Fatalf("unit a task %q acceptance %v criteria %+v", a.Task, a.Acceptance, a.Criteria)
 	}
 	if len(a.Reports) != 2 || a.Reports[0].Candidate != sha('1') || a.Reports[1].Candidate != sha('2') {
 		t.Fatalf("unit a reports %+v", a.Reports)
@@ -284,13 +278,13 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 	if len(a.Turns) != 1 || a.Turns[0].Status != "idle" || a.Turns[0].Role != "mason" || a.Turns[0].CostUSD != 0.25 || a.CostUSD != 0.25 {
 		t.Fatalf("unit a turns %+v cost %v", a.Turns, a.CostUSD)
 	}
-	// Unit b addresses spec#2 and spec#3; the walk of spec#2 keeps only its
-	// own evidence.
+	// Unit b serves spec#2 and spec#3; the walk of spec#2 names only that
+	// criterion and keeps the unit's whole report and review.
 	two, err := traceCriterion(f.repo, stream, "spec#2")
 	must(t, err)
 	b := two.Units[0]
-	if len(b.Addresses) != 1 || len(b.Reports[0].Criteria) != 1 || b.Reports[0].Criteria[0].Criterion != "spec#2" || len(b.Reviews[0].Evidence) != 1 || b.Reviews[0].Evidence[0].Criterion != "spec#2" {
-		t.Fatalf("spec#2 evidence of unit b %+v", b)
+	if len(b.Criteria) != 1 || b.Criteria[0].Criterion != "spec#2" || len(b.Acceptance) != 2 || len(b.Reports) != 1 || len(b.Reviews) != 1 || b.Reviews[0].Summary != "reviewed "+sha('3') {
+		t.Fatalf("spec#2 walk of unit b %+v", b)
 	}
 	if c.Final == nil || c.Final.Evidence != "TestParse" {
 		t.Fatalf("final account %+v", c.Final)
@@ -427,14 +421,14 @@ func TestTraceWalkIncompleteChain(t *testing.T) {
 	f.unit("b", UnitImplementing)
 
 	// A reported unit waits for its verdict, then for its landing.
-	f.report("b", sha('3'), sha('a'), "spec#2", "spec#3")
+	f.report("b", sha('3'), sha('a'))
 	f.unit("b", UnitReviewing)
 	u, err = traceUnit(f.repo, stream, "b")
 	must(t, err)
 	if !reflect.DeepEqual(gapStates(u.Gaps), map[string]string{"verdict on units/b/report.json revision 1": LinkUnfinished}) {
 		t.Fatalf("reviewing gaps %+v", u.Gaps)
 	}
-	f.review("b", 1, sha('3'), sha('a'), "satisfactory", 0, "spec#2", "spec#3")
+	f.review("b", 1, sha('3'), sha('a'), "satisfactory", 0)
 	f.unit("b", UnitApproved)
 	u, err = traceUnit(f.repo, stream, "b")
 	must(t, err)
@@ -488,7 +482,7 @@ func TestTraceWalkKeepsRevisions(t *testing.T) {
 
 	c, err := traceCriterion(f.repo, stream, "spec#1")
 	must(t, err)
-	if c.Text != "Specs parse." || c.Spec.Revision != 1 || c.Units[0].Addresses[0].Text != "Specs parse." {
+	if c.Text != "Specs parse." || c.Spec.Revision != 1 || c.Units[0].Criteria[0].Text != "Specs parse." {
 		t.Fatalf("criterion after an unsealed revision %+v", c)
 	}
 

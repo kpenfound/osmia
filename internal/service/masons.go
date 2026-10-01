@@ -329,9 +329,9 @@ func (m *masons) classify(ctx context.Context, stream config.WorkstreamID, unit 
 	case "asked_in_prose":
 		prompt += " You asked a question in prose. Call ask with the question if you need an answer."
 	case "claims_done":
-		prompt += " You claimed completion in prose. Call done with the required report if the criteria and proofs hold."
+		prompt += " You claimed completion in prose. Call done with the required report if the unit's acceptance holds."
 	default:
-		prompt += " Call ask if you need a decision, or done with the required report when the criteria and proofs hold."
+		prompt += " Call ask if you need a decision, or done with the required report when the unit's acceptance holds."
 	}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: last.Response.ID, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: last.Request.SystemPrompt, Prompt: prompt}
 	_, err = m.repository.EnqueueTurn(ctx, req)
@@ -361,7 +361,7 @@ func (m *masons) resumeMasonRuling(ctx context.Context, stream config.Workstream
 		return false, err
 	}
 	turnID := fmt.Sprintf("%s-owner-revise-%d", masonAgent(unit), ruling.ResetTurn)
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: ruling.actor(), Cause: ruling.Contest, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: last.Request.SystemPrompt, Prompt: "The " + ruling.ruler() + " ruled that you should revise this unit in your existing workspace. Note: " + ruling.Note + "\nCheck the criteria and planned proofs, then call done with a criterion report or ask if you need a decision."}
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: ruling.actor(), Cause: ruling.Contest, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: last.Request.SystemPrompt, Prompt: "The " + ruling.ruler() + " ruled that you should revise this unit in your existing workspace. Note: " + ruling.Note + "\nCheck the unit's acceptance, then call done or ask if you need a decision."}
 	_, err = m.repository.EnqueueTurn(ctx, req)
 	return err == nil, err
 }
@@ -506,7 +506,7 @@ func (m *masons) recoverTurn(ctx context.Context, stream config.WorkstreamID, un
 	if err != nil {
 		return false, err
 	}
-	req.Prompt = last.Request.Prompt + "\n\n" + interruption(last) + " " + kept("that turn", paths, recorded) + " Continue from those files, check the unit's criteria and proofs, and report done when they hold."
+	req.Prompt = last.Request.Prompt + "\n\n" + interruption(last) + " " + kept("that turn", paths, recorded) + " Continue from those files, check the unit's acceptance, and report done when it holds."
 	_, err = m.repository.EnqueueTurn(ctx, req)
 	return err == nil, err
 }
@@ -857,13 +857,13 @@ func (m *masons) enqueue(ctx context.Context, stream config.WorkstreamID, unit s
 }
 
 func masonSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are a mason of the %s project (%s). You build one unit of a ratified plan in a workspace of its own, whose files are your view. You hold no version control tool: the service records your work. Build what the sealed spec says, for the criteria of your unit, and put in place the proofs the plan names for them. When your view and the spec do not settle something you must know, call %s: your unit waits for the answer, which arrives as your next turn, and your workspace is kept. If the sealed spec or plan needs to change, call %s with citations, a proposed change and a reason, then end the turn.", p.Name, p.Upstream, questions.AskTool, questions.AmendTool)
+	return fmt.Sprintf("You are a mason of the %s project (%s). You build one unit of a ratified plan in a workspace of its own, whose files are your view. You hold no version control tool: the service records your work. Do your unit's task until every acceptance item holds; the sealed spec is the background it serves. The plan is settled: build the unit as planned. When your view and the spec do not settle something you must know, or the task itself looks wrong, call %s: your unit waits for the answer, which arrives as your next turn, and your workspace is kept.", p.Name, p.Upstream, questions.AskTool)
 }
 
 func masonPrompt(m bundle.Mason) string {
 	return fmt.Sprintf(`Build unit %s of this workstream.
 
-Your view holds the project's files as the feature branch had them when the unit started, with the work done on the unit since. Make each of the unit's criteria below hold, and put in place and pass the proof the plan names for it. Stay within the unit's footprint. The spec below is the one the owner ratified; build against it. When every criterion of the unit holds and its proof is in place and passing, call done with the outcome of your work and a report on every criterion of the unit: what you did, the evidence that it holds and where its proof lives. Include any new project facts you learned in learnings; leave that list empty when there are none. Add a short headline, what happened in concrete terms, and needs_you only when the owner has a specific action. Then end your turn.
+Your view holds the project's files as the feature branch had them when the unit started, with the work done on the unit since. Do the unit's task below until every acceptance item holds, following the project's own conventions for tests. Keep to the unit's footprint where you can. The spec below is the one the owner ratified; build against it. When the task is done and its acceptance holds, call done with the outcome of your work: what it now does and how you checked the acceptance. Include any new project facts you learned in learnings; leave that list empty when there are none. Add a short headline, what happened in concrete terms, and needs_you only when the owner has a specific action. Then end your turn.
 
 %s`, m.Unit, m.Render())
 }

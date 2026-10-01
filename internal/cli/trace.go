@@ -23,8 +23,14 @@ func traceGaps(w io.Writer, gaps []service.TraceGap) {
 func traceUnit(w io.Writer, u service.UnitTrace) {
 	fmt.Fprintf(w, "Unit %s: %s state=%s source=%s complete=%t\n", u.Unit, u.Title, u.State, u.Source, u.Complete)
 	traceRef(w, "  Definition", u.Definition)
-	for _, a := range u.Addresses {
-		fmt.Fprintf(w, "  Criterion %s: %s; proof=%s %s\n", a.Criterion, a.Text, a.Proof.Kind, a.Proof.Name)
+	if u.Task != "" {
+		fmt.Fprintf(w, "  Task: %s\n", u.Task)
+	}
+	for _, a := range u.Acceptance {
+		fmt.Fprintf(w, "  Acceptance: %s\n", a)
+	}
+	for _, c := range u.Criteria {
+		fmt.Fprintf(w, "  Criterion %s: %s\n", c.Criterion, c.Text)
 	}
 	for _, r := range u.Reports {
 		traceRef(w, "  Report", &r.Ref)

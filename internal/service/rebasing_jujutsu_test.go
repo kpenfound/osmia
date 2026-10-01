@@ -74,8 +74,8 @@ func backendOf(t *testing.T, f *shedFixture, stream config.WorkstreamID) string 
 }
 
 var (
-	uploadReport = CriterionReport{Criterion: "spec#1", Done: "send chunks", Evidence: "TestUpload passes", Proof: "internal/upload/upload_test.go TestUpload"}
-	auditReport  = CriterionReport{Criterion: "spec#2", Done: "record acknowledged chunks", Evidence: "acknowledgements are recorded", Proof: "reviewer judgement"}
+	uploadReport = "send chunks"
+	auditReport  = "record acknowledged chunks"
 )
 
 // trackedFile is a file of the clone the landing of newJujutsuLandedFixture
@@ -114,7 +114,7 @@ func newJujutsuLandedFixture(t *testing.T, key string) (*shedFixture, config.Wor
 		t.Fatalf("workstream %s is on %q: %v", stream, backend, err)
 	}
 	m := newMasonController(f.s, repository)
-	for unit, report := range map[string]CriterionReport{"upload": uploadReport, "audit": auditReport} {
+	for unit, report := range map[string]string{"upload": uploadReport, "audit": auditReport} {
 		b, found, err := m.read(stream)
 		must(t, err)
 		if !found {
@@ -373,7 +373,7 @@ func TestJujutsuCandidateHoldingAConflictIsNeitherReviewedNorLanded(t *testing.T
 	latest, _, _, err := seal.Latest(repository, stream)
 	must(t, err)
 	report := plantDocument(t, repository, stream, "audit", reportDocument("audit"), fmt.Sprintf(reportPath, "audit"),
-		UnitReport{Unit: "audit", Turn: "test", Seal: latest.Seal, Outcome: "Built", Criteria: []CriterionReport{auditReport}, Branch: unitBranch(stream, "audit"), Base: landed, Candidate: candidate})
+		UnitReport{Unit: "audit", Turn: "test", Seal: latest.Seal, Outcome: "Built", Branch: unitBranch(stream, "audit"), Base: landed, Candidate: candidate})
 	plantUnit(t, repository, stream, "audit", UnitReviewing)
 	refused := fmt.Sprintf("candidate %s holds unresolved conflicts in %s, %s", candidate, masonWrote, trackedFile)
 
@@ -393,7 +393,7 @@ func TestJujutsuCandidateHoldingAConflictIsNeitherReviewedNorLanded(t *testing.T
 
 	review := plantDocument(t, repository, stream, "audit", reviewDocument("audit"), "units/audit/review.json", UnitReviewResult{
 		Identity: UnitReviewIdentity{Subject: string(stream) + "/audit", Candidate: coreadapter.Candidate{Revision: candidate, BaseRevision: landed, SpecRevision: fmt.Sprint(latest.Revision.Spec), PlanRevision: fmt.Sprint(latest.Revision.Plan)}, Report: fmt.Sprintf("%s revision %d", report.Path, report.Revision), Seal: latest.Seal},
-		Turn:     "test", Verdict: UnitVerdict{Decision: "satisfactory", Evidence: []ReviewEvidence{{Criterion: "spec#2", Evidence: "acknowledgements are recorded"}}}})
+		Turn:     "test", Verdict: UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}})
 	plantUnit(t, repository, stream, "audit", UnitApproved)
 	_, result, satisfactory, err := lands.approval(stream, "audit", review.Revision)
 	if err != nil || !satisfactory {
@@ -650,7 +650,6 @@ func TestJujutsuConflictedUnitsAreResolvedInParallel(t *testing.T) {
 		"resume": {masonWrote: "package trace\n\n// landed and resumed\n"},
 		"audit":  {masonWrote: "package trace\n\n// landed and audited\n", trackedFile: "package trace\n\n// landed git\n"},
 	}
-	reports := map[string]CriterionReport{"resume": resumeReport, "audit": auditReport}
 	var mu sync.Mutex
 	var problems []string
 	release := make(chan struct{})
@@ -675,7 +674,7 @@ func TestJujutsuConflictedUnitsAreResolvedInParallel(t *testing.T) {
 					return nil, err
 				}
 			}
-			if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Resolved", "criteria": []any{criterionArgs(reports[unit])}}); err != nil || !recorded {
+			if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Resolved"}); err != nil || !recorded {
 				mu.Lock()
 				problems = append(problems, fmt.Sprintf("unit %s's done refused: %q %v", unit, reason, err))
 				mu.Unlock()

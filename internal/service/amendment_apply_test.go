@@ -187,7 +187,7 @@ func unitMoves(t *testing.T, repository *trace.Repository, stream config.Workstr
 }
 
 // An approved amendment that changes a criterion invalidates the approval of
-// the unit that addresses it from the resealing on: that approval is refused
+// the unit that serves it from the resealing on: that approval is refused
 // at landing, and applying the amendment returns the unit to implementing
 // with a mason turn that carries the notice and the amended spec. The
 // approval of the unit it does not affect lands on the new seal. A stop
@@ -243,7 +243,7 @@ func TestApprovedAmendmentReworksItsUnitAndLandsUnaffectedApprovals(t *testing.T
 		t.Fatalf("mason turns %+v", turns)
 	}
 	for _, part := range []string{"returns to implementing", "## Amendments", "- amendments/1/application.json: the owner approved amendment 1; seal 2 governs spec.md revision 2",
-		"changed criteria: spec#1", "affected proofs of this unit: resume:spec#1", "<<< osmia:question | asker (copied by Osmia)", "| Change: Resume from a durable checkpoint",
+		"changed criteria: spec#1", "<<< osmia:question | asker (copied by Osmia)", "| Change: Resume from a durable checkpoint",
 		"<<< osmia:owner_response | owner (copied by Osmia)", "| Checkpoints are what we meant.", "- spec#1: An interrupted upload resumes from a durable checkpoint."} {
 		if !strings.Contains(turns[0].Request.Prompt, part) {
 			t.Errorf("the mason turn misses %q:\n%s", part, turns[0].Request.Prompt)
@@ -297,7 +297,7 @@ func TestApprovedPlanAmendmentNotifiesItsUnitAndAddsUnits(t *testing.T) {
 	}
 	step(t, a, stream, req, amendmentApplied)
 	moved := transitionByID(t, repository, stream, amendmentUnitID("dedupe", "1", false))
-	if moved.From != UnitApproved || moved.To != UnitReviewing || !strings.Contains(moved.Reason, "changed its plan entry, and the criteria it addresses keep their meaning") {
+	if moved.From != UnitApproved || moved.To != UnitReviewing || !strings.Contains(moved.Reason, "changed its plan entry, and the criteria it serves keep their meaning") {
 		t.Fatalf("notice %+v", moved)
 	}
 	if body := noticeOf(t, repository, stream, moved.ID); !strings.HasPrefix(body, "Unit dedupe: unit dedupe returns to review from approved") {
@@ -322,7 +322,7 @@ func TestApprovedPlanAmendmentNotifiesItsUnitAndAddsUnits(t *testing.T) {
 	review, _, err := m.candidateEvidence(ctx, stream, "dedupe")
 	must(t, err)
 	i := slices.IndexFunc(review.Context, func(item coreadapter.ContextItem) bool { return item.Source == "amendment notices" })
-	if i < 0 || !strings.Contains(review.Context[i].Content, "It changed this unit's entry in the plan; the criteria the unit addresses keep their meaning.") || !strings.Contains(review.Context[i].Content, "affected proofs of this unit: dedupe:spec#2") {
+	if i < 0 || !strings.Contains(review.Context[i].Content, "It changed this unit's entry in the plan; the criteria the unit serves keep their meaning.") {
 		t.Fatalf("review evidence %+v", review.Context)
 	}
 	dedupe, err := m.bundle(ctx, stream, "dedupe")
@@ -349,7 +349,7 @@ func TestApprovedPlanAmendmentNotifiesItsUnitAndAddsUnits(t *testing.T) {
 	}
 }
 
-// Approving an amendment that changes a criterion a merged unit addresses
+// Approving an amendment that changes a criterion a merged unit serves
 // never reopens the unit: the gap becomes a follow-up unit. The final report
 // read against the replaced revisions is invalidated with a notice, and no
 // longer authorises delivery; final review runs again, against the amended

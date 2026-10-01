@@ -409,7 +409,7 @@ func TestInvalidRedraftGoesBackToTheArchitect(t *testing.T) {
 	defer f.stop(t)
 	p := &faults{}
 	proof := shed.ObjectionID(1, committeeAgent(1), 1)
-	f.member(1, 1, 1, objects(p, shed.Proof, "spec#2", "plan#dedupe"))
+	f.member(1, 1, 1, objects(p, shed.Acceptance, "plan#dedupe", "spec#2"))
 	f.script(replyTurnID(1, 1), map[string]string{plan.PlanPath: cyclicPlan}, answers(p, "A test shows it now.", proof))
 	f.script(replyTurnID(1, 2), map[string]string{plan.PlanPath: splitPlan}, func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 		for _, want := range []string{"Your redraft was not accepted, and the committee will not read it:", "- " + cycleProblem, "redraft/", "Your answers so far are kept", proof} {

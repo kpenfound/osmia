@@ -48,21 +48,19 @@ type refusal struct {
 }
 
 // Tools returns the question tools of the claimed turn scope names: ask for
-// every role but the chief of staff, amend for masons and reviewers, and
-// answer, escalate, relay_ruling, route_amendment and propose_charter for
-// the chief of staff. A request the trace refuses is
+// every role but the chief of staff, and answer, escalate, relay_ruling,
+// route_amendment and propose_charter for the chief of staff. A request the trace refuses is
 // an ordinary result, {"recorded":false,"reason":...}, so the agent reads why.
 func Tools(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
 	return tools(repository, agent, scope, now, nil)
 }
 
-// DriftTools is Tools for a mason or reviewer turn that reads what drift
-// rebase move did: an amendment the turn files cites move's upstream
-// commit. A mason turn with no unit, which resolves the feature branch's
-// conflicts with upstream, holds amend alone, and its request parks nothing.
+// DriftTools returns the amend tool of the mason turn that resolves the
+// feature branch's conflicts with upstream after drift rebase move: an
+// amendment it files cites move's upstream commit and parks nothing.
 func DriftTools(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time, move trace.UpstreamMove) ([]coreadapter.Tool, error) {
-	if scope.Role != "mason" && scope.Role != "reviewer" {
-		return nil, errors.New("only mason and reviewer turns read a drift rebase")
+	if scope.Role != "mason" || scope.Unit != "" {
+		return nil, errors.New("only the drift mason turn reads a drift rebase")
 	}
 	return tools(repository, agent, scope, now, &move)
 }
@@ -94,11 +92,8 @@ func tools(repository *trace.Repository, agent string, scope coreadapter.Scope, 
 			Next     string `json:"next"`
 		}{true, q.ID, "End your turn now. The answer arrives as your next turn on this thread."})
 	}
-	if scope.Role == "mason" && scope.Unit == "" && move != nil {
+	if move != nil {
 		return []coreadapter.Tool{amendmentTool(repository, agent, scope, now, false, move)}, nil
-	}
-	if scope.Role == "mason" || scope.Role == "reviewer" {
-		return []coreadapter.Tool{ask, amendmentTool(repository, agent, scope, now, false, move)}, nil
 	}
 	return []coreadapter.Tool{ask}, nil
 }
@@ -114,14 +109,11 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 		properties = `"question":{"type":"string"},` + properties
 		required = `"question",` + required
 	}
-	description := "File an amendment request against sealed spec#<n> and/or plan#<unit> citations. Give the proposed change and reason. The request is recorded and the requesting unit waits; end this turn when accepted."
+	description := "File an amendment request against sealed spec#<n> and/or plan#<unit> citations. Give the proposed change and reason. The request is recorded; end this turn when accepted."
 	next := "End your turn now. The request is with the chief of staff."
 	if move != nil {
-		description = fmt.Sprintf("File an amendment request when upstream's change from %s to %s alters what a sealed criterion means. Cite the sealed spec#<n> and/or plan#<unit> it changes, and give the proposed change and reason; the request cites upstream commit %s. The request is recorded and the requesting unit waits; end this turn when accepted.", move.From, move.To, move.To)
-		if scope.Unit == "" {
-			description = fmt.Sprintf("File an amendment request when upstream's change from %s to %s alters what a sealed criterion means. Cite the sealed spec#<n> and/or plan#<unit> it changes, and give the proposed change and reason; the request cites upstream commit %s and goes to the owner. Nothing waits for it: finish the resolution against the sealed spec as it stands.", move.From, move.To, move.To)
-			next = "The request is with the chief of staff. Finish the resolution against the sealed spec as it stands, then call done."
-		}
+		description = fmt.Sprintf("File an amendment request when upstream's change from %s to %s alters what a sealed criterion means. Cite the sealed spec#<n> and/or plan#<unit> it changes, and give the proposed change and reason; the request cites upstream commit %s and goes to the owner. Nothing waits for it: finish the resolution against the sealed spec as it stands.", move.From, move.To, move.To)
+		next = "The request is with the chief of staff. Finish the resolution against the sealed spec as it stands, then call done."
 	}
 	tool := coreadapter.Tool{Name: name, Effect: coreadapter.ToolMemory,
 		Description: description,

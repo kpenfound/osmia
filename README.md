@@ -31,10 +31,12 @@ behavior and feature dependencies; the guides describe implemented behavior.
 
 1. Register a project and write its contributor charter. Osmia builds a local
    knowledge base from the clone.
-2. Hand in a feature. An architect drafts a numbered specification and a plan;
-   reviewers challenge them before you ratify them.
-3. Masons implement plan units in scoped workspaces. Reviewers check each
-   candidate, and the service lands approved units in dependency order.
+2. Hand in a feature. An architect drafts a numbered specification and a plan
+   of units, each a task with acceptance; reviewers challenge them before you
+   ratify them.
+3. Masons do each unit's task in scoped workspaces. Reviewers check each
+   candidate against its unit's acceptance, and the service lands approved
+   units in dependency order.
 4. A final review shows the evidence for each criterion. You approve delivery;
    the service pushes the branch and opens the pull request.
 

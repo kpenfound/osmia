@@ -30,7 +30,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n// Skip acknowledged chunks.\n"), 0600); err != nil {
 			return err
 		}
-		ok, why, err := done(ctx, tools, map[string]any{"outcome": "Skip acknowledged chunks", "criteria": []any{criterionArgs(dedupeReport)}})
+		ok, why, err := done(ctx, tools, map[string]any{"outcome": "Skip acknowledged chunks"})
 		if err != nil || !ok {
 			return fmt.Errorf("dedupe report: %s: %v", why, err)
 		}
@@ -47,19 +47,15 @@ func TestDeliveryDemonstration(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/proof_test.go"), []byte("package trace\n// Acknowledged chunks are skipped.\n"), 0600); err != nil {
 				return nil, err
 			}
-			ok, why, err := done(ctx, tools, map[string]any{"outcome": "Prove skipped chunks", "criteria": []any{criterionArgs(CriterionReport{Criterion: "spec#2", Done: "prove skipping", Evidence: "proof_test.go", Proof: "reviewer judgement"})}})
+			ok, why, err := done(ctx, tools, map[string]any{"outcome": "Prove skipped chunks"})
 			if err != nil || !ok {
 				return nil, fmt.Errorf("follow-up report: %s: %v", why, err)
 			}
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
-			criterion := "spec#2"
-			if strings.HasPrefix(req.Name, reviewerAgent("resume")) {
-				criterion = "spec#1"
-			}
 			if _, err := reviewIdentityInPrompt(req.Prompt); err != nil {
 				return nil, err
 			}
-			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "evidence": []ReviewEvidence{{Criterion: criterion, Evidence: "The candidate contains the planned proof"}}, "findings": []ReviewFinding{}})
+			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("review: %s: %v", body, err)
 			}

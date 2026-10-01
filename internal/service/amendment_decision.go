@@ -672,7 +672,7 @@ func amendmentRulingPrompt(req trace.Amendment, d AmendmentDecision, role, outco
 	fmt.Fprintf(&b, "The owner ruled on amendment %s, which you asked for. Decision: %s.\nOutcome: %s\n", req.ID, d.Decision, outcome)
 	switch role {
 	case masonRole:
-		b.WriteString("Continue the unit in your existing workspace against the sealed spec and plan, and call done when its criteria and proofs hold.\n")
+		b.WriteString("Continue the unit in your existing workspace against the sealed spec and plan, and call done when its acceptance holds.\n")
 	case reviewerRole:
 		b.WriteString("Your review of the same candidate resumes against the sealed spec and plan.\n")
 	}
