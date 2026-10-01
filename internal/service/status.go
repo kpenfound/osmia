@@ -14,9 +14,13 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// statuses reports every workstream of every active project, project by
-// project in active_projects order, or none when no project or trace is
-// active. Archived workstreams are reported and marked archived. The
+// statuses reports every workstream of every active project, ordered by last
+// activity time, newest first, or none when no project or trace is active.
+// Last activity is derived only from durable trace records, so a read-only
+// request such as this one never changes it. Workstreams that share a last
+// activity time are ordered by creation time, newest first, then by
+// workstream ID, so the order stays the same across repeated loads and a
+// service restart. Archived workstreams are reported and marked archived. The
 // librarian's workstream carries no feature and is left out. A
 // workstream whose agent turns, unit states, overlap advisories or drift
 // rebases cannot be read is reported without them and its first such failure
@@ -24,7 +28,7 @@ import (
 func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagnostic, *APIError) {
 	cfg, projects := s.runtimes()
 	state, _ := s.effective()
-	out := []WorkstreamStatus{}
+	var out []workstreamActivity
 	unreadable := map[config.WorkstreamID]Diagnostic{}
 	for _, active := range projects {
 		if !cfg.Active(active.id) {
@@ -35,16 +39,39 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 			return nil, nil, api
 		}
 		for i := range list {
-			list[i].Archived = archivedIn(state, list[i].Workstream)
+			list[i].status.Archived = archivedIn(state, list[i].status.Workstream)
 		}
 		out = append(out, list...)
 	}
-	return out, unreadable, nil
+	slices.SortFunc(out, func(a, b workstreamActivity) int {
+		if c := b.lastActivity.Compare(a.lastActivity); c != 0 {
+			return c
+		}
+		if c := b.createdAt.Compare(a.createdAt); c != 0 {
+			return c
+		}
+		return strings.Compare(string(a.status.Workstream), string(b.status.Workstream))
+	})
+	statuses := []WorkstreamStatus{}
+	for _, w := range out {
+		statuses = append(statuses, w.status)
+	}
+	return statuses, unreadable, nil
 }
 
-// projectStatuses reports every workstream of one project, as statuses does.
-func (s *Service) projectStatuses(active *activeProject, unreadable map[config.WorkstreamID]Diagnostic) ([]WorkstreamStatus, *APIError) {
-	out := []WorkstreamStatus{}
+// workstreamActivity pairs a reported status with the trace facts that order
+// the workstream list: last activity time, newest first, then creation time,
+// newest first, then workstream ID.
+type workstreamActivity struct {
+	status       WorkstreamStatus
+	lastActivity time.Time
+	createdAt    time.Time
+}
+
+// projectStatuses reports every workstream of one project, as statuses does,
+// unordered.
+func (s *Service) projectStatuses(active *activeProject, unreadable map[config.WorkstreamID]Diagnostic) ([]workstreamActivity, *APIError) {
+	out := []workstreamActivity{}
 	list, err := active.repository.Statuses()
 	if err != nil {
 		return nil, &APIError{Internal, fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
@@ -99,7 +126,7 @@ func (s *Service) projectStatuses(active *activeProject, unreadable map[config.W
 				}
 			}
 		}
-		out = append(out, view)
+		out = append(out, workstreamActivity{status: view, lastActivity: w.LastActivity, createdAt: w.CreatedAt})
 	}
 	return out, nil
 }

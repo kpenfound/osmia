@@ -161,6 +161,31 @@ func (p *page) selectWorkstream(id config.WorkstreamID) {
 		` && document.body.dataset.picker === 'closed'`)
 }
 
+// sidebarIDs reads the workstream IDs the sidebar's list of work shows, top
+// to bottom.
+func (p *page) sidebarIDs() []string {
+	p.t.Helper()
+	var joined string
+	p.eval(`[...document.querySelectorAll('#workstream-list [data-select]')].map((e) => e.dataset.select).join(',')`, &joined)
+	if joined == "" {
+		return nil
+	}
+	return strings.Split(joined, ",")
+}
+
+// awaitSidebarOrder waits until the sidebar's list of work shows exactly
+// want, top to bottom.
+func (p *page) awaitSidebarOrder(want ...config.WorkstreamID) {
+	p.t.Helper()
+	ids := make([]string, len(want))
+	for i, w := range want {
+		ids[i] = string(w)
+	}
+	joined := strings.Join(ids, ",")
+	expr := `[...document.querySelectorAll('#workstream-list [data-select]')].map((e) => e.dataset.select).join(',') === ` + quote(joined)
+	p.await("the sidebar ordered "+joined, expr)
+}
+
 // closePopovers closes the header's open popovers and menus.
 func (p *page) closePopovers() {
 	p.t.Helper()
@@ -527,19 +552,15 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	}
 }
 
-// The list puts the workstreams the owner interacted with most recently
-// first. A workstream that changes while the owner looks at another is
-// marked, and looking at it clears the mark. What the page first reads
-// counts as seen, and the order, the selection and what was seen survive a
-// reload.
-func TestBrowserListOrdersByInteractionAndMarksActivity(t *testing.T) {
+// A workstream that changes while the owner looks at another is marked, and
+// looking at it clears the mark. What the page first reads counts as seen,
+// and the selection and what was seen survive a reload. Selecting a
+// workstream, a status change on one not shown and a reload never change the
+// sidebar's order, which the server already sorts by last activity.
+func TestBrowserSelectionMarksActivityWithoutReordering(t *testing.T) {
 	p := openBrowser(t)
 	f := newPageFixture(t)
 	streamRow := `[data-select="` + string(stream) + `"] `
-	first := func(id config.WorkstreamID) {
-		t.Helper()
-		p.await(string(id)+" first in the list", `document.querySelector('#workstream-list [data-select]')?.dataset.select === `+quote(string(id)))
-	}
 
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
@@ -548,28 +569,36 @@ func TestBrowserListOrdersByInteractionAndMarksActivity(t *testing.T) {
 	settle()
 	p.await("nothing marked", `document.querySelector('[data-field=unread]') === null`)
 
-	p.selectWorkstream(quiet)
-	first(quiet)
-	p.selectWorkstream(stream)
-	first(stream)
-	p.selectWorkstream(quiet)
-	first(quiet)
+	order := p.sidebarIDs()
+	sameOrder := func(what string) {
+		t.Helper()
+		if got := p.sidebarIDs(); !slices.Equal(got, order) {
+			t.Fatalf("%s changed the sidebar order: %v, want %v", what, got, order)
+		}
+	}
 
-	// A status change on the workstream not shown marks it.
+	p.selectWorkstream(quiet)
+	sameOrder("selecting quiet")
+	p.selectWorkstream(stream)
+	sameOrder("selecting stream")
+	p.selectWorkstream(quiet)
+	sameOrder("selecting quiet again")
+
+	// A status change on the workstream not shown marks it, without moving it.
 	f.status(t, trace.StatusContent{Goal: "Ship resumable uploads.", Note: "Upload landed.", Agents: []string{"A mason builds upload."}})
 	p.await("the changed workstream marked", `document.querySelector(`+quote(streamRow+"[data-field=unread]")+`) !== null`)
 	p.await("the shown workstream unmarked", `document.querySelector(`+quote(`[data-select="`+string(quiet)+`"] [data-field=unread]`)+`) === null`)
-	first(quiet)
+	sameOrder("a status change on the workstream not shown")
 
-	// Looking at it clears the mark and puts it first.
+	// Looking at it clears the mark, without moving it.
 	p.selectWorkstream(stream)
 	p.await("the mark cleared", `document.querySelector('[data-field=unread]') === null`)
-	first(stream)
+	sameOrder("clearing the mark")
 
 	p.run(chromedp.Reload())
 	p.await("the live connection after the reload", `document.body.dataset.connection === 'live'`)
 	p.await("the reloaded workstream shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(stream)))
-	first(stream)
 	settle()
 	p.await("nothing marked after the reload", `document.querySelector('[data-field=unread]') === null`)
+	sameOrder("the reload")
 }

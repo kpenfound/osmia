@@ -105,13 +105,16 @@ The page is laid out like a chat client:
   why. The pauses open to every pause with who set it (you, the daily budget
   or a provider usage limit), why and when, where you resume one or pause the
   factory, a project or a workstream, softly or hard.
-- The list on the left holds every workstream, the ones you interacted with
-  most recently first. Each row shows its goal, project and state, how many
-  inbox entries wait on it, a dot when it changed since you last looked at
-  it, whether it is working and whether it is paused. Archived workstreams
-  are kept in a collapsed Archived group at the bottom. At phone widths the
-  list is behind the button at the top left and covers the page until you
-  pick a workstream or close it.
+- The list on the left holds every workstream, ordered by last activity,
+  newest first: a state transition, a trace entry, a thread message, a
+  question, an answer, an owner decision or a delivery outcome. Opening,
+  selecting or refreshing a workstream never moves it; only new activity
+  does, the next time the list loads. Each row shows its goal, project and
+  state, how many inbox entries wait on it, a dot when it changed since you
+  last looked at it, whether it is working and whether it is paused. Archived
+  workstreams are kept in a collapsed Archived group at the bottom. At phone
+  widths the list is behind the button at the top left and covers the page
+  until you pick a workstream or close it.
 - The main area shows the selected workstream: its goal, state and project,
   its attention note, status, units by state and running agents, and its
   conversation with the chief of staff. Its inbox entries sit above the
@@ -130,8 +133,9 @@ The page is laid out like a chat client:
   that need a restart. The settings button is marked while a reload has
   something to apply.
 
-Which workstream is selected, the order of the list and what you have seen
-are kept in the browser, so another browser has its own.
+Which workstream is selected and what you have seen are kept in the browser,
+so another browser has its own. The list's order comes from the service and
+is the same in every browser.
 
 From the page you can:
 

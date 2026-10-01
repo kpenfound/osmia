@@ -146,7 +146,11 @@ func latestStatus(records []Record, stream config.WorkstreamID) *Status {
 // Workspaces is the workspace backend the workstream was created on.
 // OpenQuestions counts questions without a ruling that have not been routed
 // to an amendment. Gates lists open owner
-// decisions.
+// decisions. CreatedAt is the workstream's creation time. LastActivity is the
+// timestamp of the most recent durable record of the workstream: at least
+// CreatedAt, and later once a state transition, trace entry, thread message,
+// question, answer, owner decision or delivery outcome is recorded for it.
+// Reading the workstream never changes it.
 type WorkstreamStatus struct {
 	Workstream    config.WorkstreamID
 	Workspaces    string
@@ -155,6 +159,8 @@ type WorkstreamStatus struct {
 	OpenQuestions int
 	Gates         []OwnerGate
 	Status        *Status
+	CreatedAt     time.Time
+	LastActivity  time.Time
 }
 
 // Statuses reports every workstream in manifest order. It fails on any
@@ -172,10 +178,19 @@ func (r *Repository) Statuses() ([]WorkstreamStatus, error) {
 		if err != nil {
 			return nil, err
 		}
+		manifest, err := r.workstreamManifest(stream)
+		if err != nil {
+			return nil, err
+		}
+		createdAt := manifest.Header.At
+		lastActivity := createdAt
 		asked, ruled := map[string]bool{}, map[string]bool{}
 		for _, v := range records {
 			if v.header().Workstream != stream {
 				continue
+			}
+			if at := v.header().At; at.After(lastActivity) {
+				lastActivity = at
 			}
 			switch q := v.(type) {
 			case Question:
@@ -190,11 +205,11 @@ func (r *Repository) Statuses() ([]WorkstreamStatus, error) {
 				open++
 			}
 		}
-		workspaces, err := r.workspaces(stream)
-		if err != nil {
-			return nil, err
+		workspaces := manifest.Workspaces
+		if workspaces == "" {
+			workspaces = config.WorkspacesGit
 		}
-		out = append(out, WorkstreamStatus{Workstream: stream, Workspaces: workspaces, State: view.states[FeatureSubject].Value, Subjects: view.states, OpenQuestions: open, Gates: ownerGates(records, stream, view), Status: latestStatus(records, stream)})
+		out = append(out, WorkstreamStatus{Workstream: stream, Workspaces: workspaces, State: view.states[FeatureSubject].Value, Subjects: view.states, OpenQuestions: open, Gates: ownerGates(records, stream, view), Status: latestStatus(records, stream), CreatedAt: createdAt, LastActivity: lastActivity})
 	}
 	return out, nil
 }
