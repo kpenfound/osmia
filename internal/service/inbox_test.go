@@ -415,7 +415,8 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	}; !slices.Equal(got, want) {
 		t.Fatalf("relay results: %v", got)
 	}
-	if got := f.results["escalate"]; !slices.Equal(got, []string{`{"recorded":true,"batch":"escalation_1","questions":["1","2"]}`, `{"recorded":true,"batch":"escalation_1","questions":["1"]}`}) {
+	// The two workstreams' chiefs of staff escalate in either order.
+	if got := slices.Sorted(slices.Values(f.results["escalate"])); !slices.Equal(got, []string{`{"recorded":true,"batch":"escalation_1","questions":["1","2"]}`, `{"recorded":true,"batch":"escalation_1","questions":["1"]}`}) {
 		t.Fatalf("escalation results: %v", got)
 	}
 	if got := f.results["relay-local"]; !slices.Equal(got, []string{`{"recorded":true,"questions":["1"],"scope":"local","next":"The ruling is delivered to each asker as its next turn."}`}) {

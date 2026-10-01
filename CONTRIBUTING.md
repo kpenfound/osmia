@@ -9,13 +9,22 @@ and keep target-project factory state outside the repository Osmia works on.
 Run the complete check suite through Dagger from the repository root:
 
 ```sh
-dagger check
+dagger check --progress=report
 ```
 
-The check needs a working Dagger container engine. It runs the Go suite, browser
-tests and release checks in containers. For one package or selected tests, use
-the Dagger container command in [AGENTS.md](AGENTS.md#validation). Run a race
-check there when changing concurrent scheduling, recovery or shared state.
+The check needs a working Dagger container engine. It runs the Go suite,
+including browser tests, and release checks in containers. `--progress=report`
+prints each check's result and the output of failing tests. For selected tests
+or one package, use the Go check's selection flags:
+
+```sh
+dagger check --progress=report --go-test=TestA --go-test=TestB
+dagger check --progress=report --go-package=internal/service
+```
+
+Add `--env=race` to run them with the race detector when changing concurrent
+scheduling, recovery or shared state. [AGENTS.md](AGENTS.md#validation) covers
+listing tests and rerunning a failing check.
 
 Never run `go test` on the host, including for a single test or a flaky test.
 Tests can leave processes behind on the machine that runs them. `gofmt`,

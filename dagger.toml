@@ -1,22 +1,43 @@
 # Dagger workspace configuration
 # Install modules with: dagger module install <module>
-# Example:
-#   dagger module install github.com/dagger/dagger/modules/wolfi
 
 [modules]
 
 [modules.go]
-source = ".dagger/modules/osmia-go"
+source = "dagger.io/go@collections"
 
 [modules.go.settings]
-# Match the toolchain used by the core dependency and keep factory state out
-# of module discovery, including any go.mod files left in session directories.
-base = "golang:1.26-bookworm"
-test = ["**", "!.bees/**", "!.dagger"]
-generate = ["**", "!.bees/**", "!.dagger"]
+base = "dag://osmia-dev/test-runtime"
+# -count=1 keeps go test from recording every file the tests touch for its
+# result cache and reading that log back after each package: the service
+# tests' log outgrows the engine's memory.
+goflags = "-count=1 -timeout=30m"
+# Keep factory state out of module discovery, including any go.mod files left
+# in session directories.
+test = ["**", "!.bees"]
+generate = ["**", "!.bees/**"]
 
 [modules.release]
 source = ".dagger/modules/osmia-release"
 
-[modules.browser]
-source = ".dagger/modules/osmia-browser"
+[modules.dang-sdk]
+source = "dagger.io/sdk/dang"
+
+[sdks.dang]
+module = "dang-sdk"
+
+[modules.osmia-dev]
+source = ".dagger/modules/osmia-dev"
+entrypoint = true
+
+[sdks.dang.scopes.".dagger/modules/osmia-dev"]
+is-module = true
+name = "osmia-dev"
+
+# dagger check --env=race runs the selected tests with the race detector.
+[env.race.modules.go.settings]
+goflags = "-count=1 -timeout=30m -race"
+
+# dagger check --env=flake runs each selected test five times.
+[env.flake.modules.go.settings]
+goflags = "-count=5 -timeout=30m"
