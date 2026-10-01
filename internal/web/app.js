@@ -73,16 +73,14 @@
   }
 
   // ui is what the owner is looking at: the selected workstream, the view
-  // the main area shows and the workstream's tab. touched holds when the
-  // owner last interacted with each workstream and seen the activity they
-  // last saw on it. initial holds the workstreams the first status read
-  // listed, whose current activity counts as seen the first time the page
-  // shows them.
+  // the main area shows and the workstream's tab. seen holds the activity the
+  // owner last saw on each workstream. initial holds the workstreams the
+  // first status read listed, whose current activity counts as seen the
+  // first time the page shows them.
   const ui = {
     selected: stored('selected', null),
     view: 'workstream',
     tab: 'conversation',
-    touched: stored('touched', {}),
     seen: stored('seen', {}),
     initial: null,
     toEnd: true,
@@ -549,32 +547,16 @@
     return views.status ? views.status.workstreams : [];
   }
 
-  // ordered lists the workstreams the owner interacted with most recently
-  // first, and the others after them in the order the status lists them.
-  function ordered() {
-    return streams().map((w, i) => [w, i])
-      .sort(([a, i], [b, j]) => (ui.touched[b.workstream] || 0) - (ui.touched[a.workstream] || 0) || i - j)
-      .map(([w]) => w);
-  }
-
   // shown is the workstream the main area shows: the selected one while the
   // status lists it, archived or not, and otherwise the first in the list of
-  // work.
+  // work, which the status already orders by last activity.
   function shown() {
     const list = streams();
-    return list.find((w) => w.workstream === ui.selected) || ordered().find((w) => !w.archived) || null;
+    return list.find((w) => w.workstream === ui.selected) || list.find((w) => !w.archived) || null;
   }
 
   function terminal(w) {
     return w.state === 'delivered' || w.state === 'abandoned';
-  }
-
-  function touch(id) {
-    if (!id) {
-      return;
-    }
-    ui.touched[id] = Date.now();
-    store('touched', ui.touched);
   }
 
   function inboxOf(id) {
@@ -647,12 +629,10 @@
     if (!ui.initial) {
       ui.initial = ids;
     }
-    for (const [key, map] of [['touched', ui.touched], ['seen', ui.seen]]) {
-      const gone = Object.keys(map).filter((id) => !ids.has(id));
-      if (gone.length > 0) {
-        gone.forEach((id) => delete map[id]);
-        store(key, map);
-      }
+    const gone = Object.keys(ui.seen).filter((id) => !ids.has(id));
+    if (gone.length > 0) {
+      gone.forEach((id) => delete ui.seen[id]);
+      store('seen', ui.seen);
     }
   }
 
@@ -697,7 +677,7 @@
       }
     }
     const current = shown();
-    const archived = ordered().filter((w) => w.archived);
+    const archived = streams().filter((w) => w.archived);
     const group = byId('archived');
     group.hidden = archived.length === 0;
     byId('archived-count').textContent = String(archived.length);
@@ -719,7 +699,7 @@
       return r.node;
     };
     place(byId('archived-list'), archived.map(entry));
-    const work = ordered().filter((w) => !w.archived);
+    const work = streams().filter((w) => !w.archived);
     if (work.length === 0) {
       list.replaceChildren(el('li', { class: 'meta none' }, archived.length === 0 ? 'No workstreams yet.' : 'Every workstream is archived.'));
       return;
@@ -734,13 +714,12 @@
     byId('picker-toggle').setAttribute('aria-expanded', String(open));
   }
 
-  // select shows a workstream in the main area and counts as interacting
-  // with it.
+  // select shows a workstream in the main area and marks it as the current
+  // selection, without changing the sidebar order.
   function select(id) {
     const changed = ui.selected !== id;
     ui.selected = id;
     store('selected', id);
-    touch(id);
     setPicker(false);
     openView('workstream');
     if (changed) {
@@ -812,7 +791,6 @@
       show(c.result, 'error', 'Write a message first.');
       return;
     }
-    touch(id);
     act(c.result, c.button, () => request('POST', '/conversation/' + id, { text }), (entry) => {
       c.text.value = '';
       ui.toEnd = true;
@@ -1021,7 +999,7 @@
   // leaveArchived shows the first workstream of the list of work in place of
   // one just archived.
   function leaveArchived(id) {
-    const next = ordered().find((w) => !w.archived && w.workstream !== id);
+    const next = streams().find((w) => !w.archived && w.workstream !== id);
     if (next) {
       select(next.workstream);
     }
@@ -1034,7 +1012,6 @@
       return;
     }
     byId('workstream-menu').hidePopover();
-    touch(w.workstream);
     if (action === 'pause') {
       renderPauseForm();
       byId('pause-form').elements.target.value = 'workstream:' + w.workstream;
@@ -1191,14 +1168,12 @@
 
   function accept(d) {
     const entry = d.entry;
-    touch(entry.workstream);
     submit(d.accept, entry.answer.method, endpoint(entry), { ...entry.answer.body, text: entry.quick_reply },
       (out) => 'Accepted the recommendation on inbox entry ' + out.number + '.');
   }
 
   function decide(d) {
     const entry = d.entry;
-    touch(entry.workstream);
     const result = inboxResult;
     const body = { ...entry.answer.body };
     if (entry.kind === 'escalation') {
@@ -1465,7 +1440,6 @@
       const decide = (decision) => {
         const button = el('button', { type: 'button', 'data-field': decision }, decision === 'ratify' ? 'Ratify rule' : 'Decline rule');
         button.addEventListener('click', () => {
-          touch(p.workstream);
           act(inboxResult, button, () => request('POST', '/charter/' + p.workstream + '/' + p.question, { decision }),
             () => {
               mark(['charter', 'config']);
@@ -1895,7 +1869,6 @@
       event.preventDefault();
       if (!draftRead || draftRead.workstream !== documents.elements.workstream.value) { return; }
       const pin = draftRead;
-      touch(pin.workstream);
       formAction(documents, event.submitter, () => request('PUT', '/documents/' + pin.workstream,
         {spec_revision: pin.spec_revision, plan_revision: pin.plan_revision, spec: documents.elements.spec.value, plan: documents.elements.plan.value}), out => {
           if (draftRead === pin) {
@@ -1911,7 +1884,6 @@
       event.preventDefault();
       if (!baseRead || baseRead.workstream !== baseForm.elements.workstream.value) { return; }
       const pin = baseRead;
-      touch(pin.workstream);
       formAction(baseForm, event.submitter, () => request('PUT', '/base/' + pin.workstream, {base: baseForm.elements.base.value, revision: pin.revision}), out => {
         if (baseRead === pin) { baseRead = out; }
         return 'Dependency revision ' + out.revision + ' saved.';
@@ -1925,7 +1897,6 @@
       const note = action.elements.note.value.trim();
       const bodies = {object: {argument: note}, more: {rounds: 1}, redraft: {note}, skip: {}, abandon: {reason: note}};
       const archive = kind === 'abandon' && action.elements.archive.checked;
-      touch(workstream);
       formAction(action, event.submitter, async () => {
         const out = await request('POST', (kind === 'abandon' ? '/abandon/' : '/shed/' + kind + '/') + workstream, bodies[kind]);
         if (archive) {
