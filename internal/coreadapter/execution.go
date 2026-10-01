@@ -2,6 +2,8 @@ package coreadapter
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -175,7 +177,7 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 		return req, errors.New("workspace lease does not match verified sandbox workspace")
 	}
 	req = agent.Request{
-		Name: t.Scope.Turn, SessionDir: t.SessionDirectory, SystemPrompt: t.SystemPrompt, Prompt: t.Prompt,
+		Name: sessionName(t.Scope.Turn), SessionDir: t.SessionDirectory, SystemPrompt: t.SystemPrompt, Prompt: t.Prompt,
 		Workspace: vcs.Directory(t.Sandbox.Verified.Workspace.Directory), Env: maps.Clone(t.Sandbox.Verified.Environment),
 		ValidOutcomes: append([]string{}, t.AllowedOutcomes...),
 		Profile: agent.Profile{Name: t.Scope.Role, Agent: p.Backend, Model: p.Model, Effort: p.Effort, Timeout: p.Timeout, MaxTurns: p.MaxTurns,
@@ -208,6 +210,27 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 		req.Profile.MCP[servers[i]] = agent.MCPEntry{Type: "http", URL: endpoint.URL, BearerTokenEnv: endpoint.BearerTokenEnvironment}
 	}
 	return req, nil
+}
+
+// maxSessionName is the longest session name whose sandbox name sbx accepts:
+// core names a sandbox "agent-" + session name + "-" + 8 random hex digits,
+// and sbx rejects names longer than 63 characters.
+const maxSessionName = 63 - len("agent-") - len("-01234567")
+
+// sessionName is the turn's name for its session and sandbox. A turn whose ID
+// is longer than maxSessionName keeps the start of the ID and ends with a hash
+// of the whole ID, so turns that share a long prefix stay distinguishable.
+//
+// TODO: busybees/core should bound the sandbox names it builds from session
+// names. Remove this once it does.
+func sessionName(turn string) string {
+	r := []rune(turn)
+	if len(r) <= maxSessionName {
+		return turn
+	}
+	sum := sha256.Sum256([]byte(turn))
+	hash := hex.EncodeToString(sum[:4])
+	return string(r[:maxSessionName-len(hash)-1]) + "-" + hash
 }
 
 // AllowedTools names each granted tool the way the backend identifies MCP

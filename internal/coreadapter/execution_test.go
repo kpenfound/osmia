@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/busybees/core/vcs"
@@ -370,5 +372,38 @@ func TestCleanupFailureRetriable(t *testing.T) {
 	_ = l.Release(context.Background())
 	if calls != 2 {
 		t.Fatal(calls)
+	}
+}
+
+func TestSessionNameFitsSandboxName(t *testing.T) {
+	long := "mason-startup-kinds-web-listener-and-tailnet-implement"
+	other := "mason-startup-kinds-web-listener-and-tailnet-review"
+	for _, turn := range []string{long, other, strings.Repeat("é", 80)} {
+		name := sessionName(turn)
+		if sandbox := "agent-" + name + "-01234567"; utf8.RuneCountInString(sandbox) > 63 {
+			t.Fatalf("sandbox name for %q has %d characters: %s", turn, utf8.RuneCountInString(sandbox), sandbox)
+		}
+		if name != sessionName(turn) {
+			t.Fatalf("session name for %q is not stable", turn)
+		}
+	}
+	if sessionName(long) == sessionName(other) {
+		t.Fatalf("turns sharing a prefix have the same session name %q", sessionName(long))
+	}
+	if !strings.HasPrefix(sessionName(long), "mason-startup-kinds-web-listener") {
+		t.Fatalf("session name %q does not keep the start of the turn ID", sessionName(long))
+	}
+	if short := "turn-1"; sessionName(short) != short {
+		t.Fatalf("short turn ID changed: %q", sessionName(short))
+	}
+
+	turn := prepared(t)
+	turn.Scope.Turn = long
+	req, err := translateTurn(turn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Name != sessionName(long) {
+		t.Fatalf("request name %q, want %q", req.Name, sessionName(long))
 	}
 }
