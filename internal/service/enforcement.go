@@ -215,6 +215,7 @@ func Enforce(opts Options, e Enforcement) Options {
 		if service := controls.service.Load(); service != nil {
 			runner.OnProviderLimit = service.recordProviderLimit
 			runner.AdmitRole = service.admitRole
+			runner.Jev = service.jev
 		}
 		if cfg.Project.Classifier != "" {
 			profile, err := cfg.NamedProfile(cfg.Project.Classifier)

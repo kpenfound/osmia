@@ -10,6 +10,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -31,6 +32,10 @@ type Runner struct {
 	MaxRetries        int
 	Classifier        func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error)
 	ClassifierProfile *coreadapter.Profile
+	// Jev classifies clean mason responses first while the boost is on; a
+	// fallback leaves them to the classifier, then the code rules. Nil has
+	// the boost off.
+	Jev *jev.Judge
 }
 
 // RunNext retries infrastructure failures within the turn, as execute
@@ -87,7 +92,7 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	}
 	if t.Identity.Role == "mason" {
 		response.Classification = trace.ClassifyMasonTurn(result, response.Failure)
-		if response.Classification != nil && r.Classifier != nil && r.ClassifierProfile != nil {
+		if response.Classification != nil && !r.judgeClassification(ctx, req, prepared.Scope, &response) && r.Classifier != nil && r.ClassifierProfile != nil {
 			r.classify(ctx, prepared, &response)
 		}
 	}

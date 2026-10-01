@@ -155,12 +155,20 @@ func newConfiguredMasonFixture(t *testing.T, capacity, drafted, classifier strin
 // handed in on the workspace backend given.
 func newMasonFixtureOn(t *testing.T, backend, capacity, drafted, classifier string) (*shedFixture, *fakeMasons) {
 	t.Helper()
+	return newMasonFixtureWith(t, backend, capacity, drafted, classifier, nil)
+}
+
+// newMasonFixtureWith is newMasonFixtureOn with prepare, when set, changing
+// the options and the configuration file before the service starts.
+func newMasonFixtureWith(t *testing.T, backend, capacity, drafted, classifier string, prepare func(*Options)) (*shedFixture, *fakeMasons) {
+	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, masonRoles, func(opts *Options) {
 		onWorkspaces(t, *opts, backend)
 		// Leave time for status snapshots when instrumented tests run many
 		// service fixtures concurrently.
 		opts.WriteTimeout = time.Minute
-		opts.Threads = Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts}).Threads
+		enforced := Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts})
+		opts.Threads, opts.controls = enforced.Threads, enforced.controls
 		if classifier != "" {
 			original := opts.Threads
 			opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
@@ -172,6 +180,9 @@ func newMasonFixtureOn(t *testing.T, backend, capacity, drafted, classifier stri
 		data, err := os.ReadFile(path)
 		must(t, err)
 		must(t, os.WriteFile(path, []byte(strings.Replace(string(data), "committee = 1\n", "committee = 1\n"+capacity, 1)), 0600))
+		if prepare != nil {
+			prepare(opts)
+		}
 	})
 	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: drafted}, nil)
 	f.upstream(t)

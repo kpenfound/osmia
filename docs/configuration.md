@@ -513,7 +513,8 @@ call. An unknown profile is rejected. The classifier inherits the mason's
 sandbox, uses an empty read-only workspace and receives no service tools or native write, shell or web tools. A Claude
 sandbox requires a Claude classifier profile. Its attempts are limited to two,
 each with a 30 second maximum timeout. Invalid or unavailable answers retain
-the code classification.
+the code classification. With the Jev boost on, a Jev judgment classifies the
+response first, and the classifier runs only when that judgment falls back.
 
 ## Configuration and restart behavior
 
@@ -660,6 +661,14 @@ or three transient failures in a row, cools Jev down for every judgment for 30
 seconds, doubling with each further episode up to 15 minutes or as long as the
 provider's `Retry-After` asks within that cap; judgments fall back without a
 request meanwhile.
+
+With the boost on, a clean mason turn without an outcome is classified by Jev
+before the `classifier` profile and the code rules. Jev chooses the class and
+the sentence of the response that supports it, which becomes the recorded
+evidence. A class below its threshold, a stricter one for `gave_up`, or one no
+sentence supports falls back to the classifier, then the code rules. The turn's
+classification records `by` as `jev`, `classifier` or `rule`, and a Jev class
+names its judgment, which the chief of staff's notice cites.
 
 With the boost on, a unit's check run lists the project's checks with
 `dagger list checks --all --format=link` and asks Jev which of them the

@@ -295,7 +295,8 @@ func validate(r Record) error {
 		if v.Classification != nil {
 			c := v.Classification
 			valid = valid && v.Failure == "" && v.Result.Outcome == nil && !v.Result.Cancelled && !v.Result.IsError && !v.Result.TimedOut && v.Result.ExitCode == 0 && v.Result.Signal == 0 &&
-				slices.Contains([]string{"asked_in_prose", "claims_done", "gave_up", "unclear"}, c.Class) && present(c.Evidence) && len([]rune(c.Window)) <= 2000
+				slices.Contains([]string{"asked_in_prose", "claims_done", "gave_up", "unclear"}, c.Class) && present(c.Evidence) && len([]rune(c.Window)) <= 2000 &&
+				slices.Contains([]string{"", ClassifiedByRule, ClassifiedByClassifier, ClassifiedByJev}, c.By) && (c.By == ClassifiedByJev) == (c.Judgment != "") && (c.Judgment == "" || key(c.Judgment))
 			for _, count := range c.ToolCounts {
 				valid = valid && count >= 0
 			}

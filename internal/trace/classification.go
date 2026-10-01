@@ -8,14 +8,26 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// TurnClassification records the rule and inputs used to classify a clean
-// mason response. Window is the final 2,000 Unicode characters at most.
+// TurnClassification records the class of a clean mason response, the
+// evidence for it and the inputs it was judged from. Window is the final
+// 2,000 Unicode characters at most. By says what classified the response;
+// Judgment is the Jev judgment record behind a ClassifiedByJev class.
 type TurnClassification struct {
 	Class      string         `json:"class"`
 	Evidence   string         `json:"evidence"`
 	Window     string         `json:"window"`
 	ToolCounts map[string]int `json:"tool_counts,omitempty"`
+	By         string         `json:"by,omitempty"`
+	Judgment   string         `json:"judgment,omitempty"`
 }
+
+// What classified a clean mason response: the code rules, the configured
+// classifier profile or a Jev judgment.
+const (
+	ClassifiedByRule       = "rule"
+	ClassifiedByClassifier = "classifier"
+	ClassifiedByJev        = "jev"
+)
 
 var (
 	proseQuestion = regexp.MustCompile(`(?i)(?:\?|\b(?:could you|can you|please clarify|i need (?:an? )?(?:answer|clarification|decision)|what should i|which (?:one|option))\b)`)
@@ -48,5 +60,5 @@ func ClassifyMasonTurn(result coreadapter.SessionResult, failure string) *TurnCl
 			break
 		}
 	}
-	return &TurnClassification{Class: class, Evidence: evidence, Window: window, ToolCounts: maps.Clone(result.ToolCounts)}
+	return &TurnClassification{Class: class, Evidence: evidence, Window: window, ToolCounts: maps.Clone(result.ToolCounts), By: ClassifiedByRule}
 }

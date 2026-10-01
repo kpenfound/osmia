@@ -34,6 +34,7 @@ func (s *Service) threadRunner(cfg *config.Config, store *trace.Repository, turn
 	r := threadRunner(cfg, store, turns, now)
 	r.OnProviderLimit = s.recordProviderLimit
 	r.AdmitRole = s.admitRole
+	r.Jev = s.jev
 	return r
 }
 

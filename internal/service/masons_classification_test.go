@@ -2,14 +2,20 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/busybees/core/agent"
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/jev/jevtest"
+	"github.com/kpenfound/osmia/internal/systemone"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -177,6 +183,61 @@ func TestMasonCleanTurnPolicy(t *testing.T) {
 			}
 			f.engine.mu.Unlock()
 		})
+	}
+}
+
+// TestMasonJevClassification turns the boost on through the configuration
+// and its key's environment variable, so it does not run in parallel.
+func TestMasonJevClassification(t *testing.T) {
+	t.Setenv("OSMIA_TEST_JEV_KEY", "key")
+	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{
+		"class":                   jevtest.Choice("claims_done", 0.94, 0.9, "asked_in_prose", "gave_up", "unclear"),
+		"evidence-claims_done":    jevtest.Choice("span-2", 0.9, 0.9, "span-1", "none"),
+		"evidence-asked_in_prose": jevtest.Choice("none", 0.9, 0.9, "span-1", "span-2"),
+		"evidence-gave_up":        jevtest.Choice("none", 0.9, 0.9, "span-1", "span-2"),
+	}}}}}
+	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, "default", func(opts *Options) {
+		opts.JevProvider = p.Factory()
+		configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
+		must(t, err)
+		_, err = configFile.WriteString("\n[jev]\nenabled = true\nmodel = \"jev-test\"\napi_key_env = \"OSMIA_TEST_JEV_KEY\"\n")
+		must(t, errors.Join(err, configFile.Close()))
+	})
+	defer f.stop(t)
+	fake.response = map[string]string{masonTurnID("resume"): "Wrote the store. The unit is ready for review."}
+	delete(fake.play, masonAgent("resume")+"-clarify-1")
+	f.engine.mu.Lock()
+	f.engine.turns[masonAgent("resume")+"-clarify-1"] = fake.turn
+	f.engine.mu.Unlock()
+	stream := f.seedBuilding(t, "jev-classified", validPlan)
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		th, err := f.repository().Thread(stream, masonAgent("resume"))
+		if err == nil && len(th.Turns) > 1 && th.Turns[0].Response != nil {
+			c := th.Turns[0].Response.Classification
+			if c == nil || c.Class != "claims_done" || c.By != trace.ClassifiedByJev || c.Evidence != "The unit is ready for review." || c.Judgment == "" {
+				t.Fatalf("classification %+v", c)
+			}
+			if !strings.Contains(th.Turns[1].Request.Prompt, "Call done") {
+				t.Fatalf("continuation prompt %q", th.Turns[1].Request.Prompt)
+			}
+			f.awaitEventTurns(t, stream, "Jev judgment "+c.Judgment)
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("classification did not settle: %+v %v", th, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if requests := p.Requests(); len(requests) == 0 || requests[0].State.(map[string]any)["message"] != "Wrote the store. The unit is ready for review." {
+		t.Fatalf("Jev requests %+v", requests)
+	}
+	f.engine.mu.Lock()
+	defer f.engine.mu.Unlock()
+	for _, name := range f.engine.runs {
+		if strings.HasPrefix(name, masonTurnID("resume")+"-classifier-") {
+			t.Errorf("classifier ran after Jev classified the turn: %s", name)
+		}
 	}
 }
 

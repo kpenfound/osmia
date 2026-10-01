@@ -98,6 +98,7 @@ func (r Runner) classify(ctx context.Context, original coreadapter.PreparedTurn,
 		if v, ok := parseClassification(result.FinalResponse); ok {
 			response.Classification.Class = v.Class
 			response.Classification.Evidence = v.Evidence
+			response.Classification.By = trace.ClassifiedByClassifier
 			return
 		}
 	}

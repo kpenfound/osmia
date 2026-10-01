@@ -295,6 +295,9 @@ func (m *masons) classify(ctx context.Context, stream config.WorkstreamID, unit 
 	}
 	if receipt.Value == "" {
 		reason := fmt.Sprintf("mason turn %s classified %s: %s; tool counts %v", last.Request.TurnID, c.Class, c.Evidence, c.ToolCounts)
+		if c.Judgment != "" {
+			reason += "; Jev judgment " + c.Judgment
+		}
 		if c.Class == "gave_up" {
 			reason += "; unit contested"
 		} else if attempts >= m.cfg.Mason.MaxCleanTurns {
