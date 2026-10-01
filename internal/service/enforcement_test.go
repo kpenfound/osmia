@@ -27,6 +27,9 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 	chief := cfg.Roles[trace.ChiefOfStaff]
 	chief.Sandbox, chief.Image = "container", "loaded-image"
 	cfg.Roles[trace.ChiefOfStaff] = chief
+	mason := cfg.Roles[masonRole]
+	mason.Sandbox, mason.Dagger = "sbx", &config.Dagger{Version: "v0.20.5", Engine: "tcp://127.0.0.1:1234"}
+	cfg.Roles[masonRole] = mason
 	must(t, os.WriteFile(filepath.Join(opts.Config.Root, "config.toml"), []byte("not toml ["), 0600))
 
 	zone := time.FixedZone("east", 5*60*60)
@@ -47,8 +50,21 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 	scope := coreadapter.Scope{Project: string(cfg.Project.ID), Workstream: string(stream), Role: trace.ChiefOfStaff}
 	selection, err := turns.Select(context.Background(), scope)
 	must(t, err)
-	if selection.Execution.Mode != "container" || selection.Execution.Image != "loaded-image" {
+	if selection.Execution.Mode != "container" || selection.Execution.Image != "loaded-image" || selection.Execution.Dagger != nil {
 		t.Fatalf("execution %+v", selection.Execution)
+	}
+	// The classifier runs in the mason's sandbox without a shell, so it is
+	// not given the mason's Dagger engine.
+	classifier, err := turns.Select(context.Background(), coreadapter.Scope{Project: string(cfg.Project.ID), Role: "classifier"})
+	must(t, err)
+	if classifier.Execution.Mode != "sbx" || classifier.Execution.Dagger != nil {
+		t.Fatalf("classifier execution %+v", classifier.Execution)
+	}
+	if execution := threadExecution(masonRole, mason); execution.Mode != "sbx" || execution.Dagger == nil || *execution.Dagger != *mason.Dagger.Settings() {
+		t.Fatalf("mason execution %+v", execution)
+	}
+	if execution := threadExecution(reviewerRole, mason); execution.Dagger != nil {
+		t.Fatalf("reviewer execution %+v", execution)
 	}
 	scope.Project = "other"
 	if _, err := turns.Select(context.Background(), scope); err == nil {

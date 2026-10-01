@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
@@ -120,7 +121,26 @@ type Role struct {
 	Profile string `toml:"profile" json:"profile"`
 	Sandbox string `toml:"sandbox" json:"sandbox"`
 	Image   string `toml:"image" json:"image"`
+	// Dagger gives the mason's sbx sandbox the Dagger CLI and an engine on
+	// the host; nil gives neither.
+	Dagger *Dagger `toml:"dagger" json:"dagger,omitempty"`
 }
+
+// Dagger is the Dagger CLI release installed in a sandbox and the host engine
+// it runs against.
+type Dagger struct {
+	Version string `toml:"version" json:"version"`
+	Engine  string `toml:"engine" json:"engine"`
+}
+
+// Settings is d as execution settings carry it; nil for nil.
+func (d *Dagger) Settings() *agent.Dagger {
+	if d == nil {
+		return nil
+	}
+	return &agent.Dagger{Engine: d.Engine, Version: d.Version}
+}
+
 type Project struct {
 	ID              ProjectID         `toml:"-" json:"id"`
 	Version         int               `toml:"version" json:"version"`
@@ -570,13 +590,16 @@ func knownKey(key toml.Key, project bool) bool {
 		if len(key) == 2 {
 			return true
 		}
+		if key[0] == "roles" && len(key) == 4 && key[2] == "dagger" {
+			return key[3] == "version" || key[3] == "engine"
+		}
 		if len(key) != 3 {
 			return false
 		}
 		if key[0] == "profiles" {
 			return slices.Contains([]string{"agent", "model", "effort", "fallback", "timeout", "max_turns"}, key[2])
 		}
-		return slices.Contains([]string{"profile", "sandbox", "image"}, key[2])
+		return slices.Contains([]string{"profile", "sandbox", "image", "dagger"}, key[2])
 	}
 	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window", "notify", "notify.webhook"}, path)
 }
@@ -677,6 +700,20 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 		if r.Sandbox != "container" && r.Sandbox != "sbx" && r.Image != "" {
 			return fieldError(path, prefix+".image", "image requires container or sbx sandbox")
 		}
+		if r.Dagger != nil {
+			if name != "mason" {
+				return fieldError(path, prefix+".dagger", "only the mason runs Dagger")
+			}
+			if r.Sandbox != "sbx" {
+				return fieldError(path, prefix+".dagger", "dagger requires the sbx sandbox")
+			}
+			if err := agent.CheckDaggerVersion(r.Dagger.Version); err != nil {
+				return fieldError(path, prefix+".dagger.version", err.Error())
+			}
+			if err := agent.CheckDaggerEngine(r.Dagger.Engine); err != nil {
+				return fieldError(path, prefix+".dagger.engine", err.Error())
+			}
+		}
 		for next := r.Profile; next != ""; next = c.Profiles[next].Fallback {
 			if r.Sandbox == "claude" && c.Profiles[next].Agent != "claude" {
 				return fieldError(path, prefix+".sandbox", "claude sandbox requires claude in the entire fallback chain")
@@ -709,7 +746,7 @@ func (c *Config) Execution(role, profile string) (coreadapter.Profile, coreadapt
 		if next == profile {
 			p := c.Profiles[next]
 			timeout, err := time.ParseDuration(p.Timeout)
-			return coreadapter.Profile{Name: next, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: c.Budget.SessionLimitUSD()}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image}, err
+			return coreadapter.Profile{Name: next, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: c.Budget.SessionLimitUSD()}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image, Dagger: r.Dagger.Settings()}, err
 		}
 	}
 	return coreadapter.Profile{}, coreadapter.ExecutionSettings{}, fmt.Errorf("profile %q is not in role %q's fallback chain", profile, role)

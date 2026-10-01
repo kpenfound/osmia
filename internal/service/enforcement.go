@@ -48,6 +48,16 @@ var chiefGrant = coreadapter.Capabilities{Tools: append([]string{"file_read", st
 var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, doneTool}, WriteFiles: true, Execute: true}
 var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, questions.AmendTool, verdictTool, runChecksTool, workstreamDiffTool}}
 
+// threadExecution is how a thread turn of role runs: in the role's sandbox
+// and image, and for a mason with the Dagger engine the role configures.
+func threadExecution(role string, r config.Role) coreadapter.ExecutionSettings {
+	execution := coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image}
+	if role == masonRole {
+		execution.Dagger = r.Dagger.Settings()
+	}
+	return execution
+}
+
 // Enforce returns opts with Librarian, Architect, Committee and Threads
 // running every role turn through e. Thread turns are granted to the chief of
 // staff, mason and reviewer; a turn of any other role fails with a recorded
@@ -106,7 +116,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				if !ok || scope.Project != project {
 					return isolation.Selection{}, errors.New("view selection denied")
 				}
-				execution := coreadapter.ExecutionSettings{Mode: role.Sandbox, Image: role.Image}
+				execution := threadExecution(scope.Role, role)
 				if scope.Role == masonRole && scope.Thread == driftMasonAgent {
 					return drifts.selection(ctx, scope, execution)
 				}
