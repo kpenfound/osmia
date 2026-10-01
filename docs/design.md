@@ -426,6 +426,18 @@ A role runs on the host or in a container, per profile. In a container the works
 
 A mason in a Docker Sandbox may also be given Dagger, so it can run the project's checks and functions while it builds rather than relying on review. The owner configures the Dagger CLI release and a host engine, which may be the engine container the owner's own Dagger CLI provisioned. The sandbox keeps a template's CLI at that release or installs it, and it reaches the engine through a port allowed for that sandbox alone. The engine has no delivery credentials, and no other role, including the classifier that shares the mason's sandbox, receives it.
 
+### 9.6 Jev judgments
+
+Some decisions inside a turn are small, bounded judgments rather than generation: which of four classes a mason's final response falls in, which retrieved passages bear on a question, whether a proposed answer appears to contradict a ruling. An optional Jev boost asks those of Jev, TypeSafe's System One model, which takes textual state and typed questions and returns typed answers with probability distributions: a Choice selects one supplied option, a Score rates against supplied levels, and a Noul is the probability that a proposition holds. Larger generative models remain responsible for implementation, planning, explanations and review.
+
+One global setting turns the boost on or off for every judgment; there is no per-judgment switch. It is off by default. The service reaches Jev through a TypeSafe-compatible API, OpenRouter by default, with a credential referenced through an environment variable that no session receives. Jev holds no tool, no version control and no delivery credential; a judgment sees only the state its question needs.
+
+Every judgment has a supported fallback, which is the workflow as it runs without Jev. A judgment falls back when the boost is off, its credential is missing, the provider times out, is rate limited, unavailable or refuses the request, the response does not answer the questions in the shape they require, or the judgment's own acceptance, such as a confidence threshold, declines the answers. Thresholds are per judgment and tuned against a pinned model version; confidence is derived from the answer's distribution and is never treated as a verified probability of being correct. Requests are bounded by a short timeout and at most one retry of a transient failure. A rate limit, or repeated outages, cools every judgment down together, so an outage falls back at once rather than producing a retry storm.
+
+Judgments run inside turns, never on the scheduling path, and no answer bypasses an outcome tool, reviewer judgment, service-owned version control or an owner gate. An answer is advice to the code or the role that asked; it is not a transition.
+
+The trace records each judgment, while the boost is on, under its workstream: the turn that asked, the task and its question version, the source record revisions its state was built from, the request, the configured and resolved model versions, the answers with their distributions, the outcome and any fallback reason, and usage. A judgment is identified by its cause, task, version and exact request, so after a restart the workflow reads back the decision it already used instead of asking again, and changed inputs are a new judgment. A judgment records its start before its request; a start without a result is an interrupted attempt, distinguishable from an accepted one, and a judgment interrupted twice falls back. Usage enters the ledger under the `jev` role and counts toward budgets; a cost the provider does not report is unknown, as for an agent. Status reports the boost as disabled, unconfigured, ready or degraded with its latest failure.
+
 ---
 
 ## 10. The service
@@ -451,7 +463,7 @@ Profile overrides, pause states and priority live in `runtime.json` under the ro
 
 ### 10.4 Reload
 
-Reload is explicit. It reads the top-level configuration and every project's `config.toml`, validates them whole, and applies them only if they pass. A bad file leaves the old configuration running and the error in the interface. Profiles, capacity, budgets, review settings, Hearsay settings and the project list apply live; a removed project drains and stops. Listen addresses, the tailnet identity and the root need a restart, and the interface says so. The charter and the knowledge base need no reload because bundles read them at turn time. The loaded digest is shown, so "did the reload take" is checkable.
+Reload is explicit. It reads the top-level configuration and every project's `config.toml`, validates them whole, and applies them only if they pass. A bad file leaves the old configuration running and the error in the interface. Profiles, capacity, budgets, review settings, Hearsay and Jev settings and the project list apply live; a removed project drains and stops. Listen addresses, the tailnet identity and the root need a restart, and the interface says so. The charter and the knowledge base need no reload because bundles read them at turn time. The loaded digest is shown, so "did the reload take" is checkable.
 
 ### 10.5 Notifications
 
@@ -577,6 +589,12 @@ per_day = "150.00"                   # a pause
 # token_env = "HEARSAY_OWNER_TOKEN"
 # Configure hearsay.agents.worker, orchestrator and observer with id and token_env.
 
+[jev]
+enabled = false                      # one switch for every Jev judgment
+# url = "https://openrouter.ai/api"
+# model = "~typesafe/jev-latest"
+# api_key_env = "OPENROUTER_API_KEY"
+
 [notify]
 webhook = "https://ntfy.sh/..."
 
@@ -677,6 +695,8 @@ Git worktrees and Jujutsu share the workspace interface. The service supports mu
 **Osmia owns the workflow.** Its Go controllers own feature and unit state, the plan, seals, footprints, scheduling policy, questions and fixed message routes, role notes, prompts, ratification and delivery gates. Durable threads wrap the core runner with an owned log and turn queue. The core's wakeup bus does not replace the durable outbox, and its workspace or VCS-access flags do not by themselves enforce the isolation required in sections 7 and 15. Adapters must verify those contracts explicitly.
 
 **Hearsay** is optional memory, reached through a provider boundary. Its connector executes in Hearsay's process and reads Osmia's trace. Bundles and watches augment the local record; Hearsay never becomes the workflow tracker, dispatcher or owner of the specification. Section 12 defines the integration and fallback contract.
+
+**Jev** is an optional judgment provider, reached through a TypeSafe-compatible API. Osmia owns the questions, their interpretation, the thresholds and the fallbacks; Jev answers typed questions and never owns a decision, a transition or a gate. Section 9.6 defines the contract.
 
 ---
 

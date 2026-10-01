@@ -7,6 +7,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -359,8 +360,11 @@ type RuntimeResponse struct {
 	Effective runtime.State               `json:"effective"`
 	Profiles  map[string]EffectiveProfile `json:"profiles"`
 	// Projects lists each active project's context mode.
-	Projects    []ProjectRuntime `json:"projects"`
-	Diagnostics []Diagnostic     `json:"diagnostics"`
+	Projects []ProjectRuntime `json:"projects"`
+	// Jev reports the optional Jev boost. Every mode but ready means its
+	// judgments fall back.
+	Jev         jev.Status   `json:"jev"`
+	Diagnostics []Diagnostic `json:"diagnostics"`
 }
 
 // EffectiveProfile identifies the profile selected for a role's next turn.

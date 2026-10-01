@@ -38,6 +38,7 @@ type Config struct {
 	Mason          Mason              `toml:"mason" json:"mason"`
 	Events         Events             `toml:"events" json:"events"`
 	Hearsay        Hearsay            `toml:"hearsay" json:"hearsay"`
+	Jev            Jev                `toml:"jev" json:"jev"`
 	Notify         Notify             `toml:"notify" json:"notify"`
 	// Project is the project this configuration is about: the only active
 	// project of a loaded configuration, or the project For selected. It is
@@ -235,7 +236,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Mason: Mason{3}, Events: Events{"5s"}, Workspaces: WorkspacesAuto}
+	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Mason: Mason{3}, Events: Events{"5s"}, Workspaces: WorkspacesAuto, Jev: defaultJev()}
 	md, err := decode(path, c, false)
 	if err != nil {
 		return nil, err
@@ -301,6 +302,9 @@ func LoadTopLevel(options Options) (*Config, error) {
 		return nil, fieldError(path, "workspaces", fmt.Sprintf("must be %q, %q or %q", WorkspacesAuto, WorkspacesGit, WorkspacesJujutsu))
 	}
 	if err := c.Hearsay.validate(path); err != nil {
+		return nil, err
+	}
+	if err := c.Jev.validate(path); err != nil {
 		return nil, err
 	}
 	if c.Notify.Webhook != "" {
@@ -601,7 +605,7 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "sandbox", "image", "dagger"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window", "notify", "notify.webhook"}, path)
+	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window", "notify", "notify.webhook", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {

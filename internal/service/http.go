@@ -118,7 +118,7 @@ func (s *Service) configuration() ConfigResponse {
 func (s *Service) runtimeView() RuntimeResponse {
 	state, ds := s.effective()
 	cfg := s.current()
-	out := RuntimeResponse{Effective: state, Profiles: s.effectiveProfiles(state), Projects: []ProjectRuntime{}, Diagnostics: []Diagnostic{}}
+	out := RuntimeResponse{Effective: state, Profiles: s.effectiveProfiles(state), Projects: []ProjectRuntime{}, Jev: s.jev.Status(), Diagnostics: []Diagnostic{}}
 	for _, id := range cfg.ProjectIDs() {
 		out.Projects = append(out.Projects, ProjectRuntime{id, s.Context().Mode(id)})
 	}

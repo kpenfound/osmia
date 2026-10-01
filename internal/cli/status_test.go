@@ -93,6 +93,7 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	for _, want := range []string{
 		"ready=true",
 		"Profiles:\n",
+		"Jev boost: disabled\n",
 		// The service's jj decides what auto gives new workstreams.
 		"Workspaces: setting=auto new_workstreams=",
 		"Workstreams:\n" +

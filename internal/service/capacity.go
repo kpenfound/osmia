@@ -10,6 +10,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -171,8 +172,9 @@ func (s *Service) providerUsage(state runtime.State, profiles map[string]Effecti
 }
 
 // providerCosts returns the costs of every workstream's attempts that started
-// on day, by the provider of the turn attempt each one records; costs no
-// recorded attempt matches, such as a classifier's, are under "".
+// on day, by the provider of the turn attempt each one records. Jev's costs
+// are under jev.Role; other costs no recorded attempt matches, such as a
+// classifier's, are under "".
 func providerCosts(repository *trace.Repository, day calendarDay) (map[string][]trace.Cost, error) {
 	costs, err := repository.Costs()
 	if err != nil {
@@ -200,6 +202,9 @@ func providerCosts(repository *trace.Repository, day calendarDay) (map[string][]
 	for _, c := range costs {
 		if !c.Entry.At.Before(day.start) && c.Entry.At.Before(day.end) {
 			name := providers[c.Entry.AttemptID]
+			if name == "" && c.Entry.Scope.Role == jev.Role {
+				name = jev.Role
+			}
 			out[name] = append(out[name], c)
 		}
 	}

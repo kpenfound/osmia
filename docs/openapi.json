@@ -2781,6 +2781,9 @@
           "hearsay": {
             "$ref": "#/components/schemas/ConfigHearsay"
           },
+          "jev": {
+            "$ref": "#/components/schemas/ConfigJev"
+          },
           "listen": {
             "$ref": "#/components/schemas/ConfigListen"
           },
@@ -2939,6 +2942,26 @@
             "type": "string"
           },
           "token_env": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigJev": {
+        "properties": {
+          "api_key_env": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "timeout": {
+            "type": "string"
+          },
+          "url": {
             "type": "string"
           }
         },
@@ -3957,6 +3980,30 @@
         },
         "type": "object"
       },
+      "JevStatus": {
+        "properties": {
+          "cooling_until": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "MemoryAnchor": {
         "properties": {
           "artifact": {
@@ -4509,6 +4556,9 @@
           },
           "effective": {
             "$ref": "#/components/schemas/RuntimeState"
+          },
+          "jev": {
+            "$ref": "#/components/schemas/JevStatus"
           },
           "profiles": {
             "additionalProperties": {

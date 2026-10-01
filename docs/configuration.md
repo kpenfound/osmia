@@ -603,3 +603,47 @@ the parent's feature branch. After the parent integrates, fresh review and
 owner delivery approval authorize retargeting that same pull request to the
 project's base branch with the approved description. Interrupted updates are
 reconciled against the recorded request before retrying.
+
+## Optional Jev boost
+
+The Jev boost asks Jev, TypeSafe's System One model, bounded typed questions
+inside turns. One setting turns it on or off for every judgment; it is off by
+default, and with it off Osmia makes no Jev request and needs no Jev
+credential. The other settings show their defaults:
+
+```toml
+[jev]
+enabled = false
+# Base URL of a TypeSafe-compatible API; requests go to <url>/v1/systemone.
+url = "https://openrouter.ai/api"
+# The model asked. An alias moves when a new version ships; name a versioned
+# model your provider accepts to keep tuned thresholds stable.
+model = "~typesafe/jev-latest"
+# The environment variable holding the API key.
+api_key_env = "OPENROUTER_API_KEY"
+# How long one request may take, at most 1m.
+timeout = "10s"
+```
+
+The settings are validated whether or not the boost is on, and apply through
+reload. The service reads the key when it makes a request; configuration
+responses, sessions and trace records never contain it, and it is not sent
+through a redirect.
+
+Every judgment falls back to the workflow as it runs without Jev when the key
+is missing, the request times out, is rate limited, fails or is refused, the
+response does not answer the questions as asked, or the answers fall below the
+judgment's own threshold. A transient failure is retried once. A rate limit,
+or three transient failures in a row, cools Jev down for every judgment for 30
+seconds, doubling with each further episode up to 15 minutes or as long as the
+provider's `Retry-After` asks within that cap; judgments fall back without a
+request meanwhile.
+
+While the boost is on, each judgment is recorded under its workstream in
+`judgments/<id>.json`, one revision when it starts and one with its result,
+and its usage is a ledger cost under the `jev` role. A judgment asked again
+with the same inputs, after a restart included, returns the recorded decision.
+`osmia status` reports the boost as `disabled`, `unconfigured`, `ready` or
+`degraded`, with the latest failure and any cool-down, and its spend appears
+as the `jev` provider in today's usage. `osmia doctor` warns when the boost is
+on without its key.

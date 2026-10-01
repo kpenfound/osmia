@@ -72,6 +72,9 @@ type Options struct {
 	CheckJJ func(context.Context) (string, error)
 	// Token is the GitHub token the service reads from GITHUB_TOKEN.
 	Token string
+	// Getenv reads the environment the service would start with, such as
+	// the Jev API key; nil reads the host's.
+	Getenv func(string) string
 	// GitHubAPI is the GitHub REST API base URL; empty is
 	// https://api.github.com.
 	GitHubAPI string
@@ -99,6 +102,9 @@ func Run(ctx context.Context, o Options) []Check {
 	if o.CheckJJ == nil {
 		o.CheckJJ = func(ctx context.Context) (string, error) { return workspace.CheckJJ(ctx, "") }
 	}
+	if o.Getenv == nil {
+		o.Getenv = os.Getenv
+	}
 	if o.GitHubAPI == "" {
 		o.GitHubAPI = "https://api.github.com"
 	}
@@ -114,6 +120,7 @@ func Run(ctx context.Context, o Options) []Check {
 	r.toolchain(ctx, cfg)
 	r.socket(cfg)
 	r.web(cfg)
+	r.jev(cfg)
 	for _, p := range projects {
 		r.project(ctx, p)
 	}
@@ -370,6 +377,20 @@ func (r *run) web(cfg *config.Config) {
 	}
 	l.Close()
 	r.add(GroupConfig, "listen.web", Pass, cfg.Listen.Web+" can be bound", "")
+}
+
+// jev checks that an enabled Jev boost has its API key. Without it every
+// judgment falls back, so a missing key is a warning.
+func (r *run) jev(cfg *config.Config) {
+	if cfg == nil || !cfg.Jev.Enabled {
+		return
+	}
+	name := cfg.Jev.APIKeyEnv
+	if r.Getenv(name) == "" {
+		r.add(GroupConfig, "jev", Warn, "the Jev boost is enabled but "+name+" is not set; its judgments fall back", "export "+name+" before osmia serve, or set jev.enabled = false")
+		return
+	}
+	r.add(GroupConfig, "jev", Pass, "the Jev boost is enabled with "+name+" set for "+cfg.Jev.Model, "")
 }
 
 // project checks a project's clone and the remotes the service fetches from

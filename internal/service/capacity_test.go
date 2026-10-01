@@ -11,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -194,6 +195,8 @@ func TestStatusReportsProviderUsage(t *testing.T) {
 	}
 	appendDayCost(t, repo, sibling, "classifier", clock.Now(), 0.25, true)
 	appendDayCost(t, repo, sibling, "yesterday", clock.Now().Add(-24*time.Hour), 9, true)
+	must(t, repo.Append(ctx, trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: "judgment-cost", Revision: 1, Project: project, Workstream: sibling, At: clock.Now(), Actor: trace.Actor{Kind: "service", ID: jev.Role}, Cause: "budget-fixture"},
+		Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(project), Workstream: string(sibling), Thread: "thread", Turn: "judged", Role: jev.Role}, AttemptID: "judgment-attempt", At: clock.Now(), Usage: coreadapter.Usage{CostUSD: 0.125, CostKnown: true}}}))
 
 	// The mason falls back from claude to codex; the reviewer's profile has
 	// no fallback, so the reviewer is paused.
@@ -220,10 +223,13 @@ func TestStatusReportsProviderUsage(t *testing.T) {
 	if u == nil {
 		t.Fatalf("no provider usage: %+v", got.Diagnostics)
 	}
-	if u.Day != "2026-09-16" || len(u.Providers) != 3 {
+	if u.Day != "2026-09-16" || len(u.Providers) != 4 {
 		t.Fatalf("provider usage %+v", u)
 	}
-	claude, codex, fake := u.Providers[0], u.Providers[1], u.Providers[2]
+	claude, codex, fake, judged := u.Providers[0], u.Providers[1], u.Providers[2], u.Providers[3]
+	if judged.Provider != jev.Role || judged.ProviderSpend != (ProviderSpend{SpendUSD: "0.125"}) {
+		t.Fatalf("jev %+v", judged)
+	}
 	if claude.Provider != "claude" || claude.ProviderSpend != (ProviderSpend{SpendUSD: "0"}) || claude.Limit == nil || !reflect.DeepEqual(*claude.Limit, limit) {
 		t.Fatalf("claude %+v", claude)
 	}
@@ -247,7 +253,7 @@ func TestStatusReportsProviderUsage(t *testing.T) {
 	if u.Unattributed == nil || *u.Unattributed != (ProviderSpend{SpendUSD: "0.25"}) {
 		t.Fatalf("unattributed %+v", u.Unattributed)
 	}
-	if b := got.DailyBudget; b == nil || b.SpendUSD != "0.75" || b.UnknownCosts != 1 {
+	if b := got.DailyBudget; b == nil || b.SpendUSD != "0.875" || b.UnknownCosts != 1 {
 		t.Fatalf("daily budget %+v disagrees with provider usage", b)
 	}
 

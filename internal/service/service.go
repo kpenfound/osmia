@@ -23,6 +23,7 @@ import (
 	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/issues"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -92,6 +93,9 @@ type Options struct {
 	// workstreams. It defaults to the GitHub REST API with the service's
 	// GITHUB_TOKEN environment variable, which no session receives.
 	PullRequests pulls.Client
+	// JevProvider returns the Jev provider for the current settings and API
+	// key. It defaults to the TypeSafe-compatible HTTP API the settings name.
+	JevProvider func(config.Jev, string) jev.Provider
 	// JoinTailnet joins the owner's tailnet when listen.tailnet is set. It
 	// defaults to embedded Tailscale.
 	JoinTailnet JoinTailnet
@@ -129,8 +133,11 @@ type activeProject struct {
 
 type Service struct {
 	memory hearsay.Health
-	mu     sync.Mutex // guards cfg, projects, pending and reloadErr
-	cfg    *config.Config
+	// jev answers the Jev judgments of every project's turns under the
+	// current configuration.
+	jev *jev.Judge
+	mu  sync.Mutex // guards cfg, projects, pending and reloadErr
+	cfg *config.Config
 	// projects holds the runtime of every active project that has a trace, in
 	// active_projects order.
 	projects []*activeProject
@@ -210,6 +217,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub()}
 	s.pool = &scheduler.Shared{Traces: s.traces}
+	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider}
 	if opts.controls != nil {
 		opts.controls.service.Store(s)
 	}

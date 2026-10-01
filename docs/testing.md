@@ -37,9 +37,16 @@ command in [AGENTS.md](../AGENTS.md#validation). Host `gofmt`, `go build` and
 | Agent boundary | [isolation](../internal/isolation), [coreadapter](../internal/coreadapter) | Scoped file views, grants, environment allowlist and execution policy checks |
 | Workspaces | [workspace](../internal/workspace), service Jujutsu demonstrations | Git and Jujutsu behavior, rebase and recovery using local repositories |
 | Operator interface | [cli](../internal/cli), service browser tests | Commands, API behavior, owner decisions and live page updates |
+| Jev judgments | [jev](../internal/jev), [systemone](../internal/systemone) | Fallback on every failure, cool-down, recorded decisions reused after restart, interrupted attempts, and answer validation against an HTTP test server |
 
 Test counts are useful for finding the suite, but assertions and exercised
 boundaries determine confidence.
+
+Code that asks Jev judgments tests with
+[`jevtest.Provider`](../internal/jev/jevtest), which returns scripted answers
+or `systemone` errors and can block until a request is cancelled. Cover the
+consumer with the boost disabled as well as with accepted, declined and failed
+judgments.
 
 ## Keep service tests focused
 

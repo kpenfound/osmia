@@ -21,6 +21,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/buildinfo"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -1147,7 +1148,23 @@ func showRuntime(w io.Writer, rt service.RuntimeResponse) {
 		}
 		fmt.Fprintln(w)
 	}
+	showJev(w, rt.Jev)
 	diagnostics(w, rt.Diagnostics)
+}
+
+// showJev prints the Jev boost's mode and, when it is not ready, why.
+func showJev(w io.Writer, s jev.Status) {
+	line := "Jev boost: " + string(s.Mode)
+	if s.Model != "" {
+		line += " model=" + s.Model
+	}
+	if s.Reason != "" {
+		line += fmt.Sprintf(" reason=%s detail=%q", s.Reason, s.Detail)
+	}
+	if s.CoolingUntil != nil {
+		line += " cooling_until=" + s.CoolingUntil.UTC().Format(time.RFC3339)
+	}
+	fmt.Fprintln(w, line)
 }
 
 // showDailyBudget prints today's known spend against the daily budget, if

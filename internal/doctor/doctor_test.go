@@ -164,6 +164,7 @@ func TestHealthyRoot(t *testing.T) {
 	expect(t, find(t, checks, "claude"), Pass, "claude 1.0.0")
 	expect(t, find(t, checks, "GITHUB_TOKEN"), Pass, "owner")
 	absent(t, checks, "docker")
+	absent(t, checks, "jev")
 	if Failed(checks) {
 		t.Fatal("a healthy root failed")
 	}
@@ -327,4 +328,17 @@ func TestUnopenableState(t *testing.T) {
 
 	must(t, os.Remove(filepath.Join(dir, "projects", projectID, "project.json")))
 	expect(t, find(t, Run(context.Background(), o), "widgets trace"), Warn, "no trace")
+}
+
+func TestEnabledJevBoostNeedsItsKey(t *testing.T) {
+	o, dir := fixture(t)
+	top, err := os.ReadFile(filepath.Join(dir, "config.toml"))
+	must(t, err)
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), append(top, "\n[jev]\nenabled = true\n"...), 0o600))
+	env := map[string]string{}
+	o.Getenv = func(name string) string { return env[name] }
+	checks := Run(context.Background(), o)
+	expect(t, find(t, checks, "jev"), Warn, "OPENROUTER_API_KEY is not set")
+	env["OPENROUTER_API_KEY"] = "set"
+	expect(t, find(t, Run(context.Background(), o), "jev"), Pass, "~typesafe/jev-latest")
 }
