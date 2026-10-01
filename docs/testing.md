@@ -11,21 +11,22 @@ repositories. Tests never need a live model, remote push or real delivery.
 From the repository root, with the Dagger engine available:
 
 ```sh
-dagger check
+dagger check --progress=report
 ```
 
-The Go check runs the complete suite in a Go container and installs the pinned
-`jj` binary. The Go test command and all its child processes run on at most
-four available CPUs, including on larger local engines. CPU affinity constrains
-Git and Jujutsu as well as Go; limiting only `GOMAXPROCS` does not do that. The
-check prints the selected CPUs. The browser check installs Chromium and runs
-the page tests with `OSMIA_BROWSER` set. The release check builds and exercises the versioned
-archive. See [dagger.toml](../dagger.toml) for the registered checks.
+The Go check runs the complete suite with the official Dagger Go module, in the
+test container from the `osmia-dev` module. That container installs the pinned
+`jj` binary and Chromium, and sets `OSMIA_BROWSER`, so the browser tests run with
+the rest of the suite. Each package's tests run in their own container, in
+parallel with the other packages. The release check builds and exercises the
+versioned archive. See [dagger.toml](../dagger.toml) for the registered
+checks.
 
 Never run `go test` on the host. Tests can leave processes behind on the
-machine running them. For a focused package or test, use the Dagger container
-command in [AGENTS.md](../AGENTS.md#validation). Host `gofmt`, `go build` and
-`go vet ./...` are allowed; they do not execute tests.
+machine running them. For a focused package or test, use the Go check's
+selection flags described in [AGENTS.md](../AGENTS.md#validation), such as
+`dagger check --go-test=TestA`. Host `gofmt`, `go build` and `go vet ./...` are
+allowed; they do not execute tests.
 
 ## What the suite covers
 
@@ -44,8 +45,8 @@ boundaries determine confidence.
 ## Keep service tests focused
 
 Service lifecycle tests start real reconcilers and write durable traces in local
-Git repositories. The standard Go and browser checks mount `/tmp` in memory
-for their test commands. Temporary repositories survive service restarts within that command
+Git repositories. The Go check mounts `/tmp` in memory for its test
+commands. Temporary repositories survive service restarts within that command
 and are discarded when the command ends. This exercises real Git, Jujutsu and
 filesystem operations, including the service's durability calls, without paying
 for container-layer disk writes on every fixture transaction.
@@ -106,41 +107,40 @@ workflow decisions belong in the tests responsible for those decisions.
 ## Profile inside Dagger
 
 Measure the same tests with the same container, CPU affinity, race setting and
-parallelism. The standard Go check uses at most four CPUs; for an isolated
-comparison, use `taskset -c` with four CPUs from `/proc/self/status` inside the
-container and `GOMAXPROCS=4`, `-p=4` and `-parallel=4`. Affinity applies to child
-Git and Jujutsu processes too. Compare complete-package times as well as small
-fixtures; large histories make repeated trace work more expensive.
+parallelism. For an isolated comparison, use `taskset -c` with four CPUs from
+`/proc/self/status` inside the container and `GOMAXPROCS=4`, `-p=4` and
+`-parallel=4`. Affinity applies to child Git and Jujutsu processes too.
+Compare complete-package times as well as small fixtures; large histories make
+repeated trace work more expensive.
 Use `-count=1` to bypass Go's test-result cache and `-parallel=1` to isolate the
 cost of a lifecycle from contention with other tests. Compilation, image pulls
 and engine startup are separate from the durations printed by `go test`.
 
-For example, this profiles a Git-backed service test and prints CPU and blocking
-summaries. The binary and profiles stay in the container:
+Profile in the Go check's test container, which the `osmia-dev` module's
+`test-runtime` function returns. It has the pinned `jj` and Chromium installed
+and `/tmp` in memory. For example, this profiles a Git-backed service test and
+prints CPU and blocking summaries. The binary and profiles stay in the
+container:
 
 ```sh
-dagger core container from --address golang:1.26-bookworm \
-  with-directory --path /src --source . --exclude .git,.bees \
+dagger api call test-runtime \
+  with-directory --path /src --source . --exclude .git,.bees,.dagger \
   with-workdir --path /src \
-  with-mounted-temp --path /tmp \
   with-exec --args=sh,-c,'go test -count=1 -parallel=1 -timeout=10m -run=TestMasonSessionsWithinCapacityRunAtOnce -v -o /tmp/service.test -cpuprofile=/tmp/service.cpu -blockprofile=/tmp/service.block ./internal/service && go tool pprof -top -cum /tmp/service.cpu && go tool pprof -top /tmp/service.block' \
   combined-output
 ```
 
-Use the pinned `jj` installation from the focused-test command in
-[AGENTS.md](../AGENTS.md#validation) when profiling Jujutsu tests. Cumulative CPU
-percentages overlap along call stacks; blocking profiles aggregate time across
-goroutines. Neither should be added up as wall-clock time.
+Cumulative CPU percentages overlap along call stacks; blocking profiles
+aggregate time across goroutines. Neither should be added up as wall-clock time.
 
 The trace decoding benchmark compares repeated decoding with reuse of verified
 file content, including copying mutable record fields. Run it inside Dagger:
 
 ```sh
-dagger core container from --address golang:1.26-bookworm \
-  with-directory --path /src --source . --exclude .git,.bees \
+dagger api call test-runtime \
+  with-directory --path /src --source . --exclude .git,.bees,.dagger \
   with-workdir --path /src \
-  with-mounted-temp --path /tmp \
-  with-exec --args=go,test,-run=^$,-bench=BenchmarkRecordDecoding,-benchmem,./internal/trace \
+  with-exec --args=go,test,'-run=^$',-bench=BenchmarkRecordDecoding,-benchmem,./internal/trace \
   combined-output
 ```
 

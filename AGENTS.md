@@ -27,25 +27,30 @@
 - Run `dagger check` before declaring a change complete:
 
   ```sh
-  dagger check
+  dagger check --progress=report
   ```
 
+  `--progress=report` prints each check's result and the output of failing tests. Use `--progress=plain` only when you need every container step, such as the exact `go test` command a check ran.
 - Never run `go test` on the host, in any role and for any purpose: iterating, a single test, a mutation check and reproducing a flake included. Tests start processes that leak onto the machine they run on, so they run only inside Dagger. `gofmt`, `go build` and `go vet` are fine on the host; `go vet ./...` type-checks test files without running them.
-- Run one package or one test inside a Dagger container:
+- While iterating, select tests with the Go check's flags. Each test runs in the same container as the full suite, with the pinned `jj` and Chromium:
 
   ```sh
-  dagger core container from --address golang:1.26-bookworm \
-    with-directory --path /src --source . --exclude .git,.bees \
-    with-workdir --path /src \
-    with-mounted-temp --path /tmp \
-    with-exec --args=sh,-c,'curl -fsSL https://github.com/jj-vcs/jj/releases/download/v0.45.1/jj-v0.45.1-$(uname -m)-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin ./jj' \
-    with-env-variable --name=OSMIA_REQUIRE_JJ --value=1 \
-    with-exec --args=go,test,-count=1,-run,'TestA|TestB',-v,./internal/service \
-    combined-output
+  dagger check --progress=report --go-test=TestA
+  dagger check --progress=report --go-test=TestA --go-test=TestB
+  dagger check --progress=report --go-package=internal/service
+  dagger check --progress=report --go-package=internal/service --go-test=TestA
   ```
 
-  The first `with-exec` installs the pinned `jj` that the Jujutsu tests need (the `go:test` check installs the same release); omit it, and `OSMIA_REQUIRE_JJ`, for packages that do not use `jj`, and those tests skip. The arguments after the last `--args=` are the `go test` command line, separated by commas. Add `-count=5` there to reproduce a flake and `-race` to match the race detector.
-- Browser tests of the web page run in the `browser:test` check (`dagger check browser:test`), which installs Chromium and names it in `OSMIA_BROWSER`; without it they skip.
+  `--go-test` alone selects every test with that name, in any package; add `--go-package` to pick one. `dagger list go-tests -a --go-package=internal/service` lists a package's tests, and `-f=cli` prints each one as the flags that select it.
+- `--progress=report` names each check by its link. To rerun a failing check exactly, pass that link back to `dagger check`, quoted:
+
+  ```sh
+  dagger check --progress=report 'dag://go/packages/tests/test?go-package=internal/config&go-test=TestA'
+  ```
+
+  `dagger list checks --all -f=link` lists the link of every check, including checks outside the Go module such as `release:version-round-trip`.
+- Add `--env=race` to run the selected tests with the race detector, or `--env=flake` to run each selected test five times when reproducing a flake.
+- Browser tests of the web page run in the Go check, whose container installs Chromium and names it in `OSMIA_BROWSER`; without it they skip.
 - Add meaningful tests for changed behavior and regressions, especially state transitions, recovery, owner gates and execution boundaries. Use temporary directories and local repositories for filesystem and VCS tests.
 - Tests must use fake agents, GitHub clients, providers and container engines. Never launch real model sessions, the live factory, remote pushes or pull requests from tests.
 - Report the checks actually run and their results. If validation is blocked, state the exact blocker; do not report success.
