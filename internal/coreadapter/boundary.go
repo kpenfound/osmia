@@ -101,6 +101,9 @@ func (e CoreExecutor) Check(ctx context.Context, iso Isolation, settings Executi
 	if len(settings.Mounts) != 0 || len(settings.Domains) != 0 {
 		return unsupported("execution overrides", "extra mounts and network domains are not granted")
 	}
+	if err := checkDagger(iso, settings); err != nil {
+		return err
+	}
 	if !iso.DenyVCS || !iso.DenyInheritedEnvironment || !iso.DenyDeliveryCredentials {
 		return unsupported("isolation", "mandatory denials are missing")
 	}
@@ -120,6 +123,28 @@ func (e CoreExecutor) Check(ctx context.Context, iso Isolation, settings Executi
 		return err
 	}
 	return validateFileTree(iso.Workspace.Directory)
+}
+
+// checkDagger admits a Dagger engine only for an sbx turn that may execute
+// commands, at an engine address and CLI release core accepts.
+func checkDagger(iso Isolation, settings ExecutionSettings) error {
+	d := settings.Dagger
+	if d == nil {
+		return nil
+	}
+	if settings.Mode != agent.SandboxSbx {
+		return unsupported("dagger", "only an sbx sandbox is given the Dagger engine")
+	}
+	if !iso.Capabilities.Execute {
+		return unsupported("dagger", "the Dagger engine requires an execution grant")
+	}
+	if err := agent.CheckDaggerEngine(d.Engine); err != nil {
+		return unsupported("dagger", err.Error())
+	}
+	if err := agent.CheckDaggerVersion(d.Version); err != nil {
+		return unsupported("dagger", err.Error())
+	}
+	return nil
 }
 
 // PublicEnvironment admits only literal public locale settings and a service-
@@ -182,7 +207,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	if req.SessionDir == "" {
 		return nil, unsupported("execution request", "session directory is required")
 	}
-	grants, err := coreGrants(iso, req.SessionDir, settings.Mode, req.Profile.Agent, req.Profile.MCP)
+	grants, err := coreGrants(iso, req.SessionDir, settings, req.Profile.Agent, req.Profile.MCP)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +222,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	// fields grants do not describe; they also protect callers that invoke
 	// Run without the normal turn translator.
 	if req.Workspace == nil || req.Workspace.Directory() != iso.Workspace.Directory || req.Workspace.VCS() != nil ||
-		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.VCSContainerPath) != 0 || len(req.ContainerEnv) != 0 || len(req.Profile.Skills) != 0 || req.Profile.ContainerUseEnvironment != "" || req.Profile.Dagger != nil || req.HostMCP != nil ||
+		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.VCSContainerPath) != 0 || len(req.ContainerEnv) != 0 || len(req.Profile.Skills) != 0 || req.Profile.ContainerUseEnvironment != "" || !reflect.DeepEqual(req.Profile.Dagger, settings.Dagger) || req.HostMCP != nil ||
 		len(req.Profile.SandboxDomains) != 0 || req.Profile.Sandbox != settings.Mode || req.Profile.SandboxImage != settings.Image ||
 		!maps.Equal(req.Env, iso.Environment) || !slices.Equal(req.Profile.AllowedTools, AllowedTools(slices.Collect(maps.Keys(req.Profile.MCP)), iso.Capabilities.Tools)) ||
 		(req.Grants != nil && !reflect.DeepEqual(*req.Grants, grants)) {
@@ -268,9 +293,11 @@ func viewLocation(view string) string {
 
 // coreGrants are the complete capabilities of a turn in iso: the view with its
 // access, the session directory read-only, a writable scratch directory inside
-// it when the view is read-only, the service environment and one MCP server
-// grant per scoped endpoint, with role-selected native tools and no VCS.
-func coreGrants(iso Isolation, sessionDir, mode, backend string, servers map[string]agent.MCPEntry) (agent.Grants, error) {
+// it when the view is read-only, the service environment, one MCP server
+// grant per scoped endpoint and the settings' Dagger engine, with role-selected
+// native tools and no VCS.
+func coreGrants(iso Isolation, sessionDir string, settings ExecutionSettings, backend string, servers map[string]agent.MCPEntry) (agent.Grants, error) {
+	mode := settings.Mode
 	access := agent.ReadOnly
 	if iso.Workspace.Access == ReadWrite {
 		access = agent.ReadWrite
@@ -286,6 +313,9 @@ func coreGrants(iso Isolation, sessionDir, mode, backend string, servers map[str
 	}
 	if access == agent.ReadOnly {
 		grants.Mounts = append(grants.Mounts, agent.Mount{Path: filepath.Join(session, scratchDirectory), Access: agent.ReadWrite})
+	}
+	if settings.Dagger != nil {
+		grants.DaggerEngine = settings.Dagger.Engine
 	}
 	for _, server := range slices.Sorted(maps.Keys(servers)) {
 		grants.Tools = append(grants.Tools, "mcp__"+server)
@@ -312,7 +342,7 @@ func coreGrants(iso Isolation, sessionDir, mode, backend string, servers map[str
 // granted or a VCS executable left undenied, extra native tools, or MCP servers
 // other than the granted ones.
 func checkPolicy(p agent.Policy, iso Isolation, settings ExecutionSettings, grants agent.Grants, pinned []string) error {
-	if p.DaggerEngine != "" || !slices.Equal(p.HostServers, grants.HostServers) {
+	if p.DaggerEngine != grants.DaggerEngine || !slices.Equal(p.HostServers, grants.HostServers) {
 		return unsupported("session policy", "host services differ from the grants")
 	}
 	if settings.Mode == agent.SandboxSbx && p.Agent != settings.Agent {

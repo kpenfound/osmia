@@ -30,6 +30,9 @@ type ExecutionSettings struct {
 	Domains, Mounts []string
 	// Agent is the resolved backend supplied by the executor when preparing a sandbox.
 	Agent string
+	// Dagger gives an sbx turn that may execute commands the Dagger CLI and
+	// a host engine; nil gives neither.
+	Dagger *agent.Dagger
 }
 
 // SessionExecutor is the core-facing execution seam. Check must reject boundaries
@@ -182,6 +185,9 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 		ValidOutcomes: append([]string{}, t.AllowedOutcomes...),
 		Profile: agent.Profile{Name: t.Scope.Role, Agent: p.Backend, Model: p.Model, Effort: p.Effort, Timeout: p.Timeout, MaxTurns: p.MaxTurns,
 			Sandbox: t.Execution.Mode, SandboxImage: t.Execution.Image, SandboxDomains: slices.Clone(t.Execution.Domains), MCP: map[string]agent.MCPEntry{}, VCSAccess: false},
+	}
+	if d := t.Execution.Dagger; d != nil {
+		req.Profile.Dagger = &agent.Dagger{Engine: d.Engine, Version: d.Version}
 	}
 	var servers []string
 	for i := range t.MCP {

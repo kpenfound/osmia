@@ -420,6 +420,8 @@ There is no tool that lists agents, messages an arbitrary agent, or creates one.
 
 A role runs on the host or in a container, per profile. In a container the workspace is bind-mounted and the MCP servers are reached over HTTP from the host. Native tools follow role capabilities: reading tools for read-only roles, editing tools for file writers, and a shell only for implementation turns with execution permission. Native delegation, web tools and arbitrary MCP discovery are not granted. Read-only roles cannot edit their inputs or run arbitrary commands. Unit and final reviewers can request the fixed service-owned `run_checks` tool, which runs `dagger check` on a fresh export of their pinned candidate and discards the copy afterward. It accepts no command, path or environment overrides. The check client receives a temporary home and engine connectivity, without inherited provider, delivery or signing credentials; the agent receives no engine endpoint. Results enter the tool audit trail and inform the review without granting approval or delivery.
 
+A mason in a Docker Sandbox may also be given Dagger, so it can run the project's checks and functions while it builds rather than relying on review. The owner configures the Dagger CLI release and a host engine, which may be the engine container the owner's own Dagger CLI provisioned. The sandbox keeps a template's CLI at that release or installs it, and it reaches the engine through a port allowed for that sandbox alone. The engine has no delivery credentials, and no other role, including the classifier that shares the mason's sandbox, receives it.
+
 ---
 
 ## 10. The service

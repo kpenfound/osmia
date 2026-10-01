@@ -212,6 +212,7 @@ If there is no profile named `default`, bind all seven roles explicitly. Role ke
 | `profile` | `default` | Must reference an existing named profile |
 | `sandbox` | `none` | `none` (host execution), `claude`, `container` or `sbx` (Docker Sandboxes) |
 | `image` | empty | Required for `container`; optional agent-specific template for `sbx`; forbidden with host modes |
+| `dagger` | unset | Mason only, with `sbx`: the Dagger CLI `version` and host `engine` given to implementation turns; see [Dagger for masons](#dagger-for-masons) |
 
 A `claude` sandbox requires Claude in every profile in the role's fallback chain.
 No arbitrary mounts, credentials, environment, tools or capability grants are
@@ -284,8 +285,9 @@ file writers receive editing tools, and implementation turns also receive a shel
 A turn with a read-only view starts in an empty scratch directory, and its
 instructions name the view's path. The `file_read` tool reads a file in the view
 or lists a directory's entries, with `.` naming the view's root.
-VCS executables and metadata remain unavailable. No host Dagger engine,
-arbitrary mounts or inherited credentials are exposed. Core creates and removes
+VCS executables and metadata remain unavailable. No arbitrary mounts or
+inherited credentials are exposed, and only a mason configured with `dagger`
+reaches a Dagger engine. Core creates and removes
 the sandbox for each attempt, including cancellation. If the service is forcibly
 killed, a sandbox may remain; its name is recorded in the turn's session directory
 as `sandbox-name`, and `sbx rm --force <name>` removes it and its rules.
@@ -322,6 +324,61 @@ tool-call and inspection records.
 
 Missing CLI, login, template or policy requirements fail the turn without falling back to host
 execution.
+
+### Dagger for masons
+
+A mason in `sbx` can run the project's Dagger checks and functions while it
+works. Configure the CLI release and the host engine it runs against:
+
+```toml
+[roles.mason]
+sandbox = "sbx"
+
+[roles.mason.dagger]
+version = "v0.20.5"                                 # the Dagger CLI release; match the engine's
+engine = "docker-container://dagger-engine-v0.20.5"  # or tcp://<host>:<port>, unix:///<socket>
+```
+
+| Key | Validation/meaning |
+| --- | --- |
+| `version` | Required. A Dagger release such as `v0.20.5` or `0.20.5`, installed in each mason sandbox whose template lacks it |
+| `engine` | Required. `docker-container://<container>`, `tcp://<host>:<port>` or `unix://<absolute socket path>` of an engine on the host |
+
+Each mason turn asks its sandbox for `dagger version`. A template that already
+has the configured release keeps it, so baking the CLI into the mason's `image`
+saves an install per turn. Otherwise the turn installs that release with the
+Dagger install script, and the sandbox network policy must allow `dl.dagger.io`.
+A failed installation fails the turn before the agent starts.
+
+The CLI reaches the engine through `_EXPERIMENTAL_DAGGER_RUNNER_HOST`. A
+`docker-container` or `unix` engine is forwarded from a fresh loopback port that
+belongs to the turn, and a `tcp` engine on the host's loopback is reached at its
+own port. The sandbox reaches either one as `host.docker.internal`, and the port
+is allowed for that sandbox alone. Cleanup removes the rule and the forward along
+with the sandbox. The classifier and other roles never receive the engine.
+
+The simplest engine is the one your own Dagger CLI provisions: run any Dagger
+command on the host, such as `dagger core version`, and name its container,
+`dagger-engine-<release>`. Each connection to a `docker-container` engine runs
+`docker exec -i <container> buildctl dial-stdio`, as the Dagger CLI does, with
+the service's Docker environment. The sandbox receives no Docker socket.
+
+A `tcp` or `unix` address must be reachable from the host. With Docker Desktop,
+publish a loopback port from an engine container you start, because Docker
+Desktop does not carry connections to a container's Unix socket back to the
+host:
+
+```sh
+docker run -d --name osmia-dagger-engine --privileged --restart unless-stopped \
+  -p 127.0.0.1:1234:1234 -v osmia-dagger-engine:/var/lib/dagger \
+  registry.dagger.io/engine:v0.20.5 \
+  --addr unix:///run/dagger/engine.sock --addr tcp://0.0.0.0:1234
+```
+
+Where Docker runs natively, bind-mount the engine's socket directory instead,
+for example `-v /run/osmia-dagger:/run/dagger`, and configure
+`engine = "unix:///run/osmia-dagger/engine.sock"`. The account running Osmia
+must be able to open that socket.
 
 ## Project registration
 

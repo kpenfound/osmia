@@ -2860,6 +2860,17 @@
         },
         "type": "object"
       },
+      "ConfigDagger": {
+        "properties": {
+          "engine": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "ConfigDrift": {
         "properties": {
           "differs": {
@@ -3084,6 +3095,9 @@
       },
       "ConfigRole": {
         "properties": {
+          "dagger": {
+            "$ref": "#/components/schemas/ConfigDagger"
+          },
           "image": {
             "type": "string"
           },
