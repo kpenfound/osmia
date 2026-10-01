@@ -41,7 +41,7 @@ func (m *masons) prepareUnitReview(ctx context.Context, stream config.Workstream
 	req, identity, err := m.unitReviewEvidence(ctx, stream, unit)
 	if err != nil {
 		if ctx.Err() == nil {
-			cause := reviewingTransitionID(unit, 1)
+			cause := checkingTransitionID(unit, 1)
 			blockErr := m.recordReviewPreparationError(ctx, stream, unit, cause, fmt.Sprintf("unit %s stays reviewing: its reviewer bundle cannot be assembled: %v", unit, err))
 			if blockErr != nil {
 				return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("%w; record review error: %v", err, blockErr)

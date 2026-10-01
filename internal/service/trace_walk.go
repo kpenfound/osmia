@@ -546,7 +546,8 @@ func criterionText(spec plan.Spec, citation string) (string, bool) {
 }
 
 // unitProgress orders a unit's states by how far the unit has come. A
-// waiting unit is as far as the state it waits in.
+// waiting unit is as far as the state it waits in; a checking unit, whose
+// report awaits its verdict, is as far as a reviewing one.
 func (w *traceWalk) unitProgress(unit string) int {
 	subject := trace.UnitSubject(unit)
 	state := w.states[subject]
@@ -556,7 +557,7 @@ func (w *traceWalk) unitProgress(unit string) int {
 	switch state {
 	case UnitImplementing:
 		return 1
-	case UnitReviewing:
+	case UnitChecking, UnitReviewing:
 		return 2
 	case UnitContested:
 		return 3

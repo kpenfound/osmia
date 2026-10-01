@@ -21,7 +21,7 @@
   // reads /config again this often while it is visible and live.
   const configInterval = 10000;
 
-  const unitOrder = ['planned', 'ready', 'implementing', 'waiting', 'reviewing', 'approved', 'contested', 'merged'];
+  const unitOrder = ['planned', 'ready', 'implementing', 'waiting', 'checking', 'reviewing', 'approved', 'contested', 'merged'];
 
   const pauseSources = {
     owner: 'the owner',

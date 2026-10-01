@@ -32,7 +32,7 @@ allowed; they do not execute tests.
 
 | Boundary | Representative tests | What they establish |
 | --- | --- | --- |
-| Workflow and owner gates | [service](../internal/service) | Ratification, questions, amendments, exact-candidate review, landing, final review and approved delivery |
+| Workflow and owner gates | [service](../internal/service) | Ratification, questions, amendments, checks before review, exact-candidate review, landing, final review and approved delivery |
 | Recovery | [trace](../internal/trace), [reconcile](../internal/reconcile), service restart demonstrations | Atomic records, durable operations and reconciliation after interruptions |
 | Capacity and scheduling | [scheduler](../internal/scheduler), service parallel work tests | Slot accounting, priority, pauses and disjoint unit dispatch |
 | Agent boundary | [isolation](../internal/isolation), [coreadapter](../internal/coreadapter) | Scoped file views, grants, environment allowlist and execution policy checks |
@@ -48,6 +48,10 @@ Code that asks Jev judgments tests with
 or `systemone` errors and can block until a request is cancelled. Cover the
 consumer with the boost disabled as well as with accepted, declined and failed
 judgments.
+
+Service tests run checks with a fake `ReviewChecks`: fixtures built on
+`projectFixture` pass every check, and the unit check tests script listings,
+passing, failing and incomplete runs. No test reaches a Dagger engine.
 
 ## Keep service tests focused
 

@@ -291,7 +291,7 @@ func (r *run) toolchain(ctx context.Context, cfg *config.Config) {
 	if sandboxes["sbx"] {
 		r.tool(ctx, agent.SandboxCLI, Fail, "install Docker Sandboxes; roles with sandbox = \"sbx\" run their turns in it", "version")
 	}
-	r.tool(ctx, "dagger", Warn, "install dagger; reviewers run the project's checks with dagger check", "version")
+	r.tool(ctx, "dagger", Warn, "install dagger; the service runs each candidate's checks with dagger check before review", "version")
 }
 
 // tool finds name on PATH and runs it with args, reporting the first line it

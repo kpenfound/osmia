@@ -443,7 +443,7 @@ func TestDriftRebaseIsSerializedWithLandings(t *testing.T) {
 	settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands})
 	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
 	must(t, err)
-	if state.Value != UnitReviewing {
+	if state.Value != UnitChecking {
 		t.Fatalf("rebased approved unit remained %s", state.Value)
 	}
 	if result := settleOperation(t, f.s, repository, stream, op, d); result.Outcome != "succeeded" {

@@ -108,9 +108,10 @@ func pauseStop(p runtime.Pause) *thread.Stop {
 }
 
 // pausedActions are the operations of the service's reconcilers that run
-// architect and committee turns. A pause covering an operation's workstream
-// holds it; a hard pause also stops the turn it is running.
-var pausedActions = map[string]bool{DraftAction: true, AmendmentDraftAction: true, RoundAction: true, ReplyAction: true, RedraftAction: true, AmendmentRoundAction: true, AmendmentReplyAction: true, FinalReviewAction: true, deliveryReviewAction: true}
+// architect and committee turns or a unit's checks. A pause covering an
+// operation's workstream holds it; a hard pause also stops the turn it is
+// running.
+var pausedActions = map[string]bool{DraftAction: true, AmendmentDraftAction: true, RoundAction: true, ReplyAction: true, RedraftAction: true, AmendmentRoundAction: true, AmendmentReplyAction: true, FinalReviewAction: true, deliveryReviewAction: true, CheckAction: true}
 
 // errPaused leaves a reconciler operation pending instead of starting a turn:
 // the controller holds the operation until the pause is lifted.

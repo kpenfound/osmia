@@ -271,8 +271,8 @@ func (s *Service) extractProject(ctx context.Context, req ProjectExtractRequest)
 
 // runnerAdapter routes runner-boundary operations: extraction and refresh
 // passes to the librarian, architect drafts to its drafter, committee rounds and
-// the architect's replies to its debate, everything else to the bound thread
-// reconciler.
+// the architect's replies to its debate, unit check runs to the checks
+// controller, everything else to the bound thread reconciler.
 type runnerAdapter struct {
 	turns       coreadapter.Reconciler
 	extract     *extractor
@@ -282,6 +282,7 @@ type runnerAdapter struct {
 	amendRounds amendmentDebate
 	rounds      *debate
 	finals      *finalReviewer
+	checks      *checkers
 }
 
 func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
@@ -308,6 +309,9 @@ func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (c
 	}
 	if op.Action == FinalReviewAction || op.Action == deliveryReviewAction {
 		return a.finals.Inspect(ctx, op)
+	}
+	if op.Action == CheckAction {
+		return a.checks.Inspect(ctx, op)
 	}
 	if a.turns == nil {
 		return coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: "No reconciliation adapter configured"}, nil
@@ -338,6 +342,9 @@ func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (cor
 	}
 	if op.Action == FinalReviewAction || op.Action == deliveryReviewAction {
 		return a.finals.Apply(ctx, op)
+	}
+	if op.Action == CheckAction {
+		return a.checks.Apply(ctx, op)
 	}
 	if a.turns == nil {
 		return coreadapter.OperationResult{}, errors.New("no runner adapter is configured")

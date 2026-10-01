@@ -238,12 +238,12 @@ func (m *masons) conflicts(stream config.WorkstreamID, unit string) ([]string, U
 }
 
 // resolve routes a unit whose rebases left conflicts to its mason: a unit
-// reviewing or approved returns to implementing, and an implementing unit's
+// checking, reviewing or approved returns to implementing, and an implementing unit's
 // mason gets one turn to resolve the conflicts of its latest conflicted
 // rebase. A unit in any other state is left until it is in one of those.
 // resolve reports whether the unit's state moved.
 func (f *foreman) resolve(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) (bool, error) {
-	if state.Value != UnitImplementing && state.Value != UnitReviewing && state.Value != UnitApproved {
+	if state.Value != UnitImplementing && state.Value != UnitChecking && state.Value != UnitReviewing && state.Value != UnitApproved {
 		return false, nil
 	}
 	paths, latest, err := f.conflicts(stream, unit)
@@ -645,11 +645,11 @@ func rebasedConflicts(ctx context.Context, g workspace.Provider, base, onto, sna
 // record records, in one commit, units/<unit>/rebase.json and the rebase's
 // outcome. A clean rebase of the unit's recorded candidate also records the
 // next report revision, naming the rebased candidate and the new base; an
-// approved unit returns to reviewing, and a reviewing unit's review starts
-// again. A conflicted rebase tells the chief of staff; the next pass routes
-// the conflicts to the unit's mason. When a drift rebase moved the feature
-// branch the unit is rebased onto, an approval sent back to review and a
-// conflict each also raise an upstream moved event. A rebase already
+// approved, reviewing or checking unit returns to checking, so the rebased
+// candidate is checked and reviewed again. A conflicted rebase tells the chief
+// of staff; the next pass routes the conflicts to the unit's mason. When a
+// drift rebase moved the feature branch the unit is rebased onto, an approval
+// sent back and a conflict each also raise an upstream moved event. A rebase already
 // recorded returns its result and records nothing more.
 func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in rebaseInput, operation string, rebase UnitRebase) (coreadapter.OperationResult, error) {
 	subject := trace.UnitSubject(in.Unit)
@@ -694,19 +694,19 @@ func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in reba
 		h.At, h.Actor, h.Cause = at, foremanActor, operation
 		records = append(records, trace.Document{Header: h, Path: report.Path, Content: string(content) + "\n"})
 		rebase.Report = h.Revision
-		if state.Value == UnitApproved || state.Value == UnitReviewing {
-			id := fmt.Sprintf("%s-%s-rebase-%d", subject, UnitReviewing, in.Rebase)
-			reason := fmt.Sprintf("unit %s's candidate %s from %s was rebased onto %s as candidate %s, recorded in %s revision %d; the rebased candidate is reviewed before it lands", in.Unit, rebase.Snapshot, rebase.Base, rebase.Onto, rebase.Commit, report.Path, h.Revision)
+		if state.Value == UnitApproved || state.Value == UnitReviewing || state.Value == UnitChecking {
+			id := fmt.Sprintf("%s-%s-rebase-%d", subject, UnitChecking, in.Rebase)
+			reason := fmt.Sprintf("unit %s's candidate %s from %s was rebased onto %s as candidate %s, recorded in %s revision %d; the rebased candidate is checked and reviewed before it lands", in.Unit, rebase.Snapshot, rebase.Base, rebase.Onto, rebase.Commit, report.Path, h.Revision)
 			var events []trace.Event
 			if state.Value == UnitApproved {
 				reason = "the approval no longer holds: " + reason
-				events = append(events, trace.Notice(id, "unit", fmt.Sprintf("Unit %s returns to review: its approved candidate was rebased onto %s.", in.Unit, rebase.Onto)))
+				events = append(events, trace.Notice(id, "unit", fmt.Sprintf("Unit %s returns to checking and review: its approved candidate was rebased onto %s.", in.Unit, rebase.Onto)))
 				if drifted {
-					events = append(events, trace.UpstreamMoved(id, stream, move, fmt.Sprintf("unit %s's approval no longer holds: its candidate was rebased onto the feature branch at %s and returns to review", in.Unit, rebase.Onto)))
+					events = append(events, trace.UpstreamMoved(id, stream, move, fmt.Sprintf("unit %s's approval no longer holds: its candidate was rebased onto the feature branch at %s and returns to checking and review", in.Unit, rebase.Onto)))
 				}
 			}
 			txs = append(txs, trace.Transaction{ExpectedVersion: state.Version,
-				Transition: trace.Transition{Header: r.header(id, stream, in.Unit, operation, at), Subject: subject, From: state.Value, To: UnitReviewing, Reason: reason}, Events: events})
+				Transition: trace.Transition{Header: r.header(id, stream, in.Unit, operation, at), Subject: subject, From: state.Value, To: UnitChecking, Reason: reason}, Events: events})
 		}
 	}
 	content, err := json.MarshalIndent(rebase, "", "  ")

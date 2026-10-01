@@ -291,7 +291,7 @@ func TestJujutsuRebaseStoresEachUnitsConflictAndRoutesItToItsMason(t *testing.T)
 	must(t, m.Pass(ctx))
 
 	for unit, want := range map[string]string{"resume": "+// landed and resumed", "upload": "+package upload"} {
-		if state, err := repository.Workflow(stream, trace.UnitSubject(unit)); err != nil || state.Value != UnitReviewing {
+		if state, err := repository.Workflow(stream, trace.UnitSubject(unit)); err != nil || state.Value != UnitChecking {
 			t.Fatalf("unit %s is %+v: %v", unit, state, err)
 		}
 		_, report := latestReport(t, repository, stream, unit)
@@ -805,7 +805,7 @@ func TestJujutsuRebasedUnitKeepsItsChangeAndReturnsToReview(t *testing.T) {
 		t.Fatalf("dedupe's report after its rebase %+v", report)
 	}
 	back := slices.IndexFunc(allTransitions(t, f.trace, stream), func(tr trace.Transition) bool {
-		return tr.ID == trace.UnitSubject("dedupe")+"-reviewing-rebase-1" && tr.From == UnitApproved && tr.To == UnitReviewing && strings.HasPrefix(tr.Reason, "the approval no longer holds: ")
+		return tr.ID == trace.UnitSubject("dedupe")+"-checking-rebase-1" && tr.From == UnitApproved && tr.To == UnitChecking && strings.HasPrefix(tr.Reason, "the approval no longer holds: ")
 	})
 	if back < 0 {
 		t.Fatal("dedupe's return to review is not recorded")

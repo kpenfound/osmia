@@ -83,3 +83,12 @@ func (m *masons) contestFailure(ctx context.Context, stream config.WorkstreamID,
 func failedReview(contest trace.Transition, unit string) bool {
 	return contest.To == UnitContested && contest.From == UnitReviewing && contest.Actor == reviewerActor && contest.Cause != reviewDocument(unit)
 }
+
+// bounceContest reports whether a contest was raised because send-backs, by
+// reviewer verdicts and failed checks together, reached shed.max_bounces.
+func bounceContest(contest trace.Transition, unit string) bool {
+	if contest.To != UnitContested || contest.Cause != reviewDocument(unit) {
+		return false
+	}
+	return contest.From == UnitReviewing && contest.Actor == reviewerActor || contest.From == UnitChecking && contest.Actor == checksActor
+}

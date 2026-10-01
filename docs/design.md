@@ -141,7 +141,7 @@ The shed is where units are argued over. Once the plan is ratified, a mason does
       shed/round-<n>/            one file per committee member, the architect's reply, your rulings
       amendments/<n>/            request, draft spec and plan, affected set, its round, the decision
       questions/<n>/             as asked, the decision, what you were sent, what you said, what went back
-      units/<u>/                 bundle, review/, landing.json
+      units/<u>/                 bundle, checks-<n>.json, review/, landing.json
       agents/<id>/log.jsonl      every turn's request and final response, with provenance
       events.jsonl               every transition, with who and why
       ledger.jsonl               cost per session
@@ -184,11 +184,11 @@ The owner may abandon an undelivered workstream. Abandonment stops new turns, ca
 ### 5.2 Unit states
 
 ```
-planned -> ready -> implementing -> reviewing -> approved -> merged
-                        ^              |
-                        +--------------+ changes requested, bounded by max_bounces
+planned -> ready -> implementing -> checking -> reviewing -> approved -> merged
+                        ^              |            |
+                        +--------------+------------+ checks failed or changes requested, bounded by max_bounces
 
-any state may also be: waiting (a question is open), contested (review bounces or a mason clean-turn decision)
+any state may also be: waiting (a question is open), contested (send-backs or a mason clean-turn decision)
 ```
 
 | State | Meaning | Handled by |
@@ -196,13 +196,16 @@ any state may also be: waiting (a question is open), contested (review bounces o
 | planned | In the plan, dependencies not yet merged. | scheduler |
 | ready | Every unit it depends on has merged. Eligible for a slot. | scheduler |
 | implementing | A mason works in the unit's workspace until its task is done and its acceptance holds, then ends its turn with the outcome: what the work does and how it checked the acceptance. | mason |
-| reviewing | The unit's reviewer reads the unit's task and acceptance, the mason's outcome and the unit's diff against the feature branch, with the sealed spec as background, verifies the acceptance and decides. Material findings send it back to implementing with the findings. The same reviewer re-reviews the revised candidate, always an exact commit. | committee |
+| checking | The service runs the project's Dagger checks on a fresh export of the exact candidate before review. Passing checks send it to review with their result. Failing checks send it back to implementing with the failures and their output, as a send-back counted with review's toward `max_bounces`. A run that does not complete holds the unit here, tells the chief of staff and runs again later. | service |
+| reviewing | The unit's reviewer reads the unit's task and acceptance, the mason's outcome, the recorded check result and the unit's diff against the feature branch, with the sealed spec as background, verifies the acceptance and decides. The reviewer runs no checks. Material findings send it back to implementing with the findings. The same reviewer re-reviews the revised candidate, always an exact commit. | committee |
 | approved | The reviewer is satisfied. Waiting for the foreman. | scheduler |
 | merged | Squashed to one commit on the feature branch, message generated from the unit's title and the criteria it serves. Units still in flight are rebased. | foreman |
 | waiting | A sub-state of any of the above: the unit's role asked a question and its turn ended. Nothing else on the unit moves until the answer arrives. Other units continue. | chief of staff, owner |
-| contested | Review bounces reached `max_bounces`, the mason gave up or exhausted its clean-turn bound, a role's turn failed on every retry, or a reviewer's turn ended without a verdict. The chief of staff rules on it first (section 6.6); what it cannot resolve is raised to you with its findings. Nothing on the unit moves until a ruling. | chief of staff, owner |
+| contested | Send-backs by failed checks and review reached `max_bounces`, the mason gave up or exhausted its clean-turn bound, a role's turn failed on every retry, or a reviewer's turn ended without a verdict. The chief of staff rules on it first (section 6.6); what it cannot resolve is raised to you with its findings. Nothing on the unit moves until a ruling. | chief of staff, owner |
 
-Waiting and contested preserve the underlying unit stage and any candidate under discussion. An answer or ruling resumes that stage through a recorded transition; it does not bypass review or landing checks. A mason contest has no candidate, so the owner can only return it to implementing with a note and a fresh clean-turn allowance. Plan dependencies must reference existing units and form an acyclic graph. Invalid plans cannot be ratified, and an amendment must preserve those properties.
+Waiting and contested preserve the underlying unit stage and any candidate under discussion. An answer or ruling resumes that stage through a recorded transition; it does not bypass review or landing checks. A ruling of review on a unit contested by failed checks sends the candidate to its reviewer with those failures as evidence; it does not make them pass.
+
+A check run is bound to its candidate, the feature branch commit it was built on and the diff between them, and recorded under the unit with the checks it ran, why they were chosen, the command, its exit status and the end of its output, including failures and runs that did not complete. A review starts only from a completed run of the exact candidate it reviews; a candidate that changed, through a revision or a rebase, is checked again first. With the Jev boost on, a judgment chooses the checks the change can affect from the project's check links, `dagger check` runs those, and otherwise every check runs (section 9.6). Passing checks are evidence for the review and never an approval. A mason contest has no candidate, so the owner can only return it to implementing with a note and a fresh clean-turn allowance. Plan dependencies must reference existing units and form an acyclic graph. Invalid plans cannot be ratified, and an amendment must preserve those properties.
 
 ### 5.3 The shed
 
@@ -320,7 +323,7 @@ The feature branch is one workspace on the project's clone. Each unit gets a wor
 
 On approval the foreman squashes the unit's workspace to one commit on the feature branch with a message generated from the unit's title and the criteria it serves, then rebases every unit still in flight. A conflict goes to a mason session in the conflicting unit's workspace with the sealed spec and the instruction that the tree carries conflict markers to resolve against it. A session never discovers conflict markers by accident. Reviewers never see them.
 
-An approval records the reviewed candidate, its base and the governing spec and plan revisions. Landing first checks that those inputs are still current. If a rebase changes the candidate or its base, that unit returns to review after any conflict resolution and before landing. The foreman never silently transfers approval to a different candidate. Active file writers must finish or be stopped and snapshotted before their workspace is rebased; the scheduler owns this coordination.
+An approval records the reviewed candidate, its base and the governing spec and plan revisions. Landing first checks that those inputs are still current. If a rebase changes the candidate or its base, that unit returns to checking and review after any conflict resolution and before landing. The foreman never silently transfers approval to a different candidate. Active file writers must finish or be stopped and snapshotted before their workspace is rebased; the scheduler owns this coordination.
 
 ### 7.5 Upstream drift
 
@@ -349,6 +352,7 @@ The service runs one controller per role kind, each reconciling its own input st
 | architect | `handed`, amendment requests | one per workstream |
 | shed | `in-shed`, amendment rounds | committee members per proposal, `max_shed_rounds` |
 | mason | `ready`, `implementing`, conflict resolution | `capacity.masons`, plus a per-workstream cap |
+| checks | `checking` | one check run per workstream |
 | reviewer | `reviewing`, `assembled` | `capacity.reviewers` |
 | foreman | `approved`, landing events, upstream cadence | one lander per project, landing is serial |
 | librarian | project added, unit merged | one per project |
@@ -408,7 +412,7 @@ The Osmia server, role-scoped:
 | `amend` | drift mason | File an amendment request when an upstream change alters what a sealed criterion means. |
 | `object`, `concede` | committee | A shed contribution, citing the spec, the charter or the knowledge base. |
 | `verdict` | committee | A review verdict: the decision, how the reviewer verified the acceptance, and findings with severities and the action each asks for. |
-| `run_checks` | unit and final reviewers | Run `dagger check` on a fresh disposable export of the pinned candidate; record its commit, exit status and bounded output. |
+| `run_checks` | final reviewer | Run `dagger check` on a fresh disposable export of the pinned candidate; record its commit, exit status and bounded output. A unit reviewer receives the result of the checks the service ran before review instead. |
 | `workstream_diff` | unit, drift and final reviewers | Read the diff a review is pinned to: the whole diff, the changed files with line counts, chosen files or directories, or the hunks touching a line range. A unit review reads its candidate against its base, a drift review the feature branch's change before the rebase and the resolved candidate's change on upstream, and a final review the branch against upstream. Review prompts list the changed files instead of carrying diffs. |
 | `answer`, `escalate`, `route_amendment`, `propose_charter`, `set_status`, `notify` | chief of staff | The five outcomes of a question, the status, and a notice to in-flight bundles. |
 | `inspect_code` | chief of staff | Read a committed code excerpt; a cited answer queues a librarian knowledge-gap refresh. |
@@ -422,19 +426,21 @@ There is no tool that lists agents, messages an arbitrary agent, or creates one.
 
 ### 9.5 Sandboxes
 
-A role runs on the host or in a container, per profile. In a container the workspace is bind-mounted and the MCP servers are reached over HTTP from the host. Native tools follow role capabilities: reading tools for read-only roles, editing tools for file writers, and a shell only for implementation turns with execution permission. Native delegation, web tools and arbitrary MCP discovery are not granted. Read-only roles cannot edit their inputs or run arbitrary commands. Unit and final reviewers can request the fixed service-owned `run_checks` tool, which runs `dagger check` on a fresh export of their pinned candidate and discards the copy afterward. It accepts no command, path or environment overrides. The check client receives a temporary home and engine connectivity, without inherited provider, delivery or signing credentials; the agent receives no engine endpoint. Results enter the tool audit trail and inform the review without granting approval or delivery.
+A role runs on the host or in a container, per profile. In a container the workspace is bind-mounted and the MCP servers are reached over HTTP from the host. Native tools follow role capabilities: reading tools for read-only roles, editing tools for file writers, and a shell only for implementation turns with execution permission. Native delegation, web tools and arbitrary MCP discovery are not granted. Read-only roles cannot edit their inputs or run arbitrary commands. The service runs a unit candidate's checks itself before review, and the final reviewer can request the fixed service-owned `run_checks` tool. Both run `dagger check` on a fresh export of the pinned candidate and discard the copy afterward. Neither accepts a command, path or environment override from an agent; the checks a unit runs are chosen by the service. The check client receives a temporary home and engine connectivity, without inherited provider, delivery or signing credentials; no agent receives an engine endpoint. Results enter the trace and inform the review without granting approval or delivery.
 
 A mason in a Docker Sandbox may also be given Dagger, so it can run the project's checks and functions while it builds rather than relying on review. The owner configures the Dagger CLI release and a host engine, which may be the engine container the owner's own Dagger CLI provisioned. The sandbox keeps a template's CLI at that release or installs it, and it reaches the engine through a port allowed for that sandbox alone. The engine has no delivery credentials, and no other role, including the classifier that shares the mason's sandbox, receives it.
 
 ### 9.6 Jev judgments
 
-Some decisions inside a turn are small, bounded judgments rather than generation: which of four classes a mason's final response falls in, which retrieved passages bear on a question, whether a proposed answer appears to contradict a ruling. An optional Jev boost asks those of Jev, TypeSafe's System One model, which takes textual state and typed questions and returns typed answers with probability distributions: a Choice selects one supplied option, a Score rates against supplied levels, and a Noul is the probability that a proposition holds. Larger generative models remain responsible for implementation, planning, explanations and review.
+Some decisions inside a turn are small, bounded judgments rather than generation: which of four classes a mason's final response falls in, which retrieved passages bear on a question, whether a proposed answer appears to contradict a ruling, which of a project's checks a unit's change can affect. An optional Jev boost asks those of Jev, TypeSafe's System One model, which takes textual state and typed questions and returns typed answers with probability distributions: a Choice selects one supplied option, a Score rates against supplied levels, and a Noul is the probability that a proposition holds. Larger generative models remain responsible for implementation, planning, explanations and review.
 
 One global setting turns the boost on or off for every judgment; there is no per-judgment switch. It is off by default. The service reaches Jev through a TypeSafe-compatible API, OpenRouter by default, with a credential referenced through an environment variable that no session receives. Jev holds no tool, no version control and no delivery credential; a judgment sees only the state its question needs.
 
 Every judgment has a supported fallback, which is the workflow as it runs without Jev. A judgment falls back when the boost is off, its credential is missing, the provider times out, is rate limited, unavailable or refuses the request, the response does not answer the questions in the shape they require, or the judgment's own acceptance, such as a confidence threshold, declines the answers. Thresholds are per judgment and tuned against a pinned model version; confidence is derived from the answer's distribution and is never treated as a verified probability of being correct. Requests are bounded by a short timeout and at most one retry of a transient failure. A rate limit, or repeated outages, cools every judgment down together, so an outage falls back at once rather than producing a retry storm.
 
-Judgments run inside turns, never on the scheduling path, and no answer bypasses an outcome tool, reviewer judgment, service-owned version control or an owner gate. An answer is advice to the code or the role that asked; it is not a transition.
+Judgments run inside turns, or inside the service's check runs, never on the scheduling path, and no answer bypasses an outcome tool, reviewer judgment, service-owned version control or an owner gate. An answer is advice to the code or the role that asked; it is not a transition.
+
+The check selection asks, for each link `dagger list checks --all` gives the candidate, the probability that the change can alter that check's result, from the changed files and, when it fits, the diff. A project with more links than one judgment can ask about is asked about its collections' items instead, the largest collapsed first. The links at or above a low threshold run; a judgment that selects none, or falls back, runs every check.
 
 The trace records each judgment, while the boost is on, under its workstream: the turn that asked, the task and its question version, the source record revisions its state was built from, the request, the configured and resolved model versions, the answers with their distributions, the outcome and any fallback reason, and usage. A judgment is identified by its cause, task, version and exact request, so after a restart the workflow reads back the decision it already used instead of asking again, and changed inputs are a new judgment. A judgment records its start before its request; a start without a result is an interrupted attempt, distinguishable from an accepted one, and a judgment interrupted twice falls back. Usage enters the ledger under the `jev` role and counts toward budgets; a cost the provider does not report is unknown, as for an agent. Status reports the boost as disabled, unconfigured, ready or degraded with its latest failure.
 
@@ -640,6 +646,7 @@ clone = "~/github.com/dagger/dagger"
 base_branch = "main"
 landing = "commit-per-unit"          # or "squash"
 upstream_rebase = "6h"
+checks_timeout = "15m"               # one run of a candidate's checks
 hearsay_scope = "dagger"
 
 [capacity]
@@ -735,7 +742,7 @@ trace        the workstream's record; files in the project's git repository unde
 profile      agent, model, effort, fallback; bound per role; switchable while running
 
 feature      handed -> sketched -> in-shed -> ratified -> building -> assembled -> delivered
-unit         planned -> ready -> implementing -> reviewing -> approved -> merged
+unit         planned -> ready -> implementing -> checking -> reviewing -> approved -> merged
              (+ waiting, contested)
 roles        owner, chief of staff, architect, committee, mason, foreman, librarian
 ```

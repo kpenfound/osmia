@@ -41,6 +41,9 @@ const (
 	UnitReady = "ready"
 	// UnitImplementing is a unit a mason works on.
 	UnitImplementing = "implementing"
+	// UnitChecking is a unit whose candidate the service runs the project's
+	// checks on before review.
+	UnitChecking = "checking"
 	// UnitReviewing is a unit whose candidate is under review.
 	UnitReviewing = "reviewing"
 	// UnitApproved is a unit its reviewer approved, waiting to land.
@@ -49,8 +52,8 @@ const (
 	UnitMerged = "merged"
 	// UnitWaiting is a unit whose role asked a question.
 	UnitWaiting = "waiting"
-	// UnitContested is a unit awaiting an owner ruling after review bounces
-	// or a mason clean-turn contest.
+	// UnitContested is a unit awaiting an owner ruling after review or check
+	// bounces or a mason clean-turn contest.
 	UnitContested = "contested"
 )
 

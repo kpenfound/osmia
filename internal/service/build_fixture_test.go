@@ -124,8 +124,20 @@ func newReviewFixture(t *testing.T, key string) (*shedFixture, config.Workstream
 	return f, stream, repository
 }
 
-// seedReview records a completed mason report and snapshots its candidate.
+// seedReview records a completed mason report, snapshots its candidate and
+// passes its checks, so the unit is reviewing.
 func seedReview(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome string) {
+	t.Helper()
+	seedChecking(t, f, repository, stream, unit, outcome)
+	runChecks(t, f.s, repository, stream)
+	if state, err := repository.Workflow(stream, trace.UnitSubject(unit)); err != nil || state.Value != UnitReviewing {
+		t.Fatalf("fixture unit %s is %s, not reviewing: %v", unit, state.Value, err)
+	}
+}
+
+// seedChecking records a completed mason report and snapshots its
+// candidate, so the unit is checking.
+func seedChecking(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome string) {
 	t.Helper()
 	m := newMasonController(f.s, repository)
 	ctx := context.Background()
@@ -148,6 +160,6 @@ func seedReview(t *testing.T, f *shedFixture, repository *trace.Repository, stre
 	moved, blocked, err := m.finish(ctx, b, unit)
 	must(t, err)
 	if !moved || blocked {
-		t.Fatalf("fixture unit %s did not enter review", unit)
+		t.Fatalf("fixture unit %s did not enter checking", unit)
 	}
 }

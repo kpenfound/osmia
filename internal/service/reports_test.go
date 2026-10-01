@@ -69,7 +69,7 @@ func reportDone(outcome string) func(context.Context, agent.Request, *mcp.Client
 }
 
 func TestFinishNoticeWithOptionalOwnerAction(t *testing.T) {
-	base := "Unit parser is reviewing: its mason reported done on turn first; its report is units/parser/report.json revision 2."
+	base := "Unit parser is checking: its mason reported done on turn first; its report is units/parser/report.json revision 2."
 	for _, tc := range []struct {
 		card *coreadapter.Card
 		want string
@@ -264,17 +264,17 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	}
 
 	reason := fmt.Sprintf("the mason of unit resume reported done on turn %s; its candidate is %s on %s, from %s at %s, and its report is units/resume/report.json revision 1", masonTurnID("resume"), report.Candidate, unitBranch(stream, "resume"), featureBranch(stream), report.Base)
-	reviewing := transitionMove{reviewingTransitionID("resume", 1), trace.UnitSubject("resume"), UnitImplementing, UnitReviewing, turn.Response.ID, reason}
-	if got, want := masonTransitions(t, f, stream), []transitionMove{started("resume", f.startedReason(t, stream, "resume")), reviewing, started("dedupe", f.startedReason(t, stream, "dedupe"))}; !reflect.DeepEqual(got, want) {
+	checking := transitionMove{checkingTransitionID("resume", 1), trace.UnitSubject("resume"), UnitImplementing, UnitChecking, turn.Response.ID, reason}
+	if got, want := masonTransitions(t, f, stream), []transitionMove{started("resume", f.startedReason(t, stream, "resume")), checking, started("dedupe", f.startedReason(t, stream, "dedupe"))}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
 
 	// The finish and the next start carry one notice each for the chief of
 	// staff, delivered as event turns and acknowledged once they have
 	// completed successfully.
-	reviewNotice := fmt.Sprintf("Unit resume is reviewing: its mason reported done on turn %s; its report is units/resume/report.json revision 1. Headline: Uploads resume; Needs you: Review the candidate.", masonTurnID("resume"))
-	if body := f.notice(t, stream, reviewingTransitionID("resume", 1)); body != reviewNotice {
-		t.Fatalf("the reviewing notice %q, want %q", body, reviewNotice)
+	reviewNotice := fmt.Sprintf("Unit resume is checking: its mason reported done on turn %s; its report is units/resume/report.json revision 1. Headline: Uploads resume; Needs you: Review the candidate.", masonTurnID("resume"))
+	if body := f.notice(t, stream, checkingTransitionID("resume", 1)); body != reviewNotice {
+		t.Fatalf("the checking notice %q, want %q", body, reviewNotice)
 	}
 	f.awaitEventTurns(t, stream, reviewNotice, "Unit dedupe is implementing: its mason works on it in its unit workspace on "+unitBranch(stream, "dedupe")+".")
 	f.awaitAcknowledgedNotices(t, stream)

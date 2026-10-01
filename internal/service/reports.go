@@ -59,10 +59,10 @@ type UnitReport struct {
 // reportDocument is the document ID of a unit's report.
 func reportDocument(unit string) string { return trace.UnitSubject(unit) + "-report" }
 
-// reviewingTransitionID returns the ID of the transition that moves a unit
-// to reviewing on its report revision k.
-func reviewingTransitionID(unit string, k int) string {
-	return fmt.Sprintf("%s-%s-%d", trace.UnitSubject(unit), UnitReviewing, k)
+// checkingTransitionID returns the ID of the transition that moves a unit
+// to checking on its report revision k.
+func checkingTransitionID(unit string, k int) string {
+	return fmt.Sprintf("%s-%s-%d", trace.UnitSubject(unit), UnitChecking, k)
 }
 
 // masonReports holds the report each running mason turn's done accepted,
@@ -87,7 +87,7 @@ func turnKey(scope coreadapter.Scope) string {
 // fixes it and calls done again; its unit does not move.
 func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	done := coreadapter.Tool{Name: doneTool, Effect: coreadapter.ToolMemory,
-		Description: "Report your unit's work done, once its task is done and every acceptance item holds. Give the outcome: what the work now does and how you checked the acceptance. Put any new project knowledge in learnings. Include an owner-facing headline (64 characters), what happened (140 characters), and needs_you (140 characters, empty unless the owner has an action). Write a single line per card field, in words without IDs, paths or model names. The service records the report, takes your workspace as the unit's candidate and sends it to review; end your turn as soon as this returns.",
+		Description: "Report your unit's work done, once its task is done and every acceptance item holds. Give the outcome: what the work now does and how you checked the acceptance. Put any new project knowledge in learnings. Include an owner-facing headline (64 characters), what happened (140 characters), and needs_you (140 characters, empty unless the owner has an action). Write a single line per card field, in words without IDs, paths or model names. The service records the report, takes your workspace as the unit's candidate, runs the project's checks on it and sends it to review; end your turn as soon as this returns.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"learnings":{"type":"array","items":{"type":"string"}},"headline":{"type":"string"},"happened":{"type":"string"},"needs_you":{"type":"string"}},"required":["outcome"],"additionalProperties":false}`)}
 	done.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
@@ -300,7 +300,7 @@ func (m *masons) reported(stream config.WorkstreamID, unit string) (MasonReport,
 	return report, last, true, nil
 }
 
-// finish moves an implementing unit whose mason reported done to reviewing:
+// finish moves an implementing unit whose mason reported done to checking:
 // it snapshots the unit's workspace as its candidate, and records the report
 // with the candidate as the next revision of units/<unit>/report.json and the
 // move in one commit. It reports whether the unit moved. A unit whose
@@ -374,11 +374,11 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: reportDocument(unit), Revision: k, Project: m.repository.Project(), Workstream: b.stream, Unit: unit, At: at, Actor: masonActor, Cause: turn.Response.ID, Depth: turn.Request.Depth}
 	doc := trace.Document{Header: h, Path: fmt.Sprintf(reportPath, unit), Content: string(content) + "\n"}
 	subject := trace.UnitSubject(unit)
-	h.Schema, h.ID, h.Revision = "osmia.trace.transition", reviewingTransitionID(unit, k), 1
-	tr := trace.Transition{Header: h, Subject: subject, From: UnitImplementing, To: UnitReviewing,
+	h.Schema, h.ID, h.Revision = "osmia.trace.transition", checkingTransitionID(unit, k), 1
+	tr := trace.Transition{Header: h, Subject: subject, From: UnitImplementing, To: UnitChecking,
 		Reason: fmt.Sprintf("the mason of unit %s reported done on turn %s; its candidate is %s on %s, from %s at %s, and its report is %s revision %d", unit, turn.Request.TurnID, candidate, w.Branch, featureBranch(b.stream), base, doc.Path, k)}
 	tx := trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr,
-		Events: []trace.Event{trace.Notice(reviewingTransitionID(unit, k), "unit", finishNotice(unit, turn.Request.TurnID, doc.Path, k, card))}}
+		Events: []trace.Event{trace.Notice(checkingTransitionID(unit, k), "unit", finishNotice(unit, turn.Request.TurnID, doc.Path, k, card))}}
 	if _, err := m.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); errors.Is(err, trace.ErrConflict) {
 		return false, false, nil
 	} else if err != nil {
@@ -388,7 +388,7 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 }
 
 func finishNotice(unit, turn, path string, revision int, card *coreadapter.Card) string {
-	message := fmt.Sprintf("Unit %s is reviewing: its mason reported done on turn %s; its report is %s revision %d.", unit, turn, path, revision)
+	message := fmt.Sprintf("Unit %s is checking: its mason reported done on turn %s; its report is %s revision %d.", unit, turn, path, revision)
 	if card != nil {
 		message += " Headline: " + card.Headline
 	}

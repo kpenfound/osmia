@@ -486,7 +486,7 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	if got := fileAt(t, f, rebases[0].Commit, "internal/trace/audit.go"); got != "package trace\n// audit\n" {
 		t.Fatalf("audit's carried candidate lost its own change: %q", got)
 	}
-	back := transitionByID(t, repository, stream, trace.UnitSubject("audit")+"-reviewing-rebase-1")
+	back := transitionByID(t, repository, stream, trace.UnitSubject("audit")+"-checking-rebase-1")
 	if back.From != UnitApproved || !strings.HasPrefix(back.Reason, "the approval no longer holds: ") {
 		t.Fatalf("audit's return to review %+v", back)
 	}

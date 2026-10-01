@@ -106,7 +106,7 @@ func TestReviewBundleMissingCandidateFailsClosed(t *testing.T) {
 		report.Candidate = ""
 		content, _ := json.Marshal(report)
 		d.Header.Revision++
-		d.Header.Cause = reviewingTransitionID("resume", 1)
+		d.Header.Cause = checkingTransitionID("resume", 1)
 		d.Content = string(content)
 		if err := repo.RecordDocuments(context.Background(), []trace.Document{d}); err != nil {
 			t.Fatal(err)

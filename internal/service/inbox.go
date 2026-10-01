@@ -188,7 +188,7 @@ func ratificationEntry(repository *trace.Repository, stream config.WorkstreamID)
 
 // contestOptions returns the rulings a contest takes: review alone after a
 // failed review turn, revise alone after a mason contest, and either after
-// review bounces.
+// send-backs by review or failed checks.
 func contestOptions(contest trace.Transition, unit string, mason bool) []string {
 	switch {
 	case failedReview(contest, unit):

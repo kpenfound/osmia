@@ -19,7 +19,7 @@ import (
 
 // Enforcement is what a service runs its role turns through: the engine
 // handing out each role's core enforcer and the host serving each turn's
-// scoped tools.
+// scoped tools, and what it runs candidates' checks with.
 type Enforcement struct {
 	Engine coreadapter.Engine
 	Hosts  coreadapter.MCPHosts
@@ -52,7 +52,11 @@ var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_wri
 // its view of its unit's workspace, ask the chief of staff and report its
 // unit done.
 var unitMasonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, doneTool}, WriteFiles: true, Execute: true}
-var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, verdictTool, runChecksTool, workstreamDiffTool}}
+
+// reviewerGrant is what a unit reviewer turn may do: read its candidate and
+// diff, ask the chief of staff and record its verdict. The service runs the
+// candidate's checks before review.
+var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, verdictTool, workstreamDiffTool}}
 
 // threadExecution is how a thread turn of role runs: in the role's sandbox
 // and image, and for a mason with the Dagger engine the role configures.
@@ -78,9 +82,13 @@ func threadExecution(role string, r config.Role) coreadapter.ExecutionSettings {
 // carried, cites that drift rebase's upstream commit. Each role's
 // sandbox comes from its configuration, and a sandbox the platform cannot
 // enforce fails the turn with core's reason. Thread turns take their role's sandbox and the root from the
-// configuration the service has loaded, and record UTC times.
+// configuration the service has loaded, and record UTC times. Unit check runs
+// and the final reviewer's run_checks use e.Checks, or the runner opts
+// already holds when e has none.
 func Enforce(opts Options, e Enforcement) Options {
-	opts.reviewChecks = e.Checks
+	if e.Checks != nil {
+		opts.reviewChecks = e.Checks
+	}
 	opts.Librarian = &Librarian{Engine: e.Engine, Hosts: e.Hosts}
 	opts.Architect = &Architect{Engine: e.Engine, Hosts: e.Hosts}
 	opts.Committee = &Committee{Engine: e.Engine, Hosts: e.Hosts}
@@ -178,7 +186,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					if identityErr != nil {
 						return nil, identityErr
 					}
-					return append(ask, verdicts.tool(scope), candidateCheckTool(cfg, r, scope, identity.Candidate.Revision, e.Checks), reviewDiffTool(cfg, r, scope, identity)), err
+					return append(ask, verdicts.tool(scope), reviewDiffTool(cfg, r, scope, identity)), err
 				}
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil

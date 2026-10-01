@@ -316,7 +316,7 @@ func TestLandingDemonstration(t *testing.T) {
 	if len(rebases) == 0 || rebases[0].State != UnitApproved || rebases[0].Onto != resume.Commit || rebases[0].Snapshot != approvedAudit[0].Candidate.Revision || len(rebases[0].Conflicts) != 0 {
 		t.Fatalf("audit's rebases %+v", rebases)
 	}
-	back := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("audit")+"-reviewing-rebase-1" })
+	back := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("audit")+"-checking-rebase-1" })
 	if back < merged || transitions[back].From != UnitApproved || !strings.HasPrefix(transitions[back].Reason, "the approval no longer holds: ") {
 		t.Fatalf("audit's return to review at %d: %+v", back, transitions[max(back, 0)])
 	}

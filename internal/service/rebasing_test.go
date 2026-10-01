@@ -453,7 +453,7 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(w.Path, masonWrote), []byte("package trace\n\n// landed and deduplicated\n"), 0600))
 	completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
 	must(t, m.Pass(ctx))
-	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != UnitReviewing {
+	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != UnitChecking {
 		t.Fatalf("the resolved unit is %+v %v", state, err)
 	}
 	_, report := latestReport(t, repository, stream, "dedupe")
@@ -500,7 +500,7 @@ func TestUnitDoneBehindItsFeatureBranchFinishesAfterItsRebase(t *testing.T) {
 		t.Fatalf("the rebase %+v %v", result, err)
 	}
 	must(t, m.Pass(ctx))
-	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != UnitReviewing {
+	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != UnitChecking {
 		t.Fatalf("the rebased unit is %+v %v", state, err)
 	}
 	if _, report := latestReport(t, repository, stream, "dedupe"); report.Base != landed {

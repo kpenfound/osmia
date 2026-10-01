@@ -65,7 +65,7 @@ func TestCompletedMasonTurnFinishesAfterRestart(t *testing.T) {
 	must(t, m.Pass(ctx))
 	state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
 	must(t, err)
-	if state.Value != UnitReviewing {
+	if state.Value != UnitChecking {
 		t.Fatalf("unit recovered as %s", state.Value)
 	}
 	docs, err := trace.Read[trace.Document](repo, stream)

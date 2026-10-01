@@ -241,8 +241,8 @@ func (s *Service) recordContestedRuling(ctx context.Context, repo *trace.Reposit
 }
 
 func (r *reviewers) resumeContested(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) error {
-	// Only a contest raised by review bounces is resumed by a bounce ruling.
-	if contest, _, err := masonContest(r.repository, stream, unit); err != nil || contest.From != UnitReviewing || contest.Actor != reviewerActor || failedReview(contest, unit) {
+	// Only a contest raised by send-backs is resumed by a bounce ruling.
+	if contest, _, err := masonContest(r.repository, stream, unit); err != nil || !bounceContest(contest, unit) {
 		return err
 	}
 	result, ok, err := r.storedResult(stream, unit, state)
@@ -263,7 +263,7 @@ func (r *reviewers) resumeContested(ctx context.Context, stream config.Workstrea
 		return errors.New("invalid contested ruling")
 	}
 	id := fmt.Sprintf("%s-%s-ruling-%d", trace.UnitSubject(unit), to, result.Bounces)
-	reason := fmt.Sprintf("%s ruled %s on contested candidate %s after %d material reviews: %s", ruling.ruler(), ruling.Decision, ruling.Candidate, ruling.Bounces, ruling.Note)
+	reason := fmt.Sprintf("%s ruled %s on contested candidate %s after %d send-backs: %s", ruling.ruler(), ruling.Decision, ruling.Candidate, ruling.Bounces, ruling.Note)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: ruling.actor(), Cause: fmt.Sprintf("%s-ruling-%d", trace.UnitSubject(unit), result.Bounces)}
 	_, err = r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitContested, To: to, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", reason)}})
 	if errors.Is(err, trace.ErrConflict) {

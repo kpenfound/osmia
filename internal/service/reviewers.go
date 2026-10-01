@@ -41,9 +41,13 @@ type UnitVerdict struct {
 	Findings []ReviewFinding `json:"findings"`
 }
 
+// UnitReviewResult is a decision on a candidate: a reviewer's verdict from
+// Turn, or, when Checks is set, the send-back of failed check run Checks,
+// recorded as Turn. Bounces counts the send-backs of both kinds.
 type UnitReviewResult struct {
 	Identity UnitReviewIdentity `json:"identity"`
 	Turn     string             `json:"turn"`
+	Checks   int                `json:"checks,omitempty"`
 	Verdict  UnitVerdict        `json:"verdict"`
 	Bounces  int                `json:"bounces"`
 }
@@ -346,6 +350,13 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	if err != nil {
 		return nil
 	} // preparation records the block for the chief
+	run, checked, err := latestRunFor(r.repository, stream, unit, identity)
+	if err != nil {
+		return err
+	}
+	if !checked {
+		return r.recheck(ctx, stream, unit, state, identity)
+	}
 	if err := r.ensureThread(ctx, stream, unit); err != nil {
 		return err
 	}
@@ -354,7 +365,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 		return err
 	}
 	content, _ := json.MarshalIndent(identity, "", "  ")
-	prompt := fmt.Sprintf("Review this exact candidate: verify that it does the unit's task and that every acceptance item holds, then record your verdict. Material findings must say what the mason should change. The candidate identity is:\n%s\n\nChanged files, with added and removed lines; read the diff with %s:\n%s", content, workstreamDiffTool, changedFiles(req.Diff))
+	prompt := fmt.Sprintf("Review this exact candidate: verify that it does the unit's task and that every acceptance item holds, then record your verdict. Material findings must say what the mason should change. The candidate identity is:\n%s\n\nChanged files, with added and removed lines; read the diff with %s:\n%s\n%s", content, workstreamDiffTool, changedFiles(req.Diff), checkEvidence(run))
 	guidance, err := r.reviewGuidance(stream, unit, identity.Candidate.Revision)
 	if err != nil {
 		return err
@@ -368,7 +379,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	for _, item := range req.Context {
 		prompt += "\n\n" + item.Source + ":\n" + item.Content
 	}
-	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: "You are the unit reviewer. You verify one unit's work against its task and acceptance, with the sealed spec as background. Judge the candidate against the unit as planned; the plan's shape is settled. Call ask if a decision is needed, including when the task itself looks wrong, and end the turn; review resumes when the answer arrives. Otherwise call verdict with your decision. You cannot edit the candidate. Your read-only view holds its exact files. Call workstream_diff to read the candidate's diff, whole or by file and line range. Call run_checks to run dagger check on a separate disposable copy; cite the returned candidate and result as evidence.", Prompt: prompt}
+	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: "You are the unit reviewer. You verify one unit's work against its task and acceptance, with the sealed spec as background. Judge the candidate against the unit as planned; the plan's shape is settled. Call ask if a decision is needed, including when the task itself looks wrong, and end the turn; review resumes when the answer arrives. Otherwise call verdict with your decision. You cannot edit the candidate. Your read-only view holds its exact files. Call workstream_diff to read the candidate's diff, whole or by file and line range. The service ran the project's checks on this exact candidate before review, and your prompt carries their result; cite it as evidence. You do not run checks.", Prompt: prompt}
 	_, err = r.repository.EnqueueTurn(ctx, request)
 	return err
 }
@@ -741,12 +752,28 @@ func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamI
 	return err
 }
 
+// recheck returns a reviewing unit to checking when no completed check run
+// is recorded for its current candidate, base and diff.
+func (r *reviewers) recheck(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, identity UnitReviewIdentity) error {
+	id := fmt.Sprintf("%s-%s-review-%d", trace.UnitSubject(unit), UnitChecking, state.Version)
+	reason := fmt.Sprintf("no completed check run is recorded for candidate %s from %s; its checks run before it is reviewed", identity.Candidate.Revision, identity.Candidate.BaseRevision)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit)}
+	_, err := r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitReviewing, To: UnitChecking, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", "Unit "+unit+" returns to checking: "+reason+".")}})
+	if errors.Is(err, trace.ErrConflict) {
+		return nil
+	}
+	return err
+}
+
 func (r *reviewers) enqueueFindings(ctx context.Context, stream config.WorkstreamID, unit string, result UnitReviewResult) error {
 	th, err := r.repository.Thread(stream, masonAgent(unit))
 	if err != nil {
 		return err
 	}
 	turn := fmt.Sprintf("%s-revise-%s", masonAgent(unit), strings.TrimPrefix(result.Turn, reviewerAgent(unit)+"-review-"))
+	if result.Checks > 0 {
+		turn = fmt.Sprintf("%s-revise-checks-%d", masonAgent(unit), result.Checks)
+	}
 	if slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == turn }) {
 		return nil
 	}
@@ -755,7 +782,18 @@ func (r *reviewers) enqueueFindings(ctx context.Context, stream config.Workstrea
 		return err
 	}
 	findings, _ := json.MarshalIndent(result.Verdict.Findings, "", "  ")
-	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: result.Turn, Depth: 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(r.cfg.Project), Prompt: fmt.Sprintf("The reviewer returned candidate %s for revision. Address these findings in your unit workspace, check the unit's acceptance again, then call done:\n%s", result.Identity.Candidate.Revision, findings)}
+	actor, prompt := reviewerActor, fmt.Sprintf("The reviewer returned candidate %s for revision. Address these findings in your unit workspace, check the unit's acceptance again, then call done:\n%s", result.Identity.Candidate.Revision, findings)
+	if result.Checks > 0 {
+		actor, prompt = checksActor, fmt.Sprintf("The project's checks failed on candidate %s before review. Fix these failures in your unit workspace, check the unit's acceptance again, then call done:\n%s", result.Identity.Candidate.Revision, findings)
+		runs, err := checkRuns(r.repository, stream)
+		if err != nil {
+			return err
+		}
+		if i := slices.IndexFunc(runs, func(run UnitCheckRun) bool { return run.Unit == unit && run.Run == result.Checks }); i >= 0 && runs[i].Output != "" {
+			prompt += "\n\nThe end of the check output:\n" + runs[i].Output
+		}
+	}
+	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: actor, Cause: result.Turn, Depth: 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(r.cfg.Project), Prompt: prompt}
 	ruling, found, err := latestContestedRuling(r.repository, stream, unit, result.Bounces)
 	if err != nil {
 		return err

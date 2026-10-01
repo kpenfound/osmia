@@ -67,8 +67,9 @@ removed; the service then updates the target workspace.
 
 ## Jev judgments
 
-A Jev judgment is a bounded question that turn code asks through the service's
-`jev.Judge`, never scheduling code: a judgment waits on a network call. The
+A Jev judgment is a bounded question that turn code, or a unit's check run,
+asks through the service's `jev.Judge`, never scheduling code: a judgment waits
+on a network call. The
 Judge is one per service, reads the `[jev]` settings on each call, and is
 nil-safe, so code without one behaves as if the boost were off. The
 [design](design.md#96-jev-judgments) defines what a judgment may decide.

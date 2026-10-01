@@ -294,14 +294,28 @@ as `sandbox-name`, and `sbx rm --force <name>` removes it and its rules.
 Core logs cleanup failures; a failed rule removal still attempts sandbox removal.
 
 Unit and final reviewers receive read-only files from the exact candidate commit
-and writable scratch space. Their `run_checks` tool accepts no arguments and runs
-`dagger check` through the service on a separate, fresh candidate export, made a
-Git root of its own so Dagger finds the project's workspace. The copy and
-temporary home are removed afterward. Checks have a fifteen-minute timeout
-and return the candidate commit, exit status and up to 64 KiB of output, with an
-explicit truncation flag. The check client inherits only PATH and service engine
-selection, not provider, GitHub or SSH credentials. A project without Dagger checks
-returns the check failure as review evidence; there is no command fallback.
+and writable scratch space.
+
+Before a unit is reviewed, the service runs `dagger check --progress=report` on
+a separate, fresh export of its candidate, made a Git root of its own so Dagger
+finds the project's workspace. The copy and temporary home are removed
+afterward. The run is bounded by the project's `checks_timeout` and is
+recorded in the trace as `units/<unit>/checks-<n>.json`, with the candidate,
+its base and diff, the checks it ran and why, the command, its exit status and
+the last 64 KiB of output. Passing checks send the unit to review, and its reviewer receives the
+result instead of running checks. Failing checks, which Dagger's report names,
+send it back to its mason with the failures and output; the send-back counts
+toward `shed.max_bounces`. A run that reports no result, because the engine is
+unreachable, the run timed out or the project has no Dagger checks, leaves the
+unit checking, tells the chief of staff and runs again after ten minutes. One
+run at a time per workstream; a pause holds runs not yet started.
+
+The final reviewer's `run_checks` tool accepts no arguments and runs
+`dagger check` the same way, within `checks_timeout`, returning the candidate
+commit, exit status and the last 64 KiB of output, with an explicit truncation
+flag. The check client
+inherits only PATH and service engine selection, not provider, GitHub or SSH
+credentials. There is no command fallback.
 
 Reviewers read diffs through the `workstream_diff` tool rather than their
 prompts, which list the changed files with added and removed line counts. A unit
@@ -454,6 +468,7 @@ clone = "~/src/repository"          # required; may not yet exist
 base_branch = "main"
 landing = "commit-per-unit"
 upstream_rebase = "6h"              # default; "0" disables scheduled drift rebases
+checks_timeout = "15m"              # default; how long one run of a candidate's checks may take
 classifier = "default"              # optional; omitted by default
 
 [capacity]
@@ -484,6 +499,13 @@ upstream. It defaults to `"6h"`. `"0"` (or `"0s"`) disables scheduled drift
 rebases; `osmia project rebase` still asks for them. A value that does not
 parse as a Go duration, a TOML number, a negative duration, or a nonzero
 duration shorter than `1m` is rejected.
+
+`checks_timeout` is a Go duration string from `1m` to `24h`: how long one run
+of a unit candidate's checks, or of the final reviewer's `run_checks`, may
+take. It defaults to `"15m"`; raise it for a project whose `dagger check` runs
+longer. A run that outlasts it did not complete: the unit stays checking and its
+checks run again later. Listing the check links for a Jev selection has its
+own five-minute bound. A change applies to runs that start after a reload.
 
 `classifier` names a top-level profile for clean mason turns with no accepted
 outcome. When omitted, code heuristics classify the response without a model
@@ -607,9 +629,9 @@ reconciled against the recorded request before retrying.
 ## Optional Jev boost
 
 The Jev boost asks Jev, TypeSafe's System One model, bounded typed questions
-inside turns. One setting turns it on or off for every judgment; it is off by
-default, and with it off Osmia makes no Jev request and needs no Jev
-credential. The other settings show their defaults:
+inside turns and the service's check runs. One setting turns it on or off for
+every judgment; it is off by default, and with it off Osmia makes no Jev
+request and needs no Jev credential. The other settings show their defaults:
 
 ```toml
 [jev]
@@ -638,6 +660,13 @@ or three transient failures in a row, cools Jev down for every judgment for 30
 seconds, doubling with each further episode up to 15 minutes or as long as the
 provider's `Retry-After` asks within that cap; judgments fall back without a
 request meanwhile.
+
+With the boost on, a unit's check run lists the project's checks with
+`dagger list checks --all --format=link` and asks Jev which of them the
+candidate's changed files can affect, then runs only those links. A project
+with more than 128 check links is asked about its collections' items, such as
+a Go package's tests rather than each test. When Jev selects no check, or any
+judgment fallback applies, the run checks everything, and the run records why.
 
 While the boost is on, each judgment is recorded under its workstream in
 `judgments/<id>.json`, one revision when it starts and one with its result,

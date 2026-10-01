@@ -543,10 +543,10 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 	if _, err := Get[Document](r, streamID, "unit-parser-report", 1); err != nil {
 		t.Fatal(err)
 	}
-	// A unit's landing, rebase, change, dispatch decision and the chief of
-	// staff's contest decisions are unit documents; other paths under units/
-	// are not.
-	for _, path := range []string{"units/parser/other.json", "units/parser", "units/../report.json", "units/a/b/report.json", "units/parser/chief-.json", "units/parser/chief-a b.json"} {
+	// A unit's landing, rebase, change, dispatch decision, check runs and the
+	// chief of staff's contest decisions are unit documents; other paths
+	// under units/ are not.
+	for _, path := range []string{"units/parser/other.json", "units/parser", "units/../report.json", "units/a/b/report.json", "units/parser/chief-.json", "units/parser/chief-a b.json", "units/parser/checks-0.json", "units/parser/checks-x.json"} {
 		d := unitReport("{}\n", 2)
 		d.ID, d.Path = "unit-other", path
 		if err := r.RecordDocuments(ctx, []Document{d}); err == nil {
@@ -571,6 +571,11 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 	dispatch := unitReport("{\"decision\":\"deferred\"}\n", 1)
 	dispatch.ID, dispatch.Path = "unit-parser-dispatch", "units/parser/dispatch.json"
 	if err := r.RecordDocuments(ctx, []Document{dispatch}); err != nil {
+		t.Fatal(err)
+	}
+	checks := unitReport("{\"status\":\"passed\"}\n", 1)
+	checks.ID, checks.Path = "unit-parser-checks-1", "units/parser/checks-1.json"
+	if err := r.RecordDocuments(ctx, []Document{checks}); err != nil {
 		t.Fatal(err)
 	}
 	chief := unitReport("{\"decision\":\"escalate\"}\n", 1)

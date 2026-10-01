@@ -124,13 +124,14 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 	if got := starts(t, f, lo); len(got) != 0 {
 		t.Fatalf("%s started %v behind a higher-priority workstream", lo, got)
 	}
-	resumeDone := movedAt(t, f, hi, "resume", UnitReviewing)
+	resumeDone := movedAt(t, f, hi, "resume", UnitChecking)
 	if upload := movedAt(t, f, hi, "upload", UnitImplementing); !upload.Before(resumeDone) {
 		t.Fatalf("upload started at %s, after resume left implementing at %s", upload, resumeDone)
 	}
 	if dedupe := movedAt(t, f, hi, "dedupe", UnitImplementing); !dedupe.After(resumeDone) {
 		t.Fatalf("dedupe started at %s, before resume left implementing at %s", dedupe, resumeDone)
 	}
+	f.awaitUnit(t, hi, "resume", UnitReviewing)
 	behind := UnitDispatch{Reason: DeferPriority, Limit: 2, Workstreams: []config.WorkstreamID{hi}, Message: "Waits for a mason slot: all 2 are in use, and higher-priority workstreams start first: " + string(hi) + "."}
 	f.checkUnits(t, hi, []UnitStatus{{Unit: "resume", State: UnitReviewing, Card: &exampleCard}, {Unit: "dedupe", State: UnitImplementing}, {Unit: "upload", State: UnitImplementing}, f.deferred(t, hi, "audit", slotless(2))})
 	var want []UnitStatus
@@ -176,7 +177,7 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 	if got, want := starts(t, f, lo), []string{trace.UnitSubject("resume")}; !slices.Equal(got, want) {
 		t.Fatalf("%s started %v, want %v", lo, got, want)
 	}
-	order := []time.Time{movedAt(t, f, hi, "dedupe", UnitReviewing), movedAt(t, f, lo, "resume", UnitImplementing), movedAt(t, f, lo, "resume", UnitReviewing), movedAt(t, f, hi, "audit", UnitImplementing)}
+	order := []time.Time{movedAt(t, f, hi, "dedupe", UnitChecking), movedAt(t, f, lo, "resume", UnitImplementing), movedAt(t, f, lo, "resume", UnitChecking), movedAt(t, f, hi, "audit", UnitImplementing)}
 	if !slices.IsSortedFunc(order, time.Time.Compare) {
 		t.Fatalf("dedupe of %s finished, resume of %s started and finished, audit of %s started at %v", hi, lo, hi, order)
 	}
@@ -194,6 +195,8 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 			t.Fatalf("mason turns of %s ran %v, want %v", stream, got, ran)
 		}
 	}
+	f.awaitUnit(t, hi, "dedupe", UnitReviewing)
+	f.awaitUnit(t, lo, "resume", UnitReviewing)
 	f.checkUnits(t, hi, []UnitStatus{{Unit: "resume", State: UnitReviewing, Card: &exampleCard}, {Unit: "dedupe", State: UnitReviewing, Card: &exampleCard}, {Unit: "upload", State: UnitImplementing}, {Unit: "audit", State: UnitImplementing}})
 	f.checkUnits(t, lo, []UnitStatus{{Unit: "resume", State: UnitReviewing, Card: &exampleCard}, f.deferred(t, lo, "dedupe", slotless(2)), f.deferred(t, lo, "upload", slotless(2)), f.deferred(t, lo, "audit", slotless(2))})
 	if got, want := f.dispatches(t, lo, "dedupe"), []string{"deferred paused", "deferred priority", "deferred capacity", "deferred entangled", "deferred capacity"}; !slices.Equal(got, want) {

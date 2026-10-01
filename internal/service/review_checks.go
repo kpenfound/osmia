@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -21,29 +24,69 @@ import (
 
 const runChecksTool = "run_checks"
 
-// CheckResult records bounded output and the exit status of a candidate check.
+// CheckResult records the exit status of a candidate check and the end of
+// its output, where Dagger's report is, bounded to 64 KiB.
 type CheckResult struct {
 	ExitCode  int    `json:"exit_code"`
 	Output    string `json:"output"`
 	Truncated bool   `json:"truncated"`
 }
 
-// ReviewChecks runs the fixed project check in the supplied disposable export.
-// Implementations must not inherit delivery or provider credentials.
+// ReviewChecks lists and runs the project's checks in a disposable export of
+// a candidate. Implementations must not inherit delivery or provider
+// credentials.
 type ReviewChecks interface {
-	Check(context.Context, string) (CheckResult, error)
+	// List returns the link of every check, with collections expanded to
+	// their items.
+	List(ctx context.Context, dir string) ([]string, error)
+	// Check runs the checks the links select, or every check without links,
+	// until ctx ends; callers bound it by the project's checks_timeout.
+	Check(ctx context.Context, dir string, links []string) (CheckResult, error)
 }
 
 // DaggerChecks runs the project's Dagger checks through the service's engine.
 // The agent receives neither the engine endpoint nor command selection.
 type DaggerChecks struct{}
 
-func (DaggerChecks) Check(ctx context.Context, dir string) (CheckResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+// checkOutputLimit bounds a check's recorded output; listOutputLimit bounds
+// the check links read from a listing.
+const (
+	checkOutputLimit = 64 * 1024
+	listOutputLimit  = 4 << 20
+)
+
+func (DaggerChecks) List(ctx context.Context, dir string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
+	output := &checkOutput{limit: listOutputLimit}
+	exit, err := dagger(ctx, dir, output, "list", "checks", "--all", "--format=link")
+	if err != nil {
+		return nil, err
+	}
+	if exit != 0 || output.truncated {
+		return nil, fmt.Errorf("dagger list checks exited %d: %s", exit, lastLines(output.String(), 5))
+	}
+	var links []string
+	for line := range strings.Lines(output.String()) {
+		if line = strings.TrimSpace(line); strings.HasPrefix(line, "dag+check://") {
+			links = append(links, line)
+		}
+	}
+	return links, nil
+}
+
+func (DaggerChecks) Check(ctx context.Context, dir string, links []string) (CheckResult, error) {
+	output := &checkOutput{limit: checkOutputLimit}
+	exit, err := dagger(ctx, dir, output, append([]string{"check", "--progress=report"}, links...)...)
+	return CheckResult{ExitCode: exit, Output: output.String(), Truncated: output.truncated}, err
+}
+
+// dagger runs the Dagger CLI in dir with args and returns its exit status,
+// -1 when it did not exit. A non-zero exit is not an error.
+func dagger(ctx context.Context, dir string, output io.Writer, args ...string) (int, error) {
 	home, err := os.MkdirTemp("", "osmia-check-home-")
 	if err != nil {
-		return CheckResult{}, err
+		return -1, err
 	}
 	defer os.RemoveAll(home)
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + home}
@@ -52,9 +95,9 @@ func (DaggerChecks) Check(ctx context.Context, dir string) (CheckResult, error) 
 	initialise := exec.CommandContext(ctx, "git", "init", "--quiet", dir)
 	initialise.Env = env
 	if out, err := initialise.CombinedOutput(); err != nil {
-		return CheckResult{}, fmt.Errorf("git init: %w: %s", err, out)
+		return -1, fmt.Errorf("git init: %w: %s", err, out)
 	}
-	cmd := exec.CommandContext(ctx, "dagger", "check")
+	cmd := exec.CommandContext(ctx, "dagger", args...)
 	cmd.Dir = dir
 	cmd.Env = slices.Clone(env)
 	// Engine selection belongs to the service. No project or provider secrets
@@ -72,42 +115,68 @@ func (DaggerChecks) Check(ctx context.Context, dir string) (CheckResult, error) 
 			}
 		}
 	}
-	output := &checkOutput{}
 	cmd.Stdout, cmd.Stderr = output, output
 	err = cmd.Run()
-	result := CheckResult{ExitCode: -1, Output: output.String(), Truncated: output.truncated}
+	exit := -1
 	if cmd.ProcessState != nil {
-		result.ExitCode = cmd.ProcessState.ExitCode()
+		exit = cmd.ProcessState.ExitCode()
 	}
 	if ctx.Err() != nil {
-		return result, ctx.Err()
+		return exit, ctx.Err()
 	}
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		return result, nil
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exit, nil
 	}
-	return result, err
+	return exit, err
 }
 
+// checkOutput keeps the last limit bytes written to it, starting at a whole
+// UTF-8 character, and whether anything before them was dropped.
 type checkOutput struct {
 	mu        sync.Mutex
-	text      strings.Builder
+	limit     int
+	text      []byte
 	truncated bool
 }
 
 func (b *checkOutput) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	n := len(p)
-	remaining := 64*1024 - b.text.Len()
-	if len(p) > remaining {
-		p = p[:remaining]
+	b.text = append(b.text, p...)
+	if over := len(b.text) - b.limit; over > 0 {
+		for over < len(b.text) && !utf8.RuneStart(b.text[over]) {
+			over++
+		}
+		b.text = append(b.text[:0], b.text[over:]...)
 		b.truncated = true
 	}
-	b.text.Write(p)
-	return n, nil
+	return len(p), nil
 }
-func (b *checkOutput) String() string { b.mu.Lock(); defer b.mu.Unlock(); return b.text.String() }
+func (b *checkOutput) String() string { b.mu.Lock(); defer b.mu.Unlock(); return string(b.text) }
+
+// lastLines returns the last n non-empty lines of text.
+func lastLines(text string, n int) string {
+	lines := slices.DeleteFunc(strings.Split(strings.TrimSpace(text), "\n"), func(l string) bool { return strings.TrimSpace(l) == "" })
+	return strings.Join(lines[max(len(lines)-n, 0):], "\n")
+}
+
+// failedCheck matches a failed check in the CHECKS section of Dagger's
+// report, capturing its link.
+var failedCheck = regexp.MustCompile(`(?m)^✘ (dag(?:\+check)?://\S+)`)
+
+// failedChecks returns the links of the checks Dagger's report shows failed.
+func failedChecks(output string) []string {
+	_, report, found := strings.Cut(output, "== CHECKS ==")
+	if !found {
+		return nil
+	}
+	var links []string
+	for _, m := range failedCheck.FindAllStringSubmatch(report, -1) {
+		links = append(links, m[1])
+	}
+	return links
+}
 
 // unitReviewerIdentity binds reads and checks to the queued turn's candidate,
 // including answer turns that continue an earlier review.
@@ -155,7 +224,7 @@ func unitReviewerSelection(ctx context.Context, cfg *config.Config, r *trace.Rep
 
 func candidateCheckTool(cfg *config.Config, r *trace.Repository, scope coreadapter.Scope, commit string, checks ReviewChecks) coreadapter.Tool {
 	var mu sync.Mutex
-	return coreadapter.Tool{Name: runChecksTool, Description: "Run dagger check on a fresh disposable copy of this review's exact candidate; returns its commit, exit status and bounded output.", Effect: coreadapter.ToolCheck,
+	return coreadapter.Tool{Name: runChecksTool, Description: "Run dagger check on a fresh disposable copy of this review's exact candidate; returns its commit, exit status and the end of its output.", Effect: coreadapter.ToolCheck,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			var args map[string]json.RawMessage
@@ -186,7 +255,13 @@ func candidateCheckTool(cfg *config.Config, r *trace.Repository, scope coreadapt
 			if err := provider.Export(ctx, commit, dir); err != nil {
 				return nil, err
 			}
-			result, err := checks.Check(ctx, dir)
+			timeout := cfg.Project.CheckTimeout()
+			run, cancel := context.WithTimeout(ctx, timeout)
+			result, err := checks.Check(run, dir, nil)
+			cancel()
+			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+				err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
+			}
 			response := struct {
 				Candidate string `json:"candidate"`
 				Check     string `json:"check"`

@@ -48,7 +48,7 @@ func projectFixture(t *testing.T) (Options, string) {
 	clone := filepath.Join(home, "clone")
 	must(t, os.Mkdir(clone, 0700))
 	demoGit(t, home, "init", "--quiet", clone)
-	return Options{Config: config.Options{Root: root}, Build: Identity{"test", "abc"}, ShutdownTimeout: 100 * time.Millisecond}, clone
+	return Options{Config: config.Options{Root: root}, Build: Identity{"test", "abc"}, ShutdownTimeout: 100 * time.Millisecond, reviewChecks: passingChecks}, clone
 }
 func request(clone string) ProjectAddRequest {
 	return ProjectAddRequest{Name: "dagger", Upstream: "dagger/dagger", Fork: "owner/dagger", Clone: clone}

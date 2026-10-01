@@ -244,17 +244,18 @@ func TestDriftCarryReturnsApprovalsAndTheirReviewerMayAmend(t *testing.T) {
 		t.Fatalf("upstream moved events of the carry %+v", moved)
 	}
 	for _, e := range moved {
-		unit := strings.TrimSuffix(strings.TrimPrefix(e.TransitionID, trace.UnitSubject("")), "-reviewing-rebase-1")
-		if e.TransitionID != trace.UnitSubject(unit)+"-reviewing-rebase-1" {
+		unit := strings.TrimSuffix(strings.TrimPrefix(e.TransitionID, trace.UnitSubject("")), "-checking-rebase-1")
+		if e.TransitionID != trace.UnitSubject(unit)+"-checking-rebase-1" {
 			t.Fatalf("an upstream moved event of %s", e.TransitionID)
 		}
 		checkMoved(t, e, stream, move, fmt.Sprintf("unit %s's approval no longer holds", unit), tip)
-		if state, err := repository.Workflow(stream, trace.UnitSubject(unit)); err != nil || state.Value != UnitReviewing {
+		if state, err := repository.Workflow(stream, trace.UnitSubject(unit)); err != nil || state.Value != UnitChecking {
 			t.Fatalf("unit %s is %+v: %v", unit, state, err)
 		}
 	}
 
-	// dedupe's reviewer reads the carried candidate.
+	// dedupe's reviewer reads the carried candidate once its checks pass.
+	runChecks(t, f.s, repository, stream)
 	r := &reviewers{masons: newMasonController(f.s, repository)}
 	agent := reviewerAgent("dedupe")
 	if th, err := repository.Thread(stream, agent); err == nil && th.Active != "" {

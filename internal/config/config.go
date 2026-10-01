@@ -156,8 +156,24 @@ type Project struct {
 	HearsayEntities map[string]string `toml:"hearsay_entities" json:"hearsay_entities,omitempty"`
 	// UpstreamRebase is the Go duration between a workstream's scheduled
 	// drift rebases; zero disables them.
-	UpstreamRebase string          `toml:"upstream_rebase" json:"upstream_rebase"`
-	Capacity       ProjectCapacity `toml:"capacity" json:"capacity"`
+	UpstreamRebase string `toml:"upstream_rebase" json:"upstream_rebase"`
+	// ChecksTimeout is the Go duration one run of a candidate's checks may
+	// take.
+	ChecksTimeout string          `toml:"checks_timeout" json:"checks_timeout"`
+	Capacity      ProjectCapacity `toml:"capacity" json:"capacity"`
+}
+
+// DefaultChecksTimeout and MaxChecksTimeout bound one run of a candidate's
+// checks.
+const (
+	DefaultChecksTimeout = "15m"
+	MaxChecksTimeout     = 24 * time.Hour
+)
+
+// CheckTimeout is how long one run of a candidate's checks may take.
+func (p Project) CheckTimeout() time.Duration {
+	d, _ := time.ParseDuration(p.ChecksTimeout)
+	return d
 }
 
 // RebaseInterval is how long after a workstream's latest drift or final
@@ -469,7 +485,7 @@ func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Proje
 	if err != nil {
 		return Project{}, err
 	}
-	p := Project{BaseBranch: "main", Landing: "commit-per-unit", UpstreamRebase: "6h", Capacity: ProjectCapacity{perWorkstream}}
+	p := Project{BaseBranch: "main", Landing: "commit-per-unit", UpstreamRebase: "6h", ChecksTimeout: DefaultChecksTimeout, Capacity: ProjectCapacity{perWorkstream}}
 	if _, err := decode(projectPath, &p, true); err != nil {
 		return Project{}, err
 	}
@@ -509,6 +525,9 @@ func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Proje
 	}
 	if d, err := time.ParseDuration(p.UpstreamRebase); err != nil || d < 0 || d > 0 && d < time.Minute {
 		return Project{}, fieldError(projectPath, "upstream_rebase", "must be a Go duration of at least 1m, or 0 to disable scheduled drift rebases")
+	}
+	if d, err := time.ParseDuration(p.ChecksTimeout); err != nil || d < time.Minute || d > MaxChecksTimeout {
+		return Project{}, fieldError(projectPath, "checks_timeout", "must be a Go duration from 1m to 24h")
 	}
 	if p.Capacity.PerWorkstream <= 0 {
 		return Project{}, fieldError(projectPath, "capacity.per_workstream", "must be positive")
@@ -579,7 +598,7 @@ func knownKey(key toml.Key, project bool) bool {
 		if len(key) == 2 && key[0] == "hearsay_entities" {
 			return true
 		}
-		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "version", "name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "capacity", "capacity.per_workstream"}, path)
+		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "version", "name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "checks_timeout", "capacity", "capacity.per_workstream"}, path)
 	}
 	if key[0] == "hearsay" {
 		if len(key) == 1 {

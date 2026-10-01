@@ -105,10 +105,10 @@ func TestSequentialImplementation(t *testing.T) {
 		t.Fatalf("report %+v, want %+v", report, wantReport)
 	}
 	transitions := masonTransitions(t, f, stream)
-	if len(transitions) != 4 || !reflect.DeepEqual(transitions[:3], []transitionMove{started("resume", f.startedReason(t, stream, "resume")), parked("resume", "1"), resumed("resume", "1")}) || transitions[3].ID != reviewingTransitionID("resume", 1) || transitions[3].From != UnitImplementing || transitions[3].To != UnitReviewing || transitions[3].Cause != thread.Turns[1].Response.ID {
+	if len(transitions) != 4 || !reflect.DeepEqual(transitions[:3], []transitionMove{started("resume", f.startedReason(t, stream, "resume")), parked("resume", "1"), resumed("resume", "1")}) || transitions[3].ID != checkingTransitionID("resume", 1) || transitions[3].From != UnitImplementing || transitions[3].To != UnitChecking || transitions[3].Cause != thread.Turns[1].Response.ID {
 		t.Fatalf("mason transitions %+v", transitions)
 	}
-	finishNotice := "Unit resume is reviewing: its mason reported done on turn " + questions.TurnID("1") + "; its report is units/resume/report.json revision 1. Headline: Uploads resume; Needs you: Review the candidate."
+	finishNotice := "Unit resume is checking: its mason reported done on turn " + questions.TurnID("1") + "; its report is units/resume/report.json revision 1. Headline: Uploads resume; Needs you: Review the candidate."
 	f.awaitEventTurns(t, stream, finishNotice)
 	f.awaitAcknowledgedNotices(t, stream)
 	if got := f.reports(t, stream, "dedupe"); len(got) != 0 {

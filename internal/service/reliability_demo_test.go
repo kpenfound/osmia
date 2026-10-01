@@ -265,7 +265,8 @@ func TestReliabilityDemonstration(t *testing.T) {
 	// pauses the factory softly, attributed to the daily budget, and audit
 	// waits for it; status reports today's spend.
 	stream, _ := f.builtAs(t, "reliability")
-	f.awaitUnit(t, stream, "upload", UnitReviewing)
+	// upload's mason reported done; the pause holds its checks.
+	f.awaitUnit(t, stream, "upload", UnitChecking)
 	var budgetPause runtime.Pause
 	eventually(t, "the daily budget never paused the factory", func() bool {
 		var ok bool

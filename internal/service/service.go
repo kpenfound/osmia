@@ -877,7 +877,8 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	amendRounds := amendmentDebate{rounds}
 	budget := budgetSignals{s: s, repository: repository}
 	daily := dailyBudget{s: s, repository: repository}
-	runner := runnerAdapter{turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals}
+	checks := &checkers{masons: &masons{s: s, cfg: cfg, repository: repository}}
+	runner := runnerAdapter{turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
 	hooks := []scheduleHook{{"base-refresh", (&baseRefresher{s: s, repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})
@@ -901,22 +902,23 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		}
 		units := &masons{s: s, cfg: cfg, repository: repository}
 		reviews := &reviewers{masons: units}
-		hooks = append(hooks, scheduleHook{"events", deliver.Pass}, scheduleHook{"answers", s.answers(cfg, repository).Pass}, scheduleHook{"reviews", reviews.Pass}, scheduleHook{"masons", units.Pass}, scheduleHook{"dispatch", dispatch.Pass})
+		hooks = append(hooks, scheduleHook{"events", deliver.Pass}, scheduleHook{"answers", s.answers(cfg, repository).Pass}, scheduleHook{"checks", checks.Pass}, scheduleHook{"reviews", reviews.Pass}, scheduleHook{"masons", units.Pass}, scheduleHook{"dispatch", dispatch.Pass})
 	}
 	return &stages{cfg: cfg, hooks: hooks, runner: runner,
 		repository: repositoryAdapter{other: options.Adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish}}, nil
 }
 
-// concurrentOperation reports whether op delivers a thread turn or runs a
-// committee round. The reconciler runs those beside its other operations, so
-// every turn the scheduler dispatched within capacity, and the rounds of
-// different workstreams, are in flight at once.
+// concurrentOperation reports whether op delivers a thread turn, runs a
+// committee round or runs a unit's checks. The reconciler runs those beside
+// its other operations, so every turn the scheduler dispatched within
+// capacity, the rounds of different workstreams and their check runs are in
+// flight at once.
 func concurrentOperation(op coreadapter.Operation) bool {
 	if op.Boundary != coreadapter.RunnerBoundary {
 		return false
 	}
 	switch op.Action {
-	case thread.TurnAction, RoundAction, AmendmentRoundAction:
+	case thread.TurnAction, RoundAction, AmendmentRoundAction, CheckAction:
 		return true
 	}
 	return false

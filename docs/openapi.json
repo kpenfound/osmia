@@ -3028,6 +3028,9 @@
           "capacity": {
             "$ref": "#/components/schemas/ConfigProjectCapacity"
           },
+          "checks_timeout": {
+            "type": "string"
+          },
           "classifier": {
             "type": "string"
           },

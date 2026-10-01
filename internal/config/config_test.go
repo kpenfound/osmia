@@ -80,6 +80,9 @@ func TestDefaults(t *testing.T) {
 	if c.Project.UpstreamRebase != "6h" || c.Project.RebaseInterval() != 6*time.Hour {
 		t.Fatalf("upstream rebase default: %q %v", c.Project.UpstreamRebase, c.Project.RebaseInterval())
 	}
+	if c.Project.ChecksTimeout != "15m" || c.Project.CheckTimeout() != 15*time.Minute {
+		t.Fatalf("checks timeout default: %q %v", c.Project.ChecksTimeout, c.Project.CheckTimeout())
+	}
 	if c.Profiles["default"].Timeout != "45m" || c.Profiles["default"].Effort != "medium" || len(c.Roles) != 7 {
 		t.Fatalf("profile defaults: %+v", c)
 	}
@@ -297,6 +300,11 @@ func TestInvalid(t *testing.T) {
 		{"negative upstream rebase", "", projectConfig + "upstream_rebase = '-6h'\n", "upstream_rebase:"},
 		{"short upstream rebase", "", projectConfig + "upstream_rebase = '59s'\n", "upstream_rebase:"},
 		{"integer upstream rebase", "", projectConfig + "upstream_rebase = 0\n", "upstream_rebase"},
+		{"malformed checks timeout", "", projectConfig + "checks_timeout = 'long'\n", "checks_timeout:"},
+		{"zero checks timeout", "", projectConfig + "checks_timeout = '0'\n", "checks_timeout:"},
+		{"short checks timeout", "", projectConfig + "checks_timeout = '59s'\n", "checks_timeout:"},
+		{"long checks timeout", "", projectConfig + "checks_timeout = '25h'\n", "checks_timeout:"},
+		{"integer checks timeout", "", projectConfig + "checks_timeout = 30\n", "checks_timeout"},
 		{"repository url", "", strings.Replace(projectConfig, "upstream/repo", "https://host/upstream/repo", 1), "upstream:"},
 		{"missing clone", "", strings.Replace(projectConfig, `clone = "~/clone"`, "", 1), "clone:"},
 		{"clone in root", "", strings.Replace(projectConfig, "~/clone", "~/.local/share/osmia/clone", 1), "non-nested"},
@@ -369,6 +377,22 @@ func TestUpstreamRebase(t *testing.T) {
 		})
 	}
 }
+
+// checks_timeout accepts a Go duration from a minute to a day.
+func TestChecksTimeout(t *testing.T) {
+	for value, want := range map[string]time.Duration{"1m": time.Minute, "45m": 45 * time.Minute, "24h": 24 * time.Hour} {
+		t.Run(value, func(t *testing.T) {
+			c, err := Load(fixture(t, topConfig, projectConfig+"checks_timeout = '"+value+"'\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Project.ChecksTimeout != value || c.Project.CheckTimeout() != want {
+				t.Fatalf("checks_timeout %q loaded as %q, timeout %v; want %v", value, c.Project.ChecksTimeout, c.Project.CheckTimeout(), want)
+			}
+		})
+	}
+}
+
 func TestMissingFiles(t *testing.T) {
 	for _, file := range []string{"config.toml", "projects/" + pid + "/config.toml"} {
 		t.Run(file, func(t *testing.T) {

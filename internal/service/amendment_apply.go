@@ -134,7 +134,7 @@ func (a amendmentDebate) apply(ctx context.Context, stream config.WorkstreamID, 
 				if group.rework {
 					merged = append(merged, unit)
 				}
-			case UnitImplementing, UnitReviewing, UnitApproved:
+			case UnitImplementing, UnitChecking, UnitReviewing, UnitApproved:
 				units = append(units, a.amendUnit(stream, app, unit, st, group.rework, header))
 				if group.rework {
 					reworked = append(reworked, unit)
@@ -233,7 +233,8 @@ func (a amendmentDebate) apply(ctx context.Context, stream config.WorkstreamID, 
 
 // amendUnit returns the transaction that reworks or notifies one unit in the
 // state it is in: a reworked unit moves to implementing; a notified unit
-// stays implementing, or moves to reviewing from reviewing or approved.
+// stays implementing or checking, or moves to reviewing from reviewing or
+// approved.
 func (a amendmentDebate) amendUnit(stream config.WorkstreamID, app amendment.Application, unit string, st trace.WorkflowState, rework bool, header func(id, unit string) trace.Header) trace.Transaction {
 	id := amendmentUnitID(unit, app.Amendment, rework)
 	to, reason := UnitImplementing, ""
@@ -248,6 +249,9 @@ func (a amendmentDebate) amendUnit(stream config.WorkstreamID, app amendment.App
 		reason = fmt.Sprintf("unit %s returns to implementing from %s: amendment %s changed the meaning of %s, which it serves; its mason builds it again against seal %d, spec revision %d and plan revision %d", unit, st.Value, app.Amendment, list(changed), app.To.Seal, app.To.Spec, app.To.Plan)
 	case st.Value == UnitImplementing:
 		reason = fmt.Sprintf("unit %s stays implementing: amendment %s changed its plan entry, and the criteria it serves keep their meaning; its mason's next turn carries the notice and the amended bundle", unit, app.Amendment)
+	case st.Value == UnitChecking:
+		to = UnitChecking
+		reason = fmt.Sprintf("unit %s stays checking: amendment %s changed its plan entry, and the criteria it serves keep their meaning; its review is taken against plan revision %d with the notice", unit, app.Amendment, app.To.Plan)
 	default:
 		to = UnitReviewing
 		reason = fmt.Sprintf("unit %s returns to review from %s: amendment %s changed its plan entry, and the criteria it serves keep their meaning; its review is taken again against plan revision %d with the notice", unit, st.Value, app.Amendment, app.To.Plan)
@@ -331,7 +335,7 @@ func (a amendmentDebate) follow(ctx context.Context, stream config.WorkstreamID,
 		if err != nil {
 			return err
 		}
-		if st.Value != UnitImplementing && st.Value != UnitReviewing && st.Value != UnitApproved {
+		if st.Value != UnitImplementing && st.Value != UnitChecking && st.Value != UnitReviewing && st.Value != UnitApproved {
 			continue
 		}
 		tx := a.amendUnit(stream, app, unit, st, rework, func(id, unit string) trace.Header { return a.amendmentHeader(id, stream, unit, cause) })
