@@ -29,6 +29,7 @@ const usage = `Usage: osmia <command> [--root PATH]
        osmia --version
   serve [--detach]
   stop
+  doctor [--json]
   status [workstream-id] [--json]
   project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
   project remove <project-id> [--json]
@@ -202,7 +203,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	a := o.args[1:]
 	valid := false
 	switch cmd {
-	case "serve", "stop":
+	case "serve", "stop", "doctor":
 		valid = len(a) == 0
 	case "status":
 		valid = len(a) <= 1
@@ -244,7 +245,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
-	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && (o.accept || o.project != "") || cmd == "serve" && (o.json || o.socket != "") {
+	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && (o.accept || o.project != "") || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -255,10 +256,13 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if cmd == "serve" {
 		if err := runService(ctx, root, o.detach, stdout); err != nil {
 			// Startup errors may contain raw TOML values or paths; do not echo them.
-			fmt.Fprintln(stderr, "service startup failed: check root/configuration/runtime permissions and validity; stop any existing owner before starting; socket must be unused or stale")
+			fmt.Fprintln(stderr, "service startup failed; run osmia doctor to find the cause, and stop any existing owner before starting another")
 			return 6
 		}
 		return 0
+	}
+	if cmd == "doctor" {
+		return runDoctor(ctx, root, o.json, stdout, stderr)
 	}
 	socket := o.socket
 	if socket == "" {

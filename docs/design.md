@@ -475,6 +475,7 @@ the local Unix socket.
 ```
 osmia serve [--detach]               the service, foreground or detached
 osmia stop                           stop the local service
+osmia doctor                         check what the service needs, and how to fix it
 osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clone ~/github.com/dagger/dagger
 osmia handin dagger ./design.md      a new workstream from a document, an issue URL, or stdin
 osmia status [workstream]            the status, or every workstream's goal and attention
@@ -490,7 +491,7 @@ osmia ratify <workstream>            after reading the packet
 osmia amendment <workstream> <n> [approve|reject|round|overrule]
 ```
 
-Every command is an API call. Nothing reads state files directly.
+Every command is an API call except `serve` and `doctor`. Doctor checks what the service needs before one runs, so it reads the root and configuration the way `serve` does; no other command reads state files directly.
 
 ---
 

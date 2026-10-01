@@ -95,8 +95,13 @@ webhook = "https://ntfy.sh/your-private-topic"
 ## 3. Run the service
 
 ```sh
+osmia doctor
 osmia serve
 ```
+
+`osmia doctor` checks the root, the configuration, the tools Osmia runs and
+each project's clone, remotes and GitHub access, and prints how to fix what it
+finds; see [`doctor`](cli.md#doctor). Run it whenever `osmia serve` fails.
 
 The service runs in the foreground; leave it running. In another terminal:
 

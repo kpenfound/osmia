@@ -7,6 +7,7 @@ running `osmia` for the first time. To build from source instead, use
 [configuration](configuration.md).
 
 ```sh
+osmia doctor
 osmia serve
 # In another terminal:
 osmia status
@@ -55,7 +56,9 @@ osmia status --json
   SIGTERM drain requests and release ownership and the socket. A live owner is
   refused; a provably stale socket is recovered automatically. The service
   runs the librarian, architect, committee and chief-of-staff turns in each role's
-  configured sandbox.
+  configured sandbox. A startup failure prints no detail; run `doctor`.
+- `doctor [--json] [--root PATH]` checks what `serve` needs; see
+  [doctor](#doctor).
 - `status` shows health, loaded configuration digest/root, each configuration
   file on disk against the loaded configuration as `config` prints it, the
   active project
@@ -470,7 +473,7 @@ never raw file contents.
 | Exit | Meaning |
 | --- | --- |
 | 0 | Success, help, or clean foreground cancellation |
-| 1 | Invalid API response, local output or unexpected client failure |
+| 1 | Invalid API response, local output or unexpected client failure, or a failed `doctor` check |
 | 2 | Invalid command, flags, arguments or root |
 | 3 | Missing socket, connection failure or unavailable service |
 | 4 | API malformed-input or validation rejection, no project is configured, unknown project or workstream, empty charter on hand-in, or stdin over the hand-in limit or not UTF-8 |
@@ -478,8 +481,7 @@ never raw file contents.
 | 6 | Foreground startup/service failure, including ownership conflict |
 
 For exit 3, start the service and verify matching root/socket and permissions.
-For exit 6, check configuration and runtime validity and permissions, stop any
-existing owner, and ensure the socket path is unused or stale. Do not delete a
+For exit 6, run `osmia doctor`, which names the cause and its fix. Do not delete a
 live-owned socket. Unsupported responses identify unavailable operations; restart-required
 responses instruct the operator to stop and start the service.
 
@@ -513,3 +515,69 @@ the parent's feature branch. After the parent integrates, fresh review and
 owner delivery approval authorize retargeting that same pull request to the
 project's base branch with the approved description. Interrupted updates are
 reconciled against the recorded request before retrying.
+
+## Doctor
+
+`osmia doctor` checks what `osmia serve` needs and what turns need once it
+runs, without a service, and prints what it found grouped by area. It reads
+the root and the configuration directly, the way `serve` does.
+
+| Group | Checks |
+| --- | --- |
+| `root` | The root is a writable directory, or does not exist yet; whether a service owns it; `service.log`, when present, is a private regular file; the socket is free or stale. |
+| `config` | The top-level `config.toml` and every active project's `config.toml` load and validate; `listen.web`, when set, can be bound. |
+| `toolchain` | `git`; `jj`, required for `workspaces = "jujutsu"` and a warning for `auto`; every agent a role's profile or fallback chain names; `docker` with its daemon answering, when a role uses `sandbox = "container"`; `sbx`, when a role uses `sandbox = "sbx"`; `dagger`, which reviewer checks run, as a warning. |
+| `projects` | Per project: the clone is a Git work tree; it has a remote naming the upstream, which answers and has the base branch; with a fork, a remote naming the fork, which answers. |
+| `github` | `GITHUB_TOKEN` is set, as a warning, and GitHub accepts it; it can read each project's upstream and fork. |
+| `state` | Per project: the trace opens; `runtime.json` opens. |
+
+A failure (`✗`) is something that stops the service from starting or its work
+from running. A warning (`!`) will probably bite but stops nothing. Every
+warning and failure prints its fix on the next line. Configuration errors name
+the file and field, never a value read from the file.
+
+Checks that need something an earlier check found missing are left out: with
+no root only the toolchain and GitHub checks run, and with a configuration
+that does not load neither do the project checks. While a service owns the
+root, the `state` checks and the `listen.web` check are left to it; `osmia
+status` reports them. Otherwise doctor holds the root's ownership lock while it
+runs and opens each trace the way `serve` does, which completes a trace
+publication a stopped service left unfinished.
+
+```
+$ osmia doctor
+root
+  ✓ root directory                              /home/kyle/.local/share/osmia
+  ✓ ownership lock                              no service owns this root
+  ✓ socket                                      /home/kyle/.local/share/osmia/osmia.sock is stale; serve removes it
+
+config
+  ✓ config.toml                                 /home/kyle/.config/osmia/config.toml (2 profiles, 1 active projects)
+  ✓ project p_0123456789abcdef0123456789abcdef  widgets (acme/widgets)
+
+toolchain
+  ✓ git                                         /usr/bin/git (git version 2.50.1)
+  ! jj                                          jj is missing: exec: "jj": executable file not found in $PATH; new workstreams use Git worktrees
+      → install jj 0.45.0 or later for Jujutsu workspaces, or set workspaces = "git"
+  ✓ claude                                      /usr/local/bin/claude (2.1.251 (Claude Code))
+  ✓ dagger                                      /usr/local/bin/dagger (dagger v0.20.5)
+
+projects
+  ✓ widgets clone                               /home/kyle/src/widgets
+  ✗ widgets upstream                            remote "origin" has no branch main
+      → set base_branch in the project's config.toml to a branch of acme/widgets
+
+github
+  ✓ GITHUB_TOKEN                                authenticates as kyle
+  ✓ widgets acme/widgets                        readable by kyle
+
+state
+  ✓ widgets trace                               /home/kyle/.local/share/osmia/projects/p_0123456789abcdef0123456789abcdef (3 workstreams)
+  ✓ runtime.json                                /home/kyle/.local/share/osmia/runtime.json
+
+15 checks: 13 passed, 1 warnings, 1 failed
+```
+
+`--json` prints the checks as a JSON array of `group`, `name`, `status`
+(`pass`, `warn` or `fail`), `detail` and `remediation`. Doctor exits 1 when a
+check failed and 0 when only warnings are present.
