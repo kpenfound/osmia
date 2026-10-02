@@ -169,6 +169,10 @@ type TurnResponse struct {
 	FailureClass    coreadapter.FailureKind   `json:"failure_class,omitempty"`
 	Classification  *TurnClassification       `json:"classification,omitempty"`
 	ClassifierUsage []coreadapter.Usage       `json:"classifier_usage,omitempty"`
+	// Advice is the advisory text the service added to the request's prompt
+	// when the turn ran, such as Jev signals on the chief of staff's open
+	// questions.
+	Advice string `json:"advice,omitempty"`
 	// Stop is set when the service stopped the turn on purpose. A stopped
 	// turn is interrupted, not failed, and records no failure.
 	Stop *TurnStop `json:"stop,omitempty"`

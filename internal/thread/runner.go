@@ -36,6 +36,11 @@ type Runner struct {
 	// fallback leaves them to the classifier, then the code rules. Nil has
 	// the boost off.
 	Jev *jev.Judge
+	// Advise returns advisory text for a claimed turn, which the turn's
+	// prompt ends with and its response records, or "" for none. It runs
+	// inside turn execution, before the agent session starts, so it may ask
+	// Jev. Nil adds nothing.
+	Advise func(context.Context, trace.TurnRequest, coreadapter.Scope) string
 }
 
 // RunNext retries infrastructure failures within the turn, as execute
@@ -72,13 +77,23 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	req := q.Request
 	prepared.Scope = coreadapter.Scope{Project: string(req.Project), Workstream: string(stream), Unit: req.Unit, Thread: req.ThreadID, Turn: req.TurnID, Role: t.Identity.Role}
 	prepared.Profile, prepared.SystemPrompt, prepared.Prompt = req.Profile, req.SystemPrompt, req.Prompt
+	var advice string
+	// A stop cancels the advice with the session it would have informed.
+	if run := execution(ctx); r.Advise != nil && stopped(run) == nil {
+		if advice = r.Advise(run, req, prepared.Scope); stopped(run) != nil {
+			advice = ""
+		}
+		if advice != "" {
+			prepared.Prompt += "\n\n" + advice
+		}
+	}
 	result, runErr, persistErr := r.execute(ctx, t, &q, prepared)
 	if persistErr != nil && result.StartedAt.IsZero() {
 		return q, errors.Join(runErr, persistErr)
 	}
 	h := req.Header
 	h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", trace.EventID(req.ID, "response"), r.Now(), trace.Actor{Kind: "service", ID: "thread-runner"}
-	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: req.ThreadID, TurnID: req.TurnID, RequestID: req.ID, RequestRevision: req.Revision, Result: result}
+	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: req.ThreadID, TurnID: req.TurnID, RequestID: req.ID, RequestRevision: req.Revision, Result: result, Advice: advice}
 	var stop *Stop
 	switch {
 	case errors.As(runErr, &stop):
