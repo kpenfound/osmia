@@ -543,7 +543,7 @@ func TestHandleListsTheTreesItCommits(t *testing.T) {
 			t.Fatalf("step %d: the handle lists %q, HEAD is %q", i, head, ref)
 		}
 		r.tree, r.treeHead = nil, ""
-		listed, err := r.headTree(ctx)
+		_, listed, err := r.headTree(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}

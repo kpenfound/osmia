@@ -93,8 +93,12 @@ func TestTraceAPIErrors(t *testing.T) {
 	if api == nil || api.Code != Validation {
 		t.Fatalf("workstream error %+v", api)
 	}
-	// A repository read failure is returned without record content.
+	// A repository read failure is returned without record content. The
+	// handle finds its trace removed when it next writes.
 	must(t, os.RemoveAll(f.dir))
+	if err := f.repo.CreateWorkstream(context.Background(), config.WorkstreamID("w_"+strings.Repeat("c", 32)), f.now(), ownerActor); err == nil {
+		t.Fatal("a removed trace accepted a write")
+	}
 	_, api = s.traceView(context.Background(), string(stream), "", "")
 	if api == nil || api.Code != Internal || !strings.Contains(api.Message, "trace repository") {
 		t.Fatalf("unavailable trace %+v", api)

@@ -140,6 +140,7 @@ func (r *Repository) mkdir(name string) error {
 	if err := r.checked(name); err != nil {
 		return err
 	}
+	defer r.changed()
 	return r.dir.MkdirAll(name, 0700)
 }
 func syncDir(dir *os.Root, name string) error {
@@ -161,6 +162,7 @@ func (r *Repository) writeFile(name string, data []byte) error {
 	if err := r.mkdir(path.Dir(name)); err != nil {
 		return err
 	}
+	defer r.changed()
 	tmp := path.Join(path.Dir(name), ".trace-"+rand.Text()+".tmp")
 	f, err := r.dir.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {

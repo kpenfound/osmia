@@ -44,6 +44,10 @@ func (r *Repository) publish(ctx context.Context, files map[string][]byte) error
 // publishTree is publish with paths that leave the tree: they are removed from
 // the commit and, once the ref is published, from disk.
 func (r *Repository) publishTree(ctx context.Context, files map[string][]byte, removed []string) error {
+	r.forget()
+	if _, err := r.checkHistory(ctx); err != nil {
+		return err
+	}
 	parent, err := r.readFile(".git/refs/heads/main")
 	if err != nil {
 		return err
@@ -286,6 +290,7 @@ func (r *Repository) finishPublication(ctx context.Context, own *published) erro
 			}
 		}
 		for _, name := range p.Removed {
+			r.changed()
 			if err := r.dir.Remove(name); err != nil && !os.IsNotExist(err) {
 				return err
 			}

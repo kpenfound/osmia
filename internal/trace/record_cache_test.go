@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -58,6 +59,8 @@ func TestRecordReadsDetectChangedBytes(t *testing.T) {
 		if err := os.Chtimes(name, info.ModTime(), info.ModTime()); err != nil {
 			t.Fatal(err)
 		}
+		// The handle reads the files again once it has changed them.
+		r.changed()
 		if _, err := Read[Document](r, streamID); err == nil {
 			t.Fatal("changed history accepted")
 		}
@@ -65,6 +68,7 @@ func TestRecordReadsDetectChangedBytes(t *testing.T) {
 	if err := os.WriteFile(name, original, 0600); err != nil {
 		t.Fatal(err)
 	}
+	r.changed()
 	checkTyped[Document](t, r, d)
 	d.Revision++
 	d.Content += "owner revision\n"
@@ -102,10 +106,91 @@ func TestRecordReadsRejectAliasesAfterCaching(t *testing.T) {
 			if err := link.make(external, name); err != nil {
 				t.Fatal(err)
 			}
+			r.changed()
 			if _, err := Read[Document](r, streamID); err == nil {
 				t.Fatal("aliased history accepted")
 			}
 		})
+	}
+}
+
+func TestReadsReuseTheTraceUntilTheHandleWrites(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	d := specimens()[0].(Document)
+	if err := r.Append(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	checkTyped[Document](t, r, d)
+	name := filepath.Join(r.directory, recordPath(d))
+	original, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := bytes.Replace(original, []byte(`"revision":1`), []byte(`"revision":9`), 1)
+	if err := os.WriteFile(name, edited, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing outside the handle writes an open trace, so a read reuses what
+	// the handle last read.
+	checkTyped[Document](t, r, d)
+	ref := filepath.Join(r.directory, ".git", "refs", "heads", "main")
+	head, err := os.ReadFile(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A write checks the files again and refuses the edit rather than
+	// committing it.
+	if err := r.Append(ctx, specimens()[3]); err == nil || !strings.Contains(err.Error(), "reconciliation required") {
+		t.Fatalf("record over an outside edit: %v", err)
+	}
+	if _, err := r.SetFeatureState(ctx, header("transition", "handed"), "handed", "the owner handed a design"); err == nil || !strings.Contains(err.Error(), "reconciliation required") {
+		t.Fatalf("publication over an outside edit: %v", err)
+	}
+	if after, err := os.ReadFile(ref); err != nil || string(after) != string(head) {
+		t.Fatalf("committed over an outside edit: %s %v", after, err)
+	}
+	if data, err := os.ReadFile(name); err != nil || !bytes.Equal(data, edited) {
+		t.Fatalf("outside edit overwritten: %s %v", data, err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(root, p)
+	if reopened != nil {
+		defer reopened.Close()
+	}
+	if err == nil {
+		t.Fatal("reopened handle accepted the outside edit")
+	}
+}
+
+func TestReadsSeeTheHandlesWrites(t *testing.T) {
+	r, _, _ := create(t)
+	ctx := context.Background()
+	if _, err := Read[Document](r, streamID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Workflow(streamID, FeatureSubject); err != nil {
+		t.Fatal(err)
+	}
+	d := specimens()[0].(Document)
+	if err := r.Append(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	checkTyped[Document](t, r, d)
+	if _, err := r.SetFeatureState(ctx, header("transition", "handed"), "handed", "the owner handed a design"); err != nil {
+		t.Fatal(err)
+	}
+	if state, err := r.Workflow(streamID, FeatureSubject); err != nil || state.Value != "handed" {
+		t.Fatalf("workflow after a publication = %#v, %v", state, err)
+	}
+	other := config.WorkstreamID("w_" + strings.Repeat("b", 32))
+	if err := r.CreateWorkstream(ctx, other, at, owner); err != nil {
+		t.Fatal(err)
+	}
+	if streams, err := r.Workstreams(); err != nil || !slices.Contains(streams, other) {
+		t.Fatalf("workstreams after creation = %v, %v", streams, err)
 	}
 }
 

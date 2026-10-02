@@ -149,14 +149,19 @@ func (r *Repository) commitContent(ctx context.Context, paths []string, content 
 // uncommitted file changes without guessing how to reconcile them. The owner
 // edits charter.md and a workstream's spec.md and plan.json directly; Charter
 // and OwnerDocuments record those edits, so a difference there is expected.
-// It returns the files it checked, for a scan under the same lock.
+// It returns the files it checked, for a scan under the same lock. A check
+// that passed is reused until the handle changes the files or HEAD moves.
 func (r *Repository) checkHistory(ctx context.Context) (*treeFiles, error) {
 	if err := r.recoverPublication(ctx); err != nil {
 		return nil, err
 	}
-	blobs, err := r.headTree(ctx)
+	head, blobs, err := r.headTree(ctx)
 	if err != nil {
 		return nil, err
+	}
+	generation := r.generation.Load()
+	if h := r.history; h != nil && h.generation == generation && h.head == head {
+		return h.files, nil
 	}
 	matches := func(name string, data []byte) error {
 		hash := sha1.New()
@@ -204,6 +209,7 @@ func (r *Repository) checkHistory(ctx context.Context) (*treeFiles, error) {
 			return nil, err
 		}
 	}
+	r.history = &checkedHistory{generation: generation, head: head, files: files}
 	return files, nil
 }
 
@@ -229,28 +235,28 @@ func (r *Repository) advanceTree(parent, commit string, blobs map[string]string,
 	r.tree, r.treeHead = tree, commit
 }
 
-// headTree returns the blob identity of every file committed at HEAD. A
-// commit's tree never changes, so the listing is kept until HEAD moves.
-func (r *Repository) headTree(ctx context.Context) (map[string]string, error) {
+// headTree returns HEAD and the blob identity of every file committed at
+// it. A commit's tree never changes, so the listing is kept until HEAD moves.
+func (r *Repository) headTree(ctx context.Context) (string, map[string]string, error) {
 	ref, err := r.readFile(".git/refs/heads/main")
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	head := strings.TrimSpace(string(ref))
 	if !objectID.MatchString(head) {
-		return nil, fmt.Errorf("invalid trace HEAD %q", head)
+		return "", nil, fmt.Errorf("invalid trace HEAD %q", head)
 	}
 	r.gitMu.Lock()
 	defer r.gitMu.Unlock()
 	if r.tree != nil && r.treeHead == head {
-		return r.tree, nil
+		return head, r.tree, nil
 	}
 	if err := r.checkGit(); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	tree, err := r.git(ctx, nil, "ls-tree", "-rz", head)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	blobs := map[string]string{}
 	for _, entry := range strings.Split(tree, "\x00") {
@@ -260,13 +266,13 @@ func (r *Repository) headTree(ctx context.Context) (map[string]string, error) {
 		meta, name, ok := strings.Cut(entry, "\t")
 		fields := strings.Fields(meta)
 		if !ok || len(fields) != 3 || fields[0] != "100644" || fields[1] != "blob" {
-			return nil, fmt.Errorf("invalid trace Git tree entry %q", entry)
+			return "", nil, fmt.Errorf("invalid trace Git tree entry %q", entry)
 		}
 		if err := relative(name); err != nil {
-			return nil, err
+			return "", nil, err
 		}
 		blobs[name] = fields[2]
 	}
 	r.tree, r.treeHead = blobs, head
-	return blobs, nil
+	return head, blobs, nil
 }

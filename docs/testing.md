@@ -62,12 +62,18 @@ and are discarded when the command ends. This exercises real Git, Jujutsu and
 filesystem operations, including the service's durability calls, without paying
 for container-layer disk writes on every fixture transaction.
 
-Each workflow read verifies trace files. Decoded JSONL records are reused only
-when the file bytes match, and callers receive independent copies of mutable
-fields. Each project retains at most 16 MiB of encoded JSONL in this cache,
-along with its decoded records; larger files are decoded without retention. Changes, including same-size edits with unchanged timestamps, are
-validated again. Frequent polling competes with the controllers doing the work. Parallel tests also share
-the container's CPU and filesystem, so adding parallelism can increase contention.
+An open trace handle holds the trace's lock, so only the handle changes its
+files. Reads reuse the handle's latest scan and history check until it next
+writes or HEAD moves, and callers receive independent copies of mutable fields.
+Every write checks the trace files against HEAD again before it changes
+anything, so a file changed from outside the handle stops the write rather than
+being committed; a test that edits trace files under an open handle sees the
+edit at its next write or when it reopens the trace. When a write changes the
+files, decoded JSONL records are reused only when the file bytes match. Each
+project retains at most 16 MiB of encoded JSONL in this cache, along with its
+decoded records; larger files are decoded without retention. Frequent polling
+competes with the controllers doing the work. Parallel tests also share the
+container's CPU and filesystem, so adding parallelism can increase contention.
 
 - Keep one end-to-end journey for each distinct integration contract. Exercise
   decision, delivery-style and failure variants at the controller boundary.

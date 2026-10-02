@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,7 +49,40 @@ type Repository struct {
 	synced   map[string]bool
 	// recordFiles holds decoded JSONL keyed by exact bytes, under mu.
 	recordFiles map[string]recordFile
+	// generation counts the handle's changes to the files of the trace.
+	// scanned and history, under mu, are the latest scan and history check,
+	// reused while generation is unchanged and, for history, HEAD has not
+	// moved: the lock keeps other writers out, so the files change only
+	// when the handle writes them.
+	generation atomic.Uint64
+	scanned    *scannedTrace
+	history    *checkedHistory
 }
+
+// scannedTrace is a scan the handle made at generation.
+type scannedTrace struct {
+	generation uint64
+	records    []Record
+	streams    []config.WorkstreamID
+	err        error
+}
+
+// checkedHistory is a history check the handle made at generation, against
+// the commit head.
+type checkedHistory struct {
+	generation uint64
+	head       string
+	files      *treeFiles
+}
+
+// changed records that the handle changed the files of the trace, so the
+// next scan and history check read them again.
+func (r *Repository) changed() { r.generation.Add(1) }
+
+// forget drops the remembered scan and history check. A write calls it
+// before it checks the trace, so a file changed from outside the handle is
+// reported as uncommitted rather than written over or committed.
+func (r *Repository) forget() { r.scanned, r.history = nil, nil }
 
 func location(root config.Root, project config.Project) (string, error) {
 	directory, err := root.ProjectTrace(project.ID)
@@ -137,7 +171,7 @@ func (r *Repository) Close() error {
 		err = errors.Join(syscall.Flock(int(r.lock.Fd()), syscall.LOCK_UN), r.lock.Close())
 		r.lock = nil
 	}
-	r.recordFiles = nil
+	r.recordFiles, r.scanned, r.history = nil, nil, nil
 	return errors.Join(err, r.dir.Close())
 }
 func (r *Repository) Project() config.ProjectID { return r.project }
@@ -495,6 +529,7 @@ func (r *Repository) CreateWorkstreamOn(ctx context.Context, id config.Workstrea
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	r.forget()
 	checked, err := r.checkHistory(ctx)
 	if err != nil {
 		return err
@@ -578,11 +613,29 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 }
 
 // scanFiles is scan over the files checkHistory returned under the same
-// lock, which it reads rather than walking and reading the trace again.
+// lock, which it reads rather than walking and reading the trace again. A
+// scan the handle made since it last changed the files is reused; each call
+// receives its own copy of the records.
 func (r *Repository) scanFiles(checked *treeFiles) ([]Record, []config.WorkstreamID, error) {
 	if err := r.recoverPublication(context.Background()); err != nil {
 		return nil, nil, err
 	}
+	generation := r.generation.Load()
+	if s := r.scanned; s == nil || s.generation != generation {
+		records, streams, err := r.scanTrace(checked)
+		r.scanned = &scannedTrace{generation: generation, records: records, streams: streams, err: err}
+	}
+	s := r.scanned
+	records := make([]Record, len(s.records))
+	for i, v := range s.records {
+		records[i] = cloneRecord(v)
+	}
+	return records, slices.Clone(s.streams), s.err
+}
+
+// scanTrace reads and checks every record of the trace, as scanFiles
+// describes.
+func (r *Repository) scanTrace(checked *treeFiles) ([]Record, []config.WorkstreamID, error) {
 	read := func(name string) ([]byte, error) {
 		if data, ok := checked.read(name); ok {
 			return data, nil
@@ -747,6 +800,7 @@ func (r *Repository) append(ctx context.Context, v Record, writeDocument bool) e
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	r.forget()
 	checked, err := r.checkHistory(ctx)
 	if err != nil {
 		return err
