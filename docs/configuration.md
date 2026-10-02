@@ -677,6 +677,22 @@ with more than 128 check links is asked about its collections' items, such as
 a Go package's tests rather than each test. When Jev selects no check, or any
 judgment fallback applies, the run checks everything, and the run records why.
 
+`go run ./cmd/smartcheck` asks the same judgment of a Git working tree outside
+the factory, with no Osmia configuration or state. It diffs the working tree,
+including uncommitted changes to tracked files, against the merge base of
+`--base` (`main` by default), lists the checks of the Dagger workspace at the
+repository root and runs `dagger check` with the links Jev selects, or every
+check when the judgment would fall back. It reads the key from the variable
+`--api-key-env` names, `OPENROUTER_API_KEY` by default, and always asks Jev,
+whatever `[jev] enabled` says. `-v` prints the changed files, each candidate
+link's probability and the selection; `--dry-run` prints the selected links
+instead of running them; `--threshold` changes the probability a check needs;
+`-C` names another working tree. Arguments after `--` go to `dagger check`:
+
+```sh
+go run ./cmd/smartcheck -v -- --progress=report
+```
+
 While the boost is on, each judgment is recorded under its workstream in
 `judgments/<id>.json`, one revision when it starts and one with its result,
 and its usage is a ledger cost under the `jev` role. A judgment asked again

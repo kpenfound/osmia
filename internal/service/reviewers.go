@@ -12,6 +12,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/gitdiff"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/scheduler"
@@ -365,7 +366,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 		return err
 	}
 	content, _ := json.MarshalIndent(identity, "", "  ")
-	prompt := fmt.Sprintf("Review this exact candidate: verify that it does the unit's task and that every acceptance item holds, then record your verdict. Material findings must say what the mason should change. The candidate identity is:\n%s\n\nChanged files, with added and removed lines; read the diff with %s:\n%s\n%s", content, workstreamDiffTool, changedFiles(req.Diff), checkEvidence(run))
+	prompt := fmt.Sprintf("Review this exact candidate: verify that it does the unit's task and that every acceptance item holds, then record your verdict. Material findings must say what the mason should change. The candidate identity is:\n%s\n\nChanged files, with added and removed lines; read the diff with %s:\n%s\n%s", content, workstreamDiffTool, gitdiff.ChangedFiles(req.Diff), checkEvidence(run))
 	guidance, err := r.reviewGuidance(stream, unit, identity.Candidate.Revision)
 	if err != nil {
 		return err

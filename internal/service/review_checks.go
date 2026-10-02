@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
@@ -66,13 +67,7 @@ func (DaggerChecks) List(ctx context.Context, dir string) ([]string, error) {
 	if exit != 0 || output.truncated {
 		return nil, fmt.Errorf("dagger list checks exited %d: %s", exit, lastLines(output.String(), 5))
 	}
-	var links []string
-	for line := range strings.Lines(output.String()) {
-		if line = strings.TrimSpace(line); strings.HasPrefix(line, "dag+check://") {
-			links = append(links, line)
-		}
-	}
-	return links, nil
+	return checkselect.Links(output.String()), nil
 }
 
 func (DaggerChecks) Check(ctx context.Context, dir string, links []string) (CheckResult, error) {

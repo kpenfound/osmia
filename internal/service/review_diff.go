@@ -9,13 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/gitdiff"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -23,93 +23,6 @@ const workstreamDiffTool = "workstream_diff"
 
 // diffOutputLimit bounds one workstream_diff response.
 const diffOutputLimit = 64 * 1024
-
-// fileDiff is one file's section of a unified git diff.
-type fileDiff struct {
-	Path    string
-	Header  []string
-	Hunks   []diffHunk
-	Binary  bool
-	Added   int
-	Removed int
-}
-
-// diffHunk is one hunk and the candidate lines it covers.
-type diffHunk struct {
-	Lines      []string
-	Start, End int
-}
-
-var hunkHeader = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
-
-// parseDiff splits the output of git diff --no-renames into files. Lines keep
-// their endings; a binary patch body is dropped.
-func parseDiff(diff string) []fileDiff {
-	var files []fileDiff
-	binaryBody := false
-	for _, line := range strings.SplitAfter(diff, "\n") {
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "diff --git ") {
-			files = append(files, fileDiff{Path: diffPath(strings.TrimSuffix(line, "\n")), Header: []string{line}})
-			binaryBody = false
-			continue
-		}
-		if len(files) == 0 || binaryBody {
-			continue
-		}
-		f := &files[len(files)-1]
-		switch {
-		case strings.HasPrefix(line, "@@ "):
-			h := diffHunk{Lines: []string{line}}
-			if m := hunkHeader.FindStringSubmatch(line); m != nil {
-				start, _ := strconv.Atoi(m[1])
-				count := 1
-				if m[2] != "" {
-					count, _ = strconv.Atoi(m[2])
-				}
-				h.Start, h.End = max(start, 1), max(start+count-1, start, 1)
-			}
-			f.Hunks = append(f.Hunks, h)
-		case len(f.Hunks) != 0:
-			h := &f.Hunks[len(f.Hunks)-1]
-			h.Lines = append(h.Lines, line)
-			switch line[0] {
-			case '+':
-				f.Added++
-			case '-':
-				f.Removed++
-			}
-		case strings.TrimSuffix(line, "\n") == "GIT binary patch":
-			f.Binary, binaryBody = true, true
-		default:
-			if strings.HasPrefix(line, "Binary files ") {
-				f.Binary = true
-			}
-			f.Header = append(f.Header, line)
-		}
-	}
-	return files
-}
-
-// diffPath reads the path of a "diff --git a/<path> b/<path>" line, whose two
-// paths are equal without rename detection.
-func diffPath(line string) string {
-	rest := strings.TrimPrefix(line, "diff --git ")
-	if strings.HasPrefix(rest, `"`) {
-		if quoted, err := strconv.QuotedPrefix(rest); err == nil {
-			if path, err := strconv.Unquote(quoted); err == nil {
-				return strings.TrimPrefix(path, "a/")
-			}
-		}
-	}
-	n := (len(rest) - len("a/ b/")) / 2
-	if n <= 0 || !strings.HasPrefix(rest, "a/") {
-		return rest
-	}
-	return rest[len("a/") : len("a/")+n]
-}
 
 // selectedDiff is what a workstream_diff call asks for.
 type selectedDiff struct {
@@ -140,7 +53,7 @@ type changedFile struct {
 
 // render returns the selected files, or the selected part of the diff cut at
 // a line boundary within diffOutputLimit.
-func (s selectedDiff) render(files []fileDiff) (listed []changedFile, text string, truncated bool) {
+func (s selectedDiff) render(files []gitdiff.File) (listed []changedFile, text string, truncated bool) {
 	var out strings.Builder
 	for _, f := range files {
 		if !s.matches(f.Path) {
@@ -150,7 +63,7 @@ func (s selectedDiff) render(files []fileDiff) (listed []changedFile, text strin
 			listed = append(listed, changedFile{Path: f.Path, Added: f.Added, Removed: f.Removed, Binary: f.Binary})
 			continue
 		}
-		var hunks []diffHunk
+		var hunks []gitdiff.Hunk
 		for _, h := range f.Hunks {
 			if s.Start == 0 || h.Start <= s.End && h.End >= s.Start {
 				hunks = append(hunks, h)
@@ -237,7 +150,7 @@ func diffTool(diffs ...pinnedDiff) coreadapter.Tool {
 			if err != nil {
 				return nil, err
 			}
-			listed, text, truncated := in.render(parseDiff(diff))
+			listed, text, truncated := in.render(gitdiff.Parse(diff))
 			response := struct {
 				Change    string        `json:"change,omitempty"`
 				From      string        `json:"from"`
@@ -252,19 +165,6 @@ func diffTool(diffs ...pinnedDiff) coreadapter.Tool {
 			}
 			return json.Marshal(response)
 		}}
-}
-
-// changedFiles lists a diff's files with their added and removed lines, one
-// per line, for a review prompt.
-func changedFiles(diff string) string {
-	var out strings.Builder
-	for _, f := range parseDiff(diff) {
-		fmt.Fprintf(&out, "- %s (+%d -%d)\n", f.Path, f.Added, f.Removed)
-	}
-	if out.Len() == 0 {
-		return "(no changed files)\n"
-	}
-	return out.String()
 }
 
 // reviewDiffTool serves the exact diff a unit review is pinned to: the

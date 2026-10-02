@@ -2,35 +2,12 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"slices"
-	"strings"
 
+	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/systemone"
 )
-
-// checkSelectionTask is the Jev judgment that selects the checks a unit's
-// candidate runs before review. Bump checkSelectionVersion whenever its
-// questions, their interpretation or selectThreshold change.
-const (
-	checkSelectionTask    = "check-selection"
-	checkSelectionVersion = 1
-)
-
-// selectThreshold is the probability at or above which a check is selected.
-// It favours running a check that may be unaffected over missing one that is.
-const selectThreshold = 0.3
-
-// maxCheckQuestions bounds the checks asked about in one judgment; a project
-// with more is asked about its collections' items, collapsed as
-// checkCandidates describes.
-const maxCheckQuestions = 128
-
-// maxCheckState bounds the judgment's state in bytes, keeping it and a
-// question within Jev's context. The diff is included only when it fits.
-const maxCheckState = 72 * 1024
 
 // The reasons a selection runs every check without a Jev decision. A Jev
 // fallback records the judgment's own reason.
@@ -94,32 +71,25 @@ func (c *checkers) selectChecks(ctx context.Context, in checkInput, dir, diff st
 	if len(links) == 0 {
 		return fullSelection(selectionNoChecks, "the project lists no check links")
 	}
-	candidates, ok := checkCandidates(links, maxCheckQuestions)
+	candidates, ok := checkselect.Candidates(links, checkselect.MaxQuestions)
 	if !ok {
-		return fullSelection(selectionTooMany, fmt.Sprintf("%d check links do not narrow to %d", len(links), maxCheckQuestions))
+		return fullSelection(selectionTooMany, fmt.Sprintf("%d check links do not narrow to %d", len(links), checkselect.MaxQuestions))
 	}
-	state, ok := checkSelectionState(diff)
+	state, ok := checkselect.State(diff)
 	if !ok {
 		return fullSelection(selectionTooLarge, "the changed files do not fit a judgment")
-	}
-	request := systemone.Request{State: state, Questions: map[string]systemone.Question{}}
-	for i, link := range candidates {
-		q := systemone.Noul(fmt.Sprintf("Could the change in the state alter the result of the Dagger check %s?", link))
-		q.Yes = "The check exercises a changed file, or code, configuration or generated files the change affects."
-		q.No = "Nothing the check depends on is touched by the change."
-		request.Questions[checkQuestion(i)] = q
 	}
 	decision := c.s.jev.Evaluate(ctx, c.repository, jev.Judgment{
 		Scope:   c.scope(in),
 		Cause:   checkRequestID(in.Unit, in.Run),
 		Depth:   1,
-		Task:    checkSelectionTask,
-		Version: checkSelectionVersion,
+		Task:    checkselect.Task,
+		Version: checkselect.Version,
 		Sources: []jev.Source{{Kind: "unit-report", ID: reportDocument(in.Unit), Revision: in.Report}},
-		Request: request,
+		Request: checkselect.Request(state, candidates),
 		Accept: func(r systemone.Response) string {
-			if len(selectedChecks(r, candidates)) == 0 {
-				return fmt.Sprintf("no check reached probability %.2f", selectThreshold)
+			if len(checkselect.Selected(r, candidates, checkselect.Threshold)) == 0 {
+				return fmt.Sprintf("no check reached probability %.2f", checkselect.Threshold)
 			}
 			return ""
 		},
@@ -129,99 +99,5 @@ func (c *checkers) selectChecks(ctx context.Context, in checkInput, dir, diff st
 		s.Judgment = decision.ID
 		return s
 	}
-	return CheckSelection{Mode: selectionSelected, Links: selectedChecks(*decision.Response, candidates), Candidates: len(candidates), Judgment: decision.ID}
-}
-
-func checkQuestion(i int) string { return fmt.Sprintf("check-%d", i) }
-
-// selectedChecks returns the candidates whose answer reaches selectThreshold.
-func selectedChecks(r systemone.Response, candidates []string) []string {
-	var selected []string
-	for i, link := range candidates {
-		if a, ok := r.Answers[checkQuestion(i)]; ok && a.Kind == systemone.KindNoul && a.Noul >= selectThreshold {
-			selected = append(selected, link)
-		}
-	}
-	return selected
-}
-
-// checkLinkGuide tells Jev how to read a check link.
-const checkLinkGuide = "Each question names a Dagger check by its link: dag+check://<module>/<collection path>?<filters>. " +
-	"The module and path say what the check is, such as a module's tests or a check that generated files are up to date. " +
-	"Filters narrow a collection to some of its items; for Go, go-package names a package directory and go-test a test function. " +
-	"A link covers every item its filters leave, so a link without filters covers its whole collection. " +
-	"A change can alter a check's result when the check builds or exercises a changed file, or code that depends on one through imports, build configuration or generated files."
-
-// checkSelectionState is the judgment's state: how to read a check link, the
-// changed files with their line counts, and the diff when it fits within
-// maxCheckState. It reports false when the changed files alone do not fit.
-func checkSelectionState(diff string) (map[string]any, bool) {
-	state := map[string]any{"checks": checkLinkGuide, "changed_files": changedFiles(diff)}
-	size := func() int { data, _ := json.Marshal(state); return len(data) }
-	if size() > maxCheckState {
-		return nil, false
-	}
-	state["diff"] = diff
-	if size() > maxCheckState {
-		state["diff"] = "omitted: the diff is too large; judge from the changed files"
-	}
-	return state, true
-}
-
-// checkCandidates returns the distinct links, narrowed to at most limit by
-// standing a collection item's link in for the links within it: the link
-// with its last filter removed covers every link that differs from it only
-// in that filter. Each step collapses the item that removes the most links,
-// so the largest collections are judged by item and small ones keep their
-// own links. It reports false when the links cannot be narrowed to limit.
-func checkCandidates(links []string, limit int) ([]string, bool) {
-	set := map[string]bool{}
-	for _, l := range links {
-		set[l] = true
-	}
-	for len(set) > limit {
-		within := map[string][]string{}
-		for l := range set {
-			if parent, ok := parentLink(l); ok {
-				within[parent] = append(within[parent], l)
-			}
-		}
-		best, saved := "", 0
-		for parent, children := range within {
-			n := len(children)
-			if !set[parent] {
-				n--
-			}
-			if n > saved || n == saved && n > 0 && parent < best {
-				best, saved = parent, n
-			}
-		}
-		if saved == 0 {
-			return nil, false
-		}
-		for _, l := range within[best] {
-			delete(set, l)
-		}
-		set[best] = true
-	}
-	out := make([]string, 0, len(set))
-	for l := range set {
-		out = append(out, l)
-	}
-	slices.Sort(out)
-	return out, true
-}
-
-// parentLink returns link without its last filter, and false for a link
-// without filters.
-func parentLink(link string) (string, bool) {
-	base, query, found := strings.Cut(link, "?")
-	if !found || query == "" {
-		return "", false
-	}
-	i := strings.LastIndex(query, "&")
-	if i < 0 {
-		return base, true
-	}
-	return base + "?" + query[:i], true
+	return CheckSelection{Mode: selectionSelected, Links: checkselect.Selected(*decision.Response, candidates, checkselect.Threshold), Candidates: len(candidates), Judgment: decision.ID}
 }

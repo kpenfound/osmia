@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/gitdiff"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
@@ -740,7 +741,7 @@ func (d drifter) reviewPrompt(ctx context.Context, stream config.WorkstreamID, r
 		if err != nil {
 			return "", err
 		}
-		changes = append(changes, fmt.Sprintf("Change %q is %s, from %s to %s:\n%s", diff.Name, diff.About, diff.From, diff.To, changedFiles(text)))
+		changes = append(changes, fmt.Sprintf("Change %q is %s, from %s to %s:\n%s", diff.Name, diff.About, diff.From, diff.To, gitdiff.ChangedFiles(text)))
 	}
 	return fmt.Sprintf(`Review the resolution of the conflicts of feature branch %s with upstream against the sealed spec below.
 

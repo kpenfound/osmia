@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/gitdiff"
 )
 
 const sampleDiff = `diff --git a/docs/guide.md b/docs/guide.md
@@ -50,44 +51,9 @@ HcmV?d00001
 
 `
 
-func TestParseDiffSplitsFilesAndHunks(t *testing.T) {
-	t.Parallel()
-	files := parseDiff(sampleDiff)
-	type summary struct {
-		path           string
-		added, removed int
-		binary         bool
-		hunks          int
-	}
-	var got []summary
-	for _, f := range files {
-		got = append(got, summary{f.Path, f.Added, f.Removed, f.Binary, len(f.Hunks)})
-	}
-	want := []summary{
-		{"docs/guide.md", 2, 1, false, 2},
-		{"internal/a b.go", 2, 0, false, 1},
-		{"internal/café.go", 0, 1, false, 1},
-		{"logo.png", 0, 0, true, 0},
-	}
-	if len(got) != len(want) {
-		t.Fatalf("files %+v", got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("file %d: %+v, want %+v", i, got[i], want[i])
-		}
-	}
-	if h := files[0].Hunks[1]; h.Start != 41 || h.End != 42 {
-		t.Fatalf("second hunk covers %d-%d", h.Start, h.End)
-	}
-	if h := files[2].Hunks[0]; h.Start != 1 || h.End != 1 {
-		t.Fatalf("deletion hunk covers %d-%d", h.Start, h.End)
-	}
-}
-
 func TestSelectedDiffRendersLikeGitDiff(t *testing.T) {
 	t.Parallel()
-	files := parseDiff(sampleDiff)
+	files := gitdiff.Parse(sampleDiff)
 	if _, text, truncated := (selectedDiff{}).render(files); truncated || !strings.HasPrefix(text, "diff --git a/docs/guide.md") || !strings.Contains(text, "(binary content not shown)") || strings.Contains(text, "LcmZQzWMT") {
 		t.Fatalf("whole diff truncated=%t:\n%s", truncated, text)
 	}
@@ -105,7 +71,7 @@ func TestSelectedDiffRendersLikeGitDiff(t *testing.T) {
 	if _, text, _ := (selectedDiff{Paths: []string{"doc"}}).render(files); text != "" {
 		t.Fatalf("a path prefix that is not a directory matched:\n%s", text)
 	}
-	large := parseDiff("diff --git a/big b/big\n--- a/big\n+++ b/big\n@@ -0,0 +1,5000 @@\n" + strings.Repeat("+0123456789abcdef\n", 5000))
+	large := gitdiff.Parse("diff --git a/big b/big\n--- a/big\n+++ b/big\n@@ -0,0 +1,5000 @@\n" + strings.Repeat("+0123456789abcdef\n", 5000))
 	_, text, truncated := (selectedDiff{}).render(large)
 	if !truncated || len(text) > diffOutputLimit || !strings.HasSuffix(text, "\n") {
 		t.Fatalf("large diff: truncated=%t bytes=%d", truncated, len(text))

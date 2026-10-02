@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/jev/jevtest"
@@ -257,7 +258,7 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 
 func TestChecksFallBackToEveryCheck(t *testing.T) {
 	t.Parallel()
-	many := make([]string, maxCheckQuestions+1)
+	many := make([]string, checkselect.MaxQuestions+1)
 	for i := range many {
 		many[i] = fmt.Sprintf("dag+check://module-%03d/check", i)
 	}
@@ -517,58 +518,5 @@ func TestReviewWithoutAMatchingCheckRunReturnsToChecking(t *testing.T) {
 	runChecks(t, f.s, repository, stream)
 	if got := unitState(t, repository, stream, "resume"); got != UnitReviewing || len(checks.runs()) != 2 {
 		t.Fatalf("unit is %s after %d check runs", got, len(checks.runs()))
-	}
-}
-
-func TestCheckCandidatesCollapseTheLargestCollections(t *testing.T) {
-	t.Parallel()
-	tests := "dag+check://go/packages/tests/test"
-	stale := "dag+check://go/packages/generate/stale"
-	release := "dag+check://release/version"
-	links := []string{release, stale + "?go-package=a", stale + "?go-package=b", tests + "?go-package=b&go-test=TestX", tests + "?go-package=b&go-test=TestY"}
-	for i := range 5 {
-		links = append(links, fmt.Sprintf("%s?go-package=a&go-test=Test%d", tests, i))
-	}
-	for _, c := range []struct {
-		limit int
-		want  []string
-	}{
-		{10, slices.Sorted(slices.Values(links))},
-		{7, []string{stale + "?go-package=a", stale + "?go-package=b", tests + "?go-package=a", tests + "?go-package=b&go-test=TestX", tests + "?go-package=b&go-test=TestY", release}},
-		{4, []string{stale, tests + "?go-package=a", tests + "?go-package=b", release}},
-		{3, []string{stale, tests, release}},
-	} {
-		got, ok := checkCandidates(links, c.limit)
-		if !ok || !slices.Equal(got, c.want) {
-			t.Fatalf("limit %d: %q %t, want %q", c.limit, got, ok, c.want)
-		}
-	}
-	if got, ok := checkCandidates(links, 2); ok {
-		t.Fatalf("links narrowed below their collections: %q", got)
-	}
-	for link, want := range map[string]string{tests + "?go-package=a&go-test=T": tests + "?go-package=a", tests + "?go-package=a": tests, tests: ""} {
-		if got, _ := parentLink(link); got != want {
-			t.Fatalf("parent of %s is %q, want %q", link, got, want)
-		}
-	}
-}
-
-func TestCheckSelectionStateKeepsWithinItsBound(t *testing.T) {
-	t.Parallel()
-	diff := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+new\n"
-	state, ok := checkSelectionState(diff)
-	if !ok || state["diff"] != diff || !strings.Contains(state["changed_files"].(string), "a.go (+1 -1)") {
-		t.Fatalf("state %+v", state)
-	}
-	large := diff + "+" + strings.Repeat("x", maxCheckState) + "\n"
-	if state, ok := checkSelectionState(large); !ok || !strings.HasPrefix(state["diff"].(string), "omitted") {
-		t.Fatalf("a large diff was kept: %t", ok)
-	}
-	var many strings.Builder
-	for i := range maxCheckState / 10 {
-		fmt.Fprintf(&many, "diff --git a/f%05d.go b/f%05d.go\n--- a/f%05d.go\n+++ b/f%05d.go\n@@ -1 +1 @@\n-a\n+b\n", i, i, i, i)
-	}
-	if _, ok := checkSelectionState(many.String()); ok {
-		t.Fatal("changed files beyond the bound were judged")
 	}
 }
