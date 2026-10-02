@@ -38,7 +38,7 @@ allowed; they do not execute tests.
 | Agent boundary | [isolation](../internal/isolation), [coreadapter](../internal/coreadapter) | Scoped file views, grants, environment allowlist and execution policy checks |
 | Workspaces | [workspace](../internal/workspace), service Jujutsu demonstrations | Git and Jujutsu behavior, rebase and recovery using local repositories |
 | Operator interface | [cli](../internal/cli), service browser tests | Commands, API behavior, owner decisions and live page updates |
-| Jev judgments | [jev](../internal/jev), [systemone](../internal/systemone), [thread](../internal/thread), [checkselect](../internal/checkselect), [smartcheck](../cmd/smartcheck) | Fallback on every failure, cool-down, recorded decisions reused after restart, interrupted attempts, answer validation against an HTTP test server, mason classification thresholds and evidence, and check selection against local repositories |
+| Jev judgments | [jev](../internal/jev), [systemone](../internal/systemone), [thread](../internal/thread), [service](../internal/service), [checkselect](../internal/checkselect), [smartcheck](../cmd/smartcheck) | Fallback on every failure, cool-down, recorded decisions reused after restart, interrupted attempts, answer validation against an HTTP test server, mason classification thresholds and evidence, check selection in the service and against local repositories, and the chief of staff's question signals with their fallbacks and reuse |
 
 Test counts are useful for finding the suite, but assertions and exercised
 boundaries determine confidence.

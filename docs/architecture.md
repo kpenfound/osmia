@@ -73,6 +73,10 @@ on a network call. The
 Judge is one per service, reads the `[jev]` settings on each call, and is
 nil-safe, so code without one behaves as if the boost were off. The
 [design](design.md#96-jev-judgments) defines what a judgment may decide.
+Turn code that informs a session, rather than replacing its result, uses the
+thread runner's `Advise` hook: it runs after the turn is claimed and before
+the session starts, its text ends the prompt, and the turn's response records
+it.
 
 A judgment supplies the turn's scope, the trace record that caused it, a task
 name and version, the records its state was built from, the

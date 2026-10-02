@@ -693,6 +693,19 @@ instead of running them; `--threshold` changes the probability a check needs;
 go run ./cmd/smartcheck -v -- --progress=report
 ```
 
+With the boost on, the chief of staff's turn that delivers a question asks
+Jev, before the session starts, whether the question's honest answer would
+change the sealed spec or plan, whether answering it as it proposes would
+contradict one of the owner's rulings or the project's notices, and whether it
+asks for a standing project rule. The prompt ends with each answer that
+reaches its threshold as a signal naming its judgment and the outcome it
+argues for, and the turn's response records that text as `advice`. The chief
+of staff still chooses the outcome and explains a choice against a signal. A
+fallback, or answers below every threshold, leaves the prompt as it is with
+the boost off. A question's judgment is reused when the question is delivered
+again, and names the question, so its signals can be compared with the
+question's outcome.
+
 While the boost is on, each judgment is recorded under its workstream in
 `judgments/<id>.json`, one revision when it starts and one with its result,
 and its usage is a ledger cost under the `jev` role. A judgment asked again
