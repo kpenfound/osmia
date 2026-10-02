@@ -98,8 +98,8 @@ did with the decision as it records any other result, and can cite the
 decision's ID. Keep task questions, thresholds and interpretation in the
 consumer's package, or in a package of their own when more than one program
 asks the judgment, as [checkselect](../internal/checkselect) does for the
-service and `cmd/smartcheck`; `jev` holds only what every judgment shares, and
-`systemone` knows nothing of Osmia.
+service and `cmd/smartcheck` ([smart checks](smart-checks.md)); `jev` holds
+only what every judgment shares, and `systemone` knows nothing of Osmia.
 
 ## Storage and deployment
 

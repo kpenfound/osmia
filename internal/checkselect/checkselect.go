@@ -18,12 +18,11 @@ import (
 // interpretation or Threshold change.
 const (
 	Task    = "check-selection"
-	Version = 1
+	Version = 2
 )
 
-// Threshold is the probability at or above which a check is selected. It
-// favours running a check that may be unaffected over missing one that is.
-const Threshold = 0.3
+// Threshold is the probability at or above which a check is selected.
+const Threshold = 0.5
 
 // MaxQuestions bounds the checks asked about in one judgment; a project with
 // more is asked about its collections' items, collapsed as Candidates

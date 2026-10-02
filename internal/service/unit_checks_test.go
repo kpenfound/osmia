@@ -215,7 +215,7 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 	checks := &fakeChecks{links: links, outcomes: passing()}
 	f, stream, repository := newChecksFixture(t, "checks-jev", checks)
 	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{
-		"check-0": jevtest.Noul(0.92), "check-1": jevtest.Noul(0.35), "check-2": jevtest.Noul(0.1), "check-3": jevtest.Noul(0.02)}}}}}
+		"check-0": jevtest.Noul(0.92), "check-1": jevtest.Noul(0.55), "check-2": jevtest.Noul(0.45), "check-3": jevtest.Noul(0.02)}}}}}
 	boostJev(f.s, p)
 	runChecks(t, f.s, repository, stream)
 	if got := unitState(t, repository, stream, "resume"); got != UnitReviewing {

@@ -128,7 +128,7 @@ func TestRunsTheSelectedChecks(t *testing.T) {
 	dir := newRepository(t)
 	write(t, dir, "internal/trace/trace.go", "package trace\n\nconst Version = 2\n")
 	d := &fakeDagger{links: []string{release, serviceTests, traceTests}}
-	j := &fakeJev{probabilities: map[string]float64{traceTests: 0.95, serviceTests: 0.4, release: 0.05}}
+	j := &fakeJev{probabilities: map[string]float64{traceTests: 0.95, serviceTests: 0.55, release: 0.45}}
 	r := runHarness(t, d, j, withKey, "-C", filepath.Join(dir, "internal"), "--", "--progress=report")
 	if r.code != 0 || r.stderr != "" {
 		t.Fatalf("exit %d, stderr %q", r.code, r.stderr)
@@ -157,7 +157,7 @@ func TestVerboseExplainsTheSelection(t *testing.T) {
 	if r.code != 0 {
 		t.Fatalf("exit %d: %s", r.code, r.stderr)
 	}
-	for _, want := range []string{"base: main (merge base ", "- internal/trace/trace.go (+2 -0)", "checks: 2 links, asking about 2", "jev: jev-1.13.0 answered", "  ✓ 0.95 " + traceTests + "\n    0.05 " + release, "selected 1 of 2 at probability 0.30 or more"} {
+	for _, want := range []string{"base: main (merge base ", "- internal/trace/trace.go (+2 -0)", "checks: 2 links, asking about 2", "jev: jev-1.13.0 answered", "  ✓ 0.95 " + traceTests + "\n    0.05 " + release, "selected 1 of 2 at probability 0.50 or more"} {
 		if !strings.Contains(r.stderr, want) {
 			t.Fatalf("verbose output lacks %q:\n%s", want, r.stderr)
 		}
@@ -185,7 +185,7 @@ func TestFallsBackToEveryCheck(t *testing.T) {
 		reason string
 	}{
 		{"unanswered", &fakeJev{err: &systemone.Error{Kind: systemone.KindRateLimited, Message: "slow down"}}, "Jev did not answer: "},
-		{"none likely", &fakeJev{probabilities: map[string]float64{traceTests: 0.1, release: 0.05}}, "no check reached probability 0.30"},
+		{"none likely", &fakeJev{probabilities: map[string]float64{traceTests: 0.45, release: 0.05}}, "no check reached probability 0.50"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

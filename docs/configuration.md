@@ -651,7 +651,8 @@ timeout = "10s"
 The settings are validated whether or not the boost is on, and apply through
 reload. The service reads the key when it makes a request; configuration
 responses, sessions and trace records never contain it, and it is not sent
-through a redirect.
+through a redirect. A judgment's state, such as a unit candidate's diff for
+smart checks, is sent to the configured provider.
 
 Every judgment falls back to the workflow as it runs without Jev when the key
 is missing, the request times out, is rate limited, fails or is refused, the
@@ -677,21 +678,9 @@ with more than 128 check links is asked about its collections' items, such as
 a Go package's tests rather than each test. When Jev selects no check, or any
 judgment fallback applies, the run checks everything, and the run records why.
 
-`go run ./cmd/smartcheck` asks the same judgment of a Git working tree outside
-the factory, with no Osmia configuration or state. It diffs the working tree,
-including uncommitted changes to tracked files, against the merge base of
-`--base` (`main` by default), lists the checks of the Dagger workspace at the
-repository root and runs `dagger check` with the links Jev selects, or every
-check when the judgment would fall back. It reads the key from the variable
-`--api-key-env` names, `OPENROUTER_API_KEY` by default, and always asks Jev,
-whatever `[jev] enabled` says. `-v` prints the changed files, each candidate
-link's probability and the selection; `--dry-run` prints the selected links
-instead of running them; `--threshold` changes the probability a check needs;
-`-C` names another working tree. Arguments after `--` go to `dagger check`:
-
-```sh
-go run ./cmd/smartcheck -v -- --progress=report
-```
+[Smart checks](smart-checks.md) describes the selection end to end: what Jev
+is asked, what a run records, and `go run ./cmd/smartcheck`, which runs the
+same selection on any Git working tree.
 
 With the boost on, the chief of staff's turn that delivers a question asks
 Jev, before the session starts, whether the question's honest answer would

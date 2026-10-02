@@ -56,6 +56,7 @@ keeps the documents, decisions and turns through restarts. See the
 | Write a project's charter | [Charter](docs/charter.md) |
 | Understand the components | [Architecture](docs/architecture.md) |
 | Configure optional memory | [Hearsay integration](docs/hearsay.md) |
+| Understand Jev-selected checks | [Smart checks](docs/smart-checks.md) |
 | Run and understand the checks | [Testing](docs/testing.md) |
 | Contribute a change | [Contributing](CONTRIBUTING.md) |
 | Build or install a release | [Release](docs/release.md) |
