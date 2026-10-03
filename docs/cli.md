@@ -203,6 +203,20 @@ osmia status --json
   `status` shows whether the mason gave up or exhausted the clean-turn bound;
   only `revise` is accepted, resuming its thread in the existing workspace
   with a fresh clean-turn allowance. Neither decision approves a unit.
+- `move <workstream-id> <unit> <implementing|checking|reviewing|approved|contested> <note>`
+  moves a unit the state machine left stuck or wrong. The unit must have
+  started and not merged: it is implementing, checking, reviewing, approved,
+  waiting or contested. Quote the required note. `implementing` gives the mason
+  a turn with your note and a fresh clean-turn allowance in its existing
+  workspace; `checking` runs the checks again on the recorded candidate;
+  `reviewing` has the reviewer review the recorded candidate again with your
+  note; `approved` records your approval of the recorded candidate, which the
+  foreman lands; `contested` holds the unit in your inbox. Moving a unit to the
+  state it is in restarts that stage. A unit the foreman is landing or rebasing
+  fails with `conflict` (exit 5), as does a unit that has not started or has
+  merged; an unknown unit fails with `not_found` (exit 4). The chief of staff
+  moves units on your behalf too, within the limit it shares with its
+  contested rulings, and moves a unit when you ask it to with `send`.
 - `abandon <workstream-id> <reason>` abandons a workstream of the active
   project that is neither delivered nor abandoned. The reason is one argument;
   quote it. The service records the move to `abandoned` with you as actor and

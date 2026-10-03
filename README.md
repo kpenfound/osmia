@@ -40,9 +40,9 @@ behavior and feature dependencies; the guides describe implemented behavior.
 4. A final review shows the evidence for each criterion. You approve delivery;
    the service pushes the branch and opens the pull request.
 
-The chief of staff answers what it can and resolves contested units it is
-confident about; the questions, amendments and contests left for you come to
-one owner inbox. The trace
+The chief of staff answers what it can, resolves contested units it is
+confident about and moves units the state machine leaves stuck; the
+questions, amendments and contests left for you come to one owner inbox. The trace
 keeps the documents, decisions and turns through restarts. See the
 [architecture guide](docs/architecture.md) for the components and boundaries.
 

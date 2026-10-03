@@ -196,7 +196,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					return nil, err
 				}
 				chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
-				return append([]coreadapter.Tool{set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope)}, chief...), err
+				return append([]coreadapter.Tool{set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.moveUnit(r, scope)}, chief...), err
 			},
 			Hosts:  e.Hosts,
 			Engine: e.Engine,

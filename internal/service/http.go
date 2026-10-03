@@ -353,6 +353,23 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if target, ok := strings.CutPrefix(r.URL.Path, Prefix+"/move/"); ok && r.Method == http.MethodPost {
+		stream, unit, found := strings.Cut(target, "/")
+		if !found || unit == "" {
+			failWith(w, &APIError{Validation, "a move requires a workstream and unit"})
+			return
+		}
+		var v UnitMoveRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		if out, api := s.ownerMove(r.Context(), stream, unit, v); api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, out)
+		}
+		return
+	}
 	if r.URL.Path == Prefix+"/charter" && r.Method == http.MethodGet {
 		if out, api := s.charterProposals(); api != nil {
 			failWith(w, api)

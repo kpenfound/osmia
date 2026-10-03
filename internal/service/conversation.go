@@ -156,8 +156,8 @@ func withActions(entries, actions []ConversationEntry) []ConversationEntry {
 }
 
 // chiefActions returns what the chief of staff did on the owner's behalf in
-// the workstream, as action entries: its rulings on contested units and the
-// contests it raised to the owner.
+// the workstream, as action entries: its rulings on contested units, the
+// contests it raised to the owner and the units it moved.
 func chiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -180,6 +180,23 @@ func chiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]C
 			text = fmt.Sprintf("Resolved contested unit %s: its mason revises the unit. %s", d.Unit, decision.Note)
 		}
 		out = append(out, ConversationEntry{Turn: decision.Turn, Kind: "action", Text: text, At: d.At, State: TurnDone})
+	}
+	for _, d := range docs {
+		if d.Unit == "" || !strings.HasPrefix(d.Path, movePrefix(d.Unit)) {
+			continue
+		}
+		var move UnitMove
+		if err := json.Unmarshal([]byte(d.Content), &move); err != nil {
+			return nil, fmt.Errorf("%s: %w", d.Path, err)
+		}
+		if move.By != rulerName(chiefActor) {
+			continue
+		}
+		text := fmt.Sprintf("Moved unit %s from %s to %s. %s", d.Unit, move.From, move.To, move.Note)
+		if move.To == UnitContested {
+			text = fmt.Sprintf("Held unit %s for you, from %s: %s", d.Unit, move.From, move.Note)
+		}
+		out = append(out, ConversationEntry{Turn: move.Turn, Kind: "action", Text: text, At: d.At, State: TurnDone})
 	}
 	return out, nil
 }

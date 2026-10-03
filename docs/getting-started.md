@@ -198,7 +198,9 @@ feature branch in a worktree or Jujutsu workspace of your clone, and masons
 build the units, each reviewed and landed in order. You can talk to the workstream's chief of staff
 meanwhile with `osmia send <workstream-id> "…"` or on the page, and hold work
 with `osmia pause`. The conversation also shows what the chief of staff did on
-your behalf, such as resolving a contested unit.
+your behalf, such as resolving a contested unit or moving a stuck one. You can
+move a stuck unit yourself with
+`osmia move <workstream-id> <unit> <state> "note"`.
 
 When every unit has landed and the final review is done, the workstream's
 delivery entry opens. Read the final report and the drafted pull request

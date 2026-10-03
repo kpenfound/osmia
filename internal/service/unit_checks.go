@@ -176,12 +176,16 @@ func (c *checkers) Pass(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		transitions, err := trace.Read[trace.Transition](c.repository, stream)
+		if err != nil {
+			return err
+		}
 		hold := scheduler.Paused(state.Pauses, c.cfg.Project.ID, stream) || slices.ContainsFunc(ops, func(op checkOperation) bool { return !op.done })
 		for _, u := range b.plan.Units {
 			if b.states[trace.UnitSubject(u.ID)].Value != UnitChecking {
 				continue
 			}
-			requested, err := c.one(ctx, stream, u.ID, b.states[trace.UnitSubject(u.ID)], runs, ops, hold)
+			requested, err := c.one(ctx, stream, u.ID, b.states[trace.UnitSubject(u.ID)], sinceMove(transitions, runs, u.ID), ops, hold)
 			if err != nil {
 				return fmt.Errorf("workstream %s unit %s checks: %w", stream, u.ID, err)
 			}
@@ -233,6 +237,29 @@ func (c *checkers) one(ctx context.Context, stream config.WorkstreamID, unit str
 		}
 	}
 	return true, c.request(ctx, stream, checkInput{Workstream: stream, Unit: unit, Run: run, Candidate: report.Candidate, Base: report.Base, Report: revision})
+}
+
+// sinceMove returns runs without the unit's runs requested before its latest
+// move into checking, so a move into checking runs the checks again.
+func sinceMove(transitions []trace.Transition, runs []UnitCheckRun, unit string) []UnitCheckRun {
+	moved := -1
+	for i, t := range transitions {
+		if isMove(t, unit) && t.To == UnitChecking {
+			moved = i
+		}
+	}
+	if moved < 0 {
+		return runs
+	}
+	requested := map[string]bool{}
+	for _, t := range transitions[moved+1:] {
+		if t.Subject == checksSubject(unit) {
+			requested[t.ID] = true
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(runs), func(r UnitCheckRun) bool {
+		return r.Unit == unit && !requested[checkRequestID(unit, r.Run)]
+	})
 }
 
 // request records the operation that runs in's checks.

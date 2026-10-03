@@ -58,6 +58,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   answer <inbox-number> <ruling>|--accept [--project ID] [--json]
   charter [<workstream-id> <question> [ratify|decline [note]]] [--json]
   contested <workstream> <unit> <review|revise> <note> [--json]
+  move <workstream> <unit> <implementing|checking|reviewing|approved|contested> <note> [--json]
   pause <all|project-id|workstream-id> [--hard] [--reason TEXT] [--json]
   resume <all|project-id|workstream-id> [--json]
   priority set <workstream-id>... | priority clear [--json]
@@ -228,7 +229,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = o.accept && len(a) == 1 || !o.accept && len(a) == 2
 	case "charter":
 		valid = len(a) == 0 || len(a) == 2 || (len(a) == 3 || len(a) == 4) && (a[2] == trace.CharterRatify || a[2] == trace.CharterDecline)
-	case "contested":
+	case "contested", "move":
 		valid = len(a) == 4
 	case "pause", "resume":
 		valid = len(a) == 1
@@ -275,7 +276,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "trace" || cmd == "reload" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "stop" {
 		if err := c.Do(ctx, "POST", service.Prefix+"/stop", nil, nil); err != nil {
@@ -874,6 +875,21 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Ruling recorded for contested unit %s of %s: %s\n", result.Unit, result.Workstream, result.Ruling.Decision)
+		return 0
+	}
+	if cmd == "move" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		result, err := c.MoveUnit(ctx, id, a[1], a[2], a[3])
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Moved unit %s of %s from %s to %s\n", result.Unit, result.Workstream, result.Move.From, result.Move.To)
 		return 0
 	}
 	if cmd == "status" && len(a) == 1 {

@@ -23,6 +23,9 @@ type ContestedRuling struct {
 	Candidate string `json:"candidate"`
 	Contest   string `json:"contest,omitempty"`
 	ResetTurn uint64 `json:"reset_turn,omitempty"`
+	// turn and prompt are the mason turn a move to implementing queues; a
+	// ruling's turn and prompt follow from the ruling.
+	turn, prompt string
 }
 
 type ContestedRulingRequest struct {
@@ -58,6 +61,10 @@ func masonContest(repo *trace.Repository, stream config.WorkstreamID, unit strin
 	return trace.Transition{}, false, nil
 }
 
+// latestMasonRuling returns the latest direction that resumes the unit's
+// mason with a fresh clean-turn allowance: a revise ruling on a mason contest,
+// or a move to implementing. Of two that resume after the same turn, the
+// later one holds.
 func latestMasonRuling(repo *trace.Repository, stream config.WorkstreamID, unit string) (ContestedRuling, bool, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
@@ -66,14 +73,29 @@ func latestMasonRuling(repo *trace.Repository, stream config.WorkstreamID, unit 
 	var latest ContestedRuling
 	found := false
 	for _, d := range docs {
-		if d.Unit != unit || !strings.HasPrefix(d.Path, "units/"+trace.UnitSubject(unit)+"/mason-ruling-") {
+		if d.Unit != unit {
 			continue
 		}
 		var ruling ContestedRuling
-		if err := json.Unmarshal([]byte(d.Content), &ruling); err != nil {
-			return ContestedRuling{}, false, err
+		switch {
+		case strings.HasPrefix(d.Path, "units/"+trace.UnitSubject(unit)+"/mason-ruling-"):
+			if err := json.Unmarshal([]byte(d.Content), &ruling); err != nil {
+				return ContestedRuling{}, false, err
+			}
+		case strings.HasPrefix(d.Path, movePrefix(unit)):
+			var move UnitMove
+			if err := json.Unmarshal([]byte(d.Content), &move); err != nil {
+				return ContestedRuling{}, false, err
+			}
+			if move.To != UnitImplementing {
+				continue
+			}
+			ruling = ContestedRuling{Decision: "revise", Note: move.Note, By: move.By, Contest: d.ID, ResetTurn: move.ResetTurn, turn: masonAgent(unit) + "-" + strings.TrimPrefix(d.ID, trace.UnitSubject(unit)+"-"),
+				prompt: fmt.Sprintf("The %s moved this unit from %s back to implementing, for you to revise in your existing workspace. Note: %s\nCheck the unit's acceptance, then call done or ask if you need a decision.", move.By, move.From, move.Note)}
+		default:
+			continue
 		}
-		if !found || ruling.ResetTurn > latest.ResetTurn {
+		if !found || ruling.ResetTurn >= latest.ResetTurn {
 			latest, found = ruling, true
 		}
 	}
@@ -171,6 +193,16 @@ func (s *Service) recordContestedRuling(ctx context.Context, repo *trace.Reposit
 	contest, mason, err := masonContest(repo, stream, unit)
 	if err != nil {
 		return ContestedRulingResponse{}, &APIError{Internal, "cannot read contested transition"}
+	}
+	if moveContest(contest, unit) {
+		// A unit moved to contested has no contest of its own: a ruling
+		// moves it on.
+		to := map[string]string{"review": UnitReviewing, "revise": UnitImplementing}[req.Decision]
+		out, api := s.moveUnit(ctx, repo, stream, unit, UnitMoveRequest{To: to, Note: req.Note}, actor, "")
+		if api != nil {
+			return ContestedRulingResponse{}, api
+		}
+		return ContestedRulingResponse{Workstream: stream, Unit: unit, Ruling: ContestedRuling{Decision: req.Decision, Note: out.Move.Note, By: by, Contest: contest.ID}}, nil
 	}
 	if failedReview(contest, unit) {
 		// A failed review turn left no findings, so the unit can only be reviewed again.

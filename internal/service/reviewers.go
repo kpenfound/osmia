@@ -414,11 +414,24 @@ func (r *reviewers) reviewGuidance(stream config.WorkstreamID, unit, candidate s
 			switch {
 			case t.From == UnitReviewing && t.To == UnitReviewing && t.Actor == reviewerActor:
 				guidance += "\n\nThe service asked for this review again: " + t.Reason + "."
-			case t.From == UnitContested && t.To == UnitReviewing:
+			case t.From == UnitContested && t.To == UnitReviewing && !isMove(t, unit):
 				guidance += "\n\nThe unit was contested, and the " + t.Reason + "."
 				ruled = true
 			}
 			break
+		}
+	}
+	// A move into reviewing stays the review's guidance through the checks
+	// it may need first, until the unit returns to implementing.
+	for i := len(transitions) - 1; i >= 0; i-- {
+		if t := transitions[i]; t.Subject == trace.UnitSubject(unit) {
+			if isMove(t, unit) && t.To == UnitReviewing {
+				guidance += "\n\nThe " + t.Reason + "."
+				break
+			}
+			if t.To == UnitImplementing {
+				break
+			}
 		}
 	}
 	for _, q := range asked {
