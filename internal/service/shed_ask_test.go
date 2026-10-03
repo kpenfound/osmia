@@ -23,6 +23,7 @@ import (
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/shed"
+	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -151,8 +152,18 @@ func (c *chief) choose(ctx context.Context, tools *mcp.ClientSession, name strin
 // chosen for, ruled on and delivered.
 func newAskingFixture(t *testing.T, members, rounds int, p *faults) (*shedFixture, *chief) {
 	t.Helper()
+	return newAskingFixtureWith(t, members, rounds, p, nil)
+}
+
+// newAskingFixtureWith is newAskingFixture with prepare applied to the
+// service's options before it starts.
+func newAskingFixtureWith(t *testing.T, members, rounds int, p *faults, prepare func(*Options)) (*shedFixture, *chief) {
+	t.Helper()
 	f := newDebateFixtureWith(t, members, rounds, chiefRole, func(opts *Options) {
 		opts.Threads = Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts}).Threads
+		if prepare != nil {
+			prepare(opts)
+		}
 	})
 	c := &chief{p: p, released: map[string]bool{}, held: map[string]chan struct{}{}}
 	f.engine.mu.Lock()
@@ -902,7 +913,14 @@ func TestAbandoningAParkedRoundLeavesItParked(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	p := &faults{}
-	f, c := newAskingFixture(t, 1, 1, p)
+	// Thread turns run in the pass rather than beside it, so the pass that
+	// would deliver the answer starts only once the chief of staff's turn
+	// that recorded it has ended.
+	f, c := newAskingFixtureWith(t, 1, 1, p, func(opts *Options) {
+		opts.Reconciliation.Concurrent = func(op coreadapter.Operation) bool {
+			return concurrentOperation(op) && op.Action != thread.TurnAction
+		}
+	})
 	defer f.stop(t)
 	hold := c.hold("1")
 	member := committeeAgent(1)
@@ -910,8 +928,8 @@ func TestAbandoningAParkedRoundLeavesItParked(t *testing.T) {
 	answering := f.answer("1", silent)
 	stream := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
-	// The answer is recorded, and its delivery waits for the chief of
-	// staff's turn to end.
+	// The answer is recorded while the chief of staff's turn is held open,
+	// so no pass delivers it before the abandonment.
 	f.awaitQuestion(t, stream, "1", trace.QuestionAnswered)
 	if _, err := f.c.Abandon(ctx, stream, "Superseded."); err != nil {
 		t.Fatal(err)
