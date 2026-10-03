@@ -235,6 +235,14 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/feed/"); ok {
+			if out, api := s.feedList(id); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
 		if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/status/"); ok {
 			if out, api := s.workstreamStatus(id); api != nil {
 				failWith(w, api)

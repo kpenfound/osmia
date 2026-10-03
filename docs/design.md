@@ -278,7 +278,7 @@ The chief of staff keeps a status per workstream, rewritten fresh whenever the a
 - **Note.** A few sentences on what changed that matters and where things stand. Translated, not compressed: what a worker's result means for the feature, not its identifiers.
 - **Agents.** One line per active agent in your own words.
 
-Identifiers stay out: commit hashes, branch names, file paths, session ids, model names. The status is the thing you read for a few seconds after time away, and it is the top of every view.
+Identifiers stay out: commit hashes, branch names, file paths, session ids, model names. The status is the thing you read for a few seconds after time away. Its goal heads every view, and each revision appears in the workstream's feed beside what prompted it.
 
 ### 6.5 Events
 
@@ -489,9 +489,9 @@ A new question, a contested unit, a delivery or a budget pause can go out throug
 
 Built for a phone as much as a laptop. Embedded in the binary, one page, fed by the event stream. Workstreams are listed beside the one selected, which takes the main area; each inbox entry shows with its workstream and is counted on that workstream's row, so what needs you is visible from the list.
 
-- **Active work.** Every workstream with its goal, attention and note, its units by state, sessions running with their role and profile, and the capacity view: slots used per role kind, who is waiting, and every pause in force with its reason.
+- **Active work.** Every workstream with its goal and its units counted by state, and the capacity view: slots used per role kind, who is waiting, and every pause in force with its reason.
 - **Inbox.** Every open question, contested unit and ratification packet across workstreams and projects, each with the chief of staff's rephrasing, the options and its recommendation, answered inline.
-- **Conversation.** One per workstream, the thread with the chief of staff, with the actions it took on your behalf between the messages.
+- **Feed.** One per workstream, everything that happened to it in the order it happened: the thread with the chief of staff and the actions it took on your behalf, each status it wrote with its attention and note, each session that ran with its role, profile and outcome, and each change of the workstream's or a unit's state.
 - **Controls.** Pause and resume at every level, priority order, the profile switcher with usage per provider beside it, and a reload button that lights when the file on disk differs from what is loaded.
 
 ### 11.2 Command line

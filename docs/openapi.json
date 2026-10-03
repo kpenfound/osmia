@@ -892,6 +892,46 @@
         }
       }
     },
+    "/v1/feed/{workstream}": {
+      "get": {
+        "summary": "List a workstream's conversation, statuses, sessions and state changes in time order",
+        "operationId": "getFeedByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/handin": {
       "post": {
         "summary": "Hand in a workstream",
@@ -3689,6 +3729,113 @@
             "type": "string"
           },
           "role": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FeedEntry": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "session": {
+            "$ref": "#/components/schemas/FeedSession"
+          },
+          "state": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/StatusView"
+          },
+          "text": {
+            "type": "string"
+          },
+          "transition": {
+            "$ref": "#/components/schemas/FeedTransition"
+          },
+          "turn": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FeedResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/FeedEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FeedSession": {
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "ended_at": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "failure": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FeedTransition": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "unit": {
             "type": "string"
           }
         },

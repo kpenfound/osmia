@@ -110,13 +110,24 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 	if api != nil {
 		return ConversationResponse{}, api
 	}
-	out := ConversationResponse{Workstream: stream, Entries: []ConversationEntry{}}
+	entries, err := conversationEntries(repository, stream)
+	if err != nil {
+		return ConversationResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the conversation of workstream %s; check the trace repository", stream)}
+	}
+	return ConversationResponse{Workstream: stream, Entries: entries}, nil
+}
+
+// conversationEntries returns the workstream's conversation with its chief of
+// staff, oldest first: the owner's messages, the final responses to them and
+// the actions the chief of staff took on the owner's behalf.
+func conversationEntries(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
+	out := []ConversationEntry{}
 	t, err := repository.ChiefOfStaffThread(stream)
 	if errors.Is(err, os.ErrNotExist) {
 		return out, nil
 	}
 	if err != nil {
-		return ConversationResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the conversation of workstream %s; check the trace repository", stream)}
+		return nil, err
 	}
 	for _, q := range t.Turns {
 		if q.Request.Actor != ownerActor {
@@ -130,14 +141,13 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 				entries[i].State = TurnFailed
 			}
 		}
-		out.Entries = append(out.Entries, entries...)
+		out = append(out, entries...)
 	}
 	actions, err := chiefActions(repository, stream)
 	if err != nil {
-		return ConversationResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the conversation of workstream %s; check the trace repository", stream)}
+		return nil, err
 	}
-	out.Entries = withActions(out.Entries, actions)
-	return out, nil
+	return withActions(out, actions), nil
 }
 
 // withActions places each action before the first entry recorded after it,

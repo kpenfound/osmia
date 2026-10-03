@@ -115,9 +115,13 @@ The page is laid out like a chat client:
   workstreams are kept in a collapsed Archived group at the bottom. At phone
   widths the list is behind the button at the top left and covers the page
   until you pick a workstream or close it.
-- The main area shows the selected workstream: its goal, state and project,
-  its attention note, status, units by state and running agents, and its
-  conversation with the chief of staff. Its inbox entries sit above the
+- The main area shows the selected workstream: its goal, state, project and
+  units counted by state, and its feed. The feed lists, in the order they
+  happened, your messages and the chief of staff's answers and actions, each
+  status the chief of staff wrote, each agent session with its role, profile
+  and outcome, and each change of the workstream's or a unit's state. The
+  latest status's attention note is highlighted; a finished session opens to
+  its report or failure. Its inbox entries sit below the feed, above the
   message field: what each asks, what waits on it, its options and the chief
   of staff's recommendation. A ratification also shows the dissent record; a
   delivery shows the final report's criteria with their evidence or gaps.

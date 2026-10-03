@@ -389,16 +389,17 @@ func (f *pageFixture) status(t *testing.T, content trace.StatusContent) {
 }
 
 // The page, opened through the web listener, lists the workstreams beside
-// the one it shows, and shows its goal, attention, note, workspace backend,
-// units by state and sessions, with the capacity and the pauses from the
-// /v1 views; it follows a status change without a reload, at phone and
-// laptop widths, and after its event stream is lost it reconnects and reads
-// again what changed meanwhile.
+// the one it shows, and shows its goal, workspace backend and units by state,
+// and a feed of its statuses, sessions and unit state changes, with the
+// capacity and the pauses from the /v1 views; it follows a status change
+// without a reload, at phone and laptop widths, and after its event stream is
+// lost it reconnects and reads again what changed meanwhile.
 func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	p := openBrowser(t)
 	f := newPageFixture(t)
 	card := `[data-workstream="` + string(stream) + `"] `
 	quietCard := `[data-workstream="` + string(quiet) + `"] `
+	latest := card + `[data-kind=status][data-latest=true] `
 	pause := `[data-pause="workstream:` + string(quiet) + `"] `
 
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
@@ -407,24 +408,25 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	p.awaitText(`[data-select="`+string(quiet)+`"] [data-field=paused]`, "paused")
 	p.selectWorkstream(stream)
 	for selector, want := range map[string]string{
-		card + "[data-field=goal]":                               "Ship resumable uploads.",
-		card + "[data-field=state]":                              "building",
-		card + "[data-field=note]":                               "A mason is building the upload unit.",
-		card + "[data-field=workspaces]":                         "git workspaces",
-		card + `[data-state=merged]`:                             "merged 1 resume",
-		card + `[data-state=implementing]`:                       "implementing 1 upload",
-		card + `[data-state=ready]`:                              "ready 1 audit",
-		card + `[data-state=planned]`:                            "planned 1 index",
-		card + `[data-field=agents] [data-role=mason]`:           "mason on upload · default · running",
-		card + `[data-role=chief_of_staff] [data-field=profile]`: "other",
-		`#capacity [data-role=mason] [data-field=slots]`:         "1 / 1 slots",
-		`#capacity [data-role=mason] [data-field=waiting]`:       string(stream) + " unit audit: every slot is taken",
-		`#capacity [data-role=reviewer]`:                         "Nothing waits.",
-		`#meter-total`:                                           "/",
-		pause + "[data-field=scope]":                             "Workstream " + string(quiet),
-		pause + "[data-field=reason]":                            "The owner is travelling",
-		pause + "[data-field=source]":                            "the owner",
-		`#pause-count`:                                           "1",
+		card + "[data-field=goal]":                                         "Ship resumable uploads.",
+		card + "[data-field=state]":                                        "building",
+		latest + "[data-field=note]":                                       "A mason is building the upload unit.",
+		latest + "[data-field=status-agents]":                              "A mason builds upload.",
+		card + "[data-field=workspaces]":                                   "git workspaces",
+		card + `[data-unit-state=merged]`:                                  "merged 1",
+		card + `[data-unit-state=implementing]`:                            "implementing 1",
+		card + `[data-unit-state=ready]`:                                   "ready 1",
+		card + `[data-unit-state=planned]`:                                 "planned 1",
+		card + `[data-kind=transition][data-unit=upload]`:                  "Unit upload: implementing",
+		card + `[data-kind=session][data-role=mason] [data-field=session]`: "mason on upload · default · running",
+		`#capacity [data-role=mason] [data-field=slots]`:                   "1 / 1 slots",
+		`#capacity [data-role=mason] [data-field=waiting]`:                 string(stream) + " unit audit: every slot is taken",
+		`#capacity [data-role=reviewer]`:                                   "Nothing waits.",
+		`#meter-total`:                                                     "/",
+		pause + "[data-field=scope]":                                       "Workstream " + string(quiet),
+		pause + "[data-field=reason]":                                      "The owner is travelling",
+		pause + "[data-field=source]":                                      "the owner",
+		`#pause-count`:                                                     "1",
 	} {
 		p.awaitText(selector, want)
 	}
@@ -447,7 +449,7 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	noNull(card)
 	p.selectWorkstream(quiet)
 	p.awaitText(quietCard+"[data-field=goal]", "No status yet")
-	p.awaitText(quietCard+".progress", "The chief of staff has not written a status.")
+	p.awaitText(quietCard+"[data-field=feed]", "Nothing has happened yet.")
 	noNull(quietCard)
 	p.selectWorkstream(stream)
 
@@ -457,7 +459,8 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	p.awaitText(card+"[data-field=goal]", "Ship resumable uploads with dedupe.")
 	p.awaitText(`[data-select="`+string(stream)+`"] [data-field=goal]`, "Ship resumable uploads with dedupe.")
 	p.awaitText(card+"[data-field=attention]", "Rule on the upload API.")
-	p.awaitText(card+"[data-field=note]", "Upload waits for a ruling.")
+	p.awaitText(latest+"[data-field=note]", "Upload waits for a ruling.")
+	p.awaitText(card+`[data-kind=status][data-latest=false] [data-field=note]`, "A mason is building the upload unit.")
 	p.await("the same document", `window.notReloaded === true`)
 
 	// Laptop widths show the list beside the workstream. Phone widths
@@ -514,13 +517,13 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	f.status(t, trace.StatusContent{Goal: "Ship resumable uploads with dedupe.", Note: "The ruling came; upload continues.", Agents: []string{"A mason builds upload."}})
 	mutation(t, f.c, "DELETE", "pause", ClearPauseRequest{Scope: "workstream", Project: project, Workstream: quiet})
 	var stale string
-	p.eval(textOf(card+"[data-field=note]"), &stale)
+	p.eval(textOf(latest+"[data-field=note]"), &stale)
 	if stale != "Upload waits for a ruling." {
 		t.Fatalf("the page changed while its stream was lost: %q", stale)
 	}
 	link.restore()
 	p.await("the live connection after the loss", `document.body.dataset.connection === 'live'`)
-	p.awaitText(card+"[data-field=note]", "The ruling came; upload continues.")
+	p.awaitText(latest+"[data-field=note]", "The ruling came; upload continues.")
 	p.await("no attention", `document.querySelector(`+quote(card+"[data-field=attention]")+`) === null`)
 	p.awaitText("#pause-list", "Nothing is paused.")
 	p.await("no pause count", `document.getElementById('pause-count').textContent === ''`)
@@ -565,7 +568,7 @@ func TestBrowserSelectionMarksActivityWithoutReordering(t *testing.T) {
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.await("both workstreams listed", `document.querySelectorAll('#workstream-list [data-select]').length === 2`)
-	p.await("the conversations read", `document.querySelector('[data-field=conversation] .meta')?.textContent !== 'Reading the conversation…'`)
+	p.await("the feeds read", `document.querySelector('[data-field=feed] .meta')?.textContent !== 'Reading the feed…'`)
 	settle()
 	p.await("nothing marked", `document.querySelector('[data-field=unread]') === null`)
 

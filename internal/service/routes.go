@@ -62,6 +62,7 @@ var Routes = []Route{
 
 	{Method: http.MethodGet, Path: Prefix + "/conversation/{workstream}", Summary: "List a workstream's conversation with the chief of staff", Response: ConversationResponse{}},
 	{Method: http.MethodPost, Path: Prefix + "/conversation/{workstream}", Summary: "Send a message to a workstream's chief of staff", Request: SendRequest{}, Response: ConversationEntry{}},
+	{Method: http.MethodGet, Path: Prefix + "/feed/{workstream}", Summary: "List a workstream's conversation, statuses, sessions and state changes in time order", Response: FeedResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/inbox", Summary: "List open owner decisions", Response: InboxResponse{}},
 	{Method: http.MethodPost, Path: Prefix + "/inbox/{number}", Summary: "Answer an inbox entry", Request: AnswerRequest{}, Response: AnswerResponse{}},
 

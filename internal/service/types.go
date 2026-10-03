@@ -716,6 +716,59 @@ type ConversationEntry struct {
 	State TurnState `json:"state"`
 }
 
+// FeedResponse lists a workstream's feed, oldest first.
+type FeedResponse struct {
+	Workstream config.WorkstreamID `json:"workstream"`
+	Entries    []FeedEntry         `json:"entries"`
+}
+
+// FeedEntry is one event of a workstream's feed. Kind "message", "response"
+// and "action" are the conversation with the chief of staff, as
+// ConversationEntry describes them, with Turn, Text and State. Kind "status"
+// is a status the chief of staff wrote, with Status. Kind "session" is an
+// agent turn that started, other than one answering an owner message, with
+// Session. Kind "transition" is a change of the workstream's state or of one
+// of its units' states, with Transition. At is when the entry happened; a
+// session's is when it started.
+type FeedEntry struct {
+	Kind       string          `json:"kind"`
+	At         time.Time       `json:"at"`
+	Turn       string          `json:"turn,omitempty"`
+	Text       string          `json:"text,omitempty"`
+	State      TurnState       `json:"state,omitempty"`
+	Status     *StatusView     `json:"status,omitempty"`
+	Session    *FeedSession    `json:"session,omitempty"`
+	Transition *FeedTransition `json:"transition,omitempty"`
+}
+
+// FeedSession is one agent turn. State is running, done, waiting (the turn
+// ended with a question), failed or interrupted. EndedAt is null while the
+// turn runs. Profile is the profile of its latest attempt. Summary is the
+// role's report, or the start of its final response when it reported none;
+// Failure is why a failed turn failed.
+type FeedSession struct {
+	Agent     string     `json:"agent"`
+	Role      string     `json:"role"`
+	Unit      string     `json:"unit,omitempty"`
+	Turn      string     `json:"turn"`
+	Profile   string     `json:"profile"`
+	State     string     `json:"state"`
+	StartedAt time.Time  `json:"started_at"`
+	EndedAt   *time.Time `json:"ended_at"`
+	Summary   string     `json:"summary,omitempty"`
+	Failure   string     `json:"failure,omitempty"`
+}
+
+// FeedTransition is a state change of the workstream, when Unit is empty, or
+// of one of its units, with who made it and why.
+type FeedTransition struct {
+	Unit   string `json:"unit,omitempty"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Actor  string `json:"actor"`
+	Reason string `json:"reason"`
+}
+
 // EventKind names the view an event of the client event stream announces a
 // change to.
 type EventKind string

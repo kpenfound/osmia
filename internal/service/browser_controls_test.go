@@ -52,7 +52,7 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.selectWorkstream(quiet)
-	p.awaitText(card+"[data-field=conversation]", "No messages yet.")
+	p.awaitText(card+"[data-field=feed]", "Nothing has happened yet.")
 	p.eval(`window.notReloaded = true`, nil)
 
 	// An empty message is refused on the page and never sent.
@@ -96,7 +96,7 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	// The other workstream's conversation stays its own.
 	p.selectWorkstream(stream)
 	var other string
-	p.eval(textOf(`[data-workstream="`+string(stream)+`"] [data-field=conversation]`), &other)
+	p.eval(textOf(`[data-workstream="`+string(stream)+`"] [data-field=feed]`), &other)
 	if strings.Contains(other, "Friday") {
 		t.Fatalf("the message shows in the other workstream's conversation: %q", other)
 	}

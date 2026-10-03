@@ -3,14 +3,13 @@
 (() => {
   const api = '/v1';
 
-  // The views each event kind names. "conversation" is the conversation of
-  // the event's workstream and "conversations" that of every workstream the
-  // page shows. Kinds the page does not show are ignored; every stream starts
-  // with a resync.
+  // The views each event kind names. "feed" is the feed of the event's
+  // workstream and "feeds" that of every workstream the page shows. Kinds the
+  // page does not show are ignored; every stream starts with a resync.
   const reads = {
-    resync: ['status', 'runtime', 'config', 'inbox', 'charter', 'conversations'],
-    workstream: ['status'],
-    conversation: ['conversation'],
+    resync: ['status', 'runtime', 'config', 'inbox', 'charter', 'feeds'],
+    workstream: ['status', 'feed'],
+    conversation: ['feed'],
     inbox: ['inbox', 'charter'],
     runtime: ['runtime', 'status'],
     config: ['config'],
@@ -43,7 +42,7 @@
   };
 
   // views holds each view by its path after /v1: status, runtime, config,
-  // inbox, conversation/<workstream-id>, and packet/<workstream-id> and
+  // inbox, feed/<workstream-id>, and packet/<workstream-id> and
   // delivery/<workstream-id> for the ratifications and deliveries the inbox
   // lists.
   const views = { status: null, runtime: null, config: null, inbox: null };
@@ -80,7 +79,7 @@
   const ui = {
     selected: stored('selected', null),
     view: 'workstream',
-    tab: 'conversation',
+    tab: 'feed',
     seen: stored('seen', {}),
     initial: null,
     toEnd: true,
@@ -132,11 +131,10 @@
     return out;
   }
 
-  // listedConversations names the conversations the page reads: those of the
-  // workstreams in the list of work, and the selected one's when it is
-  // archived.
-  function listedConversations() {
-    return views.status ? views.status.workstreams.filter((w) => !w.archived || w.workstream === ui.selected).map((w) => 'conversation/' + w.workstream) : [];
+  // listedFeeds names the feeds the page reads: those of the workstreams in
+  // the list of work, and the selected one's when it is archived.
+  function listedFeeds() {
+    return views.status ? views.status.workstreams.filter((w) => !w.archived || w.workstream === ui.selected).map((w) => 'feed/' + w.workstream) : [];
   }
 
   // details holds, for each packet and delivery view, the entry it was read
@@ -169,8 +167,8 @@
 
   // refresh reads every view marked since the last read, once each, and
   // renders; views marked while it reads are read again after. A
-  // workstream the status lists gets its conversation read, and one it no
-  // longer lists loses it. A ratification or delivery the inbox lists gets
+  // workstream the status lists gets its feed read, and one it no longer
+  // lists loses it. A ratification or delivery the inbox lists gets
   // its packet or delivery read, again whenever the entry's revision or
   // identity changes, and again with the next read of the inbox after a read
   // of it failed.
@@ -193,9 +191,9 @@
           }
         }));
         if (views.status) {
-          const listed = new Set(listedConversations());
+          const listed = new Set(listedFeeds());
           for (const name of [...Object.keys(views), ...Object.keys(failures)]) {
-            if (name.startsWith('conversation/') && !listed.has(name)) {
+            if (name.startsWith('feed/') && !listed.has(name)) {
               delete views[name];
               delete failures[name];
             }
@@ -238,17 +236,17 @@
 
   // expand turns an event's view names into view paths.
   function expand(name, event) {
-    if (name === 'conversations') {
-      return listedConversations();
+    if (name === 'feeds') {
+      return listedFeeds();
     }
-    if (name === 'conversation') {
+    if (name === 'feed') {
       let data = {};
       try {
         data = JSON.parse(event.data);
       } catch {
         return [];
       }
-      return data.workstream ? ['conversation/' + data.workstream] : [];
+      return data.workstream ? ['feed/' + data.workstream] : [];
     }
     return [name];
   }
@@ -504,45 +502,6 @@
       el('p', { class: 'meta', 'data-field': 'per-workstream' }, 'Each workstream may hold ' + capacity.per_workstream + ' slots.'));
   }
 
-  function renderUnits(units) {
-    if (!units || units.length === 0) {
-      return el('p', { class: 'meta' }, 'No units yet.');
-    }
-    const byState = new Map();
-    for (const state of unitOrder) {
-      byState.set(state, []);
-    }
-    for (const u of units) {
-      if (!byState.has(u.state)) {
-        byState.set(u.state, []);
-      }
-      byState.get(u.state).push(u.unit);
-    }
-    const rows = [];
-    for (const [state, names] of byState) {
-      if (names.length > 0) {
-        rows.push(el('li', { 'data-state': state },
-          el('span', { class: 'tag' }, state + ' ' + names.length),
-          ' ', names.join(', ')));
-      }
-    }
-    return el('ul', { class: 'units', 'data-field': 'units' }, ...rows);
-  }
-
-  function renderAgents(agents) {
-    if (agents === null) {
-      return el('p', { class: 'meta' }, 'Sessions are unavailable.');
-    }
-    if (agents.length === 0) {
-      return el('p', { class: 'meta' }, 'No sessions running.');
-    }
-    return el('ul', { class: 'agents', 'data-field': 'agents' }, ...agents.map((a) => el('li', { 'data-role': a.role },
-      el('strong', {}, a.role),
-      a.unit ? ' on ' + a.unit : '',
-      ' · ', el('span', { 'data-field': 'profile' }, a.profile),
-      ' · ', a.state, ' ', duration(a.elapsed))));
-  }
-
   function streams() {
     return views.status ? views.status.workstreams : [];
   }
@@ -569,20 +528,22 @@
 
   // activity is what the owner has seen of a workstream once they look at
   // it: its state, status and units, what waits on them and its
-  // conversation. It is null until the conversation and inbox are read.
+  // conversation with the chief of staff. Sessions alone are not activity.
+  // It is null until the feed and inbox are read.
   function activity(w) {
-    const conversation = views['conversation/' + w.workstream];
-    if (!conversation || !views.inbox) {
+    const feed = views['feed/' + w.workstream];
+    if (!feed || !views.inbox) {
       return null;
     }
-    const last = conversation.entries[conversation.entries.length - 1];
+    const conversation = feed.entries.filter((e) => conversationKinds.has(e.kind));
+    const last = conversation[conversation.length - 1];
     return JSON.stringify([
       w.state,
       w.status ? [w.status.goal, w.status.attention, w.status.note] : null,
       (w.units || []).map((u) => u.unit + ':' + u.state).sort(),
       inboxOf(w.workstream).map((e) => decisionKey(e) + ':' + e.revision),
       proposalsOf(w.workstream).map((p) => p.question),
-      conversation.entries.length,
+      conversation.length,
       last ? last.state : null,
     ]);
   }
@@ -730,8 +691,8 @@
       byId('archived').open = true;
     }
     render();
-    if (changed && !views['conversation/' + id]) {
-      mark(['conversation/' + id]);
+    if (changed && !views['feed/' + id]) {
+      mark(['feed/' + id]);
     }
     if (changed && ui.tab === 'documents') {
       readWorkstreamDocuments();
@@ -769,7 +730,7 @@
     if (changed && tab === 'documents') {
       readWorkstreamDocuments();
     }
-    if (changed && tab === 'conversation') {
+    if (changed && tab === 'feed') {
       ui.toEnd = true;
       render();
     }
@@ -794,7 +755,7 @@
     act(c.result, c.button, () => request('POST', '/conversation/' + id, { text }), (entry) => {
       c.text.value = '';
       ui.toEnd = true;
-      mark(['conversation/' + id]);
+      mark(['feed/' + id]);
       return 'Sent; the chief of staff answers in its next turn (' + entry.state + ').';
     });
   }
@@ -805,14 +766,16 @@
       return c;
     }
     c = {
-      progress: el('aside', { class: 'progress', 'aria-label': 'Progress' }),
-      entries: el('div', { class: 'conversation', 'data-field': 'conversation' }),
+      entries: el('div', { class: 'feed', 'data-field': 'feed' }),
       heading: el('h3', { class: 'needs-title' }, 'Waiting for you'),
       decisions: el('div', { class: 'decisions', 'data-field': 'decisions' }),
       text: el('textarea', { name: 'text', rows: '2', 'aria-label': 'Message to the chief of staff', placeholder: 'Message the chief of staff' }),
       button: el('button', { type: 'submit', class: 'primary' }, 'Send'),
       result: el('p', { class: 'result', role: 'status' }),
       shown: null,
+      // opened holds the sessions whose report the owner expanded, so a
+      // new entry does not fold them again.
+      opened: new Set(),
     };
     const form = el('form', { class: 'send composer', 'data-field': 'send' },
       el('div', { class: 'box' }, c.text, el('div', { class: 'actions' }, c.button)), c.result);
@@ -828,14 +791,97 @@
         form.requestSubmit();
       }
     });
-    c.node = el('article', { class: 'workstream', 'data-workstream': id }, c.progress,
+    c.node = el('article', { class: 'workstream', 'data-workstream': id },
       el('div', { class: 'thread' }, c.entries, c.decisions, form));
     cards.set(id, c);
     return c;
   }
 
-  function renderConversation(c, id) {
-    const name = 'conversation/' + id;
+  // conversationKinds are the feed entries of the conversation with the
+  // chief of staff.
+  const conversationKinds = new Set(['message', 'response', 'action']);
+
+  function role(name) {
+    return name.replaceAll('_', ' ');
+  }
+
+  // sessionOutcome says how a session stands or ended, with how long it ran.
+  function sessionOutcome(s) {
+    const ran = s.ended_at ? duration(Math.max(0, Math.round((new Date(s.ended_at) - new Date(s.started_at)) / 1000))) : '';
+    switch (s.state) {
+      case 'running':
+        return 'running';
+      case 'done':
+        return 'done in ' + ran;
+      case 'waiting':
+        return 'asked a question after ' + ran;
+      case 'failed':
+        return 'failed after ' + ran;
+      default:
+        return s.state;
+    }
+  }
+
+  function renderConversationEntry(e) {
+    return el('li', { class: 'entry', 'data-kind': e.kind, 'data-turn': e.turn, 'data-state': e.state },
+      el('div', { class: 'meta' }, { message: 'You', action: 'Chief of staff acted' }[e.kind] || 'Chief of staff', ' · ', when(e.at), ' · ', el('span', { 'data-field': 'state' }, e.state)),
+      el('div', { class: 'text', 'data-field': 'text' }, e.text));
+  }
+
+  // renderStatus shows a status the chief of staff wrote. Only the latest
+  // status's attention asks for something now.
+  function renderStatus(e, latest) {
+    const s = e.status;
+    return el('li', { class: 'entry', 'data-kind': 'status', 'data-revision': String(s.revision), 'data-latest': String(latest) },
+      el('div', { class: 'meta' }, 'Chief of staff · status · ', when(e.at)),
+      el('div', { class: 'card' },
+        s.attention ? el('p', latest ? { class: 'attention', 'data-field': 'attention' } : { class: 'meta', 'data-field': 'past-attention' }, s.attention) : null,
+        el('p', { class: 'text', 'data-field': 'note' }, s.note),
+        s.agents.length > 0 ? el('ul', { class: 'notes', 'data-field': 'status-agents' }, ...s.agents.map((a) => el('li', {}, a))) : null));
+  }
+
+  function renderSession(e, c) {
+    const s = e.session;
+    const report = s.failure || s.summary;
+    const line = el('span', { 'data-field': 'session' },
+      el('strong', {}, role(s.role)), s.unit ? ' on ' + s.unit : '',
+      ' · ', el('span', { 'data-field': 'profile' }, s.profile),
+      ' · ', el('span', { 'data-field': 'outcome' }, sessionOutcome(s)));
+    const head = [el('span', { class: 'dot', 'aria-hidden': 'true' }), line, el('span', { class: 'meta' }, when(s.started_at))];
+    const node = el('li', { class: 'entry event', 'data-kind': 'session', 'data-role': s.role, 'data-state': s.state, 'data-turn': s.turn });
+    if (!report) {
+      node.append(el('div', { class: 'event-line' }, ...head));
+      return node;
+    }
+    const details = el('details', {}, el('summary', { class: 'event-line' }, ...head),
+      el('div', { class: 'text', 'data-field': s.failure ? 'failure' : 'summary' }, report));
+    details.open = c.opened.has(s.agent + '/' + s.turn);
+    details.addEventListener('toggle', () => {
+      if (details.open) {
+        c.opened.add(s.agent + '/' + s.turn);
+      } else {
+        c.opened.delete(s.agent + '/' + s.turn);
+      }
+    });
+    node.append(details);
+    return node;
+  }
+
+  function renderTransition(e) {
+    const t = e.transition;
+    return el('li', { class: 'entry event', 'data-kind': 'transition', 'data-unit': t.unit || '', 'data-to': t.to },
+      el('div', { class: 'event-line', title: t.reason },
+        el('span', { class: 'dot', 'aria-hidden': 'true' }),
+        el('span', { 'data-field': 'transition' }, t.unit ? 'Unit ' + t.unit : 'Workstream', ': ', t.from ? t.from + ' → ' : '', el('strong', {}, t.to)),
+        t.reason ? el('span', { class: 'reason' }, t.reason) : null,
+        el('span', { class: 'meta' }, when(e.at))));
+  }
+
+  // renderFeed shows the workstream's feed: the conversation with the chief
+  // of staff, its statuses, the sessions that ran and the state changes, in
+  // the order they happened.
+  function renderFeed(c, id) {
+    const name = 'feed/' + id;
     const view = views[name];
     const key = view ? JSON.stringify(view.entries) : (failures[name] ? 'failed' : 'reading');
     if (c.shown === key) {
@@ -843,16 +889,26 @@
     }
     c.shown = key;
     if (!view) {
-      c.entries.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The conversation is unavailable.' : 'Reading the conversation…'));
+      c.entries.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The feed is unavailable.' : 'Reading the feed…'));
       return;
     }
     if (view.entries.length === 0) {
-      c.entries.replaceChildren(el('p', { class: 'meta' }, 'No messages yet.'));
+      c.entries.replaceChildren(el('p', { class: 'meta' }, 'Nothing has happened yet.'));
       return;
     }
-    c.entries.replaceChildren(el('ol', {}, ...view.entries.map((e) => el('li', { class: 'entry', 'data-kind': e.kind, 'data-turn': e.turn, 'data-state': e.state },
-      el('div', { class: 'meta' }, { message: 'You', action: 'Chief of staff acted' }[e.kind] || 'Chief of staff', ' · ', when(e.at), ' · ', el('span', { 'data-field': 'state' }, e.state)),
-      el('div', { class: 'text', 'data-field': 'text' }, e.text)))));
+    const latest = view.entries.findLastIndex((e) => e.kind === 'status');
+    c.entries.replaceChildren(el('ol', {}, ...view.entries.map((e, i) => {
+      switch (e.kind) {
+        case 'status':
+          return renderStatus(e, i === latest);
+        case 'session':
+          return renderSession(e, c);
+        case 'transition':
+          return renderTransition(e);
+        default:
+          return renderConversationEntry(e);
+      }
+    })));
   }
 
   // renderDecisions shows what waits for the owner on the workstream above
@@ -860,6 +916,24 @@
   function renderDecisions(c, id) {
     const nodes = [...inboxOf(id).map(renderDecision), ...proposalsOf(id).map(renderProposal)];
     place(c.decisions, [...(nodes.length > 0 ? [c.heading] : []), ...nodes, inboxResult]);
+  }
+
+  // renderUnitCounts counts the workstream's units by state, naming them on
+  // hover.
+  function renderUnitCounts(units) {
+    if (!units || units.length === 0) {
+      return null;
+    }
+    const byState = new Map(unitOrder.map((state) => [state, []]));
+    for (const u of units) {
+      if (!byState.has(u.state)) {
+        byState.set(u.state, []);
+      }
+      byState.get(u.state).push(u.unit);
+    }
+    return el('div', { class: 'unit-counts', 'data-field': 'units' }, ...[...byState]
+      .filter(([, names]) => names.length > 0)
+      .map(([state, names]) => el('span', { class: 'tag', 'data-unit-state': state, title: names.join(', ') }, state + ' ' + names.length)));
   }
 
   function renderHead(w) {
@@ -878,27 +952,18 @@
       const action = button.dataset.workstreamAction;
       button.hidden = action in offered && !offered[action];
     }
-    head.replaceChildren(
+    head.replaceChildren(...[
       el('div', { class: 'line' },
         el('h2', { 'data-field': 'goal' }, status ? status.goal : 'No status yet'),
         w.state ? el('span', { class: 'tag', 'data-field': 'state' }, w.state) : '',
         w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, 'archived') : ''),
-      el('div', { class: 'id' }, el('span', { 'data-field': 'project' }, projectName(w.project)), ' · ', w.workstream, ' · ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')));
+      el('div', { class: 'id' }, el('span', { 'data-field': 'project' }, projectName(w.project)), ' · ', w.workstream, ' · ', el('span', { 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
+      renderUnitCounts(w.units)].filter((node) => node !== null));
   }
 
   function renderWorkstream(w) {
-    const status = w.status;
     const c = card(w.workstream);
-    // replaceChildren turns a null child into the text "null", so the absent
-    // ones are dropped first.
-    c.progress.replaceChildren(...[
-      status && status.attention ? el('p', { class: 'attention', 'data-field': 'attention' }, status.attention) : null,
-      status ? el('p', { 'data-field': 'note' }, status.note) : el('p', { class: 'meta' }, 'The chief of staff has not written a status.'),
-      el('h4', {}, 'Units'),
-      renderUnits(w.units),
-      el('h4', {}, 'Sessions'),
-      renderAgents(w.agents)].filter((node) => node !== null));
-    renderConversation(c, w.workstream);
+    renderFeed(c, w.workstream);
     renderDecisions(c, w.workstream);
     return c.node;
   }
@@ -932,7 +997,7 @@
     const atEnd = main.scrollHeight - main.scrollTop - main.clientHeight < 48;
     renderHead(w);
     place(box, [renderWorkstream(w)]);
-    if (ui.view === 'workstream' && ui.tab === 'conversation' && (ui.toEnd || atEnd)) {
+    if (ui.view === 'workstream' && ui.tab === 'feed' && (ui.toEnd || atEnd)) {
       main.scrollTop = main.scrollHeight;
       ui.toEnd = false;
     }
@@ -1066,11 +1131,6 @@
     for (const button of document.querySelectorAll('[data-workstream-action]')) {
       button.addEventListener('click', () => workstreamAction(button.dataset.workstreamAction));
     }
-    // The progress beside the conversation sticks below the workstream's
-    // heading and tabs, whose height follows the goal's length.
-    new ResizeObserver(() => {
-      byId('main').style.setProperty('--top', byId('workstream-top').offsetHeight + 'px');
-    }).observe(byId('workstream-top'));
     for (const popover of document.querySelectorAll('[popover]')) {
       popover.addEventListener('beforetoggle', (event) => {
         if (event.newState === 'open') {
