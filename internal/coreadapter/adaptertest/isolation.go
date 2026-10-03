@@ -26,6 +26,9 @@ type Engine struct {
 	// Resume answers CheckResume when set; otherwise the saved session is unavailable.
 	Resume       func(previous, next a.Profile, session a.BackendSession) error
 	ResumeChecks int
+	// Skills are the directories the engine's prepared skills live in; none
+	// means it prepares no skills.
+	Skills []string
 
 	mu sync.Mutex
 }
@@ -40,6 +43,8 @@ func (f *Engine) CheckResume(ctx context.Context, previous, next a.Profile, sess
 	}
 	return f.Resume(previous, next, session)
 }
+
+func (f *Engine) SkillDirs() []string { return f.Skills }
 
 // Released reports whether every prepared session was released.
 func (f *Engine) Released() bool {

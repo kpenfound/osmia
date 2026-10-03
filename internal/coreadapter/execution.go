@@ -33,6 +33,18 @@ type ExecutionSettings struct {
 	// Dagger gives an sbx turn that may execute commands the Dagger CLI and
 	// a host engine; nil gives neither.
 	Dagger *agent.Dagger
+	// Skills are the skill references of the role. Only a Claude turn is
+	// given them.
+	Skills []string
+}
+
+// turnSkills are the skills a turn on backend is given: the settings' skills
+// for Claude and none for any other backend.
+func turnSkills(settings ExecutionSettings, backend string) []string {
+	if backend != "" && backend != agent.AgentClaude {
+		return nil
+	}
+	return settings.Skills
 }
 
 // SessionExecutor is the core-facing execution seam. Check must reject boundaries
@@ -189,6 +201,7 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 	if d := t.Execution.Dagger; d != nil {
 		req.Profile.Dagger = &agent.Dagger{Engine: d.Engine, Version: d.Version}
 	}
+	req.Profile.Skills = slices.Clone(turnSkills(t.Execution, p.Backend))
 	var servers []string
 	for i := range t.MCP {
 		servers = append(servers, fmt.Sprintf("osmia_%d", i))
@@ -196,7 +209,7 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 	if len(t.Sandbox.Verified.Capabilities.Tools) != 0 && len(servers) == 0 {
 		return agent.Request{}, unsupported("tools", "granted tools require a service MCP endpoint")
 	}
-	req.Profile.AllowedTools = AllowedTools(servers, t.Sandbox.Verified.Capabilities.Tools)
+	req.Profile.AllowedTools = allowedTools(servers, t.Sandbox.Verified.Capabilities.Tools, len(req.Profile.Skills) != 0)
 	if err := req.Profile.Validate(); err != nil {
 		return agent.Request{}, unsupported("sandbox", err.Error())
 	}
@@ -249,6 +262,16 @@ func AllowedTools(servers, tools []string) []string {
 		for _, tool := range tools {
 			allowed = append(allowed, "mcp__"+server+"__"+tool)
 		}
+	}
+	return allowed
+}
+
+// allowedTools is AllowedTools followed, for a turn given skills, by Claude's
+// Skill tool, so a turn that runs without permission prompts may load them.
+func allowedTools(servers, tools []string, skills bool) []string {
+	allowed := AllowedTools(servers, tools)
+	if skills {
+		allowed = append(allowed, skillTool)
 	}
 	return allowed
 }

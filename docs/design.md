@@ -128,6 +128,7 @@ The shed is where units are argued over. Once the plan is ratified, a mason does
 ~/.config/osmia/config.toml      profiles, capacity, budget, Hearsay, listen addresses
 <root>/                          default ~/.local/share/osmia
   runtime.json                   profile overrides, pause states, workstream priority
+  skills/                        clones of the skills roles name, and their generated plugins
   projects/<project-id>/         one git repository per project
     config.toml                  upstream, optional fork, clone path, landing style, per-project caps
     charter.md
@@ -433,7 +434,7 @@ There is no tool that lists agents, messages an arbitrary agent, or creates one.
 
 ### 9.5 Sandboxes
 
-A role runs on the host or in a container, per profile. In a container the workspace is bind-mounted and the MCP servers are reached over HTTP from the host. Native tools follow role capabilities: reading tools for read-only roles, editing tools for file writers, and a shell only for implementation turns with execution permission. Native delegation, web tools and arbitrary MCP discovery are not granted. Read-only roles cannot edit their inputs or run arbitrary commands. The service runs the checks itself before every review that reads code: a unit candidate's before its unit review, and every check on the rebased feature branch before the final read. Both run `dagger check` on a fresh export of the pinned commit and discard the copy afterward. No reviewer runs checks or chooses a command, path or environment; the checks a unit runs are chosen by the service. Reviewers judge the work against its task, acceptance and criteria; style, formatting and lint belong to the project's checks. The check client receives a temporary home and engine connectivity, without inherited provider, delivery or signing credentials; no agent receives an engine endpoint. Results enter the trace and inform the review without granting approval or delivery.
+A role runs on the host or in a container, per profile. In a container the workspace is bind-mounted and the MCP servers are reached over HTTP from the host. Native tools follow role capabilities: reading tools for read-only roles, editing tools for file writers, and a shell only for implementation turns with execution permission. Native delegation, web tools and arbitrary MCP discovery are not granted. Read-only roles cannot edit their inputs or run arbitrary commands. A role may name skills by git reference. The service clones them into its cache and gives the role's Claude turns only their skills, read-only, with Claude's tool that loads them. A repository's hooks, MCP servers, commands and agents never reach a session, and other agent binaries receive no skills. The service runs the checks itself before every review that reads code: a unit candidate's before its unit review, and every check on the rebased feature branch before the final read. Both run `dagger check` on a fresh export of the pinned commit and discard the copy afterward. No reviewer runs checks or chooses a command, path or environment; the checks a unit runs are chosen by the service. Reviewers judge the work against its task, acceptance and criteria; style, formatting and lint belong to the project's checks. The check client receives a temporary home and engine connectivity, without inherited provider, delivery or signing credentials; no agent receives an engine endpoint. Results enter the trace and inform the review without granting approval or delivery.
 
 A mason in a Docker Sandbox may also be given Dagger, so it can run the project's checks and functions while it builds rather than relying on review. The owner configures the Dagger CLI release and a host engine, which may be the engine container the owner's own Dagger CLI provisioned. The sandbox keeps a template's CLI at that release or installs it, and it reaches the engine through a port allowed for that sandbox alone. The engine has no delivery credentials, and no other role, including the classifier that shares the mason's sandbox, receives it.
 
@@ -630,6 +631,7 @@ effort = "medium"
 [roles.mason]
 profile = "claude"
 sandbox = "container"
+skills = ["https://github.com/acme/skills#skills/tdd"]
 [roles.committee]
 profile = "claude"
 [roles.chief_of_staff]

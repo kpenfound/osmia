@@ -54,7 +54,7 @@ func runService(ctx context.Context, root config.Root, detached bool, stdout io.
 		pipe = os.NewFile(3, "service-readiness")
 		defer pipe.Close()
 	}
-	s, err := service.Start(ctx, service.Enforce(service.Options{Config: root.Options(""), Build: build()}, enforcement()))
+	s, err := service.Start(ctx, service.Enforce(service.Options{Config: root.Options(""), Build: build()}, enforcement(root)))
 	if err != nil {
 		return err
 	}

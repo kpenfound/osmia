@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/kpenfound/busybees/core/agent"
@@ -12,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/skills"
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -19,19 +21,24 @@ import (
 
 // Enforcement is what a service runs its role turns through: the engine
 // handing out each role's core enforcer and the host serving each turn's
-// scoped tools, and what it runs candidates' checks with.
+// scoped tools, and what it runs candidates' checks with. Skills is the
+// engine's skill cache, refreshed as the loaded configuration says.
 type Enforcement struct {
 	Engine coreadapter.Engine
 	Hosts  coreadapter.MCPHosts
 	Checks ReviewChecks
+	Skills *skills.Manager
 }
 
-// CoreEnforcement is the production Enforcement: core's enforcers run real
-// agent sessions, a host turn reaches its tools on a fresh loopback port and
-// a container turn reaches them where a container reaches the host.
-func CoreEnforcement() Enforcement {
+// CoreEnforcement is the production Enforcement for root: core's enforcers
+// run real agent sessions with the skills cached in root's skills directory,
+// a host turn reaches its tools on a fresh loopback port and a container turn
+// reaches them where a container reaches the host.
+func CoreEnforcement(root config.Root) Enforcement {
+	cache := skills.NewManager(filepath.Join(root.String(), "skills"))
 	return Enforcement{
-		Engine: coreadapter.CoreEngine{},
+		Engine: coreadapter.CoreEngine{Runner: agent.Runner{Skills: cache, SkillMountDirs: []string{cache.Dir}}},
+		Skills: cache,
 		Checks: DaggerChecks{},
 		Hosts:  &coreadapter.MCPHost{Transport: coreadapter.CoreTransport{}, Container: coreadapter.ContainerTransport(agent.ContainerEngine), Sbx: coreadapter.SbxTransport()},
 	}
@@ -59,9 +66,10 @@ var unitMasonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file
 var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, verdictTool, workstreamDiffTool}}
 
 // threadExecution is how a thread turn of role runs: in the role's sandbox
-// and image, and for a mason with the Dagger engine the role configures.
+// and image with the role's skills, and for a mason with the Dagger engine the
+// role configures.
 func threadExecution(role string, r config.Role) coreadapter.ExecutionSettings {
-	execution := coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image}
+	execution := coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image, Skills: slices.Clone(r.Skills)}
 	if role == masonRole {
 		execution.Dagger = r.Dagger.Settings()
 	}
@@ -89,6 +97,7 @@ func Enforce(opts Options, e Enforcement) Options {
 	if e.Checks != nil {
 		opts.reviewChecks = e.Checks
 	}
+	opts.skills = e.Skills
 	opts.Librarian = &Librarian{Engine: e.Engine, Hosts: e.Hosts}
 	opts.Architect = &Architect{Engine: e.Engine, Hosts: e.Hosts}
 	opts.Committee = &Committee{Engine: e.Engine, Hosts: e.Hosts}

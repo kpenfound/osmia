@@ -2925,6 +2925,9 @@
           "shed": {
             "$ref": "#/components/schemas/ConfigShed"
           },
+          "skills": {
+            "$ref": "#/components/schemas/ConfigSkills"
+          },
           "version": {
             "type": "integer"
           },
@@ -3257,6 +3260,12 @@
           },
           "sandbox": {
             "type": "string"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "type": "object"
@@ -3268,6 +3277,14 @@
           },
           "max_rounds": {
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigSkills": {
+        "properties": {
+          "refresh": {
+            "type": "string"
           }
         },
         "type": "object"

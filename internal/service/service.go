@@ -28,6 +28,7 @@ import (
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
+	"github.com/kpenfound/osmia/internal/skills"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -113,6 +114,9 @@ type Options struct {
 	// controls is set by Enforce so the chief-of-staff tools it binds reach
 	// the runtime state of the service started with these options.
 	controls *runtimeControls
+	// skills is the skill cache of the enforcement's engine; the service
+	// gives it the loaded refresh policy.
+	skills *skills.Manager
 	// notifyInbox replaces the inbox the notifier reads, for tests.
 	notifyInbox func(context.Context) (InboxResponse, *APIError)
 	// checkJJ replaces the check of the jj on PATH that picks the workspace
@@ -218,6 +222,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub()}
 	s.pool = &scheduler.Shared{Traces: s.traces}
 	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider}
+	if opts.skills != nil {
+		opts.skills.Refresh = func() string { return s.current().Skills.Refresh }
+	}
 	if opts.controls != nil {
 		opts.controls.service.Store(s)
 	}

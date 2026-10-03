@@ -19,6 +19,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/skills"
 )
 
 // Options locates the configuration. File, when set, is the top-level file in
@@ -41,6 +42,7 @@ type Config struct {
 	Hearsay        Hearsay            `toml:"hearsay" json:"hearsay"`
 	Jev            Jev                `toml:"jev" json:"jev"`
 	Notify         Notify             `toml:"notify" json:"notify"`
+	Skills         Skills             `toml:"skills" json:"skills"`
 	// Project is the project this configuration is about: the only active
 	// project of a loaded configuration, or the project For selected. It is
 	// zero when no project, or more than one, is active.
@@ -113,6 +115,13 @@ const (
 	WorkspacesJujutsu = "jujutsu"
 )
 
+// Skills configures the cache of the skills roles reference. Refresh is how
+// stale a clone may get before a turn that needs it pulls it: "never",
+// "always" or a duration.
+type Skills struct {
+	Refresh string `toml:"refresh" json:"refresh"`
+}
+
 type Events struct {
 	Window string `toml:"window" json:"window"`
 }
@@ -139,6 +148,9 @@ type Role struct {
 	// Dagger gives the mason's sbx sandbox the Dagger CLI and an engine on
 	// the host; nil gives neither.
 	Dagger *Dagger `toml:"dagger" json:"dagger,omitempty"`
+	// Skills are git references (<url>[@<ref>][#<sub/dir>]) of skills given
+	// to the role's Claude turns.
+	Skills []string `toml:"skills" json:"skills,omitempty"`
 }
 
 // Dagger is the Dagger CLI release installed in a sandbox and the host engine
@@ -266,7 +278,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Events: Events{"5s"}, Workspaces: WorkspacesAuto, Jev: defaultJev()}
+	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Events: Events{"5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev()}
 	md, err := decode(path, c, false)
 	if err != nil {
 		return nil, err
@@ -336,6 +348,9 @@ func LoadTopLevel(options Options) (*Config, error) {
 	}
 	if err := c.Jev.validate(path); err != nil {
 		return nil, err
+	}
+	if _, _, err := skills.ParseRefresh(c.Skills.Refresh); err != nil {
+		return nil, fieldError(path, "skills.refresh", err.Error())
 	}
 	if c.Notify.Webhook != "" {
 		if err := validateWebhook(c.Notify.Webhook); err != nil {
@@ -664,9 +679,9 @@ func knownKey(key toml.Key, project bool) bool {
 		if key[0] == "profiles" {
 			return slices.Contains([]string{"agent", "model", "effort", "fallback", "timeout", "max_turns"}, key[2])
 		}
-		return slices.Contains([]string{"profile", "sandbox", "image", "dagger"}, key[2])
+		return slices.Contains([]string{"profile", "sandbox", "image", "dagger", "skills"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "events", "events.window", "notify", "notify.webhook", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout"}, path)
+	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "events", "events.window", "notify", "notify.webhook", "skills", "skills.refresh", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {
@@ -779,6 +794,18 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 				return fieldError(path, prefix+".dagger.engine", err.Error())
 			}
 		}
+		names := map[string]bool{}
+		for i, ref := range r.Skills {
+			field := fmt.Sprintf("%s.skills[%d]", prefix, i)
+			spec, err := skills.Parse(ref)
+			if err != nil {
+				return fieldError(path, field, err.Error())
+			}
+			if names[spec.Name] {
+				return fieldError(path, field, "another skill of the role has the name "+spec.Name)
+			}
+			names[spec.Name] = true
+		}
 		for next := r.Profile; next != ""; next = c.Profiles[next].Fallback {
 			if r.Sandbox == "claude" && c.Profiles[next].Agent != "claude" {
 				return fieldError(path, prefix+".sandbox", "claude sandbox requires claude in the entire fallback chain")
@@ -811,7 +838,7 @@ func (c *Config) Execution(role, profile string) (coreadapter.Profile, coreadapt
 		if next == profile {
 			p := c.Profiles[next]
 			timeout, err := time.ParseDuration(p.Timeout)
-			return coreadapter.Profile{Name: next, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: c.Budget.SessionLimitUSD()}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image, Dagger: r.Dagger.Settings()}, err
+			return coreadapter.Profile{Name: next, Backend: p.Agent, Model: p.Model, Effort: p.Effort, Timeout: timeout, MaxTurns: p.MaxTurns, CostLimitUSD: c.Budget.SessionLimitUSD()}, coreadapter.ExecutionSettings{Mode: r.Sandbox, Image: r.Image, Dagger: r.Dagger.Settings(), Skills: slices.Clone(r.Skills)}, err
 		}
 	}
 	return coreadapter.Profile{}, coreadapter.ExecutionSettings{}, fmt.Errorf("profile %q is not in role %q's fallback chain", profile, role)

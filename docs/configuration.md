@@ -131,9 +131,15 @@ window = "5s"
 # to as plain text; empty sends nothing.
 webhook = ""
 
+[skills]
+# How stale a skill clone may get before a turn that needs it pulls it:
+# "never", "always" or a duration.
+refresh = "24h"
+
 [roles.mason]
 profile = "default"
 sandbox = "none"
+skills = []
 ```
 
 The socket must be a direct child of the resolved root with a `.sock` suffix,
@@ -249,10 +255,12 @@ If there is no profile named `default`, bind all seven roles explicitly. Role ke
 | `sandbox` | `none` | `none` (host execution), `claude`, `container` or `sbx` (Docker Sandboxes) |
 | `image` | empty | Required for `container`; optional agent-specific template for `sbx`; forbidden with host modes |
 | `dagger` | unset | Mason only, with `sbx`: the Dagger CLI `version` and host `engine` given to implementation turns; see [Dagger for masons](#dagger-for-masons) |
+| `skills` | `[]` | Skills by git reference, given to the role's Claude turns; see [Role skills](#role-skills) |
 
 A `claude` sandbox requires Claude in every profile in the role's fallback chain.
 No arbitrary mounts, credentials, environment, tools or capability grants are
-accepted from these files. Sandbox settings describe requested execution. A turn
+accepted from these files; a role's `skills` add only the read-only skill cache
+and the tool that loads skills. Sandbox settings describe requested execution. A turn
 runs in any mode the platform can confine; one it cannot (for example `claude`
 on Linux) fails before launch with core's reason. Successful configuration
 loading does not imply that execution is available.
@@ -316,7 +324,8 @@ The sandbox mounts the scoped view and session paths, honoring read-only
 access. When startup requires it, core supplies a separate temporary primary
 workspace so Docker Sandboxes can write its agent instructions outside protected
 inputs. The agent still runs in its granted working directory, and cleanup removes
-the temporary workspace. Shared skills are disabled. Native reading tools are enabled;
+the temporary workspace. The sandbox's shared skills are disabled; a role's own
+[skills](#role-skills) are mounted read-only. Native reading tools are enabled;
 file writers receive editing tools, and implementation turns also receive a shell.
 A turn with a read-only view starts in an empty scratch directory, and its
 instructions name the view's path. The `file_read` tool reads a file in the view
@@ -433,6 +442,46 @@ Where Docker runs natively, bind-mount the engine's socket directory instead,
 for example `-v /run/osmia-dagger:/run/dagger`, and configure
 `engine = "unix:///run/osmia-dagger/engine.sock"`. The account running Osmia
 must be able to open that socket.
+
+### Role skills
+
+A role may name skills by git reference. Osmia clones each one into
+`<root>/skills/` and gives the role's Claude turns a generated plugin that holds
+only the skills:
+
+```toml
+[roles.reviewer]
+skills = [
+  "https://github.com/acme/skills",                 # whole repository
+  "https://github.com/acme/skills#skills/review",   # one directory inside it
+  "https://github.com/acme/review-skill@v1.2.0",    # pinned tag or branch
+  "git@github.com:acme/private-skills.git",         # ssh works too
+]
+```
+
+A reference is `<git-url>[@<ref>][#<sub/dir>]`. The selected directory is either
+a single skill, with `SKILL.md` at its root, or a skills collection, with a
+`skills/` directory. Anything else is an error when a turn needs it. A Claude
+Code plugin repository works through its `skills/` directory, but its hooks, MCP
+servers, commands and agents never reach a session. A sub-directory must stay
+inside the repository. Two references of one role may not end in the same
+name, since that name identifies the generated plugin.
+
+A turn of a role with skills mounts the skill cache read-only in every
+sandbox, and Claude's `Skill` tool joins its native tools. Codex and OpenCode
+turns receive no skills, so a role whose fallback runs another agent loses its
+skills for those turns. The classifier, which shares the mason's sandbox,
+receives none.
+
+Osmia clones a missing reference when a turn needs it, with the service's own
+`git` and credentials and without prompting. A failed clone fails the turn. A
+clone last fetched more than `skills.refresh` ago is pulled
+(`git pull --ff-only`) first: `"always"` pulls before every turn and `"never"`
+never pulls. A failed pull is logged and the turn uses the clone it has; a
+reference pinned to a tag cannot be pulled, which is the point of pinning.
+To pick up a change sooner, set `refresh = "always"` and reload, or delete the
+clone under `<root>/skills/repos/`. The references are shown in `/v1/config`,
+so do not embed credentials in a URL.
 
 ## Project registration
 
@@ -568,7 +617,8 @@ in `runtime.json`, never these files.
 ([disk drift](running.md#disk-drift)), and `osmia reload` applies edited files
 to a running service after validating all of them ([reload](running.md#reload)). The root, `listen.socket`,
 `listen.web` and `listen.tailnet` keep their loaded values until the service
-restarts. The `active_projects` list applies live: additions start their retained
+restarts. Role skills and `skills.refresh` apply to turns that start after a
+reload. The `active_projects` list applies live: additions start their retained
 traces and removals drain in-flight operations before stopping.
 
 The optional `[budget]` table accepts `per_session`, `per_unit` and `per_day` as
