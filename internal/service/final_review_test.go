@@ -200,9 +200,9 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 
 	upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream moved\n"})
 	var problems []error
-	checked := false
+	checked := 0
 	f.s.options.reviewChecks = checkFunc(func(_ context.Context, dir string) (CheckResult, error) {
-		checked = true
+		checked++
 		data, err := os.ReadFile(filepath.Join(dir, "UPSTREAM.md"))
 		if err != nil || string(data) != "upstream moved\n" {
 			return CheckResult{}, fmt.Errorf("checks missed rebased candidate: %s %v", data, err)
@@ -213,9 +213,11 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 		return CheckResult{Output: "all proofs passed"}, nil
 	})
 	turn := f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		result, err := callTool(ctx, tools, runChecksTool, map[string]any{})
-		if err != nil || !strings.Contains(result, "all proofs passed") {
-			return fmt.Errorf("review checks: %s %v", result, err)
+		if checked != 1 {
+			problems = append(problems, fmt.Errorf("the checks ran %d times before the read", checked))
+		}
+		if listed, err := tools.ListTools(ctx, nil); err != nil || slices.ContainsFunc(listed.Tools, func(t *mcp.Tool) bool { return t.Name == "run_checks" }) {
+			problems = append(problems, fmt.Errorf("the final reader can run checks: %v", err))
 		}
 
 		for path, want := range map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan, "charter.md": shedCharter,
@@ -253,9 +255,6 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 	})
 	result, err := a.Apply(ctx, op)
 	must(t, err)
-	if !checked {
-		t.Fatal("final review did not run candidate checks")
-	}
 	if err := errors.Join(problems...); err != nil {
 		t.Fatal(err)
 	}
@@ -266,6 +265,17 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 	g := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit)
 	tip, _, err := g.Branch(ctx, featureBranch(stream))
 	must(t, err)
+	var run FinalCheckRun
+	runs := streamDocuments(t, repository, stream, finalChecksDocument(1))
+	if len(runs) != 1 || runs[0].Path != "final/checks-1.json" || json.Unmarshal([]byte(runs[0].Content), &run) != nil ||
+		run.Commit != tip || run.Status != ChecksPassed || run.Output != "all proofs passed" || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report"}) {
+		t.Fatalf("the final check run %+v", runs)
+	}
+	reader, err := repository.Thread(stream, committeeAgent(1))
+	must(t, err)
+	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "recorded in final/checks-1.json; you do not run them. The run passed.") || !strings.Contains(prompt, "all proofs passed") {
+		t.Fatalf("the reader's prompt lacks the check run:\n%s", prompt)
+	}
 	if on, err := g.Ancestor(ctx, upstream, tip); err != nil || !on || tip == head {
 		t.Fatalf("the feature branch at %s is not rebased onto upstream %s: %v", tip, upstream, err)
 	}
@@ -626,6 +636,51 @@ func TestInterruptedFinalReviewKeepsItsRecordedRebase(t *testing.T) {
 	}
 	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != "final review 1 failed: the committee member ended its turn without recording a report" {
 		t.Fatalf("a failed review authorises: %q %v", reason, err)
+	}
+}
+
+// The service runs the final review's checks once, before the read, and
+// records the run whatever its result. A review interrupted after the run is
+// recorded reads it back on retry instead of running the checks again, and a
+// run that did not complete reaches the reader as a run that shows nothing.
+func TestFinalChecksRunOnceBeforeTheRead(t *testing.T) {
+	t.Parallel()
+	f, stream, repository, a := newFinalFixture(t, "final-checks")
+	ctx := context.Background()
+	_, op := assembleBoth(t, f, repository, a, stream,
+		map[string]string{"internal/trace/resume.go": "package trace\n"},
+		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
+	runs := 0
+	f.s.options.reviewChecks = checkFunc(func(context.Context, string) (CheckResult, error) {
+		runs++
+		return CheckResult{ExitCode: -1}, errors.New("engine unreachable")
+	})
+	f.s.boundary = func(name string) error {
+		if name == "final-checks-recorded" {
+			return errors.New("the service stopped")
+		}
+		return nil
+	}
+	if _, err := a.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "the service stopped") {
+		t.Fatalf("the interrupted review: %v", err)
+	}
+	f.s.boundary = nil
+	f.finalTurn(1, 1, func(context.Context, *mcp.ClientSession) error { return nil })
+	if _, err := a.Apply(ctx, op); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 1 {
+		t.Fatalf("the checks ran %d times", runs)
+	}
+	var run FinalCheckRun
+	docs := streamDocuments(t, repository, stream, finalChecksDocument(1))
+	if len(docs) != 1 || json.Unmarshal([]byte(docs[0].Content), &run) != nil || run.Status != ChecksIncomplete || run.Error != "engine unreachable" || run.Commit == "" {
+		t.Fatalf("the final check run %+v", docs)
+	}
+	reader, err := repository.Thread(stream, committeeAgent(1))
+	must(t, err)
+	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "recorded in final/checks-1.json, and they did not complete: engine unreachable. The checks show nothing about this commit") {
+		t.Fatalf("the reader's prompt lacks the incomplete run:\n%s", prompt)
 	}
 }
 

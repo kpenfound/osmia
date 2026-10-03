@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,8 +21,6 @@ import (
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-const runChecksTool = "run_checks"
 
 // CheckResult records the exit status of a candidate check and the end of
 // its output, where Dagger's report is, bounded to 64 KiB.
@@ -215,58 +212,4 @@ func unitReviewerSelection(ctx context.Context, cfg *config.Config, r *trace.Rep
 	}
 	paths, err := viewPaths(dir)
 	return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: dir, Directory: dir, BaseRevision: identity.Candidate.Revision}, Paths: paths, Execution: execution}, err
-}
-
-func candidateCheckTool(cfg *config.Config, r *trace.Repository, scope coreadapter.Scope, commit string, checks ReviewChecks) coreadapter.Tool {
-	var mu sync.Mutex
-	return coreadapter.Tool{Name: runChecksTool, Description: "Run dagger check on a fresh disposable copy of this review's exact candidate; returns its commit, exit status and the end of its output.", Effect: coreadapter.ToolCheck,
-		InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
-		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-			var args map[string]json.RawMessage
-			if err := json.Unmarshal(raw, &args); err != nil {
-				return nil, err
-			}
-			if args == nil || len(args) != 0 {
-				return nil, errors.New("run_checks accepts no command, path or environment overrides")
-			}
-			if checks == nil {
-				return nil, errors.New("candidate check runner is unavailable")
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			provider, err := newUnitWorkspaces(cfg, r).of(config.WorkstreamID(scope.Workstream))
-			if err != nil {
-				return nil, err
-			}
-			base := filepath.Join(cfg.Root.String(), "checks")
-			if err := os.MkdirAll(base, 0700); err != nil {
-				return nil, err
-			}
-			dir, err := os.MkdirTemp(base, "candidate-")
-			if err != nil {
-				return nil, err
-			}
-			defer os.RemoveAll(dir)
-			if err := provider.Export(ctx, commit, dir); err != nil {
-				return nil, err
-			}
-			timeout := cfg.Project.CheckTimeout()
-			run, cancel := context.WithTimeout(ctx, timeout)
-			result, err := checks.Check(run, dir, nil)
-			cancel()
-			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-				err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
-			}
-			response := struct {
-				Candidate string `json:"candidate"`
-				Check     string `json:"check"`
-				CheckResult
-				Error string `json:"error,omitempty"`
-			}{Candidate: commit, Check: "dagger check", CheckResult: result}
-			if err != nil {
-				response.Error = fmt.Sprintf("candidate check failed: %v", err)
-			}
-			return json.Marshal(response)
-		},
-	}
 }

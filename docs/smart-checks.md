@@ -49,8 +49,8 @@ check link can name.
 8. **Run.** `dagger check --progress=report` runs with the selected links, or
    with none to run every check, bounded by the project's `checks_timeout`.
 
-Only the unit check run selects. The final reviewer's `run_checks` tool runs
-every check whenever the reviewer calls it.
+Only the unit check run selects. The check run before a final review runs
+every check on the rebased feature branch.
 
 ## What a run records
 

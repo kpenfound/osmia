@@ -379,10 +379,17 @@ func unitPath(parts []string) bool {
 }
 
 // finalPath reports whether parts name a final review record of a
-// workstream, including its review, follow-ups, delivery decision and
-// publication.
+// workstream, including its rebase, check runs, review, follow-ups, delivery
+// decision and publication.
 func finalPath(parts []string) bool {
-	return len(parts) == 2 && parts[0] == "final" && (parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "delivery.json" || parts[1] == "publication.json")
+	if len(parts) != 2 || parts[0] != "final" {
+		return false
+	}
+	n := strings.TrimSuffix(strings.TrimPrefix(parts[1], "checks-"), ".json")
+	if strings.HasPrefix(parts[1], "checks-") && strings.HasSuffix(parts[1], ".json") && shedRound.MatchString("round-"+n) {
+		return true
+	}
+	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "delivery.json" || parts[1] == "publication.json"
 }
 
 // driftPath reports whether parts name the drift rebase record of a

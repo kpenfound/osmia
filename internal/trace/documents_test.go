@@ -578,6 +578,15 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 	if err := r.RecordDocuments(ctx, []Document{checks}); err != nil {
 		t.Fatal(err)
 	}
+	finalChecks := unitReport("{\"status\":\"passed\"}\n", 1)
+	finalChecks.ID, finalChecks.Path = "final-checks-1", "final/checks-1.json"
+	if err := r.RecordDocuments(ctx, []Document{finalChecks}); err != nil {
+		t.Fatal(err)
+	}
+	finalChecks.ID, finalChecks.Path = "final-checks-x", "final/checks-x.json"
+	if err := r.RecordDocuments(ctx, []Document{finalChecks}); err == nil {
+		t.Fatal("recorded a final check run without a run number")
+	}
 	move := unitReport("{\"to\":\"implementing\"}\n", 1)
 	move.ID, move.Path = "unit-parser-move-3", "units/parser/move-3.json"
 	if err := r.RecordDocuments(ctx, []Document{move}); err != nil {

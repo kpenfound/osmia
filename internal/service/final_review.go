@@ -499,9 +499,12 @@ func (a *finalReviewer) Inspect(ctx context.Context, op coreadapter.Operation) (
 // The foreman then fetches the configured upstream base branch and replays
 // the feature branch onto it; final/rebase.json records the result before
 // the branch moves, so a retry moves it to the same commit. A replay that
-// conflicts leaves the branch where it was. The first committee member then
-// reads the rebased branch, the sealed spec and plan and the charter in a
-// read-only view and records evidence or a gap for every sealed criterion.
+// conflicts leaves the branch where it was. The service then runs every
+// project check on the rebased commit and records the run in
+// final/checks-<k>.json, which a retry reads back. The first committee member
+// then reads the rebased branch, the check run, the sealed spec and plan and
+// the charter in a read-only view and records evidence or a gap for every
+// sealed criterion.
 // One commit records final/report.json with the review's move to reviewed or
 // failed and a notice for the chief of staff. A review whose inputs changed,
 // whose replay conflicted, or whose reader recorded no report fails with the
@@ -625,7 +628,11 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 		return coreadapter.OperationResult{}, err
 	}
 	report.Commit = rebase.Commit
-	return a.read(ctx, cfg, stream, in, report)
+	checks, err := a.finalChecks(ctx, cfg, stream, report)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	return a.read(ctx, cfg, stream, in, report, checks)
 }
 
 // rebase returns the recorded rebase of final review k, and whether one is.
@@ -682,8 +689,8 @@ func nextRevision(repository *trace.Repository, stream config.WorkstreamID, id s
 
 // read drives the first committee member's turn of the review to its end
 // and records the report it left. It abandons a turn a previous service stop
-// interrupted and starts a new turn while attempts remain.
-func (a *finalReviewer) read(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in finalReviewInput, report FinalReport) (coreadapter.OperationResult, error) {
+// interrupted and starts a new turn, carrying checks, while attempts remain.
+func (a *finalReviewer) read(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in finalReviewInput, report FinalReport, checks FinalCheckRun) (coreadapter.OperationResult, error) {
 	if err := (&debate{s: a.s, repository: a.repository}).ensureCommittee(ctx, stream, 1); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -776,7 +783,7 @@ func (a *finalReviewer) read(ctx context.Context, cfg *config.Config, stream con
 				}
 				continue
 			}
-			if err := a.enqueue(ctx, cfg, stream, in, report, member, tries+1); err != nil {
+			if err := a.enqueue(ctx, cfg, stream, in, report, checks, member, tries+1); err != nil {
 				return coreadapter.OperationResult{}, err
 			}
 		default:
@@ -830,7 +837,7 @@ func (a *finalReviewer) recorded(stream config.WorkstreamID, turn string) (Final
 
 // enqueue accepts one attempt of the reader's turn, fixing its profile and
 // prompts.
-func (a *finalReviewer) enqueue(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in finalReviewInput, report FinalReport, member string, attempt int) error {
+func (a *finalReviewer) enqueue(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in finalReviewInput, report FinalReport, checks FinalCheckRun, member string, attempt int) error {
 	profile, err := a.s.agentProfile(cfg, committeeRole, member)
 	if err != nil {
 		return err
@@ -842,7 +849,7 @@ func (a *finalReviewer) enqueue(ctx context.Context, cfg *config.Config, stream 
 	turn := finalTurnID(in.Review, member, attempt)
 	transition, _ := finalReviewIDs(in.Review)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: finalReviewActor, Cause: transition, Depth: 1},
-		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: finalSystemPrompt(cfg.Project), Prompt: finalPrompt(report)}
+		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: finalSystemPrompt(cfg.Project), Prompt: finalPrompt(report, checks)}
 	_, err = a.repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -865,8 +872,8 @@ func (a *finalReviewer) dispatch(ctx context.Context, stream config.WorkstreamID
 
 // turns is the final reader's isolated turn path: a read-only private view
 // of the reviewed branch, the sealed spec and plan, the charter and the
-// units' reports and landings, with reading, the branch's diff from upstream,
-// reporting and fixed candidate checks. It has no native write, shell or VCS capability.
+// units' reports and landings, with reading, the branch's diff from upstream
+// and reporting. It has no native write, shell, check or VCS capability.
 func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, report FinalReport) *isolation.Turns {
 	var engine coreadapter.Engine
 	var hosts coreadapter.MCPHosts
@@ -879,7 +886,7 @@ func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, r
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			return a.selectView(ctx, scope, stream, report)
 		},
-		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: []string{"file_read", FinalReportTool, runChecksTool, workstreamDiffTool}}},
+		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: []string{"file_read", FinalReportTool, workstreamDiffTool}}},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Role != committeeRole || scope.Workstream != string(stream) || scope.Project != string(a.repository.Project()) || !strings.HasPrefix(scope.Turn, finalTurnPrefix(in.Review, report.Reader)) {
 				return nil, errors.New("turn scope denied")
@@ -896,7 +903,7 @@ func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, r
 					}
 					return g.Diff(ctx, report.Upstream.Commit, report.Commit)
 				}}
-			return []coreadapter.Tool{tool, candidateCheckTool(cfg, a.repository, scope, report.Commit, a.s.options.reviewChecks), diffTool(branch)}, err
+			return []coreadapter.Tool{tool, diffTool(branch)}, err
 		},
 		Hosts:  hosts,
 		Engine: engine,
@@ -1386,10 +1393,10 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 }
 
 func finalSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s): every planned unit has landed on the feature branch, and you read the whole branch against the feature's sealed spec and the project's charter before the owner decides whether it is delivered. Your candidate files are read-only. Call run_checks to run dagger check on a separate disposable copy of the exact candidate and cite its returned commit and result. You cannot choose a command or modify the review input. You record your report with %s: for every criterion, what in the branch shows it holds, or the gap. A criterion you cannot see shown is a gap, never a guess.", p.Name, p.Upstream, FinalReportTool)
+	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s): every planned unit has landed on the feature branch, and you read the whole branch against the feature's sealed spec and the project's charter before the owner decides whether it is delivered. You judge one thing: whether the branch meets each criterion of the sealed spec without breaking a charter rule. Your view is read-only. The service ran every project check on the exact commit you read, and your prompt carries the result; cite it as evidence rather than re-deriving what the checks prove. Code style, formatting and lint belong to the checks, not to your read. You record your report with %s: for every criterion, what in the branch shows it holds, or the gap. A criterion you cannot see shown is a gap, never a guess.", p.Name, p.Upstream, FinalReportTool)
 }
 
-func finalPrompt(report FinalReport) string {
+func finalPrompt(report FinalReport, checks FinalCheckRun) string {
 	return fmt.Sprintf(`Final review %d of the assembled feature branch at commit %s, rebased onto %s/%s at %s. The spec is revision %d, the plan revision %d, sealed as seal %d; the charter is revision %d.
 
 Your view holds:
@@ -1401,6 +1408,8 @@ Your view holds:
 
 Call %s to read the whole change the branch makes to upstream: files_only lists the changed files, and paths and lines narrow the diff.
 
-Read the whole branch, not unit by unit. For every criterion of spec.md, call %s once with all of them: evidence names what in the branch shows the criterion holds, such as files, tests and behaviour; a gap says what is missing, wrong or not shown, including anything that breaks a charter rule. Then end your turn.
-`, report.Review, report.Commit, report.Upstream.Remote, report.Upstream.Branch, report.Upstream.Commit, report.Spec, report.Plan, report.Seal, report.Charter, workstreamDiffTool, FinalReportTool)
+Read the whole branch, not unit by unit. For every criterion of spec.md, call %s once with all of them: evidence names what in the branch shows the criterion holds, such as files, tests, behaviour and the checks below; a gap says what is missing, wrong or not shown, including anything that breaks a charter rule or a failed check the criterion rests on. Then end your turn.
+
+%s
+`, report.Review, report.Commit, report.Upstream.Remote, report.Upstream.Branch, report.Upstream.Commit, report.Spec, report.Plan, report.Seal, report.Charter, workstreamDiffTool, FinalReportTool, finalCheckEvidence(checks))
 }

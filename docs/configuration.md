@@ -346,12 +346,16 @@ unreachable, the run timed out or the project has no Dagger checks, leaves the
 unit checking, tells the chief of staff and runs again after ten minutes. One
 run at a time per workstream; a pause holds runs not yet started.
 
-The final reviewer's `run_checks` tool accepts no arguments and runs
-`dagger check` the same way, within `checks_timeout`, returning the candidate
-commit, exit status and the last 64 KiB of output, with an explicit truncation
-flag. The check client
-inherits only PATH and service engine selection, not provider, GitHub or SSH
-credentials. There is no command fallback.
+Before the final read, the service runs every check the same way on the
+rebased feature branch commit, within `checks_timeout`, and records the run as
+`final/checks-<k>.json` for final review `k`, with the commit, command, exit
+status, failed checks and the last 64 KiB of output. The final reader's prompt
+carries the result; neither it nor a unit reviewer runs checks. A final run
+that reports no result is recorded as incomplete, and the reader is told the
+checks show nothing about the commit. A retry of the review reads the recorded
+run back instead of running the checks again. The check client inherits only
+PATH and service engine selection, not provider, GitHub or SSH credentials.
+There is no command fallback.
 
 Reviewers read diffs through the `workstream_diff` tool rather than their
 prompts, which list the changed files with added and removed line counts. A unit
@@ -537,10 +541,11 @@ parse as a Go duration, a TOML number, a negative duration, or a nonzero
 duration shorter than `1m` is rejected.
 
 `checks_timeout` is a Go duration string from `1m` to `24h`: how long one run
-of a unit candidate's checks, or of the final reviewer's `run_checks`, may
+of a unit candidate's checks, or of a final review's checks, may
 take. It defaults to `"15m"`; raise it for a project whose `dagger check` runs
 longer. A run that outlasts it did not complete: the unit stays checking and its
-checks run again later. Listing the check links for a Jev selection has its
+checks run again later, and a final review's reader is told its checks did not
+complete. Listing the check links for a Jev selection has its
 own five-minute bound. A change applies to runs that start after a reload.
 
 `classifier` names a top-level profile for clean mason turns with no accepted
