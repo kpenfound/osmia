@@ -78,14 +78,6 @@ func sealIDs(k int) (transition, event string) {
 	return transition, trace.EventID(transition, "run")
 }
 
-// sealState splits a seal-subject value into its kind (sealing or failed)
-// and sealing number.
-func sealState(value string) (kind string, n int, ok bool) {
-	kind, number, found := strings.Cut(value, "-")
-	n, err := strconv.Atoi(number)
-	return kind, n, found && err == nil && n > 0 && (kind == "sealing" || kind == "failed")
-}
-
 // featureBranch names the feature branch of a workstream in the project's
 // clone.
 func featureBranch(stream config.WorkstreamID) string { return "osmia/" + string(stream) }

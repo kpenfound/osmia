@@ -41,3 +41,6 @@ goflags = "-count=1 -timeout=30m -race"
 # dagger check --env=flake runs each selected test five times.
 [env.flake.modules.go.settings]
 goflags = "-count=5 -timeout=30m"
+
+[modules.staticcheck]
+source = "dagger.io/go/staticcheck@collections"

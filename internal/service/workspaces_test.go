@@ -57,8 +57,8 @@ func (j *fakeJJ) lastBounded() bool {
 }
 
 var (
-	jjMissing = fmt.Errorf("%w: exec: \"jj\": executable file not found in $PATH", workspace.ErrJJMissing)
-	jjTooOld  = fmt.Errorf("%w: found jj 0.44.0, Osmia needs %s or later", workspace.ErrJJTooOld, workspace.MinimumJJ)
+	errJJMissing = fmt.Errorf("%w: exec: \"jj\": executable file not found in $PATH", workspace.ErrJJMissing)
+	errJJTooOld  = fmt.Errorf("%w: found jj 0.44.0, Osmia needs %s or later", workspace.ErrJJTooOld, workspace.MinimumJJ)
 )
 
 // workspacesFixture is a hand-in fixture whose configuration sets
@@ -153,9 +153,9 @@ func TestWorkspacesKeyPicksTheBackendOfANewWorkstream(t *testing.T) {
 	}{
 		{"git with jj", config.WorkspacesGit, nil, "0.45.1", config.WorkspacesGit, ""},
 		{"auto with jj", config.WorkspacesAuto, nil, "0.45.1", config.WorkspacesJujutsu, ""},
-		{"auto without jj", config.WorkspacesAuto, jjMissing, "", config.WorkspacesGit, ""},
+		{"auto without jj", config.WorkspacesAuto, errJJMissing, "", config.WorkspacesGit, ""},
 		{"jujutsu with jj", config.WorkspacesJujutsu, nil, "0.45.1", config.WorkspacesJujutsu, ""},
-		{"jujutsu with an old jj", config.WorkspacesJujutsu, jjTooOld, "0.44.0", "", "found jj 0.44.0, Osmia needs 0.45.0 or later"},
+		{"jujutsu with an old jj", config.WorkspacesJujutsu, errJJTooOld, "0.44.0", "", "found jj 0.44.0, Osmia needs 0.45.0 or later"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -227,7 +227,7 @@ func TestWorkstreamKeepsItsBackendAcrossARestartAfterTheKeyChanges(t *testing.T)
 	}
 
 	must(t, f.s.Close())
-	f.jj.set("", jjMissing)
+	f.jj.set("", errJJMissing)
 	f.setting(t, config.WorkspacesAuto)
 	s, c := start(t, f.opts)
 	f.s, f.c = s, c

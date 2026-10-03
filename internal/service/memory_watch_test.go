@@ -24,7 +24,7 @@ func TestMemoryWatchResumesCursorAndDeduplicatesAfterRestart(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer owner-secret" || r.Header.Get("Hearsay-Agent-Token") != "agent-secret" {
 			t.Error("watch did not use delegated authentication")
-			http.Error(w, "unauthorized", 401)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		var args struct {

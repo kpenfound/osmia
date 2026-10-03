@@ -231,7 +231,7 @@ func TestDriftCarryReturnsApprovalsAndTheirReviewerMayAmend(t *testing.T) {
 	}
 	for _, unit := range []string{"resume", "dedupe"} {
 		for _, o := range rebaseOperations(t, repository, stream, unit) {
-			settleOperation(t, f.s, repository, stream, o.Operation, rebaser{d.foreman})
+			settleOperation(t, f.s, repository, stream, o.Operation, rebaser(d))
 		}
 	}
 	if result := settleOperation(t, f.s, repository, stream, op, d); result.Outcome != "succeeded" {

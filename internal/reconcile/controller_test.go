@@ -20,7 +20,7 @@ const projectID config.ProjectID = "p_00000000000000000000000000000001"
 const streamID config.WorkstreamID = "w_00000000000000000000000000000001"
 
 var epoch = time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
-var injected = errors.New("interrupted")
+var errInjected = errors.New("interrupted")
 
 type fakeClock struct {
 	mu sync.Mutex
@@ -77,7 +77,7 @@ func (f *fakeSystem) Apply(ctx context.Context, op coreadapter.Operation) (corea
 	defer f.mu.Unlock()
 	f.applications = append(f.applications, op.ID)
 	if f.failBeforeEffect {
-		return coreadapter.OperationResult{}, injected
+		return coreadapter.OperationResult{}, errInjected
 	}
 	// Deliberately not idempotent: a repeated Apply must be caught by assertions.
 	result := coreadapter.OperationResult{Outcome: "complete", Evidence: string(f.boundary) + " resource persisted", Data: json.RawMessage(`{"resource":"local"}`)}
@@ -192,11 +192,11 @@ func TestRestartAtEveryBoundary(t *testing.T) {
 			c := f.controller(t)
 			c.boundary = func(name string) error {
 				if name == step {
-					return injected
+					return errInjected
 				}
 				return nil
 			}
-			if err := c.Pass(context.Background()); !errors.Is(err, injected) {
+			if err := c.Pass(context.Background()); !errors.Is(err, errInjected) {
 				t.Fatalf("boundary %s: %v", step, err)
 			}
 			before, _ := f.system.counts()
@@ -216,7 +216,7 @@ func TestLocalBoundariesRecoverEffectDespiteError(t *testing.T) {
 	for _, boundary := range []coreadapter.OperationBoundary{coreadapter.RepositoryBoundary, coreadapter.RunnerBoundary, coreadapter.ContainerBoundary} {
 		t.Run(string(boundary), func(t *testing.T) {
 			f := setup(t, boundary)
-			f.system.applyErr = injected
+			f.system.applyErr = errInjected
 			must(t, f.controller(t).Pass(context.Background()))
 			record := f.record(t)
 			if record.Result != nil || record.Acknowledged || record.RetryAt.IsZero() {
@@ -245,7 +245,7 @@ func TestAmbiguousInspectionNeverAppliesOrAcknowledges(t *testing.T) {
 			f := setup(t, coreadapter.RunnerBoundary)
 			f.system.unknown = true
 			if inspectionError {
-				f.system.inspectErr = injected
+				f.system.inspectErr = errInjected
 			}
 			for range 2 {
 				must(t, f.controller(t).Pass(context.Background()))

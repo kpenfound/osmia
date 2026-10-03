@@ -510,13 +510,13 @@ func TestDriftQueuesUnitConflictOnce(t *testing.T) {
 	if len(rebases) != 1 {
 		t.Fatalf("unit rebase requests %+v", rebases)
 	}
-	settleOperation(t, f.s, repository, stream, rebases[0].Operation, rebaser{d.foreman})
+	settleOperation(t, f.s, repository, stream, rebases[0].Operation, rebaser(d))
 	carried := unitRebases(t, repository, stream, "dedupe")
 	if len(carried) != 1 || carried[0].Base != base || !slices.Equal(carried[0].Conflicts, []string{"CONFLICT.md"}) {
 		t.Fatalf("the unit's drift conflict %+v", carried)
 	}
 	for _, other := range rebaseOperations(t, repository, stream, "resume") {
-		settleOperation(t, f.s, repository, stream, other.Operation, rebaser{d.foreman})
+		settleOperation(t, f.s, repository, stream, other.Operation, rebaser(d))
 	}
 	if result := settleOperation(t, f.s, repository, stream, op, d); result.Outcome != "succeeded" {
 		t.Fatalf("drift result %+v", result)

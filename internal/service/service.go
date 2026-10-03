@@ -202,7 +202,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, fmt.Errorf("root ownership lock must be a regular file")
 	}
 	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return nil, fmt.Errorf("Osmia root is already owned or cannot be locked; stop its service before starting another: %w", err)
+		return nil, fmt.Errorf("root is already owned by another Osmia service or cannot be locked; stop that service before starting another: %w", err)
 	}
 	opts.Config = root.Options(opts.Config.Home)
 	if opts.Issues == nil {

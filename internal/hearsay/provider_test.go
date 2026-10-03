@@ -32,11 +32,11 @@ func TestProviderAuthenticatesRoleScopesAndFallsBackLocally(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/get_bundle" || r.Header.Get("Authorization") != "Bearer private-OWNER_TOKEN" || r.Header.Get("Hearsay-Principal") != "human" || r.Header.Get("Hearsay-Agent") != "worker" || r.Header.Get("Hearsay-Agent-Token") != "private-WORKER_TOKEN" {
 			t.Error("wrong call or authentication")
-			w.WriteHeader(401)
+			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 		if failure.Load() {
-			http.Error(w, "private-OWNER_TOKEN upstream details", 503)
+			http.Error(w, "private-OWNER_TOKEN upstream details", http.StatusServiceUnavailable)
 			return
 		}
 		var in map[string]string

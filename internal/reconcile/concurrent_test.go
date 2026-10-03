@@ -261,7 +261,7 @@ func TestConcurrentOperationFailureStopsRun(t *testing.T) {
 	c.options.Ticks = make(chan time.Time)
 	c.boundary = func(step string) error {
 		if step == "before-result" {
-			return injected
+			return errInjected
 		}
 		return nil
 	}
@@ -269,13 +269,13 @@ func TestConcurrentOperationFailureStopsRun(t *testing.T) {
 	go func() { errs <- c.Run(context.Background()) }()
 	select {
 	case err := <-errs:
-		if !errors.Is(err, injected) {
+		if !errors.Is(err, errInjected) {
 			t.Fatalf("run: %v", err)
 		}
 	case <-time.After(overlapTimeout):
 		t.Fatal("the failure did not stop the loop")
 	}
-	if err := c.Pass(context.Background()); !errors.Is(err, injected) {
+	if err := c.Pass(context.Background()); !errors.Is(err, errInjected) {
 		t.Fatalf("pass after the failure: %v", err)
 	}
 }
@@ -295,7 +295,7 @@ func TestRestartAtEveryBoundaryOfAConcurrentOperation(t *testing.T) {
 			c := concurrent()
 			c.boundary = func(name string) error {
 				if name == step {
-					return injected
+					return errInjected
 				}
 				return nil
 			}
@@ -303,7 +303,7 @@ func TestRestartAtEveryBoundaryOfAConcurrentOperation(t *testing.T) {
 			if waited := c.Wait(); err == nil {
 				err = waited
 			}
-			if !errors.Is(err, injected) {
+			if !errors.Is(err, errInjected) {
 				t.Fatalf("boundary %s: %v", step, err)
 			}
 			before, _ := f.system.counts()

@@ -310,9 +310,9 @@ func TestNotifyPostsEveryNewInboxEntryOnce(t *testing.T) {
 	startNotifying(t, opts, inbox)
 	next := entryOf(InboxEscalation, 9)
 	inbox.set(append(entries, next)...)
-	bodies = hook.await(t, len(kinds)+1)
+	hook.await(t, len(kinds)+1)
 	time.Sleep(50 * time.Millisecond)
-	if bodies = hook.received(); len(bodies) != len(kinds)+1 || !strings.Contains(bodies[len(kinds)], "Decide escalation 9?") {
+	if bodies := hook.received(); len(bodies) != len(kinds)+1 || !strings.Contains(bodies[len(kinds)], "Decide escalation 9?") {
 		t.Fatalf("posts after restart: %q", bodies[len(kinds):])
 	}
 }
@@ -424,9 +424,9 @@ func TestNotifyReloadTurnsNotificationsOnAndOff(t *testing.T) {
 		return readLedger(t, opts).Notifications[notificationKey(project, e4)] != nil
 	})
 	inbox.set(e1, e2, e3, e3b, e4, e5)
-	got := second.await(t, 3)
+	second.await(t, 3)
 	time.Sleep(50 * time.Millisecond)
-	if got = second.received(); len(got) != 3 || !strings.Contains(got[2], "Kind: ratification") || len(first.received()) != 1 {
+	if got := second.received(); len(got) != 3 || !strings.Contains(got[2], "Kind: ratification") || len(first.received()) != 1 {
 		t.Fatalf("posts after turning notifications back on: %q and %q", first.received(), got)
 	}
 	if rec := readLedger(t, opts).Notifications[notificationKey(project, e4)]; rec.State != notificationSkipped {

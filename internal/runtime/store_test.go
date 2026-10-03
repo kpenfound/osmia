@@ -98,7 +98,9 @@ func TestPauseAttributionAndClearing(t *testing.T) {
 		}
 	}
 	must(t, reopened.ClearPause(targets[2], PauseProviderUsageLimit))
-	if err := reopened.ClearPause(targets[0], PauseProviderUsageLimit); err == nil { t.Fatal("provider cleared owner pause") }
+	if err := reopened.ClearPause(targets[0], PauseProviderUsageLimit); err == nil {
+		t.Fatal("provider cleared owner pause")
+	}
 	for _, p := range state.Pauses {
 		must(t, reopened.ClearPause(p.Target, PauseOwner))
 	}

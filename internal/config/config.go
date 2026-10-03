@@ -819,7 +819,7 @@ func (c *Config) Execution(role, profile string) (coreadapter.Profile, coreadapt
 func validateSocket(path string) error {
 	// 103 bytes fits Darwin's sockaddr_un and Linux's larger limit, with NUL.
 	if len(path) > 103 {
-		return fmt.Errorf("Unix socket path exceeds 103 bytes; choose a shorter root/path")
+		return fmt.Errorf("socket path exceeds the 103-byte Unix socket limit; choose a shorter root/path")
 	}
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
