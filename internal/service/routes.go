@@ -76,6 +76,7 @@ var Routes = []Route{
 	{Method: http.MethodPost, Path: Prefix + "/ratify/{workstream}", Summary: "Ratify the spec and plan", Request: RatifyRequest{}, Response: RatifyResponse{}},
 
 	{Method: http.MethodPost, Path: Prefix + "/contested/{workstream}/{unit}", Summary: "Direct a contested unit", Request: ContestedRulingRequest{}, Response: ContestedRulingResponse{}},
+	{Method: http.MethodPost, Path: Prefix + "/move/{workstream}/{unit}", Summary: "Move a unit to another state", Request: UnitMoveRequest{}, Response: UnitMoveResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/amendment/{workstream}/{amendment}", Summary: "Show an amendment", Response: AmendmentResponse{}},
 	{Method: http.MethodPost, Path: Prefix + "/amendment/{workstream}/{amendment}", Summary: "Decide an amendment", Request: AmendmentDecisionRequest{}, Response: AmendmentResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/charter", Summary: "List charter proposals", Response: CharterProposalsResponse{}},

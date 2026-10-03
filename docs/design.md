@@ -188,7 +188,8 @@ planned -> ready -> implementing -> checking -> reviewing -> approved -> merged
                         ^              |            |
                         +--------------+------------+ checks failed or changes requested, bounded by max_bounces
 
-any state may also be: waiting (a question is open), contested (send-backs or a mason clean-turn decision)
+any state may also be: waiting (a question is open), contested (send-backs, a mason clean-turn decision or a move)
+any started unit that has not merged may be moved by the owner or the chief of staff
 ```
 
 | State | Meaning | Handled by |
@@ -201,9 +202,11 @@ any state may also be: waiting (a question is open), contested (send-backs or a 
 | approved | The reviewer is satisfied. Waiting for the foreman. | scheduler |
 | merged | Squashed to one commit on the feature branch, message generated from the unit's title and the criteria it serves. Units still in flight are rebased. | foreman |
 | waiting | A sub-state of any of the above: the unit's role asked a question and its turn ended. Nothing else on the unit moves until the answer arrives. Other units continue. | chief of staff, owner |
-| contested | Send-backs by failed checks and review reached `max_bounces`, the mason gave up or exhausted its clean-turn bound, a role's turn failed on every retry, or a reviewer's turn ended without a verdict. The chief of staff rules on it first (section 6.6); what it cannot resolve is raised to you with its findings. Nothing on the unit moves until a ruling. | chief of staff, owner |
+| contested | Send-backs by failed checks and review reached `max_bounces`, the mason gave up or exhausted its clean-turn bound, a role's turn failed on every retry, a reviewer's turn ended without a verdict, or a move held it for you. The chief of staff rules on it first (section 6.6), except on a unit moved here, which is yours; what it cannot resolve is raised to you with its findings. Nothing on the unit moves until a ruling. | chief of staff, owner |
 
 Waiting and contested preserve the underlying unit stage and any candidate under discussion. An answer or ruling resumes that stage through a recorded transition; it does not bypass review or landing checks. A ruling of review on a unit contested by failed checks sends the candidate to its reviewer with those failures as evidence; it does not make them pass.
+
+The state machine can still leave a unit stuck or wrong: checks that never complete, a block the service reports and cannot clear, a stage that needs to run again, a send-back you disagree with. So you can move any started unit that has not merged, from implementing, checking, reviewing, approved, waiting or contested, to implementing, checking, reviewing, approved or contested, with a note. The move and its note are recorded together. A move to implementing gives the mason a turn with the note and a fresh clean-turn allowance in its existing workspace. A move to checking runs the checks again on the recorded candidate, even if a run of it already completed. A move to reviewing gives the reviewer a fresh review of the recorded candidate with the note, and the review still starts from a completed check run of that candidate. A move to approved records your approval of the recorded candidate in place of the reviewer's verdict, and the foreman lands it with the usual landing checks. A move to contested holds the unit for you. A move into the state the unit is in restarts that stage. Planned and ready units are the scheduler's, a merged unit has landed and is changed only through a follow-up, and a unit does not move while the foreman is landing or rebasing it. A move from waiting leaves the question open; its answer still reaches the role.
 
 A check run is bound to its candidate, the feature branch commit it was built on and the diff between them, and recorded under the unit with the checks it ran, why they were chosen, the command, its exit status and the end of its output, including failures and runs that did not complete. A review starts only from a completed run of the exact candidate it reviews; a candidate that changed, through a revision or a rebase, is checked again first. With the Jev boost on, a judgment chooses the checks the change can affect from the project's check links, `dagger check` runs those, and otherwise every check runs (section 9.6). Passing checks are evidence for the review and never an approval. A mason contest has no candidate, so the owner can only return it to implementing with a note and a fresh clean-turn allowance. Plan dependencies must reference existing units and form an acyclic graph. Invalid plans cannot be ratified, and an amendment must preserve those properties.
 
@@ -215,7 +218,7 @@ The shed runs for a new spec and plan, and in a shorter form for amendments. It 
 - **Fit is a judgement.** The committee says whether the plan realises the handed design without painting the project into a corner against the decisions the knowledge base holds. That is advice for you, not a veto.
 - **Size is a split test.** A unit that takes on too much for one mason or touches too much of the code gets split. A unit whose task is unclear, or whose acceptance a reviewer could not verify from the unit's work, gets sent back to the architect.
 
-Committee members run in parallel on the same revision of the spec and plan. The architect answers once per round. Consensus means zero dissent, never a vote and never a self-reported confidence. Debate may conclude early when dissent is resolved. The round cap limits automatic debate; reaching it does not turn remaining objections into approval. The chief of staff presents the spec, plan, dissent record and recommendation. You may request a redraft or further bounded debate, abandon the work, or explicitly overrule the remaining objections and ratify. Every overrule, including a charter veto, is recorded against the document revision. A small feature may skip debate at your explicit request, but still requires your ratification of both documents.
+Committee members run in parallel on the same revision of the spec and plan. Members have distinct review perspectives, correctness, integration and scope, and may run on different profiles; both are assigned in turn by member number from configuration. A perspective focuses a member without limiting the objections it may raise. The architect answers once per round. Consensus means zero dissent, never a vote and never a self-reported confidence. Debate may conclude early when dissent is resolved. The round cap limits automatic debate; reaching it does not turn remaining objections into approval. The chief of staff presents the spec, plan, dissent record and recommendation. You may request a redraft or further bounded debate, abandon the work, or explicitly overrule the remaining objections and ratify. Every overrule, including a charter veto, is recorded against the document revision. A small feature may skip debate at your explicit request, but still requires your ratification of both documents.
 
 The shed is the only place units are debated. After ratification the plan is the masons' and reviewers' ticket queue, not a further argument.
 
@@ -291,6 +294,8 @@ Events are information, not authorisation. The chief of staff does not dispatch,
 The chief of staff is your assistant for the workstream. It takes the workstream decisions you could take when that resolves an issue or a conflict, and raises to you only what it cannot resolve or is not sure of. The service holds it to the same rules as you, records it as the actor, and shows each of its actions in the workstream's conversation.
 
 A contested unit goes to the chief of staff first. Its view shows each started unit's state, its contest and the rulings the contest takes, its recent transitions and block reasons, and its roles' latest turns with their outcomes and the tool calls the service refused. When it is confident, it rules review or revise with a note the resumed role receives. It escalates when it cannot tell what is wrong, when the fix needs a decision you have not made, or when the unit is contested again after its ruling. It may rule on two contests of a unit in a row; after that, the unit's contests are yours until you rule on one. A contest reaches your inbox when it escalates it, when it has no rulings left for the unit, or once it has seen the contest and left it undecided, so no contest waits unseen. You can rule on any contest yourself at any time.
+
+When the state machine leaves a unit stuck or wrong outside a contest, the chief of staff moves it as you could (section 5.2), with a note the resumed role receives. Its moves and its rulings share one limit: two on a unit in a row, after which only a move to contested is open to it until you rule on or move the unit. A move to contested raises the unit to your inbox with its note, and the contest is yours. When you ask it to move a unit, it records the move as yours.
 
 Ratification, amendments, charter changes and delivery stay yours. The chief of staff records those decisions only when you give them in a message.
 
@@ -394,7 +399,7 @@ Every turn's request and final response is captured by the service, per agent, i
 
 ### 9.3 Profiles
 
-A profile names an agent binary, model, effort, optional fallback profile, timeout and turn limits. The `fallback` setting refers to another named profile, so a fallback can change the model or the agent binary. Unknown references and fallback cycles are configuration errors. Roles bind to profiles in configuration. The binding can be overridden per role while the factory runs, from the web interface or the command line, effective for every new turn on every workstream. Turns in flight finish on the profile they started with. A switch that stays on the same agent binary resumes the thread as it is. A switch across binaries starts the next turn fresh from the owned log.
+A profile names an agent binary, model, effort, optional fallback profile, timeout and turn limits. The `fallback` setting refers to another named profile, so a fallback can change the model or the agent binary. Unknown references and fallback cycles are configuration errors. Roles bind to profiles in configuration, and the committee's members may each be assigned a profile of their own. The binding can be overridden per role while the factory runs, from the web interface or the command line, effective for every new turn on every workstream. Turns in flight finish on the profile they started with. A switch that stays on the same agent binary resumes the thread as it is. A switch across binaries starts the next turn fresh from the owned log.
 
 When the service sees a provider's usage limit, the role falls to its profile's fallback automatically and the status says so. A manual override wins either way.
 
@@ -421,6 +426,7 @@ The Osmia server, role-scoped:
 | `pause`, `resume`, `prioritise`, `capacity` | chief of staff | The factory-wide controls. |
 | `decide_amendment` | chief of staff | Record your decision on a presented amendment when you give it in a message. |
 | `resolve_contested` | chief of staff | Rule review or revise on a contested unit on your behalf, escalate it to you, or record the ruling you gave in a message. |
+| `move_unit` | chief of staff | Move a started unit that has not merged to implementing, checking, reviewing, approved or contested on your behalf, or record the move you asked for in a message. |
 
 The Hearsay server: `get_bundle`, `resolve`, `stance_history`, `get_l1`, `get_l0`, `search`, `assert`, filtered by the role's agent class and your principal.
 
@@ -511,6 +517,7 @@ osmia handin dagger ./design.md      a new workstream from a document, an issue 
 osmia status [workstream]            the status, or every workstream's goal and attention
 osmia inbox                          open questions
 osmia answer <n> "..."               a ruling
+osmia move <workstream> <unit> <state> "..."   a unit to another state, with a note
 osmia send <workstream> "..."        a message to the chief of staff
 osmia pause|resume [all|<project>|<workstream>]
 osmia archive|unarchive <workstream> a delivered or abandoned workstream out of the list, or back
@@ -638,6 +645,10 @@ profile = "codex-fast"
 [shed]
 max_rounds = 3
 max_bounces = 3
+
+[committee]
+perspectives = ["correctness", "integration", "scope"]
+profiles = ["claude", "codex-fast"]   # assigned in turn by member number
 ```
 
 ### 13.2 Project configuration

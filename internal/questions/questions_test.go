@@ -440,7 +440,7 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 
 	profiles := map[string]int{}
 	d := &questions.Deliverer{Repository: f.repo, Now: func() time.Time { return start.Add(2 * time.Hour) },
-		Profile: func(role string) (coreadapter.Profile, error) {
+		Profile: func(role, _ string) (coreadapter.Profile, error) {
 			profiles[role]++
 			return coreadapter.Profile{Name: "strong", Backend: "fake", Model: "for-" + role}, nil
 		}}
@@ -519,7 +519,7 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 
 	// Deliver queues nothing for a question without a ruling, or asked by an
 	// agent the trace does not hold.
-	noProfile := func(string) (coreadapter.Profile, error) {
+	noProfile := func(string, string) (coreadapter.Profile, error) {
 		t.Error("profile looked up for an undeliverable question")
 		return coreadapter.Profile{}, nil
 	}
@@ -541,7 +541,9 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 	if _, err := f2.repo.AnswerQuestion(ctx, "chief", chief2, "1", "In files.", []string{"charter#2"}, start); err != nil {
 		t.Fatal(err)
 	}
-	broken := &questions.Deliverer{Repository: f2.repo, Now: time.Now, Profile: func(string) (coreadapter.Profile, error) { return coreadapter.Profile{}, errors.New("no profile") }}
+	broken := &questions.Deliverer{Repository: f2.repo, Now: time.Now, Profile: func(string, string) (coreadapter.Profile, error) {
+		return coreadapter.Profile{}, errors.New("no profile")
+	}}
 	if err := broken.Pass(ctx); err == nil || !strings.Contains(err.Error(), "question 1") || !strings.Contains(err.Error(), "profile of role mason: no profile") {
 		t.Fatalf("pass without a profile: %v", err)
 	}
@@ -647,7 +649,7 @@ func TestRelayRulingDeliversToEachAsker(t *testing.T) {
 	}
 	call(t, chief["escalate"], `{"questions":["1","2"],"rephrasing":"Are state and logs part of the contract?","blocked":"Both units.","options":[],"recommendation":"Yes."}`)
 	d := &questions.Deliverer{Repository: f.repo, Now: func() time.Time { return start.Add(3 * time.Hour) },
-		Profile: func(string) (coreadapter.Profile, error) {
+		Profile: func(string, string) (coreadapter.Profile, error) {
 			return coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, nil
 		}}
 	turns := func(agent string) []trace.QueuedTurn {

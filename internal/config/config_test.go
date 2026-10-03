@@ -231,6 +231,11 @@ func TestInvalid(t *testing.T) {
 		{"negative rounds", topConfig + "[shed]\nmax_rounds = -1\n", "", "shed.max_rounds"},
 		{"zero bounces", topConfig + "[shed]\nmax_bounces = 0\n", "", "shed.max_bounces"},
 		{"zero clean turns", topConfig + "[mason]\nmax_clean_turns = 0\n", "", "mason.max_clean_turns"},
+		{"no perspectives", topConfig + "[committee]\nperspectives = []\n", "", "committee.perspectives"},
+		{"unknown perspective", topConfig + "[committee]\nperspectives = ['scope', 'style']\n", "", "committee.perspectives[1]"},
+		{"unknown committee profile", topConfig + "[committee]\nprofiles = ['default', 'missing']\n", "", "committee.profiles[1]: unknown profile missing"},
+		{"committee profile sandbox", topConfig + "[profiles.other]\nagent = 'codex'\nmodel = 'test'\n[roles.committee]\nsandbox = 'claude'\n[committee]\nprofiles = ['other']\n", "", "committee.profiles[0]: claude sandbox"},
+		{"unknown committee key", topConfig + "[committee]\nsize = 3\n", "", "committee.size"},
 		{"zero event window", topConfig + "[events]\nwindow = \"0s\"\n", "", "events.window"},
 		{"malformed event window", topConfig + "[events]\nwindow = \"soon\"\n", "", "events.window"},
 		{"unknown events key", topConfig + "[events]\nlimit = 1\n", "", "events.limit"},
@@ -688,5 +693,23 @@ func TestSymlinkedConfig(t *testing.T) {
 	}
 	if c, err := Load(opts); err != nil || !c.HasProject() {
 		t.Fatalf("edited config: %+v %v", c, err)
+	}
+}
+
+func TestCommitteeAssignments(t *testing.T) {
+	c, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(c.Committee.Perspectives, ",") != "correctness,integration,scope" || len(c.Committee.Profiles) != 0 {
+		t.Fatalf("default committee: %+v", c.Committee)
+	}
+	top := topConfig + "[profiles.second]\nagent = 'codex'\nmodel = 'other'\n[committee]\nperspectives = ['scope', 'correctness']\nprofiles = ['default', 'second']\n"
+	c, err = Load(fixture(t, top, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(c.Committee.Perspectives, ",") != "scope,correctness" || strings.Join(c.Committee.Profiles, ",") != "default,second" {
+		t.Fatalf("committee: %+v", c.Committee)
 	}
 }

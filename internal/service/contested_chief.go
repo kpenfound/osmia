@@ -47,7 +47,8 @@ func chiefContestPath(unit, contest string) string {
 const contestGuidance = "A contested unit is stuck until someone rules on it. You rule first, on the owner's behalf: read units/<unit>/activity.json for the contest, the rulings it takes, the unit's recent turns and anything the service refused. " +
 	"When you are confident a ruling resolves it, call resolve_contested with review (the reviewer reviews the candidate again) or revise (the mason revises the unit), and a note the resumed role receives saying exactly what to do differently. " +
 	"When you cannot tell what is wrong, the fix needs a decision the owner has not made, or the unit has been contested again after your ruling, call resolve_contested with escalate and a note for the owner: what is stuck, what you found and your recommendation. " +
-	"A contest you see and do not resolve goes to the owner. When the owner rules on a contested unit in a message, call resolve_contested with owner_decided true and the owner's words as the note."
+	"A contest you see and do not resolve goes to the owner. When the owner rules on a contested unit in a message, call resolve_contested with owner_decided true and the owner's words as the note. " +
+	"When a unit is stuck or wrong outside a contest, such as checks that keep failing to complete, a block the service reports, or a stage that has to run again, call move_unit to move it to implementing, checking, reviewing or approved with a note; your moves share the limit on your rulings. Move it to contested to hold it for the owner when you cannot fix it. When the owner asks you to move a unit, call move_unit with owner_decided true and the owner's words as the note."
 
 // unitContest returns the unit's latest move to contested, and whether the
 // unit is contested by it now.
@@ -83,9 +84,10 @@ func chiefDecisions(repo *trace.Repository, stream config.WorkstreamID, unit str
 	return records, decisions, nil
 }
 
-// chiefRulingsLeft returns how many more contests of the unit the chief of
-// staff may rule on: chiefContestLimit less its rulings since the owner last
-// ruled on the unit.
+// chiefRulingsLeft returns how many more times the chief of staff may rule on
+// a contest of the unit or move it: chiefContestLimit less its rulings and
+// moves since the owner last ruled on or moved the unit. Escalations and moves
+// to contested raise the unit to the owner and use none.
 func chiefRulingsLeft(repo *trace.Repository, stream config.WorkstreamID, unit string) (int, error) {
 	transitions, err := trace.Read[trace.Transition](repo, stream)
 	if err != nil {
@@ -93,7 +95,7 @@ func chiefRulingsLeft(repo *trace.Repository, stream config.WorkstreamID, unit s
 	}
 	var owner trace.Transition
 	for _, t := range transitions {
-		if t.Subject == trace.UnitSubject(unit) && t.From == UnitContested && t.Actor == ownerActor {
+		if t.Subject == trace.UnitSubject(unit) && t.Actor == ownerActor {
 			owner = t
 		}
 	}
@@ -107,15 +109,29 @@ func chiefRulingsLeft(repo *trace.Repository, stream config.WorkstreamID, unit s
 			used++
 		}
 	}
+	moved, moves, err := recordedMoves(repo, stream, unit)
+	if err != nil {
+		return 0, err
+	}
+	for i, m := range moves {
+		if m.By == rulerName(chiefActor) && m.To != UnitContested && moved[i].At.After(owner.At) {
+			used++
+		}
+	}
 	return max(chiefContestLimit-used, 0), nil
 }
 
 // contestRaised reports whether a contest is the owner's to rule, and the
-// chief of staff's note when it escalated it. It is the owner's when the
-// chief of staff escalated it, has no rulings left for the unit, or has seen
-// it and left it undecided: its event was acknowledged after a completed
-// chief-of-staff turn or failed to be delivered, or it raised no event.
+// chief of staff's note when it escalated it. It is the owner's when a move
+// to contested raised it, when the chief of staff escalated it, has no
+// rulings left for the unit, or has seen it and left it undecided: its event
+// was acknowledged after a completed chief-of-staff turn or failed to be
+// delivered, or it raised no event.
 func contestRaised(repo *trace.Repository, stream config.WorkstreamID, unit string, contest trace.Transition) (bool, string, error) {
+	if moveContest(contest, unit) {
+		note, err := moveNote(repo, stream, unit, contest)
+		return err == nil, note, err
+	}
 	_, decisions, err := chiefDecisions(repo, stream, unit)
 	if err != nil {
 		return false, "", err
@@ -188,7 +204,7 @@ func (c *runtimeControls) resolveContested(repository *trace.Repository, scope c
 			return nil, err
 		}
 		if !contested {
-			return priorityRefusal(fmt.Sprintf("unit %s is not contested", input.Unit))
+			return priorityRefusal(fmt.Sprintf("unit %s is not contested; move_unit moves a unit that is not", input.Unit))
 		}
 		request := ContestedRulingRequest{Decision: input.Decision, Note: note}
 		if input.OwnerDecided {
@@ -203,6 +219,9 @@ func (c *runtimeControls) resolveContested(repository *trace.Repository, scope c
 				return priorityRefusal("the owner rules review or revise")
 			}
 			return rulingResult(s.recordContestedRuling(ctx, repository, stream, input.Unit, request, turn.Actor))
+		}
+		if moveContest(contest, input.Unit) {
+			return priorityRefusal(fmt.Sprintf("unit %s was moved to contested for the owner; the owner rules on it", input.Unit))
 		}
 		_, decisions, err := chiefDecisions(repository, stream, input.Unit)
 		if err != nil {

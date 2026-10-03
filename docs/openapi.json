@@ -1074,6 +1074,65 @@
         }
       }
     },
+    "/v1/move/{workstream}/{unit}": {
+      "post": {
+        "summary": "Move a unit to another state",
+        "operationId": "postMoveByWorkstreamByUnit",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "unit",
+            "in": "path",
+            "description": "Unit ID from the workstream's plan.",
+            "required": true,
+            "schema": {
+              "description": "Unit ID from the workstream's plan.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnitMoveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitMoveResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/packet/{workstream}": {
       "get": {
         "summary": "Show the ratification packet",
@@ -2815,6 +2874,9 @@
           "capacity": {
             "$ref": "#/components/schemas/ConfigCapacity"
           },
+          "committee": {
+            "$ref": "#/components/schemas/ConfigCommittee"
+          },
           "events": {
             "$ref": "#/components/schemas/ConfigEvents"
           },
@@ -2899,6 +2961,29 @@
           },
           "reviewers": {
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigCommittee": {
+        "properties": {
+          "perspectives": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "profiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -5717,6 +5802,58 @@
             "type": "string"
           },
           "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UnitMove": {
+        "properties": {
+          "by": {
+            "type": "string"
+          },
+          "candidate": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "reset_turn": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "to": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UnitMoveRequest": {
+        "properties": {
+          "note": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UnitMoveResponse": {
+        "properties": {
+          "move": {
+            "$ref": "#/components/schemas/UnitMove"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "workstream": {
             "type": "string"
           }
         },

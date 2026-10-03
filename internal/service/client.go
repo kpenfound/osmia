@@ -428,6 +428,13 @@ func (c *Client) Answer(ctx context.Context, number int, text string, project co
 	return v, err
 }
 
+// MoveUnit moves a unit to another state as the owner.
+func (c *Client) MoveUnit(ctx context.Context, stream config.WorkstreamID, unit, to, note string) (UnitMoveResponse, error) {
+	var v UnitMoveResponse
+	err := c.Do(ctx, "POST", Prefix+"/move/"+string(stream)+"/"+unit, UnitMoveRequest{To: to, Note: note}, &v)
+	return v, err
+}
+
 // RuleContested records the owner's direction for a contested unit.
 func (c *Client) RuleContested(ctx context.Context, stream config.WorkstreamID, unit, decision, note string) (ContestedRulingResponse, error) {
 	var v ContestedRulingResponse
