@@ -18,6 +18,7 @@ import (
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/busybees/core/agent/agenttest/enforcertest"
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/service"
@@ -32,8 +33,8 @@ var launches = &launchEngine{runs: map[string]*enforcertest.Turn{}, views: map[s
 var production = enforcement
 
 func TestMain(m *testing.M) {
-	enforcement = func() service.Enforcement {
-		e := production()
+	enforcement = func(root config.Root) service.Enforcement {
+		e := production(root)
 		e.Engine = launches
 		return e
 	}
@@ -258,11 +259,24 @@ func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream stri
 	}
 }
 
-// Without an injected fake, serve runs its turns through core's enforcers
-// and MCP host.
+// Without an injected fake, serve runs its turns through core's enforcers,
+// with the root's skill cache, and MCP host.
 func TestServeBuildsCoreEnforcement(t *testing.T) {
-	e := production()
-	if !reflect.DeepEqual(e.Engine, coreadapter.CoreEngine{}) {
+	root, err := config.ResolveRoot(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := production(root)
+	cache := filepath.Join(root.String(), "skills")
+	if e.Skills == nil || e.Skills.Dir != cache {
+		t.Fatalf("skills %#v", e.Skills)
+	}
+	engine, ok := e.Engine.(coreadapter.CoreEngine)
+	if !ok || engine.Runner.Skills != e.Skills || !slices.Equal(engine.Runner.SkillMountDirs, []string{cache}) || !slices.Equal(engine.SkillDirs(), []string{cache}) {
+		t.Fatalf("engine %#v", e.Engine)
+	}
+	engine.Runner.Skills, engine.Runner.SkillMountDirs = nil, nil
+	if !reflect.DeepEqual(engine, coreadapter.CoreEngine{}) {
 		t.Fatalf("engine %#v", e.Engine)
 	}
 	host, ok := e.Hosts.(*coreadapter.MCPHost)

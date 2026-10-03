@@ -17,6 +17,7 @@ import (
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/busybees/core/vcs"
+	"github.com/kpenfound/osmia/internal/skills"
 )
 
 // Engine hands out the core enforcer that holds turns of one set of execution
@@ -25,11 +26,30 @@ type Engine interface {
 	Enforcer(ExecutionSettings) (agent.Enforcer, error)
 }
 
+// SkillSource is an Engine that prepares skills. SkillDirs are the
+// directories its prepared skills live in, which a turn given skills is
+// granted read-only.
+type SkillSource interface {
+	SkillDirs() []string
+}
+
 // CoreEngine is the production Engine: every enforcer runs its turns with
 // Runner.
 type CoreEngine struct{ Runner agent.Runner }
 
-var _ Engine = CoreEngine{}
+var (
+	_ Engine      = CoreEngine{}
+	_ SkillSource = CoreEngine{}
+)
+
+// SkillDirs are the runner's skill directories, or none when it has no skill
+// preparer.
+func (e CoreEngine) SkillDirs() []string {
+	if e.Runner.Skills == nil {
+		return nil
+	}
+	return e.Runner.SkillMountDirs
+}
 
 func (e CoreEngine) Enforcer(settings ExecutionSettings) (agent.Enforcer, error) {
 	return NewEnforcer(e.Runner, settings)
@@ -103,6 +123,11 @@ func (e CoreExecutor) Check(ctx context.Context, iso Isolation, settings Executi
 	}
 	if err := checkDagger(iso, settings); err != nil {
 		return err
+	}
+	for _, ref := range settings.Skills {
+		if _, err := skills.Parse(ref); err != nil {
+			return unsupported("skills", err.Error())
+		}
 	}
 	if !iso.DenyVCS || !iso.DenyInheritedEnvironment || !iso.DenyDeliveryCredentials {
 		return unsupported("isolation", "mandatory denials are missing")
@@ -207,7 +232,21 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	if req.SessionDir == "" {
 		return nil, unsupported("execution request", "session directory is required")
 	}
-	grants, err := coreGrants(iso, req.SessionDir, settings, req.Profile.Agent, req.Profile.MCP)
+	var skillDirs []string
+	if len(req.Profile.Skills) != 0 {
+		if source, ok := e.Runner.(SkillSource); ok {
+			skillDirs = source.SkillDirs()
+		}
+		if len(skillDirs) == 0 {
+			return nil, unsupported("skills", "execution engine prepares no skills")
+		}
+		for _, dir := range skillDirs {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return nil, err
+			}
+		}
+	}
+	grants, err := coreGrants(iso, req.SessionDir, settings, req.Profile.Agent, req.Profile.MCP, skillDirs)
 	if err != nil {
 		return nil, err
 	}
@@ -222,9 +261,9 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	// fields grants do not describe; they also protect callers that invoke
 	// Run without the normal turn translator.
 	if req.Workspace == nil || req.Workspace.Directory() != iso.Workspace.Directory || req.Workspace.VCS() != nil ||
-		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.VCSContainerPath) != 0 || len(req.ContainerEnv) != 0 || len(req.Profile.Skills) != 0 || req.Profile.ContainerUseEnvironment != "" || !reflect.DeepEqual(req.Profile.Dagger, settings.Dagger) || req.HostMCP != nil ||
+		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.VCSContainerPath) != 0 || len(req.ContainerEnv) != 0 || !slices.Equal(req.Profile.Skills, turnSkills(settings, req.Profile.Agent)) || req.Profile.ContainerUseEnvironment != "" || !reflect.DeepEqual(req.Profile.Dagger, settings.Dagger) || req.HostMCP != nil ||
 		len(req.Profile.SandboxDomains) != 0 || req.Profile.Sandbox != settings.Mode || req.Profile.SandboxImage != settings.Image ||
-		!maps.Equal(req.Env, iso.Environment) || !slices.Equal(req.Profile.AllowedTools, AllowedTools(slices.Collect(maps.Keys(req.Profile.MCP)), iso.Capabilities.Tools)) ||
+		!maps.Equal(req.Env, iso.Environment) || !slices.Equal(req.Profile.AllowedTools, allowedTools(slices.Collect(maps.Keys(req.Profile.MCP)), iso.Capabilities.Tools, len(req.Profile.Skills) != 0)) ||
 		(req.Grants != nil && !reflect.DeepEqual(*req.Grants, grants)) {
 		return nil, unsupported("execution request", "request widens the service boundary")
 	}
@@ -240,7 +279,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	if iso.Workspace.Access == ReadOnly {
 		// Core runs a session in a writable directory; a read-only view is
 		// mounted beside an empty scratch directory the session starts in.
-		scratch := grants.Mounts[len(grants.Mounts)-1].Path
+		scratch := filepath.Join(grants.Mounts[1].Path, scratchDirectory)
 		if err = os.Mkdir(scratch, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 			return nil, err
 		}
@@ -293,10 +332,11 @@ func viewLocation(view string) string {
 
 // coreGrants are the complete capabilities of a turn in iso: the view with its
 // access, the session directory read-only, a writable scratch directory inside
-// it when the view is read-only, the service environment, one MCP server
-// grant per scoped endpoint and the settings' Dagger engine, with role-selected
-// native tools and no VCS.
-func coreGrants(iso Isolation, sessionDir string, settings ExecutionSettings, backend string, servers map[string]agent.MCPEntry) (agent.Grants, error) {
+// it when the view is read-only, each skill directory read-only, the service
+// environment, one MCP server grant per scoped endpoint and the settings'
+// Dagger engine, with role-selected native tools and no VCS. A turn with skill
+// directories also holds the Skill tool.
+func coreGrants(iso Isolation, sessionDir string, settings ExecutionSettings, backend string, servers map[string]agent.MCPEntry, skillDirs []string) (agent.Grants, error) {
 	mode := settings.Mode
 	access := agent.ReadOnly
 	if iso.Workspace.Access == ReadWrite {
@@ -308,11 +348,18 @@ func coreGrants(iso Isolation, sessionDir string, settings ExecutionSettings, ba
 	}
 	grants := agent.Grants{
 		Env:    slices.Sorted(maps.Keys(iso.Environment)),
-		Tools:  nativeTools(backend, iso.Capabilities),
+		Tools:  nativeTools(backend, iso.Capabilities, len(skillDirs) != 0),
 		Mounts: []agent.Mount{{Path: iso.Workspace.Directory, Access: access}, {Path: session, Access: agent.ReadOnly}},
 	}
 	if access == agent.ReadOnly {
 		grants.Mounts = append(grants.Mounts, agent.Mount{Path: filepath.Join(session, scratchDirectory), Access: agent.ReadWrite})
+	}
+	for _, dir := range skillDirs {
+		dir, err := filepath.Abs(dir)
+		if err != nil {
+			return agent.Grants{}, err
+		}
+		grants.Mounts = append(grants.Mounts, agent.Mount{Path: dir, Access: agent.ReadOnly})
 	}
 	if settings.Dagger != nil {
 		grants.DaggerEngine = settings.Dagger.Engine
@@ -373,7 +420,7 @@ func checkPolicy(p agent.Policy, iso Isolation, settings ExecutionSettings, gran
 			return unsupported("session policy", "VCS executable "+name+" is not denied")
 		}
 	}
-	if p.Tools == nil || !slices.Equal(p.Tools, nativeTools(settings.Agent, iso.Capabilities)) {
+	if p.Tools == nil || !slices.Equal(p.Tools, nativeTools(settings.Agent, iso.Capabilities, len(turnSkills(settings, settings.Agent)) != 0)) {
 		return unsupported("session policy", "built-in tools differ from the role grant")
 	}
 	var servers []string
