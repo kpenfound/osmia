@@ -521,17 +521,27 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 		err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
 	run.ExitCode, run.Output, run.Truncated = result.ExitCode, result.Output, result.Truncated
-	switch run.Failed = failedChecks(result.Output); {
-	case err != nil:
+	if run.Status, run.Failed, err = classifyChecks(result, err); run.Status == ChecksIncomplete {
 		return incomplete(err)
-	case result.ExitCode == 0:
-		run.Status, run.Failed = ChecksPassed, nil
-	case len(run.Failed) > 0:
-		run.Status = ChecksFailed
-	default:
-		return incomplete(fmt.Errorf("dagger check exited %d without reporting a failed check", result.ExitCode))
 	}
 	return c.record(ctx, in, run)
+}
+
+// classifyChecks classifies a finished dagger check from its result and the
+// error it ran with: passed on exit 0, failed with the links Dagger's report
+// shows failed, and otherwise incomplete with the reason.
+func classifyChecks(result CheckResult, err error) (status string, failed []string, reason error) {
+	failed = failedChecks(result.Output)
+	switch {
+	case err != nil:
+		return ChecksIncomplete, failed, err
+	case result.ExitCode == 0:
+		return ChecksPassed, nil, nil
+	case len(failed) > 0:
+		return ChecksFailed, failed, nil
+	default:
+		return ChecksIncomplete, failed, fmt.Errorf("dagger check exited %d without reporting a failed check", result.ExitCode)
+	}
 }
 
 // superseded returns why a run no longer checks its unit's candidate: the
@@ -676,17 +686,22 @@ func checkEvidence(run UnitCheckRun) string {
 	if len(run.Failed) > 0 {
 		out += "\nFailed: " + strings.Join(run.Failed, ", ")
 	}
-	output := run.Output
+	return out + outputEvidence(run.Output)
+}
+
+// outputEvidence is how a prompt carries the end of a check run's output,
+// bounded to 16 KiB and starting at a whole UTF-8 character.
+func outputEvidence(output string) string {
 	if over := len(output) - 16*1024; over > 0 {
 		for over < len(output) && !utf8.RuneStart(output[over]) {
 			over++
 		}
 		output = output[over:]
 	}
-	if output != "" {
-		out += "\nThe end of its output:\n" + output
+	if output == "" {
+		return ""
 	}
-	return out
+	return "\nThe end of its output:\n" + output
 }
 
 // quoteLinks quotes the arguments of a command that a shell would split.

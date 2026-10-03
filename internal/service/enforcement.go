@@ -82,9 +82,9 @@ func threadExecution(role string, r config.Role) coreadapter.ExecutionSettings {
 // carried, cites that drift rebase's upstream commit. Each role's
 // sandbox comes from its configuration, and a sandbox the platform cannot
 // enforce fails the turn with core's reason. Thread turns take their role's sandbox and the root from the
-// configuration the service has loaded, and record UTC times. Unit check runs
-// and the final reviewer's run_checks use e.Checks, or the runner opts
-// already holds when e has none.
+// configuration the service has loaded, and record UTC times. Unit and final
+// review check runs use e.Checks, or the runner opts already holds when e has
+// none.
 func Enforce(opts Options, e Enforcement) Options {
 	if e.Checks != nil {
 		opts.reviewChecks = e.Checks

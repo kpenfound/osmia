@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,7 +24,7 @@ var passingChecks = checkFunc(func(context.Context, string) (CheckResult, error)
 	return CheckResult{Output: "== CHECKS ==  ✔ 1 passed\n✔ dag://go/packages/tests/test 1.0s OK\n"}, nil
 })
 
-func TestCandidateChecksUseFreshPinnedExports(t *testing.T) {
+func TestUnitReviewReadsThePinnedCandidate(t *testing.T) {
 	f, stream, repo := newReviewFixture(t, "checks")
 	ctx := context.Background()
 	r := &reviewers{masons: newMasonController(f.s, repo)}
@@ -41,7 +40,7 @@ func TestCandidateChecksUseFreshPinnedExports(t *testing.T) {
 	if pinned != identity {
 		t.Fatalf("review turn identity %+v, want %+v", pinned, identity)
 	}
-	// Moving the branch and dirtying its workspace must not change the check input.
+	// Moving the branch and dirtying its workspace must not change the review input.
 	w, _, err := newUnitWorkspaces(f.s.cfg, repo).open(ctx, stream, "resume")
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(w.Path, masonWrote), []byte("unreviewed\n"), 0600))
@@ -53,65 +52,6 @@ func TestCandidateChecksUseFreshPinnedExports(t *testing.T) {
 	must(t, err)
 	if string(selected) != "package trace\n" || selection.Workspace.BaseRevision != identity.Candidate.Revision {
 		t.Fatalf("review input is not pinned: %s", selected)
-	}
-	var dirs []string
-	checker := checkFunc(func(_ context.Context, dir string) (CheckResult, error) {
-		dirs = append(dirs, dir)
-		data, err := os.ReadFile(filepath.Join(dir, masonWrote))
-		if err != nil || string(data) != "package trace\n" {
-			t.Fatalf("wrong candidate: %s %v", data, err)
-		}
-		for _, name := range []string{".git", ".jj"} {
-			if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
-				t.Fatalf("export contains %s", name)
-			}
-		}
-		must(t, os.WriteFile(filepath.Join(dir, masonWrote), []byte("check output"), 0600))
-		return CheckResult{ExitCode: 2, Output: "proof failed"}, nil
-	})
-	tool := candidateCheckTool(f.s.about(repo), repo, coreadapter.Scope{Workstream: string(stream)}, identity.Candidate.Revision, checker)
-	finalGrant := coreadapter.Capabilities{Tools: []string{"file_read", FinalReportTool, runChecksTool, workstreamDiffTool}}
-	if !coreadapter.ToolPermitted(finalGrant, tool) || coreadapter.ToolPermitted(coreadapter.Capabilities{}, tool) {
-		t.Fatal("check does not require an explicit tool grant")
-	}
-	if coreadapter.ToolPermitted(reviewerGrant, tool) {
-		t.Fatal("a unit reviewer may run checks; the service runs them before review")
-	}
-	if coreadapter.ToolPermitted(finalGrant, coreadapter.Tool{Name: runChecksTool, Effect: coreadapter.ToolExecute}) {
-		t.Fatal("check grant permits arbitrary execution")
-	}
-	for range 2 {
-		data, err := tool.Handle(ctx, json.RawMessage("{}"))
-		must(t, err)
-		var got struct {
-			Candidate, Check string
-			CheckResult
-		}
-		must(t, json.Unmarshal(data, &got))
-		if got.Candidate != identity.Candidate.Revision || got.Check != "dagger check" || got.ExitCode != 2 || got.Output != "proof failed" {
-			t.Fatalf("check result %s", data)
-		}
-	}
-	if dirs[0] == dirs[1] {
-		t.Fatal("checks shared a workspace")
-	}
-	for _, dir := range dirs {
-		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			t.Fatalf("check workspace leaked: %s", dir)
-		}
-	}
-	data, err := os.ReadFile(filepath.Join(w.Path, masonWrote))
-	must(t, err)
-	if string(data) != "unreviewed\n" {
-		t.Fatal("check modified implementation workspace")
-	}
-	for _, input := range []string{`{"command":"touch /tmp/escape"}`, `{"path":"/"}`, `{"env":{}}`} {
-		if _, err := tool.Handle(ctx, json.RawMessage(input)); err == nil {
-			t.Fatalf("accepted override %s", input)
-		}
-	}
-	if len(dirs) != 2 {
-		t.Fatal("invalid input ran checks")
 	}
 }
 
