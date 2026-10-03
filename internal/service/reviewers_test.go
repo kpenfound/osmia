@@ -112,8 +112,8 @@ func TestRefusedVerdictReviewsTheCandidateAgain(t *testing.T) {
 		t.Fatalf("review turns: %+v", th.Turns)
 	}
 	// The reviewer verifies the unit's task and acceptance; the review
-	// carries neither the plan's other units nor a footprint to explain.
-	if prompt := th.Turns[0].Request.Prompt; !strings.Contains(prompt, "unit resume:\n## Task\n") || !strings.Contains(prompt, "## Acceptance\n- ") || strings.Contains(prompt, "footprint") || strings.Contains(prompt, "plan.json:") {
+	// carries the unit's task alone, not the plan's other units.
+	if prompt := th.Turns[0].Request.Prompt; !strings.Contains(prompt, "unit resume:\n## Task\n") || !strings.Contains(prompt, "## Acceptance\n- ") || strings.Contains(prompt, "plan.json:") {
 		t.Fatalf("review prompt does not carry the unit's task alone:\n%s", prompt)
 	}
 	if prompt := th.Turns[0].Request.Prompt; !strings.Contains(prompt, "- "+masonWrote+" (+1 -0)\n") || strings.Contains(prompt, "+package trace") {

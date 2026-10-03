@@ -466,23 +466,23 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 
 	// A ruling alone delivers nothing: only a question in the answered state
 	// is delivered.
-	legacy := trace.Header{Schema: "osmia.trace.question", Version: trace.Version, ID: "legacy", Revision: 1, Project: project, Workstream: stream, At: start, Actor: owner, Cause: "import"}
-	if err := f.repo.Append(ctx, trace.Question{Header: legacy, AskedBy: trace.Actor{Kind: "agent", ID: "reviewer1"}, Thread: "reviewer1_thread", Turn: "review1", Question: "An older question"}); err != nil {
+	unasked := trace.Header{Schema: "osmia.trace.question", Version: trace.Version, ID: "unasked", Revision: 1, Project: project, Workstream: stream, At: start, Actor: owner, Cause: "import"}
+	if err := f.repo.Append(ctx, trace.Question{Header: unasked, AskedBy: trace.Actor{Kind: "agent", ID: "reviewer1"}, Thread: "reviewer1_thread", Turn: "review1", Question: "A question recorded without ask"}); err != nil {
 		t.Fatal(err)
 	}
-	legacy.Schema, legacy.ID = "osmia.trace.ruling", "legacy-ruling"
-	if err := f.repo.Append(ctx, trace.Ruling{Header: legacy, QuestionID: "legacy", QuestionRevision: 1, Decision: "Owner ruled", ReturnedAnswer: "Not yet relayed"}); err != nil {
+	unasked.Schema, unasked.ID = "osmia.trace.ruling", "unasked-ruling"
+	if err := f.repo.Append(ctx, trace.Ruling{Header: unasked, QuestionID: "unasked", QuestionRevision: 1, Decision: "Owner ruled", ReturnedAnswer: "Not yet relayed"}); err != nil {
 		t.Fatal(err)
 	}
 
 	// A question recorded without ask has no state to leave, so the chief of
 	// staff cannot choose for it.
-	unasked := `{"recorded":false,"reason":"question legacy was not asked through ask and cannot be chosen for"}`
-	if got := call(t, chief["answer"], `{"question":"legacy","text":"x","citations":["charter#1"]}`); got != unasked {
-		t.Fatalf("answer to a legacy question: %s", got)
+	refused := `{"recorded":false,"reason":"question unasked was not asked through ask and cannot be chosen for"}`
+	if got := call(t, chief["answer"], `{"question":"unasked","text":"x","citations":["charter#1"]}`); got != refused {
+		t.Fatalf("answer to an unasked question: %s", got)
 	}
-	if got := call(t, chief["escalate"], `{"questions":["legacy"],"rephrasing":"r","blocked":"b","options":[],"recommendation":"c"}`); got != unasked {
-		t.Fatalf("escalation of a legacy question: %s", got)
+	if got := call(t, chief["escalate"], `{"questions":["unasked"],"rephrasing":"r","blocked":"b","options":[],"recommendation":"c"}`); got != refused {
+		t.Fatalf("escalation of an unasked question: %s", got)
 	}
 
 	// A skipped workstream keeps its answer undelivered.

@@ -12,11 +12,11 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-const legacyStream config.WorkstreamID = "w_00000000000000000000000000000002"
+const threadlessStream config.WorkstreamID = "w_00000000000000000000000000000002"
 
-// legacyWorkstream lays out a workstream the way traces without a
-// chief-of-staff thread hold it.
-func legacyWorkstream(t *testing.T, r *Repository, id config.WorkstreamID) {
+// threadlessWorkstream lays out a committed workstream whose chief-of-staff
+// thread was never written.
+func threadlessWorkstream(t *testing.T, r *Repository, id config.WorkstreamID) {
 	t.Helper()
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -94,9 +94,9 @@ func TestCreateWorkstreamCreatesOneChiefOfStaffThread(t *testing.T) {
 func TestEnsureChiefOfStaffBackfillsOnce(t *testing.T) {
 	ctx := context.Background()
 	r, root, p := create(t)
-	legacyWorkstream(t, r, legacyStream)
-	if _, err := r.ChiefOfStaffThread(legacyStream); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("legacy lookup = %v", err)
+	threadlessWorkstream(t, r, threadlessStream)
+	if _, err := r.ChiefOfStaffThread(threadlessStream); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("lookup before ensure = %v", err)
 	}
 	service := Actor{Kind: "service", ID: "osmia"}
 	var wg sync.WaitGroup
@@ -105,7 +105,7 @@ func TestEnsureChiefOfStaffBackfillsOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = r.EnsureChiefOfStaff(ctx, legacyStream, at.Add(time.Duration(i)*time.Second), service)
+			_, errs[i] = r.EnsureChiefOfStaff(ctx, threadlessStream, at.Add(time.Duration(i)*time.Second), service)
 		}()
 	}
 	wg.Wait()
@@ -120,17 +120,17 @@ func TestEnsureChiefOfStaffBackfillsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if _, err := reopened.EnsureChiefOfStaff(ctx, legacyStream, at.Add(time.Hour), service); err != nil {
+	if _, err := reopened.EnsureChiefOfStaff(ctx, threadlessStream, at.Add(time.Hour), service); err != nil {
 		t.Fatal(err)
 	}
-	th, err := reopened.ChiefOfStaffThread(legacyStream)
+	th, err := reopened.ChiefOfStaffThread(threadlessStream)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if th.Identity.Workstream != legacyStream || th.Identity.Actor != service {
+	if th.Identity.Workstream != threadlessStream || th.Identity.Actor != service {
 		t.Fatalf("thread = %+v", th.Identity)
 	}
-	if got := chiefAgents(t, reopened, legacyStream); len(got) != 1 {
+	if got := chiefAgents(t, reopened, threadlessStream); len(got) != 1 {
 		t.Fatalf("chief-of-staff agents = %d", len(got))
 	}
 }
@@ -143,14 +143,14 @@ func TestEnsureChiefOfStaffRefusesAnotherIdentity(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			r, _, _ := create(t)
-			legacyWorkstream(t, r, legacyStream)
+			threadlessWorkstream(t, r, threadlessStream)
 			a := threadAgent()
-			a.Workstream, a.ID = legacyStream, ChiefOfStaff
+			a.Workstream, a.ID = threadlessStream, ChiefOfStaff
 			change(&a)
 			if err := r.CreateThread(ctx, a); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := r.EnsureChiefOfStaff(ctx, legacyStream, at, owner); !errors.Is(err, ErrConflict) {
+			if _, err := r.EnsureChiefOfStaff(ctx, threadlessStream, at, owner); !errors.Is(err, ErrConflict) {
 				t.Fatalf("ensure = %v", err)
 			}
 		})

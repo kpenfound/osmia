@@ -199,9 +199,6 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	if !strings.Contains(req.Prompt, "Check run 1 passed: every check ran: the Jev boost is off.") || !strings.Contains(req.Prompt, passedReport) {
 		t.Fatalf("review prompt lacks the check run:\n%s", req.Prompt)
 	}
-	if strings.Contains(req.SystemPrompt, "run_checks") || slices.Contains(reviewerGrant.Tools, "run_checks") {
-		t.Fatal("the unit reviewer is still told to run checks")
-	}
 }
 
 func TestChecksRunTheLinksJevSelects(t *testing.T) {

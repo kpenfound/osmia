@@ -382,7 +382,7 @@ func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
 	// scopes, a handed revision, a project path in a workstream, an unknown
 	// workstream and a repeated revision are all refused whole.
 	other := streamDocument("spec", "spec.md", "x\n", 1)
-	other.Workstream = legacyStream
+	other.Workstream = threadlessStream
 	handed2 := streamDocument("handed", "handed/design.md", "changed\n", 2)
 	handed2.Source = "stdin"
 	invalid := [][]Document{
@@ -503,7 +503,7 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 		{transaction("stale", 3, "", "reviewing", 0)},
 		{func() Transaction {
 			tx := transaction("elsewhere", 0, "", "reviewing", 0)
-			tx.Transition.Workstream = legacyStream
+			tx.Transition.Workstream = threadlessStream
 			return tx
 		}()},
 	}

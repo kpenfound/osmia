@@ -325,7 +325,7 @@ turn without silently selecting another mode.
 
 ### 7.3 Workspaces
 
-The feature branch is one workspace on the project's clone. Each unit gets a workspace of its own descending from the feature branch. The first implementation is git worktrees behind a workspace interface. Jujutsu is the second implementation behind the same interface, colocated so plain git still works for reading history: change IDs that survive rebases, snapshot on every command so an interrupted session never loses work, stored rather than blocking conflicts, and an operation log the service can restore from. The design does not depend on it, and the switch is made when rebases and interrupted sessions start to hurt.
+The feature branch is one workspace on the project's clone. Each unit gets a workspace of its own descending from the feature branch. Workspaces sit behind one interface with two backends: git worktrees, and Jujutsu colocated so plain git can still read history. Jujutsu adds change IDs that survive rebases, a snapshot on every command so an interrupted session never loses work, stored rather than blocking conflicts, and an operation log the service can restore from. The workflow does not depend on which backend a project uses.
 
 ### 7.4 Landing a unit
 
@@ -534,7 +534,7 @@ Every command is an API call except `serve` and `doctor`. Doctor checks what the
 
 ## 12. Hearsay
 
-Hearsay is an optional external context and memory service. It is not an orchestrator, has no work-unit model, delivers no agent messages and synthesises nothing at read time. The state machine, the plan, the mailbox and the documents of record stay in Osmia. Hearsay ingests source records (L0), distils them into memory (L1), and serves scoped bundles of decisions and source pointers. Its integration is planned independently; the complete local workflow must remain usable without it.
+Hearsay is an optional external context and memory service. It is not an orchestrator, has no work-unit model, delivers no agent messages and synthesises nothing at read time. The state machine, the plan, the mailbox and the documents of record stay in Osmia. Hearsay ingests source records (L0), distils them into memory (L1), and serves scoped bundles of decisions and source pointers. The integration is optional; the complete local workflow must remain usable without it.
 
 ### 12.1 What lives there
 

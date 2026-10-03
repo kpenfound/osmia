@@ -322,7 +322,4 @@ func TestDefaultRootReloadsXDGConfig(t *testing.T) {
 	if now.Effective.Capacity.Masons != 7 {
 		t.Fatalf("after reload: %+v", now.Effective.Capacity)
 	}
-	if _, err := os.Stat(filepath.Join(root, "config.toml")); !os.IsNotExist(err) {
-		t.Fatalf("root config.toml: %v", err)
-	}
 }

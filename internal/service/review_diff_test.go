@@ -128,17 +128,14 @@ func TestReviewDiffToolServesThePinnedCandidate(t *testing.T) {
 	}
 }
 
-// Review prompts recorded before and after the diff moved to a tool pin the
-// same identity.
-func TestReviewIdentityInPromptReadsEitherLayout(t *testing.T) {
+// A recorded review prompt pins the identity of the candidate it reviewed.
+func TestReviewIdentityInPromptReadsThePinnedIdentity(t *testing.T) {
 	t.Parallel()
 	identity := UnitReviewIdentity{Subject: "stream/resume", Candidate: coreadapter.Candidate{Revision: "candidate", BaseRevision: "base", SpecRevision: "1", PlanRevision: "2"}, DiffSHA256: "digest", Report: "report", Seal: 1}
 	content, _ := json.MarshalIndent(identity, "", "  ")
-	for _, tail := range []string{"\n\nExact diff:\ndiff --git a/x b/x\n", "\n\nChanged files, with added and removed lines; read the diff with workstream_diff:\n- x (+1 -0)\n"} {
-		got, err := reviewIdentityInPrompt("Review this.\nThe candidate identity is:\n" + string(content) + tail)
-		if err != nil || got != identity {
-			t.Fatalf("identity %+v %v", got, err)
-		}
+	got, err := reviewIdentityInPrompt("Review this.\nThe candidate identity is:\n" + string(content) + "\n\nChanged files, with added and removed lines; read the diff with workstream_diff:\n- x (+1 -0)\n")
+	if err != nil || got != identity {
+		t.Fatalf("identity %+v %v", got, err)
 	}
 }
 

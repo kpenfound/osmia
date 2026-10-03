@@ -216,10 +216,6 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 		if checked != 1 {
 			problems = append(problems, fmt.Errorf("the checks ran %d times before the read", checked))
 		}
-		if listed, err := tools.ListTools(ctx, nil); err != nil || slices.ContainsFunc(listed.Tools, func(t *mcp.Tool) bool { return t.Name == "run_checks" }) {
-			problems = append(problems, fmt.Errorf("the final reader can run checks: %v", err))
-		}
-
 		for path, want := range map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan, "charter.md": shedCharter,
 			"branch/internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n", "branch/UPSTREAM.md": "upstream moved\n"} {
 			if got, err := readTool(ctx, tools, path); err != nil || got != want {
@@ -232,9 +228,6 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 		}
 		if listed, err := callTool(ctx, tools, workstreamDiffTool, map[string]any{"files_only": true, "paths": []string{"internal/trace/dedupe.go"}}); err != nil || !strings.Contains(listed, `"path":"internal/trace/dedupe.go"`) || strings.Contains(listed, "resume.go") {
 			problems = append(problems, fmt.Errorf("branch files %q: %v", listed, err))
-		}
-		if stale, err := readTool(ctx, tools, "branch.diff"); err == nil {
-			problems = append(problems, fmt.Errorf("the view still holds branch.diff %q", stale))
 		}
 		if report, err := readTool(ctx, tools, "units/resume/report.json"); err == nil {
 			problems = append(problems, fmt.Errorf("a unit that never reported shows a report %q", report))

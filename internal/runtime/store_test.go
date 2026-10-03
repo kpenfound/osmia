@@ -117,7 +117,7 @@ func TestPauseAttributionAndClearing(t *testing.T) {
 	}
 }
 
-func TestLegacyPauseOpensAsOwner(t *testing.T) {
+func TestOperatorPauseSourceOpensAsOwner(t *testing.T) {
 	in := fixture(t)
 	must(t, os.WriteFile(filepath.Join(in.Config.Root.String(), "runtime.json"), []byte(`{"version":1,"pauses":[{"target":{"scope":"factory"},"mode":"soft","source":"operator"}]}`), 0600))
 	s := open(t, in)
@@ -126,7 +126,7 @@ func TestLegacyPauseOpensAsOwner(t *testing.T) {
 		t.Fatal(state)
 	}
 	if !bytes.Contains(disk(t, in), []byte(`"source": "owner"`)) {
-		t.Fatal("legacy pause was not persisted as owner")
+		t.Fatal("operator pause was not persisted as owner")
 	}
 }
 func TestRoundTripsAndChangedDefaults(t *testing.T) {
