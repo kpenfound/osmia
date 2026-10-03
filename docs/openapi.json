@@ -2775,6 +2775,9 @@
           "capacity": {
             "$ref": "#/components/schemas/ConfigCapacity"
           },
+          "committee": {
+            "$ref": "#/components/schemas/ConfigCommittee"
+          },
           "events": {
             "$ref": "#/components/schemas/ConfigEvents"
           },
@@ -2859,6 +2862,29 @@
           },
           "reviewers": {
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigCommittee": {
+        "properties": {
+          "perspectives": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "profiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "type": "object"

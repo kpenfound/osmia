@@ -115,6 +115,11 @@ per_workstream = 2
 max_rounds = 3
 max_bounces = 3
 
+[committee]
+perspectives = ["correctness", "integration", "scope"]
+# Empty: every member runs on roles.committee's profile.
+profiles = []
+
 [mason]
 max_clean_turns = 3
 
@@ -183,6 +188,37 @@ members, and all of them run at the same time in every round, whatever other
 workstreams run and outside `capacity.per_workstream`. Two workstreams in the
 shed run two committees at once. The committee is fixed when the workstream
 enters the shed, so a later change applies to workstreams that enter after it.
+
+`committee.perspectives` and `committee.profiles` give committee members
+different review focuses and agents. Member *n* takes entry (*n*−1) modulo
+the list's length from each list, so the two lists cycle independently and
+a member keeps its assignments across rounds:
+
+```toml
+[committee]
+perspectives = ["correctness", "integration", "scope"]
+profiles = ["claude", "codex-fast"]
+```
+
+A perspective is `correctness` (charter compliance, contradictions and
+verifiable acceptance), `integration` (fit with the knowledge base's decisions,
+the existing code and the order of units) or `scope` (expansion beyond the
+handed design and unit size). It adds that focus to the member's shed system
+prompt, in debate and amendment rounds. Every member still applies the charter,
+fit, size and acceptance tests and may raise any objection. The list must not be
+empty, and any other name is an error that names the entry.
+
+Each entry of `committee.profiles` must name a configured profile. A member
+runs every turn of its thread on its assigned profile: shed rounds, answers to
+its questions, continuations after a hard pause and, for member 1, the final
+review. With a provider limit in force, the member uses the first profile in
+its assigned profile's fallback chain whose provider is not limited, and the
+committee role's effective profile when there is none. An empty list, and an
+owner override of the committee's profile, which wins while it is set, run
+every member on the committee role's profile. With `roles.committee.sandbox =
+"claude"`, every profile in each assigned profile's fallback chain must use
+Claude, and a custom `roles.committee.image` must support all of their agents.
+Reload applies both lists to turns queued after it.
 
 `notify.webhook` is an absolute `http` or `https` URL with a host, such as an
 [ntfy](https://ntfy.sh) topic; a relative URL, one without a host and any other

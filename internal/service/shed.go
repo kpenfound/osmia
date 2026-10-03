@@ -109,7 +109,9 @@ func (in roundInput) parkedID() string {
 	return fmt.Sprintf("shed-round-%d-waiting-%d", in.Round, in.Resume+1)
 }
 
-func committeeAgent(i int) string  { return "agent_committee_" + strconv.Itoa(i) }
+const committeeAgentPrefix = "agent_committee_"
+
+func committeeAgent(i int) string  { return committeeAgentPrefix + strconv.Itoa(i) }
 func committeeThread(i int) string { return "thread_committee_" + strconv.Itoa(i) }
 
 func roundIDs(n int) (transition, event string) {
@@ -1052,7 +1054,7 @@ func (d *debate) terminal(ctx context.Context, operation string, stream config.W
 // and prompts. The prompt of a later attempt repeats the answers the member
 // received in the round, whose turns a service stop interrupted.
 func (d *debate) enqueue(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in roundInput, member string, attempt int, operation string, asked []trace.QuestionState) error {
-	profile, _, err := d.s.roleExecution(cfg, committeeRole)
+	profile, err := d.s.agentProfile(cfg, committeeRole, member)
 	if err != nil {
 		return err
 	}
@@ -1073,7 +1075,7 @@ func (d *debate) enqueue(ctx context.Context, cfg *config.Config, stream config.
 	answers := received(t, in.memberChain(t, asked), asked)
 	turn := in.memberPrefix(member) + strconv.Itoa(attempt)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: shedActor, Cause: operation, Depth: 1},
-		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: amendmentCommitteeSystemPrompt(cfg.Project, in), Prompt: amendmentCommitteePrompt(in, standing, answers)}
+		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: amendmentCommitteeSystemPrompt(cfg.Project, in) + "\n\n" + memberPerspective(cfg, member), Prompt: amendmentCommitteePrompt(in, standing, answers)}
 	_, err = d.repository.EnqueueTurn(ctx, req)
 	return err
 }

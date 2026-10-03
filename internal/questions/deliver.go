@@ -46,11 +46,11 @@ func Prompt(q trace.Question, ruling trace.Ruling) string {
 
 // Deliver queues the ruling's returned answer as the next turn of the thread
 // that asked, which unparks it, and reports whether it queued the turn. The
-// turn carries the asking turn's system prompt and unit, and the profile the
-// asker's role is bound to now. A question without a ruling, one whose answer
-// is already on the thread, and one whose asking agent the trace does not hold
-// queue nothing.
-func Deliver(ctx context.Context, repository *trace.Repository, q trace.QuestionState, profile func(role string) (coreadapter.Profile, error), at time.Time) (bool, error) {
+// turn carries the asking turn's system prompt and unit, and the profile
+// profile returns for the asker's role and agent now. A question without a
+// ruling, one whose answer is already on the thread, and one whose asking
+// agent the trace does not hold queue nothing.
+func Deliver(ctx context.Context, repository *trace.Repository, q trace.QuestionState, profile func(role, agent string) (coreadapter.Profile, error), at time.Time) (bool, error) {
 	if q.Ruling == nil {
 		return false, nil
 	}
@@ -71,7 +71,7 @@ func Deliver(ctx context.Context, repository *trace.Repository, q trace.Question
 			system = turn.Request.SystemPrompt
 		}
 	}
-	p, err := profile(thread.Identity.Role)
+	p, err := profile(thread.Identity.Role, thread.Identity.ID)
 	if err != nil {
 		return false, fmt.Errorf("profile of role %s: %w", thread.Identity.Role, err)
 	}
@@ -90,8 +90,8 @@ func Deliver(ctx context.Context, repository *trace.Repository, q trace.Question
 type Deliverer struct {
 	Repository *trace.Repository
 	Now        func() time.Time
-	// Profile returns the profile a role's new turn runs with.
-	Profile func(role string) (coreadapter.Profile, error)
+	// Profile returns the profile a new turn of the role's agent runs with.
+	Profile func(role, agent string) (coreadapter.Profile, error)
 	// Skip reports a workstream whose answers stay undelivered.
 	Skip func(config.WorkstreamID) (bool, error)
 }

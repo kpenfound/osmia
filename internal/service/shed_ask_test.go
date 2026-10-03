@@ -702,7 +702,7 @@ func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 	if len(planted) != 1 || planted[0].State != trace.QuestionAnswered {
 		t.Fatalf("planted questions: %+v", planted)
 	}
-	if delivered, err := questions.Deliver(ctx, repo, planted[0], func(string) (coreadapter.Profile, error) {
+	if delivered, err := questions.Deliver(ctx, repo, planted[0], func(string, string) (coreadapter.Profile, error) {
 		return coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, nil
 	}, f.clock.Now()); err != nil || !delivered {
 		t.Fatalf("deliver: %t %v", delivered, err)
