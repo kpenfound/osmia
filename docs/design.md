@@ -218,7 +218,7 @@ The shed runs for a new spec and plan, and in a shorter form for amendments. It 
 - **Fit is a judgement.** The committee says whether the plan realises the handed design without painting the project into a corner against the decisions the knowledge base holds. That is advice for you, not a veto.
 - **Size is a split test.** A unit that takes on too much for one mason or touches too much of the code gets split. A unit whose task is unclear, or whose acceptance a reviewer could not verify from the unit's work, gets sent back to the architect.
 
-Committee members run in parallel on the same revision of the spec and plan. The architect answers once per round. Consensus means zero dissent, never a vote and never a self-reported confidence. Debate may conclude early when dissent is resolved. The round cap limits automatic debate; reaching it does not turn remaining objections into approval. The chief of staff presents the spec, plan, dissent record and recommendation. You may request a redraft or further bounded debate, abandon the work, or explicitly overrule the remaining objections and ratify. Every overrule, including a charter veto, is recorded against the document revision. A small feature may skip debate at your explicit request, but still requires your ratification of both documents.
+Committee members run in parallel on the same revision of the spec and plan. Members have distinct review perspectives, correctness, integration and scope, and may run on different profiles; both are assigned in turn by member number from configuration. A perspective focuses a member without limiting the objections it may raise. The architect answers once per round. Consensus means zero dissent, never a vote and never a self-reported confidence. Debate may conclude early when dissent is resolved. The round cap limits automatic debate; reaching it does not turn remaining objections into approval. The chief of staff presents the spec, plan, dissent record and recommendation. You may request a redraft or further bounded debate, abandon the work, or explicitly overrule the remaining objections and ratify. Every overrule, including a charter veto, is recorded against the document revision. A small feature may skip debate at your explicit request, but still requires your ratification of both documents.
 
 The shed is the only place units are debated. After ratification the plan is the masons' and reviewers' ticket queue, not a further argument.
 
@@ -399,7 +399,7 @@ Every turn's request and final response is captured by the service, per agent, i
 
 ### 9.3 Profiles
 
-A profile names an agent binary, model, effort, optional fallback profile, timeout and turn limits. The `fallback` setting refers to another named profile, so a fallback can change the model or the agent binary. Unknown references and fallback cycles are configuration errors. Roles bind to profiles in configuration. The binding can be overridden per role while the factory runs, from the web interface or the command line, effective for every new turn on every workstream. Turns in flight finish on the profile they started with. A switch that stays on the same agent binary resumes the thread as it is. A switch across binaries starts the next turn fresh from the owned log.
+A profile names an agent binary, model, effort, optional fallback profile, timeout and turn limits. The `fallback` setting refers to another named profile, so a fallback can change the model or the agent binary. Unknown references and fallback cycles are configuration errors. Roles bind to profiles in configuration, and the committee's members may each be assigned a profile of their own. The binding can be overridden per role while the factory runs, from the web interface or the command line, effective for every new turn on every workstream. Turns in flight finish on the profile they started with. A switch that stays on the same agent binary resumes the thread as it is. A switch across binaries starts the next turn fresh from the owned log.
 
 When the service sees a provider's usage limit, the role falls to its profile's fallback automatically and the status says so. A manual override wins either way.
 
@@ -645,6 +645,10 @@ profile = "codex-fast"
 [shed]
 max_rounds = 3
 max_bounces = 3
+
+[committee]
+perspectives = ["correctness", "integration", "scope"]
+profiles = ["claude", "codex-fast"]   # assigned in turn by member number
 ```
 
 ### 13.2 Project configuration

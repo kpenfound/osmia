@@ -35,6 +35,7 @@ type Config struct {
 	Profiles       map[string]Profile `toml:"profiles" json:"profiles"`
 	Roles          map[string]Role    `toml:"roles" json:"roles"`
 	Shed           Shed               `toml:"shed" json:"shed"`
+	Committee      Committee          `toml:"committee" json:"committee"`
 	Mason          Mason              `toml:"mason" json:"mason"`
 	Events         Events             `toml:"events" json:"events"`
 	Hearsay        Hearsay            `toml:"hearsay" json:"hearsay"`
@@ -79,6 +80,19 @@ type Shed struct {
 	MaxRounds  int `toml:"max_rounds" json:"max_rounds"`
 	MaxBounces int `toml:"max_bounces" json:"max_bounces"`
 }
+
+// Committee assigns shed debate perspectives and profiles to committee
+// members. Member n takes element (n-1) modulo the list's length of each list;
+// an empty Profiles leaves every member on the committee role's profile.
+type Committee struct {
+	Perspectives []string `toml:"perspectives" json:"perspectives"`
+	Profiles     []string `toml:"profiles" json:"profiles"`
+}
+
+// CommitteePerspectives are the review perspectives a committee member may
+// take in the shed.
+var CommitteePerspectives = []string{"correctness", "integration", "scope"}
+
 type Mason struct {
 	MaxCleanTurns int `toml:"max_clean_turns" json:"max_clean_turns"`
 }
@@ -252,7 +266,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Mason: Mason{3}, Events: Events{"5s"}, Workspaces: WorkspacesAuto, Jev: defaultJev()}
+	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Events: Events{"5s"}, Workspaces: WorkspacesAuto, Jev: defaultJev()}
 	md, err := decode(path, c, false)
 	if err != nil {
 		return nil, err
@@ -340,7 +354,35 @@ func LoadTopLevel(options Options) (*Config, error) {
 	if err := c.validateProfiles(path, md); err != nil {
 		return nil, err
 	}
+	if err := c.validateCommittee(path); err != nil {
+		return nil, err
+	}
 	return c, nil
+}
+
+// validateCommittee checks the committee's perspectives and profiles against
+// the known perspectives, the named profiles and the committee's sandbox.
+func (c *Config) validateCommittee(path string) error {
+	if len(c.Committee.Perspectives) == 0 {
+		return fieldError(path, "committee.perspectives", "at least one perspective is required")
+	}
+	for i, name := range c.Committee.Perspectives {
+		if !slices.Contains(CommitteePerspectives, name) {
+			return fieldError(path, fmt.Sprintf("committee.perspectives[%d]", i), "expected "+strings.Join(CommitteePerspectives, ", "))
+		}
+	}
+	for i, name := range c.Committee.Profiles {
+		field := fmt.Sprintf("committee.profiles[%d]", i)
+		if _, ok := c.Profiles[name]; !ok {
+			return fieldError(path, field, "unknown profile "+name)
+		}
+		for next := name; next != ""; next = c.Profiles[next].Fallback {
+			if c.Roles["committee"].Sandbox == "claude" && c.Profiles[next].Agent != "claude" {
+				return fieldError(path, field, "claude sandbox requires claude in the entire fallback chain")
+			}
+		}
+	}
+	return nil
 }
 
 // HasProject reports whether the configuration is about one project: the only
@@ -624,7 +666,7 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "sandbox", "image", "dagger"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "mason", "mason.max_clean_turns", "events", "events.window", "notify", "notify.webhook", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout"}, path)
+	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "events", "events.window", "notify", "notify.webhook", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {

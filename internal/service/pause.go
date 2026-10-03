@@ -194,12 +194,12 @@ func stoppedTurn(q *trace.QueuedTurn) bool {
 }
 
 // continueStopped queues the turn that continues the turn q a hard pause
-// stopped, on the same thread and with the role's current profile, so it
+// stopped, on the same thread and with its agent's current profile, so it
 // resumes the stopped session, and returns its ID. The continuation belongs
 // to the attempt q belongs to: it is named after the turn q continues, and
 // spends no attempt.
 func (s *Service) continueStopped(ctx context.Context, repository *trace.Repository, cfg *config.Config, role string, q trace.QueuedTurn) (string, error) {
-	profile, _, err := s.roleExecution(cfg, role)
+	profile, err := s.agentProfile(cfg, role, q.Request.AgentID)
 	if err != nil {
 		return "", err
 	}

@@ -831,7 +831,7 @@ func (a *finalReviewer) recorded(stream config.WorkstreamID, turn string) (Final
 // enqueue accepts one attempt of the reader's turn, fixing its profile and
 // prompts.
 func (a *finalReviewer) enqueue(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in finalReviewInput, report FinalReport, member string, attempt int) error {
-	profile, _, err := a.s.roleExecution(cfg, committeeRole)
+	profile, err := a.s.agentProfile(cfg, committeeRole, member)
 	if err != nil {
 		return err
 	}
