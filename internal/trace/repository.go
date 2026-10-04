@@ -586,6 +586,15 @@ func (r *Repository) Workstreams() ([]config.WorkstreamID, error) {
 	_, streams, err := r.scan()
 	return streams, err
 }
+
+// Generation reports how many changes this handle has made to the files of
+// the trace. It never decreases while the handle is open, and it is
+// unchanged exactly when no write landed between two calls: a caller that
+// assembles a response from several separate reads can call it before and
+// after and retry the assembly when it differs, so the response never mixes
+// state from before a commit with state from after it. It never blocks on
+// mu, so it is safe to call around a read held up by a long-running write.
+func (r *Repository) Generation() uint64 { return r.generation.Load() }
 func recordKey(v Record) string {
 	h := v.header()
 	return string(h.Workstream) + "/" + kind(v) + "/" + h.ID

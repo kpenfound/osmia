@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -34,14 +35,27 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 		if !cfg.Active(active.id) {
 			continue
 		}
-		list, api := s.projectStatuses(active, unreadable)
-		if api != nil {
-			return nil, nil, api
+		found, err := consistentRead(active.repository, func() (projectStatusResult, error) {
+			list, projectUnreadable, api := s.projectStatuses(active)
+			if api != nil {
+				return projectStatusResult{}, apiErrAsError{api}
+			}
+			return projectStatusResult{list, projectUnreadable}, nil
+		})
+		if err != nil {
+			var wrapped apiErrAsError
+			if errors.As(err, &wrapped) {
+				return nil, nil, wrapped.api
+			}
+			return nil, nil, &APIError{Internal, err.Error()}
 		}
-		for i := range list {
-			list[i].status.Archived = archivedIn(state, list[i].status.Workstream)
+		for i := range found.list {
+			found.list[i].status.Archived = archivedIn(state, found.list[i].status.Workstream)
 		}
-		out = append(out, list...)
+		out = append(out, found.list...)
+		for id, d := range found.unreadable {
+			unreadable[id] = d
+		}
 	}
 	slices.SortFunc(out, func(a, b workstreamActivity) int {
 		if c := b.lastActivity.Compare(a.lastActivity); c != 0 {
@@ -68,13 +82,25 @@ type workstreamActivity struct {
 	createdAt    time.Time
 }
 
+// projectStatusResult is one consistent attempt of projectStatuses: the
+// workstream activity it found and the diagnostic of the first thing it
+// could not read, by workstream.
+type projectStatusResult struct {
+	list       []workstreamActivity
+	unreadable map[config.WorkstreamID]Diagnostic
+}
+
 // projectStatuses reports every workstream of one project, as statuses does,
-// unordered.
-func (s *Service) projectStatuses(active *activeProject, unreadable map[config.WorkstreamID]Diagnostic) ([]workstreamActivity, *APIError) {
+// unordered. Its own unreadable map holds only the diagnostics of this one
+// attempt, so a caller that retries the whole attempt through consistentRead
+// never carries a diagnostic from an earlier, discarded attempt into a later
+// one that read the workstream cleanly.
+func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, map[config.WorkstreamID]Diagnostic, *APIError) {
 	out := []workstreamActivity{}
+	unreadable := map[config.WorkstreamID]Diagnostic{}
 	list, err := active.repository.Statuses()
 	if err != nil {
-		return nil, &APIError{Internal, fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
+		return nil, nil, &APIError{Internal, fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
 	}
 	mode := s.Context().Mode(active.id)
 	librarian := librarianWorkstream(active.id)
@@ -128,7 +154,7 @@ func (s *Service) projectStatuses(active *activeProject, unreadable map[config.W
 		}
 		out = append(out, workstreamActivity{status: view, lastActivity: w.LastActivity, createdAt: w.CreatedAt})
 	}
-	return out, nil
+	return out, unreadable, nil
 }
 
 func agentStatuses(repository *trace.Repository, stream config.WorkstreamID, now time.Time) ([]AgentStatus, error) {

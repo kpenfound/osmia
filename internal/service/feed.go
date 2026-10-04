@@ -16,7 +16,7 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 	if api != nil {
 		return FeedResponse{}, api
 	}
-	entries, err := feedEntries(repository, stream)
+	entries, err := consistentRead(repository, func() ([]FeedEntry, error) { return feedEntries(repository, stream) })
 	if err != nil {
 		return FeedResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the feed of workstream %s; check the trace repository", stream)}
 	}

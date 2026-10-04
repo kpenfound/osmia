@@ -110,7 +110,7 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 	if api != nil {
 		return ConversationResponse{}, api
 	}
-	entries, err := conversationEntries(repository, stream)
+	entries, err := consistentRead(repository, func() ([]ConversationEntry, error) { return conversationEntries(repository, stream) })
 	if err != nil {
 		return ConversationResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the conversation of workstream %s; check the trace repository", stream)}
 	}
