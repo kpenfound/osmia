@@ -363,7 +363,11 @@ func notificationKey(project config.ProjectID, e InboxEntry) string {
 // notificationBody is the plain-text post for an inbox entry.
 func notificationBody(project config.ProjectID, e InboxEntry, link string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Osmia needs your decision.\nProject: %s\nWorkstream: %s\nKind: %s\nQuestion: %s\n", project, e.Workstream, e.Kind, oneLine(e.Question))
+	opening := "Osmia needs your decision."
+	if e.Kind == InboxPublication {
+		opening = "Osmia cannot publish a pull request."
+	}
+	fmt.Fprintf(&b, "%s\nProject: %s\nWorkstream: %s\nKind: %s\nQuestion: %s\n", opening, project, e.Workstream, e.Kind, oneLine(e.Question))
 	if r := oneLine(e.Recommendation); r != "" {
 		fmt.Fprintf(&b, "Recommendation: %s\n", r)
 	}

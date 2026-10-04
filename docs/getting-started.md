@@ -193,6 +193,14 @@ The decisions, in the order a workstream meets them:
 | A contested unit the chief of staff raised to you | contested card, with its findings | `osmia contested <workstream-id> <unit> review\|revise "note"` |
 | Approve delivery | delivery card | `osmia delivery <workstream-id>`, then `osmia approve <workstream-id>` |
 
+Publishing needs `GITHUB_TOKEN` in the environment of `osmia serve`, set to a
+token that can open pull requests on the upstream. Without it the service
+pushes nothing and holds the publication in the inbox until you restart it with
+the token. A publication that keeps failing, such as when GitHub refuses the
+token, also shows in the inbox with its last failure. It takes no answer: fix the cause and
+the next attempt publishes. Attempts wait longer after each failure, up to five
+minutes apart.
+
 Ratifying seals the spec and plan: the service fetches upstream, creates the
 feature branch in a worktree or Jujutsu workspace of your clone, and masons
 build the units, each reviewed and landed in order. You can talk to the workstream's chief of staff

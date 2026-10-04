@@ -7,11 +7,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
+	"unicode"
 )
 
 // PullRequest is one pull request of a repository. Head is the head branch,
@@ -59,6 +63,15 @@ type Client interface {
 	Update(ctx context.Context, repository string, number int, change Update) (PullRequest, error)
 }
 
+// Credentialed reports whether client holds the credential that opening pull
+// requests needs. A client that does not report it is assumed to hold one.
+func Credentialed(client Client) bool {
+	if c, ok := client.(interface{ Credentialed() bool }); ok {
+		return c.Credentialed()
+	}
+	return client != nil
+}
+
 // MaxResponse bounds the API response GitHub reads.
 const MaxResponse = 8 << 20
 
@@ -69,6 +82,10 @@ type GitHub struct {
 	Token   string
 	HTTP    *http.Client
 }
+
+// Credentialed reports whether g has a token; without one GitHub reads public
+// repositories but refuses to open a pull request.
+func (g GitHub) Credentialed() bool { return g.Token != "" }
 
 type githubPull struct {
 	Number   int     `json:"number"`
@@ -181,7 +198,7 @@ func (g GitHub) do(ctx context.Context, method, path string, in any, want int, o
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != want {
-		return fmt.Errorf("GitHub answered %d", resp.StatusCode)
+		return statusError(resp)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponse+1))
 	if err != nil || len(data) > MaxResponse {
@@ -191,4 +208,58 @@ func (g GitHub) do(ctx context.Context, method, path string, in any, want int, o
 		return fmt.Errorf("invalid response")
 	}
 	return nil
+}
+
+// maxErrorBody bounds the error response statusError reads, and
+// maxErrorText each value it keeps from it.
+const (
+	maxErrorBody = 64 << 10
+	maxErrorText = 500
+)
+
+// statusError describes an unexpected answer: its status, GitHub's message
+// and documentation link, the token permissions GitHub says the request
+// needs, and the rate limit when it is exhausted or GitHub asks to retry
+// later.
+func statusError(resp *http.Response) error {
+	var body struct {
+		Message          string `json:"message"`
+		DocumentationURL string `json:"documentation_url"`
+	}
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+	_ = json.Unmarshal(data, &body)
+	text := fmt.Sprintf("GitHub answered %d", resp.StatusCode)
+	if message := errorText(body.Message); message != "" {
+		text += ": " + message
+	}
+	if permissions := errorText(resp.Header.Get("X-Accepted-GitHub-Permissions")); permissions != "" {
+		text += "; the request needs the token permissions " + permissions
+	}
+	if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+		text += "; the rate limit is exhausted"
+		if reset, err := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+			text += " until " + time.Unix(reset, 0).UTC().Format(time.RFC3339)
+		}
+	}
+	if after, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && after >= 0 {
+		text += fmt.Sprintf("; GitHub asks to retry after %ds", after)
+	}
+	if doc := errorText(body.DocumentationURL); doc != "" {
+		text += "; see " + doc
+	}
+	return errors.New(text)
+}
+
+// errorText is one value of an error response, on one line and bounded.
+func errorText(s string) string {
+	s = strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s))
+	if r := []rune(s); len(r) > maxErrorText {
+		s = string(r[:maxErrorText]) + "…"
+	}
+	return s
 }

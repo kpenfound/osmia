@@ -137,7 +137,8 @@ osmia status --json
   indented. It fails like `send`.
 - `inbox` lists every owner decision waiting for you across the workstreams
   of the active project, oldest first: escalated questions, ratification
-  packets, contested units, presented amendments and delivery approvals.
+  packets, contested units, presented amendments, delivery approvals and
+  failing publications.
   Questions escalated together are one entry, headed by its inbox number, when
   it was escalated, its workstream and batch; any other entry is headed by its
   kind, when it opened, its workstream and its unit or amendment. Each shows
@@ -150,7 +151,13 @@ osmia status --json
   revision, or the final review, report revision and commit) and the command
   that answers it: `answer`, with `answer <number> --accept` when there is a
   quick reply, `ratify`, `contested`, `amendment`, or `delivery` then
-  `approve`. Decided entries, superseded packet revisions and entries of an
+  `approve`. A publication the service holds because it was started without
+  `GITHUB_TOKEN` is listed as soon as it is asked for: nothing is pushed or
+  asked of GitHub until you restart `serve` with the token. Any other failing
+  publication is listed once three attempts in a row have failed: its question carries the last failure, such as GitHub's
+  refusal with the token permissions it asks for, and it says when the next
+  attempt runs. It takes no answer; fix the cause and it leaves the inbox once
+  an attempt publishes. Decided entries, superseded packet revisions and entries of an
   abandoned workstream are left out. Without a project or a trace the inbox is
   empty.
 - `answer <inbox-number> <ruling>` records your ruling on an inbox entry. The
@@ -492,11 +499,14 @@ never raw file contents.
 | 3 | Missing socket, connection failure or unavailable service |
 | 4 | API malformed-input or validation rejection, no project is configured, unknown project or workstream, empty charter on hand-in, or stdin over the hand-in limit or not UTF-8 |
 | 5 | API conflict (including an extraction already running or abandoning a delivered or abandoned workstream), project already active, unsupported operation, restart required or internal failure |
-| 6 | Foreground startup/service failure, including ownership conflict |
+| 6 | Foreground startup failure, including ownership conflict, or a failure that stopped a running service |
 
 For exit 3, start the service and verify matching root/socket and permissions.
-For exit 6, run `osmia doctor`, which names the cause and its fix. Do not delete a
-live-owned socket. Unsupported responses identify unavailable operations; restart-required
+For exit 6 at startup, run `osmia doctor`, which names the cause and its fix. Do not delete a
+live-owned socket. When a running service stops after a failure, stderr (the
+`service.log` of a detached service) names it on one line after the time it
+stopped, starting with the project whose work failed. Credentials in URLs and
+the `GITHUB_TOKEN` value are redacted. Unsupported responses identify unavailable operations; restart-required
 responses instruct the operator to stop and start the service.
 
 Detached management, install/upgrade commands and completion are

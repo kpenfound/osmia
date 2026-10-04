@@ -615,6 +615,7 @@ const (
 	InboxContested    = "contested"
 	InboxAmendment    = "amendment"
 	InboxDelivery     = "delivery"
+	InboxPublication  = "publication"
 )
 
 // InboxEntry is one open owner decision. Kind says which, and Answer how it
@@ -624,7 +625,9 @@ const (
 // amendment was filed from; Amendment names an amendment. Revision is the
 // revision of the record the decision is taken on. Question is the chief of
 // staff's rephrasing of an escalation, and the service's statement of the
-// decision for the other kinds. Project names the project whose workstream
+// decision for the other kinds. A publication entry reports a publication
+// whose last attempts failed: it takes no decision, its Revision is the owner
+// approval being published and its Options are empty. Project names the project whose workstream
 // the decision belongs to; escalation numbers are unique only within it.
 type InboxEntry struct {
 	Kind           string              `json:"kind"`
@@ -645,7 +648,8 @@ type InboxEntry struct {
 	Answer         InboxAnswer         `json:"answer"`
 }
 
-// InboxAnswer is the existing endpoint that answers an inbox entry. Body
+// InboxAnswer is the existing endpoint that answers an inbox entry, or that
+// shows the delivery of a publication entry, which takes no answer. Body
 // holds the request fields that pin what the owner read; the client adds the
 // decision fields of that endpoint's request.
 type InboxAnswer struct {

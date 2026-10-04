@@ -4,16 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/pulls"
+	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -28,12 +31,26 @@ type fakePulls struct {
 	creates  int
 	lose     bool
 	fork     func() string
+	// findErr, when set, fails every Find as a refusing host does.
+	findErr error
+	// uncredentialed reports the client holding no credential, as GitHub
+	// without a token does.
+	uncredentialed bool
+}
+
+func (c *fakePulls) Credentialed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return !c.uncredentialed
 }
 
 func (c *fakePulls) Find(_ context.Context, repository, headRepository, branch string) ([]pulls.PullRequest, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.finds++
+	if c.findErr != nil {
+		return nil, c.findErr
+	}
 	var out []pulls.PullRequest
 	for _, pr := range c.prs {
 		if pr.HeadRepository == headRepository && pr.Head == branch {
@@ -637,4 +654,142 @@ func (c *fakePulls) Update(_ context.Context, repository string, number int, cha
 		return c.prs[i], nil
 	}
 	return pulls.PullRequest{}, errors.New("pull request not found")
+}
+
+// TestRepeatedPublicationFailuresReachTheInbox shows a publication the host
+// keeps refusing backing off and raised to the inbox with the host's
+// explanation, and the entry closing once an attempt publishes.
+func TestRepeatedPublicationFailuresReachTheInbox(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p := newPublicationFixture(t, "squash")
+	p.approve(t, nil)
+	in, err := decodePublish(p.request(t))
+	must(t, err)
+	refusal := "find pull requests of acme/dagger from owner/dagger:osmia/w: GitHub answered 403: Resource not accessible by personal access token; the request needs the token permissions pull_requests=read"
+	p.pulls.findErr = errors.New(refusal)
+	// The controller's clock moves only as the test advances it, past every
+	// time the fixture recorded.
+	clock := &fixedClock{now: p.clock.Now().Add(time.Hour)}
+	c, err := reconcile.New(p.repository, reconcile.Options{Worker: "test", Now: clock.Now, RetryDelay: time.Minute,
+		Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: p.publisher()},
+		Hold:     func(_ config.WorkstreamID, op coreadapter.Operation) bool { return op.Action != PublishAction }})
+	must(t, err)
+	publication := func() (InboxEntry, bool) {
+		t.Helper()
+		inbox, api := p.s.inbox(ctx)
+		if api != nil {
+			t.Fatal(api)
+		}
+		for _, e := range inbox.Entries {
+			if e.Kind == InboxPublication {
+				return e, true
+			}
+		}
+		return InboxEntry{}, false
+	}
+	var firstFailure time.Time
+	for attempt, wait := range []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute} {
+		must(t, c.Pass(ctx))
+		if attempt == 0 {
+			firstFailure = clock.Now()
+		}
+		e, found := publication()
+		if attempt < publicationEscalation-1 {
+			if found {
+				t.Fatalf("raised after %d failures: %+v", attempt+1, e)
+			}
+		} else {
+			want := fmt.Sprintf("Publishing owner approval %d has failed 3 times in a row. Last failure: Effect returned error: %s", in.Approval, refusal)
+			retryAt := clock.Now().Add(wait).UTC().Format(time.RFC3339)
+			if !found || e.Workstream != p.stream || e.Question != want || len(e.Options) != 0 || e.Revision != in.Approval ||
+				!e.OpenedAt.Equal(firstFailure) || !strings.Contains(e.Blocked, "tries again at "+retryAt) || e.Answer.Method != http.MethodGet {
+				t.Fatalf("publication entry %+v, want question %q and a retry at %s", e, want, retryAt)
+			}
+		}
+		// The next attempt waits twice as long as the one before.
+		clock.Advance(wait - time.Second)
+		must(t, c.Pass(ctx))
+		if p.pulls.finds != attempt+1 {
+			t.Fatalf("attempted %d times before the retry was due, want %d", p.pulls.finds, attempt+1)
+		}
+		clock.Advance(time.Second)
+	}
+	p.pulls.findErr = nil
+	must(t, c.Pass(ctx))
+	if p.feature(t) != DeliveredState || p.pulls.creates != 1 {
+		t.Fatalf("state %s after %d pull requests", p.feature(t), p.pulls.creates)
+	}
+	if e, found := publication(); found {
+		t.Fatalf("the published workstream stays raised: %+v", e)
+	}
+}
+
+// TestPublicationWaitsForAGitHubToken shows a service without a credential
+// holding a publication without pushing or asking the host anything, raising
+// it to the inbox at once, and publishing once it has one.
+func TestPublicationWaitsForAGitHubToken(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p := newPublicationFixture(t, "squash")
+	p.approve(t, nil)
+	op := p.request(t)
+	in, err := decodePublish(op)
+	must(t, err)
+	p.pulls.mu.Lock()
+	p.pulls.uncredentialed = true
+	p.pulls.mu.Unlock()
+	clock := &fixedClock{now: p.clock.Now().Add(time.Hour)}
+	c, err := reconcile.New(p.repository, reconcile.Options{Worker: "test", Now: clock.Now, RetryDelay: time.Minute,
+		Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: p.publisher()},
+		Hold:     p.s.holding(p.repository)})
+	must(t, err)
+	for range 3 {
+		must(t, c.Pass(ctx))
+		clock.Advance(time.Hour)
+	}
+	if _, pushed := p.forkBranch(t); pushed || p.pulls.finds != 0 || p.pulls.creates != 0 {
+		t.Fatalf("a publication without a credential pushed %v, found %d times and opened %d pull requests", pushed, p.pulls.finds, p.pulls.creates)
+	}
+	ops, err := p.repository.Operations(p.stream)
+	must(t, err)
+	i := slices.IndexFunc(ops, func(r trace.OperationRecord) bool { return r.Operation.ID == op.ID })
+	if i < 0 || len(ops[i].History) != 0 {
+		t.Fatalf("the held publication was attempted: %+v", ops)
+	}
+	requested := ops[i].Transition.At
+	inbox, api := p.s.inbox(ctx)
+	if api != nil {
+		t.Fatal(api)
+	}
+	i = slices.IndexFunc(inbox.Entries, func(e InboxEntry) bool { return e.Kind == InboxPublication })
+	if i < 0 {
+		t.Fatalf("the held publication is not in the inbox: %+v", inbox.Entries)
+	}
+	e := inbox.Entries[i]
+	if !strings.Contains(e.Question, "waits for a GitHub token") || !strings.Contains(e.Blocked, "Restart osmia serve with GITHUB_TOKEN set") ||
+		!strings.Contains(e.Blocked, in.Upstream) || !e.OpenedAt.Equal(requested) || len(e.Options) != 0 {
+		t.Fatalf("held publication entry %+v", e)
+	}
+	// A direct attempt is refused before any side effect.
+	if _, err := p.publisher().Apply(ctx, op); !errors.Is(err, errNoPullRequestCredential) {
+		t.Fatalf("an attempt without a credential: %v", err)
+	}
+	if _, pushed := p.forkBranch(t); pushed || p.pulls.finds != 0 {
+		t.Fatal("a refused attempt pushed or asked the host")
+	}
+	p.pulls.mu.Lock()
+	p.pulls.uncredentialed = false
+	p.pulls.mu.Unlock()
+	must(t, c.Pass(ctx))
+	if p.feature(t) != DeliveredState || p.pulls.creates != 1 {
+		t.Fatalf("state %s after %d pull requests", p.feature(t), p.pulls.creates)
+	}
+	inbox, api = p.s.inbox(ctx)
+	if api != nil {
+		t.Fatal(api)
+	}
+	if slices.ContainsFunc(inbox.Entries, func(e InboxEntry) bool { return e.Kind == InboxPublication }) {
+		t.Fatal("the published workstream stays raised")
+	}
 }

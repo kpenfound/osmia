@@ -3,12 +3,14 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
@@ -87,5 +89,33 @@ func TestDetachedRootFlag(t *testing.T) {
 	must(t, err)
 	if flag := rootFlag(explicit); flag != explicit.String() {
 		t.Fatalf("explicit root flag %q", flag)
+	}
+}
+
+// TestServeFailureNamesARuntimeFailure shows a service that stopped after it
+// started naming its failure, redacted and on one line, while a startup
+// failure still points at doctor without echoing its error.
+func TestServeFailureNamesARuntimeFailure(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_secret")
+	at := time.Date(2026, 10, 3, 19, 58, 13, 0, time.UTC)
+	failure := errors.Join(
+		errors.New("project p_1: workstream w_1: push https://x-access-token:hunter2@github.com/acme/widgets.git refused"),
+		errors.New("token ghp_secret\x1b[31m rejected"))
+	var out strings.Builder
+	reportServeFailure(&out, stoppedError{failure}, at)
+	want := "2026-10-03T19:58:13Z service stopped after a failure: project p_1: workstream w_1: push https://[redacted]@github.com/acme/widgets.git refused; token [redacted] [31m rejected\n" +
+		"fix the cause above, then start the service again\n"
+	if out.String() != want {
+		t.Fatalf("runtime failure:\n got %q\nwant %q", out.String(), want)
+	}
+	out.Reset()
+	reportServeFailure(&out, errors.New("config.toml: token = \"ghp_secret\""), at)
+	if got := out.String(); strings.Contains(got, "ghp_secret") || strings.Contains(got, "config.toml") || !strings.Contains(got, "osmia doctor") {
+		t.Fatalf("startup failure: %q", got)
+	}
+	out.Reset()
+	reportServeFailure(&out, stoppedError{errors.New(strings.Repeat("é", maxFailureText))}, at)
+	if line, _, _ := strings.Cut(out.String(), "\n"); !strings.HasSuffix(line, "…") || !utf8.ValidString(line) || len(line) > maxFailureText+100 {
+		t.Fatalf("an unbounded failure: %d bytes", len(line))
 	}
 }

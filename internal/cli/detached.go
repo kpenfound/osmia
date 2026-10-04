@@ -8,9 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
@@ -64,7 +67,61 @@ func runService(ctx context.Context, root config.Root, detached bool, stdout io.
 		}
 		pipe.Close()
 	}
-	return s.Wait()
+	if err := s.Wait(); err != nil {
+		return stoppedError{err}
+	}
+	return nil
+}
+
+// stoppedError is the failure that stopped a service after it started.
+type stoppedError struct{ err error }
+
+func (e stoppedError) Error() string { return e.err.Error() }
+func (e stoppedError) Unwrap() error { return e.err }
+
+// reportServeFailure explains why serve failed. A service that stopped
+// after it started names the failure; startup errors may contain raw TOML
+// values or paths, so they are not echoed.
+func reportServeFailure(stderr io.Writer, err error, at time.Time) {
+	if stopped := (stoppedError{}); errors.As(err, &stopped) {
+		fmt.Fprintf(stderr, "%s service stopped after a failure: %s\n", at.Format(time.RFC3339), failureText(stopped.err))
+		fmt.Fprintln(stderr, "fix the cause above, then start the service again")
+		return
+	}
+	fmt.Fprintln(stderr, "service startup failed; run osmia doctor to find the cause, and stop any existing owner before starting another")
+}
+
+// credentialURL matches the user information of a URL, which may hold a
+// credential.
+var credentialURL = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s@]+@`)
+
+// maxFailureText bounds the failure text the service prints when it stops.
+const maxFailureText = 4000
+
+// failureText renders err for the service's own output: credentials in URLs
+// and the GitHub token are redacted, joined errors are separated by
+// semicolons, other control characters become spaces and the text is
+// bounded.
+func failureText(err error) string {
+	text := credentialURL.ReplaceAllString(err.Error(), "${1}[redacted]@")
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		text = strings.ReplaceAll(text, token, "[redacted]")
+	}
+	text = strings.ReplaceAll(text, "\n", "; ")
+	text = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, text)
+	if len(text) > maxFailureText {
+		cut := maxFailureText
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut] + "…"
+	}
+	return text
 }
 
 // detach acknowledges startup only through the child's private readiness pipe.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -143,9 +144,14 @@ func (s *Service) held(repository *trace.Repository, stream config.WorkstreamID)
 }
 
 // holding is the controller's Hold: it holds every reconciler operation that
-// runs architect or committee turns while held holds its workstream.
+// runs architect or committee turns while held holds its workstream, and
+// every publication while the service has no credential to open its pull
+// request, so nothing is pushed or asked of GitHub.
 func (s *Service) holding(repository *trace.Repository) func(config.WorkstreamID, coreadapter.Operation) bool {
 	return func(stream config.WorkstreamID, op coreadapter.Operation) bool {
+		if publicationAction(op) && !pulls.Credentialed(s.options.PullRequests) {
+			return true
+		}
 		if waiting, err := baseWaiting(repository, stream); op.Action != baseRefreshAction && (err != nil || waiting) {
 			if input, err := thread.DecodeTurn(op); err == nil {
 				t, err := repository.Thread(stream, input.Agent)

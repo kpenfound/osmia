@@ -403,7 +403,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		projects := s.projects
 		s.projects = nil
 		s.mu.Unlock()
-		s.err = errors.Join(s.err, s.stop(projects...))
+		// A project failure that stopped the service is reported once.
+		if e := s.stop(projects...); e != nil && (s.err == nil || !errors.Is(e, s.err)) {
+			s.err = errors.Join(s.err, e)
+		}
 		s.cleanupSocket()
 		s.store.Close()
 		unlock(s.lock)
@@ -750,6 +753,9 @@ func (s *Service) launch(active *activeProject) {
 		cancel()
 		if watchErr := <-watchDone; watchErr != nil {
 			err = watchErr
+		}
+		if err != nil && !errors.Is(err, context.Canceled) {
+			err = fmt.Errorf("project %s: %w", active.id, err)
 		}
 		active.done <- err
 		close(active.done)

@@ -15,12 +15,16 @@ import (
 )
 
 type Options struct {
-	Worker     string
-	Adapters   map[coreadapter.OperationBoundary]coreadapter.Reconciler
-	Now        func() time.Time
-	Ticks      <-chan time.Time
-	Interval   time.Duration
-	RetryDelay time.Duration
+	Worker   string
+	Adapters map[coreadapter.OperationBoundary]coreadapter.Reconciler
+	Now      func() time.Time
+	Ticks    <-chan time.Time
+	Interval time.Duration
+	// RetryDelay is the wait after an operation's first failed attempt. Each
+	// further consecutive failure doubles it, up to MaxRetryDelay, which
+	// defaults to DefaultMaxRetryDelay or RetryDelay, whichever is longer.
+	RetryDelay    time.Duration
+	MaxRetryDelay time.Duration
 	// Schedule runs at the start of every pass, before operations are read, so
 	// the intent it publishes is reconciled in the same pass. It runs
 	// serialized with reconciliation, so it sees the work a concurrent
@@ -45,6 +49,26 @@ type Options struct {
 	Concurrent func(coreadapter.Operation) bool
 }
 
+// DefaultMaxRetryDelay is the longest wait between attempts of a failing
+// operation when Options.MaxRetryDelay is unset.
+const DefaultMaxRetryDelay = 5 * time.Minute
+
+// RetryAction is the kind of the operation action that records a failed
+// attempt and when the next one is due.
+const RetryAction = "retry"
+
+// ConsecutiveFailures counts the failed attempts the operation recorded.
+// Every failure of an operation is consecutive: a result ends its attempts.
+func ConsecutiveFailures(record trace.OperationRecord) int {
+	n := 0
+	for _, action := range record.History {
+		if action.Kind == RetryAction {
+			n++
+		}
+	}
+	return n
+}
+
 type Controller struct {
 	repository *trace.Repository
 	options    Options
@@ -64,7 +88,7 @@ type Controller struct {
 }
 
 func New(repository *trace.Repository, options Options) (*Controller, error) {
-	if repository == nil || options.Worker == "" || options.Interval < 0 || options.RetryDelay < 0 {
+	if repository == nil || options.Worker == "" || options.Interval < 0 || options.RetryDelay < 0 || options.MaxRetryDelay < 0 {
 		return nil, fmt.Errorf("invalid reconciliation options")
 	}
 	if options.Now == nil {
@@ -75,6 +99,9 @@ func New(repository *trace.Repository, options Options) (*Controller, error) {
 	}
 	if options.RetryDelay == 0 {
 		options.RetryDelay = time.Second
+	}
+	if options.MaxRetryDelay == 0 {
+		options.MaxRetryDelay = max(DefaultMaxRetryDelay, options.RetryDelay)
 	}
 	adapters := make(map[coreadapter.OperationBoundary]coreadapter.Reconciler)
 	for k, v := range options.Adapters {
@@ -205,6 +232,16 @@ func (c *Controller) start(ctx context.Context, stream config.WorkstreamID, even
 	return c.failed()
 }
 
+// retryDelay is the wait before the next attempt of an operation that
+// failed failures times before this failure.
+func (c *Controller) retryDelay(failures int) time.Duration {
+	delay := c.options.RetryDelay
+	for i := 0; i < failures && delay < c.options.MaxRetryDelay; i++ {
+		delay *= 2
+	}
+	return min(delay, c.options.MaxRetryDelay)
+}
+
 func (c *Controller) step(ctx context.Context, name string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -288,8 +325,8 @@ func (c *Controller) reconcile(ctx context.Context, attempt *trace.OperationAtte
 	}
 	write := func(kind string) error { return attempt.Record(ctx, attempt.Action(kind, c.options.Now())) }
 	retry := func(reason string) error {
-		action := attempt.Action("retry", c.options.Now())
-		action.Failure, action.RetryAt = reason, action.At.Add(c.options.RetryDelay)
+		action := attempt.Action(RetryAction, c.options.Now())
+		action.Failure, action.RetryAt = reason, action.At.Add(c.retryDelay(ConsecutiveFailures(record)))
 		if err := attempt.Record(ctx, action); err != nil {
 			return err
 		}
@@ -342,7 +379,11 @@ func (c *Controller) reconcile(ctx context.Context, attempt *trace.OperationAtte
 				return e
 			}
 			if err != nil {
-				return retry(fmt.Sprintf("Effect returned error: %v; evidence: %s", err, result.Evidence))
+				reason := fmt.Sprintf("Effect returned error: %v", err)
+				if result.Evidence != "" {
+					reason += "; evidence: " + result.Evidence
+				}
+				return retry(reason)
 			}
 		case coreadapter.EffectUnknown:
 			return retry(observed.Evidence)

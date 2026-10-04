@@ -286,6 +286,8 @@ func TestServiceReconcilesOperationsInStageOrder(t *testing.T) {
 	}
 }
 
+// TestServiceReportsScheduleFailure shows a failed pass stopping the service
+// with the failure, named once with its project.
 func TestServiceReportsScheduleFailure(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
@@ -304,7 +306,11 @@ func TestServiceReportsScheduleFailure(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("service did not stop after schedule failure")
 	}
-	if err := s.Wait(); !errors.Is(err, failure) || !strings.Contains(err.Error(), "configured pass:") {
-		t.Fatalf("service error = %v, want named pass and originating error", err)
+	err = s.Wait()
+	if !errors.Is(err, failure) || !strings.Contains(err.Error(), "configured pass:") || !strings.HasPrefix(err.Error(), "project "+string(cfg.Project.ID)+": ") {
+		t.Fatalf("service error = %v, want the project, the named pass and the originating error", err)
+	}
+	if n := strings.Count(err.Error(), failure.Error()); n != 1 {
+		t.Fatalf("service error = %v, reports the failure %d times", err, n)
 	}
 }

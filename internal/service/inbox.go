@@ -13,6 +13,8 @@ import (
 	"unicode"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/pulls"
+	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -101,7 +103,7 @@ func decision(kind string, stream config.WorkstreamID, opened time.Time, path st
 
 // openDecisions lists a workstream's open decisions other than its
 // escalations: its ratification packet, contested units, presented
-// amendments and delivery approval.
+// amendments, delivery approval and failing publication.
 func (s *Service) openDecisions(ctx context.Context, repository *trace.Repository, w trace.WorkstreamStatus) ([]InboxEntry, error) {
 	var out []InboxEntry
 	add := func(e InboxEntry, open bool, err error) error {
@@ -142,8 +144,69 @@ func (s *Service) openDecisions(ctx context.Context, repository *trace.Repositor
 		if err := add(s.deliveryEntry(ctx, repository, w.Workstream)); err != nil {
 			return nil, err
 		}
+		if err := add(s.publicationEntry(repository, w)); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
+}
+
+// publicationEscalation is how many consecutive failed attempts raise a
+// publication to the inbox.
+const publicationEscalation = 3
+
+// publicationEntry is a pending publication the service holds because it has
+// no credential to open the pull request, opened when it was asked for, or
+// one whose last publicationEscalation or more attempts failed in a row,
+// opened at the first of them. It takes no decision: it leaves the inbox
+// once an attempt succeeds or the publication is refused.
+func (s *Service) publicationEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error) {
+	if !strings.HasPrefix(w.Subjects[publicationSubject].Value, "requested-") {
+		return InboxEntry{}, false, nil
+	}
+	stream := w.Workstream
+	records, err := repository.Operations(stream)
+	if err != nil {
+		return InboxEntry{}, false, err
+	}
+	for _, record := range records {
+		if record.Acknowledged || !publicationAction(record.Operation) {
+			continue
+		}
+		credentialed := pulls.Credentialed(s.options.PullRequests)
+		failures := reconcile.ConsecutiveFailures(record)
+		if credentialed && failures < publicationEscalation {
+			continue
+		}
+		in, err := decodePublish(record.Operation)
+		if err != nil {
+			return InboxEntry{}, false, err
+		}
+		if !credentialed {
+			e := decision(InboxPublication, stream, record.Transition.At, "/delivery/"+string(stream), map[string]any{})
+			e.Answer.Method = http.MethodGet
+			e.Revision = in.Approval
+			e.Question = fmt.Sprintf("Publishing owner approval %d waits for a GitHub token. The service was started without GITHUB_TOKEN, so it pushes nothing and opens no pull request.", in.Approval)
+			e.Blocked = "Publishing the pull request. Restart osmia serve with GITHUB_TOKEN set to a token that can open pull requests on " + in.Upstream + "."
+			return e, true, nil
+		}
+		var first, last trace.OperationAction
+		for _, action := range record.History {
+			if action.Kind == reconcile.RetryAction {
+				if first.At.IsZero() {
+					first = action
+				}
+				last = action
+			}
+		}
+		e := decision(InboxPublication, stream, first.At, "/delivery/"+string(stream), map[string]any{})
+		e.Answer.Method = http.MethodGet
+		e.Revision = in.Approval
+		e.Question = fmt.Sprintf("Publishing owner approval %d has failed %d times in a row. Last failure: %s", in.Approval, failures, last.Failure)
+		e.Blocked = fmt.Sprintf("Publishing the pull request. The service tries again at %s, waiting longer after each failure, and this entry closes once an attempt succeeds.", record.RetryAt.UTC().Format(time.RFC3339))
+		return e, true, nil
+	}
+	return InboxEntry{}, false, nil
 }
 
 // ratificationEntry is the workstream's ratification packet while debate

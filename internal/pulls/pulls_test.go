@@ -95,3 +95,53 @@ func TestGitHubSameRepositoryCreateAndRetarget(t *testing.T) {
 		t.Fatalf("update %+v %v", pr, err)
 	}
 }
+
+func TestGitHubErrorsKeepGitHubsExplanation(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/acme/permissions/pulls":
+			w.Header().Set("X-Accepted-GitHub-Permissions", "pull_requests=read")
+			w.WriteHeader(http.StatusForbidden)
+			io.WriteString(w, `{"message": "Resource not accessible by personal access token\nsecond line", "documentation_url": "https://docs.github.com/rest/pulls/pulls#list-pull-requests"}`)
+		case "/repos/acme/limited/pulls":
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.Header().Set("X-RateLimit-Reset", "1791079426")
+			w.Header().Set("Retry-After", "60")
+			w.WriteHeader(http.StatusForbidden)
+			io.WriteString(w, `{"message": "`+strings.Repeat("x", 600)+`"}`)
+		default:
+			w.WriteHeader(http.StatusBadGateway)
+			io.WriteString(w, `<html>bad gateway</html>`)
+		}
+	}))
+	defer server.Close()
+	g := GitHub{BaseURL: server.URL, Token: "secret", HTTP: server.Client()}
+	ctx := context.Background()
+	_, err := g.Find(ctx, "acme/permissions", "acme/permissions", "osmia/w")
+	want := "find pull requests of acme/permissions from acme/permissions:osmia/w: GitHub answered 403: Resource not accessible by personal access token second line; the request needs the token permissions pull_requests=read; see https://docs.github.com/rest/pulls/pulls#list-pull-requests"
+	if err == nil || err.Error() != want {
+		t.Fatalf("a refused token:\n got %v\nwant %s", err, want)
+	}
+	_, err = g.Find(ctx, "acme/limited", "acme/limited", "osmia/w")
+	if err == nil || !strings.Contains(err.Error(), strings.Repeat("x", 500)+"…;") || strings.Contains(err.Error(), strings.Repeat("x", 501)) ||
+		!strings.Contains(err.Error(), "; the rate limit is exhausted until 2026-10-04T02:03:46Z; GitHub asks to retry after 60s") {
+		t.Fatalf("an exhausted rate limit: %v", err)
+	}
+	_, err = g.Find(ctx, "acme/gateway", "acme/gateway", "osmia/w")
+	if err == nil || !strings.HasSuffix(err.Error(), ": GitHub answered 502") || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("a body that is not GitHub's JSON: %v", err)
+	}
+}
+
+type silentClient struct{ Client }
+
+func TestCredentialed(t *testing.T) {
+	t.Parallel()
+	if Credentialed(GitHub{}) || !Credentialed(GitHub{Token: "secret"}) {
+		t.Fatal("GitHub is credentialed exactly when it has a token")
+	}
+	if Credentialed(nil) || !Credentialed(silentClient{}) {
+		t.Fatal("no client holds no credential, and a client that does not say is assumed to")
+	}
+}

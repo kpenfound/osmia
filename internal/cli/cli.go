@@ -257,8 +257,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	if cmd == "serve" {
 		if err := runService(ctx, root, o.detach, stdout); err != nil {
-			// Startup errors may contain raw TOML values or paths; do not echo them.
-			fmt.Fprintln(stderr, "service startup failed; run osmia doctor to find the cause, and stop any existing owner before starting another")
+			reportServeFailure(stderr, err, time.Now())
 			return 6
 		}
 		return 0
@@ -1490,6 +1489,9 @@ func showInbox(w io.Writer, list service.InboxResponse) {
 		case service.InboxDelivery:
 			block("Decided on", fmt.Sprintf("final review %v (report revision %d) of commit %v", e.Answer.Body["review"], e.Revision, e.Answer.Body["commit"]))
 			block("Answer", fmt.Sprintf("osmia delivery %s, then osmia approve %s [description-file]", stream, stream))
+		case service.InboxPublication:
+			block("Publishing", fmt.Sprintf("owner approval %d", e.Revision))
+			block("Answer", "none; fix the cause of the last failure and the service publishes on its next attempt")
 		}
 	}
 }

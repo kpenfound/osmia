@@ -239,6 +239,30 @@ func TestLocalBoundariesRecoverEffectDespiteError(t *testing.T) {
 	}
 }
 
+func TestFailedAttemptsBackOffUpToTheLimit(t *testing.T) {
+	f := setup(t, coreadapter.RepositoryBoundary)
+	f.system.failBeforeEffect = true
+	for _, want := range []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 5 * time.Minute, 5 * time.Minute} {
+		must(t, f.controller(t).Pass(context.Background()))
+		record := f.record(t)
+		retry := record.History[len(record.History)-1]
+		if retry.Kind != RetryAction || retry.Failure != "Effect returned error: interrupted" || record.RetryAt.Sub(retry.At) != want {
+			t.Fatalf("want a retry after %s: %+v", want, retry)
+		}
+		f.clock.Advance(want - time.Second)
+		must(t, f.controller(t).Pass(context.Background()))
+		if _, applies := f.system.counts(); applies != ConsecutiveFailures(f.record(t)) {
+			t.Fatalf("attempt ran before its retry was due: %d applications", applies)
+		}
+		f.clock.Advance(time.Second)
+	}
+	f.system.failBeforeEffect = false
+	must(t, f.controller(t).Pass(context.Background()))
+	if record := f.record(t); !record.Acknowledged || ConsecutiveFailures(record) != 5 {
+		t.Fatalf("not completed after its failures: %+v", record)
+	}
+}
+
 func TestAmbiguousInspectionNeverAppliesOrAcknowledges(t *testing.T) {
 	for _, inspectionError := range []bool{false, true} {
 		t.Run(fmt.Sprint(inspectionError), func(t *testing.T) {
@@ -258,7 +282,8 @@ func TestAmbiguousInspectionNeverAppliesOrAcknowledges(t *testing.T) {
 					t.Fatal("ambiguous effect applied")
 				}
 				f.reopen(t)
-				f.clock.Advance(time.Minute)
+				// The second failure waits twice as long as the first.
+				f.clock.Advance(2 * time.Minute)
 			}
 			f.system.unknown, f.system.inspectErr = false, nil
 			must(t, f.controller(t).Pass(context.Background()))

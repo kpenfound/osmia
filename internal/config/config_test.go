@@ -296,7 +296,7 @@ func TestInvalid(t *testing.T) {
 		{"empty socket", topConfig + "[listen]\nsocket = ''\n", "", "listen.socket"},
 		{"socket escape", topConfig + "[listen]\nsocket = '../outside.sock'\n", "", "listen.socket"},
 		{"socket directory", topConfig + "[listen]\nsocket = '.'\n", "", "direct child"},
-		{"long socket", topConfig + "[listen]\nsocket = '" + strings.Repeat("a", 104) + ".sock'\n", "", "103 bytes"},
+		{"long socket", topConfig + "[listen]\nsocket = '" + strings.Repeat("a", 104) + ".sock'\n", "", "103-byte Unix socket limit"},
 		{"project version", "", strings.Replace(projectConfig, "version = 1", "version = 2", 1), "version:"},
 		{"project unknown", "", projectConfig + "oops = 1\n", "oops"},
 		{"project unsupported", "", projectConfig + "hearsay_unknown = 'dagger'\n", "unknown configuration key"},

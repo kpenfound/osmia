@@ -17,6 +17,15 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
+// errNoPullRequestCredential refuses a publication before any side effect
+// while the service has no credential to open its pull request.
+var errNoPullRequestCredential = errors.New("the service was started without GITHUB_TOKEN, so it cannot open the pull request; restart osmia serve with GITHUB_TOKEN set")
+
+// publicationAction reports whether op publishes a workstream.
+func publicationAction(op coreadapter.Operation) bool {
+	return op.Boundary == coreadapter.RepositoryBoundary && (op.Action == PublishAction || op.Action == publishUpstreamAction)
+}
+
 // PublishAction is the repository-boundary operation action that publishes
 // an assembled workstream's owner-approved branch and description: it pushes
 // the delivery commit to the push repository, opens one pull request against
@@ -358,8 +367,8 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		return coreadapter.OperationResult{}, errors.New("the project is not active")
 	}
 	client := p.s.options.PullRequests
-	if client == nil {
-		return coreadapter.OperationResult{}, errors.New("the service has no pull request client")
+	if !pulls.Credentialed(client) {
+		return coreadapter.OperationResult{}, errNoPullRequestCredential
 	}
 	approval, err := approvalAt(p.repository, stream, in.Approval)
 	if err != nil {

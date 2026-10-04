@@ -207,11 +207,14 @@ webhook once, as plain text you can act on without the page open:
 Osmia needs your decision.
 Project: <project-id>
 Workstream: <workstream-id>
-Kind: <escalation, ratification, contested, amendment or delivery>
+Kind: <escalation, ratification, contested, amendment, delivery or publication>
 Question: <the entry's question on one line>
 Recommendation: <the entry's recommendation on one line, when it has one>
 Open: http://<tailnet-name>/
 ```
+
+A failing publication opens with `Osmia cannot publish a pull request.`
+instead, since it takes no decision.
 
 The webhook also receives one post when the daily budget pauses dispatch:
 

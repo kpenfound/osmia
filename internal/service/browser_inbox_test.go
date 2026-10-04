@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -564,4 +567,54 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 		t.Fatalf("the edited approval %+v", after.Approval)
 	}
 	p.await("the same document", `window.notReloaded === true`)
+}
+
+// The page lists a publication the host keeps refusing with its last
+// failure and what it waits on, and offers no answer: it closes once an
+// attempt publishes.
+func TestBrowserPageShowsAFailingPublication(t *testing.T) {
+	p := openBrowser(t)
+	f, ws, repository, _ := deliveryFixtureWith(t, listenWeb)
+	ctx := context.Background()
+	presented, api := f.s.deliveryPresentation(ctx, string(ws))
+	if api != nil {
+		t.Fatal(api)
+	}
+	if _, api := f.s.approveDelivery(ctx, string(ws), DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash}); api != nil {
+		t.Fatal(api)
+	}
+	must(t, repository.Close())
+	home := filepath.Dir(f.clone)
+	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
+	must(t, os.MkdirAll(filepath.Dir(fork), 0700))
+	demoGit(t, home, "init", "--quiet", "--bare", fork)
+	demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
+	refusal := "GitHub answered 403: Resource not accessible by personal access token"
+	f.opts.PullRequests = &fakePulls{findErr: errors.New(refusal), fork: func() string { return "" }}
+	f.start(t)
+	defer f.stop(t)
+	var entry InboxEntry
+	for deadline := time.Now().Add(browserTimeout); ; time.Sleep(100 * time.Millisecond) {
+		if entries := entriesOf(t, f.c, InboxPublication); len(entries) == 1 {
+			entry = entries[0]
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the failing publication never reached the inbox")
+		}
+	}
+	card := decisionCard(entry)
+	p.run(chromedp.Navigate("http://" + f.s.WebAddr() + "/"))
+	p.await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.selectWorkstream(ws)
+	p.awaitText(card+"[data-field=kind]", "Publication failing")
+	p.awaitText(card+"[data-field=question]", "Last failure: Effect returned error: ")
+	p.awaitText(card+"[data-field=question]", refusal)
+	p.awaitText(card+"[data-field=blocked]", "Waiting on it: Publishing the pull request.")
+	p.awaitText(card+"[data-field=options]", "Options: none until what blocks it is resolved")
+	var answerable bool
+	p.eval(`document.querySelector(`+quote(card+"[data-field=answer]")+`) !== null || document.querySelector(`+quote(card+"[data-field=pins]")+`) !== null`, &answerable)
+	if answerable {
+		t.Fatal("the page offers an answer to a failing publication")
+	}
 }

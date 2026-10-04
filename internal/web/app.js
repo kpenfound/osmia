@@ -1159,6 +1159,7 @@
     contested: 'Contested unit',
     amendment: 'Amendment',
     delivery: 'Delivery',
+    publication: 'Publication failing',
   };
 
   // pinNames name the request fields an entry's answer carries to pin what
@@ -1343,7 +1344,8 @@
       event.preventDefault();
       decide(d);
     });
-    d.node = el('article', { class: 'decision', 'data-decision': key, 'data-kind': entry.kind, 'data-workstream': entry.workstream }, d.head, d.detail, form);
+    // A failing publication takes no decision, so its card has no form.
+    d.node = el('article', { class: 'decision', 'data-decision': key, 'data-kind': entry.kind, 'data-workstream': entry.workstream }, d.head, d.detail, entry.kind === 'publication' ? null : form);
     decisions.set(key, d);
     return d;
   }
@@ -1425,7 +1427,7 @@
         return button;
       }));
     } else {
-      const none = entry.kind === 'ratification' ? 'none until what blocks it is resolved' : 'none';
+      const none = entry.kind === 'ratification' || entry.kind === 'publication' ? 'none until what blocks it is resolved' : 'none';
       options = el('p', { 'data-field': 'options' }, 'Options: ' + (entry.options.length === 0 ? none : entry.options.join(', ')));
     }
     d.head.replaceChildren(...[
@@ -1438,7 +1440,7 @@
       entry.blocked ? el('p', { class: 'meta', 'data-field': 'blocked' }, 'Waiting on it: ' + entry.blocked) : null,
       options,
       entry.recommendation ? el('p', { class: 'attention', 'data-field': 'recommendation' }, 'Recommendation: ' + entry.recommendation) : null,
-      el('p', { class: 'meta', 'data-field': 'pins' }, 'Answers ' + pins(entry)),
+      entry.kind === 'publication' ? null : el('p', { class: 'meta', 'data-field': 'pins' }, 'Answers ' + pins(entry)),
     ].filter((node) => node !== null));
     switch (entry.kind) {
       case 'escalation':
@@ -1448,6 +1450,8 @@
       case 'delivery':
         renderDelivery(d, name);
         place(d.actions, [d.submit]);
+        break;
+      case 'publication':
         break;
       case 'ratification': {
         const dissent = renderDissent(d, name);

@@ -195,11 +195,13 @@ func TestInboxPrintsEveryDecisionKind(t *testing.T) {
 			Options: []string{"approve", "reject"}, Recommendation: "approve: no objection stands", OpenedAt: opened},
 		{Kind: service.InboxDelivery, Workstream: stream, Revision: 5, Question: "Deliver it?", Blocked: "Publishing the pull request.", Options: []string{"approve"}, OpenedAt: opened,
 			Answer: service.InboxAnswer{Method: "POST", Path: "/v1/delivery/" + stream, Body: map[string]any{"review": 2.0, "review_revision": 5.0, "commit": "abc123", "draft_hash": "f00"}}},
+		{Kind: service.InboxPublication, Workstream: stream, Revision: 1, Question: "Publishing owner approval 1 has failed 3 times in a row. Last failure: GitHub answered 403", Blocked: "Publishing the pull request.", Options: []string{}, OpenedAt: opened,
+			Answer: service.InboxAnswer{Method: "GET", Path: "/v1/delivery/" + stream, Body: map[string]any{}}},
 		{Kind: service.InboxEscalation, Workstream: stream, Number: 3, Batch: "escalation_4", Question: "Which format?", Blocked: "The unit.", Options: []string{}, Recommendation: "Merge them.", OpenedAt: opened},
 	}}
 	var out strings.Builder
 	showInbox(&out, list)
-	want := "Inbox: 5 waiting; each entry names the command that answers it\n" +
+	want := "Inbox: 6 waiting; each entry names the command that answers it\n" +
 		"\n[ratification] " + stamp + " " + stream + "\n  Question: Ratify spec.md revision 1 and plan.json revision 3? Debate ended after round 1: settled\n  Blocked: Sealing.\n  Options: none until what blocks it is resolved\n  Recommendation: do not ratify yet: ratification is blocked by 1 objection\n" +
 		"  Decided on: spec.md revision 1 and plan.json revision 3 in packet revision 2\n  Answer: osmia ratify " + stream + "\n" +
 		"\n[contested] " + stamp + " " + stream + " unit resume\n  Question: Unit resume is contested: two bounces\n  Blocked: Unit resume.\n  Options: review, revise\n" +
@@ -208,6 +210,8 @@ func TestInboxPrintsEveryDecisionKind(t *testing.T) {
 		"  Decided on: packet revision 4\n  Answer: osmia amendment " + stream + " 2 <approve|reject> [note]\n" +
 		"\n[delivery] " + stamp + " " + stream + "\n  Question: Deliver it?\n  Blocked: Publishing the pull request.\n  Options: approve\n" +
 		"  Decided on: final review 2 (report revision 5) of commit abc123\n  Answer: osmia delivery " + stream + ", then osmia approve " + stream + " [description-file]\n" +
+		"\n[publication] " + stamp + " " + stream + "\n  Question: Publishing owner approval 1 has failed 3 times in a row. Last failure: GitHub answered 403\n  Blocked: Publishing the pull request.\n  Options: none until what blocks it is resolved\n" +
+		"  Publishing: owner approval 1\n  Answer: none; fix the cause of the last failure and the service publishes on its next attempt\n" +
 		"\n[3] " + stamp + " " + stream + " (escalation_4)\n  Question: Which format?\n  Blocked: The unit.\n  Recommendation: Merge them.\n  Answer: osmia answer 3 \"...\"\n"
 	if out.String() != want {
 		t.Fatalf("inbox:\n%s\nwant:\n%s", out.String(), want)
