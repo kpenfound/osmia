@@ -26,8 +26,8 @@ const priorityGuidance = "When the owner asks you to change which workstreams go
 	"Workstreams you leave out come after the ones you name. Name each workstream once, and never a delivered or abandoned one. " +
 	"prioritise changes the order only: it does not pause, resume or abandon work, and it is the same order the owner sets with osmia priority."
 
-// runtimeControls hands the chief-of-staff tools that Enforce binds the
-// service whose runtime state they change, once Start has created it.
+// runtimeControls hands the chief-of-staff and Beekeeper tools that read or
+// change runtime state the service itself, once Start has created it.
 type runtimeControls struct{ service atomic.Pointer[Service] }
 
 // prioritise returns the prioritise tool of one claimed chief-of-staff turn.
