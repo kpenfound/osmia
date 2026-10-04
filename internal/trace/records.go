@@ -213,7 +213,7 @@ var keyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 func key(s string) bool     { return keyPattern.MatchString(s) }
 func present(s string) bool { return strings.TrimSpace(s) != "" }
 func validActor(a Actor) bool {
-	return (a.Kind == "owner" || a.Kind == "service" || a.Kind == "agent") && key(a.ID)
+	return (a.Kind == "owner" || a.Kind == "service" || a.Kind == "agent" || a.Kind == "beekeeper") && key(a.ID)
 }
 func validUsage(u coreadapter.Usage) bool {
 	return u.Turns >= 0 && u.CostUSD >= 0 && !math.IsNaN(u.CostUSD) && !math.IsInf(u.CostUSD, 0) && (u.CostKnown || u.CostUSD == 0)
