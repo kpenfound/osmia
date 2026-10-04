@@ -281,6 +281,76 @@ func TestConsistentReadRetriesAcrossARacingCommit(t *testing.T) {
 	}
 }
 
+// secondStream is a second workstream in the same repository and project as
+// stream, used to show that a factory operation blocked on one workstream
+// does not hold up an owner action on another.
+const secondStream = config.WorkstreamID("w_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1")
+
+// TestOwnerActionOnAnotherWorkstreamDoesNotWaitForBlockedFactoryWork covers
+// spec#3 and plan#api-action-isolation: an owner action submitted for one
+// workstream is accepted or refused without waiting for factory work in
+// progress on a different workstream of the same project, even when that
+// work is a RepositoryBoundary operation such as a rebase, merge, build,
+// seal or publish, which concurrentOperation (service.go) does not mark
+// concurrent and which the reconcile controller therefore runs synchronously
+// inside trace.Repository.WithOperation rather than through
+// trace.OperationAttempt.Unlocked (internal/reconcile/controller.go,
+// Controller.reconcile).
+//
+// trace.Repository.operationMu, the lock WithOperation holds for the whole
+// call, is already scoped to this isolation: WithOperation and the
+// bookkeeping writes attempt.Record makes around the blocked effect (claim,
+// observe, effect-start) take r.mu only briefly and release it before
+// Apply runs (internal/trace/operations.go, WithOperation and Record), so
+// Apply holds operationMu but never r.mu. An owner action's write - here
+// Abandon, through SetFeatureStateUnless and CancelTurns - takes only r.mu
+// (internal/trace/notice.go, internal/trace/threads.go) and never calls
+// WithOperation or Serialize itself, so it never contends for operationMu.
+// The only thing that does take operationMu beside WithOperation is
+// Serialize, which the controller uses to run the scheduling hooks of every
+// workstream at the start of a pass, before any operation's effect runs; it
+// is not held during Apply. So the read fix of plan#api-busy-reads, which
+// made reads (and, by the same mechanism, writes) stop paying for a full
+// re-scan while r.mu is briefly held, already gives this isolation: no lock
+// was narrowed or scoped further for this unit. This test is the evidence,
+// not a change to production code.
+func TestOwnerActionOnAnotherWorkstreamDoesNotWaitForBlockedFactoryWork(t *testing.T) {
+	t.Parallel()
+	blocking := newBlockedFactoryOperation()
+	opts := fixture(t)
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, serviceActor)
+	must(t, err)
+	must(t, repository.CreateWorkstream(context.Background(), stream, demoStart, serviceActor))
+	must(t, repository.CreateWorkstream(context.Background(), secondStream, demoStart, serviceActor))
+	must(t, repository.Close())
+
+	opts.Reconciliation.Adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: blocking}
+	s, c := start(t, opts)
+	_, active := s.runtimeOf(project)
+	if active == nil {
+		t.Fatal("no active project")
+	}
+	requestFactoryOperation(t, active.repository, stream, "isolation-blocked")
+
+	select {
+	case <-blocking.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the fake factory operation never started")
+	}
+	defer close(blocking.release)
+
+	ctx := context.Background()
+	started := time.Now()
+	if _, err := c.Abandon(ctx, secondStream, "owner action while factory work is blocked on a different workstream"); err != nil {
+		t.Fatalf("owner action on another workstream: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("owner action on another workstream took %s while factory work was blocked on a different workstream", elapsed)
+	}
+}
+
 // TestConsistentReadReturnsWithoutARacingWrite shows the common case: with
 // nothing racing it, consistentRead calls fn exactly once.
 func TestConsistentReadReturnsWithoutARacingWrite(t *testing.T) {
