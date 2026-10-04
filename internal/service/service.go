@@ -28,6 +28,7 @@ import (
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
+	"github.com/kpenfound/osmia/internal/service/beekeeper"
 	"github.com/kpenfound/osmia/internal/skills"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -180,7 +181,15 @@ type Service struct {
 	// driftAsked is set once an owner's drift rebase request is recorded,
 	// so the next pass reads the drift schedule.
 	driftAsked atomic.Bool
+	// shadow is the Beekeeper's shadow project: created or reopened at
+	// startup, outside cfg.Projects and the reconciliation loop, so no
+	// scheduler or workflow ever runs on it.
+	shadow *trace.Repository
 }
+
+// Beekeeper returns the open repository of the Beekeeper's shadow project,
+// for the Beekeeper's own thread and tools.
+func (s *Service) Beekeeper() *trace.Repository { return s.shadow }
 
 // Start loads state and binds before returning. Wait joins shutdown and cleanup.
 // A configuration without an active project starts an idle service that accepts
@@ -222,7 +231,16 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub()}
+	shadow, err := beekeeper.Open(ctx, root, cfg.Beekeeper, time.Now().UTC())
+	if err != nil {
+		return nil, fmt.Errorf("open the Beekeeper's shadow project: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			shadow.Close()
+		}
+	}()
+	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), shadow: shadow}
 	s.pool = &scheduler.Shared{Traces: s.traces}
 	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider}
 	if opts.skills != nil {
@@ -412,6 +430,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.mu.Unlock()
 		// A project failure that stopped the service is reported once.
 		if e := s.stop(projects...); e != nil && (s.err == nil || !errors.Is(e, s.err)) {
+			s.err = errors.Join(s.err, e)
+		}
+		if e := s.shadow.Close(); e != nil {
 			s.err = errors.Join(s.err, e)
 		}
 		s.cleanupSocket()

@@ -15,6 +15,19 @@ type WorkstreamID string
 var idPattern = regexp.MustCompile(`^[pw]_[0-9a-f]{32}$`)
 var ErrCollision = errors.New("identity already exists")
 
+// ShadowProjectID is the Beekeeper's shadow project: a fixed identifier the
+// service creates or reopens on every start, outside the owner's project
+// configuration. No owner-registered project may take it.
+const ShadowProjectID ProjectID = "p_bebebebebebebebebebebebebebebebe"
+
+// BeekeeperWorkstreamID is the one reserved workstream the shadow project
+// holds for the Beekeeper's thread. It never runs the workstream workflow.
+const BeekeeperWorkstreamID WorkstreamID = "w_bebebebebebebebebebebebebebebebe"
+
+// ErrReservedProjectID reports that a project identifier is reserved for the
+// Beekeeper's shadow project and cannot be registered by the owner.
+var ErrReservedProjectID = errors.New("project identifier is reserved for the Beekeeper's shadow project")
+
 func parseID(s, prefix string) error {
 	if !idPattern.MatchString(s) || s[:2] != prefix {
 		return fmt.Errorf("invalid identity %q: expected %s followed by 32 lowercase hex digits", s, prefix)

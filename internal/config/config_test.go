@@ -336,6 +336,51 @@ func TestInvalid(t *testing.T) {
 	}
 }
 
+// The Beekeeper's runtime session settings come from the [beekeeper] section
+// of the service-level configuration, with documented defaults when it is
+// absent.
+func TestBeekeeperDefaults(t *testing.T) {
+	c, err := Load(fixture(t, topConfig, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Beekeeper != (Beekeeper{Name: "Beekeeper", Profile: "default", Sandbox: "none"}) {
+		t.Fatalf("beekeeper defaults: %+v", c.Beekeeper)
+	}
+}
+
+// The Beekeeper's runtime session settings come from the [beekeeper] section
+// of the service-level configuration, overriding the documented defaults.
+func TestBeekeeperSection(t *testing.T) {
+	top := topConfig + "[beekeeper]\nname = 'Hive'\nprofile = 'other'\nsandbox = 'container'\nimage = 'beekeeper-image'\n[profiles.other]\nagent = 'codex'\nmodel = 'other'\n"
+	c, err := Load(fixture(t, top, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Beekeeper != (Beekeeper{Name: "Hive", Profile: "other", Sandbox: "container", Image: "beekeeper-image"}) {
+		t.Fatalf("beekeeper override: %+v", c.Beekeeper)
+	}
+}
+
+func TestBeekeeperAndShadowProjectIDValidation(t *testing.T) {
+	cases := []struct{ name, top, want string }{
+		{"reserved shadow project id", strings.Replace(topConfig, pid, string(ShadowProjectID), 1), "reserved for the Beekeeper's shadow project"},
+		{"beekeeper invalid sandbox", topConfig + "[beekeeper]\nsandbox = 'unsafe'\n", "beekeeper.sandbox"},
+		{"beekeeper missing image", topConfig + "[beekeeper]\nsandbox = 'container'\n", "beekeeper.image"},
+		{"beekeeper unused image", topConfig + "[beekeeper]\nimage = 'image'\n", "beekeeper.image"},
+		{"beekeeper empty name", topConfig + "[beekeeper]\nname = ''\n", "beekeeper.name"},
+		{"beekeeper unknown key", topConfig + "[beekeeper]\nfoo = 1\n", "beekeeper.foo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := Load(fixture(t, tc.top, projectConfig))
+			if c != nil || err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got config=%+v err=%v; want nil and %q", c, err, tc.want)
+			}
+		})
+	}
+}
+
 // listen.tailnet accepts one DNS label; empty disables it.
 func TestListenTailnet(t *testing.T) {
 	for _, value := range []string{"", "osmia", "o", "osmia-2", "7", strings.Repeat("a", 63)} {

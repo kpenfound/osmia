@@ -31,6 +31,9 @@ func editActiveProjects(path string, id ProjectID, add bool) error {
 	if err := CheckProjectIDs(id); err != nil {
 		return err
 	}
+	if add && id == ShadowProjectID {
+		return ErrReservedProjectID
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err

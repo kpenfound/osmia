@@ -163,10 +163,16 @@ func (r Root) Notifications() (string, error) { return r.managed("notifications.
 // PendingProject is the journal of one interrupted project registration.
 func (r Root) PendingProject() (string, error) { return r.managed("project-add.json") }
 
-// ProjectTrace is the project directory and dedicated trace repository.
+// ProjectTrace is the project directory and dedicated trace repository. The
+// Beekeeper's shadow project is kept out of the "projects" tree entirely, in
+// its own managed directory, so it never shares a parent directory with any
+// owner-registered project and nothing scans it as one.
 func (r Root) ProjectTrace(id ProjectID) (string, error) {
 	if err := CheckProjectIDs(id); err != nil {
 		return "", err
+	}
+	if id == ShadowProjectID {
+		return r.managed("beekeeper")
 	}
 	return r.managed("projects", string(id))
 }

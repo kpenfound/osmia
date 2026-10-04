@@ -96,6 +96,14 @@ func location(root config.Root, project config.Project) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The Beekeeper's shadow project has no target repository: nothing is
+	// cloned or configured for it.
+	if project.ID == config.ShadowProjectID {
+		if project.Clone != "" {
+			return "", fmt.Errorf("the shadow project must not configure a target clone")
+		}
+		return directory, nil
+	}
 	if !filepath.IsAbs(project.Clone) {
 		return "", fmt.Errorf("target clone must be an absolute configured path")
 	}
@@ -117,12 +125,16 @@ func openDirectory(root config.Root, project config.Project) (*Repository, error
 	if err != nil {
 		return nil, err
 	}
+	rel, err := filepath.Rel(root.String(), directory)
+	if err != nil {
+		return nil, err
+	}
 	base, err := os.OpenRoot(root.String())
 	if err != nil {
 		return nil, err
 	}
 	defer base.Close()
-	dir, err := base.OpenRoot("projects/" + string(project.ID))
+	dir, err := base.OpenRoot(rel)
 	if err != nil {
 		return nil, err
 	}
@@ -337,11 +349,15 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 	if _, err := root.ProjectTrace(project.ID); err != nil {
 		return nil, err
 	}
+	rel, err := filepath.Rel(root.String(), directory)
+	if err != nil {
+		return nil, err
+	}
 	base, err := os.OpenRoot(root.String())
 	if err != nil {
 		return nil, err
 	}
-	err = base.MkdirAll("projects/"+string(project.ID), 0700)
+	err = base.MkdirAll(rel, 0700)
 	base.Close()
 	if err != nil {
 		return nil, err

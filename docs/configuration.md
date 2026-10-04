@@ -140,6 +140,15 @@ webhook = ""
 # "never", "always" or a duration.
 refresh = "24h"
 
+[beekeeper]
+# The Beekeeper's runtime session settings. It runs in its own shadow
+# project, separate from every registered project's configuration.
+name = "Beekeeper"
+profile = "default"
+sandbox = "none"
+# image = "example/osmia-claude:1" # only with sandbox "container" or "sbx"
+
+
 [roles.mason]
 profile = "default"
 sandbox = "none"

@@ -44,6 +44,10 @@ type Config struct {
 	Jev            Jev                `toml:"jev" json:"jev"`
 	Notify         Notify             `toml:"notify" json:"notify"`
 	Skills         Skills             `toml:"skills" json:"skills"`
+	// Beekeeper holds the Beekeeper's runtime session settings. It never
+	// comes from, and never applies to, any registered project's
+	// configuration.
+	Beekeeper Beekeeper `toml:"beekeeper" json:"beekeeper"`
 	// Project is the project this configuration is about: the only active
 	// project of a loaded configuration, or the project For selected. It is
 	// zero when no project, or more than one, is active.
@@ -302,7 +306,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Loop: Loop{30}, Events: Events{Window: "5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev()}
+	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Loop: Loop{30}, Events: Events{Window: "5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev(), Beekeeper: defaultBeekeeper()}
 	md, err := decode(path, c, false)
 	if err != nil {
 		return nil, err
@@ -316,6 +320,9 @@ func LoadTopLevel(options Options) (*Config, error) {
 		ids[i], err = ParseProjectID(s)
 		if err != nil {
 			return nil, fieldError(path, fmt.Sprintf("active_projects[%d]", i), err.Error())
+		}
+		if ids[i] == ShadowProjectID {
+			return nil, fieldError(path, fmt.Sprintf("active_projects[%d]", i), "reserved for the Beekeeper's shadow project")
 		}
 	}
 	if err := CheckProjectIDs(ids...); err != nil {
@@ -384,6 +391,9 @@ func LoadTopLevel(options Options) (*Config, error) {
 	}
 	if _, _, err := skills.ParseRefresh(c.Skills.Refresh); err != nil {
 		return nil, fieldError(path, "skills.refresh", err.Error())
+	}
+	if err := c.Beekeeper.validate(path); err != nil {
+		return nil, err
 	}
 	if c.Notify.Webhook != "" {
 		if err := validateWebhook(c.Notify.Webhook); err != nil {
@@ -689,6 +699,12 @@ func knownKey(key toml.Key, project bool) bool {
 			return true
 		}
 		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "version", "name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "checks_timeout", "capacity", "capacity.per_workstream"}, path)
+	}
+	if key[0] == "beekeeper" {
+		if len(key) == 1 {
+			return true
+		}
+		return len(key) == 2 && slices.Contains([]string{"name", "profile", "sandbox", "image"}, key[1])
 	}
 	if key[0] == "hearsay" {
 		if len(key) == 1 {

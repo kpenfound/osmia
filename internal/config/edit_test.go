@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,6 +179,26 @@ func TestWriteProjectConfigLoads(t *testing.T) {
 		if err := WriteProjectConfig(filepath.Join(t.TempDir(), "config.toml"), bad); err == nil {
 			t.Fatalf("invalid project written: %+v", bad)
 		}
+	}
+}
+
+// Owner project registration refuses the Beekeeper's reserved shadow
+// identifier: AddActiveProject, the function registration completes with,
+// errors and leaves the file untouched; removal and a listed-elsewhere check
+// are unaffected.
+func TestAddActiveProjectRefusesShadowProjectID(t *testing.T) {
+	text := "version = 1\nactive_projects = []\n"
+	path := editFixture(t, text)
+	if err := AddActiveProject(path, ShadowProjectID); !errors.Is(err, ErrReservedProjectID) {
+		t.Fatalf("got %v, want ErrReservedProjectID", err)
+	}
+	if got := read(t, path); got != text {
+		t.Fatalf("file changed: %s", got)
+	}
+	// Removing an identity never listed, including the reserved one, is a
+	// no-op, not a refusal: there is nothing for it to protect.
+	if err := RemoveActiveProject(path, ShadowProjectID); err != nil || read(t, path) != text {
+		t.Fatalf("remove: %v\n%s", err, read(t, path))
 	}
 }
 
