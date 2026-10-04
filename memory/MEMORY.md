@@ -1,0 +1,2 @@
+- [Mason env lacks git/dagger](mason_env_no_git_dagger.md) — can't run go test or dagger check here; use go build/vet/gofmt + manual tracing
+- [Osmia Beekeeper turns architecture](osmia_beekeeper_turns_architecture.md) — how to wire Beekeeper turn dispatch/recovery to match chief-of-staff's reconcile path, and a capacity-test fixture trap

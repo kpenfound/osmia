@@ -13,6 +13,8 @@ import (
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/busybees/core/agent/procs"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/service/beekeeper"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -77,16 +79,17 @@ func (s *Service) recoverSessions(ctx context.Context, cfg *config.Config, repos
 				}
 			}
 			if th.Identity.Role == trace.ChiefOfStaff && s.options.Threads != nil {
-				settled, err := repository.Thread(stream, th.Identity.ID)
-				if err != nil {
+				if err := s.recoverContinuations(ctx, repository, stream, th.Identity.ID, func(turn string) error {
+					return s.recoverChief(ctx, repository, stream, th.Identity.ID, turn)
+				}); err != nil {
 					return err
 				}
-				for _, q := range settled.Turns {
-					if q.Response != nil && q.Status() == "interrupted" && q.Response.Actor == recoveryActor {
-						if err := s.recoverChief(ctx, repository, stream, th.Identity.ID, q.Request.TurnID); err != nil {
-							return err
-						}
-					}
+			}
+			if th.Identity.Role == beekeeper.AgentID && s.options.BeekeeperTurns != nil {
+				if err := s.recoverContinuations(ctx, repository, stream, th.Identity.ID, func(turn string) error {
+					return s.recoverBeekeeper(ctx, cfg, repository, stream, th.Identity.ID, turn)
+				}); err != nil {
+					return err
 				}
 			}
 		}
@@ -177,17 +180,40 @@ func sessionDirectories(cfg *config.Config, project config.ProjectID, stream con
 	}
 }
 
-func (s *Service) recoverChief(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, agent, turn string) error {
-	th, err := repository.Thread(stream, agent)
+// recoverContinuations calls recover with the turn ID of every turn of the
+// thread's agent that this or an earlier recovery pass ended interrupted, so
+// each gets the chance at a continuation an unbroken service session would
+// have given it.
+func (s *Service) recoverContinuations(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, agent string, recover func(turn string) error) error {
+	settled, err := repository.Thread(stream, agent)
 	if err != nil {
 		return err
+	}
+	for _, q := range settled.Turns {
+		if q.Response != nil && q.Status() == "interrupted" && q.Response.Actor == recoveryActor {
+			if err := recover(q.Request.TurnID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// recoverContinuation enqueues turn's continuation on the thread with
+// profile, resuming the interrupted request from the durable thread state,
+// and reports whether it did so: it takes no action, and reports false, if
+// the turn did not end interrupted or its continuation is already enqueued.
+func (s *Service) recoverContinuation(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, agent, turn string, profile coreadapter.Profile) (bool, error) {
+	th, err := repository.Thread(stream, agent)
+	if err != nil {
+		return false, err
 	}
 	for _, q := range th.Turns {
 		if q.Request.TurnID != turn {
 			continue
 		}
 		if q.Response == nil || q.Status() != "interrupted" {
-			return nil
+			return false, nil
 		}
 		// After maxRecoveries interruptions in a row the work is not
 		// continued again; the owner's next message resumes the thread.
@@ -199,18 +225,42 @@ func (s *Service) recoverChief(ctx context.Context, repository *trace.Repository
 		req.TurnID = fmt.Sprintf("%s-recover-%d", agent, q.Sequence)
 		for _, existing := range th.Turns {
 			if existing.Request.TurnID == req.TurnID {
-				return nil
+				return false, nil
 			}
 		}
 		req.At, req.Actor, req.Cause = s.now(), recoveryActor, q.Response.ID
 		req.Prompt += "\n\nThe service stopped during your previous turn. Continue this work from the durable thread state."
-		profile, _, err := s.roleExecution(s.current(), trace.ChiefOfStaff)
-		if err != nil {
-			return err
-		}
 		req.Profile = profile
-		_, err = repository.EnqueueTurn(ctx, req)
+		if _, err := repository.EnqueueTurn(ctx, req); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func (s *Service) recoverChief(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, agent, turn string) error {
+	profile, _, err := s.roleExecution(s.current(), trace.ChiefOfStaff)
+	if err != nil {
 		return err
 	}
-	return nil
+	_, err = s.recoverContinuation(ctx, repository, stream, agent, turn, profile)
+	return err
+}
+
+// recoverBeekeeper enqueues the Beekeeper's continuation turn with the
+// profile the Beekeeper section of the loaded configuration names, the same
+// way recoverChief does for an interrupted chief-of-staff turn, and runs it
+// at once through beekeeper.Continue: the shadow project has no background
+// reconciliation loop of its own to pick the continuation up later.
+func (s *Service) recoverBeekeeper(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, agent, turn string) error {
+	profile, err := cfg.NamedProfile(cfg.Beekeeper.Profile)
+	if err != nil {
+		return err
+	}
+	queued, err := s.recoverContinuation(ctx, repository, stream, agent, turn, profile)
+	if err != nil || !queued {
+		return err
+	}
+	return beekeeper.Continue(ctx, repository, s.options.BeekeeperTurns, s.beekeeperPrepare(cfg), s.now)
 }

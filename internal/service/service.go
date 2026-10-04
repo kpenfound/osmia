@@ -69,6 +69,14 @@ type Options struct {
 	// rulings before the mason controller starts more work.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error)
+	// BeekeeperTurns runs the Beekeeper's own turns: the same runner-boundary
+	// adapter chief-of-staff turns use, on the runtime agent-session
+	// machinery, bound only to the shadow project's repository and the
+	// Beekeeper section of the loaded configuration. No registered project's
+	// configuration, charter or capacity bounds these turns, and none of
+	// Threads, Librarian, Architect or Committee ever runs one. Without it,
+	// PostBeekeeper fails and records nothing.
+	BeekeeperTurns coreadapter.Turns
 	// Librarian supplies the execution boundary of the librarian's
 	// knowledge-base extraction and refresh turns. Without it those operations
 	// fail with a recorded reason and the project stays usable.
@@ -182,14 +190,58 @@ type Service struct {
 	// so the next pass reads the drift schedule.
 	driftAsked atomic.Bool
 	// shadow is the Beekeeper's shadow project: created or reopened at
-	// startup, outside cfg.Projects and the reconciliation loop, so no
-	// scheduler or workflow ever runs on it.
+	// startup, outside cfg.Projects and this service's own reconciliation
+	// loop. beekeeper.Post and beekeeper.Continue run their own scheduler and
+	// reconcile.Controller pass directly against it, on demand rather than on
+	// a continuous loop; no other workflow ever runs on it.
 	shadow *trace.Repository
 }
 
 // Beekeeper returns the open repository of the Beekeeper's shadow project,
 // for the Beekeeper's own thread and tools.
 func (s *Service) Beekeeper() *trace.Repository { return s.shadow }
+
+// BeekeeperBusy reports whether the Beekeeper's latest owner request has no
+// finished turn, for bk-api's conflict response.
+func (s *Service) BeekeeperBusy() (bool, error) {
+	return beekeeper.Busy(s.shadow)
+}
+
+// beekeeperPrepare supplies a Beekeeper turn's session directory and
+// execution settings from cfg's Beekeeper section, for beekeeper.Post and
+// beekeeper.Continue alike.
+func (s *Service) beekeeperPrepare(cfg *config.Config) beekeeper.Prepare {
+	b := cfg.Beekeeper
+	root := cfg.Root.String()
+	return func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
+		// The same layout sessionDirectories' default case expects, so a
+		// crash between this call and ClaimTurn is found by the existing
+		// recovery path.
+		directory := filepath.Join(root, "threads", string(config.ShadowProjectID), string(in.Workstream), in.Agent, in.Turn)
+		if err := os.MkdirAll(directory, 0700); err != nil {
+			return coreadapter.PreparedTurn{}, err
+		}
+		return coreadapter.PreparedTurn{SessionDirectory: directory, Execution: coreadapter.ExecutionSettings{Mode: b.Sandbox, Image: b.Image}}, nil
+	}
+}
+
+// PostBeekeeper records text as the Beekeeper thread's next owner request
+// and runs the Beekeeper turn through beekeeper.Post, on
+// Options.BeekeeperTurns, with the profile and sandbox settings the
+// Beekeeper section of the loaded configuration names alone: no registered
+// project's configuration, charter or capacity bounds it. A busy Beekeeper
+// returns beekeeper.ErrBusy and records nothing.
+func (s *Service) PostBeekeeper(ctx context.Context, text string) (trace.QueuedTurn, error) {
+	cfg := s.current()
+	profile, err := cfg.NamedProfile(cfg.Beekeeper.Profile)
+	if err != nil {
+		return trace.QueuedTurn{}, fmt.Errorf("beekeeper profile %q: %w", cfg.Beekeeper.Profile, err)
+	}
+	if s.options.BeekeeperTurns == nil {
+		return trace.QueuedTurn{}, fmt.Errorf("the beekeeper has no turn runner configured")
+	}
+	return beekeeper.Post(ctx, s.shadow, profile, s.options.BeekeeperTurns, s.beekeeperPrepare(cfg), s.now, text)
+}
 
 // Start loads state and binds before returning. Wait joins shutdown and cleanup.
 // A configuration without an active project starts an idle service that accepts
@@ -351,6 +403,17 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			return nil, fmt.Errorf("recover thread sessions: %w", err)
 		}
 		reapSandboxes(ctx, view, s.options.removeSandbox)
+	}
+	// The Beekeeper's thread is recovered by the same existing path every
+	// workstream's threads are: a turn a previous session claimed or
+	// prepared without capturing a result ends interrupted, exactly as an
+	// interrupted chief-of-staff turn does, and gets the same kind of
+	// continuation turn, run at once since the shadow project has no
+	// background reconciliation loop to pick it up later.
+	if err = s.recoverSessions(ctx, cfg, shadow); err != nil {
+		s.cleanupSocket()
+		st.Close()
+		return nil, fmt.Errorf("recover the beekeeper's interrupted turns: %w", err)
 	}
 	s.lifetime, s.cancel = context.WithCancel(ctx)
 	hostname := cfg.Listen.Tailnet
