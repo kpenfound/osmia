@@ -824,8 +824,12 @@
   }
 
   function renderConversationEntry(e) {
+    const who = { message: 'You', action: 'Chief of staff acted' }[e.kind] || 'Chief of staff';
     return el('li', { class: 'entry', 'data-kind': e.kind, 'data-turn': e.turn, 'data-state': e.state },
-      el('div', { class: 'meta' }, { message: 'You', action: 'Chief of staff acted' }[e.kind] || 'Chief of staff', ' · ', when(e.at), ' · ', el('span', { 'data-field': 'state' }, e.state)),
+      el('div', { class: 'meta' },
+        el('span', { 'data-ann': 'role' }, who), ' · ',
+        el('span', { 'data-ann': 'when' }, when(e.at)), ' · ',
+        el('span', { 'data-field': 'state', 'data-ann': 'action' }, e.state)),
       el('div', { class: 'text', 'data-field': 'text' }, e.text));
   }
 
@@ -834,7 +838,10 @@
   function renderStatus(e, latest) {
     const s = e.status;
     return el('li', { class: 'entry', 'data-kind': 'status', 'data-revision': String(s.revision), 'data-latest': String(latest) },
-      el('div', { class: 'meta' }, 'Chief of staff · status · ', when(e.at)),
+      el('div', { class: 'meta' },
+        el('span', { 'data-ann': 'role' }, 'Chief of staff'), ' · ',
+        el('span', { 'data-ann': 'action' }, 'status'), ' · ',
+        el('span', { 'data-ann': 'when' }, when(e.at))),
       el('div', { class: 'card' },
         s.attention ? el('p', latest ? { class: 'attention', 'data-field': 'attention' } : { class: 'meta', 'data-field': 'past-attention' }, s.attention) : null,
         el('p', { class: 'text', 'data-field': 'note' }, s.note),
@@ -845,10 +852,10 @@
     const s = e.session;
     const report = s.failure || s.summary;
     const line = el('span', { 'data-field': 'session' },
-      el('strong', {}, role(s.role)), s.unit ? ' on ' + s.unit : '',
+      el('strong', { 'data-ann': 'role' }, role(s.role)), s.unit ? ' on ' + s.unit : '',
       ' · ', el('span', { 'data-field': 'profile' }, s.profile),
-      ' · ', el('span', { 'data-field': 'outcome' }, sessionOutcome(s)));
-    const head = [el('span', { class: 'dot', 'aria-hidden': 'true' }), line, el('span', { class: 'meta' }, when(s.started_at))];
+      ' · ', el('span', { 'data-field': 'outcome', 'data-ann': 'action' }, sessionOutcome(s)));
+    const head = [el('span', { class: 'dot', 'aria-hidden': 'true' }), line, el('span', { class: 'meta', 'data-ann': 'when' }, when(s.started_at))];
     const node = el('li', { class: 'entry event', 'data-kind': 'session', 'data-role': s.role, 'data-state': s.state, 'data-turn': s.turn });
     if (!report) {
       node.append(el('div', { class: 'event-line' }, ...head));
@@ -873,9 +880,11 @@
     return el('li', { class: 'entry event', 'data-kind': 'transition', 'data-unit': t.unit || '', 'data-to': t.to },
       el('div', { class: 'event-line', title: t.reason },
         el('span', { class: 'dot', 'aria-hidden': 'true' }),
-        el('span', { 'data-field': 'transition' }, t.unit ? 'Unit ' + t.unit : 'Workstream', ': ', t.from ? t.from + ' → ' : '', el('strong', {}, t.to)),
+        el('span', { 'data-field': 'transition' },
+          el('span', { 'data-ann': 'role' }, t.unit ? 'Unit ' + t.unit : 'Workstream'), ': ', t.from ? t.from + ' → ' : '',
+          el('strong', { 'data-ann': 'action' }, t.to)),
         t.reason ? el('span', { class: 'reason' }, t.reason) : null,
-        el('span', { class: 'meta' }, when(e.at))));
+        el('span', { class: 'meta', 'data-ann': 'when' }, when(e.at))));
   }
 
   // renderFeed shows the workstream's feed: the conversation with the chief
