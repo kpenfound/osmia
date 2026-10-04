@@ -143,10 +143,10 @@ func (b *baseRefresher) Inspect(ctx context.Context, op coreadapter.Operation) (
 	}
 	for _, t := range transitions {
 		if t.Cause == op.ID && t.Subject == baseRefreshAction && t.To == "checked" {
-			return coreadapter.Observation{State: coreadapter.EffectCompleted, Result: &coreadapter.OperationResult{Outcome: "succeeded", Evidence: t.Reason}}, nil
+			return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: fmt.Sprintf("integration check %d is recorded as %s", in.Check, t.ID), Result: &coreadapter.OperationResult{Outcome: "succeeded", Evidence: t.Reason}}, nil
 		}
 	}
-	return coreadapter.Observation{State: coreadapter.EffectAbsent}, nil
+	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: fmt.Sprintf("integration check %d has not recorded its result", in.Check)}, nil
 }
 
 func (b *baseRefresher) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {

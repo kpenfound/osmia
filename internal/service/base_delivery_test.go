@@ -69,8 +69,7 @@ func maintenanceFixture(t *testing.T) *publicationFixture {
 	refresh := &baseRefresher{s: p.s, repository: repo}
 	must(t, refresh.Pass(ctx))
 	op := actionOperation(t, repo, p.stream, baseRefreshAction)
-	result, err = refresh.Apply(ctx, op)
-	must(t, err)
+	result = settleOperation(t, p.s, repo, p.stream, op, refresh)
 	if result.Outcome != "succeeded" {
 		t.Fatal(result)
 	}
@@ -197,8 +196,13 @@ func TestBaseRefreshRetryDoesNotDuplicateObservation(t *testing.T) {
 	if next.ID == op.ID {
 		t.Fatal("next integration check not scheduled")
 	}
+	// The check's effect lands before its result is recorded; settling
+	// observes the completed check through the trace.
 	_, err = refresh.Apply(ctx, next)
 	must(t, err)
+	if result := settleOperation(t, p.s, p.repository, p.stream, next, refresh); result.Outcome != "succeeded" {
+		t.Fatal(result)
+	}
 	_, rev, err = baseObservationAt(p.repository, p.stream)
 	must(t, err)
 	if rev != 1 {
@@ -272,8 +276,7 @@ func TestBaseIntegrationReleasesUnsealedDependentAfterParentBranchRemoval(t *tes
 	refresh := &baseRefresher{s: p.s, repository: repo}
 	must(t, refresh.Pass(ctx))
 	op := actionOperation(t, repo, child, baseRefreshAction)
-	result, err := refresh.Apply(ctx, op)
-	must(t, err)
+	result := settleOperation(t, p.s, repo, child, op, refresh)
 	if result.Outcome != "succeeded" {
 		t.Fatal(result)
 	}
