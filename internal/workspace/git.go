@@ -142,6 +142,26 @@ func (g *Git) MergeBase(ctx context.Context, a, b string) (string, error) {
 	return g.run(ctx, "merge-base", a, b)
 }
 
+// Integrated reports whether onto already holds the changes of head: their
+// three-way merge from the merge base is clean and leaves onto's tree as it
+// is. Squash and rebase merges count, since only content is compared, and
+// nothing is committed and no ref moves.
+func (g *Git) Integrated(ctx context.Context, head, onto string) (bool, error) {
+	out, err := g.runInRaw(ctx, g.Clone, nil, "merge-tree", "--write-tree", "--no-messages", onto, head)
+	if exitCode(err, 1) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	merged, _, _ := strings.Cut(out, "\n")
+	tree, err := g.run(ctx, "rev-parse", "--verify", onto+"^{tree}")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(merged) == tree, nil
+}
+
 // Diff reads two recorded commits directly, independently of moving branches.
 func (g *Git) Diff(ctx context.Context, base, candidate string) (string, error) {
 	for _, revision := range []string{base, candidate} {

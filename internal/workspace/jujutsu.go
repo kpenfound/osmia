@@ -860,6 +860,12 @@ func (j *Jujutsu) MergeBase(ctx context.Context, a, b string) (string, error) {
 	return j.git().MergeBase(ctx, a, b)
 }
 
+// Integrated reports whether onto already holds the changes of head, as
+// Git's Integrated does.
+func (j *Jujutsu) Integrated(ctx context.Context, head, onto string) (bool, error) {
+	return j.git().Integrated(ctx, head, onto)
+}
+
 // Commit reads the tree, parents and message of a commit.
 func (j *Jujutsu) Commit(ctx context.Context, revision string) (Commit, error) {
 	return j.git().Commit(ctx, revision)

@@ -151,7 +151,7 @@ func dependentBaseChanged(ctx context.Context, cfg *config.Config, repo *trace.R
 }
 
 func baseWaiting(repo *trace.Repository, stream config.WorkstreamID) (bool, error) {
-	state, err := repo.Workflow(stream, "base-wait")
+	state, err := repo.Workflow(stream, baseWaitSubject)
 	return state.Value == "waiting", err
 }
 
@@ -227,7 +227,7 @@ func (s *Service) baseWaitPass(ctx context.Context, repo *trace.Repository) erro
 			}
 			parent = next.Base
 		}
-		state, err := repo.Workflow(stream, "base-wait")
+		state, err := repo.Workflow(stream, baseWaitSubject)
 		if err != nil {
 			return err
 		}
@@ -238,12 +238,12 @@ func (s *Service) baseWaitPass(ctx context.Context, repo *trace.Repository) erro
 		if state.Value == next || state.Value == "" && next == "available" {
 			continue
 		}
-		id := fmt.Sprintf("base-wait-%d", state.Version+1)
+		id := fmt.Sprintf("%s-%d", baseWaitSubject, state.Version+1)
 		if reason == "" {
 			reason = "the workstream base is available again"
 		}
 		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: s.now(), Actor: foremanActor, Cause: "base-availability"}
-		_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: "base-wait", From: state.Value, To: next, Reason: reason}, Events: []trace.Event{trace.Notice(id, "base", reason)}})
+		_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: baseWaitSubject, From: state.Value, To: next, Reason: reason}, Events: []trace.Event{trace.Notice(id, "base", reason)}})
 		if err != nil {
 			return err
 		}

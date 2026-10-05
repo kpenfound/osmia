@@ -241,6 +241,19 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 		}
 		return out
 	}
+	// await ticks until the turns that ran are want. A pass dispatches a
+	// turn without waiting for it, so the ticks that follow a pass may come
+	// before the turn runs.
+	await := func(what string, want []string) {
+		t.Helper()
+		deadline := time.Now().Add(demoTimeout)
+		for !slices.Equal(ran(), want) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s runs %v, want %v", what, ran(), want)
+			}
+			tick()
+		}
+	}
 
 	target := runtime.Target{Scope: "workstream", Project: project, Workstream: stream}
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
@@ -249,7 +262,9 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "chief", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: chief"}
 	_, err = repo.EnqueueTurn(ctx, req)
 	must(t, err)
-	// A tick is taken only once the previous pass has finished.
+	await("paused", []string{"chief"})
+	// A tick is taken only once the previous pass has finished, so the
+	// held turn had passes in which to start.
 	tick()
 	tick()
 	if got := ran(); !slices.Equal(got, []string{"chief"}) {
@@ -262,11 +277,7 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 	// Clearing the pause is enough: the periodic pass runs the held turn with
 	// no new message or operation.
 	mutation(t, c, "DELETE", "pause", ClearPauseRequest(target))
-	tick()
-	tick()
-	if got := ran(); !slices.Equal(got, []string{"chief", "held"}) {
-		t.Fatalf("resumed runs %v", got)
-	}
+	await("resumed", []string{"chief", "held"})
 	must(t, s.Close())
 }
 

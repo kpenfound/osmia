@@ -9,6 +9,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -254,6 +255,29 @@ type AbandonResponse struct {
 	State      string              `json:"state"`
 	Reason     string              `json:"reason"`
 }
+
+// BaseUpstreamRequest is the owner's decision to continue a workstream
+// parked on its abandoned base from upstream. Base names that abandoned
+// workstream, as the inbox entry the owner read names it.
+type BaseUpstreamRequest struct {
+	Base config.WorkstreamID `json:"base"`
+}
+
+// BaseUpstreamResponse reports a workstream moved onto upstream: the
+// abandoned base, the commit of it the workstream held, found already in
+// upstream, and the upstream commit the workstream continues from. Its
+// feature branch moves there with its next drift rebase.
+type BaseUpstreamResponse struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	Base       config.WorkstreamID `json:"base"`
+	Integrated string              `json:"integrated,omitempty"`
+	Upstream   seal.Base           `json:"upstream"`
+}
+
+// BaseDecisionUpstream is the decision a parked base's inbox entry offers
+// when the workstream's own base was abandoned: continue from upstream.
+const BaseDecisionUpstream = "upstream"
 
 // ArchiveResponse reports whether a workstream is archived after the
 // owner's request.
@@ -619,6 +643,7 @@ const (
 	InboxDrift        = "drift"
 	InboxNotices      = "notices"
 	InboxLoop         = "loop"
+	InboxBase         = "base"
 )
 
 // InboxEntry is one open owner decision. Kind says which, and Answer how it

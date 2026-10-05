@@ -1075,3 +1075,47 @@ func TestReplayInFromResumesAfterSquashedDependencyConflict(t *testing.T) {
 		})
 	}
 }
+
+// Integrated finds a dependency's changes in upstream when upstream took them
+// squashed, as other commits, and not when upstream holds only some of them
+// or conflicting ones. It moves no ref.
+func TestIntegratedComparesContentNotHistory(t *testing.T) {
+	for _, backend := range []string{"git", "jujutsu"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newFixture(t)
+			ctx := context.Background()
+			base, feature, _ := rebaseFixture(t, f)
+			parent1 := f.commitFiles(t, feature, base, map[string]string{"parent.go": "one\n"})
+			parent2 := f.commitFiles(t, feature, parent1, map[string]string{"parent.go": "two\n", "other.go": "other\n"})
+			at := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+			var g Provider = f.provider
+			if backend == "jujutsu" {
+				requireJJ(t)
+				g = &Jujutsu{Clone: f.clone, Directory: filepath.Join(t.TempDir(), "integrated-jj")}
+			}
+			check := func(onto string, want bool) {
+				t.Helper()
+				refs := git(t, "-C", f.clone, "for-each-ref")
+				if ok, err := g.Integrated(ctx, parent2, onto); err != nil || ok != want {
+					t.Fatalf("Integrated(%s) = %v, %v; want %v", onto, ok, err, want)
+				}
+				if after := git(t, "-C", f.clone, "for-each-ref"); after != refs {
+					t.Fatalf("Integrated moved refs:\n%s\nwant\n%s", after, refs)
+				}
+			}
+			check(base, false)
+			squashed, err := f.provider.Squash(ctx, base, parent2, "Integrate dependency", at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			git(t, "-C", feature.Path, "reset", "--hard", "--quiet", squashed)
+			upstream := f.commitFiles(t, feature, squashed, map[string]string{"upstream.go": "upstream\n"})
+			check(upstream, true)
+			partial := f.commitFiles(t, feature, upstream, map[string]string{"other.go": ""})
+			check(partial, false)
+			git(t, "-C", feature.Path, "reset", "--hard", "--quiet", base)
+			conflicting := f.commitFiles(t, feature, base, map[string]string{"parent.go": "three\n", "other.go": "other\n"})
+			check(conflicting, false)
+		})
+	}
+}

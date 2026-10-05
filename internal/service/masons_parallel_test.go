@@ -40,7 +40,8 @@ const disjointPlan = `{"version": 1, "units": [
 // masons and capacity.per_workstream to perWorkstream, whose entity map adds
 // internal.upload and internal.audit to the seeded one before any plan is
 // drafted. Every unit's first mason turn is played by the returned fake
-// masons.
+// masons, and its follow-up turns fail as newMasonFixtureOn's do, so a unit
+// whose first turn calls no outcome tool stays implementing.
 func newParallelMasonFixture(t *testing.T, masons, perWorkstream int, drafted string) (*shedFixture, *fakeMasons) {
 	t.Helper()
 	return newParallelMasonFixtureOn(t, config.WorkspacesGit, masons, perWorkstream, drafted)
@@ -61,6 +62,11 @@ func newParallelMasonFixtureOn(t *testing.T, backend string, masons, perWorkstre
 	defer f.engine.mu.Unlock()
 	for _, unit := range []string{"upload", "audit"} {
 		f.engine.turns[masonTurnID(unit)] = fake.turn
+		for i := 1; i <= 3; i++ {
+			name := fmt.Sprintf("%s-clarify-%d", masonAgent(unit), i)
+			fake.play[name] = failMasonTurn
+			f.engine.turns[name] = fake.turn
+		}
 	}
 	return f, fake
 }

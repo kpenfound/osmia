@@ -49,6 +49,22 @@ func (s *Service) documentRequest(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	if raw, ok := strings.CutPrefix(r.URL.Path, Prefix+"/base/"); ok {
+		if raw, ok := strings.CutSuffix(raw, "/upstream"); ok {
+			if r.Method != http.MethodPost {
+				fail(w, Unsupported)
+				return true
+			}
+			var in BaseUpstreamRequest
+			if !decode(w, r, &in) {
+				return true
+			}
+			if out, api := s.baseUpstream(r.Context(), raw, in); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return true
+		}
 		_, stream, repo, api := s.conversationTrace(raw)
 		if api != nil {
 			failWith(w, api)

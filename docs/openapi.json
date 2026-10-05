@@ -338,6 +338,55 @@
         }
       }
     },
+    "/v1/base/{workstream}/upstream": {
+      "post": {
+        "summary": "Move a workstream parked on its abandoned base onto upstream",
+        "operationId": "postBaseByWorkstreamUpstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BaseUpstreamRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseUpstreamResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/charter": {
       "get": {
         "summary": "List charter proposals",
@@ -2586,6 +2635,34 @@
           },
           "revision": {
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "BaseUpstreamRequest": {
+        "properties": {
+          "base": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "BaseUpstreamResponse": {
+        "properties": {
+          "base": {
+            "type": "string"
+          },
+          "integrated": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "upstream": {
+            "$ref": "#/components/schemas/SealBase"
+          },
+          "workstream": {
+            "type": "string"
           }
         },
         "type": "object"

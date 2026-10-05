@@ -39,6 +39,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   project rebase <project-id> [--json]
   handin <project-id> <path|issue-url|-> [--base WORKSTREAM] [--skip-debate] [--json]
   abandon <workstream-id> <reason> [--json]
+  upstream <workstream-id> <base-workstream-id> [--json]
   archive <workstream-id> [--json]
   unarchive <workstream-id> [--json]
   shed object <workstream-id> <argument> [--json]
@@ -209,7 +210,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 0
 	case "status":
 		valid = len(a) <= 1
-	case "send", "abandon":
+	case "send", "abandon", "upstream":
 		valid = len(a) == 2
 	case "ratify", "archive", "unarchive":
 		valid = len(a) == 1
@@ -275,7 +276,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "stop" {
 		if err := c.Do(ctx, "POST", service.Prefix+"/stop", nil, nil); err != nil {
@@ -484,6 +485,29 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Workstream %s abandoned\nReason: %s\n", result.Workstream, result.Reason)
+		return 0
+	}
+	if cmd == "upstream" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		base, err := config.ParseWorkstreamID(a[1])
+		if err != nil {
+			return invalid()
+		}
+		result, err := c.BaseUpstream(ctx, id, base)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Workstream %s continues from %s/%s at %s instead of abandoned workstream %s\n", result.Workstream, result.Upstream.Remote, result.Upstream.Branch, result.Upstream.Commit, result.Base)
+		if result.Integrated != "" {
+			fmt.Fprintf(stdout, "Integrated: upstream holds the changes of %s at %s\n", result.Base, result.Integrated)
+		}
+		fmt.Fprintln(stdout, "Its next drift rebase replays its own commits onto upstream")
 		return 0
 	}
 	if cmd == "archive" || cmd == "unarchive" {
@@ -1495,6 +1519,12 @@ func showInbox(w io.Writer, list service.InboxResponse) {
 		case service.InboxDrift:
 			block("Held", fmt.Sprintf("drift rebase %d", e.Revision))
 			block("Answer", fmt.Sprintf("osmia project rebase %v asks for another drift rebase; osmia send %s \"...\" asks the chief of staff to hand it back with a note; or abandon the workstream", e.Answer.Body["project"], stream))
+		case service.InboxBase:
+			if len(e.Options) > 0 {
+				block("Answer", fmt.Sprintf("osmia upstream %s %v moves it onto upstream; or osmia abandon %s \"...\"", stream, e.Answer.Body["base"], stream))
+			} else {
+				block("Answer", fmt.Sprintf("none while its base is unavailable; or osmia abandon %s \"...\"", stream))
+			}
 		case service.InboxLoop:
 			block("Answer", fmt.Sprintf("osmia resume %s once you have looked at its status and feed", stream))
 		case service.InboxNotices:

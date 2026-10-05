@@ -140,7 +140,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 				}
 			}
 			f.mu.Unlock()
-			// The service stops before any pass can deliver the relayed ruling.
+			// The service stops while this turn still runs.
 			close(relayed)
 			<-ctx.Done()
 			return nil, ctx.Err()
@@ -298,8 +298,8 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	stop(s, c)
 
 	// Second lifetime, after the ruling: the chief of staff hears of it once
-	// the event window closes, relays it, and the service stops before the
-	// relayed ruling is delivered.
+	// the event window closes, relays it, and the service stops while the
+	// chief's turn still runs.
 	s, c, repo = lifetime()
 	f.settle(t, s)
 	if got := runs(); !reflect.DeepEqual(got, started) {
@@ -320,8 +320,11 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	if got := states(repo, stream); !reflect.DeepEqual(got, map[string]string{"1": trace.QuestionAnswered, "2": trace.QuestionAnswered}) {
 		t.Fatalf("questions after the relay: %v", got)
 	}
-	if got := turnsOf(repo, stream, demoAgent); len(got) != 1 {
-		t.Fatalf("ruling delivered inside the chief-of-staff turn: %v", got)
+	// The relay only records the answer. The answer pass, which the
+	// recorded relay wakes while the chief's turn still runs, is the one
+	// path that queues it on the asker's thread.
+	if th := thread(repo, stream, demoAgent); len(th.Turns) > 2 || len(th.Turns) == 2 && (th.Turns[1].Request.TurnID != questions.TurnID("1") || th.Turns[1].Request.Actor != questions.Actor) {
+		t.Fatalf("ruling delivered other than by the answer pass: %v", turnsOf(repo, stream, demoAgent))
 	}
 	stop(s, c)
 

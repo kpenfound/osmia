@@ -138,8 +138,8 @@ osmia status --json
 - `inbox` lists every owner decision waiting for you across the workstreams
   of the active project, oldest first: escalated questions, ratification
   packets, contested units, presented amendments, held drift rebases,
-  delivery approvals, failing publications, notices held from the chief of
-  staff and loop guard pauses.
+  delivery approvals, failing publications, parked bases, notices held from
+  the chief of staff and loop guard pauses.
   Questions escalated together are one entry, headed by its inbox number, when
   it was escalated, its workstream and batch; any other entry is headed by its
   kind, when it opened, its workstream and its unit or amendment. Each shows
@@ -163,6 +163,11 @@ osmia status --json
   asks for another, or by asking the chief of staff with `send` to hand it
   back with a note its drift mason and reviewer receive; it leaves the inbox
   once either is recorded.
+  A parked base is a workstream whose base workstream, or an ancestor of it,
+  was abandoned or lost its branch; nothing of it runs but the chief of staff
+  and the check of its base. When its own base was abandoned it is answered
+  with `upstream`; otherwise it leaves the inbox once the base is available
+  again, or you abandon the workstream.
   Notices are held once the chief of staff's turns delivering them failed five
   times in a row; `send` a message once the cause is fixed, and they follow
   its answer. A loop guard pause, set when a workstream ran
@@ -245,6 +250,20 @@ osmia status --json
   then shows the state `abandoned`. An empty reason, or a workstream the
   active project does not hold, fails with `validation` (exit 4); a delivered
   or already abandoned workstream fails with `conflict` (exit 5).
+- `upstream <workstream-id> <base-workstream-id>` continues a workstream
+  parked on its abandoned base from upstream instead. The base is the
+  abandoned workstream the inbox entry names. The service fetches the
+  project's base branch and checks that it already holds the changes of the
+  base the workstream builds on: merging the commit of the base the feature
+  branch was last rebased onto, or the base's branch before the workstream is
+  sealed, into upstream must be clean and change nothing, so squash and
+  rebase merges count. It then records upstream as the workstream's base and
+  releases the park, with you as actor, and the workstream's next drift
+  rebase replays its own commits onto upstream and moves its seal there. The
+  output names the upstream commit and the integrated base commit. A
+  workstream that is not parked, whose base is another workstream or is not
+  abandoned, or whose base's changes upstream lacks or conflicts with, fails
+  with `conflict` (exit 5) and stays parked.
 - `archive <workstream-id>` archives a delivered or abandoned workstream. It
   leaves the list of work: `status` names it on its `Archived:` line, the web
   page moves it to its Archived group, and `status <workstream-id>` marks it

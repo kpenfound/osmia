@@ -243,6 +243,13 @@ func (c *Client) Abandon(ctx context.Context, id config.WorkstreamID, reason str
 	return v, err
 }
 
+// BaseUpstream moves a workstream parked on its abandoned base onto upstream.
+func (c *Client) BaseUpstream(ctx context.Context, id, base config.WorkstreamID) (BaseUpstreamResponse, error) {
+	var v BaseUpstreamResponse
+	err := c.Do(ctx, "POST", Prefix+"/base/"+url.PathEscape(string(id))+"/upstream", BaseUpstreamRequest{Base: base}, &v)
+	return v, err
+}
+
 // Archive archives a delivered or abandoned workstream.
 func (c *Client) Archive(ctx context.Context, id config.WorkstreamID) (ArchiveResponse, error) {
 	var v ArchiveResponse

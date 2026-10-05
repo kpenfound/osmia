@@ -107,7 +107,7 @@ func decision(kind string, stream config.WorkstreamID, opened time.Time, path st
 // openDecisions lists a workstream's open decisions other than its
 // escalations: its ratification packet, contested units, presented
 // amendments, held drift rebase, delivery approval, failing publication,
-// notices held from the chief of staff and a loop guard pause.
+// parked base, notices held from the chief of staff and a loop guard pause.
 func (s *Service) openDecisions(ctx context.Context, repository *trace.Repository, w trace.WorkstreamStatus) ([]InboxEntry, error) {
 	var out []InboxEntry
 	add := func(e InboxEntry, open bool, err error) error {
@@ -152,6 +152,11 @@ func (s *Service) openDecisions(ctx context.Context, repository *trace.Repositor
 			return nil, err
 		}
 		if err := add(s.publicationEntry(repository, w)); err != nil {
+			return nil, err
+		}
+	}
+	if w.State != DeliveredState {
+		if err := add(baseEntry(repository, w)); err != nil {
 			return nil, err
 		}
 	}
@@ -321,6 +326,48 @@ func driftEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEn
 	e.Revision = k
 	e.Question = fmt.Sprintf("Drift rebase %d is held: %s.", k, held.Reason)
 	e.Blocked = "Rebasing the feature branch onto upstream. No drift rebase is asked for on the upstream_rebase cadence until you ask for one with osmia project rebase " + string(repository.Project()) + ", or ask the chief of staff in a message to hand it back with what its drift mason or reviewer should do differently."
+	return e, true, nil
+}
+
+// baseEntry is the workstream's park on an unavailable base, opened when it
+// was parked. When its own base workstream was abandoned, the owner can move
+// it onto upstream; otherwise it takes no decision here, and leaves the inbox
+// once the base is available again or the workstream is abandoned.
+func baseEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error) {
+	if w.Subjects[baseWaitSubject].Value != "waiting" {
+		return InboxEntry{}, false, nil
+	}
+	transitions, err := trace.Read[trace.Transition](repository, w.Workstream)
+	if err != nil {
+		return InboxEntry{}, false, err
+	}
+	var parked trace.Transition
+	for _, t := range transitions {
+		if t.Subject == baseWaitSubject && t.To == "waiting" {
+			parked = t
+		}
+	}
+	dependency, err := repository.WorkstreamBase(w.Workstream)
+	if err != nil {
+		return InboxEntry{}, false, err
+	}
+	var parent trace.WorkflowState
+	if dependency.Base != "" {
+		if parent, err = repository.Workflow(dependency.Base, trace.FeatureSubject); err != nil {
+			return InboxEntry{}, false, err
+		}
+	}
+	path := fmt.Sprintf("/base/%s/upstream", w.Workstream)
+	e := decision(InboxBase, w.Workstream, parked.At, path, map[string]any{"base": string(dependency.Base)})
+	e.Question = fmt.Sprintf("The workstream is parked: %s.", parked.Reason)
+	e.Blocked = "Everything on the workstream but the chief of staff and the check of its base."
+	if parent.Value == AbandonedState {
+		e.Options = []string{BaseDecisionUpstream}
+		e.Question += fmt.Sprintf(" If upstream already holds the changes of %s this workstream builds on, it can continue from upstream: the service moves it there only once merging them into upstream changes nothing, and its next drift rebase replays its own commits onto upstream. Otherwise abandon it.", dependency.Base)
+	} else {
+		e.Answer = InboxAnswer{Method: http.MethodPost, Path: Prefix + "/abandon/" + string(w.Workstream), Body: map[string]any{}}
+		e.Question += " It continues once its base is available again; otherwise abandon it."
+	}
 	return e, true, nil
 }
 

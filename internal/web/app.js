@@ -1164,6 +1164,7 @@
     drift: 'Drift held',
     notices: 'Notices held',
     loop: 'Loop guard',
+    base: 'Base parked',
   };
 
   // pinNames name the request fields an entry's answer carries to pin what
@@ -1176,6 +1177,7 @@
     review_revision: 'report revision',
     commit: 'commit',
     draft_hash: 'draft',
+    base: 'base workstream',
   };
 
   const decisionNames = {
@@ -1185,6 +1187,7 @@
     reject: 'Reject',
     round: 'Debate another round',
     overrule: 'Overrule the objections',
+    upstream: 'Continue from upstream',
   };
 
   function workstreamName(id) {
@@ -1286,6 +1289,9 @@
         }
         submit(d.submit, entry.answer.method, endpoint(entry), { ...body, decision }, decided(() => 'Decided ' + decision + ' on amendment ' + entry.amendment + '.'));
         return;
+      case 'base':
+        submit(d.submit, entry.answer.method, endpoint(entry), body, decided((out) => workstreamName(entry.workstream) + ' continues from ' + out.upstream.remote + '/' + out.upstream.branch + '.'));
+        return;
     }
     // A ratification is decided with ratify, or through the shed: a
     // disposition of an objection or a request for a redraft.
@@ -1344,6 +1350,7 @@
       fields.push(el('label', {}, 'Decision', d.decision), el('label', {}, 'Note', d.note));
     }
     const form = el('form', { class: 'send', 'data-field': 'answer' }, ...fields, d.actions);
+    d.form = form;
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       decide(d);
@@ -1432,7 +1439,7 @@
         return button;
       }));
     } else {
-      const none = ['ratification', 'publication', 'drift', 'notices', 'loop'].includes(entry.kind) ? 'none until what blocks it is resolved' : 'none';
+      const none = ['ratification', 'publication', 'drift', 'notices', 'loop', 'base'].includes(entry.kind) ? 'none until what blocks it is resolved' : 'none';
       options = el('p', { 'data-field': 'options' }, 'Options: ' + (entry.options.length === 0 ? none : entry.options.join(', ')));
     }
     d.head.replaceChildren(...[
@@ -1469,6 +1476,12 @@
       }
       default:
         setOptions(d.decision, [['', 'Choose a decision'], ...entry.options.map((o) => [o, decisionNames[o] || o])]);
+        // A parked base takes no note, and no decision here unless its own
+        // base was abandoned.
+        if (entry.kind === 'base') {
+          d.form.hidden = entry.options.length === 0;
+          d.note.parentElement.hidden = true;
+        }
         place(d.actions, [d.submit]);
     }
     return d.node;

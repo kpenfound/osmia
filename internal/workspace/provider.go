@@ -29,6 +29,7 @@ type Provider interface {
 	Branch(ctx context.Context, name string) (string, bool, error)
 	Ancestor(ctx context.Context, commit, tip string) (bool, error)
 	MergeBase(ctx context.Context, a, b string) (string, error)
+	Integrated(ctx context.Context, head, onto string) (bool, error)
 	Commit(ctx context.Context, revision string) (Commit, error)
 	Diff(ctx context.Context, base, candidate string) (string, error)
 	ChangedPaths(ctx context.Context, base, candidate string) ([]string, error)
