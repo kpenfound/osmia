@@ -81,7 +81,9 @@ func dagger(ctx context.Context, dir string, output io.Writer, args ...string) (
 		return -1, err
 	}
 	defer os.RemoveAll(home)
-	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + home}
+	// Dagger's report colors its output even off a terminal; agents read it
+	// and failedChecks parses it as plain text.
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + home, "NO_COLOR=1"}
 	// Dagger finds the workspace, and with it dagger.toml, at the enclosing
 	// Git root. The export carries no repository, so it becomes its own root.
 	initialise := exec.CommandContext(ctx, "git", "init", "--quiet", dir)

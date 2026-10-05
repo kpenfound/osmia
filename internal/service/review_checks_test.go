@@ -55,7 +55,7 @@ func TestUnitReviewReadsThePinnedCandidate(t *testing.T) {
 	}
 }
 
-func TestDaggerChecksBoundOutputAndWithholdCredentials(t *testing.T) {
+func TestDaggerChecksBoundOutputWithholdCredentialsAndDisableColor(t *testing.T) {
 	bin := t.TempDir()
 	script := `#!/bin/sh
 [ "$#" = 4 ] && [ "$1" = check ] && [ "$2" = --progress=report ] && [ "$3" = 'dag+check://go/packages/tests/test?go-package=a&go-test=TestA' ] && [ "$4" = dag+check://release/version ] || exit 91
@@ -64,6 +64,7 @@ func TestDaggerChecksBoundOutputAndWithholdCredentials(t *testing.T) {
 [ -z "$EXPECTED_HOST_HOME" ] || exit 95
 [ -f candidate.txt ] || exit 94
 [ "$(git rev-parse --show-toplevel)" = "$(pwd -P)" ] || exit 96
+[ "$NO_COLOR" = 1 ] || exit 97
 head -c 70000 /dev/zero | tr '\000' x
 printf '\n== CHECKS ==  ✘ 1 failed\n✘ dag://release/version 1.0s ERROR\n'
 exit 3
