@@ -629,7 +629,7 @@
   function renderSidebar() {
     const list = byId('workstream-list');
     if (!views.status) {
-      place(list, []);
+      place(list, [el('li', { class: 'meta none', 'data-field': 'loading' }, 'Loading workstreams…')]);
       return;
     }
     const ids = new Set(streams().map((w) => w.workstream));
