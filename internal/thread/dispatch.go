@@ -46,6 +46,14 @@ type TurnResult struct {
 type Dispatcher struct {
 	Runner  Runner
 	Prepare func(context.Context, TurnInput) (coreadapter.PreparedTurn, error)
+	// Relay, when set, runs every time Apply observes a turn with a
+	// captured response and a completion, given the thread's identity and
+	// the completed queued turn, so a caller can mirror the reply
+	// elsewhere, such as the Beekeeper's shadow trace, without the
+	// dispatcher knowing why. It never starts a new turn. Apply reports its
+	// error like any other reconciliation failure, so Relay runs again on
+	// retry; it must not repeat a side effect it already completed.
+	Relay func(context.Context, trace.Thread, trace.QueuedTurn) error
 }
 
 var _ coreadapter.Reconciler = Dispatcher{}
@@ -136,38 +144,47 @@ func (d Dispatcher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		return coreadapter.OperationResult{}, errors.New("thread runner requires a clock")
 	}
 	var runErr error
-	switch {
-	case !q.CompletedAt.IsZero():
-		return turnResult(q), nil
-	case q.Response != nil:
-		cleanup := context.WithoutCancel(ctx)
-		err := trace.Relock(cleanup, func() error {
-			if err := r.costs(cleanup, t.Identity.Role, q); err != nil {
-				return err
-			}
-			return r.Store.CompleteTurn(cleanup, in.Workstream, in.Agent, in.Turn, q.Claim.Token, r.Now())
-		})
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-	case q.Claim != nil || !ready:
-		return coreadapter.OperationResult{}, errors.New("turn is not eligible to run")
-	default:
-		if d.Prepare == nil {
-			return coreadapter.OperationResult{}, errors.New("dispatcher requires turn preparation")
-		}
-		prepared, err := d.Prepare(ctx, in)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		_, runErr = r.RunNext(ctx, in.Workstream, in.Agent, prepared)
-	}
-	_, q, _, err = d.find(in)
-	if err != nil {
-		return coreadapter.OperationResult{}, err
-	}
 	if q.CompletedAt.IsZero() {
-		return coreadapter.OperationResult{}, errors.Join(runErr, errors.New("turn did not complete"))
+		switch {
+		case q.Response != nil:
+			cleanup := context.WithoutCancel(ctx)
+			err := trace.Relock(cleanup, func() error {
+				if err := r.costs(cleanup, t.Identity.Role, q); err != nil {
+					return err
+				}
+				return r.Store.CompleteTurn(cleanup, in.Workstream, in.Agent, in.Turn, q.Claim.Token, r.Now())
+			})
+			if err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+		case q.Claim != nil || !ready:
+			return coreadapter.OperationResult{}, errors.New("turn is not eligible to run")
+		default:
+			if d.Prepare == nil {
+				return coreadapter.OperationResult{}, errors.New("dispatcher requires turn preparation")
+			}
+			prepared, err := d.Prepare(ctx, in)
+			if err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			_, runErr = r.RunNext(ctx, in.Workstream, in.Agent, prepared)
+		}
+		_, q, _, err = d.find(in)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if q.CompletedAt.IsZero() {
+			return coreadapter.OperationResult{}, errors.Join(runErr, errors.New("turn did not complete"))
+		}
+	}
+	// Relay runs every time Apply observes a completed turn, not only the
+	// call that completed it, so a transient Relay failure gets the same
+	// reconciliation retries completion itself gets; Relay must therefore
+	// not repeat a side effect it already completed.
+	if d.Relay != nil {
+		if err := d.Relay(ctx, t, q); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
 	}
 	return turnResult(q), nil
 }

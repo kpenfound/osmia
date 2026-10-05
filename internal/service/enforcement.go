@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/service/beekeeper"
 	"github.com/kpenfound/osmia/internal/skills"
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -121,6 +122,7 @@ func Enforce(opts Options, e Enforcement) Options {
 		opts.controls = &runtimeControls{}
 	}
 	controls := opts.controls
+	opts.BeekeeperTurns = beekeeperTurns(opts, e, controls)
 	opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
 		root := cfg.Root.String()
 		views := filepath.Join(root, "views")
@@ -250,6 +252,12 @@ func Enforce(opts Options, e Enforcement) Options {
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				directory := filepath.Join(root, "threads", project, string(in.Workstream), in.Agent, in.Turn)
 				return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
+			},
+			Relay: func(ctx context.Context, t trace.Thread, q trace.QueuedTurn) error {
+				if service := controls.service.Load(); service != nil {
+					return service.relayBeekeeperReply(ctx, t, q)
+				}
+				return nil
 			}}, nil
 	}
 	return opts
@@ -282,4 +290,50 @@ func driftMasonTools(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		return nil, err
 	}
 	return questions.DriftTools(r, driftMasonAgent, scope, now, move)
+}
+
+// beekeeperTurns is the execution boundary of every Beekeeper turn: a
+// view of its own empty workspace, with no file_read or file_write grant,
+// and exactly two tools, list_factory and message_chief_of_staff, both
+// bound to controls. Its runtime session settings come only from the
+// Beekeeper section of the loaded configuration, read afresh for each
+// turn; no registered project's configuration, charter or capacity limits
+// ever apply to it.
+func beekeeperTurns(opts Options, e Enforcement, controls *runtimeControls) *isolation.Turns {
+	root := opts.Config.Root
+	views := filepath.Join(root, "views")
+	workspace := filepath.Join(root, "beekeeper", "workspace")
+	return &isolation.Turns{
+		Workspaces: stagedWorkspaces{},
+		Views:      isolation.Views{Directory: views},
+		Grants:     map[string]coreadapter.Capabilities{beekeeper.AgentID: {Tools: []string{listFactoryTool, messageChiefOfStaffTool}}},
+		Select: func(_ context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
+			if scope.Role != beekeeper.AgentID {
+				return isolation.Selection{}, errors.New("view selection denied")
+			}
+			service := controls.service.Load()
+			if service == nil {
+				return isolation.Selection{}, errors.New("the service is not ready")
+			}
+			b := service.current().Beekeeper
+			if err := os.MkdirAll(views, 0700); err != nil {
+				return isolation.Selection{}, err
+			}
+			if err := os.MkdirAll(workspace, 0700); err != nil {
+				return isolation.Selection{}, err
+			}
+			return isolation.Selection{
+				Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace},
+				Execution: coreadapter.ExecutionSettings{Mode: b.Sandbox, Image: b.Image},
+			}, nil
+		},
+		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
+			if scope.Role != beekeeper.AgentID {
+				return nil, errors.New("turn scope denied")
+			}
+			return []coreadapter.Tool{controls.listFactory(scope), controls.messageChiefOfStaff(scope)}, nil
+		},
+		Hosts:  e.Hosts,
+		Engine: e.Engine,
+	}
 }

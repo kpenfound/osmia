@@ -97,6 +97,39 @@ func Continue(ctx context.Context, repository *trace.Repository, turns coreadapt
 	return controller.Pass(ctx)
 }
 
+// withPendingReplies appends every relayed reply RelayedReplies has
+// recorded since the Beekeeper's previous turn, in time order, to
+// systemPrompt, so the Beekeeper's next turn is given them. th is the
+// thread's state before this turn is enqueued: a fresh thread with no
+// previous turn carries no cutoff, so every relayed reply recorded before
+// the Beekeeper's first message is included.
+func withPendingReplies(repository *trace.Repository, th trace.Thread, systemPrompt string) (string, error) {
+	var cutoff time.Time
+	if n := len(th.Turns); n > 0 {
+		cutoff = th.Turns[n-1].Request.At
+	}
+	replies, err := RelayedReplies(repository)
+	if err != nil {
+		return "", err
+	}
+	var pending []RelayedReply
+	for _, r := range replies {
+		if r.At.After(cutoff) {
+			pending = append(pending, r)
+		}
+	}
+	if len(pending) == 0 {
+		return systemPrompt, nil
+	}
+	var b strings.Builder
+	b.WriteString(systemPrompt)
+	b.WriteString("\n\nReplies from chiefs of staff since your last turn:\n")
+	for _, r := range pending {
+		fmt.Fprintf(&b, "- workstream %s: %s\n", r.Workstream, r.Text)
+	}
+	return b.String(), nil
+}
+
 // Post records text as the Beekeeper thread's next owner request, unless its
 // latest request has no finished turn, and runs the turn through Continue,
 // with RolePrompt as its system prompt and profile and prepare supplying the
@@ -124,6 +157,10 @@ func Post(ctx context.Context, repository *trace.Repository, profile coreadapter
 	if unfinished(th) {
 		return trace.QueuedTurn{}, ErrBusy
 	}
+	systemPrompt, err := withPendingReplies(repository, th, RolePrompt)
+	if err != nil {
+		return trace.QueuedTurn{}, err
+	}
 
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -133,7 +170,7 @@ func Post(ctx context.Context, repository *trace.Repository, profile coreadapter
 	req := trace.TurnRequest{
 		Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + id, Revision: 1,
 			Project: config.ShadowProjectID, Workstream: config.BeekeeperWorkstreamID, At: at, Actor: OwnerActor, Cause: "owner-message"},
-		AgentID: AgentID, ThreadID: ThreadID, TurnID: "message_" + id, Profile: profile, SystemPrompt: RolePrompt, Prompt: text,
+		AgentID: AgentID, ThreadID: ThreadID, TurnID: "message_" + id, Profile: profile, SystemPrompt: systemPrompt, Prompt: text,
 	}
 	q, err := repository.EnqueueTurn(ctx, req)
 	if err != nil {

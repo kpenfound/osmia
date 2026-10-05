@@ -121,6 +121,58 @@ func TestDispatcherRejectsInvalidOperations(t *testing.T) {
 	}
 }
 
+// Relay runs once a turn completes, given its thread identity and the
+// completed queued turn, and runs again on an already-completed turn so a
+// transient failure gets the same retry an incomplete turn gets; a failure
+// fails Apply the same way any other reconciliation failure does.
+func TestDispatcherRelayRunsOnCompletionAndRetriesAfterAFailure(t *testing.T) {
+	ctx := context.Background()
+	repo, _, _ := setup(t)
+	queue(t, repo, "first")
+	turns := fakeTurns(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+		return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "s"}, FinalResponse: "done"}, nil
+	})
+	prepare := func(_ context.Context, in TurnInput) (coreadapter.PreparedTurn, error) {
+		return coreadapter.PreparedTurn{SessionDirectory: "/owned/" + in.Turn}, nil
+	}
+	var calls int
+	var seen trace.QueuedTurn
+	failing := true
+	failure := errors.New("relay unavailable")
+	d := Dispatcher{
+		Runner:  Runner{Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: turns},
+		Prepare: prepare,
+		Relay: func(_ context.Context, th trace.Thread, q trace.QueuedTurn) error {
+			calls++
+			seen = q
+			if th.Identity.Role != "mason" || th.Identity.ID != "agent" {
+				t.Fatalf("relay thread identity: %+v", th.Identity)
+			}
+			if failing {
+				return failure
+			}
+			return nil
+		},
+	}
+	op := turnOp(t, "first")
+	if _, err := d.Apply(ctx, op); !errors.Is(err, failure) || calls != 1 {
+		t.Fatalf("relay failure did not fail apply: calls=%d err=%v", calls, err)
+	}
+	failing = false
+	result, err := d.Apply(ctx, op)
+	if err != nil || result.Outcome != "idle" || calls != 2 {
+		t.Fatalf("relay retry: %+v %v calls=%d", result, err, calls)
+	}
+	if seen.Request.TurnID != "first" || seen.Response == nil || seen.Response.Result.FinalResponse != "done" {
+		t.Fatalf("relay saw: %+v", seen)
+	}
+	// Relay keeps running for an already-completed turn: a caller relies on
+	// it being idempotent, not on Apply calling it only once ever.
+	if _, err := d.Apply(ctx, op); err != nil || calls != 3 {
+		t.Fatalf("relay did not run again for a completed turn: calls=%d err=%v", calls, err)
+	}
+}
+
 func TestDispatcherRecoversCapturedAndReservedTurns(t *testing.T) {
 	ctx := context.Background()
 	repo, root, p := setup(t)

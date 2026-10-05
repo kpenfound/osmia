@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -39,9 +40,16 @@ const RolePrompt = "You are the Beekeeper, the owner's one assistant for the who
 // EnsureThread creates the Beekeeper's thread identity in the shadow
 // project's repository unless it already exists, and returns the thread.
 // The first creation fixes the identity's timestamp; later calls leave it
-// unchanged. It uses the same trace.Repository.CreateThread every
-// chief-of-staff thread is created with; no Beekeeper-specific store exists.
+// unchanged and never retry creation, so a caller's own at never collides
+// with the identity an earlier call already fixed. It uses the same
+// trace.Repository.CreateThread every chief-of-staff thread is created
+// with; no Beekeeper-specific store exists.
 func EnsureThread(ctx context.Context, repository *trace.Repository, at time.Time) (trace.Thread, error) {
+	if th, err := repository.Thread(config.BeekeeperWorkstreamID, AgentID); err == nil {
+		return th, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return trace.Thread{}, err
+	}
 	agent := trace.Agent{
 		Header: trace.Header{
 			Schema: "osmia.trace.agent", Version: trace.Version, ID: AgentID, Revision: 1,
@@ -51,7 +59,7 @@ func EnsureThread(ctx context.Context, repository *trace.Repository, at time.Tim
 		Role:     AgentID,
 		ThreadID: ThreadID,
 	}
-	if err := repository.CreateThread(ctx, agent); err != nil {
+	if err := repository.CreateThread(ctx, agent); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return trace.Thread{}, err
 	}
 	return repository.Thread(config.BeekeeperWorkstreamID, AgentID)
@@ -86,40 +94,49 @@ type Message struct {
 // Messages returns the Beekeeper chat's most recent messages, oldest first,
 // each with its author, and whether older messages exist. A limit of zero or
 // less uses 50. It reads the Beekeeper's thread with trace.Repository.Thread
-// and applies no store or windowing beyond this bound: every message the
-// thread holds is considered, and only the requested tail is returned. A
-// thread that does not exist yet reports no messages and no older ones.
+// and every relayed reply RelayedReplies returns, and applies no store or
+// windowing beyond this bound: every message the thread and the relayed
+// replies hold is considered, merged in time order, and only the requested
+// tail is returned. A thread that does not exist yet reports no owner
+// messages or Beekeeper replies, but still reports any relayed reply.
 func Messages(repository *trace.Repository, limit int) ([]Message, bool, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	all := []Message{}
 	t, err := repository.Thread(config.BeekeeperWorkstreamID, AgentID)
-	if errors.Is(err, os.ErrNotExist) {
-		return []Message{}, false, nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, false, err
 	}
+	if err == nil {
+		for _, q := range t.Turns {
+			req := q.Request
+			all = append(all, Message{Turn: req.TurnID, Author: Author{Kind: AuthorOwner}, Text: req.Prompt, At: req.At})
+			if q.Response == nil || q.CompletedAt.IsZero() {
+				continue
+			}
+			switch q.Status() {
+			case "failed", "interrupted":
+				text := q.Response.Failure
+				if text == "" {
+					text = "the turn did not complete"
+				}
+				all = append(all, Message{Turn: req.TurnID, Author: Author{Kind: AuthorFailure}, Text: text, At: q.Response.At})
+			default:
+				if q.Response.Result.FinalResponse != "" {
+					all = append(all, Message{Turn: req.TurnID, Author: Author{Kind: AuthorBeekeeper}, Text: q.Response.Result.FinalResponse, At: q.Response.At})
+				}
+			}
+		}
+	}
+	replies, err := RelayedReplies(repository)
 	if err != nil {
 		return nil, false, err
 	}
-	all := []Message{}
-	for _, q := range t.Turns {
-		req := q.Request
-		all = append(all, Message{Turn: req.TurnID, Author: Author{Kind: AuthorOwner}, Text: req.Prompt, At: req.At})
-		if q.Response == nil || q.CompletedAt.IsZero() {
-			continue
-		}
-		switch q.Status() {
-		case "failed", "interrupted":
-			text := q.Response.Failure
-			if text == "" {
-				text = "the turn did not complete"
-			}
-			all = append(all, Message{Turn: req.TurnID, Author: Author{Kind: AuthorFailure}, Text: text, At: q.Response.At})
-		default:
-			if q.Response.Result.FinalResponse != "" {
-				all = append(all, Message{Turn: req.TurnID, Author: Author{Kind: AuthorBeekeeper}, Text: q.Response.Result.FinalResponse, At: q.Response.At})
-			}
-		}
+	for _, r := range replies {
+		all = append(all, Message{Author: Author{Kind: AuthorChiefOfStaff, Workstream: r.Workstream}, Text: r.Text, At: r.At})
 	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].At.Before(all[j].At) })
 	hasOlder := false
 	if len(all) > limit {
 		hasOlder = true

@@ -310,6 +310,57 @@ func TestMessagesOldestFirstWithHasOlderFlag(t *testing.T) {
 	}
 }
 
+// Messages merges relayed replies into the Beekeeper's own thread turns in
+// time order, each attributed to its workstream's chief of staff, and
+// reports no older messages when every message fits the limit.
+func TestMessagesMergesRelayedRepliesInTimeOrder(t *testing.T) {
+	ctx := context.Background()
+	root, err := config.ResolveRoot(filepath.Join(t.TempDir(), "osmia"), "")
+	must(t, err)
+	b := config.Beekeeper{Name: "Hive", Profile: "default", Sandbox: "none"}
+	repo, err := Open(ctx, root, b, at)
+	must(t, err)
+	defer repo.Close()
+
+	if _, err := EnsureThread(ctx, repo, at); err != nil {
+		t.Fatal(err)
+	}
+	req := request("1", at, "Status?")
+	if _, err := repo.EnqueueTurn(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	completeTurn(t, repo, req, at, "Checking with the workstreams.")
+
+	alpha := config.WorkstreamID("w_11111111111111111111111111111111")
+	beta := config.WorkstreamID("w_22222222222222222222222222222222")
+	must(t, RecordRelayedReply(ctx, repo, "p_11111111111111111111111111111111", alpha, "request_alpha", "Two masons are building.", at.Add(30*time.Second)))
+	must(t, RecordRelayedReply(ctx, repo, "p_11111111111111111111111111111111", beta, "request_beta", "The reviewer found nothing.", at.Add(90*time.Second)))
+
+	all, hasOlder, err := Messages(repo, 50)
+	must(t, err)
+	if hasOlder {
+		t.Fatal("expected no older messages")
+	}
+	if len(all) != 4 {
+		t.Fatalf("expected 4 messages, got %d: %+v", len(all), all)
+	}
+	wantKinds := []string{AuthorOwner, AuthorBeekeeper, AuthorChiefOfStaff, AuthorChiefOfStaff}
+	wantWorkstreams := []config.WorkstreamID{"", "", alpha, beta}
+	for i, m := range all {
+		if m.Author.Kind != wantKinds[i] || m.Author.Workstream != wantWorkstreams[i] {
+			t.Fatalf("message %d author: %+v", i, m.Author)
+		}
+	}
+	for i := 1; i < len(all); i++ {
+		if all[i].At.Before(all[i-1].At) {
+			t.Fatal("messages not oldest first")
+		}
+	}
+	if all[2].Text != "Two masons are building." || all[3].Text != "The reviewer found nothing." {
+		t.Fatalf("relayed reply text: %+v", all[2:])
+	}
+}
+
 // The Beekeeper's thread, including recording an owner message and reading
 // it back, works with Hearsay not configured.
 func TestBeekeeperThreadWorksWithHearsayNotConfigured(t *testing.T) {

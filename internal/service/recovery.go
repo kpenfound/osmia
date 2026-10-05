@@ -218,7 +218,7 @@ func (s *Service) recoverContinuation(ctx context.Context, repository *trace.Rep
 		// After maxRecoveries interruptions in a row the work is not
 		// continued again; the owner's next message resumes the thread.
 		if interruptedInARow(th) >= maxRecoveries {
-			return nil
+			return false, nil
 		}
 		req := q.Request
 		req.ID = fmt.Sprintf("request_%s-recover-%d", agent, q.Sequence)

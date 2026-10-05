@@ -207,11 +207,12 @@ func (s *Service) BeekeeperBusy() (bool, error) {
 	return beekeeper.Busy(s.shadow)
 }
 
-// beekeeperPrepare supplies a Beekeeper turn's session directory and
-// execution settings from cfg's Beekeeper section, for beekeeper.Post and
-// beekeeper.Continue alike.
+// beekeeperPrepare supplies a Beekeeper turn's session directory alone, for
+// beekeeper.Post and beekeeper.Continue alike. Its execution settings come
+// from Options.BeekeeperTurns' own selection, the way a chief-of-staff
+// turn's come from the Threads runner's selection, never from the prepared
+// turn: Options.BeekeeperTurns refuses a turn that supplies them twice.
 func (s *Service) beekeeperPrepare(cfg *config.Config) beekeeper.Prepare {
-	b := cfg.Beekeeper
 	root := cfg.Root.String()
 	return func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		// The same layout sessionDirectories' default case expects, so a
@@ -221,7 +222,7 @@ func (s *Service) beekeeperPrepare(cfg *config.Config) beekeeper.Prepare {
 		if err := os.MkdirAll(directory, 0700); err != nil {
 			return coreadapter.PreparedTurn{}, err
 		}
-		return coreadapter.PreparedTurn{SessionDirectory: directory, Execution: coreadapter.ExecutionSettings{Mode: b.Sandbox, Image: b.Image}}, nil
+		return coreadapter.PreparedTurn{SessionDirectory: directory}, nil
 	}
 }
 
@@ -292,6 +293,14 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			shadow.Close()
 		}
 	}()
+	// EnsureThread's identity carries this call's timestamp, which almost
+	// never matches an earlier session's creation time; a thread the
+	// Beekeeper already has, from any earlier session, reports that
+	// mismatch as trace.ErrConflict, not as a problem to fail startup over.
+	if _, err = beekeeper.EnsureThread(ctx, shadow, time.Now().UTC()); err != nil && !errors.Is(err, trace.ErrConflict) {
+		return nil, fmt.Errorf("ensure the beekeeper's thread: %w", err)
+	}
+	err = nil
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), shadow: shadow}
 	s.pool = &scheduler.Shared{Traces: s.traces}
 	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider}
