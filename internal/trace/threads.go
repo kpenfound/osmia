@@ -2,7 +2,6 @@ package trace
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -78,7 +77,111 @@ func (t QueuedTurn) Status() string {
 	}
 }
 
-func validateThreads(threads map[string]Thread, records []Record, project config.ProjectID, stream config.WorkstreamID) error {
+// storedThread is a thread as workflow.json holds it.
+type storedThread struct {
+	Identity Agent                      `json:"identity"`
+	Session  coreadapter.BackendSession `json:"session"`
+	Status   string                     `json:"status"`
+	Active   string                     `json:"active,omitempty"`
+	Turns    []storedTurn               `json:"turns,omitempty"`
+}
+
+// storedTurn is a queued turn as workflow.json holds it. In the current
+// workflow version, RequestID and ResponseID name the turn's records in the
+// agent's log.jsonl, which hold their content. Workflow version 1 carries
+// Request and Response whole instead.
+type storedTurn struct {
+	Attempts    []TurnAttempt `json:"attempts,omitempty"`
+	Sequence    uint64        `json:"sequence"`
+	RequestID   string        `json:"request_id,omitempty"`
+	Request     *TurnRequest  `json:"request,omitempty"`
+	Claim       *TurnClaim    `json:"claim,omitempty"`
+	ResponseID  string        `json:"response_id,omitempty"`
+	Response    *TurnResponse `json:"response,omitempty"`
+	CompletedAt time.Time     `json:"completed_at,omitempty"`
+}
+
+// storeThreads returns threads as the current workflow version stores them.
+func storeThreads(threads map[string]Thread) map[string]storedThread {
+	if len(threads) == 0 {
+		return nil
+	}
+	stored := make(map[string]storedThread, len(threads))
+	for id, t := range threads {
+		s := storedThread{Identity: t.Identity, Session: t.Session, Status: t.Status, Active: t.Active}
+		for _, q := range t.Turns {
+			turn := storedTurn{Attempts: q.Attempts, Sequence: q.Sequence, RequestID: q.Request.ID, Claim: q.Claim, CompletedAt: q.CompletedAt}
+			if q.Response != nil {
+				turn.ResponseID = q.Response.ID
+			}
+			s.Turns = append(s.Turns, turn)
+		}
+		stored[id] = s
+	}
+	return stored
+}
+
+// loadThreads restores stored threads of workflow version with their requests
+// and responses from records. It returns the record keys of turns whose
+// content the workflow carries itself, which validateThreads compares with
+// the records.
+func loadThreads(stored map[string]storedThread, version int, records []Record, stream config.WorkstreamID) (map[string]Thread, map[string]bool, error) {
+	if len(stored) == 0 {
+		return nil, nil, nil
+	}
+	requests, responses := map[string]TurnRequest{}, map[string]TurnResponse{}
+	for _, rec := range records {
+		switch v := rec.(type) {
+		case TurnRequest:
+			if v.Workstream == stream && v.Revision == 1 {
+				requests[v.ID] = v
+			}
+		case TurnResponse:
+			if v.Workstream == stream && v.Revision == 1 {
+				responses[v.ID] = v
+			}
+		}
+	}
+	threads := make(map[string]Thread, len(stored))
+	carried := map[string]bool{}
+	for id, s := range stored {
+		t := Thread{Identity: s.Identity, Session: s.Session, Status: s.Status, Active: s.Active}
+		for _, turn := range s.Turns {
+			q := QueuedTurn{Attempts: turn.Attempts, Sequence: turn.Sequence, Claim: turn.Claim, CompletedAt: turn.CompletedAt}
+			switch {
+			case version == 1 && turn.Request != nil && turn.RequestID == "" && turn.ResponseID == "":
+				q.Request, q.Response = *turn.Request, turn.Response
+				carried[recordKey(q.Request)] = true
+				if q.Response != nil {
+					carried[recordKey(*q.Response)] = true
+				}
+			case version == workflowVersion && turn.Request == nil && turn.Response == nil:
+				req, ok := requests[turn.RequestID]
+				if !ok {
+					return nil, nil, fmt.Errorf("owned thread record missing")
+				}
+				q.Request = req
+				if turn.ResponseID != "" {
+					res, ok := responses[turn.ResponseID]
+					if !ok {
+						return nil, nil, fmt.Errorf("owned thread record missing")
+					}
+					q.Response = &res
+				}
+			default:
+				return nil, nil, fmt.Errorf("invalid queued turn")
+			}
+			t.Turns = append(t.Turns, q)
+		}
+		threads[id] = t
+	}
+	return threads, carried, nil
+}
+
+// validateThreads checks threads against their records. Every managed record
+// must belong to exactly one identity or turn of threads. Identities, and the
+// turns whose record keys compare names, must also equal their records.
+func validateThreads(threads map[string]Thread, records []Record, project config.ProjectID, stream config.WorkstreamID, compare map[string]bool) error {
 	expected := map[string]Record{}
 	for id, t := range threads {
 		a := t.Identity
@@ -168,7 +271,8 @@ func validateThreads(threads map[string]Thread, records []Record, project config
 		}
 		k := recordKey(rec)
 		want, ok := expected[k]
-		if !ok || found[k] || !equalJSON(want, rec) {
+		_, identity := rec.(Agent)
+		if !ok || found[k] || ((identity || compare[k]) && !equalJSON(want, rec)) {
 			return fmt.Errorf("owned thread log differs from workflow: %w", ErrConflict)
 		}
 		found[k] = true
@@ -637,14 +741,18 @@ func (r *Repository) saveThread(ctx context.Context, stream config.WorkstreamID,
 		return err
 	}
 	records = append(records, additions...)
-	if err := validateThreads(log.Threads, records, r.project, stream); err != nil {
+	added := map[string]bool{}
+	for _, rec := range additions {
+		added[recordKey(rec)] = true
+	}
+	if err := validateThreads(log.Threads, records, r.project, stream, added); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(log, "", "  ")
+	data, err := encodeWorkflow(log)
 	if err != nil {
 		return err
 	}
-	files := map[string][]byte{"workstreams/" + string(stream) + "/workflow.json": append(data, '\n')}
+	files := map[string][]byte{"workstreams/" + string(stream) + "/workflow.json": data}
 	if err := r.appendRecords(files, additions); err != nil {
 		return err
 	}

@@ -305,9 +305,9 @@ func (a *OperationAttempt) Record(ctx context.Context, action OperationAction) e
 		return err
 	}
 	log.Operations = append(log.Operations, action)
-	data, err := json.MarshalIndent(log, "", "  ")
+	data, err := encodeWorkflow(log)
 	if err != nil {
 		return err
 	}
-	return r.publish(ctx, map[string][]byte{"workstreams/" + string(a.stream) + "/workflow.json": append(data, '\n')})
+	return r.publish(ctx, map[string][]byte{"workstreams/" + string(a.stream) + "/workflow.json": data})
 }

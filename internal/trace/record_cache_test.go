@@ -114,6 +114,79 @@ func TestRecordReadsRejectAliasesAfterCaching(t *testing.T) {
 	}
 }
 
+func TestHistoryCheckReadsOnlyChangedFiles(t *testing.T) {
+	window := racyWindow
+	racyWindow = 0
+	t.Cleanup(func() { racyWindow = window })
+	r, _, _ := create(t)
+	ctx := context.Background()
+	d := specimens()[0].(Document)
+	if err := r.Append(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	path := recordPath(d)
+	if _, err := r.checkHistory(ctx); err != nil {
+		t.Fatal(err)
+	}
+	first, ok := r.verified[path]
+	if !ok || !bytes.Contains(first.data, []byte(`"id":"spec"`)) {
+		t.Fatal("checked file not remembered")
+	}
+	r.changed()
+	if _, err := r.checkHistory(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if again := r.verified[path]; &again.data[0] != &first.data[0] {
+		t.Fatal("unchanged file read again")
+	}
+	name := filepath.Join(r.directory, path)
+	info, err := os.Stat(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := bytes.Replace(first.data, []byte(`"revision":1`), []byte(`"revision":9`), 1)
+	if err := os.WriteFile(name, edited, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(name, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	r.changed()
+	if _, err := r.checkHistory(ctx); err == nil || !strings.Contains(err.Error(), "reconciliation required") {
+		t.Fatalf("outside edit of the same size and time accepted: %v", err)
+	}
+}
+
+func TestDecodedRecordsReuseAppendedFiles(t *testing.T) {
+	values := specimens()
+	var lines [][]byte
+	for _, v := range values[:3] {
+		line, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, append(line, '\n'))
+	}
+	r := &Repository{recordFiles: map[string]recordFile{}}
+	prefix := slices.Concat(lines[0], lines[1])
+	r.recordFiles["records.jsonl"] = r.decodedRecords("records.jsonl", prefix)
+	appended := r.decodedRecords("records.jsonl", slices.Concat(prefix, lines[2]))
+	whole := (&Repository{}).decodedRecords("records.jsonl", slices.Concat(prefix, lines[2]))
+	if len(appended.records) != 3 || !reflect.DeepEqual(appended.records, whole.records) {
+		t.Fatalf("appended records = %#v, want %#v", appended.records, whole.records)
+	}
+	if len(r.recordFiles["records.jsonl"].records) != 2 {
+		t.Fatal("decoding an appended file changed the cached file")
+	}
+	changed := slices.Concat(bytes.Replace(lines[0], []byte(`"revision":1`), []byte(`"revision":9`), 1), lines[1], lines[2])
+	if got := r.decodedRecords("records.jsonl", changed); got.records[0].record.header().Revision != 9 {
+		t.Fatal("changed line reused")
+	}
+	if got := r.decodedRecords("records.jsonl", slices.Concat(prefix, lines[2][:len(lines[2])-1])); got.records[2].err == nil {
+		t.Fatal("incomplete appended line accepted")
+	}
+}
+
 func TestReadsReuseTheTraceUntilTheHandleWrites(t *testing.T) {
 	r, root, p := create(t)
 	ctx := context.Background()

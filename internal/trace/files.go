@@ -12,6 +12,7 @@ import (
 	"path"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/go-json-experiment/json/jsontext"
 )
@@ -118,6 +119,44 @@ func readEntry(parent *os.Root, name string, entry fs.DirEntry) ([]byte, error) 
 		return nil, err
 	}
 	return readOpened(f, name)
+}
+
+// readEntryStat is readEntry that also returns the status the bytes were
+// read in. The status is untrusted when the file changed during the read.
+func readEntryStat(parent *os.Root, name string, entry fs.DirEntry) ([]byte, fileStat, error) {
+	if err := checkInternalPath(name); err != nil {
+		return nil, fileStat{}, err
+	}
+	f, err := parent.OpenFile(entry.Name(), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, fileStat{}, err
+	}
+	defer f.Close()
+	read := time.Now()
+	before, err := f.Stat()
+	if err != nil {
+		return nil, fileStat{}, err
+	}
+	if !before.Mode().IsRegular() {
+		return nil, fileStat{}, fmt.Errorf("%s: expected regular file", name)
+	}
+	if st, ok := before.Sys().(*syscall.Stat_t); ok && st.Nlink > 1 {
+		return nil, fileStat{}, fmt.Errorf("%s: hardlink aliases are forbidden", name)
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fileStat{}, err
+	}
+	after, err := f.Stat()
+	if err != nil {
+		return nil, fileStat{}, err
+	}
+	stat, ok := statOf(before, read)
+	end, endOK := statOf(after, read)
+	if !ok || !endOK || !stat.same(end) {
+		stat = fileStat{}
+	}
+	return data, stat, nil
 }
 
 // readOpened reads and closes f, the file name, which must be regular and

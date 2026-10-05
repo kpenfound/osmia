@@ -7,9 +7,6 @@ import (
 	"slices"
 )
 
-// Limit retained encoded history per project; decoded values accompany it.
-const maxRecordCacheBytes = 16 << 20
-
 type decodedRecord struct {
 	record Record
 	err    error
@@ -20,29 +17,36 @@ type recordFile struct {
 	records []decodedRecord
 }
 
-// decodedRecords reuses decoding only when the file's bytes match. Callers still
-// read through the confined filesystem and check cross-record invariants. The
-// caller holds r.mu and clones records before exposing or modifying their fields.
+// decodedRecords reuses decoding of the file's previous bytes: all of it when
+// the bytes match, and every line before the appended ones when the file grew
+// by whole lines. Callers still read through the confined filesystem and check
+// cross-record invariants. The caller holds r.mu and clones records before
+// exposing or modifying their fields.
 func (r *Repository) decodedRecords(name string, data []byte) recordFile {
 	cached, ok := r.recordFiles[name]
-	if !ok || !bytes.Equal(cached.data, data) {
-		cached = recordFile{data: data}
-		lines := bytes.Split(data, []byte{'\n'})
-		for i, line := range lines {
-			if i == len(lines)-1 && len(line) == 0 {
-				continue
-			}
-			v, err := decodeRecord(line)
-			if err == nil && i == len(lines)-1 {
-				err = fmt.Errorf("incomplete JSONL record (missing newline)")
-			}
-			if err == nil {
-				err = validate(v)
-			}
-			cached.records = append(cached.records, decodedRecord{v, err})
-		}
+	if ok && bytes.Equal(cached.data, data) {
+		return cached
 	}
-	return cached
+	file := recordFile{data: data}
+	if ok && len(cached.data) > 0 && len(data) > len(cached.data) && cached.data[len(cached.data)-1] == '\n' && bytes.Equal(data[:len(cached.data)], cached.data) {
+		file.records = slices.Clip(cached.records)
+		data = data[len(cached.data):]
+	}
+	lines := bytes.Split(data, []byte{'\n'})
+	for i, line := range lines {
+		if i == len(lines)-1 && len(line) == 0 {
+			continue
+		}
+		v, err := decodeRecord(line)
+		if err == nil && i == len(lines)-1 {
+			err = fmt.Errorf("incomplete JSONL record (missing newline)")
+		}
+		if err == nil {
+			err = validate(v)
+		}
+		file.records = append(file.records, decodedRecord{v, err})
+	}
+	return file
 }
 
 func clonePointer[T any](p *T) *T {

@@ -11,9 +11,67 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"syscall"
+	"time"
 )
 
 const gitConfig = "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n"
+
+// racyWindow is how long after a file last changed its status is not trusted
+// to show a later change: a change within the same timestamp tick as the read
+// would leave the status as it was.
+var racyWindow = 2 * time.Second
+
+// fileStat identifies one state of a file: a change to its content changes
+// its status change time, and replacing it changes its device or inode.
+type fileStat struct {
+	device, inode     uint64
+	size              int64
+	modified, changed int64
+	read              time.Time
+}
+
+// statOf returns the status of info, read at the given time, and whether its
+// times are known.
+func statOf(info fs.FileInfo, read time.Time) (fileStat, bool) {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return fileStat{}, false
+	}
+	modified, changed, ok := statTimes(st)
+	return fileStat{device: uint64(st.Dev), inode: uint64(st.Ino), size: info.Size(), modified: modified, changed: changed, read: read}, ok
+}
+
+// trusted reports whether s last changed long enough before it was read that
+// any later change shows in the status.
+func (s fileStat) trusted() bool {
+	limit := s.read.Add(-racyWindow).UnixNano()
+	return !s.read.IsZero() && s.modified < limit && s.changed < limit
+}
+
+// same reports whether s and o describe the same state of a file.
+func (s fileStat) same(o fileStat) bool {
+	return s.device == o.device && s.inode == o.inode && s.size == o.size && s.modified == o.modified && s.changed == o.changed
+}
+
+// verifiedFile is a trace file as checkHistory last read and checked it: its
+// status, the committed blob its bytes matched, and the bytes.
+type verifiedFile struct {
+	stat fileStat
+	blob string
+	data []byte
+}
+
+// unchanged reports whether entry, listed in parent, is in the state f was
+// read in.
+func (f verifiedFile) unchanged(parent *os.Root, entry fs.DirEntry) bool {
+	info, err := parent.Lstat(entry.Name())
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	stat, ok := statOf(info, time.Time{})
+	return ok && f.stat.same(stat)
+}
 
 func (r *Repository) checkGit() error {
 	if _, err := r.root.ProjectTrace(r.project); err != nil {
@@ -175,6 +233,7 @@ func (r *Repository) checkHistory(ctx context.Context) (*treeFiles, error) {
 		return nil
 	}
 	files := &treeFiles{data: map[string][]byte{}}
+	verified := map[string]verifiedFile{}
 	err = r.walk(func(parent *os.Root, name string, entry fs.DirEntry) error {
 		if entry.IsDir() {
 			return nil
@@ -189,13 +248,25 @@ func (r *Repository) checkHistory(ctx context.Context) (*treeFiles, error) {
 		if ownerEdited(name) {
 			return nil
 		}
-		data, err := readEntry(parent, name, entry)
+		if v, ok := r.verified[name]; ok && v.blob == blobs[name] && v.unchanged(parent, entry) {
+			files.data[name] = v.data
+			verified[name] = v
+			return nil
+		}
+		data, stat, err := readEntryStat(parent, name, entry)
 		if err != nil {
 			return fmt.Errorf("trace history %s: %w", name, err)
 		}
 		files.data[name] = data
-		return matches(name, data)
+		if err := matches(name, data); err != nil {
+			return err
+		}
+		if stat.trusted() {
+			verified[name] = verifiedFile{stat: stat, blob: blobs[name], data: data}
+		}
+		return nil
 	})
+	r.verified = verified
 	if err != nil {
 		return nil, err
 	}

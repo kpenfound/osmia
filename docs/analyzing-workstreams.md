@@ -30,7 +30,7 @@ Paths are under the root, `~/.local/share/osmia` by default.
 | `.../events.jsonl` | Every transition: `subject`, `from`, `to`, `reason`, `actor`, `cause`, `at`, `unit` |
 | `.../ledger.jsonl` | One cost record per session: `.entry.Scope` (`Role`, `Unit`, `Thread`, `Turn`), `.entry.At`, `.entry.Usage` (`CostUSD`, `Turns`) |
 | `.../agents/<agent>/log.jsonl` | Each turn's request (`actor`, `cause`, `prompt`, `profile`) and response (`result.FinalResponse`, `result.Outcome`) |
-| `.../workflow.json` | `transactions[].events[]` with their `operation`, and `operations[]`: each attempt's `claim`, `observe`, `effect`, `retry` (with `failure` and `retry_at`) and `result` |
+| `.../workflow.json` | `transactions[].events[]` with their `operation`, and `operations[]`: each attempt's `claim`, `observe`, `effect`, `retry` (with `failure` and `retry_at`) and `result`; `threads`: each agent's queued turns with their `claim`, `attempts` and `completed_at`, and the `request_id` and `response_id` of the turn's records in the agent's `log.jsonl` |
 | `.../status.jsonl` | The chief of staff's status revisions: `goal`, `note`, `agents` |
 | `.../tools/` | One audit record per tool call: `scope.Role`, `scope.Turn`, `name` |
 | `.../units/<u>/` | `report.json`, `review.json`, `rebase.json`, `landing.json`, `checks-<n>.json` |

@@ -47,7 +47,8 @@ type Repository struct {
 	tree     map[string]string
 	treeHead string
 	synced   map[string]bool
-	// recordFiles holds decoded JSONL keyed by exact bytes, under mu.
+	// recordFiles holds, under mu, the bytes of each valid JSONL file with its
+	// decoded records.
 	recordFiles map[string]recordFile
 	// generation counts the handle's changes to the files of the trace.
 	// scanned and history, under mu, are the latest scan and history check,
@@ -57,6 +58,12 @@ type Repository struct {
 	generation atomic.Uint64
 	scanned    *scannedTrace
 	history    *checkedHistory
+	// verified holds, under mu, each trace file checkHistory read and checked
+	// with a trusted status, by path, so a later check reads only the files
+	// whose status changed.
+	verified map[string]verifiedFile
+	// workflows holds each workstream's latest loaded workflow, under mu.
+	workflows map[config.WorkstreamID]*cachedWorkflow
 }
 
 // scannedTrace is a scan the handle made at generation.
@@ -171,7 +178,7 @@ func (r *Repository) Close() error {
 		err = errors.Join(syscall.Flock(int(r.lock.Fd()), syscall.LOCK_UN), r.lock.Close())
 		r.lock = nil
 	}
-	r.recordFiles, r.scanned, r.history = nil, nil, nil
+	r.recordFiles, r.scanned, r.history, r.verified, r.workflows = nil, nil, nil, nil, nil
 	return errors.Join(err, r.dir.Close())
 }
 func (r *Repository) Project() config.ProjectID { return r.project }
@@ -695,7 +702,6 @@ func (r *Repository) scanTrace(checked *treeFiles) ([]Record, []config.Workstrea
 	}
 	var records []Record
 	files := map[string]recordFile{}
-	cacheBytes := 0
 	latest := map[string]Record{}
 	documents := map[string]string{}
 	recordFile := func(name string) bool {
@@ -738,9 +744,8 @@ func (r *Repository) scanTrace(checked *treeFiles) ([]Record, []config.Workstrea
 			latest[recordKey(v)] = v
 			records = append(records, v)
 		}
-		if valid && len(cached.data) <= maxRecordCacheBytes-cacheBytes {
+		if valid {
 			files[name] = cached
-			cacheBytes += len(cached.data)
 		}
 	}
 	if checked != nil {

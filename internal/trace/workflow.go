@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"time"
 
@@ -164,6 +166,106 @@ func (v *workflowView) delivery(a DeliveryAction) error {
 	return nil
 }
 
+// workflowVersion is the version of workflow.json that saving writes.
+const workflowVersion = 2
+
+// workflowFile is workflow.json as it is stored.
+type workflowFile struct {
+	Schema       string                  `json:"schema"`
+	Version      int                     `json:"version"`
+	Transactions []Transaction           `json:"transactions"`
+	Deliveries   []DeliveryAction        `json:"deliveries"`
+	Operations   []OperationAction       `json:"operations,omitempty"`
+	Threads      map[string]storedThread `json:"threads,omitempty"`
+}
+
+// encodeWorkflow returns the contents of workflow.json for log.
+func encodeWorkflow(log workflowLog) ([]byte, error) {
+	data, err := json.MarshalIndent(workflowFile{Schema: "osmia.workflow", Version: workflowVersion, Transactions: log.Transactions, Deliveries: log.Deliveries, Operations: log.Operations, Threads: storeThreads(log.Threads)}, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
+
+// cachedWorkflow is a workstream's workflow as loadWorkflow decoded and
+// checked it from the committed files in sources, by path, with their blobs.
+type cachedWorkflow struct {
+	sources map[string]string
+	log     workflowLog
+	view    *workflowView
+}
+
+// workflowSources returns the committed blob, in blobs, of every file the
+// workflow of the workstream at prefix was decoded and checked from: its
+// manifest, workflow and transitions, and the identities and logs of its
+// threads. An absent file has no blob.
+func workflowSources(prefix string, log workflowLog, blobs map[string]string) map[string]string {
+	sources := map[string]string{}
+	for _, name := range []string{"workstream.json", "workflow.json", "events.jsonl"} {
+		sources[prefix+name] = blobs[prefix+name]
+	}
+	for id := range log.Threads {
+		for _, name := range []string{"identity.jsonl", "log.jsonl"} {
+			path := prefix + "agents/" + id + "/" + name
+			sources[path] = blobs[path]
+		}
+	}
+	return sources
+}
+
+// current reports whether every source of c is still committed as blobs has it.
+func (c *cachedWorkflow) current(blobs map[string]string) bool {
+	for name, blob := range c.sources {
+		if blobs[name] != blob {
+			return false
+		}
+	}
+	return true
+}
+
+// clone returns a copy of log that its holder may change without changing log.
+func (log workflowLog) clone() workflowLog {
+	log.Transactions = slices.Clone(log.Transactions)
+	log.Deliveries = slices.Clone(log.Deliveries)
+	log.Operations = slices.Clone(log.Operations)
+	if log.Threads != nil {
+		threads := make(map[string]Thread, len(log.Threads))
+		for id, t := range log.Threads {
+			t.Turns = slices.Clone(t.Turns)
+			for i := range t.Turns {
+				q := &t.Turns[i]
+				q.Attempts = slices.Clone(q.Attempts)
+				q.Claim = clonePointer(q.Claim)
+				q.Response = clonePointer(q.Response)
+			}
+			threads[id] = t
+		}
+		log.Threads = threads
+	}
+	return log
+}
+
+// clone returns a copy of v that its holder may change without changing v.
+func (v *workflowView) clone() *workflowView {
+	c := &workflowView{states: maps.Clone(v.states), transactions: maps.Clone(v.transactions), entries: make(map[string]*OutboxEntry, len(v.entries)), operations: make(map[string]*OperationRecord, len(v.operations))}
+	for id, e := range v.entries {
+		e := *e
+		e.History = slices.Clip(e.History)
+		c.entries[id] = &e
+	}
+	for id, o := range v.operations {
+		o := *o
+		o.History = slices.Clip(o.History)
+		c.operations[id] = &o
+	}
+	return c
+}
+
+// loadWorkflow requires r.mu. It returns the workstream's checked workflow,
+// which the caller may change. A workflow is decoded and checked once for the
+// committed files it comes from; while they are unchanged, later calls
+// return copies of that result.
 func (r *Repository) loadWorkflow(stream config.WorkstreamID) (workflowLog, *workflowView, error) {
 	var log workflowLog
 	if err := config.CheckWorkstreamIDs(stream); err != nil {
@@ -181,17 +283,34 @@ func (r *Repository) loadWorkflow(stream config.WorkstreamID) (workflowLog, *wor
 	if err := r.manifest(prefix+"workstream.json", "osmia.trace.workstream", stream); err != nil {
 		return log, nil, err
 	}
-	data, err := r.readFile(prefix + "workflow.json")
-	if os.IsNotExist(err) {
-		log = workflowLog{Schema: "osmia.workflow", Version: 1}
-	} else if err != nil {
-		return log, nil, err
-	} else if err = decode(data, &log); err != nil {
+	_, blobs, err := r.headTree(context.Background())
+	if err != nil {
 		return log, nil, err
 	}
-	if log.Schema != "osmia.workflow" || log.Version != 1 {
+	if c := r.workflows[stream]; c != nil && c.current(blobs) {
+		return c.log.clone(), c.view.clone(), nil
+	}
+	file := workflowFile{Schema: "osmia.workflow", Version: workflowVersion}
+	data, ok := checked.read(prefix + "workflow.json")
+	if !ok {
+		data, err = r.readFile(prefix + "workflow.json")
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return log, nil, err
+	}
+	if err == nil {
+		if err := decode(data, &file); err != nil {
+			return log, nil, err
+		}
+	}
+	if file.Schema != "osmia.workflow" || (file.Version != 1 && file.Version != workflowVersion) {
 		return log, nil, fmt.Errorf("unsupported workflow schema/version")
 	}
+	threads, carried, err := loadThreads(file.Threads, file.Version, records, stream)
+	if err != nil {
+		return log, nil, err
+	}
+	log = workflowLog{Schema: file.Schema, Version: file.Version, Transactions: file.Transactions, Deliveries: file.Deliveries, Operations: file.Operations, Threads: threads}
 	v := &workflowView{states: map[string]WorkflowState{}, transactions: map[string]Transaction{}, entries: map[string]*OutboxEntry{}, operations: map[string]*OperationRecord{}}
 	for _, tx := range log.Transactions {
 		if _, err := v.transition(tx, r.project, stream); err != nil {
@@ -225,9 +344,13 @@ func (r *Repository) loadWorkflow(stream config.WorkstreamID) (workflowLog, *wor
 	if len(found) != len(v.transactions) {
 		return log, nil, fmt.Errorf("workflow transition missing from trace")
 	}
-	if err := validateThreads(log.Threads, records, r.project, stream); err != nil {
+	if err := validateThreads(log.Threads, records, r.project, stream, carried); err != nil {
 		return log, nil, err
 	}
+	if r.workflows == nil {
+		r.workflows = map[config.WorkstreamID]*cachedWorkflow{}
+	}
+	r.workflows[stream] = &cachedWorkflow{sources: workflowSources(prefix, log, blobs), log: log.clone(), view: v.clone()}
 	return log, v, nil
 }
 
@@ -325,11 +448,11 @@ func (r *Repository) stage(stream config.WorkstreamID, log workflowLog, v *workf
 		events = append(events, append(line, '\n')...)
 		log.Transactions = append(log.Transactions, tx)
 	}
-	data, err := json.MarshalIndent(log, "", "  ")
+	data, err := encodeWorkflow(log)
 	if err != nil {
 		return nil, nil, err
 	}
-	files := map[string][]byte{prefix + "workflow.json": append(data, '\n'), prefix + "events.jsonl": events}
+	files := map[string][]byte{prefix + "workflow.json": data, prefix + "events.jsonl": events}
 	if err := r.appendRecords(files, records); err != nil {
 		return nil, nil, err
 	}
@@ -494,11 +617,11 @@ func (r *Repository) finishDelivery(ctx context.Context, stream config.Workstrea
 }
 func (r *Repository) saveDelivery(ctx context.Context, stream config.WorkstreamID, log workflowLog, a DeliveryAction) error {
 	log.Deliveries = append(log.Deliveries, a)
-	data, err := json.MarshalIndent(log, "", "  ")
+	data, err := encodeWorkflow(log)
 	if err != nil {
 		return err
 	}
-	if err := r.publish(ctx, map[string][]byte{"workstreams/" + string(stream) + "/workflow.json": append(data, '\n')}); err != nil {
+	if err := r.publish(ctx, map[string][]byte{"workstreams/" + string(stream) + "/workflow.json": data}); err != nil {
 		return err
 	}
 	if a.Kind == "release" {

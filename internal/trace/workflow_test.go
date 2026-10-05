@@ -428,6 +428,67 @@ func TestWorkflowRejectsInvalidAndCorruptData(t *testing.T) {
 	}
 }
 
+func TestLoadWorkflowCopiesAreIndependent(t *testing.T) {
+	r, _, _ := create(t)
+	ctx := context.Background()
+	tx := transaction("tx", 0, "", "active", 1)
+	transact(t, r, tx)
+	if err := r.CreateThread(ctx, threadAgent()); err != nil {
+		t.Fatal(err)
+	}
+	enqueue(t, r, "one")
+	claimTurn(t, r, "token")
+	event := tx.Events[0].ID
+	log, v, err := r.loadWorkflow(streamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	th := log.Threads["mason"]
+	th.Turns[0].Request.Prompt = "changed"
+	th.Turns[0].Claim.Token = "changed"
+	th.Turns[0].Attempts = append(th.Turns[0].Attempts, TurnAttempt{Number: 1})
+	log.Threads["other"] = Thread{}
+	log.Transactions[0].ExpectedVersion = 99
+	v.states["feature"] = WorkflowState{Version: 99}
+	v.entries[event].Acknowledged = true
+	v.entries[event].History = append(v.entries[event].History, DeliveryAction{Kind: "claim"})
+	log, v, err = r.loadWorkflow(streamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := log.Threads["mason"].Turns[0]
+	if _, ok := log.Threads["other"]; ok || q.Request.Prompt != "Message one" || q.Claim.Token != "token" || len(q.Attempts) != 0 || log.Transactions[0].ExpectedVersion != 0 {
+		t.Fatalf("changed copy reached the next load: %+v", log)
+	}
+	if v.states["feature"].Version != 1 || v.entries[event].Acknowledged || len(v.entries[event].History) != 0 {
+		t.Fatalf("changed view reached the next load: %+v %+v", v.states, v.entries[event])
+	}
+}
+
+func TestLoadWorkflowSeesCommittedChanges(t *testing.T) {
+	r, _, _ := create(t)
+	ctx := context.Background()
+	transact(t, r, transaction("tx", 0, "", "active", 1))
+	if _, _, err := r.loadWorkflow(streamID); err != nil {
+		t.Fatal(err)
+	}
+	name := "workstreams/" + string(streamID) + "/workflow.json"
+	data, err := r.readFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), `"expected_version": 0`, `"expected_version": 99`, 1))
+	if err := r.writeFile(name, data); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.commit(ctx, []string{name}, "Corrupt fixture"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.loadWorkflow(streamID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changed workflow accepted: %v", err)
+	}
+}
+
 func TestWorkflowProcessInterruption(t *testing.T) {
 	if step := os.Getenv("OSMIA_WORKFLOW_CRASH_STEP"); step != "" {
 		root, err := config.ResolveRoot(os.Getenv("OSMIA_WORKFLOW_ROOT"), "")

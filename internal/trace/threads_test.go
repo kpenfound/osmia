@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -490,8 +491,28 @@ func TestThreadRestartDuringCaptureAndCompletion(t *testing.T) {
 	}
 }
 
+// embeddedWorkflow returns log as workflow version 1 stores it, with each
+// turn's request and response whole.
+func embeddedWorkflow(t *testing.T, log workflowLog) []byte {
+	t.Helper()
+	f := workflowFile{Schema: "osmia.workflow", Version: 1, Transactions: log.Transactions, Deliveries: log.Deliveries, Operations: log.Operations, Threads: map[string]storedThread{}}
+	for id, th := range log.Threads {
+		s := storedThread{Identity: th.Identity, Session: th.Session, Status: th.Status, Active: th.Active}
+		for _, q := range th.Turns {
+			req := q.Request
+			s.Turns = append(s.Turns, storedTurn{Attempts: q.Attempts, Sequence: q.Sequence, Request: &req, Claim: q.Claim, Response: q.Response, CompletedAt: q.CompletedAt})
+		}
+		f.Threads[id] = s
+	}
+	data, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(data, '\n')
+}
+
 func TestThreadOwnedRecordValidation(t *testing.T) {
-	for _, mode := range []string{"missing-log", "changed-queue"} {
+	for _, mode := range []string{"missing-log", "changed-embedded-queue", "unknown-request"} {
 		t.Run(mode, func(t *testing.T) {
 			r, root, p := create(t)
 			ctx := context.Background()
@@ -500,21 +521,28 @@ func TestThreadOwnedRecordValidation(t *testing.T) {
 			}
 			enqueue(t, r, "one")
 			files := map[string][]byte{}
-			if mode == "missing-log" {
+			name := "workstreams/" + string(streamID) + "/workflow.json"
+			log, _, err := r.loadWorkflow(streamID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "missing-log":
 				files["workstreams/"+string(streamID)+"/agents/mason/log.jsonl"] = nil
-			} else {
-				log, _, err := r.loadWorkflow(streamID)
-				if err != nil {
-					t.Fatal(err)
-				}
+			case "changed-embedded-queue":
 				th := log.Threads["mason"]
 				th.Turns[0].Request.Prompt = "tampered"
 				log.Threads["mason"] = th
-				data, err := json.Marshal(log)
+				files[name] = embeddedWorkflow(t, log)
+			case "unknown-request":
+				th := log.Threads["mason"]
+				th.Turns[0].Request.ID = "request_unknown"
+				log.Threads["mason"] = th
+				data, err := encodeWorkflow(log)
 				if err != nil {
 					t.Fatal(err)
 				}
-				files["workstreams/"+string(streamID)+"/workflow.json"] = data
+				files[name] = data
 			}
 			if err := r.publish(ctx, files); err != nil {
 				t.Fatal(err)
@@ -528,6 +556,106 @@ func TestThreadOwnedRecordValidation(t *testing.T) {
 				t.Fatal("inconsistent owned records accepted")
 			}
 		})
+	}
+}
+
+func TestWorkflowStoresTurnReferences(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	if err := r.CreateThread(ctx, threadAgent()); err != nil {
+		t.Fatal(err)
+	}
+	enqueue(t, r, "one")
+	q := claimTurn(t, r, "token")
+	if err := r.CaptureTurn(ctx, "token", threadResponse(q)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CompleteTurn(ctx, streamID, "mason", "one", "token", at.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	enqueue(t, r, "two")
+	before := mustThread(t, r)
+	data, err := r.readFile("workstreams/" + string(streamID) + "/workflow.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f workflowFile
+	if err := decode(data, &f); err != nil {
+		t.Fatal(err)
+	}
+	turns := f.Threads["mason"].Turns
+	if f.Version != workflowVersion || len(turns) != 2 {
+		t.Fatalf("stored workflow: version %d, %d turns", f.Version, len(turns))
+	}
+	if turns[0].RequestID != "request_one" || turns[0].ResponseID != "response_one" || turns[1].RequestID != "request_two" || turns[1].ResponseID != "" {
+		t.Fatalf("stored turn references: %+v", turns)
+	}
+	for _, turn := range turns {
+		if turn.Request != nil || turn.Response != nil {
+			t.Fatalf("stored turn carries its records: %+v", turn)
+		}
+	}
+	for _, content := range []string{"Message one", "Captured final"} {
+		if strings.Contains(string(data), content) {
+			t.Fatalf("workflow.json repeats turn content %q", content)
+		}
+	}
+	r.Close()
+	reopened, err := Open(root, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if after := mustThread(t, reopened); !equalJSON(after, before) {
+		t.Fatalf("reopened thread differs:\n%+v\n%+v", after, before)
+	}
+}
+
+func TestWorkflowLoadsEmbeddedTurns(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	if err := r.CreateThread(ctx, threadAgent()); err != nil {
+		t.Fatal(err)
+	}
+	enqueue(t, r, "one")
+	q := claimTurn(t, r, "token")
+	if err := r.CaptureTurn(ctx, "token", threadResponse(q)); err != nil {
+		t.Fatal(err)
+	}
+	before := mustThread(t, r)
+	log, _, err := r.loadWorkflow(streamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "workstreams/" + string(streamID) + "/workflow.json"
+	if err := r.publish(ctx, map[string][]byte{name: embeddedWorkflow(t, log)}); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	reopened, err := Open(root, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if after := mustThread(t, reopened); !equalJSON(after.Turns, before.Turns) || after.Status != before.Status {
+		t.Fatalf("embedded thread differs:\n%+v\n%+v", after, before)
+	}
+	if err := reopened.CompleteTurn(ctx, streamID, "mason", "one", "token", at.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	data, err := reopened.readFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f workflowFile
+	if err := decode(data, &f); err != nil {
+		t.Fatal(err)
+	}
+	if f.Version != workflowVersion || strings.Contains(string(data), "Message one") || f.Threads["mason"].Turns[0].ResponseID != "response_one" {
+		t.Fatalf("saved workflow keeps embedded turns:\n%s", data)
+	}
+	if th := mustThread(t, reopened); th.Status != "waiting" || th.Turns[0].Request.Prompt != "Message one" || th.Turns[0].Response.Result.FinalResponse != "Captured final" {
+		t.Fatalf("completed thread: %+v", th)
 	}
 }
 
