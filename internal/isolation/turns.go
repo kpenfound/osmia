@@ -75,7 +75,7 @@ func narrow(grant coreadapter.Capabilities, request *coreadapter.Capabilities) c
 }
 
 // roleTools names tools only one role may hold, whatever the service grant says.
-var roleTools = map[string]string{"inspect_code": "chief_of_staff", "capacity": "chief_of_staff", "notify": "chief_of_staff", "set_status": "chief_of_staff", "prioritise": "chief_of_staff", "decide_amendment": "chief_of_staff", "decide_charter": "chief_of_staff", "resolve_contested": "chief_of_staff", "answer": "chief_of_staff", "escalate": "chief_of_staff", "relay_ruling": "chief_of_staff", "route_amendment": "chief_of_staff", "propose_charter": "chief_of_staff",
+var roleTools = map[string]string{"inspect_code": "chief_of_staff", "capacity": "chief_of_staff", "notify": "chief_of_staff", "set_status": "chief_of_staff", "prioritise": "chief_of_staff", "decide_amendment": "chief_of_staff", "decide_charter": "chief_of_staff", "resolve_contested": "chief_of_staff", "move_unit": "chief_of_staff", "hand_back_drift": "chief_of_staff", "answer": "chief_of_staff", "escalate": "chief_of_staff", "relay_ruling": "chief_of_staff", "route_amendment": "chief_of_staff", "propose_charter": "chief_of_staff",
 	"object": "committee", "concede": "committee", "final_report": "committee", "reply": "architect", "verdict": "reviewer"}
 
 // deniedTools names tools one role may never hold, whatever the service grant says.

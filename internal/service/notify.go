@@ -367,6 +367,15 @@ func notificationBody(project config.ProjectID, e InboxEntry, link string) strin
 	if e.Kind == InboxPublication {
 		opening = "Osmia cannot publish a pull request."
 	}
+	if e.Kind == InboxDrift {
+		opening = "Osmia holds a drift rebase for you."
+	}
+	if e.Kind == InboxNotices {
+		opening = "Osmia cannot reach the chief of staff."
+	}
+	if e.Kind == InboxLoop {
+		opening = "Osmia paused a workstream that is not making progress."
+	}
 	fmt.Fprintf(&b, "%s\nProject: %s\nWorkstream: %s\nKind: %s\nQuestion: %s\n", opening, project, e.Workstream, e.Kind, oneLine(e.Question))
 	if r := oneLine(e.Recommendation); r != "" {
 		fmt.Fprintf(&b, "Recommendation: %s\n", r)

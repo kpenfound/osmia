@@ -31,7 +31,7 @@ func TestSetFeatureStateCommitsANotice(t *testing.T) {
 	}
 	bodies := map[string]string{}
 	for _, e := range entries {
-		if e.Event.Kind != NoticeKind || e.Event.Operation != nil || !e.At.Equal(at) {
+		if e.Event.Kind != ProgressKind || e.Event.Operation != nil || !e.At.Equal(at) {
 			t.Fatalf("entry %+v", e)
 		}
 		bodies[e.TransitionID] = e.Event.Body

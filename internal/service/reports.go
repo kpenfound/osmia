@@ -349,7 +349,8 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 	}
 	if len(stored) != 0 {
 		slices.Sort(stored)
-		return false, false, m.remind(ctx, b.stream, unit, turn, stored)
+		moved, err := m.remind(ctx, b.stream, unit, b.states[trace.UnitSubject(unit)], turn, stored)
+		return moved, false, err
 	}
 	latest, _, _, err := seal.Latest(m.repository, b.stream)
 	if err != nil {
@@ -377,8 +378,14 @@ func (m *masons) finish(ctx context.Context, b building, unit string) (moved, bl
 	h.Schema, h.ID, h.Revision = "osmia.trace.transition", checkingTransitionID(unit, k), 1
 	tr := trace.Transition{Header: h, Subject: subject, From: UnitImplementing, To: UnitChecking,
 		Reason: fmt.Sprintf("the mason of unit %s reported done on turn %s; its candidate is %s on %s, from %s at %s, and its report is %s revision %d", unit, turn.Request.TurnID, candidate, w.Branch, featureBranch(b.stream), base, doc.Path, k)}
+	// A mason that names something the owner must act on is news; otherwise
+	// the unit's move to checking is routine progress.
+	event := trace.Progress(checkingTransitionID(unit, k), "unit", finishNotice(unit, turn.Request.TurnID, doc.Path, k, card))
+	if card != nil && card.NeedsYou != "" {
+		event = trace.Notice(checkingTransitionID(unit, k), "unit", finishNotice(unit, turn.Request.TurnID, doc.Path, k, card))
+	}
 	tx := trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr,
-		Events: []trace.Event{trace.Notice(checkingTransitionID(unit, k), "unit", finishNotice(unit, turn.Request.TurnID, doc.Path, k, card))}}
+		Events: []trace.Event{event}}
 	if _, err := m.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); errors.Is(err, trace.ErrConflict) {
 		return false, false, nil
 	} else if err != nil {

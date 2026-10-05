@@ -290,6 +290,9 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 				last = th.Turns[len(th.Turns)-1]
 			}
 			if last.Status() == "interrupted" && !paused {
+				if contested, err := contestInterrupted(ctx, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, th, r.s.now()); err != nil || contested {
+					return err
+				}
 				return r.recover(ctx, last)
 			}
 			if last.CompletedAt.IsZero() {
@@ -327,6 +330,9 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 				last = th.Turns[len(th.Turns)-1]
 			}
 			if last.Status() == "interrupted" && !paused {
+				if contested, err := contestInterrupted(ctx, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, th, r.s.now()); err != nil || contested {
+					return err
+				}
 				return r.recover(ctx, last)
 			}
 			if last.CompletedAt.IsZero() {
@@ -346,6 +352,12 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	}
 	if paused {
 		return nil
+	}
+	// A candidate whose workspace does not descend from the feature branch's
+	// tip would be refused as stale once reviewed, so the review waits for the
+	// foreman's rebase, which makes a new candidate.
+	if behind, err := newUnitWorkspaces(r.cfg, r.repository).behind(ctx, stream, unit); err != nil || behind {
+		return err
 	}
 	req, identity, err := r.prepareUnitReview(ctx, stream, unit)
 	if err != nil {
@@ -653,7 +665,11 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 		reason += fmt.Sprintf("; %d material send-backs reached shed.max_bounces; the owner must rule review or revise before the unit moves", result.Bounces)
 	}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit)}
-	_, err := r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitReviewing, To: to, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s review %s: %s.", unit, result.Verdict.Decision, reason))}})
+	notice := trace.Progress
+	if to == UnitContested {
+		notice = trace.Notice
+	}
+	_, err := r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitReviewing, To: to, Reason: reason}, Events: []trace.Event{notice(id, "unit", fmt.Sprintf("Unit %s review %s: %s.", unit, result.Verdict.Decision, reason))}})
 	if errors.Is(err, trace.ErrConflict) {
 		return nil
 	}
@@ -756,10 +772,46 @@ func (m *masons) staleInputs(ctx context.Context, stream config.WorkstreamID, un
 	return "", nil
 }
 
+// maxReviewRefreshes is how many reviews of a unit in a row the service
+// refuses before it contests the unit instead of asking for another.
+const maxReviewRefreshes = 3
+
+// refreshReview refuses the unit's review and keeps it reviewing, so its
+// candidate is reviewed again, with a notice saying why. The review that
+// would be the maxReviewRefreshes-th refused in a row contests the unit
+// instead, as a failed review the chief of staff or the owner rules on.
 func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, reason string) error {
-	id := fmt.Sprintf("%s-review-refresh-%d", trace.UnitSubject(unit), state.Version)
+	subject := trace.UnitSubject(unit)
+	transitions, err := trace.Read[trace.Transition](r.repository, stream)
+	if err != nil {
+		return err
+	}
+	refreshes, latest := 0, ""
+	for _, t := range slices.Backward(transitions) {
+		if t.Subject != subject {
+			continue
+		}
+		if t.From != UnitReviewing || t.To != UnitReviewing || !strings.HasPrefix(t.ID, subject+"-review-refresh-") {
+			break
+		}
+		if latest == "" {
+			latest = t.ID
+		}
+		refreshes++
+	}
+	if refreshes+1 >= maxReviewRefreshes {
+		id := fmt.Sprintf("%s-contested-refresh-%d", subject, state.Version)
+		why := fmt.Sprintf("the service refused %d reviews of unit %s in a row, so the unit is contested instead of reviewed again; the latest was refused for this reason: %s", refreshes+1, unit, reason)
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: latest}
+		_, err := r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitReviewing, To: UnitContested, Reason: why}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, why))}})
+		if errors.Is(err, trace.ErrConflict) {
+			return nil
+		}
+		return err
+	}
+	id := fmt.Sprintf("%s-review-refresh-%d", subject, state.Version)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: reviewerActor, Cause: reviewDocument(unit)}
-	_, err := r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitReviewing, To: UnitReviewing, Reason: reason}, Events: []trace.Event{trace.Notice(id, "chief", "Unit "+unit+" stays reviewing: "+reason)}})
+	_, err = r.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitReviewing, To: UnitReviewing, Reason: reason}, Events: []trace.Event{trace.Notice(id, "chief", "Unit "+unit+" stays reviewing: "+reason)}})
 	if errors.Is(err, trace.ErrConflict) {
 		return nil
 	}

@@ -312,7 +312,7 @@ func (f *shedFixture) awaitAcknowledgedNotices(t *testing.T, stream config.Works
 		must(t, err)
 		pending := 0
 		for _, e := range outbox {
-			if e.Event.Kind == trace.NoticeKind && !e.Acknowledged {
+			if chiefEvent(e.Event) && !e.Acknowledged {
 				pending++
 			}
 		}

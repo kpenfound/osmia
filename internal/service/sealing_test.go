@@ -150,7 +150,7 @@ func (f *architectFixture) notice(t *testing.T, stream config.WorkstreamID, tran
 	outbox, err := f.repository().Outbox(stream)
 	must(t, err)
 	for _, entry := range outbox {
-		if entry.TransitionID == transition && entry.Event.Kind == trace.NoticeKind {
+		if entry.TransitionID == transition && chiefEvent(entry.Event) {
 			return entry.Event.Body
 		}
 	}

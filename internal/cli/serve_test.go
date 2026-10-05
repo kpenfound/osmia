@@ -245,7 +245,7 @@ func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream stri
 	if work := turn.Request.Workspace.Directory(); filepath.Dir(work) != turn.Request.SessionDir {
 		t.Fatalf("working directory %s is not the session's own", work)
 	}
-	granted := append([]string{"file_read", status.ToolName, "notify", "capacity", "inspect_code", "prioritise", "pause", "resume", "decide_amendment", "decide_charter", "resolve_contested"}, questions.ChiefTools...)
+	granted := append([]string{"file_read", status.ToolName, "notify", "capacity", "inspect_code", "prioritise", "pause", "resume", "decide_amendment", "decide_charter", "resolve_contested", "move_unit", "hand_back_drift"}, questions.ChiefTools...)
 	var tools []string
 	for _, allowed := range turn.Request.Profile.AllowedTools {
 		server, tool, ok := strings.Cut(strings.TrimPrefix(allowed, "mcp__"), "__")

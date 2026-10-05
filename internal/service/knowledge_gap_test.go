@@ -98,7 +98,7 @@ func TestCodeAnswerQueuesPinnedKnowledgeRefreshAcrossRestart(t *testing.T) {
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(output, "entities.json"), encoded, 0600))
 	must(t, os.WriteFile(filepath.Join(output, "internal.md"), []byte("# Internal\n\nCommitted knowledge.\n"), 0600))
-	accepted, err := r.recordRefresh(ctx, op.Operation.ID, in, UnitReport{}, trace.QueuedTurn{Request: trace.TurnRequest{TurnID: turn}})
+	accepted, err := r.recordRefresh(ctx, op.Operation.ID, in, trace.QueuedTurn{Request: trace.TurnRequest{TurnID: turn}})
 	must(t, err)
 	if accepted.Outcome != "succeeded" {
 		t.Fatal(accepted)

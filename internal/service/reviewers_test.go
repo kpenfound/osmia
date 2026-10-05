@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/busybees/core/agent"
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -243,7 +246,12 @@ func TestStaleCandidateReturnsUnitToReview(t *testing.T) {
 		if !strings.Contains(transitions[len(transitions)-1].Reason, "stale "+tc.name) {
 			t.Fatalf("%s: reason: %s", tc.name, transitions[len(transitions)-1].Reason)
 		}
-		state = current
+		// Re-entering review starts the count of refused reviews over.
+		moveUnitNow(t, f, repo, stream, "resume", UnitChecking)
+		moveUnitNow(t, f, repo, stream, "resume", UnitReviewing)
+		if state, err = repo.Workflow(stream, trace.UnitSubject("resume")); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -494,4 +502,159 @@ func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
 		t.Fatalf("ruling lost: %v %v", found, err)
 	}
 	masons.check(t)
+}
+
+// A reviewing unit whose workspace a landing left behind the feature branch
+// gets no review turn and no refreshed review: a review of its candidate
+// would be refused as stale, so it waits for the foreman's rebase.
+func TestReviewWaitsForTheRebaseOfAUnitLeftBehind(t *testing.T) {
+	t.Parallel()
+	f, _ := newMasonFixture(t, 1, independentPlan)
+	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	stream, repository := seedBuild(t, f, "review-behind", independentPlan, config.WorkspacesGit, base)
+	seedReview(t, f, repository, stream, "resume", resumeReport)
+	seedReview(t, f, repository, stream, "dedupe", dedupeReport)
+	approveDirectly(t, f.s, repository, stream, "resume", "spec#1")
+	lands := &foreman{masons: newMasonController(f.s, repository)}
+	ctx := context.Background()
+	must(t, lands.Pass(ctx))
+	landings := landOperations(t, repository, stream)
+	if len(landings) != 1 {
+		t.Fatalf("landing operations %+v", landings)
+	}
+	if result := settleOperation(t, f.s, repository, stream, landings[0].Operation, lands); result.Outcome != "succeeded" {
+		t.Fatalf("landing result %+v", result)
+	}
+	units := newUnitWorkspaces(f.s.cfg, repository)
+	if behind, err := units.behind(ctx, stream, "dedupe"); err != nil || !behind {
+		t.Fatalf("dedupe is not behind the landed feature branch: %v %v", behind, err)
+	}
+
+	r := &reviewers{masons: lands.masons}
+	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
+	must(t, err)
+	if state.Value != UnitReviewing {
+		t.Fatalf("dedupe is %s, not reviewing", state.Value)
+	}
+	for range 2 {
+		must(t, r.one(ctx, stream, "dedupe", state, false))
+	}
+	if th, err := repository.Thread(stream, reviewerAgent("dedupe")); err == nil && len(th.Turns) != 0 || err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the candidate left behind was offered for review: %+v %v", th.Turns, err)
+	}
+	if after, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || after != state {
+		t.Fatalf("dedupe moved from %+v to %+v while it waits for its rebase: %v", state, after, err)
+	}
+
+	must(t, lands.Pass(ctx))
+	rebases := rebaseOperations(t, repository, stream, "dedupe")
+	if len(rebases) != 1 {
+		t.Fatalf("dedupe's rebases %+v", rebases)
+	}
+	settleOperation(t, f.s, repository, stream, rebases[0].Operation, rebaser{lands})
+	if behind, err := units.behind(ctx, stream, "dedupe"); err != nil || behind {
+		t.Fatalf("dedupe is behind after its rebase: %v %v", behind, err)
+	}
+}
+
+// A unit whose reviews the service refuses maxReviewRefreshes times in a row
+// is contested instead of reviewed again, as a failed review whose ruling is
+// another review, and the chief of staff hears why.
+func TestRepeatedlyRefusedReviewsContestTheUnit(t *testing.T) {
+	t.Parallel()
+	f, stream, repository := newReviewFixture(t, "refresh-limit")
+	r := &reviewers{masons: newMasonController(f.s, repository)}
+	ctx := context.Background()
+	subject := trace.UnitSubject("resume")
+	for i := 1; i < maxReviewRefreshes; i++ {
+		state, err := repository.Workflow(stream, subject)
+		must(t, err)
+		must(t, r.refreshReview(ctx, stream, "resume", state, "stale base revision; review the current candidate again"))
+		if after, err := repository.Workflow(stream, subject); err != nil || after.Value != UnitReviewing {
+			t.Fatalf("refused review %d left the unit %+v: %v", i, after, err)
+		}
+	}
+	state, err := repository.Workflow(stream, subject)
+	must(t, err)
+	must(t, r.refreshReview(ctx, stream, "resume", state, "stale base revision; review the current candidate again"))
+	contested, err := repository.Workflow(stream, subject)
+	must(t, err)
+	if contested.Value != UnitContested {
+		t.Fatalf("refused review %d left the unit %s", maxReviewRefreshes, contested.Value)
+	}
+	transitions := allTransitions(t, f.trace, stream)
+	contest := transitions[len(transitions)-1]
+	if contest.Subject != subject || !failedReview(contest, "resume") || !strings.Contains(contest.Reason, fmt.Sprintf("refused %d reviews of unit resume in a row", maxReviewRefreshes)) {
+		t.Fatalf("the contest %+v", contest)
+	}
+	if opts := contestOptions(contest, "resume", false); !slices.Equal(opts, []string{"review"}) {
+		t.Fatalf("the contest offers %v", opts)
+	}
+}
+
+// interruptTurn runs the latest turn of the workstream's agent as a turn a
+// stop interrupted.
+func interruptTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent string) trace.QueuedTurn {
+	t.Helper()
+	ctx := context.Background()
+	th, err := repository.Thread(stream, agent)
+	must(t, err)
+	token := "stopped-" + th.Turns[len(th.Turns)-1].Request.TurnID
+	q, err := repository.ClaimTurn(ctx, stream, agent, token, t.TempDir(), f.clock.Now())
+	must(t, err)
+	h := q.Request.Header
+	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.clock.Now()
+	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: agent, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision,
+		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: token}, SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, Cancelled: true}}
+	must(t, repository.CaptureTurn(ctx, q.Claim.Token, response))
+	must(t, repository.CompleteTurn(ctx, stream, agent, q.Request.TurnID, q.Claim.Token, f.clock.Now()))
+	return q
+}
+
+// A review whose turns are interrupted maxRecoveries times in a row is not
+// continued again: the unit is contested as a failed review.
+func TestRepeatedlyInterruptedReviewContestsTheUnit(t *testing.T) {
+	t.Parallel()
+	f, stream, repository := newReviewFixture(t, "interrupted-review")
+	r := &reviewers{masons: newMasonController(f.s, repository)}
+	ctx := context.Background()
+	subject := trace.UnitSubject("resume")
+	state, err := repository.Workflow(stream, subject)
+	must(t, err)
+	must(t, r.one(ctx, stream, "resume", state, false))
+	for i := 1; i <= maxRecoveries; i++ {
+		interruptTurn(t, f, repository, stream, reviewerAgent("resume"))
+		must(t, r.one(ctx, stream, "resume", state, false))
+		got, err := repository.Workflow(stream, subject)
+		must(t, err)
+		if i < maxRecoveries && got.Value != UnitReviewing || i == maxRecoveries && got.Value != UnitContested {
+			t.Fatalf("after %d interruptions the unit is %s", i, got.Value)
+		}
+	}
+	if ids := turnIDs(t, repository, stream, reviewerAgent("resume")); len(ids) != maxRecoveries {
+		t.Fatalf("reviewer turns %v", ids)
+	}
+	transitions := allTransitions(t, f.trace, stream)
+	contest := transitions[len(transitions)-1]
+	if !failedReview(contest, "resume") || !strings.Contains(contest.Reason, fmt.Sprintf("the latest %d reviewer turns of unit resume were interrupted in a row", maxRecoveries)) {
+		t.Fatalf("the contest %+v", contest)
+	}
+
+	// The chief of staff hands the unit back to its reviewer: the review its
+	// move asks for starts a new count, so an interruption of it is continued.
+	if _, api := f.s.moveUnit(ctx, repository, stream, "resume", UnitMoveRequest{To: UnitReviewing, Note: "The service is stable again; review it."}, chiefActor, ""); api != nil {
+		t.Fatalf("the chief's move: %+v", api)
+	}
+	state, err = repository.Workflow(stream, subject)
+	must(t, err)
+	must(t, r.one(ctx, stream, "resume", state, false))
+	interruptTurn(t, f, repository, stream, reviewerAgent("resume"))
+	must(t, r.one(ctx, stream, "resume", state, false))
+	if got, err := repository.Workflow(stream, subject); err != nil || got.Value != UnitReviewing {
+		t.Fatalf("after the move and one interruption the unit is %+v: %v", got, err)
+	}
+	ids := turnIDs(t, repository, stream, reviewerAgent("resume"))
+	if last := ids[len(ids)-1]; !strings.Contains(last, "-recover-") {
+		t.Fatalf("the interrupted review after the move was not continued: %v", ids)
+	}
 }

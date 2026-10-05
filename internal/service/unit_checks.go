@@ -34,6 +34,11 @@ var checksActor = trace.Actor{Kind: "service", ID: checksRole}
 // before they run again.
 const checkRetryDelay = 10 * time.Minute
 
+// maxIncompleteChecks is how many check runs of one candidate in a row may
+// fail to complete, since the unit last moved into checking, before the unit
+// is contested instead of its checks running again.
+const maxIncompleteChecks = 3
+
 // The statuses of a check run.
 const (
 	ChecksPassed = "passed"
@@ -222,6 +227,11 @@ func (c *checkers) one(ctx context.Context, stream config.WorkstreamID, unit str
 			if err := c.incomplete(ctx, stream, *latest); err != nil {
 				return false, err
 			}
+			if n, err := c.incompleteSinceEntry(stream, unit, *latest, runs); err != nil {
+				return false, err
+			} else if n >= maxIncompleteChecks {
+				return false, c.contestIncomplete(ctx, stream, unit, state, *latest, n)
+			}
 			if c.s.now().Before(latest.FinishedAt.Add(checkRetryDelay)) {
 				return false, nil
 			}
@@ -293,7 +303,7 @@ func (c *checkers) pass(ctx context.Context, stream config.WorkstreamID, unit st
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: c.s.now(), Actor: checksActor, Cause: checkDocumentID(unit, run.Run)}
 	_, err := c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitChecking, To: UnitReviewing, Reason: reason},
-		Events:     []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is reviewing: %s.", unit, reason))}})
+		Events:     []trace.Event{trace.Progress(id, "unit", fmt.Sprintf("Unit %s is reviewing: %s.", unit, reason))}})
 	if errors.Is(err, trace.ErrConflict) {
 		return nil
 	}
@@ -369,6 +379,52 @@ func checkVerdict(run UnitCheckRun) UnitVerdict {
 		v.Findings = append(v.Findings, ReviewFinding{Severity: "blocking", Evidence: fmt.Sprintf("check %s failed in check run %d", link, run.Run), Action: fmt.Sprintf("make %s pass", link)})
 	}
 	return v
+}
+
+// incompleteSinceEntry counts the unit's check runs of latest's candidate
+// and base that did not complete and were requested since the unit last
+// moved into checking.
+func (c *checkers) incompleteSinceEntry(stream config.WorkstreamID, unit string, latest UnitCheckRun, runs []UnitCheckRun) (int, error) {
+	transitions, err := trace.Read[trace.Transition](c.repository, stream)
+	if err != nil {
+		return 0, err
+	}
+	entered := -1
+	for i, t := range transitions {
+		if t.Subject == trace.UnitSubject(unit) && t.To == UnitChecking && t.From != UnitChecking {
+			entered = i
+		}
+	}
+	requested := map[string]bool{}
+	for _, t := range transitions[entered+1:] {
+		if t.Subject == checksSubject(unit) {
+			requested[t.ID] = true
+		}
+	}
+	n := 0
+	for _, r := range runs {
+		if r.Unit == unit && r.Status == ChecksIncomplete && r.Candidate == latest.Candidate && r.Base == latest.Base && requested[checkRequestID(unit, r.Run)] {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// contestIncomplete contests a checking unit whose latest n check runs of
+// its candidate did not complete, with a notice for the chief of staff. A
+// ruling of review runs its checks again before review, and revise returns it
+// to its mason.
+func (c *checkers) contestIncomplete(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, latest UnitCheckRun, n int) error {
+	id := checkDocumentID(unit, latest.Run) + "-contested"
+	reason := fmt.Sprintf("%d check runs in a row on candidate %s of unit %s did not complete, the latest because %s; the unit is contested instead of its checks running again", n, latest.Candidate, unit, latest.Error)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: c.s.now(), Actor: checksActor, Cause: checkDocumentID(unit, latest.Run)}
+	_, err := c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version,
+		Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitChecking, To: UnitContested, Reason: reason},
+		Events:     []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))}})
+	if errors.Is(err, trace.ErrConflict) {
+		return nil
+	}
+	return err
 }
 
 // incomplete tells the chief of staff, once, that a unit's check run did not

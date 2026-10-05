@@ -21,11 +21,16 @@ const driftRequestSubject = "drift-request"
 // driftHistory is what a workstream's next drift rebase is measured from.
 type driftHistory struct {
 	// Drift is the number of the workstream's latest drift rebase, and
-	// Requested the number of the drift rebase the owner's latest request
-	// waits for; each is 0 before there is one.
+	// Requested the number of the drift rebase the latest request waits
+	// for; each is 0 before there is one.
 	Drift, Requested int
-	// RequestedAt is when the owner's latest request was recorded.
+	// RequestedAt is when the latest request was recorded, and RequestedBy
+	// who made it: the owner, or the chief of staff handing a held drift
+	// rebase back.
 	RequestedAt time.Time
+	RequestedBy string
+	// Held reports whether the latest drift rebase is held for the owner.
+	Held bool
 	// Since is when the latest drift rebase, final rebase or the sealing
 	// that created the feature branch was recorded, and What names it.
 	Since time.Time
@@ -50,7 +55,7 @@ func (f *foreman) history(stream config.WorkstreamID) (driftHistory, error) {
 				}
 			case driftRequestSubject:
 				if !r.At.Before(request) {
-					request = r.At
+					request, h.RequestedBy = r.At, rulerName(r.Actor)
 				}
 			}
 		case trace.Document:
@@ -76,6 +81,7 @@ func (f *foreman) history(stream config.WorkstreamID) (driftHistory, error) {
 	if h.Requested, err = driftNumber(states[driftRequestSubject].Value); err != nil {
 		return driftHistory{}, err
 	}
+	h.Held = strings.HasPrefix(states[driftSubject].Value, driftHeld+"-")
 	h.RequestedAt = request
 	for _, at := range []struct {
 		t    time.Time
@@ -89,19 +95,27 @@ func (f *foreman) history(stream config.WorkstreamID) (driftHistory, error) {
 }
 
 // driftDue returns why the sealed workstream takes a drift rebase at now, or
-// "" when it takes none: the owner asked for one it has not had, or the
-// project's upstream_rebase interval has elapsed since its latest drift
-// rebase, final rebase or, before either, its sealing.
+// "" when it takes none: the owner, or the chief of staff handing a held one
+// back, asked for one it has not had, or, unless
+// its latest drift rebase is held for the owner, its base workstream's
+// branch moved or the project's upstream_rebase interval has elapsed since
+// its latest drift rebase, final rebase or, before either, its sealing.
 func (f *foreman) driftDue(stream config.WorkstreamID, now time.Time) (string, error) {
+	h, err := f.history(stream)
+	if err != nil {
+		return "", err
+	}
+	if h.Held && h.Requested <= h.Drift {
+		return "", nil
+	}
 	if changed, err := dependentBaseChanged(context.Background(), f.cfg, f.repository, stream); err != nil || changed {
 		return "the base workstream branch moved", err
 	}
-	h, err := f.history(stream)
-	if err != nil || h.Since.IsZero() {
-		return "", err
+	if h.Since.IsZero() {
+		return "", nil
 	}
 	if h.Requested > h.Drift {
-		return fmt.Sprintf("the owner asked for a drift rebase at %s", h.RequestedAt.Format(time.RFC3339)), nil
+		return fmt.Sprintf("the %s asked for a drift rebase at %s", h.RequestedBy, h.RequestedAt.Format(time.RFC3339)), nil
 	}
 	interval := f.cfg.Project.RebaseInterval()
 	if interval <= 0 || now.Sub(h.Since) < interval {

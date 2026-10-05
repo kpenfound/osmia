@@ -28,8 +28,8 @@ const DriftAction = "drift"
 const (
 	// driftSubject is the workflow subject that tracks a workstream's drift
 	// rebases: requested-<k> once drift rebase k is asked for, then
-	// rebased-<k> or skipped-<k>, through conflicted-<k> while a conflict
-	// the replay left is resolved.
+	// rebased-<k>, skipped-<k> or held-<k>, through conflicted-<k> while a
+	// conflict the replay left is resolved.
 	driftSubject = "drift"
 	// driftPath is the workstream document of drift rebases, and
 	// driftDocument its trace record ID.
@@ -44,6 +44,11 @@ const (
 	driftRebased    = "rebased"
 	driftConflicted = "conflicted"
 	driftSkipped    = "skipped"
+	// driftHeld is the drift subject's value, held-<k>, once drift rebase
+	// k's conflict resolution stopped: the drift rebase is over, and the
+	// workstream takes no other until the owner asks for one or the chief
+	// of staff hands it back.
+	driftHeld = "held"
 )
 
 // driftInput names one drift rebase of a workstream by its number.
@@ -243,7 +248,7 @@ func (d drifter) stream(op coreadapter.Operation, in driftInput) (config.Workstr
 }
 
 // outcome returns the recorded result of drift rebase k: succeeded once it
-// is recorded rebased or skipped, nil before.
+// is recorded rebased, skipped or held, nil before.
 func (d drifter) outcome(stream config.WorkstreamID, k int) (*coreadapter.OperationResult, error) {
 	transitions, err := trace.Read[trace.Transition](d.repository, stream)
 	if err != nil {
@@ -252,7 +257,7 @@ func (d drifter) outcome(stream config.WorkstreamID, k int) (*coreadapter.Operat
 	transition, _ := driftIDs(k)
 	for _, t := range transitions {
 		switch t.ID {
-		case transition + "-" + driftRebased, transition + "-" + driftSkipped:
+		case transition + "-" + driftRebased, transition + "-" + driftSkipped, transition + "-" + driftHeld:
 			return &coreadapter.OperationResult{Outcome: "succeeded", Evidence: t.Reason}, nil
 		}
 	}
@@ -327,8 +332,10 @@ func (d drifter) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 // the feature branch onto it. A conflicted replay records the upstream
 // commit and the conflicted paths and changes neither the branch nor the
 // seal: the conflicts are resolved and reviewed as resolve says, and the
-// operation stays pending, holding the project's lander, until a reviewer
-// approves the resolved branch, which is then the replay's commit. A
+// operation stays pending, holding its workstream's landings and the
+// project's other drift rebases, until a reviewer approves the resolved
+// branch, which is then the replay's commit, or the resolution stops and
+// the drift rebase is held, as resolve says. A
 // workstream that stops building or being assembled while its conflicts
 // are resolved is skipped, and its resolution workspace removed. A clean
 // replay records drift/rebase.json with the rebased commit before
@@ -392,7 +399,10 @@ func (d drifter) drift(ctx context.Context, operation string, stream config.Work
 			}
 			return d.skip(ctx, stream, in.Drift, operation, reason+"; its conflict resolution is dropped")
 		}
-		if rebase, err = d.resolve(ctx, stream, rebase); err != nil {
+		var held driftHeldError
+		if rebase, err = d.resolve(ctx, stream, rebase); errors.As(err, &held) {
+			return d.hold(ctx, stream, rebase, operation, held.why)
+		} else if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 	}
@@ -444,7 +454,10 @@ func (d drifter) drift(ctx context.Context, operation string, stream config.Work
 			if err := d.conflict(ctx, stream, rebase); err != nil {
 				return coreadapter.OperationResult{}, err
 			}
-			if rebase, err = d.resolve(ctx, stream, rebase); err != nil {
+			var held driftHeldError
+			if rebase, err = d.resolve(ctx, stream, rebase); errors.As(err, &held) {
+				return d.hold(ctx, stream, rebase, operation, held.why)
+			} else if err != nil {
 				return coreadapter.OperationResult{}, err
 			}
 		} else {
@@ -699,6 +712,41 @@ func (d drifter) record(ctx context.Context, stream config.WorkstreamID, rebase 
 		return coreadapter.OperationResult{}, err
 	}
 	if err := d.s.step("drift-recorded"); err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
+}
+
+// hold records that the conflict resolution of the drift rebase that
+// rebase records stops, for the reason why: its resolution workspace is
+// removed, the feature branch and the seal stay, and the drift subject
+// moves to held-<k> with a notice. A held drift rebase is over, and the
+// workstream takes no other until the owner asks for one or the chief of
+// staff hands it back.
+func (d drifter) hold(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase, operation, why string) (coreadapter.OperationResult, error) {
+	if err := d.release(ctx, stream); err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	state, err := d.repository.Workflow(stream, driftSubject)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	transition, _ := driftIDs(rebase.Drift)
+	id := transition + "-" + driftHeld
+	reason := fmt.Sprintf("drift rebase %d is held for the owner: %s; feature branch %s stays at %s, the seal is unchanged, and no drift rebase is asked for until the owner asks for one or the chief of staff hands this one back", rebase.Drift, why, rebase.Branch, rebase.Before)
+	if rebase.Verdict != nil && rebase.Verdict.Summary != "" {
+		reason += "; the last review found: " + rebase.Verdict.Summary
+	}
+	visible := fmt.Sprintf("Drift rebase %d onto upstream %s is held for the owner: %s. The feature branch and the seal stay, and no drift rebase is asked for until the owner asks for one or the chief of staff hands this one back with a note for its drift mason and reviewer.", rebase.Drift, rebase.Upstream.Commit, why)
+	tx := trace.Transaction{ExpectedVersion: state.Version,
+		Transition: trace.Transition{Header: d.header(id, stream, "", operation, d.s.now()), Subject: driftSubject, From: state.Value, To: fmt.Sprintf("%s-%d", driftHeld, rebase.Drift), Reason: reason},
+		Events:     []trace.Event{trace.Notice(id, "drift", visible)}}
+	if _, err := d.repository.Transact(ctx, tx); err != nil {
+		if errors.Is(err, trace.ErrConflict) {
+			if recorded, outcomeErr := d.outcome(stream, rebase.Drift); outcomeErr == nil && recorded != nil {
+				return *recorded, nil
+			}
+		}
 		return coreadapter.OperationResult{}, err
 	}
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil

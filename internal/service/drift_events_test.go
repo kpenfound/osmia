@@ -179,6 +179,13 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	}
 	deliverer := chiefDeliverer(t, f, repository, stream)
 	must(t, deliverer.Pass(ctx))
+	if n := deliveredTurns(t, repository, stream, moved[1].Event.Body); n != 0 {
+		t.Fatalf("the amendment's event was queued behind the conflict's turn in %d turns", n)
+	}
+	// The chief of staff takes the conflict's turn, and the amendment's
+	// event, which waited for it, goes out in the next.
+	completeDriftTurn(t, f, repository, stream, trace.ChiefOfStaff, nil)
+	must(t, deliverer.Pass(ctx))
 	must(t, deliverer.Pass(ctx))
 	if n := deliveredTurns(t, repository, stream, conflicted); n != 1 {
 		t.Fatalf("after a restart the conflict was delivered in %d turns", n)

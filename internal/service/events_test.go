@@ -93,7 +93,9 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 
 	s, err := Start(ctx, opts)
 	must(t, err)
-	clock.Advance(3 * time.Second)
+	// Workstream state changes are routine progress, which waits for
+	// events.progress_window.
+	clock.Advance(14 * time.Minute)
 	pass(s)
 	pass(s)
 	bound.Lock()
@@ -106,7 +108,7 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	}
 	// "other" is a configured profile outside the chief of staff's fallback chain.
 	must(t, s.store.SetProfile(trace.ChiefOfStaff, "other"))
-	clock.Advance(3 * time.Second)
+	clock.Advance(2 * time.Minute)
 	// The pass that closes the window also runs the turn: no later tick is sent.
 	pass(s)
 	select {
@@ -151,7 +153,7 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	must(t, err)
 	notices := 0
 	for _, e := range entries {
-		if e.Event.Kind == trace.NoticeKind {
+		if chiefEvent(e.Event) {
 			notices++
 		}
 		if !e.Acknowledged {
@@ -225,7 +227,7 @@ func TestAbandonedWorkstreamEventsAreNotDelivered(t *testing.T) {
 	must(t, err)
 	notices := 0
 	for _, e := range entries {
-		if e.Event.Kind != trace.NoticeKind {
+		if !chiefEvent(e.Event) {
 			continue
 		}
 		notices++

@@ -507,3 +507,46 @@ func TestUnitDoneBehindItsFeatureBranchFinishesAfterItsRebase(t *testing.T) {
 		t.Fatalf("the report %+v is not on %s", report, landed)
 	}
 }
+
+// A mason that keeps reporting done with conflict markers left gets
+// mason.max_clean_turns reminders since its latest ruling; its next such
+// done contests the unit instead of reminding it again.
+func TestRebaseConflictRemindersAreBoundedByCleanTurns(t *testing.T) {
+	t.Parallel()
+	f, stream, repository := newApprovedFixture(t, "conflict-bound")
+	defer repository.Close()
+	f.s.cfg.Mason.MaxCleanTurns = 1
+	ctx := context.Background()
+	m := newMasonController(f.s, repository)
+	lands := &foreman{masons: m}
+	moveFeature(t, f, stream, map[string]string{masonWrote: "package trace\n\n// landed\n"})
+	must(t, lands.Pass(ctx))
+	ops := rebaseOperations(t, repository, stream, "dedupe")
+	if len(ops) != 1 {
+		t.Fatalf("dedupe's rebases %+v", ops)
+	}
+	if result, err := (rebaser{lands}).Apply(ctx, ops[0].Operation); err != nil || result.Outcome != "succeeded" {
+		t.Fatalf("the conflicted rebase %+v %v", result, err)
+	}
+	must(t, lands.Pass(ctx))
+
+	done := completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
+	must(t, m.Pass(ctx))
+	if ids := turnIDs(t, repository, stream, masonAgent("dedupe")); ids[len(ids)-1] != fmt.Sprintf("%s-markers-%d", masonAgent("dedupe"), done.Sequence) {
+		t.Fatalf("the mason's turns after a done with markers %v", ids)
+	}
+	again := completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
+	must(t, m.Pass(ctx))
+	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
+	must(t, err)
+	if state.Value != UnitContested {
+		t.Fatalf("the unit is %s after a second done with markers", state.Value)
+	}
+	if ids := turnIDs(t, repository, stream, masonAgent("dedupe")); slices.Contains(ids, fmt.Sprintf("%s-markers-%d", masonAgent("dedupe"), again.Sequence)) {
+		t.Fatalf("the mason was reminded again: %v", ids)
+	}
+	contest := transitionByID(t, repository, stream, trace.EventID(trace.EventID(again.Request.ID, "response"), "contested"))
+	if contest.From != UnitImplementing || contest.Actor != masonActor || !strings.Contains(contest.Reason, "exhausting mason.max_clean_turns (1)") {
+		t.Fatalf("the contest %+v", contest)
+	}
+}

@@ -24,6 +24,12 @@ import (
 // RefreshAction updates local knowledge from landings and code-based answers.
 const RefreshAction = "kb-refresh"
 
+// refreshInput names a refresh: of a code-based answer, by its question and
+// inspection, or of a workstream's landings. Commit is the commit the
+// librarian reads the repository at: the inspected commit, or the latest of
+// the landings. A refresh lists its landings in Landings, or, as one recorded
+// before landings were batched, names its one landing by Unit, Landing and
+// Report.
 type refreshInput struct {
 	Question   string              `json:"question,omitempty"`
 	Inspection string              `json:"inspection,omitempty"`
@@ -32,6 +38,25 @@ type refreshInput struct {
 	Landing    int                 `json:"landing"`
 	Commit     string              `json:"commit"`
 	Report     int                 `json:"report"`
+	Landings   []refreshLanding    `json:"landings,omitempty"`
+}
+
+// refreshLanding is one unit landing a refresh folds in: the unit, the
+// revisions of its landing.json and of the report whose learnings it folds,
+// and the commit it landed as.
+type refreshLanding struct {
+	Unit    string `json:"unit"`
+	Landing int    `json:"landing"`
+	Commit  string `json:"commit"`
+	Report  int    `json:"report"`
+}
+
+// landings returns the landings the refresh folds in, oldest first.
+func (in refreshInput) landings() []refreshLanding {
+	if len(in.Landings) != 0 || in.Unit == "" {
+		return in.Landings
+	}
+	return []refreshLanding{{Unit: in.Unit, Landing: in.Landing, Commit: in.Commit, Report: in.Report}}
 }
 
 // KnowledgeSource attributes a subsystem revision to its immutable evidence.
@@ -85,7 +110,11 @@ func refreshPending(repo *trace.Repository) (bool, error) {
 }
 
 // Pass serializes refreshes from recorded landings and code-based answers.
-// Each request derives its identity from the immutable source records.
+// Each request derives its identity from the immutable source records. A
+// workstream's landings are folded in together once it is quiet: no unit of
+// it is started and unmerged, as once it is assembled, or it is delivered or
+// abandoned. Until then they wait, so one refresh carries what several units
+// learned.
 func (r *refresher) Pass(ctx context.Context) error {
 	stream := librarianWorkstream(r.repository.Project())
 	streams, err := r.repository.Workstreams()
@@ -100,7 +129,6 @@ func (r *refresher) Pass(ctx context.Context) error {
 		return err
 	}
 	known := map[string]bool{}
-	knownUnit := map[string]bool{}
 	for _, op := range ops {
 		if op.Operation.Action == RefreshAction {
 			var in refreshInput
@@ -110,11 +138,10 @@ func (r *refresher) Pass(ctx context.Context) error {
 			if len(in.Commit) < 16 {
 				return errors.New("recorded refresh has no landing commit")
 			}
-			if in.Inspection == "" {
-				known[in.Commit] = true
+			for _, l := range in.landings() {
+				known[l.Commit] = true
 			}
 			known[in.key()] = true
-			knownUnit[string(in.Workstream)+"/"+in.Unit] = true
 			if op.Result == nil {
 				return nil
 			}
@@ -127,108 +154,136 @@ func (r *refresher) Pass(ctx context.Context) error {
 		if workstream == stream {
 			continue
 		}
-		landings, err := r.repository.Operations(workstream)
-		if err != nil {
-			return err
-		}
-		unrefreshed := false
-		for _, landing := range landings {
-			if landing.Operation.Action != LandAction || landing.Result == nil || landing.Result.Outcome != "succeeded" {
-				continue
-			}
-			var in landInput
-			if err := json.Unmarshal(landing.Operation.Input, &in); err != nil {
-				return err
-			}
-			if !knownUnit[string(workstream)+"/"+in.Unit] {
-				unrefreshed = true
-				break
-			}
-		}
-		if !unrefreshed {
-			continue
-		}
-		docs, err := trace.Read[trace.Document](r.repository, workstream)
-		if err != nil {
-			return err
-		}
-		for _, doc := range docs {
-			if !strings.HasSuffix(doc.Path, "/landing.json") {
-				continue
-			}
-			var landing UnitLanding
-			if err := json.Unmarshal([]byte(doc.Content), &landing); err != nil {
-				return err
-			}
-			if len(landing.Commit) < 16 {
-				return fmt.Errorf("landing %s has no commit", doc.Path)
-			}
-			if known[landing.Commit] {
-				continue
-			}
-			var report trace.Document
-			for _, candidate := range docs {
-				if candidate.ID != reportDocument(landing.Unit) {
-					continue
-				}
-				var value UnitReport
-				if json.Unmarshal([]byte(candidate.Content), &value) == nil && value.Candidate == landing.Candidate {
-					report = candidate
-				}
-			}
-			if report.Revision == 0 {
-				return fmt.Errorf("landing %s has no matching mason report", doc.Path)
-			}
-			in := refreshInput{Workstream: workstream, Unit: landing.Unit, Landing: doc.Revision, Commit: landing.Commit, Report: report.Revision}
-			data, err := json.Marshal(in)
+		landings, err := r.unfolded(workstream, known)
+		if err != nil || len(landings) == 0 {
 			if err != nil {
 				return err
 			}
-			id := in.key()
-			event := trace.EventID(id, "run")
-			op := coreadapter.Operation{ID: trace.OperationID(r.repository.Project(), stream, event), Boundary: coreadapter.RunnerBoundary, Action: RefreshAction, Input: data}
-			at := r.s.now()
-			tx := trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, At: at, Actor: foremanActor, Cause: landing.Operation}, Subject: id, From: "", To: "requested", Reason: fmt.Sprintf("refresh knowledge from unit %s landed as %s", in.Unit, in.Commit)}, Events: []trace.Event{{ID: event, Kind: RefreshAction, Body: "Refresh local knowledge base", Operation: &op}}}
-			_, err = r.repository.Transact(ctx, tx)
+			continue
+		}
+		if quiet, err := quietWorkstream(r.repository, workstream); err != nil || !quiet {
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		in := refreshInput{Workstream: workstream, Commit: landings[len(landings)-1].Commit, Landings: landings}
+		data, err := json.Marshal(in)
+		if err != nil {
 			return err
 		}
+		var units []string
+		for _, l := range landings {
+			units = append(units, fmt.Sprintf("%s landed as %s", l.Unit, l.Commit))
+		}
+		id := in.key()
+		event := trace.EventID(id, "run")
+		op := coreadapter.Operation{ID: trace.OperationID(r.repository.Project(), stream, event), Boundary: coreadapter.RunnerBoundary, Action: RefreshAction, Input: data}
+		at := r.s.now()
+		tx := trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repository.Project(), Workstream: stream, At: at, Actor: foremanActor, Cause: landingDocument(landings[len(landings)-1].Unit)}, Subject: id, From: "", To: "requested", Reason: fmt.Sprintf("refresh knowledge from workstream %s's units %s", workstream, strings.Join(units, ", "))}, Events: []trace.Event{{ID: event, Kind: RefreshAction, Body: "Refresh local knowledge base", Operation: &op}}}
+		_, err = r.repository.Transact(ctx, tx)
+		return err
 	}
 	return r.requestKnowledgeGap(ctx, streams, known)
 }
 
-func (r *refresher) source(in refreshInput) (UnitLanding, UnitReport, error) {
+// unfolded returns the workstream's landings no refresh has folded in, in
+// the order they were recorded, each with the mason report of its candidate.
+func (r *refresher) unfolded(workstream config.WorkstreamID, known map[string]bool) ([]refreshLanding, error) {
+	docs, err := trace.Read[trace.Document](r.repository, workstream)
+	if err != nil {
+		return nil, err
+	}
+	var out []refreshLanding
+	for _, doc := range docs {
+		if !strings.HasSuffix(doc.Path, "/landing.json") {
+			continue
+		}
+		var landing UnitLanding
+		if err := json.Unmarshal([]byte(doc.Content), &landing); err != nil {
+			return nil, err
+		}
+		if len(landing.Commit) < 16 {
+			return nil, fmt.Errorf("landing %s has no commit", doc.Path)
+		}
+		if known[landing.Commit] {
+			continue
+		}
+		report := 0
+		for _, candidate := range docs {
+			var value UnitReport
+			if candidate.ID == reportDocument(landing.Unit) && json.Unmarshal([]byte(candidate.Content), &value) == nil && value.Candidate == landing.Candidate {
+				report = candidate.Revision
+			}
+		}
+		if report == 0 {
+			return nil, fmt.Errorf("landing %s has no matching mason report", doc.Path)
+		}
+		out = append(out, refreshLanding{Unit: landing.Unit, Landing: doc.Revision, Commit: landing.Commit, Report: report})
+	}
+	return out, nil
+}
+
+// quietWorkstream reports whether no unit of the workstream is started and
+// unmerged, or the workstream is delivered or abandoned.
+func quietWorkstream(repository *trace.Repository, workstream config.WorkstreamID) (bool, error) {
+	states, err := repository.WorkflowStates(workstream)
+	if err != nil {
+		return false, err
+	}
+	if feature := states[trace.FeatureSubject].Value; feature == DeliveredState || feature == AbandonedState {
+		return true, nil
+	}
+	started := []string{UnitImplementing, UnitWaiting, UnitChecking, UnitReviewing, UnitApproved, UnitContested}
+	for subject, state := range states {
+		if strings.HasPrefix(subject, "unit-") && slices.Contains(started, state.Value) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// sources returns the landings and mason reports of the refresh's
+// landings, in its order, and fails unless each names its unit's merged
+// landing and the report of the candidate that landed.
+func (r *refresher) sources(in refreshInput) ([]UnitLanding, []UnitReport, error) {
 	docs, err := trace.Read[trace.Document](r.repository, in.Workstream)
 	if err != nil {
-		return UnitLanding{}, UnitReport{}, err
+		return nil, nil, err
 	}
-	var landing UnitLanding
-	var report UnitReport
-	lf, rf := false, false
-	for _, d := range docs {
-		if d.ID == landingDocument(in.Unit) && d.Revision == in.Landing {
-			if err := json.Unmarshal([]byte(d.Content), &landing); err != nil {
-				return landing, report, err
+	var landings []UnitLanding
+	var reports []UnitReport
+	for _, l := range in.landings() {
+		var landing UnitLanding
+		var report UnitReport
+		lf, rf := false, false
+		for _, d := range docs {
+			if d.ID == landingDocument(l.Unit) && d.Revision == l.Landing {
+				if err := json.Unmarshal([]byte(d.Content), &landing); err != nil {
+					return nil, nil, err
+				}
+				lf = true
 			}
-			lf = true
-		}
-		if d.ID == reportDocument(in.Unit) && d.Revision == in.Report {
-			if err := json.Unmarshal([]byte(d.Content), &report); err != nil {
-				return landing, report, err
+			if d.ID == reportDocument(l.Unit) && d.Revision == l.Report {
+				if err := json.Unmarshal([]byte(d.Content), &report); err != nil {
+					return nil, nil, err
+				}
+				rf = true
 			}
-			rf = true
 		}
+		if !lf || !rf || landing.Commit != l.Commit || landing.Unit != l.Unit || report.Unit != l.Unit || report.Candidate != landing.Candidate {
+			return nil, nil, fmt.Errorf("refresh source of unit %s does not match its unit and landing", l.Unit)
+		}
+		state, err := r.repository.Workflow(in.Workstream, trace.UnitSubject(l.Unit))
+		if err != nil {
+			return nil, nil, err
+		}
+		if state.Value != UnitMerged {
+			return nil, nil, fmt.Errorf("refresh source unit %s has not merged", l.Unit)
+		}
+		landings, reports = append(landings, landing), append(reports, report)
 	}
-	if !lf || !rf || landing.Commit != in.Commit || landing.Unit != in.Unit || report.Unit != in.Unit || report.Candidate != landing.Candidate {
-		return landing, report, errors.New("refresh source does not match its unit and landing")
-	}
-	state, err := r.repository.Workflow(in.Workstream, trace.UnitSubject(in.Unit))
-	if err != nil {
-		return landing, report, err
-	}
-	if state.Value != UnitMerged {
-		return landing, report, errors.New("refresh source unit has not merged")
-	}
-	return landing, report, nil
+	return landings, reports, nil
 }
 
 func (r *refresher) decode(op coreadapter.Operation) (refreshInput, error) {
@@ -239,8 +294,19 @@ func (r *refresher) decode(op coreadapter.Operation) (refreshInput, error) {
 	if err := json.Unmarshal(op.Input, &in); err != nil {
 		return in, err
 	}
-	if in.Workstream == "" || len(in.Commit) < 16 || (in.Inspection == "" && (in.Unit == "" || in.Landing < 1 || in.Report < 1)) || (in.Inspection != "" && in.Question == "") {
+	if in.Workstream == "" || len(in.Commit) < 16 || (in.Inspection != "" && in.Question == "") {
 		return in, errors.New("incomplete refresh operation")
+	}
+	if in.Inspection == "" {
+		landings := in.landings()
+		if len(landings) == 0 || landings[len(landings)-1].Commit != in.Commit {
+			return in, errors.New("incomplete refresh operation")
+		}
+		for _, l := range landings {
+			if l.Unit == "" || l.Landing < 1 || l.Report < 1 || len(l.Commit) < 16 {
+				return in, errors.New("incomplete refresh operation")
+			}
+		}
 	}
 	return in, nil
 }
@@ -278,14 +344,12 @@ func (r *refresher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	var landing UnitLanding
-	var report UnitReport
+	var landings []UnitLanding
 	if err := r.checkSource(in); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	if in.Inspection == "" {
-		landing, report, err = r.source(in)
-		if err != nil {
+		if landings, _, err = r.sources(in); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 	}
@@ -336,7 +400,11 @@ func (r *refresher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 				return coreadapter.OperationResult{}, err
 			}
 			turn := fmt.Sprintf("%s-%d", in.key(), len(turns)+1)
-			prompt := fmt.Sprintf("Fold the reported learnings of unit %s into the current knowledge base. Read source/landing.json and source/report.json for exact provenance and learnings. Read repo/, kb/ and seed/ as needed. Write the complete resulting KB under output/kb/ with entities.json and one nonempty <subsystem>.md per subsystem. Preserve useful current content and stable entity IDs. Only output/kb/ is accepted. Do not repeat AGENTS.md, CLAUDE.md or CONTRIBUTING.md. Source landing: %s; commit: %s.", in.Unit, landing.Operation, in.Commit)
+			var units, operations []string
+			for _, landing := range landings {
+				units, operations = append(units, landing.Unit), append(operations, landing.Operation)
+			}
+			prompt := fmt.Sprintf("Fold the reported learnings of units %s into the current knowledge base. Read source/landings.json and source/reports.json for exact provenance and learnings, one entry per unit in the same order. Read repo/, kb/ and seed/ as needed; repo/ is at the latest of the landings. Write the complete resulting KB under output/kb/ with entities.json and one nonempty <subsystem>.md per subsystem. Preserve useful current content and stable entity IDs. Only output/kb/ is accepted. Do not repeat AGENTS.md, CLAUDE.md or CONTRIBUTING.md. Source landings: %s; commit: %s.", strings.Join(units, ", "), strings.Join(operations, ", "), in.Commit)
 			if in.Inspection != "" {
 				prompt = fmt.Sprintf("A chief-of-staff answer required inspecting code. Fill this knowledge gap using source/ruling.json and source/inspection.json, with repo/ fixed at commit %s. Read context.md, kb/ and seed/. Write the complete resulting KB under output/kb/. Preserve stable entity IDs and useful content; do not treat the chief's answer as an owner ruling. Only output/kb/ is accepted.", in.Commit)
 			}
@@ -352,7 +420,7 @@ func (r *refresher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 				return coreadapter.OperationResult{}, err
 			}
 		case last.Status() == "idle":
-			return r.recordRefresh(ctx, op.ID, in, report, *last)
+			return r.recordRefresh(ctx, op.ID, in, *last)
 		default:
 			reason := last.Response.Failure
 			if reason == "" {
@@ -389,11 +457,11 @@ func stageRefreshSource(ctx context.Context, repo *trace.Repository, clone, turn
 			}
 			sources["ruling.json"], sources["inspection.json"] = ruling, inspection
 		} else {
-			landing, report, err := r.source(in)
+			landings, reports, err := r.sources(in)
 			if err != nil {
 				return err
 			}
-			sources["landing.json"], sources["report.json"] = landing, report
+			sources["landings.json"], sources["reports.json"] = landings, reports
 		}
 
 		if err := os.RemoveAll(filepath.Join(workspace, "repo")); err != nil {
@@ -479,7 +547,7 @@ func copyCommit(ctx context.Context, clone, commit, dst string) error {
 	return nil
 }
 
-func (r *refresher) recordRefresh(ctx context.Context, operation string, in refreshInput, _ UnitReport, last trace.QueuedTurn) (coreadapter.OperationResult, error) {
+func (r *refresher) recordRefresh(ctx context.Context, operation string, in refreshInput, last trace.QueuedTurn) (coreadapter.OperationResult, error) {
 	out, err := kb.ReadOutput(filepath.Join(r.turnDirectory(last.Request.TurnID), kb.OutputDirectory))
 	if err != nil {
 		return failedExtraction("invalid librarian output: " + err.Error()), nil
@@ -512,7 +580,12 @@ func (r *refresher) recordRefresh(ctx context.Context, operation string, in refr
 		if latest[id].Content == out.Prose[name] {
 			continue
 		}
-		sources = append(sources, KnowledgeSource{Question: in.Question, Inspection: in.Inspection, Subsystem: name, Revision: latest[id].Revision + 1, Workstream: in.Workstream, Unit: in.Unit, Landing: in.Landing, Commit: in.Commit, Report: in.Report, Operation: operation})
+		if in.Inspection != "" {
+			sources = append(sources, KnowledgeSource{Question: in.Question, Inspection: in.Inspection, Subsystem: name, Revision: latest[id].Revision + 1, Workstream: in.Workstream, Commit: in.Commit, Operation: operation})
+		}
+		for _, l := range in.landings() {
+			sources = append(sources, KnowledgeSource{Subsystem: name, Revision: latest[id].Revision + 1, Workstream: in.Workstream, Unit: l.Unit, Landing: l.Landing, Commit: l.Commit, Report: l.Report, Operation: operation})
+		}
 		records = append(records, trace.Document{Header: header(id), Path: trace.ProsePath(name), Content: out.Prose[name]})
 	}
 	for _, d := range latestDocuments(docs) {
@@ -524,7 +597,7 @@ func (r *refresher) recordRefresh(ctx context.Context, operation string, in refr
 		records = append(records, trace.Document{Header: header(trace.EntitiesDocument), Path: trace.EntitiesPath, Content: string(entities)})
 	}
 	// The source ledger is also the durable marker for a no-op refresh.
-	sort.Slice(sources, func(i, j int) bool {
+	sort.SliceStable(sources, func(i, j int) bool {
 		if sources[i].Operation == sources[j].Operation {
 			return sources[i].Subsystem < sources[j].Subsystem
 		}

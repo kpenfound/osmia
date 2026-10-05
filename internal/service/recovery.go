@@ -189,6 +189,11 @@ func (s *Service) recoverChief(ctx context.Context, repository *trace.Repository
 		if q.Response == nil || q.Status() != "interrupted" {
 			return nil
 		}
+		// After maxRecoveries interruptions in a row the work is not
+		// continued again; the owner's next message resumes the thread.
+		if interruptedInARow(th) >= maxRecoveries {
+			return nil
+		}
 		req := q.Request
 		req.ID = fmt.Sprintf("request_%s-recover-%d", agent, q.Sequence)
 		req.TurnID = fmt.Sprintf("%s-recover-%d", agent, q.Sequence)

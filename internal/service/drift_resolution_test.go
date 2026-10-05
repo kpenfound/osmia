@@ -576,3 +576,116 @@ func driftResolutionDiff(t *testing.T, f *shedFixture, repository *trace.Reposit
 	must(t, json.Unmarshal(out, &got))
 	return got.Diff
 }
+
+// A drift rebase whose conflict resolution review sends back
+// shed.max_bounces times is held for the owner: its mason gets no further
+// turn, the feature branch and the seal stay, the resolution workspace is
+// removed and the operation completes. The workstream takes no drift rebase
+// on the upstream_rebase cadence while it is held, the owner's inbox lists
+// it, and only the owner's request asks for another.
+func TestDriftResolutionIsHeldForTheOwnerAtMaxBounces(t *testing.T) {
+	t.Parallel()
+	f, stream, repository, _ := newFinalFixture(t, "drift-held")
+	f.s.cfg.Shed.MaxBounces = 2
+	fm := cadenceForeman(f, repository, "1h")
+	d := drifter{fm}
+	ctx := context.Background()
+	before, _, op := conflictedDrift(t, f, d, stream)
+	sealed := streamDocuments(t, repository, stream, seal.DocumentID)
+	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
+	w := resolutionWorkspace(t, f, stream)
+	for review := 1; review <= 2; review++ {
+		must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte(fmt.Sprintf("/internal/ @feature%d\n", review)), 0600))
+		completeDriftTurn(t, f, repository, stream, driftMasonAgent, resolvedDone("Resolved"))
+		awaitResolution(t, f.s, d, stream, op, fmt.Sprintf("review %d", review))
+		completeDriftTurn(t, f, repository, stream, driftReviewerAgent, driftVerdict(t, rejectedResolution))
+		if review == 1 {
+			awaitResolution(t, f.s, d, stream, op, "its mason's answer to review 1")
+		}
+	}
+	result, err := attemptOperation(t, f.s, repository, stream, op, d)
+	if err != nil || result.Outcome != "succeeded" || !strings.Contains(result.Evidence, "drift rebase 1 is held for the owner: review sent its resolution of the conflicts in CODEOWNERS back 2 times, reaching shed.max_bounces") {
+		t.Fatalf("the drift rebase at max_bounces %+v %v", result, err)
+	}
+	if ids := turnIDs(t, repository, stream, driftMasonAgent); !slices.Equal(ids, []string{driftResolveTurnID(1, 1), driftFixTurnID(1, 1)}) {
+		t.Fatalf("drift mason turns %v", ids)
+	}
+	if state, err := repository.Workflow(stream, driftSubject); err != nil || state.Value != driftHeld+"-1" {
+		t.Fatalf("the drift subject is %+v: %v", state, err)
+	}
+	if tip := featureTip(t, f, stream); tip != before {
+		t.Fatalf("a held drift rebase moved the feature branch to %s", tip)
+	}
+	if after := streamDocuments(t, repository, stream, seal.DocumentID); !reflect.DeepEqual(after, sealed) {
+		t.Fatalf("a held drift rebase changed the seal: %+v", after)
+	}
+	if _, found, err := workspaces(f.s.cfg, driftsDirectory, backendOf(t, f, stream)).Workspace(ctx, string(stream)); err != nil || found {
+		t.Fatalf("the held drift rebase kept its resolution workspace: %v %v", found, err)
+	}
+	if again, err := d.Apply(ctx, op); err != nil || again.Outcome != result.Outcome || again.Evidence != result.Evidence {
+		t.Fatalf("a retry of the held drift rebase %+v %v", again, err)
+	}
+
+	later := f.s.now().Add(48 * time.Hour)
+	if why, err := fm.driftDue(stream, later); err != nil || why != "" {
+		t.Fatalf("a held workstream is due for a drift rebase: %q %v", why, err)
+	}
+	statuses, err := repository.Statuses()
+	must(t, err)
+	i := slices.IndexFunc(statuses, func(w trace.WorkstreamStatus) bool { return w.Workstream == stream })
+	decisions, err := f.s.openDecisions(ctx, repository, statuses[i])
+	must(t, err)
+	j := slices.IndexFunc(decisions, func(e InboxEntry) bool { return e.Kind == InboxDrift })
+	if j < 0 {
+		t.Fatalf("the inbox does not list the held drift rebase: %+v", decisions)
+	}
+	if e := decisions[j]; e.Revision != 1 || e.Answer.Path != Prefix+"/projects/rebase" || e.Answer.Body["project"] != repository.Project() || !strings.Contains(e.Question, "is held for the owner") {
+		t.Fatalf("the held drift rebase entry %+v", e)
+	}
+
+	if k, err := fm.askDrift(ctx, stream, f.s.now()); err != nil || k != 2 {
+		t.Fatalf("the owner's request answers drift rebase %d: %v", k, err)
+	}
+	if why, err := fm.driftDue(stream, later); err != nil || !strings.HasPrefix(why, "the owner asked for a drift rebase") {
+		t.Fatalf("the owner's request does not make the held workstream due: %q %v", why, err)
+	}
+	statuses, err = repository.Statuses()
+	must(t, err)
+	decisions, err = f.s.openDecisions(ctx, repository, statuses[i])
+	must(t, err)
+	if slices.ContainsFunc(decisions, func(e InboxEntry) bool { return e.Kind == InboxDrift }) {
+		t.Fatalf("the inbox still lists the drift rebase the owner asked again for: %+v", decisions)
+	}
+}
+
+// A drift mason that keeps reporting done with conflict markers left gets
+// mason.max_clean_turns reminders; its next such done holds the drift rebase
+// for the owner instead of reminding it again.
+func TestDriftMarkerRemindersAreBoundedByCleanTurns(t *testing.T) {
+	t.Parallel()
+	f, stream, repository, _ := newFinalFixture(t, "drift-markers")
+	f.s.cfg.Mason.MaxCleanTurns = 1
+	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
+	before, _, op := conflictedDrift(t, f, d, stream)
+	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
+	done := completeDriftTurn(t, f, repository, stream, driftMasonAgent, resolvedDone("Resolved"))
+	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
+	remind := fmt.Sprintf("%s-markers-%d", driftMasonAgent, done.Sequence)
+	if ids := turnIDs(t, repository, stream, driftMasonAgent); !slices.Equal(ids, []string{driftResolveTurnID(1, 1), remind}) {
+		t.Fatalf("drift mason turns after a done with markers %v", ids)
+	}
+	completeDriftTurn(t, f, repository, stream, driftMasonAgent, resolvedDone("Resolved again"))
+	result, err := attemptOperation(t, f.s, repository, stream, op, d)
+	if err != nil || result.Outcome != "succeeded" || !strings.Contains(result.Evidence, "drift rebase 1 is held for the owner: its mason left conflict markers in CODEOWNERS after 1 reminders, exhausting mason.max_clean_turns") {
+		t.Fatalf("the drift rebase after a second done with markers %+v %v", result, err)
+	}
+	if ids := turnIDs(t, repository, stream, driftMasonAgent); len(ids) != 2 {
+		t.Fatalf("the drift mason was reminded again: %v", ids)
+	}
+	if state, err := repository.Workflow(stream, driftSubject); err != nil || state.Value != driftHeld+"-1" {
+		t.Fatalf("the drift subject is %+v: %v", state, err)
+	}
+	if tip := featureTip(t, f, stream); tip != before {
+		t.Fatalf("a held drift rebase moved the feature branch to %s", tip)
+	}
+}

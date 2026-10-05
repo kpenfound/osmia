@@ -137,8 +137,9 @@ osmia status --json
   indented. It fails like `send`.
 - `inbox` lists every owner decision waiting for you across the workstreams
   of the active project, oldest first: escalated questions, ratification
-  packets, contested units, presented amendments, delivery approvals and
-  failing publications.
+  packets, contested units, presented amendments, held drift rebases,
+  delivery approvals, failing publications, notices held from the chief of
+  staff and loop guard pauses.
   Questions escalated together are one entry, headed by its inbox number, when
   it was escalated, its workstream and batch; any other entry is headed by its
   kind, when it opened, its workstream and its unit or amendment. Each shows
@@ -157,7 +158,15 @@ osmia status --json
   publication is listed once three attempts in a row have failed: its question carries the last failure, such as GitHub's
   refusal with the token permissions it asks for, and it says when the next
   attempt runs. It takes no answer; fix the cause and it leaves the inbox once
-  an attempt publishes. Decided entries, superseded packet revisions and entries of an
+  an attempt publishes. A held drift rebase, whose conflict resolution review
+  sent back `shed.max_bounces` times, is answered with `project rebase`, which
+  asks for another, or by asking the chief of staff with `send` to hand it
+  back with a note its drift mason and reviewer receive; it leaves the inbox
+  once either is recorded.
+  Notices are held once the chief of staff's turns delivering them failed five
+  times in a row; `send` a message once the cause is fixed, and they follow
+  its answer. A loop guard pause, set when a workstream ran
+  `loop.max_sessions` sessions without progress, is answered with `resume`. Decided entries, superseded packet revisions and entries of an
   abandoned workstream are left out. Without a project or a trace the inbox is
   empty.
 - `answer <inbox-number> <ruling>` records your ruling on an inbox entry. The
@@ -371,7 +380,8 @@ osmia status --json
   the drift rebase that answers it (`Covered: <workstream> drift rebase <n>`),
   and each skipped workstream with why (`Skipped: <workstream>: <reason>`). The
   foreman runs the drift rebases on the project's lander once no landing or
-  other drift rebase holds it; follow them with `status`. A project ID that is
+  other drift rebase holds it; follow them with `status`. A request also
+  resumes a workstream whose drift rebase is held. A project ID that is
   not the active project fails with `not_found` (exit 4).
 - `project remove <project-id>` takes the active project out of
   `active_projects` and closes its runtime state. The trace directory and the

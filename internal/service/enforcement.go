@@ -46,8 +46,19 @@ func CoreEnforcement(root config.Root) Enforcement {
 
 // chiefGrant is what a chief-of-staff thread turn may call: file_read over
 // its read-only view of the workstream's documents, status, runtime controls,
-// owner decisions and question tools.
-var chiefGrant = coreadapter.Capabilities{Tools: append([]string{"file_read", status.ToolName, "notify", "capacity", "inspect_code", prioritiseTool, pauseTool, resumeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool}, questions.ChiefTools...)}
+// owner decisions, unit moves, drift handbacks and question tools. It names
+// every tool chiefTools makes.
+var chiefGrant = coreadapter.Capabilities{Tools: append([]string{"file_read", status.ToolName, "notify", "capacity", "inspect_code", prioritiseTool, pauseTool, resumeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, moveUnitTool, handBackDriftTool}, questions.ChiefTools...)}
+
+// chiefTools are the service tools of one chief-of-staff turn.
+func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeControls, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
+	set, err := status.Tool(r, trace.ChiefOfStaff, scope, now)
+	if err != nil {
+		return nil, err
+	}
+	chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
+	return append([]coreadapter.Tool{set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.moveUnit(r, scope), controls.handBackDrift(r, scope, now)}, chief...), err
+}
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
 // its view, ask the chief of staff, file an amendment and report done. A unit
@@ -200,12 +211,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil
 				}
-				set, err := status.Tool(r, trace.ChiefOfStaff, scope, now)
-				if err != nil {
-					return nil, err
-				}
-				chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
-				return append([]coreadapter.Tool{set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.moveUnit(r, scope)}, chief...), err
+				return chiefTools(cfg, r, controls, scope, now)
 			},
 			Hosts:  e.Hosts,
 			Engine: e.Engine,

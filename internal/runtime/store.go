@@ -37,6 +37,7 @@ const (
 	PauseOwner              = "owner"
 	PauseDailyBudget        = "daily-budget"
 	PauseProviderUsageLimit = "provider-usage-limit"
+	PauseLoopGuard          = "loop-guard"
 )
 
 type Priority struct {
@@ -442,7 +443,7 @@ func validate(st State) error {
 		if p.Mode != "soft" && p.Mode != "hard" {
 			return fmt.Errorf("invalid pause mode %q", p.Mode)
 		}
-		if p.Source != PauseOwner && p.Source != PauseDailyBudget && p.Source != PauseProviderUsageLimit {
+		if p.Source != PauseOwner && p.Source != PauseDailyBudget && p.Source != PauseProviderUsageLimit && p.Source != PauseLoopGuard {
 			return fmt.Errorf("invalid pause source %q", p.Source)
 		}
 		if strings.TrimSpace(p.Reason) == "" {
@@ -600,7 +601,7 @@ func (s *Store) ClearPause(t Target, actor string) error {
 		if err := validateTarget(t); err != nil {
 			return err
 		}
-		if actor != PauseOwner && actor != PauseDailyBudget && actor != PauseProviderUsageLimit {
+		if actor != PauseOwner && actor != PauseDailyBudget && actor != PauseProviderUsageLimit && actor != PauseLoopGuard {
 			return fmt.Errorf("invalid pause clearing source %q", actor)
 		}
 		for _, p := range st.Pauses {

@@ -45,7 +45,7 @@ func (r *refresher) checkSource(in refreshInput) error {
 		_, _, err := r.codeSource(in)
 		return err
 	}
-	_, _, err := r.source(in)
+	_, _, err := r.sources(in)
 	return err
 }
 

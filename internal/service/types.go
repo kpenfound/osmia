@@ -616,6 +616,9 @@ const (
 	InboxAmendment    = "amendment"
 	InboxDelivery     = "delivery"
 	InboxPublication  = "publication"
+	InboxDrift        = "drift"
+	InboxNotices      = "notices"
+	InboxLoop         = "loop"
 )
 
 // InboxEntry is one open owner decision. Kind says which, and Answer how it

@@ -333,23 +333,47 @@ func jujutsuMarkers(onto, change string) string {
 
 // remind queues one turn of the unit's mason, after its done turn, that
 // names the conflicted files still carrying markers, unless the thread has
-// it.
-func (m *masons) remind(ctx context.Context, stream config.WorkstreamID, unit string, done trace.QueuedTurn, marked []string) error {
+// it. Once the mason has had mason.max_clean_turns reminders since its
+// latest ruling, the unit is contested instead, and remind reports that it
+// moved.
+func (m *masons) remind(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, done trace.QueuedTurn, marked []string) (bool, error) {
 	th, err := m.repository.Thread(stream, masonAgent(unit))
 	if err != nil {
-		return err
+		return false, err
 	}
 	req := done.Request
 	req.TurnID = fmt.Sprintf("%s-markers-%d", masonAgent(unit), done.Sequence)
 	if slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == req.TurnID }) {
-		return nil
+		return false, nil
+	}
+	var reset uint64
+	if ruling, found, err := latestMasonRuling(m.repository, stream, unit); err != nil {
+		return false, err
+	} else if found {
+		reset = ruling.ResetTurn
+	}
+	reminded := 0
+	for _, q := range th.Turns {
+		if q.Sequence > reset && strings.HasPrefix(q.Request.TurnID, masonAgent(unit)+"-markers-") {
+			reminded++
+		}
+	}
+	if reminded >= m.cfg.Mason.MaxCleanTurns {
+		id := trace.EventID(done.Response.ID, "contested")
+		reason := fmt.Sprintf("the mason reported done %d times with conflict markers left in %s, exhausting mason.max_clean_turns (%d)", reminded+1, strings.Join(marked, ", "), m.cfg.Mason.MaxCleanTurns)
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: done.Response.ID}
+		_, err := m.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: UnitImplementing, To: UnitContested, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))}})
+		if errors.Is(err, trace.ErrConflict) {
+			return false, nil
+		}
+		return err == nil, err
 	}
 	req.ID = "request_" + req.TurnID
 	req.At = m.s.now()
 	req.Cause = done.Response.ID
 	req.Prompt = fmt.Sprintf("You reported unit %s done, and these files still carry conflict markers from rebasing its workspace onto the feature branch: %s. Resolve each conflict against the sealed spec, remove every marker, check the unit's acceptance, and call done again.", unit, strings.Join(marked, ", "))
 	_, err = m.repository.EnqueueTurn(ctx, req)
-	return err
+	return false, err
 }
 
 // rebaser runs the rebase operations of the foreman.
@@ -700,7 +724,7 @@ func (r rebaser) record(ctx context.Context, stream config.WorkstreamID, in reba
 			var events []trace.Event
 			if state.Value == UnitApproved {
 				reason = "the approval no longer holds: " + reason
-				events = append(events, trace.Notice(id, "unit", fmt.Sprintf("Unit %s returns to checking and review: its approved candidate was rebased onto %s.", in.Unit, rebase.Onto)))
+				events = append(events, trace.Progress(id, "unit", fmt.Sprintf("Unit %s returns to checking and review: its approved candidate was rebased onto %s.", in.Unit, rebase.Onto)))
 				if drifted {
 					events = append(events, trace.UpstreamMoved(id, stream, move, fmt.Sprintf("unit %s's approval no longer holds: its candidate was rebased onto the feature branch at %s and returns to checking and review", in.Unit, rebase.Onto)))
 				}

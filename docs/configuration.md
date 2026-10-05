@@ -123,8 +123,12 @@ profiles = []
 [mason]
 max_clean_turns = 3
 
+[loop]
+max_sessions = 30
+
 [events]
 window = "5s"
+progress_window = "15m"
 
 [notify]
 # Optional absolute http or https URL that each new owner decision is posted
@@ -162,10 +166,25 @@ prints a login URL on first run. The auth key never belongs in these files.
 Tailnet membership is the boundary: there is no in-app authentication
 ([tailnet listener](running.md#tailnet-listener)). All capacity and shed values
 must be positive integers. `events.window` is a positive Go duration: how long
-the oldest undelivered event of a workstream waits before the service delivers
-it, with every other ready event, as one
-chief-of-staff turn. A workstream cap may exceed global mason capacity:
+an undelivered event of a workstream waits before the service delivers it, with
+every other ready event, as one chief-of-staff turn. `events.progress_window`
+is how long an event of routine progress waits instead: a unit starting,
+passing its checks, being approved or sent back, or landing, or the workstream
+changing state. It goes out sooner with any other event. It must be no shorter
+than `events.window`, and defaults to the longer of `15m` and `events.window`.
+While an event turn of a workstream is queued or running, its new events wait
+for the next turn. A workstream cap may exceed global mason capacity:
 the global pool still limits concurrent execution.
+
+`mason.max_clean_turns` also bounds the reminders a mason, or a drift mason,
+gets when it reports done with conflict markers left; past it the unit is
+contested or the drift rebase is held. `loop.max_sessions` is how many agent
+sessions a workstream may run without progress before the loop guard pauses
+it: a change of state of the feature, a unit, the shed, an amendment, the
+final review or the publication, a drift rebase that moved the branch, or
+anything you do counts as progress. The pause is soft, attributed to the loop
+guard, and listed in the inbox; resuming the workstream starts the count over.
+It must not be negative, and `0` turns the guard off.
 
 `workspaces` picks the backend of the workspaces the agents work in for each
 new workstream: its feature branch, units and drift resolution. The project's
@@ -225,6 +244,13 @@ every member on the committee role's profile. With `roles.committee.sandbox =
 "claude"`, every profile in each assigned profile's fallback chain must use
 Claude, and a custom `roles.committee.image` must support all of their agents.
 Reload applies both lists to turns queued after it.
+
+`roles.chief_of_staff.events_profile` optionally names the profile of the chief
+of staff's turns that deliver service events, so they can run on a lighter
+model than the turns that answer you, which use `roles.chief_of_staff.profile`.
+It must name a configured profile and is accepted only on the chief of staff.
+An owner override of the chief of staff's profile applies to both while it is
+set.
 
 `notify.webhook` is an absolute `http` or `https` URL with a host, such as an
 [ntfy](https://ntfy.sh) topic; a relative URL, one without a host and any other
@@ -352,7 +378,9 @@ result instead of running checks. Failing checks, which Dagger's report names,
 send it back to its mason with the failures and output; the send-back counts
 toward `shed.max_bounces`. A run that reports no result, because the engine is
 unreachable, the run timed out or the project has no Dagger checks, leaves the
-unit checking, tells the chief of staff and runs again after ten minutes. One
+unit checking, tells the chief of staff and runs again after ten minutes. After
+three such runs of one candidate in a row the unit is contested instead: a
+ruling of review runs its checks again, and revise returns it to its mason. One
 run at a time per workstream; a pause holds runs not yet started.
 
 Before the final read, the service runs every check the same way on the
@@ -585,7 +613,11 @@ approve delivery again to retry. Local workstream commits remain unsigned.
 latest drift rebase or final rebase (or, before either, its sealing) the
 foreman schedules its next drift rebase onto
 upstream. It defaults to `"6h"`. `"0"` (or `"0s"`) disables scheduled drift
-rebases; `osmia project rebase` still asks for them. A value that does not
+rebases; `osmia project rebase` still asks for them. A drift rebase whose
+conflict resolution review sent back `shed.max_bounces` times is held: the
+workstream takes no scheduled drift rebase until `osmia project rebase` asks
+for one or the chief of staff hands it back, and the inbox lists it until
+then. A value that does not
 parse as a Go duration, a TOML number, a negative duration, or a nonzero
 duration shorter than `1m` is rejected.
 

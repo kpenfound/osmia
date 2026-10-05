@@ -38,6 +38,7 @@ type Config struct {
 	Shed           Shed               `toml:"shed" json:"shed"`
 	Committee      Committee          `toml:"committee" json:"committee"`
 	Mason          Mason              `toml:"mason" json:"mason"`
+	Loop           Loop               `toml:"loop" json:"loop"`
 	Events         Events             `toml:"events" json:"events"`
 	Hearsay        Hearsay            `toml:"hearsay" json:"hearsay"`
 	Jev            Jev                `toml:"jev" json:"jev"`
@@ -99,6 +100,13 @@ type Mason struct {
 	MaxCleanTurns int `toml:"max_clean_turns" json:"max_clean_turns"`
 }
 
+// Loop configures the loop guard. MaxSessions is how many agent sessions a
+// workstream may run without progress before the loop guard pauses it; zero
+// turns the guard off.
+type Loop struct {
+	MaxSessions int `toml:"max_sessions" json:"max_sessions"`
+}
+
 // Notify configures owner notifications. Webhook is the absolute http or
 // https URL each new inbox entry is posted to; empty sends nothing.
 type Notify struct {
@@ -123,13 +131,25 @@ type Skills struct {
 }
 
 type Events struct {
-	Window string `toml:"window" json:"window"`
+	Window         string `toml:"window" json:"window"`
+	ProgressWindow string `toml:"progress_window" json:"progress_window"`
 }
 
 // EventWindow is how long the service collects a workstream's events before
 // delivering them to its chief of staff as one turn.
 func (c *Config) EventWindow() time.Duration {
 	d, _ := time.ParseDuration(c.Events.Window)
+	return d
+}
+
+// defaultProgressWindow is how long an event of routine progress waits when
+// events.progress_window is unset and events.window is shorter.
+const defaultProgressWindow = 15 * time.Minute
+
+// EventProgressWindow is how long an event of routine progress waits for
+// others before the service delivers it to the chief of staff.
+func (c *Config) EventProgressWindow() time.Duration {
+	d, _ := time.ParseDuration(c.Events.ProgressWindow)
 	return d
 }
 
@@ -143,8 +163,12 @@ type Profile struct {
 }
 type Role struct {
 	Profile string `toml:"profile" json:"profile"`
-	Sandbox string `toml:"sandbox" json:"sandbox"`
-	Image   string `toml:"image" json:"image"`
+	// EventsProfile is the profile of the chief of staff's turns that
+	// deliver service events; empty uses Profile. Turns answering the owner
+	// use Profile.
+	EventsProfile string `toml:"events_profile" json:"events_profile,omitempty"`
+	Sandbox       string `toml:"sandbox" json:"sandbox"`
+	Image         string `toml:"image" json:"image"`
 	// Dagger gives the mason's sbx sandbox the Dagger CLI and an engine on
 	// the host; nil gives neither.
 	Dagger *Dagger `toml:"dagger" json:"dagger,omitempty"`
@@ -278,7 +302,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Events: Events{"5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev()}
+	c := &Config{Capacity: Capacity{4, 2, 3, 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Loop: Loop{30}, Events: Events{Window: "5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev()}
 	md, err := decode(path, c, false)
 	if err != nil {
 		return nil, err
@@ -337,8 +361,17 @@ func LoadTopLevel(options Options) (*Config, error) {
 			return nil, fieldError(path, value.field, "must be positive")
 		}
 	}
+	if c.Loop.MaxSessions < 0 {
+		return nil, fieldError(path, "loop.max_sessions", "must not be negative")
+	}
 	if d, err := time.ParseDuration(c.Events.Window); err != nil || d <= 0 {
 		return nil, fieldError(path, "events.window", "must be a positive Go duration")
+	}
+	if c.Events.ProgressWindow == "" {
+		c.Events.ProgressWindow = max(defaultProgressWindow, c.EventWindow()).String()
+	}
+	if d, err := time.ParseDuration(c.Events.ProgressWindow); err != nil || d < c.EventWindow() {
+		return nil, fieldError(path, "events.progress_window", "must be a Go duration no shorter than events.window")
 	}
 	if !slices.Contains([]string{WorkspacesAuto, WorkspacesGit, WorkspacesJujutsu}, c.Workspaces) {
 		return nil, fieldError(path, "workspaces", fmt.Sprintf("must be %q, %q or %q", WorkspacesAuto, WorkspacesGit, WorkspacesJujutsu))
@@ -679,9 +712,9 @@ func knownKey(key toml.Key, project bool) bool {
 		if key[0] == "profiles" {
 			return slices.Contains([]string{"agent", "model", "effort", "fallback", "timeout", "max_turns"}, key[2])
 		}
-		return slices.Contains([]string{"profile", "sandbox", "image", "dagger", "skills"}, key[2])
+		return slices.Contains([]string{"profile", "events_profile", "sandbox", "image", "dagger", "skills"}, key[2])
 	}
-	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "events", "events.window", "notify", "notify.webhook", "skills", "skills.refresh", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout"}, path)
+	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "capacity", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "skills", "skills.refresh", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {
@@ -806,9 +839,19 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 			}
 			names[spec.Name] = true
 		}
-		for next := r.Profile; next != ""; next = c.Profiles[next].Fallback {
-			if r.Sandbox == "claude" && c.Profiles[next].Agent != "claude" {
-				return fieldError(path, prefix+".sandbox", "claude sandbox requires claude in the entire fallback chain")
+		if r.EventsProfile != "" {
+			if name != "chief_of_staff" {
+				return fieldError(path, prefix+".events_profile", "only the chief of staff takes event turns")
+			}
+			if _, ok := c.Profiles[r.EventsProfile]; !ok {
+				return fieldError(path, prefix+".events_profile", "unknown profile "+r.EventsProfile)
+			}
+		}
+		for _, first := range []string{r.Profile, r.EventsProfile} {
+			for next := first; next != ""; next = c.Profiles[next].Fallback {
+				if r.Sandbox == "claude" && c.Profiles[next].Agent != "claude" {
+					return fieldError(path, prefix+".sandbox", "claude sandbox requires claude in the entire fallback chain")
+				}
 			}
 		}
 		c.Roles[name] = r

@@ -15,10 +15,21 @@ var ErrFeatureState = errors.New("feature state refuses the transition")
 // staff as information.
 const NoticeKind = "notice"
 
+// ProgressKind is the kind of outbox events that report routine progress to
+// a workstream's chief of staff. They ask for no judgment, so the chief of
+// staff receives them in batches, or with the next notice.
+const ProgressKind = "progress"
+
 // Notice returns an outbox event for the chief of staff, identified by the
 // transition that raises it and a key unique within that transition.
 func Notice(transition, key, body string) Event {
 	return Event{ID: EventID(transition, key), Kind: NoticeKind, Body: body}
+}
+
+// Progress returns an outbox event of routine progress for the chief of
+// staff, identified as Notice identifies a notice.
+func Progress(transition, key, body string) Event {
+	return Event{ID: EventID(transition, key), Kind: ProgressKind, Body: body}
 }
 
 // SetFeatureState moves the workstream's FeatureSubject state to the given
@@ -83,7 +94,7 @@ func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string
 	}
 	tx := Transaction{ExpectedVersion: state.Version,
 		Transition: Transition{Header: h, Subject: FeatureSubject, From: state.Value, To: to, Reason: reason},
-		Events:     []Event{Notice(h.ID, "state", body)}}
+		Events:     []Event{Progress(h.ID, "state", body)}}
 	for _, other := range with {
 		if other.Transition.Subject == FeatureSubject {
 			return WorkflowState{}, fmt.Errorf("a transaction recorded with the feature state must be of another subject")

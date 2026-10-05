@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,8 +14,10 @@ import (
 	"unicode"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/reconcile"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -103,7 +106,8 @@ func decision(kind string, stream config.WorkstreamID, opened time.Time, path st
 
 // openDecisions lists a workstream's open decisions other than its
 // escalations: its ratification packet, contested units, presented
-// amendments, delivery approval and failing publication.
+// amendments, held drift rebase, delivery approval, failing publication,
+// notices held from the chief of staff and a loop guard pause.
 func (s *Service) openDecisions(ctx context.Context, repository *trace.Repository, w trace.WorkstreamStatus) ([]InboxEntry, error) {
 	var out []InboxEntry
 	add := func(e InboxEntry, open bool, err error) error {
@@ -139,6 +143,9 @@ func (s *Service) openDecisions(ctx context.Context, repository *trace.Repositor
 				return nil, err
 			}
 		}
+		if err := add(driftEntry(repository, w)); err != nil {
+			return nil, err
+		}
 	}
 	if w.State == AssembledState || w.State == DeliveredState {
 		if err := add(s.deliveryEntry(ctx, repository, w.Workstream)); err != nil {
@@ -148,7 +155,82 @@ func (s *Service) openDecisions(ctx context.Context, repository *trace.Repositor
 			return nil, err
 		}
 	}
+	if err := add(heldNoticesEntry(repository, w.Workstream)); err != nil {
+		return nil, err
+	}
+	if e, open := s.loopEntry(repository, w.Workstream); open {
+		out = append(out, e)
+	}
 	return out, nil
+}
+
+// loopEntry is the loop guard's pause of the workstream while it holds,
+// opened when it was set. Resuming the workstream answers it.
+func (s *Service) loopEntry(repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool) {
+	if s.store == nil {
+		return InboxEntry{}, false
+	}
+	target := runtime.Target{Scope: "workstream", Project: repository.Project(), Workstream: stream}
+	state, _ := s.store.Snapshot()
+	i := slices.IndexFunc(state.Pauses, func(p runtime.Pause) bool { return p.Target == target && p.Source == runtime.PauseLoopGuard })
+	if i < 0 {
+		return InboxEntry{}, false
+	}
+	pause := state.Pauses[i]
+	e := decision(InboxLoop, stream, pause.SetAt, "/runtime/pause", map[string]any{"scope": target.Scope, "project": target.Project, "workstream": target.Workstream})
+	e.Answer.Method = http.MethodDelete
+	e.Question = pause.Reason + "."
+	e.Blocked = fmt.Sprintf("Everything on the workstream but the chief of staff. Look at its status and feed, then resume it with osmia resume %s; the count of sessions without progress starts over.", stream)
+	return e, true
+}
+
+// heldNoticesEntry is the workstream's notices the chief of staff no longer
+// receives because events.MaxDeliveryFailures turns delivering them failed,
+// opened when the first of them was recorded. A message to the chief of
+// staff answers it: once the chief completes a turn answering the owner,
+// they are delivered again.
+func heldNoticesEntry(repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
+	chief, err := repository.ChiefOfStaffThread(stream)
+	if errors.Is(err, os.ErrNotExist) {
+		return InboxEntry{}, false, nil
+	}
+	if err != nil {
+		return InboxEntry{}, false, err
+	}
+	outbox, err := repository.Outbox(stream)
+	if err != nil {
+		return InboxEntry{}, false, err
+	}
+	held := 0
+	var opened time.Time
+	var last trace.QueuedTurn
+	for _, e := range outbox {
+		if e.Event.Operation != nil || e.Acknowledged {
+			continue
+		}
+		turn, ok := events.Held(e, chief)
+		if !ok {
+			continue
+		}
+		held++
+		if opened.IsZero() || e.At.Before(opened) {
+			opened = e.At
+		}
+		if turn.CompletedAt.After(last.CompletedAt) {
+			last = turn
+		}
+	}
+	if held == 0 {
+		return InboxEntry{}, false, nil
+	}
+	failure := "the turn failed"
+	if last.Response != nil && last.Response.Failure != "" {
+		failure = last.Response.Failure
+	}
+	e := decision(InboxNotices, stream, opened, "/conversation/"+string(stream), map[string]any{})
+	e.Question = fmt.Sprintf("%d notices for the chief of staff are held: the chief of staff's turns delivering them failed %d times in a row. The latest failure: %s", held, events.MaxDeliveryFailures, failure)
+	e.Blocked = fmt.Sprintf("The chief of staff hearing what happened on the workstream. Send it a message with osmia send %s once the cause is fixed; when its answer completes, the held notices are delivered again.", stream)
+	return e, true, nil
 }
 
 // publicationEscalation is how many consecutive failed attempts raise a
@@ -207,6 +289,39 @@ func (s *Service) publicationEntry(repository *trace.Repository, w trace.Workstr
 		return e, true, nil
 	}
 	return InboxEntry{}, false, nil
+}
+
+// driftEntry is the workstream's latest drift rebase while it is held for
+// the owner and the owner has not asked for another, opened when it was
+// held. It is answered by asking for a drift rebase of the project, or by a
+// handback of it.
+func driftEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error) {
+	value := w.Subjects[driftSubject].Value
+	if !strings.HasPrefix(value, driftHeld+"-") {
+		return InboxEntry{}, false, nil
+	}
+	k, err := driftNumber(value)
+	if err != nil {
+		return InboxEntry{}, false, err
+	}
+	if requested, err := driftNumber(w.Subjects[driftRequestSubject].Value); err != nil || requested > k {
+		return InboxEntry{}, false, err
+	}
+	transitions, err := trace.Read[trace.Transition](repository, w.Workstream)
+	if err != nil {
+		return InboxEntry{}, false, err
+	}
+	transition, _ := driftIDs(k)
+	i := slices.IndexFunc(transitions, func(t trace.Transition) bool { return t.ID == transition+"-"+driftHeld })
+	if i < 0 {
+		return InboxEntry{}, false, nil
+	}
+	held := transitions[i]
+	e := decision(InboxDrift, w.Workstream, held.At, "/projects/rebase", map[string]any{"project": repository.Project()})
+	e.Revision = k
+	e.Question = fmt.Sprintf("Drift rebase %d is held: %s.", k, held.Reason)
+	e.Blocked = "Rebasing the feature branch onto upstream. No drift rebase is asked for on the upstream_rebase cadence until you ask for one with osmia project rebase " + string(repository.Project()) + ", or ask the chief of staff in a message to hand it back with what its drift mason or reviewer should do differently."
+	return e, true, nil
 }
 
 // ratificationEntry is the workstream's ratification packet while debate
@@ -282,7 +397,7 @@ func (s *Service) contestedEntry(repository *trace.Repository, stream config.Wor
 	}
 	options := contestOptions(contest, unit, mason)
 	switch {
-	case failedReview(contest, unit), mason, moveContest(contest, unit):
+	case failedReview(contest, unit), mason, moveContest(contest, unit), checksContest(contest, unit):
 	default:
 		r := &reviewers{masons: &masons{s: s, cfg: s.about(repository), repository: repository}}
 		result, ok, err := r.storedResult(stream, unit, state)

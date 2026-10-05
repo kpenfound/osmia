@@ -104,13 +104,19 @@ func transitionByID(t *testing.T, repository *trace.Repository, stream config.Wo
 	return transitions[i]
 }
 
+// chiefEvent reports whether e is an event the chief of staff receives as
+// information: a notice or routine progress.
+func chiefEvent(e trace.Event) bool {
+	return e.Kind == trace.NoticeKind || e.Kind == trace.ProgressKind
+}
+
 // noticeOf returns the notice the transition raised for the chief of staff.
 func noticeOf(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, transition string) string {
 	t.Helper()
 	outbox, err := repository.Outbox(stream)
 	must(t, err)
 	for _, entry := range outbox {
-		if entry.TransitionID == transition && entry.Event.Kind == trace.NoticeKind {
+		if entry.TransitionID == transition && chiefEvent(entry.Event) {
 			return entry.Event.Body
 		}
 	}

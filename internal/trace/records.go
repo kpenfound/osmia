@@ -392,10 +392,15 @@ func finalPath(parts []string) bool {
 	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "delivery.json" || parts[1] == "publication.json"
 }
 
-// driftPath reports whether parts name the drift rebase record of a
-// workstream.
+// driftPath reports whether parts name a drift record of a workstream: its
+// drift rebase record, drift/rebase.json, or a handback of a held drift
+// rebase, drift/handback-<n>.json.
 func driftPath(parts []string) bool {
-	return len(parts) == 2 && parts[0] == "drift" && parts[1] == "rebase.json"
+	if len(parts) != 2 || parts[0] != "drift" {
+		return false
+	}
+	n := strings.TrimSuffix(strings.TrimPrefix(parts[1], "handback-"), ".json")
+	return parts[1] == "rebase.json" || strings.HasPrefix(parts[1], "handback-") && strings.HasSuffix(parts[1], ".json") && shedRound.MatchString("round-"+n)
 }
 
 var shedRound = regexp.MustCompile(`^round-[1-9][0-9]{0,8}$`)

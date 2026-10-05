@@ -168,7 +168,7 @@ func (f *handInFixture) checkHanded(t *testing.T, out HandInResponse, key, name,
 	must(t, err)
 	var notices []trace.OutboxEntry
 	for _, e := range outbox {
-		if e.Event.Kind == trace.NoticeKind {
+		if chiefEvent(e.Event) {
 			notices = append(notices, e)
 		}
 	}

@@ -26,6 +26,7 @@
     owner: 'the owner',
     'daily-budget': 'the daily budget',
     'provider-usage-limit': 'a provider usage limit',
+    'loop-guard': 'the loop guard',
   };
 
   const waitReasons = {
@@ -1160,6 +1161,9 @@
     amendment: 'Amendment',
     delivery: 'Delivery',
     publication: 'Publication failing',
+    drift: 'Drift held',
+    notices: 'Notices held',
+    loop: 'Loop guard',
   };
 
   // pinNames name the request fields an entry's answer carries to pin what
@@ -1344,8 +1348,9 @@
       event.preventDefault();
       decide(d);
     });
-    // A failing publication takes no decision, so its card has no form.
-    d.node = el('article', { class: 'decision', 'data-decision': key, 'data-kind': entry.kind, 'data-workstream': entry.workstream }, d.head, d.detail, entry.kind === 'publication' ? null : form);
+    // A failing publication, a held drift rebase, held notices or a loop
+    // guard pause take no decision here, so their cards have no form.
+    d.node = el('article', { class: 'decision', 'data-decision': key, 'data-kind': entry.kind, 'data-workstream': entry.workstream }, d.head, d.detail, ['publication', 'drift', 'notices', 'loop'].includes(entry.kind) ? null : form);
     decisions.set(key, d);
     return d;
   }
@@ -1427,7 +1432,7 @@
         return button;
       }));
     } else {
-      const none = entry.kind === 'ratification' || entry.kind === 'publication' ? 'none until what blocks it is resolved' : 'none';
+      const none = ['ratification', 'publication', 'drift', 'notices', 'loop'].includes(entry.kind) ? 'none until what blocks it is resolved' : 'none';
       options = el('p', { 'data-field': 'options' }, 'Options: ' + (entry.options.length === 0 ? none : entry.options.join(', ')));
     }
     d.head.replaceChildren(...[

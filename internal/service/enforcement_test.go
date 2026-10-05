@@ -94,3 +94,25 @@ func TestSkillCacheFollowsLoadedRefreshPolicy(t *testing.T) {
 		t.Fatalf("refresh after reload %q", got)
 	}
 }
+
+// Isolation serves a turn only the tools its role's grant names, so the
+// chief of staff's grant names every tool a chief-of-staff turn is given.
+func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
+	t.Parallel()
+	f, stream, repository := newReviewFixture(t, "chief-grant")
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "turn"}
+	tools, err := chiefTools(f.s.cfg, repository, &runtimeControls{}, scope, time.Now)
+	must(t, err)
+	var names []string
+	for _, tool := range tools {
+		names = append(names, tool.Name)
+		if !slices.Contains(chiefGrant.Tools, tool.Name) {
+			t.Errorf("chief-of-staff tool %s is not in the chief's grant", tool.Name)
+		}
+	}
+	for _, name := range []string{moveUnitTool, handBackDriftTool, resolveContestedTool} {
+		if !slices.Contains(names, name) {
+			t.Errorf("a chief-of-staff turn is not given %s: %v", name, names)
+		}
+	}
+}

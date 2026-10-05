@@ -455,6 +455,42 @@ func TestDriftRebaseIsSerializedWithLandings(t *testing.T) {
 	}
 }
 
+// A drift rebase holds back only its own workstream. While one workstream's
+// drift rebase has no result, as while it waits on its conflict resolution,
+// another workstream of the project still lands its approved units and has
+// the units a landing left behind rebased onto its feature branch.
+func TestDriftRebaseHoldsBackOnlyItsOwnWorkstream(t *testing.T) {
+	t.Parallel()
+	f, stream, repository := newApprovedFixture(t, "drift-elsewhere")
+	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	drifting := recordBuild(t, f, repository, "drift-elsewhere-other", independentPlan, config.WorkspacesGit, base)
+	lands := &foreman{masons: newMasonController(f.s, repository)}
+	ctx := context.Background()
+	must(t, lands.requestDrift(ctx, drifting, "the test asks for a drift rebase"))
+	if ops := driftOperations(t, repository, drifting); len(ops) != 1 || ops[0].Result != nil {
+		t.Fatalf("drift operations %+v", ops)
+	}
+
+	must(t, lands.Pass(ctx))
+	landings := landOperations(t, repository, stream)
+	if len(landings) != 1 {
+		t.Fatalf("landings asked for while another workstream's drift rebase has no result: %+v", landings)
+	}
+	if result := settleOperation(t, f.s, repository, stream, landings[0].Operation, lands); result.Outcome != "succeeded" {
+		t.Fatalf("landing result %+v", result)
+	}
+	must(t, lands.Pass(ctx))
+	if ops := rebaseOperations(t, repository, stream, "dedupe"); len(ops) != 1 {
+		t.Fatalf("unit rebases asked for while another workstream's drift rebase has no result: %+v", ops)
+	}
+	if ops := landOperations(t, repository, drifting); len(ops) != 0 {
+		t.Fatalf("the drifting workstream was asked to land: %+v", ops)
+	}
+	if ops := driftOperations(t, repository, drifting); len(ops) != 1 || ops[0].Result != nil {
+		t.Fatalf("drift operations %+v", ops)
+	}
+}
+
 func TestDriftWaitsForActiveMasonBeforeRebasingItsWorkspace(t *testing.T) {
 	t.Parallel()
 	f, stream, repository := newRebaseFixture(t, "drift-writer")

@@ -704,9 +704,16 @@ func (s *Service) priorities() []runtime.Priority {
 	return st.Priorities
 }
 
-// chiefProfile returns the chief of staff's effective profile for a new turn.
-func (s *Service) chiefProfile(cfg *config.Config) func() (coreadapter.Profile, error) {
+// chiefEventsProfile returns the profile of a new chief-of-staff turn that
+// delivers service events: the owner's override of the role's profile when
+// there is one, else roles.chief_of_staff.events_profile when it is set, else
+// the role's profile.
+func (s *Service) chiefEventsProfile(cfg *config.Config) func() (coreadapter.Profile, error) {
 	return func() (coreadapter.Profile, error) {
+		st, _ := s.effective()
+		if name := cfg.Roles[trace.ChiefOfStaff].EventsProfile; name != "" && st.Profiles[trace.ChiefOfStaff] == "" {
+			return cfg.NamedProfile(name)
+		}
 		_, profile, err := s.chiefOverride(cfg)
 		return profile, err
 	}
@@ -814,7 +821,7 @@ func (s *Service) stop(projects ...*activeProject) error {
 // committee rounds and the architect's replies to them, and final reviews, and the repository
 // boundary by the service's sealer for sealings, its builder for builds and
 // its foreman for landings and rebases and its publisher for publications;
-// the daily budget, then the architect controller, then the shed controller, then the sealing
+// the daily budget, then the loop guard, then the architect controller, then the shed controller, then the sealing
 // controller, then the building controller, then the overlap, charter, refresh, drift,
 // landing, assembly and publication controllers run at the start of every pass, and the pass reconciles operations in stagePriority order. With
 // Options.Threads, outbox events are then delivered to each workstream's
@@ -899,7 +906,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	daily := dailyBudget{s: s, repository: repository}
 	checks := &checkers{masons: &masons{s: s, cfg: cfg, repository: repository}}
 	runner := runnerAdapter{turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
-	hooks := []scheduleHook{{"base-refresh", (&baseRefresher{s: s, repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", (&workspaceCleanup{cfg: cfg, repository: repository, now: s.now}).Pass}}
+	hooks := []scheduleHook{{"base-refresh", (&baseRefresher{s: s, repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", (&workspaceCleanup{cfg: cfg, repository: repository, now: s.now}).Pass}}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})
 	}
@@ -915,7 +922,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		if err != nil {
 			return nil, err
 		}
-		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), Profile: s.chiefProfile(cfg), System: s.chiefEventsPrompt(cfg.Project.ID, repository),
+		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), ProgressWindow: cfg.EventProgressWindow(), Profile: s.chiefEventsProfile(cfg), System: s.chiefEventsPrompt(cfg.Project.ID, repository),
 			Skip: func(stream config.WorkstreamID) (bool, error) { return abandoned(repository, stream) }})
 		if err != nil {
 			return nil, err

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -26,9 +27,12 @@ const Preamble = "Service events for this workstream. They are information only:
 
 type Options struct {
 	Now func() time.Time
-	// Window is how long the oldest undelivered event waits for others before
-	// they are delivered together.
-	Window time.Duration
+	// Window is how long an undelivered event waits for others before they
+	// are delivered together, and ProgressWindow how long an event of routine
+	// progress waits; zero means Window. A delivery carries every ready event,
+	// so progress goes out early with any other event.
+	Window         time.Duration
+	ProgressWindow time.Duration
 	// Lease bounds a delivery claim. An unfinished delivery is retried once it
 	// expires. Zero means one minute.
 	Lease time.Duration
@@ -43,7 +47,7 @@ type Options struct {
 }
 
 // Deliverer turns a workstream's ready outbox events into one chief-of-staff
-// turn each window.
+// turn at a time, once the earliest of them has waited its window.
 //
 // A delivery claims every event with one token and enqueues a turn whose ID
 // derives from that token. A pass acknowledges an event once a turn its
@@ -60,7 +64,7 @@ type Deliverer struct {
 }
 
 func New(repository *trace.Repository, options Options) (*Deliverer, error) {
-	if repository == nil || options.Profile == nil || options.Window < 0 || options.Lease < 0 {
+	if repository == nil || options.Profile == nil || options.Window < 0 || options.ProgressWindow < 0 || options.Lease < 0 {
 		return nil, errors.New("invalid event delivery options")
 	}
 	if options.Now == nil {
@@ -69,7 +73,27 @@ func New(repository *trace.Repository, options Options) (*Deliverer, error) {
 	if options.Lease == 0 {
 		options.Lease = time.Minute
 	}
+	if options.ProgressWindow == 0 {
+		options.ProgressWindow = options.Window
+	}
 	return &Deliverer{repository: repository, options: options}, nil
+}
+
+// wait is how long e waits for other events before a delivery carries it.
+func (d *Deliverer) wait(e trace.OutboxEntry) time.Duration {
+	if e.Event.Kind == trace.ProgressKind {
+		return d.options.ProgressWindow
+	}
+	return d.options.Window
+}
+
+// eventTurnPending reports whether an event turn of the chief of staff is
+// queued or running. Events that arrive meanwhile wait for the next turn
+// rather than queue another behind it.
+func eventTurnPending(chief trace.Thread, states map[string]turnState) bool {
+	return slices.ContainsFunc(chief.Turns, func(q trace.QueuedTurn) bool {
+		return q.Request.Actor == Actor && states[q.Request.TurnID] == turnPending
+	})
 }
 
 // TurnID is the chief-of-staff turn that delivers the events claimed with token.
@@ -144,7 +168,7 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 		case turnPending:
 			continue
 		}
-		if d.options.Now().Before(retryAt(e, chief)) {
+		if _, held := Held(e, chief); held || d.options.Now().Before(retryAt(e, chief)) {
 			continue
 		}
 		if !free[e.Event.ID] && e.Claim != nil {
@@ -160,12 +184,12 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 		}
 		pending = append(pending, e)
 	}
-	if len(pending) == 0 {
+	if len(pending) == 0 || eventTurnPending(chief, states) {
 		return nil
 	}
 	sort.SliceStable(pending, func(i, j int) bool { return pending[i].At.Before(pending[j].At) })
 	now := d.options.Now()
-	if now.Before(pending[0].At.Add(d.options.Window)) {
+	if !slices.ContainsFunc(pending, func(e trace.OutboxEntry) bool { return !now.Before(e.At.Add(d.wait(e))) }) {
 		return nil
 	}
 	profile, err := d.options.Profile()
@@ -213,22 +237,61 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	return nil
 }
 
-// retryAt backs off repeated delivery failures using durable turn results.
-// The first failure is retried immediately; subsequent failures wait from
-// thirty seconds up to fifteen minutes. New events keep their own schedule.
-func retryAt(e trace.OutboxEntry, chief trace.Thread) time.Time {
+// MaxDeliveryFailures is how many chief-of-staff turns delivering an event
+// may fail, since the chief last completed a turn answering the owner, before
+// the event is held instead of delivered again.
+const MaxDeliveryFailures = 5
+
+// claimedTurns returns the chief-of-staff turns that claimed e and ended,
+// in the order the thread holds them.
+func claimedTurns(e trace.OutboxEntry, chief trace.Thread) []trace.QueuedTurn {
 	claimed := map[string]bool{}
 	for _, attempt := range e.History {
 		if attempt.Kind == "claim" {
 			claimed[TurnID(attempt.Token)] = true
 		}
 	}
+	var out []trace.QueuedTurn
+	for _, turn := range chief.Turns {
+		if claimed[turn.Request.TurnID] && !turn.CompletedAt.IsZero() {
+			out = append(out, turn)
+		}
+	}
+	return out
+}
+
+// Held reports whether e is held instead of delivered again:
+// MaxDeliveryFailures chief-of-staff turns delivering it failed since the
+// chief last completed a turn answering the owner. It returns the latest
+// failed turn. Once the chief completes a turn answering the owner, the event
+// is delivered again.
+func Held(e trace.OutboxEntry, chief trace.Thread) (trace.QueuedTurn, bool) {
+	var answered time.Time
+	for _, turn := range chief.Turns {
+		if turn.Request.Actor.Kind == "owner" && !turn.CompletedAt.IsZero() && turn.Status() == "idle" && turn.CompletedAt.After(answered) {
+			answered = turn.CompletedAt
+		}
+	}
+	failed := 0
+	var last trace.QueuedTurn
+	for _, turn := range claimedTurns(e, chief) {
+		if turn.Status() == "failed" && turn.CompletedAt.After(answered) {
+			failed++
+			if turn.CompletedAt.After(last.CompletedAt) {
+				last = turn
+			}
+		}
+	}
+	return last, failed >= MaxDeliveryFailures
+}
+
+// retryAt backs off repeated delivery failures using durable turn results.
+// The first failure is retried immediately; subsequent failures wait from
+// thirty seconds up to fifteen minutes. New events keep their own schedule.
+func retryAt(e trace.OutboxEntry, chief trace.Thread) time.Time {
 	failures := 0
 	var last time.Time
-	for _, turn := range chief.Turns {
-		if !claimed[turn.Request.TurnID] || turn.CompletedAt.IsZero() {
-			continue
-		}
+	for _, turn := range claimedTurns(e, chief) {
 		if turn.Status() == "failed" || turn.Status() == "interrupted" {
 			failures++
 			if turn.CompletedAt.After(last) {

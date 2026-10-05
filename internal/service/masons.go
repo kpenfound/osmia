@@ -738,7 +738,7 @@ func (m *masons) start(ctx context.Context, b building, unit string) (started, b
 	tr := trace.Transition{Header: h, Subject: subject, From: UnitReady, To: UnitImplementing,
 		Reason: fmt.Sprintf("unit %s is the next ready unit of the plan of seal %d; its mason works in the unit's workspace on %s, created from %s at %s", unit, mason.Seal, w.Branch, featureBranch(b.stream), base)}
 	tx := trace.Transaction{ExpectedVersion: b.states[subject].Version, Transition: tr,
-		Events: []trace.Event{trace.Notice(masonTransitionID(unit), "unit", fmt.Sprintf("Unit %s is implementing: its mason works on it in its unit workspace on %s.", unit, w.Branch))}}
+		Events: []trace.Event{trace.Progress(masonTransitionID(unit), "unit", fmt.Sprintf("Unit %s is implementing: its mason works on it in its unit workspace on %s.", unit, w.Branch))}}
 	if len(docs) != 0 {
 		_, err = m.repository.RecordDocumentsWith(ctx, docs, tx)
 	} else {

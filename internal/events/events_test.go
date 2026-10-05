@@ -739,3 +739,118 @@ func TestRepeatedEventFailuresBackOffAcrossRestart(t *testing.T) {
 		t.Fatal("successful delivery was not acknowledged")
 	}
 }
+
+// An event whose delivery turns fail MaxDeliveryFailures times is held
+// instead of delivered again, however long the backoff, until the chief of
+// staff completes a turn answering the owner.
+func TestRepeatedlyFailedEventIsHeldUntilTheChiefAnswersTheOwner(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t)
+	defer repo.Close()
+	f.notify(t, repo, "first")
+	d := f.deliverer(t, repo, 0)
+	for range MaxDeliveryFailures {
+		must(t, d.Pass(ctx))
+		f.finish(t, repo, f.claimNext(t, repo), false)
+		f.clock.Advance(time.Hour)
+	}
+	must(t, d.Pass(ctx))
+	if got := deliveries(t, repo, "first"); got != MaxDeliveryFailures {
+		t.Fatalf("the event went out %d times after %d failures", got, MaxDeliveryFailures)
+	}
+	entries, err := repo.Outbox(stream)
+	must(t, err)
+	th, err := repo.ChiefOfStaffThread(stream)
+	must(t, err)
+	i := slices.IndexFunc(entries, func(e trace.OutboxEntry) bool { return strings.Contains(e.Event.Body, "first") })
+	if last, held := Held(entries[i], th); !held || last.Response == nil || last.Response.Failure != "the turn failed" {
+		t.Fatalf("the event is not held: %+v %v", last, held)
+	}
+
+	f.notify(t, repo, "second")
+	f.clock.Advance(time.Minute)
+	must(t, d.Pass(ctx))
+	if deliveries(t, repo, "first") != MaxDeliveryFailures || deliveries(t, repo, "second") != 1 {
+		t.Fatal("a held event went out with a new one")
+	}
+	f.finish(t, repo, f.claimNext(t, repo), true)
+
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_owner", Project: project, Workstream: stream, At: f.clock.Now(), Actor: owner, Cause: "message"},
+		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "owner", Profile: profile, Prompt: "The provider is back."}
+	_, err = repo.EnqueueTurn(ctx, req)
+	must(t, err)
+	f.finish(t, repo, f.claimNext(t, repo), true)
+	must(t, d.Pass(ctx))
+	if got := deliveries(t, repo, "first"); got != MaxDeliveryFailures+1 {
+		t.Fatalf("the held event went out %d times after the chief answered the owner", got)
+	}
+}
+
+// progress commits a state transition of subject id with one event of
+// routine progress.
+func (f *fixture) progress(t *testing.T, repo *trace.Repository, id string) {
+	t.Helper()
+	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: id, Project: project, Workstream: stream, At: f.clock.Now(), Actor: owner, Cause: "test"}
+	_, err := repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: h, Subject: id, To: "changed", Reason: "Test change"},
+		Events: []trace.Event{trace.Progress(id, "progress", "Notice "+id)}})
+	must(t, err)
+}
+
+// Events that arrive while an event turn is queued or running wait for the
+// next turn rather than queue another behind it.
+func TestEventsWaitForTheEventTurnInFlight(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t)
+	defer repo.Close()
+	d := f.deliverer(t, repo, 0)
+	f.notify(t, repo, "first")
+	must(t, d.Pass(ctx))
+	f.notify(t, repo, "second")
+	f.clock.Advance(time.Minute)
+	must(t, d.Pass(ctx))
+	if turns := eventTurns(t, repo); len(turns) != 1 || deliveries(t, repo, "second") != 0 {
+		t.Fatalf("an event turn was queued behind the one in flight: %d turns", len(turns))
+	}
+	f.finish(t, repo, f.claimNext(t, repo), true)
+	must(t, d.Pass(ctx))
+	if turns := eventTurns(t, repo); len(turns) != 2 || deliveries(t, repo, "second") != 1 || deliveries(t, repo, "first") != 1 {
+		t.Fatalf("the waiting event was not delivered once the turn finished: %d turns", len(turns))
+	}
+}
+
+// Routine progress waits for the progress window, unless another event goes
+// out first and carries it.
+func TestProgressWaitsForItsWindowOrTheNextNotice(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t)
+	defer repo.Close()
+	d, err := New(repo, Options{Now: f.clock.Now, Window: 5 * time.Second, ProgressWindow: 15 * time.Minute, Profile: func() (coreadapter.Profile, error) { return profile, nil }})
+	must(t, err)
+	f.progress(t, repo, "started")
+	f.clock.Advance(14 * time.Minute)
+	must(t, d.Pass(ctx))
+	if turns := eventTurns(t, repo); len(turns) != 0 {
+		t.Fatalf("progress went out before its window: %d turns", len(turns))
+	}
+	f.clock.Advance(time.Minute)
+	must(t, d.Pass(ctx))
+	if deliveries(t, repo, "started") != 1 {
+		t.Fatal("progress was not delivered once its window passed")
+	}
+	f.finish(t, repo, f.claimNext(t, repo), true)
+
+	f.progress(t, repo, "checking")
+	f.clock.Advance(time.Minute)
+	f.notify(t, repo, "contested")
+	f.clock.Advance(4 * time.Second)
+	must(t, d.Pass(ctx))
+	if deliveries(t, repo, "contested") != 0 {
+		t.Fatal("a notice went out before its window")
+	}
+	f.clock.Advance(time.Second)
+	must(t, d.Pass(ctx))
+	turns := eventTurns(t, repo)
+	if len(turns) != 2 || deliveries(t, repo, "contested") != 1 || deliveries(t, repo, "checking") != 1 || !strings.Contains(turns[1].Request.Prompt, "(progress): Notice checking") {
+		t.Fatalf("the notice did not carry the waiting progress: %d turns", len(turns))
+	}
+}

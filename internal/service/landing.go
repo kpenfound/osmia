@@ -95,13 +95,16 @@ type foreman struct {
 var _ coreadapter.Reconciler = (*foreman)(nil)
 
 // Pass runs one landing and rebase sequence at a time per project. While a
-// landing or drift rebase of the project has no result, it does nothing. Otherwise it keeps
-// the unfinished units of the building and assembled workstreams that are not paused on
-// their feature branches, rebasing each unit whose workspace a landing left
-// behind and routing rebase conflicts to masons. Once every such unit is
-// current and every rebase has its result, it asks to land the first approved
-// unit, in the workstreams' priority order and each plan's dependency order,
-// whose approval no landing was asked for.
+// landing of the project has no result, it does nothing. Otherwise it keeps
+// the unfinished units of the building and assembled workstreams that are not
+// paused and have no drift rebase in flight on their feature branches,
+// rebasing each unit whose workspace a landing left behind and routing rebase
+// conflicts to masons. A workstream's drift rebase carries that workstream's
+// units itself, and can wait on its conflict resolution for as long as its
+// mason and reviewer take, so it holds back only its own workstream. Once
+// every such unit is current and every rebase has its result, it asks to land
+// the first approved unit, in the workstreams' priority order and each plan's
+// dependency order, whose approval no landing was asked for.
 func (f *foreman) Pass(ctx context.Context) error {
 	pending, err := refreshPending(f.repository)
 	if err != nil {
@@ -120,6 +123,7 @@ func (f *foreman) Pass(ctx context.Context) error {
 	rebasing := map[config.WorkstreamID]map[string]bool{}
 	rebased := map[config.WorkstreamID]map[string][]string{}
 	dispatched := map[config.WorkstreamID]map[string]bool{}
+	drifting := map[config.WorkstreamID]bool{}
 	var candidates []building
 	for _, stream := range streams {
 		if stream == librarian {
@@ -137,7 +141,7 @@ func (f *foreman) Pass(ctx context.Context) error {
 			switch o.Operation.Action {
 			case DriftAction:
 				if o.Result == nil {
-					return nil
+					drifting[stream] = true
 				}
 			case LandAction:
 				if o.Result == nil {
@@ -168,7 +172,7 @@ func (f *foreman) Pass(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("workstream %s landing: %w", stream, err)
 		}
-		if found && !scheduler.Paused(state.Pauses, f.cfg.Project.ID, stream) {
+		if found && !drifting[stream] && !scheduler.Paused(state.Pauses, f.cfg.Project.ID, stream) {
 			candidates = append(candidates, b)
 		}
 	}
@@ -636,7 +640,7 @@ func (f *foreman) record(ctx context.Context, stream config.WorkstreamID, in lan
 		in.Unit, commit, branch, approval, in.Candidate, in.Base, identity.Candidate.SpecRevision, identity.Candidate.PlanRevision, identity.Seal, strings.Join(criteria, ", "))
 	txs := []trace.Transaction{{ExpectedVersion: b.states[subject].Version,
 		Transition: trace.Transition{Header: f.header(merged, stream, in.Unit, operation, at), Subject: subject, From: UnitApproved, To: UnitMerged, Reason: reason},
-		Events:     []trace.Event{trace.Notice(merged, "unit", fmt.Sprintf("Unit %s merged: it landed as %s on %s.", in.Unit, commit, branch))}}}
+		Events:     []trace.Event{trace.Progress(merged, "unit", fmt.Sprintf("Unit %s merged: it landed as %s on %s.", in.Unit, commit, branch))}}}
 	transition, _ := landIDs(in.Unit, in.Review)
 	landingState := b.states[landingSubject(in.Unit)]
 	txs = append(txs, trace.Transaction{ExpectedVersion: landingState.Version,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -50,11 +52,11 @@ func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fake
 		if fail {
 			return nil, fmt.Errorf("fake librarian failed")
 		}
-		source, err := callTool(ctx, tools, "file_read", map[string]any{"path": "source/report.json"})
+		source, err := callTool(ctx, tools, "file_read", map[string]any{"path": "source/reports.json"})
 		if err != nil || !strings.Contains(source, "Trace snapshots require a clean worktree") {
 			return nil, fmt.Errorf("missing reported learning: %s: %w", source, err)
 		}
-		landing, err := callTool(ctx, tools, "file_read", map[string]any{"path": "source/landing.json"})
+		landing, err := callTool(ctx, tools, "file_read", map[string]any{"path": "source/landings.json"})
 		if err != nil || !strings.Contains(landing, "commit") {
 			return nil, fmt.Errorf("missing landing source: %s: %w", landing, err)
 		}
@@ -168,9 +170,10 @@ func TestLandedLearningsRefreshKnowledgeAndSurviveRestart(t *testing.T) {
 	masons.check(t)
 	var in refreshInput
 	must(t, json.Unmarshal(op.Operation.Input, &in))
-	if in.Unit != "resume" || in.Workstream != stream {
+	if len(in.Landings) != 1 || in.Landings[0].Unit != "resume" || in.Landings[0].Commit != in.Commit || in.Workstream != stream {
 		t.Fatalf("source: %+v", in)
 	}
+	landed := in.Landings[0]
 	docs, err := trace.Read[trace.Document](f.repository(), "")
 	must(t, err)
 	var ledger trace.Document
@@ -185,7 +188,7 @@ func TestLandedLearningsRefreshKnowledgeAndSurviveRestart(t *testing.T) {
 	}
 	var sources []KnowledgeSource
 	must(t, json.Unmarshal([]byte(ledger.Content), &sources))
-	if len(sources) != 1 || sources[0].Unit != in.Unit || sources[0].Commit != in.Commit || sources[0].Landing != in.Landing || sources[0].Report != in.Report || sources[0].Operation != op.Operation.ID || sources[0].Revision != 2 || prose.Revision != 2 || prose.Cause != op.Operation.ID || ledger.Revision != 1 {
+	if len(sources) != 1 || sources[0].Unit != landed.Unit || sources[0].Commit != landed.Commit || sources[0].Landing != landed.Landing || sources[0].Report != landed.Report || sources[0].Operation != op.Operation.ID || sources[0].Revision != 2 || prose.Revision != 2 || prose.Cause != op.Operation.ID || ledger.Revision != 1 {
 		t.Fatalf("provenance: %+v; prose %+v", sources, prose)
 	}
 	files := bundle.Files{Repository: func(_ config.ProjectID) (*trace.Repository, error) { return f.repository(), nil }}
@@ -268,4 +271,86 @@ func TestFailedRefreshPreservesKnowledge(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A workstream's landings are folded into the knowledge base together once
+// none of its units is started and unmerged: a landing while another unit is
+// in flight waits, and one refresh then carries both, with the repository at
+// the latest landing.
+func TestRefreshFoldsAWorkstreamsLandingsOnceItIsQuiet(t *testing.T) {
+	t.Parallel()
+	f, stream, repository := newApprovedFixture(t, "refresh-batch")
+	ctx := context.Background()
+	lands := &foreman{masons: newMasonController(f.s, repository)}
+	r := &refresher{extractor: &extractor{s: f.s, repository: repository}}
+	refreshes := func() []refreshInput {
+		t.Helper()
+		ops, err := repository.Operations(librarianWorkstream(f.project))
+		must(t, err)
+		var out []refreshInput
+		for _, op := range ops {
+			if op.Operation.Action == RefreshAction {
+				var in refreshInput
+				must(t, json.Unmarshal(op.Operation.Input, &in))
+				out = append(out, in)
+			}
+		}
+		return out
+	}
+	land := func(unit string) {
+		t.Helper()
+		must(t, lands.Pass(ctx))
+		ops := slices.DeleteFunc(landOperations(t, repository, stream), func(o trace.OperationRecord) bool { return o.Result != nil })
+		if len(ops) != 1 {
+			t.Fatalf("pending landings of %s: %+v", unit, ops)
+		}
+		if result := settleOperation(t, f.s, repository, stream, ops[0].Operation, lands); result.Outcome != "succeeded" {
+			t.Fatalf("landing of %s: %+v", unit, result)
+		}
+		if got := unitState(t, repository, stream, unit); got != UnitMerged {
+			t.Fatalf("unit %s is %s after its landing", unit, got)
+		}
+	}
+	ops, err := repository.Operations(librarianWorkstream(f.project))
+	must(t, err)
+	for _, op := range ops {
+		if op.Operation.Action == ExtractAction && op.Result == nil {
+			settleOperation(t, f.s, repository, librarianWorkstream(f.project), op.Operation, completedEffect{})
+		}
+	}
+	land("resume")
+	must(t, r.Pass(ctx))
+	if got := refreshes(); len(got) != 0 {
+		t.Fatalf("a refresh was asked for while dedupe is in flight: %+v", got)
+	}
+
+	must(t, lands.Pass(ctx))
+	rebases := rebaseOperations(t, repository, stream, "dedupe")
+	if len(rebases) != 1 {
+		t.Fatalf("dedupe's rebases %+v", rebases)
+	}
+	settleOperation(t, f.s, repository, stream, rebases[0].Operation, rebaser{lands})
+	runChecks(t, f.s, repository, stream)
+	approveDirectly(t, f.s, repository, stream, "dedupe", "spec#2")
+	land("dedupe")
+	must(t, r.Pass(ctx))
+	got := refreshes()
+	if len(got) != 1 || len(got[0].Landings) != 2 || got[0].Landings[0].Unit != "resume" || got[0].Landings[1].Unit != "dedupe" || got[0].Commit != got[0].Landings[1].Commit || got[0].Workstream != stream {
+		t.Fatalf("refreshes %+v", got)
+	}
+	must(t, r.Pass(ctx))
+	if again := refreshes(); len(again) != 1 {
+		t.Fatalf("the landings were asked to be folded twice: %+v", again)
+	}
+}
+
+// completedEffect is a reconciler whose effect has always completed.
+type completedEffect struct{}
+
+func (completedEffect) Inspect(context.Context, coreadapter.Operation) (coreadapter.Observation, error) {
+	return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: "completed", Result: &coreadapter.OperationResult{Outcome: "succeeded", Evidence: "completed"}}, nil
+}
+
+func (completedEffect) Apply(context.Context, coreadapter.Operation) (coreadapter.OperationResult, error) {
+	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: "completed"}, nil
 }

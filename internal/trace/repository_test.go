@@ -863,3 +863,18 @@ func TestCloseReleasesALockItsDescriptorsShare(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The trace's Git writes each new object by renaming it into place, so a
+// check of the object store never meets an object Git has linked twice while
+// it writes it. The setting rides on every command, and the isolated
+// .git/config stays as it is.
+func TestTraceGitWritesObjectsByRename(t *testing.T) {
+	r, _, _ := create(t)
+	got, err := r.git(context.Background(), nil, "config", "--get", "core.createObject")
+	if err != nil || got != "rename" {
+		t.Fatalf("core.createObject is %q: %v", got, err)
+	}
+	if err := r.checkGit(); err != nil {
+		t.Fatal(err)
+	}
+}

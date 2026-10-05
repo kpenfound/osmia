@@ -40,9 +40,18 @@ const (
 )
 
 // errDriftAwaits wraps why a drift rebase in resolution waits: the
-// operation stays pending, and holds the project's lander, until the
-// resolution is approved.
+// operation stays pending, holding its workstream's landings and the
+// project's other drift rebases, until the resolution is approved or held.
 var errDriftAwaits = errors.New("drift rebase awaits its conflict resolution")
+
+// driftHeldError reports why a drift rebase's conflict resolution stops and the
+// drift rebase is held for the owner: review sent the resolution back
+// shed.max_bounces times, its mason left conflict markers after
+// mason.max_clean_turns reminders, or maxRecoveries turns of its mason or
+// reviewer in a row were interrupted.
+type driftHeldError struct{ why string }
+
+func (e driftHeldError) Error() string { return "drift rebase is held for the owner: " + e.why }
 
 // resolving reports whether a drift rebase record is one of a resolution
 // in progress.
@@ -316,8 +325,11 @@ func (d drifter) advance(ctx context.Context, stream config.WorkstreamID, next D
 // replayed branch is the candidate a reviewer reads against the sealed
 // spec: approval replays the feature branch to it, and material findings
 // return it to the mason, whose work the service snapshots as the next
-// candidate. The resolution workspace is removed once the feature branch
-// moves. Every step reads the workspace and the threads first, so a
+// candidate. Once review has sent the resolution back shed.max_bounces
+// times, or the mason has left markers after mason.max_clean_turns
+// reminders, resolve returns a driftHeldError instead of asking the mason
+// again.
+// The resolution workspace is removed once the feature branch moves. Every step reads the workspace and the threads first, so a
 // retry or a restart goes on from where the last one stopped and queues no
 // turn twice.
 func (d drifter) resolve(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase) (DriftRebase, error) {
@@ -391,6 +403,9 @@ func (d drifter) resolve(ctx context.Context, stream config.WorkstreamID, rebase
 			}
 			continue
 		case driftRejected:
+			if rebase.Review >= d.cfg.Shed.MaxBounces {
+				return rebase, driftHeldError{fmt.Sprintf("review sent its resolution of the conflicts in %s back %d times, reaching shed.max_bounces", strings.Join(rebase.Conflicts, ", "), rebase.Review)}
+			}
 			paths, err := d.conflicted(stream, rebase.Drift)
 			if err != nil {
 				return rebase, err
@@ -487,7 +502,10 @@ func (d drifter) release(ctx context.Context, stream config.WorkstreamID) error 
 // ended, and none of paths carries a conflict marker in the workspace. It
 // queues turn when the thread does not have it. An interrupted turn has its
 // surviving view copied back and one continuation queued. A turn that ended
-// with markers left gets one reminder that names them.
+// with markers left gets one reminder that names them, up to
+// mason.max_clean_turns reminders since turn; after that, or once
+// maxRecoveries turns in a row were interrupted, it returns a
+// driftHeldError.
 func (d drifter) masonDone(ctx context.Context, stream config.WorkstreamID, w workspace.Worktree, turn, prompt string, paths []string) (bool, error) {
 	if err := d.ensureThread(ctx, stream, driftMasonAgent, masonRole); err != nil {
 		return false, err
@@ -513,6 +531,9 @@ func (d drifter) masonDone(ctx context.Context, stream config.WorkstreamID, w wo
 	last := th.Turns[len(th.Turns)-1]
 	switch last.Status() {
 	case "interrupted":
+		if n := interruptedInARow(th); n >= maxRecoveries {
+			return false, driftHeldError{fmt.Sprintf("its mason's latest %d turns were interrupted in a row", n)}
+		}
 		return false, d.follow(ctx, stream, last, "recover", last.Request.Prompt+"\n\n"+interruption(last)+" Your view holds the files that turn left. Go on from them, and call done once the resolution is complete.")
 	case "idle":
 	default:
@@ -525,6 +546,15 @@ func (d drifter) masonDone(ctx context.Context, stream config.WorkstreamID, w wo
 	marked, err := g.MarkedFiles(w, paths)
 	if err != nil || len(marked) == 0 {
 		return err == nil, err
+	}
+	reminded := 0
+	for _, q := range th.Turns[i:] {
+		if strings.HasPrefix(q.Request.TurnID, driftMasonAgent+"-markers-") {
+			reminded++
+		}
+	}
+	if reminded >= d.cfg.Mason.MaxCleanTurns {
+		return false, driftHeldError{fmt.Sprintf("its mason left conflict markers in %s after %d reminders, exhausting mason.max_clean_turns", strings.Join(marked, ", "), reminded)}
 	}
 	return false, d.follow(ctx, stream, last, "markers", fmt.Sprintf("Your last turn ended, and these files still carry conflict markers: %s. Resolve each conflict against the sealed spec, remove every marker, and call done again.", strings.Join(marked, ", ")))
 }
@@ -559,7 +589,8 @@ func (d drifter) follow(ctx context.Context, stream config.WorkstreamID, last tr
 // reviewed returns the verdict of review n of the resolved candidate, and
 // whether its turn recorded one. It queues the review turn when the
 // reviewer's thread does not have it, and one continuation of a review a
-// stop interrupted.
+// stop interrupted, unless maxRecoveries turns in a row were interrupted,
+// when it returns a driftHeldError.
 func (d drifter) reviewed(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase) (UnitVerdict, bool, error) {
 	if err := d.ensureThread(ctx, stream, driftReviewerAgent, reviewerRole); err != nil {
 		return UnitVerdict{}, false, err
@@ -595,6 +626,9 @@ func (d drifter) reviewed(ctx context.Context, stream config.WorkstreamID, rebas
 	last := th.Turns[len(th.Turns)-1]
 	switch last.Status() {
 	case "interrupted":
+		if n := interruptedInARow(th); n >= maxRecoveries {
+			return UnitVerdict{}, false, driftHeldError{fmt.Sprintf("its reviewer's latest %d turns were interrupted in a row", n)}
+		}
 		req := last.Request
 		req.TurnID = fmt.Sprintf("%s-recover-%d", turn, last.Sequence)
 		req.ID, req.At = "request_"+req.TurnID, d.s.now()
@@ -672,6 +706,10 @@ func (d drifter) resolvePrompt(ctx context.Context, stream config.WorkstreamID, 
 	if err != nil {
 		return "", err
 	}
+	handback, err := driftHandbackNote(d.repository, stream, rebase.Drift)
+	if err != nil {
+		return "", err
+	}
 	g, err := driftWorkspaces(d.cfg, d.repository).of(stream)
 	if err != nil {
 		return "", err
@@ -694,15 +732,19 @@ func (d drifter) resolvePrompt(ctx context.Context, stream config.WorkstreamID, 
 The service is rebasing the workstream's feature branch %s from %s onto %s/%s at %s, one commit at a time, in a workspace of its own whose files are your view. Replaying commit %s (%q) conflicted, and these files of your view are conflicted:
 - %s
 
-%s Resolve every conflict against the sealed spec below, so that what upstream now holds and what the feature branch built both stand, and remove every marker. Change nothing the conflicts do not need. Then call done with the outcome of your resolution and end your turn. The service goes on with the rebase once no conflicted file carries a marker, and a reviewer reads the resolved branch against the sealed spec before the feature branch moves.
+%s Resolve every conflict against the sealed spec below, so that what upstream now holds and what the feature branch built both stand, and remove every marker. Change nothing the conflicts do not need. Then call done with the outcome of your resolution and end your turn. The service goes on with the rebase once no conflicted file carries a marker, and a reviewer reads the resolved branch against the sealed spec before the feature branch moves.%s
 
 %s
 
-%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, rebase.Stop, subject, strings.Join(rebase.Conflicts, "\n- "), markers, driftAmendGuidance(rebase), spec), nil
+%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, rebase.Stop, subject, strings.Join(rebase.Conflicts, "\n- "), markers, handback, driftAmendGuidance(rebase), spec), nil
 }
 
 func (d drifter) fixPrompt(stream config.WorkstreamID, rebase DriftRebase) (string, error) {
 	spec, err := d.sealedSpec(stream)
+	if err != nil {
+		return "", err
+	}
+	handback, err := driftHandbackNote(d.repository, stream, rebase.Drift)
 	if err != nil {
 		return "", err
 	}
@@ -715,15 +757,19 @@ func (d drifter) fixPrompt(stream config.WorkstreamID, rebase DriftRebase) (stri
 	return fmt.Sprintf(`The reviewer did not approve your resolution of the conflicts of feature branch %s with upstream. Their findings:
 %s
 
-Your view holds the resolved branch, candidate %s. Address every finding against the sealed spec below, keep what upstream holds and what the feature branch built, and leave no conflict marker. Then call done with the outcome of your changes and end your turn. The reviewer reads the resolution again before the feature branch moves.
+Your view holds the resolved branch, candidate %s. Address every finding against the sealed spec below, keep what upstream holds and what the feature branch built, and leave no conflict marker. Then call done with the outcome of your changes and end your turn. The reviewer reads the resolution again before the feature branch moves.%s
 
 %s
 
-%s`, rebase.Branch, strings.Join(findings, "\n"), rebase.Candidate, driftAmendGuidance(rebase), spec), nil
+%s`, rebase.Branch, strings.Join(findings, "\n"), rebase.Candidate, handback, driftAmendGuidance(rebase), spec), nil
 }
 
 func (d drifter) reviewPrompt(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase) (string, error) {
 	spec, err := d.sealedSpec(stream)
+	if err != nil {
+		return "", err
+	}
+	handback, err := driftHandbackNote(d.repository, stream, rebase.Drift)
 	if err != nil {
 		return "", err
 	}
@@ -748,12 +794,12 @@ func (d drifter) reviewPrompt(ctx context.Context, stream config.WorkstreamID, r
 The service rebased feature branch %s from %s onto %s/%s at %s. The rebase conflicted in:
 - %s
 
-A mason resolved the conflicts, and the resolved branch is candidate %s. The feature branch stays at %s until you approve it: a satisfactory verdict moves the feature branch and the seal to the candidate, and material findings return the resolution to the mason with your findings. Check that each conflicted file keeps both what upstream now holds and what the feature branch built, that nothing else of the feature branch's change was lost or altered, and that the sealed criteria still hold. Summarize what you checked in the verdict, citing criteria as spec#<n> where they matter.
+A mason resolved the conflicts, and the resolved branch is candidate %s. The feature branch stays at %s until you approve it: a satisfactory verdict moves the feature branch and the seal to the candidate, and material findings return the resolution to the mason with your findings. Check that each conflicted file keeps both what upstream now holds and what the feature branch built, that nothing else of the feature branch's change was lost or altered, and that the sealed criteria still hold. Summarize what you checked in the verdict, citing criteria as spec#<n> where they matter.%s
 
 Read both changes with %s, whole or by file and line range. Their changed files, with added and removed lines:
 
 %s
-%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, strings.Join(paths, "\n- "), rebase.Candidate, rebase.Before, workstreamDiffTool, strings.Join(changes, "\n"), spec), nil
+%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, strings.Join(paths, "\n- "), rebase.Candidate, rebase.Before, handback, workstreamDiffTool, strings.Join(changes, "\n"), spec), nil
 }
 
 // driftDiffs are the two changes a drift review reads: the feature branch's

@@ -1492,6 +1492,13 @@ func showInbox(w io.Writer, list service.InboxResponse) {
 		case service.InboxPublication:
 			block("Publishing", fmt.Sprintf("owner approval %d", e.Revision))
 			block("Answer", "none; fix the cause of the last failure and the service publishes on its next attempt")
+		case service.InboxDrift:
+			block("Held", fmt.Sprintf("drift rebase %d", e.Revision))
+			block("Answer", fmt.Sprintf("osmia project rebase %v asks for another drift rebase; osmia send %s \"...\" asks the chief of staff to hand it back with a note; or abandon the workstream", e.Answer.Body["project"], stream))
+		case service.InboxLoop:
+			block("Answer", fmt.Sprintf("osmia resume %s once you have looked at its status and feed", stream))
+		case service.InboxNotices:
+			block("Answer", fmt.Sprintf("osmia send %s \"...\" once the cause is fixed; the held notices follow the chief of staff's answer", stream))
 		}
 	}
 }

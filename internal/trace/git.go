@@ -60,9 +60,11 @@ func (r *Repository) git(ctx context.Context, input []byte, args ...string) (str
 }
 
 // gitBytes runs Git without checking the repository; callers run checkGit
-// once before the Git commands of an operation.
+// once before the Git commands of an operation. Git writes each new object
+// by renaming it into place, never by a hard link it removes afterwards, so a
+// concurrent check of the store never sees an object with a second link.
 func (r *Repository) gitBytes(ctx context.Context, input []byte, index string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"--git-dir=" + r.directory + "/.git", "--work-tree=" + r.directory, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "gc.auto=0"}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", append([]string{"--git-dir=" + r.directory + "/.git", "--work-tree=" + r.directory, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "gc.auto=0", "-c", "core.createObject=rename"}, args...)...)
 	cmd.Dir = r.directory
 	// No inherited Git routing, credentials, config includes, hooks or signing.
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_AUTHOR_NAME=Osmia", "GIT_AUTHOR_EMAIL=osmia@localhost", "GIT_COMMITTER_NAME=Osmia", "GIT_COMMITTER_EMAIL=osmia@localhost", "LC_ALL=C"}

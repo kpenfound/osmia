@@ -108,7 +108,7 @@ What a new contributor learns that the repository's documents do not say. It has
 
 The repository's `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md` are inputs the knowledge base must not repeat. Everyone reads it: the architect plans against the real architecture, the committee cites it, the mason's bundle carries the sections its footprint names.
 
-It is written by the librarian: an extraction pass over the clone when a project is added, and a pass at every unit landing that folds in what the mason reported it learned. Landing is serial, so several workstreams on one project never race on it. A question the chief of staff had to answer from the code rather than the knowledge base is a gap, and it files the entry.
+It is written by the librarian: an extraction pass over the clone when a project is added, and a pass each time a workstream goes quiet, with none of its units started and unmerged, as at assembly, or once it is delivered or abandoned. That pass folds in what every mason whose unit landed since the last one reported it learned. Refreshes are serial, so several workstreams on one project never race on them. A question the chief of staff had to answer from the code rather than the knowledge base is a gap, and it files the entry.
 
 ### 4.3 Feature spec
 
@@ -198,12 +198,12 @@ any started unit that has not merged may be moved by the owner or the chief of s
 | planned | In the plan, dependencies not yet merged. | scheduler |
 | ready | Every unit it depends on has merged. Eligible for a slot. | scheduler |
 | implementing | A mason works in the unit's workspace until its task is done and its acceptance holds, then ends its turn with the outcome: what the work does and how it checked the acceptance. | mason |
-| checking | The service runs the project's Dagger checks on a fresh export of the exact candidate before review. Passing checks send it to review with their result. Failing checks send it back to implementing with the failures and their output, as a send-back counted with review's toward `max_bounces`. A run that does not complete holds the unit here, tells the chief of staff and runs again later. | service |
+| checking | The service runs the project's Dagger checks on a fresh export of the exact candidate before review. Passing checks send it to review with their result. Failing checks send it back to implementing with the failures and their output, as a send-back counted with review's toward `max_bounces`. A run that does not complete holds the unit here, tells the chief of staff and runs again later; three in a row contest it. | service |
 | reviewing | The unit's reviewer reads the unit's task and acceptance, the mason's outcome, the recorded check result and the unit's diff against the feature branch, with the sealed spec as background, verifies the acceptance and decides. The reviewer runs no checks. Material findings send it back to implementing with the findings. The same reviewer re-reviews the revised candidate, always an exact commit. | committee |
 | approved | The reviewer is satisfied. Waiting for the foreman. | scheduler |
 | merged | Squashed to one commit on the feature branch, message generated from the unit's title and the criteria it serves. Units still in flight are rebased. | foreman |
 | waiting | A sub-state of any of the above: the unit's role asked a question and its turn ended. Nothing else on the unit moves until the answer arrives. Other units continue. | chief of staff, owner |
-| contested | Send-backs by failed checks and review reached `max_bounces`, the mason gave up or exhausted its clean-turn bound, a role's turn failed on every retry, a reviewer's turn ended without a verdict, or a move held it for you. The chief of staff rules on it first (section 6.6), except on a unit moved here, which is yours; what it cannot resolve is raised to you with its findings. Nothing on the unit moves until a ruling. | chief of staff, owner |
+| contested | Send-backs by failed checks and review reached `max_bounces`, the mason gave up or exhausted its clean-turn bound, a role's turn failed on every retry, a reviewer's turn ended without a verdict, its reviews were refused as stale, its check runs did not complete or its role's turns were interrupted too many times in a row, or a move held it for you. The chief of staff rules on it first (section 6.6), except on a unit moved here, which is yours; what it cannot resolve is raised to you with its findings. Nothing on the unit moves until a ruling. | chief of staff, owner |
 
 Waiting and contested preserve the underlying unit stage and any candidate under discussion. An answer or ruling resumes that stage through a recorded transition; it does not bypass review or landing checks. A ruling of review on a unit contested by failed checks sends the candidate to its reviewer with those failures as evidence; it does not make them pass.
 
@@ -286,7 +286,7 @@ Identifiers stay out: commit hashes, branch names, file paths, session ids, mode
 
 ### 6.5 Events
 
-The service tells the chief of staff what happened: a unit finished, a review came back, a question was raised, a landing succeeded, upstream moved. Events are written to a durable outbox in the same transaction as the state change, coalesced over a short window, and delivered as one turn, retried until delivered. After the first failed delivery, the service retries immediately; repeated failures wait thirty seconds, doubling up to fifteen minutes. The delay is recovered from durable turn results, does not acknowledge undelivered events, and does not delay new events. Only the chief of staff receives events. Workers receive turns from the scheduler and nothing else, and are never told to wait for another agent.
+The service tells the chief of staff what happened: a unit finished, a review came back, a question was raised, a landing succeeded, upstream moved. Events are written to a durable outbox in the same transaction as the state change, coalesced over a short window, and delivered as one turn, retried until delivered. Routine progress, such as a unit starting, passing its checks, being approved or landing, or the workstream changing state, asks for no judgment: it waits for a longer window, `events.progress_window`, or goes out with the next event that does. While an event turn is queued or running, new events wait for the next one rather than queue another turn. Event turns may run on a lighter profile than the turns that answer you. After the first failed delivery, the service retries immediately; repeated failures wait thirty seconds, doubling up to fifteen minutes. The delay is recovered from durable turn results, does not acknowledge undelivered events, and does not delay new events. Only the chief of staff receives events. Workers receive turns from the scheduler and nothing else, and are never told to wait for another agent.
 
 Events are information, not authorisation. The chief of staff does not dispatch, restart, replace or route around an agent. Transitions are the scheduler's. What it may do is take a decision you could take, through the same tool, and the service applies it as it applies yours.
 
@@ -341,6 +341,8 @@ An approval records the reviewed candidate, its base and the governing spec and 
 
 Upstream main moves daily on a busy project. On a cadence per project, and on demand, the foreman fetches upstream and rebases the feature branch onto it, then every unit in flight onto that. A rebase that changes what a sealed criterion means files an amendment. The seal moves with the branch.
 
+A rebase that conflicts goes to a drift mason, and a reviewer reads the resolution against the sealed spec. Send-backs are bounded by `max_bounces`, as a unit's are. A resolution sent back that many times holds the drift rebase: the branch and the seal stay, and the workstream takes no further drift rebase, on the cadence or otherwise, until you ask for one or the chief of staff hands it back. A handback asks for the next drift rebase with a note its drift mason and reviewer receive, so the chief of staff can return the work to the role that can resolve it, as it moves a unit. It may hand back twice in a row before the drift rebase is yours. A drift rebase in progress holds back its own workstream's landings and the project's other drift rebases, never another workstream's units.
+
 ### 7.6 Entanglement and dependencies
 
 Two units in one workstream are entangled when the plan makes one depend on the other or their code footprints intersect. Entangled units run in sequence. Two workstreams on one project have no shared spec, so their entanglement is code entity overlap, and the foreman warns when both are in the same subsystem before both pull requests are open.
@@ -382,11 +384,13 @@ A freed slot is offered to review before implementation, implementation before d
 
 Capacity is per role kind and global across every workstream on every project. A per-workstream work-in-progress cap keeps one feature from taking everything when it is alone.
 
-Active workstreams have a priority order you set, or ask the chief of staff to set. A paused workstream, project or factory dispatches nothing new. Turns in flight finish, and a hard pause stops them too. Paused units stay where they are, their slots go to what is not paused, and resume picks up with nothing to reconcile. The chief of staff stays reachable while everything is paused, so "pause everything, I'm travelling" and "resume dagger only" are messages. Pause state persists across restart and is shown with who set it and why: you, the daily budget, or a provider's usage limit.
+Active workstreams have a priority order you set, or ask the chief of staff to set. A paused workstream, project or factory dispatches nothing new. Turns in flight finish, and a hard pause stops them too. Paused units stay where they are, their slots go to what is not paused, and resume picks up with nothing to reconcile. The chief of staff stays reachable while everything is paused, so "pause everything, I'm travelling" and "resume dagger only" are messages. Pause state persists across restart and is shown with who set it and why: you, the daily budget, a provider's usage limit, or the loop guard.
 
 ### 8.5 Cost, retries and degradation
 
-A per-session cost cap protects the infrastructure. A per-unit cost is a signal: passing it files an amendment request saying the unit is bigger than planned. A daily budget across the factory pauses dispatch when reached. Failures are classified as infrastructure or behavioural: infrastructure failures retry, then fall to the profile's fallback; behavioural failures are outcomes and go back into the state machine. Streaks of failures show in the status so broken plumbing is visible rather than silently expensive.
+A per-session cost cap protects the infrastructure. A per-unit cost is a signal: passing it files an amendment request saying the unit is bigger than planned. A daily budget across the factory pauses dispatch when reached.
+
+Nothing the service repeats on its own repeats without a bound. Send-backs, clean turns, rounds and drift resolutions have their limits, and so do reviews the service refuses as stale, check runs that do not complete, reminders to remove conflict markers, continuations of interrupted turns and redelivery of notices the chief of staff's turns keep failing on. Each limit ends in a decision someone can take: a contested unit, a held drift rebase, or notices held until you message the chief of staff. Behind them all, the loop guard watches each workstream for sessions without progress, meaning a change of state of the feature, a unit, the shed, an amendment, the final review or the publication, a drift rebase that moved the branch, or anything you did. A workstream that runs `loop.max_sessions` of them pauses with the loop guard as its source and enters your inbox, and resuming it starts the count over. Failures are classified as infrastructure or behavioural: infrastructure failures retry, then fall to the profile's fallback; behavioural failures are outcomes and go back into the state machine. Streaks of failures show in the status so broken plumbing is visible rather than silently expensive.
 
 ---
 
@@ -431,6 +435,7 @@ The Osmia server, role-scoped:
 | `decide_amendment` | chief of staff | Record your decision on a presented amendment when you give it in a message. |
 | `resolve_contested` | chief of staff | Rule review or revise on a contested unit on your behalf, escalate it to you, or record the ruling you gave in a message. |
 | `move_unit` | chief of staff | Move a started unit that has not merged to implementing, checking, reviewing, approved or contested on your behalf, or record the move you asked for in a message. |
+| `hand_back_drift` | chief of staff | Hand a held drift rebase back on your behalf with a note its drift mason and reviewer receive, or record the handback you asked for in a message. |
 
 The Hearsay server: `get_bundle`, `resolve`, `stance_history`, `get_l1`, `get_l0`, `search`, `assert`, filtered by the role's agent class and your principal.
 
@@ -642,6 +647,7 @@ skills = ["https://github.com/acme/skills#skills/tdd"]
 profile = "claude"
 [roles.chief_of_staff]
 profile = "claude"
+events_profile = "codex-fast"        # optional: the profile of event turns
 [roles.architect]
 profile = "claude"
 [roles.foreman]
@@ -652,6 +658,9 @@ profile = "codex-fast"
 [shed]
 max_rounds = 3
 max_bounces = 3
+
+[loop]
+max_sessions = 30                    # sessions without progress before a pause; 0 disables
 
 [committee]
 perspectives = ["correctness", "integration", "scope"]

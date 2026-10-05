@@ -2889,6 +2889,9 @@
           "listen": {
             "$ref": "#/components/schemas/ConfigListen"
           },
+          "loop": {
+            "$ref": "#/components/schemas/ConfigLoop"
+          },
           "mason": {
             "$ref": "#/components/schemas/ConfigMason"
           },
@@ -3021,6 +3024,9 @@
       },
       "ConfigEvents": {
         "properties": {
+          "progress_window": {
+            "type": "string"
+          },
           "window": {
             "type": "string"
           }
@@ -3105,6 +3111,14 @@
           },
           "web": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConfigLoop": {
+        "properties": {
+          "max_sessions": {
+            "type": "integer"
           }
         },
         "type": "object"
@@ -3251,6 +3265,9 @@
         "properties": {
           "dagger": {
             "$ref": "#/components/schemas/ConfigDagger"
+          },
+          "events_profile": {
+            "type": "string"
           },
           "image": {
             "type": "string"

@@ -587,6 +587,15 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 	if err := r.RecordDocuments(ctx, []Document{finalChecks}); err == nil {
 		t.Fatal("recorded a final check run without a run number")
 	}
+	handback := unitReport("{\"drift\":2,\"held\":1}\n", 1)
+	handback.ID, handback.Path = "drift-handback-2", "drift/handback-2.json"
+	if err := r.RecordDocuments(ctx, []Document{handback}); err != nil {
+		t.Fatal(err)
+	}
+	handback.ID, handback.Path = "drift-handback-x", "drift/handback-x.json"
+	if err := r.RecordDocuments(ctx, []Document{handback}); err == nil {
+		t.Fatal("recorded a drift handback without a drift rebase number")
+	}
 	move := unitReport("{\"to\":\"implementing\"}\n", 1)
 	move.ID, move.Path = "unit-parser-move-3", "units/parser/move-3.json"
 	if err := r.RecordDocuments(ctx, []Document{move}); err != nil {
