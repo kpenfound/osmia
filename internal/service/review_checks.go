@@ -203,8 +203,11 @@ func unitReviewerSelection(ctx context.Context, cfg *config.Config, r *trace.Rep
 	if err != nil {
 		return isolation.Selection{}, err
 	}
-	dir := filepath.Join(cfg.Root.String(), "review-inputs", scope.Project, scope.Workstream, scope.Thread, scope.Turn)
-	if err := os.RemoveAll(dir); err != nil {
+	// A thread runs one turn at a time, so the exports of its earlier turns
+	// are done with.
+	exports := filepath.Join(cfg.Root.String(), reviewInputsDirectory, scope.Project, scope.Workstream, scope.Thread)
+	dir := filepath.Join(exports, scope.Turn)
+	if err := os.RemoveAll(exports); err != nil {
 		return isolation.Selection{}, err
 	}
 	if err := provider.Export(ctx, identity.Candidate.Revision, dir); err != nil {

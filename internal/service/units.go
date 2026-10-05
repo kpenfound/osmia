@@ -35,9 +35,10 @@ func unitBranch(stream config.WorkstreamID, unit string) string {
 
 // unitWorkspaces are the workspaces of a project's units: one workspace per
 // workstream and unit, <root>/units/<project>/<workstream>/<unit> on
-// unitBranch, created from the workstream's feature branch. Nothing here
-// removes one, so a unit's work stays in its workspace between turns and
-// across restarts. They are also the workspaces a mason turn is lent: the
+// unitBranch, created from the workstream's feature branch. A unit's work
+// stays in its workspace between turns and across restarts, until
+// workspaceCleanup removes it once the unit merges or its workstream
+// finishes. They are also the workspaces a mason turn is lent: the
 // turn works on a copy without VCS metadata, which capture copies back.
 type unitWorkspaces struct{ streamWorkspaces }
 

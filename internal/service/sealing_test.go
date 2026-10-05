@@ -555,7 +555,7 @@ func TestSealingChecksAbandonmentAndResumesAfterTheBranchIsCreated(t *testing.T)
 	if !found || record.Base.Commit != commit || record.Seal != 1 {
 		t.Fatalf("the seal %+v", record)
 	}
-	if out := demoGit(t, home, "-C", f.clone, "worktree", "list", "--porcelain"); strings.Count(out, "worktree ") != 3 {
+	if out := demoGit(t, home, "-C", f.clone, "worktree", "list", "--porcelain"); strings.Count(out, "branch refs/heads/"+branch+"\n") != 1 {
 		t.Fatalf("worktrees:\n%s", out)
 	}
 

@@ -322,10 +322,14 @@ with the service. The runner allows each service-owned MCP listener's exact
 port for that sandbox's lifetime; no global localhost allowance is required.
 A sandbox that cannot enforce the requested grants fails the
 turn without silently selecting another mode.
+A sandbox outlives its turn only when the service stops during the turn; the
+service removes such sandboxes when it next starts.
 
 ### 7.3 Workspaces
 
 The feature branch is one workspace on the project's clone. Each unit gets a workspace of its own descending from the feature branch. Workspaces sit behind one interface with two backends: git worktrees, and Jujutsu colocated so plain git can still read history. Jujutsu adds change IDs that survive rebases, a snapshot on every command so an interrupted session never loses work, stored rather than blocking conflicts, and an operation log the service can restore from. The workflow does not depend on which backend a project uses.
+
+A workspace lasts as long as the work it holds. A unit's workspace is removed once the unit merges, since its work is on the feature branch. When a workstream is delivered or abandoned, the service removes its remaining workspaces: it first commits the files of each unit that did not merge to that unit's branch, so abandonment keeps the work. Every branch stays, so each candidate the trace records remains in the clone. A workspace stays while a turn on it is unfinished or, on a finished workstream, while an operation is pending, and a unit's workspace stays while a replay is in progress in it.
 
 ### 7.4 Landing a unit
 
@@ -408,7 +412,7 @@ Provider limits persist in `runtime.json` by agent backend. New turns of roles b
 
 ### 9.4 What a session sees
 
-A session receives a scoped plain-file view with the Osmia MCP server and a bundle. A mason works in a disposable writable copy; the service captures its changes into the unit workspace. A reviewer receives a read-only export of the exact candidate commit and separate writable scratch space. Session records and authoritative repositories remain service-owned. It additionally receives a Hearsay MCP server when that integration is enabled and available.
+A session receives a scoped plain-file view with the Osmia MCP server and a bundle. A mason works in a disposable writable copy; the service captures its changes into the unit workspace. A reviewer receives a read-only export of the exact candidate commit and separate writable scratch space. A reviewer's next turn replaces its export, and the export is discarded when the unit merges or the workstream finishes. Session records and authoritative repositories remain service-owned. A workstream's session directories, including each agent's own transcript, last until it is delivered or abandoned and its turns are done; they are then removed with its workspaces, and its trace keeps every turn's request and final response. It additionally receives a Hearsay MCP server when that integration is enabled and available.
 
 The Osmia server, role-scoped:
 

@@ -229,11 +229,13 @@ osmia status --json
   quote it. The service records the move to `abandoned` with you as actor and
   your reason, cancels the workstream's running turns (their recorded work is
   kept), completes its queued turns as cancelled, and runs no turn of the
-  workstream again, including after a restart. Nothing is deleted: the trace,
-  `handed/` and any branch stay. `status` then shows the state `abandoned`. An
-  empty reason, or a workstream the active project does not hold, fails with
-  `validation` (exit 4); a delivered or already abandoned workstream fails
-  with `conflict` (exit 5).
+  workstream again, including after a restart. The trace, `handed/` and every
+  branch stay. Once its turns are done, the service removes the workstream's
+  workspaces, committing each unmerged unit's files to that unit's branch
+  first, and its session directories, agent transcripts included. `status`
+  then shows the state `abandoned`. An empty reason, or a workstream the
+  active project does not hold, fails with `validation` (exit 4); a delivered
+  or already abandoned workstream fails with `conflict` (exit 5).
 - `archive <workstream-id>` archives a delivered or abandoned workstream. It
   leaves the list of work: `status` names it on its `Archived:` line, the web
   page moves it to its Archived group, and `status <workstream-id>` marks it

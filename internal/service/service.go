@@ -122,6 +122,9 @@ type Options struct {
 	// checkJJ replaces the check of the jj on PATH that picks the workspace
 	// backend of new workstreams, for tests.
 	checkJJ jjCheck
+	// removeSandbox replaces the removal of the Docker Sandboxes interrupted
+	// sessions left, for tests.
+	removeSandbox func(context.Context, string) error
 }
 
 // activeProject is the runtime state of one active project: its open trace
@@ -303,6 +306,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if opts.WriteTimeout <= 0 {
 		opts.WriteTimeout = 10 * time.Second
 	}
+	if opts.removeSandbox == nil {
+		opts.removeSandbox = removeSandbox
+	}
 	s.options = opts
 	if s.tailnet != nil {
 		// A first join that fails leaves the tailnet down for the supervisor
@@ -326,6 +332,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			st.Close()
 			return nil, fmt.Errorf("recover thread sessions: %w", err)
 		}
+		reapSandboxes(ctx, view, s.options.removeSandbox)
 	}
 	s.lifetime, s.cancel = context.WithCancel(ctx)
 	hostname := cfg.Listen.Tailnet
@@ -892,7 +899,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	daily := dailyBudget{s: s, repository: repository}
 	checks := &checkers{masons: &masons{s: s, cfg: cfg, repository: repository}}
 	runner := runnerAdapter{turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
-	hooks := []scheduleHook{{"base-refresh", (&baseRefresher{s: s, repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}}
+	hooks := []scheduleHook{{"base-refresh", (&baseRefresher{s: s, repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", (&workspaceCleanup{cfg: cfg, repository: repository, now: s.now}).Pass}}
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})
 	}
