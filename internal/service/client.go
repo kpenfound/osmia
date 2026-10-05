@@ -436,6 +436,25 @@ func (c *Client) Conversation(ctx context.Context, id config.WorkstreamID) (Conv
 	return v, err
 }
 
+// Beekeeper lists the Beekeeper chat's recent messages, oldest first. A
+// limit of zero uses the server's default.
+func (c *Client) Beekeeper(ctx context.Context, limit int) (BeekeeperMessagesResponse, error) {
+	path := Prefix + "/beekeeper"
+	if limit > 0 {
+		path += "?limit=" + strconv.Itoa(limit)
+	}
+	var v BeekeeperMessagesResponse
+	err := c.Do(ctx, "GET", path, nil, &v)
+	return v, err
+}
+
+// SendBeekeeper sends an owner message to the Beekeeper.
+func (c *Client) SendBeekeeper(ctx context.Context, text string) (BeekeeperMessagesResponse, error) {
+	var v BeekeeperMessagesResponse
+	err := c.Do(ctx, "POST", Prefix+"/beekeeper", BeekeeperSendRequest{Text: text}, &v)
+	return v, err
+}
+
 // Inbox lists every owner decision waiting for the owner.
 func (c *Client) Inbox(ctx context.Context) (InboxResponse, error) {
 	var v InboxResponse

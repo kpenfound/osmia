@@ -68,6 +68,9 @@ var Routes = []Route{
 	{Method: http.MethodGet, Path: Prefix + "/inbox", Summary: "List open owner decisions", Response: InboxResponse{}},
 	{Method: http.MethodPost, Path: Prefix + "/inbox/{number}", Summary: "Answer an inbox entry", Request: AnswerRequest{}, Response: AnswerResponse{}},
 
+	{Method: http.MethodGet, Path: Prefix + "/beekeeper", Summary: "List the Beekeeper chat's recent messages, oldest first, limited by limit (default 50, capped at 200)", Response: BeekeeperMessagesResponse{}},
+	{Method: http.MethodPost, Path: Prefix + "/beekeeper", Summary: "Send an owner message to the Beekeeper; refused with conflict while a previous turn is in flight", Request: BeekeeperSendRequest{}, Response: BeekeeperMessagesResponse{}},
+
 	{Method: http.MethodPost, Path: Prefix + "/shed/object/{workstream}", Summary: "Add an owner objection to the current debate round", Request: ShedObjectRequest{}, Response: ShedResponse{}},
 	{Method: http.MethodPost, Path: Prefix + "/shed/rule/{workstream}", Summary: "Sustain or dismiss an objection", Request: ShedRuleRequest{}, Response: ShedResponse{}},
 	{Method: http.MethodPost, Path: Prefix + "/shed/skip/{workstream}", Summary: "Skip debate and go to ratification", Response: ShedResponse{}},

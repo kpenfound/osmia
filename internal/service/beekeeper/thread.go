@@ -91,6 +91,31 @@ type Message struct {
 	At     time.Time `json:"at"`
 }
 
+// EntriesOf converts one turn of the Beekeeper's thread into its owner
+// message and, once the turn has completed, the Beekeeper's reply or a
+// failure note: the same conversion Messages applies to every turn it reads,
+// usable directly on the turn Post just ran.
+func EntriesOf(q trace.QueuedTurn) []Message {
+	req := q.Request
+	out := []Message{{Turn: req.TurnID, Author: Author{Kind: AuthorOwner}, Text: req.Prompt, At: req.At}}
+	if q.Response == nil || q.CompletedAt.IsZero() {
+		return out
+	}
+	switch q.Status() {
+	case "failed", "interrupted":
+		text := q.Response.Failure
+		if text == "" {
+			text = "the turn did not complete"
+		}
+		out = append(out, Message{Turn: req.TurnID, Author: Author{Kind: AuthorFailure}, Text: text, At: q.Response.At})
+	default:
+		if q.Response.Result.FinalResponse != "" {
+			out = append(out, Message{Turn: req.TurnID, Author: Author{Kind: AuthorBeekeeper}, Text: q.Response.Result.FinalResponse, At: q.Response.At})
+		}
+	}
+	return out
+}
+
 // Messages returns the Beekeeper chat's most recent messages, oldest first,
 // each with its author, and whether older messages exist. A limit of zero or
 // less uses 50. It reads the Beekeeper's thread with trace.Repository.Thread
@@ -110,23 +135,7 @@ func Messages(repository *trace.Repository, limit int) ([]Message, bool, error) 
 	}
 	if err == nil {
 		for _, q := range t.Turns {
-			req := q.Request
-			all = append(all, Message{Turn: req.TurnID, Author: Author{Kind: AuthorOwner}, Text: req.Prompt, At: req.At})
-			if q.Response == nil || q.CompletedAt.IsZero() {
-				continue
-			}
-			switch q.Status() {
-			case "failed", "interrupted":
-				text := q.Response.Failure
-				if text == "" {
-					text = "the turn did not complete"
-				}
-				all = append(all, Message{Turn: req.TurnID, Author: Author{Kind: AuthorFailure}, Text: text, At: q.Response.At})
-			default:
-				if q.Response.Result.FinalResponse != "" {
-					all = append(all, Message{Turn: req.TurnID, Author: Author{Kind: AuthorBeekeeper}, Text: q.Response.Result.FinalResponse, At: q.Response.At})
-				}
-			}
+			all = append(all, EntriesOf(q)...)
 		}
 	}
 	replies, err := RelayedReplies(repository)
