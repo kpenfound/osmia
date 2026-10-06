@@ -48,6 +48,11 @@ func (s *Service) resolveBase(ctx context.Context, cfg *config.Config, repo *tra
 	if state.Value == AbandonedState {
 		return seal.Base{}, fmt.Errorf("%w: base %s was abandoned", errBaseUnavailable, dependency.Base)
 	}
+	// Upstream held the branch of a base the owner merged there outside the
+	// factory when the merge was recorded.
+	if _, merged, err := deliveryMerge(repo, dependency.Base); err != nil || merged {
+		return resolved, err
+	}
 	parent, _, found, err := seal.Latest(repo, dependency.Base)
 	if err != nil {
 		return seal.Base{}, err
@@ -135,6 +140,9 @@ func dependentBaseChanged(ctx context.Context, cfg *config.Config, repo *trace.R
 	}
 	if current.Workstream == "" {
 		return false, nil
+	}
+	if _, merged, err := deliveryMerge(repo, dependency.Base); err != nil || merged {
+		return merged, err
 	}
 	tip, exists, err = g.Branch(ctx, featureBranch(dependency.Base))
 	if err != nil || !exists {

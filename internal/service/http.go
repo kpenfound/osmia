@@ -517,6 +517,16 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/delivery/"); ok {
+		if id, ok := strings.CutSuffix(id, "/merged"); ok {
+			if r.Method != http.MethodPost {
+				fail(w, Unsupported)
+			} else if out, api := s.recordMerge(r.Context(), id); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
 		switch r.Method {
 		case http.MethodGet:
 			if out, api := s.deliveryPresentation(r.Context(), id); api != nil {

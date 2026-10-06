@@ -33,9 +33,11 @@ type DeliveryPresentation struct {
 	Messages       []workspace.DeliveryMessage `json:"messages"`
 	Style          string                      `json:"style"`
 	Approval       *DeliveryApproval           `json:"approval,omitempty"`
-	// Publication is the latest record of publishing an approval, and
-	// Delivered whether the workstream is delivered.
+	// Publication is the latest record of publishing an approval, Merge the
+	// owner's own merge of the branch into upstream that delivered it
+	// instead, and Delivered whether the workstream is delivered.
 	Publication *DeliveryPublication `json:"publication,omitempty"`
+	Merge       *DeliveryMerge       `json:"merge,omitempty"`
 	Delivered   bool                 `json:"delivered,omitempty"`
 	Maintenance bool                 `json:"maintenance,omitempty"`
 }
@@ -179,7 +181,13 @@ func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID,
 		if err != nil {
 			return DeliveryPresentation{}, &APIError{Internal, "cannot read delivery records"}
 		}
-		return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Approval: approval, Publication: publication, Delivered: true}, nil
+		var merge *DeliveryMerge
+		if m, merged, err := deliveryMerge(repository, stream); err != nil {
+			return DeliveryPresentation{}, &APIError{Internal, "cannot read delivery records"}
+		} else if merged {
+			merge = &m
+		}
+		return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Approval: approval, Publication: publication, Merge: merge, Delivered: true}, nil
 	}
 	if feature.Value != AssembledState && !maintenance {
 		return DeliveryPresentation{}, &APIError{Conflict, "the workstream is not assembled"}

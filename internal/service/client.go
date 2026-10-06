@@ -361,6 +361,14 @@ func (c *Client) ApproveDelivery(ctx context.Context, id config.WorkstreamID, de
 	return v, err
 }
 
+// RecordMerge records an assembled workstream delivered by the owner's own
+// merge of its feature branch into upstream.
+func (c *Client) RecordMerge(ctx context.Context, id config.WorkstreamID) (MergeResponse, error) {
+	var v MergeResponse
+	err := c.Do(ctx, "POST", Prefix+"/delivery/"+url.PathEscape(string(id))+"/merged", nil, &v)
+	return v, err
+}
+
 func (c *Client) shed(ctx context.Context, action string, id config.WorkstreamID, input any) (ShedResponse, error) {
 	var v ShedResponse
 	err := c.Do(ctx, "POST", Prefix+"/shed/"+action+"/"+url.PathEscape(string(id)), input, &v)

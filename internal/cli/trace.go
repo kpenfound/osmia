@@ -71,6 +71,11 @@ func traceDelivery(w io.Writer, d *service.TraceDelivery) {
 	traceRef(w, "Final report", d.Report)
 	traceRef(w, "Delivery approval", d.Approval)
 	traceRef(w, "Publication", d.Publication)
+	if d.Merge != nil {
+		traceRef(w, "Owner merge", d.Merge)
+		fmt.Fprintf(w, "Delivery: merged reviewed=%s upstream=%s\n", d.Reviewed, d.Merged)
+		return
+	}
 	fmt.Fprintf(w, "Delivery: %s reviewed=%s published=%s pull_request=%d %s\n", d.Status, d.Reviewed, d.Published, d.PullRequest, d.URL)
 }
 

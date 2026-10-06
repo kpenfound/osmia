@@ -256,6 +256,18 @@ type AbandonResponse struct {
 	Reason     string              `json:"reason"`
 }
 
+// MergeResponse reports a workstream recorded delivered by the owner's own
+// merge of its feature branch into upstream. Refused names the owner
+// approval whose publication, waiting for a GitHub token, the merge
+// refused, and is 0 when none waited.
+type MergeResponse struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	State      string              `json:"state"`
+	Merge      DeliveryMerge       `json:"merge"`
+	Refused    int                 `json:"refused_publication,omitempty"`
+}
+
 // BaseUpstreamRequest is the owner's decision to continue a workstream
 // parked on its abandoned base from upstream. Base names that abandoned
 // workstream, as the inbox entry the owner read names it.

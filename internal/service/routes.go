@@ -86,6 +86,7 @@ var Routes = []Route{
 
 	{Method: http.MethodGet, Path: Prefix + "/delivery/{workstream}", Summary: "Show the final report and pull request draft", Response: DeliveryPresentation{}},
 	{Method: http.MethodPost, Path: Prefix + "/delivery/{workstream}", Summary: "Approve delivery", Request: DeliveryDecision{}, Response: DeliveryApproval{}},
+	{Method: http.MethodPost, Path: Prefix + "/delivery/{workstream}/merged", Summary: "Record an assembled workstream delivered by the owner's own merge into upstream", Response: MergeResponse{}},
 
 	{Method: http.MethodGet, Path: Prefix + "/trace/{workstream}", Summary: "Summarize a workstream's trace", Response: TraceSummary{}},
 	{Method: http.MethodGet, Path: Prefix + "/trace/{workstream}/unit/{unit}", Summary: "Trace one unit", Response: UnitTrace{}},

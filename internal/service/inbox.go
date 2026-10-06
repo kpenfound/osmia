@@ -274,7 +274,7 @@ func (s *Service) publicationEntry(repository *trace.Repository, w trace.Workstr
 			e.Answer.Method = http.MethodGet
 			e.Revision = in.Approval
 			e.Question = fmt.Sprintf("Publishing owner approval %d waits for a GitHub token. The service was started without GITHUB_TOKEN, so it pushes nothing and opens no pull request.", in.Approval)
-			e.Blocked = "Publishing the pull request. Restart osmia serve with GITHUB_TOKEN set to a token that can open pull requests on " + in.Upstream + "."
+			e.Blocked = "Publishing the pull request. Restart osmia serve with GITHUB_TOKEN set to a token that can open pull requests on " + in.Upstream + ", or merge " + featureBranch(stream) + " into upstream yourself and record it with osmia merged " + string(stream) + "."
 			return e, true, nil
 		}
 		var first, last trace.OperationAction

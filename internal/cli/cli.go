@@ -51,6 +51,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   ratify <workstream-id> [--json]
   amendment <workstream-id> <n> [approve|reject|round|overrule [note]] [--json]
   delivery <workstream-id> [--json]
+  merged <workstream-id> [--json]
   trace <workstream-id> [unit <id>|criterion <spec#n>|commit <sha>] [--json]
   approve <workstream-id> [description-file] [--message-file FILE | --messages-file FILE] [--json]
   send <workstream-id> <message> [--json]
@@ -212,7 +213,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) <= 1
 	case "send", "abandon", "upstream":
 		valid = len(a) == 2
-	case "ratify", "archive", "unarchive":
+	case "ratify", "archive", "unarchive", "merged":
 		valid = len(a) == 1
 	case "amendment":
 		valid = len(a) == 2 || (len(a) == 3 || len(a) == 4) && slices.Contains([]string{service.AmendmentApprove, service.AmendmentReject, service.AmendmentRound, service.AmendmentOverrule}, a[2])
@@ -276,7 +277,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "stop" {
 		if err := c.Do(ctx, "POST", service.Prefix+"/stop", nil, nil); err != nil {
@@ -487,6 +488,25 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintf(stdout, "Workstream %s abandoned\nReason: %s\n", result.Workstream, result.Reason)
 		return 0
 	}
+	if cmd == "merged" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		result, err := c.RecordMerge(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		m := result.Merge
+		fmt.Fprintf(stdout, "Workstream %s delivered: %s/%s at %s holds %s at %s\n", result.Workstream, m.Upstream.Remote, m.Upstream.Branch, m.Upstream.Commit, m.Branch, m.Commit)
+		if result.Refused > 0 {
+			fmt.Fprintf(stdout, "The publication of owner approval %d is refused; no pull request is opened\n", result.Refused)
+		}
+		return 0
+	}
 	if cmd == "upstream" {
 		id, err := config.ParseWorkstreamID(a[0])
 		if err != nil {
@@ -668,6 +688,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 					fmt.Fprintf(stdout, "\nApproved commit %s:\n%s\n", m.Commit, m.Message)
 				}
 				fmt.Fprintf(stdout, "\nApproved description:\n%s", presentation.Approval.Description)
+			}
+			if m := presentation.Merge; m != nil {
+				fmt.Fprintf(stdout, "\nMerged by you outside the factory: %s/%s at %s holds %s at %s\n", m.Upstream.Remote, m.Upstream.Branch, m.Upstream.Commit, m.Branch, m.Commit)
 			}
 			if p := presentation.Publication; p != nil {
 				if p.Status == "opened" {

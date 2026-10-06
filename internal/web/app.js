@@ -958,9 +958,11 @@
     const head = byId('workstream-head');
     const status = w.status;
     head.dataset.workstream = w.workstream;
-    // The menu offers what the workstream's state allows: abandoning work in
-    // progress, archiving finished work and unarchiving archived work.
+    // The menu offers what the workstream's state allows: recording your own
+    // merge of an assembled branch, abandoning work in progress, archiving
+    // finished work and unarchiving archived work.
     const offered = {
+      merged: w.state === 'assembled',
       abandon: !terminal(w),
       'abandon-archive': !terminal(w),
       archive: terminal(w) && !w.archived,
@@ -1109,6 +1111,14 @@
         }
         mark(['status', 'runtime']);
         return out.archived ? 'Archived ' + goal(w) + '; it is listed under Archived.' : goal(w) + ' is back in the list of work.';
+      });
+      return;
+    }
+    if (action === 'merged') {
+      const button = document.querySelector('[data-workstream-action="merged"]');
+      act(inboxResult, button, () => request('POST', '/delivery/' + w.workstream + '/merged'), (out) => {
+        mark(['status', 'runtime', 'inbox', 'feed/' + w.workstream]);
+        return goal(w) + ' is delivered: ' + out.merge.upstream.remote + '/' + out.merge.upstream.branch + ' holds ' + out.merge.branch + '.';
       });
       return;
     }

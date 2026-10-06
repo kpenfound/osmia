@@ -154,7 +154,8 @@ osmia status --json
   quick reply, `ratify`, `contested`, `amendment`, or `delivery` then
   `approve`. A publication the service holds because it was started without
   `GITHUB_TOKEN` is listed as soon as it is asked for: nothing is pushed or
-  asked of GitHub until you restart `serve` with the token. Any other failing
+  asked of GitHub until you restart `serve` with the token, or you merge the
+  branch into upstream yourself and record it with `merged`. Any other failing
   publication is listed once three attempts in a row have failed: its question carries the last failure, such as GitHub's
   refusal with the token permissions it asks for, and it says when the next
   attempt runs. It takes no answer; fix the cause and it leaves the inbox once
@@ -347,7 +348,7 @@ osmia status --json
   unshown criteria first, and the drafted pull request description, then any
   approved description and the state of its publication. For a delivered
   workstream it shows the report, the approved description and the pull
-  request it was delivered as.
+  request it was delivered as, or the merge you recorded with `merged`.
 - `approve <workstream-id> [description-file] [--message-file FILE | --messages-file FILE]` approves the drafted
   description, or the file's text instead, for the presented final report.
   `--message-file` supplies the commit message when delivery has one commit.
@@ -359,6 +360,20 @@ osmia status --json
   branch to your repository or fork and opening the pull request; `delivery` shows its progress. A report with gaps, a presentation
   that changed and a delivered workstream fail with `conflict` (exit 5). After
   a publication was refused, approving again asks for another one.
+- `merged <workstream-id>` records an assembled workstream delivered because
+  you merged its feature branch into upstream yourself, outside the factory.
+  The service fetches the project's base branch and checks that it already
+  holds the changes of the feature branch tip: merging the tip into upstream
+  must be clean and change nothing, so fast-forward, merge, squash and rebase
+  merges count. It then records the merge in `final/merge.json` and moves the
+  workstream to delivered, with you as actor. It pushes nothing and opens no
+  pull request, and needs neither a final review nor a delivery approval. The
+  output names the upstream commit and the branch tip it holds. A publication
+  waiting for `GITHUB_TOKEN` is refused in the same step and leaves the inbox.
+  A workstream that is not assembled, whose feature branch upstream lacks or
+  conflicts with, or whose publication the service could still carry out
+  fails with `conflict` (exit 5) and stays assembled. The web page offers the
+  same as Record my merge upstream in an assembled workstream's menu.
 - Editing the documents needs no command. You edit `spec.md` and `plan.json` in
   the workstream's directory under the trace yourself. The service records what
   you changed as a new revision of yours before any turn reads it, and the next

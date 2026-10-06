@@ -191,8 +191,11 @@ const (
 
 // TraceDelivery is the delivery chain of a workstream: the final report an
 // approval names, the owner's approval a publication names, and the
-// publication.
+// publication, or the owner's own merge of the branch into upstream that
+// delivered it without one, with the upstream commit found holding it.
 type TraceDelivery struct {
+	Merge       *TraceRef  `json:"merge,omitempty"`
+	Merged      string     `json:"merged,omitempty"`
 	Report      *TraceRef  `json:"report,omitempty"`
 	Outcome     string     `json:"outcome,omitempty"`
 	Reviewed    string     `json:"reviewed,omitempty"`
@@ -946,8 +949,9 @@ func (w *traceWalk) ratification() (TraceRuling, *TraceGap) {
 // delivery follows the delivery chain back from the latest publication:
 // the approval revision it publishes and the final report revision that
 // approval names. Without a publication it starts from the latest approval,
-// and without one from the latest final report. It returns the final report
-// the chain reaches.
+// and without one from the latest final report. A workstream the owner
+// merged into upstream needs neither a publication nor an approval. It
+// returns the final report the chain reaches.
 func (w *traceWalk) delivery() (*TraceDelivery, *FinalReport, []TraceGap) {
 	var gaps []TraceGap
 	pending := func(link, reason string) {
@@ -976,6 +980,15 @@ func (w *traceWalk) delivery() (*TraceDelivery, *FinalReport, []TraceGap) {
 		return d, found, true
 	}
 	t := &TraceDelivery{}
+	var m DeliveryMerge
+	d, merged, ok := follow(mergeDocument, mergePath, 0, "", &m)
+	if !ok {
+		return nil, nil, gaps
+	}
+	if merged {
+		ref := refOf(d)
+		t.Merge, t.Merged = &ref, m.Upstream.Commit
+	}
 	var p DeliveryPublication
 	d, published, ok := follow(publicationDocument, publicationPath, 0, "", &p)
 	if !ok {
@@ -989,7 +1002,7 @@ func (w *traceWalk) delivery() (*TraceDelivery, *FinalReport, []TraceGap) {
 		if p.Status != publicationOpened {
 			pending("pull request", "the publication is "+p.Status)
 		}
-	} else {
+	} else if !merged {
 		pending(publicationPath, "it is not published")
 	}
 	var a DeliveryApproval
@@ -1001,7 +1014,7 @@ func (w *traceWalk) delivery() (*TraceDelivery, *FinalReport, []TraceGap) {
 	if approved {
 		ref := refOf(d)
 		t.Approval, t.Approved, reportRevision = &ref, a.Commit, a.ReviewRevision
-	} else {
+	} else if !merged {
 		pending(deliveryPath, "the owner has not approved its delivery")
 	}
 	var r FinalReport
@@ -1011,7 +1024,7 @@ func (w *traceWalk) delivery() (*TraceDelivery, *FinalReport, []TraceGap) {
 	}
 	if !reviewed {
 		pending(finalReportPath, "it has no final review")
-		if !published && !approved {
+		if !published && !approved && !merged {
 			return nil, nil, gaps
 		}
 		return t, nil, gaps

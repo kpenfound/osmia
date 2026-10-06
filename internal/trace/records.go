@@ -380,7 +380,7 @@ func unitPath(parts []string) bool {
 
 // finalPath reports whether parts name a final review record of a
 // workstream, including its rebase, check runs, review, follow-ups, delivery
-// decision and publication.
+// decision, publication and the owner's own merge into upstream.
 func finalPath(parts []string) bool {
 	if len(parts) != 2 || parts[0] != "final" {
 		return false
@@ -389,7 +389,7 @@ func finalPath(parts []string) bool {
 	if strings.HasPrefix(parts[1], "checks-") && strings.HasSuffix(parts[1], ".json") && shedRound.MatchString("round-"+n) {
 		return true
 	}
-	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "delivery.json" || parts[1] == "publication.json"
+	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "delivery.json" || parts[1] == "publication.json" || parts[1] == "merge.json"
 }
 
 // driftPath reports whether parts name a drift record of a workstream: its

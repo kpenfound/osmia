@@ -819,6 +819,46 @@
         }
       }
     },
+    "/v1/delivery/{workstream}/merged": {
+      "post": {
+        "summary": "Record an assembled workstream delivered by the owner's own merge into upstream",
+        "operationId": "postDeliveryByWorkstreamMerged",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MergeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/documents/{workstream}": {
       "get": {
         "summary": "Read a workstream's handed document, spec and plan",
@@ -3658,6 +3698,20 @@
         },
         "type": "object"
       },
+      "DeliveryMerge": {
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "upstream": {
+            "$ref": "#/components/schemas/SealBase"
+          }
+        },
+        "type": "object"
+      },
       "DeliveryPresentation": {
         "properties": {
           "approval": {
@@ -3674,6 +3728,9 @@
           },
           "maintenance": {
             "type": "boolean"
+          },
+          "merge": {
+            "$ref": "#/components/schemas/DeliveryMerge"
           },
           "messages": {
             "items": {
@@ -4392,6 +4449,26 @@
             ]
           },
           "hearsay_scope": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MergeResponse": {
+        "properties": {
+          "merge": {
+            "$ref": "#/components/schemas/DeliveryMerge"
+          },
+          "project": {
+            "type": "string"
+          },
+          "refused_publication": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          },
+          "workstream": {
             "type": "string"
           }
         },
@@ -5331,6 +5408,12 @@
             "$ref": "#/components/schemas/TraceRef"
           },
           "approved": {
+            "type": "string"
+          },
+          "merge": {
+            "$ref": "#/components/schemas/TraceRef"
+          },
+          "merged": {
             "type": "string"
           },
           "outcome": {
