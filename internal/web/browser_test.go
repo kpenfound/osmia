@@ -111,17 +111,27 @@ func (p *page) awaitText(selector, want string) {
 // for the page to render without error, with no backing service. It counts
 // the requests made for the workstream list and can hold its response open
 // until a test chooses to let it go, so tests can see what the page does
-// before that response arrives, and how many requests it took.
+// before that response arrives, and how many requests it took. inboxEntries
+// and events let a test control what the inbox answers and announce a
+// change on the event stream, as browser_feed_dismiss_test.go's tests do.
 type fakeAPI struct {
 	workstreams int
 
 	mu         sync.Mutex
 	statusHits int
+	inboxHits  int
 	hold       chan struct{}
+
+	inboxEntries []string
+	events       chan string
+
+	// contested and ratify answer the inbox entries' own decision
+	// endpoints that browser_feed_dismiss_test.go's tests submit to.
+	contested, ratify fakeAction
 }
 
 func newFakeAPI(workstreams int) *fakeAPI {
-	return &fakeAPI{workstreams: workstreams}
+	return &fakeAPI{workstreams: workstreams, events: make(chan string, 8)}
 }
 
 // holdStatus makes every /v1/status response already in flight, and every
@@ -184,7 +194,8 @@ func (f *fakeAPI) handleFeed(w http.ResponseWriter, r *http.Request) {
 
 // handleEvents answers the event stream with a single resync and then holds
 // the connection open, the way the real service does until the page closes
-// it or the stream is lost.
+// it or the stream is lost, relaying any event a test pushes through
+// pushEvent meanwhile.
 func (f *fakeAPI) handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -195,7 +206,48 @@ func (f *fakeAPI) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "event: resync\ndata: {}\n\n")
 	flusher.Flush()
-	<-r.Context().Done()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case kind := <-f.events:
+			fmt.Fprintf(w, "event: %s\ndata: {}\n\n", kind)
+			flusher.Flush()
+		}
+	}
+}
+
+// handleInbox answers the inbox with whatever entries setInbox last set,
+// none until a test sets some.
+func (f *fakeAPI) handleInbox(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.inboxHits++
+	entries := strings.Join(f.inboxEntries, ",")
+	f.mu.Unlock()
+	writeJSON(w, `{"entries":[`+entries+`]}`)
+}
+
+// inboxRequests returns how many times /v1/inbox has been answered, so a
+// test can confirm the page has actually fetched a particular inbox state,
+// set through setInbox, before changing that state again.
+func (f *fakeAPI) inboxRequests() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inboxHits
+}
+
+// setInbox replaces the entries /v1/inbox answers with.
+func (f *fakeAPI) setInbox(entries ...string) {
+	f.mu.Lock()
+	f.inboxEntries = entries
+	f.mu.Unlock()
+}
+
+// pushEvent sends a server-sent event of the given kind on the page's open
+// event stream, the way the real service announces a change for the page
+// to read again.
+func (f *fakeAPI) pushEvent(kind string) {
+	f.events <- kind
 }
 
 func (f *fakeAPI) handler() http.Handler {
@@ -203,10 +255,14 @@ func (f *fakeAPI) handler() http.Handler {
 	mux.HandleFunc("/v1/status", f.handleStatus)
 	mux.HandleFunc("/v1/runtime", handleJSON(`{"effective":{"pauses":[],"priorities":[]},"profiles":{},"diagnostics":[]}`))
 	mux.HandleFunc("/v1/config", handleJSON(`{"root":"","digest":"fake","effective":{"profiles":{}},"project":null,"projects":[],"diagnostics":[],"drift":{"differs":false,"files":[]}}`))
-	mux.HandleFunc("/v1/inbox", handleJSON(`{"entries":[]}`))
+	mux.HandleFunc("/v1/inbox", f.handleInbox)
 	mux.HandleFunc("/v1/charter", handleJSON(`{"proposals":[]}`))
 	mux.HandleFunc("/v1/feed/", f.handleFeed)
 	mux.HandleFunc("/v1/events", f.handleEvents)
+	mux.HandleFunc("/v1/contested/", func(w http.ResponseWriter, r *http.Request) { f.contested.serve(w, r, `{}`) })
+	mux.HandleFunc("/v1/ratify/", func(w http.ResponseWriter, r *http.Request) {
+		f.ratify.serve(w, r, `{"detail":"the owner ratified the packet."}`)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if !Serve(w, r) {
 			http.NotFound(w, r)

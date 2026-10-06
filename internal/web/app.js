@@ -20,6 +20,12 @@
   // reads /config again this often while it is visible and live.
   const configInterval = 10000;
 
+  // How often the page checks whether a dismissed feed action item has
+  // passed its DISMISS_TIMEOUT_MS comeback window. This runs independently
+  // of any other activity, so a dismissal still clears on time even if
+  // nothing else prompts a render.
+  const dismissCheckInterval = 1000;
+
   const unitOrder = ['planned', 'ready', 'implementing', 'waiting', 'checking', 'reviewing', 'approved', 'contested', 'merged'];
 
   const pauseSources = {
@@ -519,8 +525,10 @@
     return w.state === 'delivered' || w.state === 'abandoned';
   }
 
+  // inboxOf lists the workstream's open entries, less any a submission has
+  // dismissed from the feed; see dismissed above.
   function inboxOf(id) {
-    return views.inbox ? views.inbox.entries.filter((e) => e.workstream === id) : [];
+    return views.inbox ? views.inbox.entries.filter((e) => e.workstream === id && !dismissed.has(decisionKey(e))) : [];
   }
 
   function proposalsOf(id) {
@@ -1233,6 +1241,59 @@
   // arrive meanwhile. A card answers the entry as it last rendered it.
   const decisions = new Map();
 
+  // DISMISS_TIMEOUT_MS bounds how long a feed action item may stay hidden
+  // after its submission is acknowledged. If the backend is still listing
+  // it once this elapses, the dismissal clears and the item comes back as
+  // actionable, so a submission that never finishes processing can never
+  // hide an item for good.
+  const DISMISS_TIMEOUT_MS = 120000;
+
+  // dismissed holds, for each inbox entry identity a submission is
+  // deciding, keyed the way decisionKey keys a card: null while the
+  // submission is still in flight, and the time (Date.now()) the server
+  // acknowledged it once that happens. inboxOf hides any entry whose key is
+  // here, so the item disappears from the feed as soon as it is submitted,
+  // before the server answers. pruneInbox clears a key once a refreshed
+  // inbox no longer lists the entry, and expireDismissals clears one whose
+  // acknowledgement is older than DISMISS_TIMEOUT_MS. Date.now is read
+  // directly, rather than through some indirection, so a test can fake the
+  // clock by overriding it on the page.
+  const dismissed = new Map();
+
+  function dismiss(key) {
+    dismissed.set(key, null);
+  }
+
+  // acknowledge starts an already-dismissed entry's comeback window, once
+  // the server has confirmed its submission.
+  function acknowledge(key) {
+    if (dismissed.has(key)) {
+      dismissed.set(key, Date.now());
+    }
+  }
+
+  // restore cancels a dismissal at once, used when a submission fails.
+  function restore(key) {
+    dismissed.delete(key);
+  }
+
+  // expireDismissals brings back any entry whose submission was
+  // acknowledged at least DISMISS_TIMEOUT_MS ago and that the backend is
+  // still listing, which is the only reason its key would still be here.
+  function expireDismissals() {
+    const now = Date.now();
+    let changed = false;
+    for (const [key, acknowledgedAt] of dismissed) {
+      if (acknowledgedAt !== null && now - acknowledgedAt >= DISMISS_TIMEOUT_MS) {
+        dismissed.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) {
+      render();
+    }
+  }
+
   // submit sends an answer and, once the API confirms it, clears the card's
   // form back to its default values, the way the browser's own reset does,
   // so a card the inbox still lists or reuses next never shows a value from
@@ -1241,15 +1302,34 @@
   // refusal reads the inbox again, so the entry shows what the refusal was
   // about and the owner's input stands; the page never sends it again
   // itself.
-  function submit(form, button, method, path, body, done, afterReset) {
+  //
+  // When dismissKey is given, the entry it names is hidden from the feed
+  // at once, before the server answers; it stays hidden once the server
+  // confirms, until a refreshed inbox no longer lists it or
+  // DISMISS_TIMEOUT_MS passes, and it comes back at once, with the
+  // owner's input kept, if the submission fails.
+  function submit(form, button, method, path, body, done, afterReset, dismissKey) {
+    if (dismissKey) {
+      dismiss(dismissKey);
+      render();
+    }
     act(inboxResult, button, () => request(method, path, body), (out) => {
+      if (dismissKey) {
+        acknowledge(dismissKey);
+      }
       const text = done(out);
       form.reset();
       if (afterReset) {
         afterReset();
       }
       return text;
-    }, () => mark(['inbox']));
+    }, () => {
+      if (dismissKey) {
+        restore(dismissKey);
+        render();
+      }
+      mark(['inbox']);
+    });
   }
 
   function endpoint(entry) {
@@ -1259,7 +1339,7 @@
   function accept(d) {
     const entry = d.entry;
     submit(d.form, d.accept, entry.answer.method, endpoint(entry), { ...entry.answer.body, text: entry.quick_reply },
-      (out) => 'Accepted the recommendation on inbox entry ' + out.number + '.');
+      (out) => 'Accepted the recommendation on inbox entry ' + out.number + '.', undefined, decisionKey(entry));
   }
 
   function decide(d) {
@@ -1273,7 +1353,7 @@
         return;
       }
       submit(d.form, d.submit, entry.answer.method, endpoint(entry), { ...body, text },
-        (out) => 'Answered inbox entry ' + out.number + '.');
+        (out) => 'Answered inbox entry ' + out.number + '.', undefined, decisionKey(entry));
       return;
     }
     if (entry.kind === 'delivery') {
@@ -1284,7 +1364,7 @@
         // The next render then treats the drafted description and commit
         // messages as unedited, so it fills them with whatever the delivery
         // presents next rather than leaving the reset, blank fields stuck.
-        () => { d.draft = ''; d.messages = []; });
+        () => { d.draft = ''; d.messages = []; }, decisionKey(entry));
       return;
     }
     const [decision, objection] = d.decision.value.split(' ');
@@ -1300,23 +1380,25 @@
           return;
         }
         submit(d.form, d.submit, entry.answer.method, endpoint(entry), { ...body, decision, note },
-          () => 'Ruled ' + decision + ' on unit ' + entry.unit + '.');
+          () => 'Ruled ' + decision + ' on unit ' + entry.unit + '.', undefined, decisionKey(entry));
         return;
       case 'amendment':
         if (note !== '') {
           body.note = note;
         }
         submit(d.form, d.submit, entry.answer.method, endpoint(entry), { ...body, decision },
-          () => 'Decided ' + decision + ' on amendment ' + entry.amendment + '.');
+          () => 'Decided ' + decision + ' on amendment ' + entry.amendment + '.', undefined, decisionKey(entry));
         return;
       case 'base':
         submit(d.submit, entry.answer.method, endpoint(entry), body, decided((out) => workstreamName(entry.workstream) + ' continues from ' + out.upstream.remote + '/' + out.upstream.branch + '.'));
         return;
     }
-    // A ratification is decided with ratify, or through the shed: a
-    // disposition of an objection or a request for a redraft.
+    // A ratification is decided with ratify, which dismisses its card like
+    // any other terminal decision, or through the shed: a disposition of
+    // an objection or a request for a redraft, which the shed may still
+    // leave open with updated dissent, so those do not dismiss it.
     if (decision === 'ratify') {
-      submit(d.form, d.submit, entry.answer.method, endpoint(entry), body, (out) => out.detail);
+      submit(d.form, d.submit, entry.answer.method, endpoint(entry), body, (out) => out.detail, undefined, decisionKey(entry));
       return;
     }
     if (decision === 'sustain') {
@@ -1509,13 +1591,20 @@
   }
 
   // pruneInbox forgets the cards of entries and charter proposals the
-  // inbox no longer lists.
+  // inbox no longer lists, and clears the dismissal of any entry no longer
+  // listed, which is what brings a dismissed item back once the server has
+  // actually processed its submission.
   function pruneInbox() {
     if (views.inbox) {
       const keys = new Set(views.inbox.entries.map(decisionKey));
       for (const key of decisions.keys()) {
         if (!keys.has(key)) {
           decisions.delete(key);
+        }
+      }
+      for (const key of dismissed.keys()) {
+        if (!keys.has(key)) {
+          dismissed.delete(key);
         }
       }
     }
@@ -2084,6 +2173,7 @@
       mark(['config']);
     }
   }, configInterval);
+  setInterval(expireDismissals, dismissCheckInterval);
   window.addEventListener('online', reconnectNow);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
