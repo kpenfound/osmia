@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/network"
+	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -37,22 +38,81 @@ type page struct {
 	requested []string
 }
 
-// openBrowser starts the Chromium binary OSMIA_BROWSER names, or skips the
-// test without one. The browser Dagger check sets it.
+// sharedBrowserOnce gates sharedBrowser so Chromium starts at most once per
+// package run. Every browser test gets its own tab on the browser it
+// starts, through sharedBrowser; TestMain shuts the browser down once every
+// test has run.
+var (
+	sharedBrowserOnce sync.Once
+	sharedBrowserCtx  context.Context
+	sharedBrowserDone context.CancelFunc
+	sharedBrowserErr  error
+)
+
+// sharedBrowser starts the Chromium binary named by binary on its first
+// call, and returns the context of the long-lived tab that run, for every
+// later call in the package to derive its own tab from with
+// chromedp.NewContext.
+func sharedBrowser(t *testing.T, binary string) context.Context {
+	t.Helper()
+	sharedBrowserOnce.Do(func() {
+		options := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(binary), chromedp.NoSandbox,
+			chromedp.Flag("disable-dev-shm-usage", true))
+		allocator, cancelAllocator := chromedp.NewExecAllocator(context.Background(), options...)
+		ctx, cancel := chromedp.NewContext(allocator)
+		sharedBrowserCtx = ctx
+		sharedBrowserDone = func() {
+			cancel()
+			cancelAllocator()
+		}
+		// The first run starts the browser itself, on the long-lived
+		// context, before any test's own tab or per-action timeout.
+		sharedBrowserErr = chromedp.Run(ctx, network.Enable())
+	})
+	if sharedBrowserErr != nil {
+		t.Fatalf("starting the shared browser: %v", sharedBrowserErr)
+	}
+	return sharedBrowserCtx
+}
+
+// TestMain shuts down the browser sharedBrowser started, if any, once every
+// test in the package has run.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if sharedBrowserDone != nil {
+		sharedBrowserDone()
+	}
+	os.Exit(code)
+}
+
+// openBrowser gives the test its own tab, on the Chromium binary
+// OSMIA_BROWSER names, starting it on the package's first call, or skips the
+// test without one. The browser Dagger check sets it. Every tab lives in the
+// one browser context and window sharedBrowser's long-lived tab opened; a
+// second browser context's first target has no window to open in under
+// headless Chromium and Target.createTarget fails with "no browser is open",
+// and chromedp's own browser-context creation offers no way to request one
+// (target.CreateTargetParams.NewWindow, which would, is also documented as
+// unsupported by headless shell). A test's tab doesn't need its own browser
+// context anyway: each fixture's web listener binds its own loopback port, so
+// localStorage, sessionStorage and cache are already isolated per test by
+// origin. Bringing the tab to the front as soon as it opens keeps it the
+// visible, focused tab regardless of which other tabs (including
+// sharedBrowser's own) still exist in that window, which some pages need:
+// app.js only polls for configuration drift, and only marks a workstream
+// seen, while document.visibilityState is "visible". t.Cleanup closes the
+// tab before the fixture that ran it tears down the service and its
+// workspace, since cleanups run in last-registered-first-run order and this
+// one is registered after the fixture's.
 func openBrowser(t *testing.T) *page {
 	t.Helper()
 	binary := os.Getenv("OSMIA_BROWSER")
 	if binary == "" {
 		t.Skip("OSMIA_BROWSER names no Chromium binary; dagger check runs the browser tests")
 	}
-	options := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(binary), chromedp.NoSandbox,
-		chromedp.Flag("disable-dev-shm-usage", true))
-	allocator, cancelAllocator := chromedp.NewExecAllocator(context.Background(), options...)
-	ctx, cancel := chromedp.NewContext(allocator)
-	t.Cleanup(func() {
-		cancel()
-		cancelAllocator()
-	})
+	root := sharedBrowser(t, binary)
+	ctx, cancel := chromedp.NewContext(root)
+	t.Cleanup(cancel)
 	p := &page{t: t, ctx: ctx}
 	chromedp.ListenTarget(ctx, func(event any) {
 		if e, ok := event.(*network.EventRequestWillBeSent); ok {
@@ -61,8 +121,10 @@ func openBrowser(t *testing.T) *page {
 			p.mu.Unlock()
 		}
 	})
-	// The first run starts the browser for the lifetime of ctx.
-	must(t, chromedp.Run(ctx, network.Enable()))
+	// The first run opens this test's own tab, on its own long-lived
+	// context, before any later action's per-run timeout, and brings it to
+	// the front before anything else can observe its visibility.
+	must(t, chromedp.Run(ctx, network.Enable(), cdppage.BringToFront()))
 	return p
 }
 
@@ -395,8 +457,8 @@ func (f *pageFixture) status(t *testing.T, content trace.StatusContent) {
 // without a reload, at phone and laptop widths, and after its event stream is
 // lost it reconnects and reads again what changed meanwhile.
 func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
-	p := openBrowser(t)
 	f := newPageFixture(t)
+	p := openBrowser(t)
 	card := `[data-workstream="` + string(stream) + `"] `
 	quietCard := `[data-workstream="` + string(quiet) + `"] `
 	latest := card + `[data-kind=status][data-latest=true] `
@@ -561,8 +623,8 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 // workstream, a status change on one not shown and a reload never change the
 // sidebar's order, which the server already sorts by last activity.
 func TestBrowserSelectionMarksActivityWithoutReordering(t *testing.T) {
-	p := openBrowser(t)
 	f := newPageFixture(t)
+	p := openBrowser(t)
 	streamRow := `[data-select="` + string(stream) + `"] `
 
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))

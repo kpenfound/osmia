@@ -30,10 +30,9 @@ import (
 // and follows the workstream through its event stream. See
 // docs/web-demonstration.md.
 func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
-	p := openBrowser(t)
 	ctx := context.Background()
 	f, masons := newMasonFixture(t, 1, validPlan)
-	defer func() { f.stop(t) }()
+	t.Cleanup(func() { f.stop(t) })
 
 	// The owner serves the page on a loopback web listener.
 	f.stop(t)
@@ -150,6 +149,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 
 	// The owner opens the page at phone width before anything is handed in,
 	// and keeps it open to the end.
+	p := openBrowser(t)
 	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.eval(`window.notReloaded = true`, nil)
