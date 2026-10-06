@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -75,9 +76,14 @@ func sharedBrowser(t *testing.T, binary string) context.Context {
 	return sharedBrowserCtx
 }
 
-// TestMain shuts down the browser sharedBrowser started, if any, once every
-// test in the package has run.
+// TestMain applies this package's shuffle and timeout defaults
+// (applyServiceTestDefaults), runs the tests, and shuts down the browser
+// sharedBrowser started, if any, once every test in the package has run.
 func TestMain(m *testing.M) {
+	if !flag.Parsed() {
+		flag.Parse()
+	}
+	applyServiceTestDefaults(flag.CommandLine, serviceTestTimeoutCap)
 	code := m.Run()
 	if sharedBrowserDone != nil {
 		sharedBrowserDone()
