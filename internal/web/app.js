@@ -732,6 +732,84 @@
     }
   }
 
+  // beekeeperAuthorLabel names who sent one Beekeeper chat message: the
+  // owner, the Beekeeper itself, a named workstream's chief of staff
+  // relaying a reply, or a failure note.
+  function beekeeperAuthorLabel(author) {
+    switch (author.kind) {
+      case 'owner':
+        return 'You';
+      case 'beekeeper':
+        return 'Beekeeper';
+      case 'chief_of_staff':
+        return 'Chief of staff: ' + workstreamName(author.workstream);
+      case 'failure':
+        return 'Failed';
+      default:
+        return author.kind;
+    }
+  }
+
+  let beekeeperShown = null;
+
+  // renderBeekeeperFeed shows the Beekeeper chat's recent messages, oldest
+  // first, with each one's author. It reads only what views.beekeeper
+  // already holds: the page never asks for more than the recent window and
+  // offers no way to load older history.
+  function renderBeekeeperFeed() {
+    const view = views.beekeeper;
+    const key = view ? JSON.stringify(view.messages) : (failures.beekeeper ? 'failed' : 'reading');
+    if (beekeeperShown === key) {
+      return;
+    }
+    beekeeperShown = key;
+    const box = byId('beekeeper-feed');
+    if (!view) {
+      box.replaceChildren(el('p', { class: 'meta' }, failures.beekeeper ? 'The beekeeper chat is unavailable.' : 'Reading the beekeeper chat…'));
+    } else if (view.messages.length === 0) {
+      box.replaceChildren(el('p', { class: 'meta' }, 'Nothing has happened yet.'));
+    } else {
+      box.replaceChildren(el('ol', {}, ...view.messages.map((m) => el('li', { class: 'entry', 'data-kind': m.author.kind },
+        el('div', { class: 'meta' }, beekeeperAuthorLabel(m.author), ' · ', when(m.at)),
+        el('div', { class: 'text', 'data-field': 'text' }, m.text)))));
+    }
+    if (ui.view === 'beekeeper') {
+      byId('main').scrollTop = byId('main').scrollHeight;
+    }
+  }
+
+  // openBeekeeper shows the Beekeeper chat and reads its recent messages
+  // again. It is service-level, not tied to any selected workstream.
+  function openBeekeeper() {
+    openView('beekeeper');
+    mark(['beekeeper']);
+  }
+
+  // sendBeekeeper posts an owner message to the Beekeeper and, once it
+  // answers, reads the chat again, the same way the chief-of-staff
+  // composer's send marks the workstream's feed dirty after posting: the
+  // sent message and the reply appear without a page reload. A busy
+  // refusal from the API shows in the composer's result.
+  function sendBeekeeper(event) {
+    event.preventDefault();
+    const form = byId('beekeeper-form');
+    const result = byId('beekeeper-result');
+    const text = form.elements.text.value.trim();
+    if (text === '') {
+      show(result, 'error', 'Write a message first.');
+      return;
+    }
+    act(result, event.submitter || form.querySelector('button'), () => request('POST', '/beekeeper', { text }), () => {
+      form.elements.text.value = '';
+      mark(['beekeeper']);
+      return 'Sent; the beekeeper has replied.';
+    });
+  }
+
+  function renderBeekeeperButton() {
+    byId('beekeeper-button').setAttribute('aria-current', String(ui.view === 'beekeeper'));
+  }
+
   function setTab(tab) {
     const changed = ui.tab !== tab;
     ui.tab = tab;
@@ -1157,6 +1235,7 @@
     for (const id of ['new-workstream', 'sidebar-new']) {
       byId(id).addEventListener('click', () => openView('handin'));
     }
+    byId('beekeeper-button').addEventListener('click', openBeekeeper);
     for (const button of document.querySelectorAll('[data-open]')) {
       button.addEventListener('click', () => openView(button.dataset.open));
     }
@@ -2175,11 +2254,22 @@
     renderProfiles();
     renderProviders();
     renderConfig();
+    renderBeekeeperButton();
+    renderBeekeeperFeed();
   }
 
   setupLayout();
   setupOwnerForms();
   render();
+  byId('beekeeper-form').addEventListener('submit', sendBeekeeper);
+  // Enter sends and Shift+Enter starts a new line where there is a
+  // keyboard; on a touch screen Enter starts a new line.
+  byId('beekeeper-form').elements.text.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && window.matchMedia('(pointer: fine)').matches) {
+      event.preventDefault();
+      byId('beekeeper-form').requestSubmit();
+    }
+  });
   byId('pause-form').addEventListener('submit', pause);
   byId('priority-form').addEventListener('submit', setPriority);
   byId('priority-project').addEventListener('change', () => {

@@ -408,6 +408,11 @@ svg {
   background: var(--selected);
 }
 
+.beekeeper {
+  margin: 0 0.5rem 0.5rem;
+  font-weight: 500;
+}
+
 .row .title,
 .row .sub {
   min-width: 0;
@@ -614,11 +619,13 @@ svg {
   gap: 0.2rem;
 }
 
-.entry[data-kind="message"] {
+.entry[data-kind="message"],
+.entry[data-kind="owner"] {
   justify-items: end;
 }
 
-.entry[data-kind="message"] .text {
+.entry[data-kind="message"] .text,
+.entry[data-kind="owner"] .text {
   max-width: min(36rem, 90%);
   padding: 0.5rem 0.8rem;
   background: var(--bubble);
@@ -1110,7 +1117,8 @@ button:disabled {
     padding: 0.7rem 0.6rem;
   }
 
-  .entry[data-kind="message"] .text {
+  .entry[data-kind="message"] .text,
+  .entry[data-kind="owner"] .text {
     max-width: 92%;
   }
 }

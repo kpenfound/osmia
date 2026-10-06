@@ -84,6 +84,9 @@
     <button type="button" id="sidebar-new" class="new">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> New workstream
     </button>
+    <button type="button" id="beekeeper-button" class="row beekeeper">
+      <span class="title">Beekeeper</span>
+    </button>
     <ul id="workstream-list" class="rows"></ul>
     <details id="archived" class="archived" hidden>
       <summary>Archived <span id="archived-count" class="meta"></span></summary>
@@ -169,6 +172,20 @@
         </form>
       </div>
       <p id="inbox-result" class="result" role="status"></p>
+    </section>
+
+    <section class="view" data-view="beekeeper" aria-labelledby="beekeeper-title" hidden>
+      <div class="view-head"><h2 id="beekeeper-title">Beekeeper</h2></div>
+      <div class="thread">
+        <div id="beekeeper-feed" class="feed" data-field="feed"></div>
+        <form id="beekeeper-form" class="send composer">
+          <div class="box">
+            <textarea name="text" rows="2" aria-label="Message the beekeeper" placeholder="Message the beekeeper"></textarea>
+            <div class="actions"><button type="submit" class="primary">Send</button></div>
+          </div>
+          <p id="beekeeper-result" class="result" role="status"></p>
+        </form>
+      </div>
     </section>
 
     <section class="view" data-view="handin" aria-labelledby="handin-title" hidden>
