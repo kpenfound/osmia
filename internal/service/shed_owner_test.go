@@ -555,7 +555,11 @@ func TestOwnerAsksForMoreRoundsAcrossARestart(t *testing.T) {
 	if docs := f.documents(t, stream, shed.MoreDocumentID(1)); len(docs) != 2 || docs[1].Revision != 2 || docs[1].Path != shed.MorePath(1) {
 		t.Fatalf("requests %+v", docs)
 	}
-	must(t, (&debate{s: f.s, repository: f.repository()}).Pass(ctx))
+	// Idle the controller before driving the pass by hand, so nothing it
+	// runs beside its schedule hooks can commit while it does, and the
+	// repository's handle this lifetime closes next is not still in use.
+	repo := f.repository()
+	drivePass(t, f.s, repo, func() error { return (&debate{s: f.s, repository: repo}).Pass(ctx) })
 	if moves := f.shedMoves(t, stream); moves[len(moves)-1] != "concluded-1" {
 		t.Fatalf("a round ran without a committee runner: %v", moves)
 	}
@@ -579,7 +583,9 @@ func TestOwnerAsksForMoreRoundsAcrossARestart(t *testing.T) {
 		t.Fatalf("dissent after the concession %+v", entries)
 	}
 	// The debate concluded again, and nothing resumes it a second time.
-	must(t, (&debate{s: f.s, repository: f.repository()}).Pass(ctx))
+	// Drive the pass by hand as above.
+	repo = f.repository()
+	drivePass(t, f.s, repo, func() error { return (&debate{s: f.s, repository: repo}).Pass(ctx) })
 	if moves := f.shedMoves(t, stream); moves[len(moves)-1] != "concluded-2" {
 		t.Fatalf("the debate resumed without a request: %v", moves)
 	}

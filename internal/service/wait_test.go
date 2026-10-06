@@ -5,7 +5,22 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/trace"
 )
+
+// drivePass idles the service's reconciliation controller, joining the
+// operations it runs beside its schedule hooks, so driving pass by hand
+// afterward has nothing left to race for the repository's one operation
+// lock and commits in a single attempt.
+func drivePass(t *testing.T, s *Service, repo *trace.Repository, pass func() error) {
+	t.Helper()
+	if err := s.halt(s.sole()); err != nil {
+		t.Fatalf("idle the controller: %v", err)
+	}
+	if err := repo.Serialize(pass); err != nil {
+		t.Fatalf("drive the pass: %v", err)
+	}
+}
 
 // serviceChanges subscribes before a waiter's first read. Notifications are
 // hints; the timer also wakes reads of state the event stream does not expose.

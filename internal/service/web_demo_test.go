@@ -184,7 +184,19 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	p.click(card + "button[type=submit]")
 	p.awaitText("#inbox-result", "Answered inbox entry")
 	p.awaitGone("the answered question", card)
-	if r := f.question(t, stream, "1").Ruling; r == nil || r.OwnerResponse != ownerRuling || r.Actor != ownerActor {
+	// f.question's Ruling is the newest revision: by the time the page has
+	// cleared the card, the fake chief of staff's relay may already have
+	// recorded revision 2 over it. Find the owner's own revision (1) rather
+	// than whichever is latest.
+	rulings, err := trace.Read[trace.Ruling](f.repository(), stream)
+	must(t, err)
+	var r *trace.Ruling
+	for i, ruling := range rulings {
+		if ruling.QuestionID == "1" && ruling.Revision == 1 {
+			r = &rulings[i]
+		}
+	}
+	if r == nil || r.OwnerResponse != ownerRuling || r.Actor != ownerActor {
 		t.Fatalf("the owner's ruling on question 1: %+v", r)
 	}
 
