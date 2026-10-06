@@ -148,7 +148,7 @@ func TestSameRepositoryMaintenanceRetargetRecovery(t *testing.T) {
 }
 
 func TestSameRepositoryMaintenanceRefusesExternalPREdits(t *testing.T) {
-	for _, change := range []string{"body", "base", "closed", "missing"} {
+	for _, change := range []string{"body", "base", "closed", "merged", "missing"} {
 		t.Run(change, func(t *testing.T) {
 			p := sameRepositoryMaintenance(t)
 			approveMaintenance(t, p)
@@ -160,6 +160,8 @@ func TestSameRepositoryMaintenanceRefusesExternalPREdits(t *testing.T) {
 				p.pulls.prs[0].Base = "another-branch"
 			case "closed":
 				p.pulls.prs[0].State = "closed"
+			case "merged":
+				p.pulls.prs[0].State, p.pulls.prs[0].Merged = "closed", true
 			case "missing":
 				p.pulls.prs = []pulls.PullRequest{}
 			}
@@ -168,6 +170,25 @@ func TestSameRepositoryMaintenanceRefusesExternalPREdits(t *testing.T) {
 			after, _ := p.forkBranch(t)
 			if result.Outcome == "succeeded" || before != after || p.pulls.updates != 0 {
 				t.Fatalf("unsafe publication: %+v", result)
+			}
+			// This lookup of the workstream's own pull request, already made to
+			// decide the refusal above, is also the one existing operations use
+			// to record a merged or closed own-PR outcome, with no added call.
+			outcome, revision, err := ownPullRequestOutcomeAt(p.repository, p.stream)
+			must(t, err)
+			switch change {
+			case "closed", "merged":
+				want := ownPullRequestOutcomeClosed
+				if change == "merged" {
+					want = ownPullRequestOutcomeMerged
+				}
+				if revision != 1 || outcome.PullRequest != 100 || outcome.Outcome != want {
+					t.Fatalf("own-PR outcome %+v revision %d, want #100 %s", outcome, revision, want)
+				}
+			default:
+				if revision != 0 {
+					t.Fatalf("own-PR outcome recorded without a merged or closed pull request: %+v revision %d", outcome, revision)
+				}
 			}
 		})
 	}

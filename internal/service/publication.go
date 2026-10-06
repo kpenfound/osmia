@@ -478,6 +478,11 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	// This lookup already names the workstream's own pull request; a merged
+	// or closed one found here is recorded durably without any added call.
+	if err := recordOwnPullRequestOutcomeFromFind(ctx, p.repository, p.s.now(), stream, op.ID, ownPullRequestNumber(in, prior), before); err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	if in.Retarget != nil && len(before) == 0 {
 		return p.refuse(ctx, stream, in, "the dependent pull request is missing")
 	}

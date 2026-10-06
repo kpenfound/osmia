@@ -327,7 +327,7 @@ func documentPath(p string, stream bool) error {
 	if !stream && (memoryPath(parts) || p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || (len(parts) == 2 && parts[0] == "notices" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))) || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && ((p == "base.json" || p == "base-observation.json") || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts)) {
+	if stream && ((p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json") || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)

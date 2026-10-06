@@ -428,6 +428,30 @@ func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
 	}
 }
 
+// own-pull-request-outcome.json is a workstream document path the publication
+// journal accepts, next to base.json and base-observation.json; an unlisted
+// name alongside it is still refused.
+func TestOwnPullRequestOutcomeDocumentPathIsAccepted(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	dir, err := root.ProjectTrace(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome := streamDocument("workstream-own-pull-request-outcome", "own-pull-request-outcome.json", "{\"number\":1,\"outcome\":\"merged\"}\n", 1)
+	if err := r.RecordDocuments(ctx, []Document{outcome}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), "own-pull-request-outcome.json"))
+	if err != nil || string(data) != "{\"number\":1,\"outcome\":\"merged\"}\n" {
+		t.Fatalf("own-pull-request-outcome.json on disk: %q %v", data, err)
+	}
+	unlisted := streamDocument("workstream-own-pull-request-outcome-extra", "own-pull-request-outcome-extra.json", "x\n", 1)
+	if err := r.RecordDocuments(ctx, []Document{unlisted}); err == nil {
+		t.Fatal("unlisted path accepted")
+	}
+}
+
 // A shed record is a workstream document under shed/round-<n>/: a batch is one
 // commit through RecordDocuments, Append records one too, a project-scoped
 // shed path is refused, and the trace reopens with the files on disk.
