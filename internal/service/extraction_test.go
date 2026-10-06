@@ -313,6 +313,7 @@ func proseOnDisk(t *testing.T, traceDir string) map[string]string {
 	return out
 }
 
+// serial: sets process environment variables GITHUB_TOKEN and GH_TOKEN via t.Setenv
 func TestExtractionRecordsKnowledgeBaseAndReruns(t *testing.T) {
 	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
 		t.Setenv(name, demoSecret)

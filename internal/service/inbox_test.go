@@ -39,6 +39,7 @@ func apiError(t *testing.T, err error, code Code, message string) {
 }
 
 func TestQuickReplyEligibility(t *testing.T) {
+	t.Parallel()
 	for _, word := range []string{"push", "merge", "deliver", "abandon", "force", "delete", "rebase", "overrule", "deploy", "ratify", "veto", "revert", "reset", "discard", "PUSHES", "merged", "ratified", "vetoing", "abandoned", "force-push", "Merge,please"} {
 		t.Run(word, func(t *testing.T) {
 			entry := trace.InboxEntry{State: trace.QuestionEscalated, Recommendation: "Please " + word + " this.", Questions: []trace.QuestionState{{}}}

@@ -329,6 +329,7 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 }
 
 func TestDeliveryWithoutForkOnBothWorkspaceBackends(t *testing.T) {
+	t.Parallel()
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			if backend == config.WorkspacesJujutsu {
