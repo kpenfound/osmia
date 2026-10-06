@@ -958,10 +958,12 @@
     const head = byId('workstream-head');
     const status = w.status;
     head.dataset.workstream = w.workstream;
-    // The menu offers what the workstream's state allows: recording your own
-    // merge of an assembled branch, abandoning work in progress, archiving
-    // finished work and unarchiving archived work.
+    // The menu offers what the workstream's state allows: asking for a drift
+    // rebase of a building or assembled branch, recording your own merge of an
+    // assembled branch, abandoning work in progress, archiving finished work
+    // and unarchiving archived work.
     const offered = {
+      rebase: w.state === 'building' || w.state === 'assembled',
       merged: w.state === 'assembled',
       abandon: !terminal(w),
       'abandon-archive': !terminal(w),
@@ -1111,6 +1113,14 @@
         }
         mark(['status', 'runtime']);
         return out.archived ? 'Archived ' + goal(w) + '; it is listed under Archived.' : goal(w) + ' is back in the list of work.';
+      });
+      return;
+    }
+    if (action === 'rebase') {
+      const button = document.querySelector('[data-workstream-action="rebase"]');
+      act(inboxResult, button, () => request('POST', '/rebase/' + w.workstream), (out) => {
+        mark(['status', 'inbox', 'feed/' + w.workstream]);
+        return 'Drift rebase ' + out.drift + ' of ' + goal(w) + ' is requested; the foreman runs it once no landing or other drift rebase holds the project.';
       });
       return;
     }

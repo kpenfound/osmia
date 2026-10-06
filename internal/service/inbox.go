@@ -322,10 +322,10 @@ func driftEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEn
 		return InboxEntry{}, false, nil
 	}
 	held := transitions[i]
-	e := decision(InboxDrift, w.Workstream, held.At, "/projects/rebase", map[string]any{"project": repository.Project()})
+	e := decision(InboxDrift, w.Workstream, held.At, "/rebase/"+string(w.Workstream), map[string]any{})
 	e.Revision = k
 	e.Question = fmt.Sprintf("Drift rebase %d is held: %s.", k, held.Reason)
-	e.Blocked = "Rebasing the feature branch onto upstream. No drift rebase is asked for on the upstream_rebase cadence until you ask for one with osmia project rebase " + string(repository.Project()) + ", or ask the chief of staff in a message to hand it back with what its drift mason or reviewer should do differently."
+	e.Blocked = "Rebasing the feature branch onto upstream. No drift rebase is asked for on the upstream_rebase cadence until you ask for one with osmia rebase " + string(w.Workstream) + ", or ask the chief of staff in a message to hand it back with what its drift mason or reviewer should do differently."
 	return e, true, nil
 }
 

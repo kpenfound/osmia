@@ -190,6 +190,14 @@ type ProjectRebaseResponse struct {
 	Skipped []DriftSkip      `json:"skipped"`
 }
 
+// WorkstreamRebaseResponse reports a recorded request for a drift rebase of
+// one workstream, with the number of the drift rebase that answers it.
+type WorkstreamRebaseResponse struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	Drift      int                 `json:"drift"`
+}
+
 // DriftCoverage is one workstream a drift rebase request covers.
 type DriftCoverage struct {
 	Workstream config.WorkstreamID `json:"workstream"`

@@ -20,6 +20,7 @@ osmia project add dagger --upstream dagger/dagger --fork kpenfound/dagger --clon
 osmia project memory p_0123456789abcdef0123456789abcdef
 osmia project extract p_0123456789abcdef0123456789abcdef
 osmia project rebase p_0123456789abcdef0123456789abcdef
+osmia rebase w_0123456789abcdef0123456789abcdef
 osmia project remove p_0123456789abcdef0123456789abcdef
 osmia handin p_0123456789abcdef0123456789abcdef design.md
 osmia handin p_0123456789abcdef0123456789abcdef small-fix.md --skip-debate
@@ -160,7 +161,7 @@ osmia status --json
   refusal with the token permissions it asks for, and it says when the next
   attempt runs. It takes no answer; fix the cause and it leaves the inbox once
   an attempt publishes. A held drift rebase, whose conflict resolution review
-  sent back `shed.max_bounces` times, is answered with `project rebase`, which
+  sent back `shed.max_bounces` times, is answered with `rebase`, which
   asks for another, or by asking the chief of staff with `send` to hand it
   back with a note its drift mason and reviewer receive; it leaves the inbox
   once either is recorded.
@@ -251,6 +252,20 @@ osmia status --json
   then shows the state `abandoned`. An empty reason, or a workstream the
   active project does not hold, fails with `validation` (exit 4); a delivered
   or already abandoned workstream fails with `conflict` (exit 5).
+- `rebase <workstream-id>` asks for a drift rebase of one `building` or
+  `assembled` workstream that is not paused, whatever its project's
+  `upstream_rebase` cadence: the foreman fetches upstream, or the base
+  workstream's branch, and rebases the feature branch and every unit in flight
+  onto it. The command returns once the request is recorded and names the
+  drift rebase that answers it (`Drift rebase <n> requested for workstream
+  <workstream>`). Asking again before that drift rebase starts names the same
+  one. The foreman runs it on the project's lander once no landing or other
+  drift rebase holds it; follow it with `status <workstream-id>`. A request
+  also resumes a workstream whose drift rebase is held. A workstream that is
+  not building or assembled, or is paused, fails with `conflict` (exit 5) and
+  why. The web page offers the same as Check for drift in a building or
+  assembled workstream's menu. `project rebase` asks the same of every
+  workstream of a project.
 - `upstream <workstream-id> <base-workstream-id>` continues a workstream
   parked on its abandoned base from upstream instead. The base is the
   abandoned workstream the inbox entry names. The service fetches the

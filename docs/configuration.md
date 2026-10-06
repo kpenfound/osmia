@@ -613,10 +613,10 @@ approve delivery again to retry. Local workstream commits remain unsigned.
 latest drift rebase or final rebase (or, before either, its sealing) the
 foreman schedules its next drift rebase onto
 upstream. It defaults to `"6h"`. `"0"` (or `"0s"`) disables scheduled drift
-rebases; `osmia project rebase` still asks for them. A drift rebase whose
-conflict resolution review sent back `shed.max_bounces` times is held: the
-workstream takes no scheduled drift rebase until `osmia project rebase` asks
-for one or the chief of staff hands it back, and the inbox lists it until
+rebases; `osmia rebase` and `osmia project rebase` still ask for them. A
+drift rebase whose conflict resolution review sent back `shed.max_bounces`
+times is held: the workstream takes no scheduled drift rebase until
+`osmia rebase` or `osmia project rebase` asks for one or the chief of staff hands it back, and the inbox lists it until
 then. A value that does not
 parse as a Go duration, a TOML number, a negative duration, or a nonzero
 duration shorter than `1m` is rejected.

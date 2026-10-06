@@ -1584,6 +1584,46 @@
         }
       }
     },
+    "/v1/rebase/{workstream}": {
+      "post": {
+        "summary": "Ask for a drift rebase of one workstream",
+        "operationId": "postRebaseByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkstreamRebaseResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/reload": {
       "post": {
         "summary": "Reload the configuration files",
@@ -6240,6 +6280,20 @@
             "type": "string"
           },
           "setting": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkstreamRebaseResponse": {
+        "properties": {
+          "drift": {
+            "type": "integer"
+          },
+          "project": {
+            "type": "string"
+          },
+          "workstream": {
             "type": "string"
           }
         },

@@ -338,3 +338,66 @@ func TestRebaseProjectThroughTheAPI(t *testing.T) {
 	}
 	f.stop(t)
 }
+
+// POST /v1/rebase/{workstream} asks for a drift rebase of one building
+// workstream that is not paused, refuses the others with why, and leaves the
+// project's other workstreams alone.
+func TestRebaseWorkstreamThroughTheAPI(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixture(t, 1, 1)
+	f.upstream(t)
+	stream, _ := f.builtAs(t, "rebase-one")
+	ctx := context.Background()
+	must(t, f.repository().CreateWorkstream(ctx, idleStream, f.s.now(), ownerActor))
+	assertCode(t, f.c.Do(ctx, "POST", Prefix+"/rebase/not-a-workstream", nil, nil), Validation)
+	assertCode(t, f.c.Do(ctx, "GET", Prefix+"/rebase/"+string(stream), nil, nil), Unsupported)
+	_, err := f.c.RebaseWorkstream(ctx, "w_ffffffffffffffffffffffffffffffff")
+	assertCode(t, err, Validation)
+	_, err = f.c.RebaseWorkstream(ctx, idleStream)
+	assertCode(t, err, Conflict)
+	if err == nil || !strings.Contains(err.Error(), "takes no drift rebase: the workstream is not started, not building or assembled") {
+		t.Fatalf("an idle workstream's refusal: %v", err)
+	}
+
+	pause := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
+	must(t, f.c.Do(ctx, "PUT", Prefix+"/runtime/pause", PauseRequest{Target: pause, Mode: "soft", Reason: "hold", Source: "owner"}, nil))
+	_, err = f.c.RebaseWorkstream(ctx, stream)
+	assertCode(t, err, Conflict)
+	if err == nil || !strings.Contains(err.Error(), "the workstream is paused") {
+		t.Fatalf("a paused workstream's refusal: %v", err)
+	}
+	if state, err := f.repository().Workflow(stream, driftRequestSubject); err != nil || state.Value != "" {
+		t.Fatalf("a paused workstream's request is %q: %v", state.Value, err)
+	}
+	must(t, f.c.Do(ctx, "DELETE", Prefix+"/runtime/pause", pause, nil))
+
+	got, err := f.c.RebaseWorkstream(ctx, stream)
+	must(t, err)
+	if want := (WorkstreamRebaseResponse{Project: f.project, Workstream: stream, Drift: 1}); got != want {
+		t.Fatalf("request: %+v, want %+v", got, want)
+	}
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		state, err := f.repository().Workflow(stream, driftSubject)
+		must(t, err)
+		if state.Value == "rebased-1" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the owner's request left drift at %q", state.Value)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if first := transitionByID(t, f.repository(), stream, "drift-1"); !strings.HasPrefix(first.Reason, "the owner asked for a drift rebase at ") {
+		t.Fatalf("drift rebase 1 reason %q", first.Reason)
+	}
+	if state, err := f.repository().Workflow(idleStream, driftRequestSubject); err != nil || state.Value != "" {
+		t.Fatalf("the request reached another workstream: %q %v", state.Value, err)
+	}
+	got, err = f.c.RebaseWorkstream(ctx, stream)
+	must(t, err)
+	if got.Drift != 2 {
+		t.Fatalf("the next request answers drift rebase %d, want 2", got.Drift)
+	}
+	f.stop(t)
+}

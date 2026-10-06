@@ -229,6 +229,14 @@ func (c *Client) RebaseProject(ctx context.Context, id config.ProjectID) (Projec
 	return v, err
 }
 
+// RebaseWorkstream asks for a drift rebase of one building or assembled
+// workstream and reports the drift rebase that answers it.
+func (c *Client) RebaseWorkstream(ctx context.Context, id config.WorkstreamID) (WorkstreamRebaseResponse, error) {
+	var v WorkstreamRebaseResponse
+	err := c.Do(ctx, "POST", Prefix+"/rebase/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
+}
+
 // HandIn hands work to a project and returns the workstream it created.
 func (c *Client) HandIn(ctx context.Context, req HandInRequest) (HandInResponse, error) {
 	var v HandInResponse

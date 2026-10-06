@@ -229,6 +229,34 @@ func (s *Service) rebaseProject(ctx context.Context, req ProjectRebaseRequest) (
 	return out, nil
 }
 
+// rebaseWorkstream records the owner's request for a drift rebase of the
+// workstream named by raw, which must be building or assembled and not
+// paused. The foreman asks for it on the project's lander, whether or not
+// scheduled drift rebases are enabled, and a held drift rebase takes it as
+// the owner asking for another. It returns once the request is durable,
+// with the number of the drift rebase that answers it.
+func (s *Service) rebaseWorkstream(ctx context.Context, raw string) (WorkstreamRebaseResponse, *APIError) {
+	project, stream, repository, api := s.conversationTrace(raw)
+	if api != nil {
+		return WorkstreamRebaseResponse{}, api
+	}
+	failed := &APIError{Internal, fmt.Sprintf("cannot record the drift rebase request in the trace of workstream %s; check the trace repository", stream)}
+	d := drifter{&foreman{masons: &masons{s: s, cfg: s.about(repository), repository: repository}}}
+	reason, err := d.eligible(stream)
+	if err != nil {
+		return WorkstreamRebaseResponse{}, failed
+	}
+	if reason != "" {
+		return WorkstreamRebaseResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s takes no drift rebase: %s", stream, reason)}
+	}
+	k, err := d.askDrift(ctx, stream, s.now())
+	if err != nil {
+		return WorkstreamRebaseResponse{}, failed
+	}
+	s.driftAsked.Store(true)
+	return WorkstreamRebaseResponse{Project: project, Workstream: stream, Drift: k}, nil
+}
+
 // latestDrift returns the workstream's latest drift rebase as status reports
 // it, with what its upstream moved events told the chief of staff, or nil
 // before its first.

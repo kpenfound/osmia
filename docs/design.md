@@ -543,6 +543,7 @@ osmia reload
 osmia trace <workstream> [unit|criterion|commit]
 osmia ratify <workstream>            after reading the packet
 osmia merged <workstream>            an assembled branch you merged into upstream yourself, recorded delivered
+osmia rebase <workstream>            a drift rebase of a building or assembled workstream now, outside its cadence
 osmia amendment <workstream> <n> [approve|reject|round|overrule]
 ```
 

@@ -639,7 +639,7 @@ func TestDriftResolutionIsHeldForTheOwnerAtMaxBounces(t *testing.T) {
 	if j < 0 {
 		t.Fatalf("the inbox does not list the held drift rebase: %+v", decisions)
 	}
-	if e := decisions[j]; e.Revision != 1 || e.Answer.Path != Prefix+"/projects/rebase" || e.Answer.Body["project"] != repository.Project() || !strings.Contains(e.Question, "is held for the owner") {
+	if e := decisions[j]; e.Revision != 1 || e.Answer.Path != Prefix+"/rebase/"+string(stream) || len(e.Answer.Body) != 0 || !strings.Contains(e.Blocked, "osmia rebase "+string(stream)) || !strings.Contains(e.Question, "is held for the owner") {
 		t.Fatalf("the held drift rebase entry %+v", e)
 	}
 
