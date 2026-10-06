@@ -100,6 +100,7 @@ func actionOperation(t *testing.T, repo *trace.Repository, stream config.Workstr
 }
 
 func TestDependentDeliveryMaintenanceReviewsApprovesAndReconcilesUpstream(t *testing.T) {
+	t.Parallel()
 	p := maintenanceFixture(t)
 	ctx := context.Background()
 	reviewer := &finalReviewer{s: p.s, repository: p.repository}
@@ -172,6 +173,7 @@ func TestDependentDeliveryMaintenanceReviewsApprovesAndReconcilesUpstream(t *tes
 }
 
 func TestBaseRefreshRetryDoesNotDuplicateObservation(t *testing.T) {
+	t.Parallel()
 	p := maintenanceFixture(t)
 	ctx := context.Background()
 	refresh := &baseRefresher{s: p.s, repository: p.repository}
@@ -211,6 +213,7 @@ func TestBaseRefreshRetryDoesNotDuplicateObservation(t *testing.T) {
 }
 
 func TestDependentDeliveryMaintenanceGapKeepsImplementationTerminal(t *testing.T) {
+	t.Parallel()
 	p := maintenanceFixture(t)
 	ctx := context.Background()
 	reviewer := &finalReviewer{s: p.s, repository: p.repository}
@@ -245,6 +248,7 @@ func TestDependentDeliveryMaintenanceGapKeepsImplementationTerminal(t *testing.T
 }
 
 func TestBaseIntegrationReleasesUnsealedDependentAfterParentBranchRemoval(t *testing.T) {
+	t.Parallel()
 	p := maintenanceFixture(t)
 	ctx := context.Background()
 	parent := config.WorkstreamID("w_fffffffffffffffffffffffffffffff0")

@@ -17,6 +17,7 @@ import (
 )
 
 func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
+	t.Parallel()
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			if backend == config.WorkspacesJujutsu {
