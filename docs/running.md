@@ -177,6 +177,32 @@ When the connection drops, the page shows that it is reconnecting and retries
 with a growing delay up to 10 seconds, immediately when the browser comes back
 online or the page becomes visible again.
 
+## The Beekeeper
+
+Beside each workstream's chat with its chief of staff, the page carries a
+"Beekeeper" item above the workstream list. The Beekeeper is the owner's one
+assistant for the whole service, not any single project: open it to ask what
+projects and workstreams exist, or to have it pass a message to the chief of
+staff of any workstream in any registered project. Selecting it opens a chat
+in the main area, with a composer that behaves like a workstream's: Enter
+sends, Shift+Enter starts a new line, and your message and the Beekeeper's
+reply appear without a reload. A reply a chief of staff sends back after the
+Beekeeper relays it a message also appears in the chat, attributed to that
+workstream's chief of staff, without you having to ask again.
+
+The Beekeeper answers one message at a time. Sending another while it is
+still working on the previous one is refused with a busy notice; wait for the
+reply and send it again. The chat shows only the most recent messages and has
+no way to load older history.
+
+The Beekeeper cannot approve or refuse a delivery, rule on a contested unit,
+approve a spec or plan, edit or ratify the charter, answer a question a
+worker escalated, or open a workstream; those decisions are still made from
+the workstream's own inbox entries, on the page or with the command line, as
+described above. `[beekeeper]` in the top-level configuration names its
+profile and sandbox; see the
+[configuration reference](configuration.md#top-level-configtoml).
+
 ## Reload
 
 `osmia reload` (or the page's reload control) reads the top-level
