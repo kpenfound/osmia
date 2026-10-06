@@ -114,6 +114,8 @@ func judgments(t *testing.T, repository *trace.Repository, stream config.Workstr
 //
 // The boost is on through the configuration and its key's environment
 // variable, so the test does not run in parallel.
+//
+// serial: sets OSMIA_TEST_JEV_KEY via t.Setenv
 func TestChiefQuestionSignals(t *testing.T) {
 	t.Setenv("OSMIA_TEST_JEV_KEY", "key")
 	p := &jevtest.Provider{Results: []jevtest.Result{
@@ -230,6 +232,8 @@ func TestChiefQuestionSignals(t *testing.T) {
 //
 // The boost is on through the configuration and its key's environment
 // variable, so the test does not run in parallel.
+//
+// serial: sets OSMIA_TEST_JEV_KEY via t.Setenv
 func TestChiefQuestionWithoutSignals(t *testing.T) {
 	t.Setenv("OSMIA_TEST_JEV_KEY", "key")
 	for _, tc := range []struct {
