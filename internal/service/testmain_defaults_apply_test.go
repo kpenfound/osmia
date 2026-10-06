@@ -16,6 +16,7 @@ func newTestFlags() *flag.FlagSet {
 }
 
 func TestApplyServiceTestDefaults(t *testing.T) {
+	t.Parallel()
 	const limit = 10 * time.Minute
 
 	t.Run("unset shuffle becomes on", func(t *testing.T) {
