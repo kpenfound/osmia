@@ -1233,10 +1233,23 @@
   // arrive meanwhile. A card answers the entry as it last rendered it.
   const decisions = new Map();
 
-  // submit sends an answer. A refusal reads the inbox again, so the entry
-  // shows what the refusal was about; the page never sends it again itself.
-  function submit(button, method, path, body, done) {
-    act(inboxResult, button, () => request(method, path, body), done, () => mark(['inbox']));
+  // submit sends an answer and, once the API confirms it, clears the card's
+  // form back to its default values, the way the browser's own reset does,
+  // so a card the inbox still lists or reuses next never shows a value from
+  // a stale submission; afterReset fixes up bookkeeping a field-by-field
+  // reset would not, such as the delivery card's drafted-value tracking. A
+  // refusal reads the inbox again, so the entry shows what the refusal was
+  // about and the owner's input stands; the page never sends it again
+  // itself.
+  function submit(form, button, method, path, body, done, afterReset) {
+    act(inboxResult, button, () => request(method, path, body), (out) => {
+      const text = done(out);
+      form.reset();
+      if (afterReset) {
+        afterReset();
+      }
+      return text;
+    }, () => mark(['inbox']));
   }
 
   function endpoint(entry) {
@@ -1245,7 +1258,7 @@
 
   function accept(d) {
     const entry = d.entry;
-    submit(d.accept, entry.answer.method, endpoint(entry), { ...entry.answer.body, text: entry.quick_reply },
+    submit(d.form, d.accept, entry.answer.method, endpoint(entry), { ...entry.answer.body, text: entry.quick_reply },
       (out) => 'Accepted the recommendation on inbox entry ' + out.number + '.');
   }
 
@@ -1259,27 +1272,23 @@
         show(result, 'error', 'Write an answer first.');
         return;
       }
-      submit(d.submit, entry.answer.method, endpoint(entry), { ...body, text }, (out) => {
-        d.text.value = '';
-        return 'Answered inbox entry ' + out.number + '.';
-      });
+      submit(d.form, d.submit, entry.answer.method, endpoint(entry), { ...body, text },
+        (out) => 'Answered inbox entry ' + out.number + '.');
       return;
     }
     if (entry.kind === 'delivery') {
       body.messages = d.messages.map((m) => ({ commit: m.commit, message: m.input.value }));
       body.description = d.text.value;
-      submit(d.submit, entry.answer.method, endpoint(entry), body, (out) => 'Approved the delivery of final review ' + out.review + ' of ' + workstreamName(entry.workstream) + '.');
+      submit(d.form, d.submit, entry.answer.method, endpoint(entry), body,
+        (out) => 'Approved the delivery of final review ' + out.review + ' of ' + workstreamName(entry.workstream) + '.',
+        // The next render then treats the drafted description and commit
+        // messages as unedited, so it fills them with whatever the delivery
+        // presents next rather than leaving the reset, blank fields stuck.
+        () => { d.draft = ''; d.messages = []; });
       return;
     }
     const [decision, objection] = d.decision.value.split(' ');
     const note = d.note.value.trim();
-    // decided clears the choice once the API recorded it, so a card that
-    // stays listed is not answered twice by accident.
-    const decided = (text) => (out) => {
-      d.decision.value = '';
-      d.note.value = '';
-      return text(out);
-    };
     if (!decision) {
       show(result, 'error', 'Choose a decision.');
       return;
@@ -1290,13 +1299,15 @@
           show(result, 'error', 'Give a note for the ruling.');
           return;
         }
-        submit(d.submit, entry.answer.method, endpoint(entry), { ...body, decision, note }, decided(() => 'Ruled ' + decision + ' on unit ' + entry.unit + '.'));
+        submit(d.form, d.submit, entry.answer.method, endpoint(entry), { ...body, decision, note },
+          () => 'Ruled ' + decision + ' on unit ' + entry.unit + '.');
         return;
       case 'amendment':
         if (note !== '') {
           body.note = note;
         }
-        submit(d.submit, entry.answer.method, endpoint(entry), { ...body, decision }, decided(() => 'Decided ' + decision + ' on amendment ' + entry.amendment + '.'));
+        submit(d.form, d.submit, entry.answer.method, endpoint(entry), { ...body, decision },
+          () => 'Decided ' + decision + ' on amendment ' + entry.amendment + '.');
         return;
       case 'base':
         submit(d.submit, entry.answer.method, endpoint(entry), body, decided((out) => workstreamName(entry.workstream) + ' continues from ' + out.upstream.remote + '/' + out.upstream.branch + '.'));
@@ -1304,24 +1315,25 @@
     }
     // A ratification is decided with ratify, or through the shed: a
     // disposition of an objection or a request for a redraft.
-    const detail = decided((out) => out.detail);
-    switch (decision) {
-      case 'ratify':
-        submit(d.submit, entry.answer.method, endpoint(entry), body, detail);
+    if (decision === 'ratify') {
+      submit(d.form, d.submit, entry.answer.method, endpoint(entry), body, (out) => out.detail);
+      return;
+    }
+    if (decision === 'sustain') {
+      submit(d.form, d.submit, 'POST', '/shed/rule/' + entry.workstream, { objection, disposition: 'sustain', note }, (out) => out.detail);
+      return;
+    }
+    if (decision === 'overrule') {
+      submit(d.form, d.submit, 'POST', '/shed/overrule/' + entry.workstream, { objection, reason: note }, (out) => out.detail);
+      return;
+    }
+    if (decision === 'redraft') {
+      if (note === '') {
+        show(result, 'error', 'Say what the redraft should change.');
         return;
-      case 'sustain':
-        submit(d.submit, 'POST', '/shed/rule/' + entry.workstream, { objection, disposition: 'sustain', note }, detail);
-        return;
-      case 'overrule':
-        submit(d.submit, 'POST', '/shed/overrule/' + entry.workstream, { objection, reason: note }, detail);
-        return;
-      case 'redraft':
-        if (note === '') {
-          show(result, 'error', 'Say what the redraft should change.');
-          return;
-        }
-        submit(d.submit, 'POST', '/shed/redraft/' + entry.workstream, { note }, detail);
-        return;
+      }
+      submit(d.form, d.submit, 'POST', '/shed/redraft/' + entry.workstream, { note }, (out) => out.detail);
+      return;
     }
   }
 
@@ -1809,10 +1821,20 @@
   let baseRead = null;
   let handinRetry = null;
 
-  function formAction(form, button, operation, done) {
+  // formAction runs an owner action a form submits. With opts.reset, a
+  // successful submission clears the form back to its default values, the
+  // way the browser's own reset does, and recomputes what renderOwnerForms
+  // keeps current, such as a hidden workstream field; a failed submission
+  // leaves the form exactly as the owner left it.
+  function formAction(form, button, operation, done, opts) {
     return act(form.querySelector('.result'), button, operation, (out) => {
       mark(['status', 'config', 'inbox', 'charter']);
-      return done(out);
+      const text = done(out);
+      if (opts && opts.reset) {
+        form.reset();
+        renderOwnerForms();
+      }
+      return text;
     });
   }
 
@@ -1897,7 +1919,7 @@
     add.addEventListener('submit', event => {
       event.preventDefault();
       const body = Object.fromEntries(new FormData(add));
-      formAction(add, event.submitter, () => request('POST', '/projects', body), out => 'Registered ' + out.project.name + '. Read and write its charter in Projects and charters before handing in work.');
+      formAction(add, event.submitter, () => request('POST', '/projects', body), out => 'Registered ' + out.project.name + '. Read and write its charter in Projects and charters before handing in work.', { reset: true });
     });
     const handin = byId('handin-form');
     handin.elements.project.addEventListener('change', renderOwnerForms);
@@ -1912,10 +1934,9 @@
       body.key = handinRetry.key;
       formAction(handin, event.submitter, () => request('POST', '/handin', body), out => {
         handinRetry = null;
-        handin.elements.content.value = '';
         select(out.workstream);
         return 'Handed in ' + out.workstream + '.';
-      });
+      }, { reset: true });
     });
     const charter = byId('project-edit');
     charter.elements.project.addEventListener('change', () => {
@@ -1998,10 +2019,9 @@
         if (!archive) {
           return 'Workstream action recorded.';
         }
-        action.elements.archive.checked = false;
         leaveArchived(workstream);
         return 'Workstream abandoned and archived.';
-      });
+      }, { reset: true });
     });
     action.elements.action.addEventListener('change', renderOwnerForms);
     const trace = byId('trace-form');
