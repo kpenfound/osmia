@@ -16,6 +16,7 @@ import (
 )
 
 func TestMemoryWatchResumesCursorAndDeduplicatesAfterRestart(t *testing.T) {
+	// serial: sets process env WATCH_OWNER_TOKEN and WATCH_AGENT_TOKEN via t.Setenv
 	t.Setenv("WATCH_OWNER_TOKEN", "owner-secret")
 	t.Setenv("WATCH_AGENT_TOKEN", "agent-secret")
 	_, cfg := conversationFixture(t, "memory-watch-")

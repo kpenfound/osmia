@@ -54,6 +54,7 @@ func TestMemorySetupIsLocalAndSeparatesOwnerAuthority(t *testing.T) {
 }
 
 func TestMemorySetupCombinesEntitiesMappedToOneScope(t *testing.T) {
+	t.Parallel()
 	_, cfg := conversationFixture(t, "setup-shared-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
@@ -86,6 +87,7 @@ func TestMemorySetupCombinesEntitiesMappedToOneScope(t *testing.T) {
 
 // The same configuration fixture is validated by Hearsay's directory loader.
 func TestMemorySetupMatchesConnectorConfigurationContract(t *testing.T) {
+	t.Parallel()
 	_, cfg := conversationFixture(t, "setup-contract-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)

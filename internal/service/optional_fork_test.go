@@ -21,6 +21,7 @@ func useUpstreamForPush(t *testing.T, p *publicationFixture) {
 }
 
 func TestPublicationWithoutForkReconcilesLostResponse(t *testing.T) {
+	t.Parallel()
 	p := newPublicationFixture(t, "commit-per-unit")
 	useUpstreamForPush(t, p)
 	ctx := context.Background()
@@ -96,6 +97,7 @@ func approveMaintenance(t *testing.T, p *publicationFixture) {
 }
 
 func TestSameRepositoryMaintenanceRetargetRecovery(t *testing.T) {
+	t.Parallel()
 	for _, interruption := range []string{"publish-pushed", "publish-retargeting", "lost-response", "publish-retargeted"} {
 		t.Run(interruption, func(t *testing.T) {
 			p := sameRepositoryMaintenance(t)
@@ -148,6 +150,7 @@ func TestSameRepositoryMaintenanceRetargetRecovery(t *testing.T) {
 }
 
 func TestSameRepositoryMaintenanceRefusesExternalPREdits(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"body", "base", "closed", "missing"} {
 		t.Run(change, func(t *testing.T) {
 			p := sameRepositoryMaintenance(t)
