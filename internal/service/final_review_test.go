@@ -62,7 +62,9 @@ func advanceUpstream(t *testing.T, f *shedFixture, files map[string]string) stri
 	home := filepath.Dir(f.clone)
 	scratch := filepath.Join(home, "upstream-scratch")
 	if _, err := os.Stat(scratch); err != nil {
-		demoGit(t, home, "clone", "--quiet", filepath.Join(home, "remotes", "dagger", "dagger.git"), scratch)
+		// --no-hardlinks: a local clone otherwise hardlinks the bare
+		// repository's object files into scratch instead of copying them.
+		demoGit(t, home, "clone", "--quiet", "--no-hardlinks", filepath.Join(home, "remotes", "dagger", "dagger.git"), scratch)
 	}
 	for name, content := range files {
 		must(t, os.MkdirAll(filepath.Dir(filepath.Join(scratch, name)), 0700))
