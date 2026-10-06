@@ -11,6 +11,7 @@ import (
 )
 
 func TestBrowserRegistersHandsInEditsAndInspectsTrace(t *testing.T) {
+	t.Parallel()
 	opts, clone := projectFixture(t)
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(path)

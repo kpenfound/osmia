@@ -13,6 +13,7 @@ import (
 )
 
 func TestBrowserControlsEachProjectAndKeepsPriorityOrdersSeparate(t *testing.T) {
+	t.Parallel()
 	f := newTwoProjectFixture(t)
 	ctx := context.Background()
 	path := filepath.Join(f.opts.Config.Root, "config.toml")

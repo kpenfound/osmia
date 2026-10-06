@@ -29,6 +29,7 @@ func sidebarFixture(t *testing.T) (Options, *trace.Repository) {
 // The sidebar the web UI renders lists workstreams by last activity, newest
 // first, regardless of the order they were created in.
 func TestBrowserSidebarOrdersWorkstreamsByActivity(t *testing.T) {
+	t.Parallel()
 	opts, repo := sidebarFixture(t)
 	ctx := context.Background()
 	first := config.WorkstreamID("w_00000000000000000000000000000001")
@@ -55,6 +56,7 @@ func TestBrowserSidebarOrdersWorkstreamsByActivity(t *testing.T) {
 // page afterwards with localStorage kept, never changes its position in the
 // sidebar.
 func TestBrowserSelectingWorkstreamDoesNotReorderSidebar(t *testing.T) {
+	t.Parallel()
 	opts, repo := sidebarFixture(t)
 	ctx := context.Background()
 	first := config.WorkstreamID("w_00000000000000000000000000000011")
@@ -91,6 +93,7 @@ func TestBrowserSelectingWorkstreamDoesNotReorderSidebar(t *testing.T) {
 // currently first, it appears first in the sidebar the next time the list
 // loads.
 func TestBrowserNewActivityPromotesWorkstreamInSidebar(t *testing.T) {
+	t.Parallel()
 	opts, repo := sidebarFixture(t)
 	ctx := context.Background()
 	first := config.WorkstreamID("w_00000000000000000000000000000021")
@@ -122,6 +125,7 @@ func TestBrowserNewActivityPromotesWorkstreamInSidebar(t *testing.T) {
 // Selecting a workstream in the sidebar opens it and marks it with the
 // current-selection marker, while other workstreams carry none.
 func TestBrowserSelectedWorkstreamIsMarkedCurrent(t *testing.T) {
+	t.Parallel()
 	opts, repo := sidebarFixture(t)
 	ctx := context.Background()
 	first := config.WorkstreamID("w_00000000000000000000000000000031")

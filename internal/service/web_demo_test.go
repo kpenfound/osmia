@@ -30,6 +30,7 @@ import (
 // and follows the workstream through its event stream. See
 // docs/web-demonstration.md.
 func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f, masons := newMasonFixture(t, 1, validPlan)
 	t.Cleanup(func() { f.stop(t) })

@@ -79,6 +79,8 @@ func sharedBrowser(t *testing.T, binary string) context.Context {
 // TestMain applies this package's shuffle and timeout defaults
 // (applyServiceTestDefaults), runs the tests, and shuts down the browser
 // sharedBrowser started, if any, once every test in the package has run.
+// serial: configures the process-wide flag.CommandLine (test shuffle and
+// timeout) before m.Run; it is the package entrypoint, not a parallel test.
 func TestMain(m *testing.M) {
 	if !flag.Parsed() {
 		flag.Parse()
@@ -463,6 +465,7 @@ func (f *pageFixture) status(t *testing.T, content trace.StatusContent) {
 // without a reload, at phone and laptop widths, and after its event stream is
 // lost it reconnects and reads again what changed meanwhile.
 func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
+	t.Parallel()
 	f := newPageFixture(t)
 	p := openBrowser(t)
 	card := `[data-workstream="` + string(stream) + `"] `
@@ -628,6 +631,10 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 // and the selection and what was seen survive a reload. Selecting a
 // workstream, a status change on one not shown and a reload never change the
 // sidebar's order, which the server already sorts by last activity.
+// serial: asserts markSeen's unread tracking, which app.js gates on
+// document.visibilityState === 'visible' (internal/web/app.js); openBrowser's
+// shared browser window has one visible tab at a time, and a concurrent
+// test's chromedp.BringToFront() races this test's visibility.
 func TestBrowserSelectionMarksActivityWithoutReordering(t *testing.T) {
 	f := newPageFixture(t)
 	p := openBrowser(t)
