@@ -156,6 +156,18 @@ From the page you can:
 - Abandon a workstream, archive a finished one and unarchive it.
 - Reload the configuration.
 
+Submitting a feed action, such as a ruling on a contested unit or ratifying a
+proposal, removes its card from the feed right away, before the service has
+answered. The card stays off the feed through any refresh that still lists the
+action, since the service may not have gotten to it yet, and comes back on
+its own, actionable again, if the service is still listing it two minutes
+after acknowledging the submission, so it can never disappear for good.
+Submitting one card never hides or changes any other. If a submission fails,
+the card comes back at once with the error shown and what you typed still in
+it. Every form that submits an action, including new project, archive and the
+feed's own action forms, clears back to its defaults once it succeeds; a
+failed submission leaves it exactly as you left it, with the error shown.
+
 An answer applies to the entry as the page showed it. If the packet, report or
 entry changed since, the answer is refused rather than applied to something
 you did not read, and the page shows the current version. The reload control
