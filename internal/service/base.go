@@ -17,10 +17,23 @@ var errBaseUnavailable = errors.New("workstream base is unavailable")
 
 // resolveBase selects one immutable revision for sealing and rebasing. A
 // dependency remains on the owner's local feature branch until integrated.
+// Once a durable observation records that the dependency has integrated
+// into upstream, resolveBase returns that recorded base without a Git
+// fetch or any pull-request lookup, parent or own (spec#8): the check runs
+// before any remote operation.
 func (s *Service) resolveBase(ctx context.Context, cfg *config.Config, repo *trace.Repository, stream config.WorkstreamID, g workspace.Provider) (seal.Base, error) {
 	dependency, err := repo.WorkstreamBase(stream)
 	if err != nil {
 		return seal.Base{}, err
+	}
+	if dependency.Base != "" {
+		observed, revision, err := baseObservationAt(repo, stream)
+		if err != nil {
+			return seal.Base{}, err
+		}
+		if integrationRecorded(observed, revision) {
+			return observed.Base, nil
+		}
 	}
 	remote, err := g.Remote(ctx, cfg.Project.Upstream)
 	if err != nil {
@@ -32,13 +45,6 @@ func (s *Service) resolveBase(ctx context.Context, cfg *config.Config, repo *tra
 	}
 	resolved := seal.Base{Remote: remote, Branch: cfg.Project.BaseBranch, Commit: upstream}
 	if dependency.Base == "" {
-		return resolved, nil
-	}
-	observed, revision, err := baseObservationAt(repo, stream)
-	if err != nil {
-		return seal.Base{}, err
-	}
-	if revision > 0 && observed.Base.Commit != "" && observed.Base.Workstream == "" {
 		return resolved, nil
 	}
 	state, err := repo.Workflow(dependency.Base, trace.FeatureSubject)

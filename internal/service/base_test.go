@@ -18,10 +18,19 @@ type baseProvider struct {
 	workspace.Provider
 	upstream, tip string
 	integrated    bool
+	// remotes and fetches count calls, to show resolveBase makes neither
+	// once a dependency's integration into upstream is recorded (spec#8).
+	remotes, fetches int
 }
 
-func (g *baseProvider) Remote(context.Context, string) (string, error)        { return "upstream", nil }
-func (g *baseProvider) Fetch(context.Context, string, string) (string, error) { return g.upstream, nil }
+func (g *baseProvider) Remote(context.Context, string) (string, error) {
+	g.remotes++
+	return "upstream", nil
+}
+func (g *baseProvider) Fetch(context.Context, string, string) (string, error) {
+	g.fetches++
+	return g.upstream, nil
+}
 func (g *baseProvider) Branch(context.Context, string) (string, bool, error) {
 	return g.tip, g.tip != "", nil
 }

@@ -171,7 +171,11 @@ func TestDependentDeliveryMaintenanceReviewsApprovesAndReconcilesUpstream(t *tes
 	}
 }
 
-func TestBaseRefreshRetryDoesNotDuplicateObservation(t *testing.T) {
+// TestBaseRefreshRetryDoesNotDuplicateObservationAndPassStopsScheduling
+// covers spec#3: once the retried Apply leaves the dependency's integration
+// recorded, Pass schedules no further base-refresh, so the latest recorded
+// base-refresh operation is still the one already applied.
+func TestBaseRefreshRetryDoesNotDuplicateObservationAndPassStopsScheduling(t *testing.T) {
 	p := maintenanceFixture(t)
 	ctx := context.Background()
 	refresh := &baseRefresher{s: p.s, repository: p.repository}
@@ -193,15 +197,8 @@ func TestBaseRefreshRetryDoesNotDuplicateObservation(t *testing.T) {
 	jump(p.clock, p.s.now().Add(2*time.Minute))
 	must(t, refresh.Pass(ctx))
 	next := actionOperation(t, p.repository, p.stream, baseRefreshAction)
-	if next.ID == op.ID {
-		t.Fatal("next integration check not scheduled")
-	}
-	// The check's effect lands before its result is recorded; settling
-	// observes the completed check through the trace.
-	_, err = refresh.Apply(ctx, next)
-	must(t, err)
-	if result := settleOperation(t, p.s, p.repository, p.stream, next, refresh); result.Outcome != "succeeded" {
-		t.Fatal(result)
+	if next.ID != op.ID {
+		t.Fatal("base-refresh was scheduled again after integration was recorded")
 	}
 	_, rev, err = baseObservationAt(p.repository, p.stream)
 	must(t, err)

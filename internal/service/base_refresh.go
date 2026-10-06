@@ -76,6 +76,24 @@ func (b *baseRefresher) Pass(ctx context.Context) error {
 		if state.Value == AbandonedState {
 			continue
 		}
+		// Finished, beyond abandoned, means delivered with the current pull
+		// request durably recorded as merged or closed (spec#4). A delivered
+		// workstream with no pull request of its own, or whose outcome isn't
+		// recorded yet, is not finished and keeps its refreshes (spec#11).
+		if state.Value == DeliveredState {
+			finished, err := ownPullRequestFinished(b.repository, stream)
+			if err != nil {
+				return err
+			}
+			if finished {
+				continue
+			}
+		}
+		if observed, revision, err := baseObservationAt(b.repository, stream); err != nil {
+			return err
+		} else if integrationRecorded(observed, revision) {
+			continue
+		}
 		_, _, sealed, err := seal.Latest(b.repository, stream)
 		if err != nil {
 			return err
