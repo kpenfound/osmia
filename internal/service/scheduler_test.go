@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -224,6 +225,8 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 	}
 	ticks := make(chan time.Time)
 	opts.Reconciliation.Now, opts.Reconciliation.Ticks = clock.Now, ticks
+	var passed atomic.Int64
+	opts.schedulePassed = func() { passed.Add(1) }
 	s, c := start(t, opts)
 	repo = <-lives
 	tick := func() {
@@ -254,6 +257,21 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 			tick()
 		}
 	}
+	// awaitPasses drives ticks until n further reconciliation passes have
+	// completed their schedule stage - the stage that runs the scheduler's
+	// dispatch pass - so a held turn has demonstrably had that many chances
+	// to start, rather than a fixed number of ticks.
+	awaitPasses := func(n int64) {
+		t.Helper()
+		base := passed.Load()
+		deadline := time.Now().Add(demoTimeout)
+		for passed.Load()-base < n {
+			if time.Now().After(deadline) {
+				t.Fatalf("only %d of %d further reconciliation passes completed; runs %v", passed.Load()-base, n, ran())
+			}
+			tick()
+		}
+	}
 
 	target := runtime.Target{Scope: "workstream", Project: project, Workstream: stream}
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
@@ -263,10 +281,10 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 	_, err = repo.EnqueueTurn(ctx, req)
 	must(t, err)
 	await("paused", []string{"chief"})
-	// A tick is taken only once the previous pass has finished, so the
-	// held turn had passes in which to start.
-	tick()
-	tick()
+	// Two full reconciliation passes complete since the held turn was
+	// queued, so the scheduler demonstrably had the chance to start it and
+	// left it held, rather than simply not having reached it yet.
+	awaitPasses(2)
 	if got := ran(); !slices.Equal(got, []string{"chief"}) {
 		t.Fatalf("paused runs %v", got)
 	}
