@@ -15,7 +15,10 @@ import (
 )
 
 // recordingTurns is a fake model session: it records every prepared turn and
-// answers with its scripted result.
+// answers with its scripted result. It leaves unverified anything about a
+// real model backend: actual LLM reasoning, tool selection and timing; each
+// test configures result or err to stand in for exactly the outcome its
+// scenario claims, never an unconditional success.
 type recordingTurns struct {
 	mu     sync.Mutex
 	calls  []coreadapter.PreparedTurn
@@ -37,7 +40,11 @@ func (f *recordingTurns) Calls() []coreadapter.PreparedTurn {
 }
 
 // blockingTurns is a fake model session whose first call closes entered and
-// then waits for hold to close, or for its context to end.
+// then waits for hold to close, or for its context to end: it stands in for
+// a real model session's duration, not its reasoning, so a test can make a
+// turn observably "in flight" without timing a live call. Its scripted
+// result is reached only once the test has used that window to assert on
+// the concurrent calls it is actually checking.
 type blockingTurns struct {
 	hold    chan struct{}
 	entered chan struct{}
