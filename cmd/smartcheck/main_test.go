@@ -22,7 +22,11 @@ const (
 	release      = "dag+check://release/version-round-trip"
 )
 
-// fakeDagger lists links and records each dagger check it is asked to run.
+// fakeDagger stands in for the Dagger CLI, which is costly to invoke for
+// real (it builds and runs the project's checks) and may not be installed.
+// It lists links and records each dagger check it is asked to run, but does
+// not exercise whether the real Dagger CLI accepts the arguments smartcheck
+// passes it or actually runs the selected checks.
 type fakeDagger struct {
 	links []string
 	exit  int
@@ -48,7 +52,11 @@ func (d *fakeDagger) run(_ context.Context, _ string, stdout, _ io.Writer, args 
 	return d.exit, nil
 }
 
-// fakeJev answers with probabilities by check link, or with err.
+// fakeJev stands in for the Jev model service reached over the network,
+// which is both costly and nondeterministic to call for real. It answers
+// with probabilities by check link, or with err. It does not exercise
+// whether a real Jev endpoint accepts the request shape smartcheck sends or
+// returns well-formed answers for it.
 type fakeJev struct {
 	probabilities map[string]float64
 	err           error
@@ -217,30 +225,49 @@ func TestNothingChangedRunsNothing(t *testing.T) {
 	}
 }
 
+// Without the default Jev API key env var set, smartcheck refuses before
+// touching the repository or Dagger.
 func TestRefusesWithoutAnAPIKey(t *testing.T) {
 	t.Parallel()
 	dir := newRepository(t)
-	write(t, dir, "README.md", "changed\n")
 	d, j := &fakeDagger{links: []string{traceTests}}, &fakeJev{}
 	r := runHarness(t, d, j, map[string]string{"JEV_KEY": "set"}, "-C", dir)
 	if r.code != 1 || !strings.Contains(r.stderr, config.DefaultJevAPIKeyEnv+" is not set") || len(d.checks) != 0 {
 		t.Fatalf("exit %d, stderr %q", r.code, r.stderr)
 	}
-	r = runHarness(t, d, j, map[string]string{"JEV_KEY": "set"}, "-C", dir, "--api-key-env=JEV_KEY", "--base=HEAD")
-	if r.code != 0 || j.clients[0].APIKey != "set" {
-		t.Fatalf("exit %d, stderr %q", r.code, r.stderr)
+}
+
+// --api-key-env names the environment variable smartcheck reads instead of
+// the default, and --base is accepted as a revision other than main.
+func TestHonoursAPIKeyEnvAndBaseFlags(t *testing.T) {
+	t.Parallel()
+	dir := newRepository(t)
+	write(t, dir, "internal/trace/trace.go", "package trace\n\nconst Version = 2\n")
+	d := &fakeDagger{links: []string{traceTests}}
+	j := &fakeJev{probabilities: map[string]float64{traceTests: 0.95}}
+	r := runHarness(t, d, j, map[string]string{"JEV_KEY": "set"}, "-C", dir, "--api-key-env=JEV_KEY", "--base=HEAD")
+	if r.code != 0 || r.stderr != "" || j.clients[0].APIKey != "set" || !slices.EqualFunc(d.checks, [][]string{{traceTests}}, slices.Equal) {
+		t.Fatalf("exit %d, stderr %q, ran %q", r.code, r.stderr, d.checks)
 	}
 }
 
-func TestReportsInvalidArguments(t *testing.T) {
+// An unknown --base revision surfaces git's own error and runs nothing.
+func TestUnknownBaseRevisionFails(t *testing.T) {
 	t.Parallel()
 	dir := newRepository(t)
 	d, j := &fakeDagger{}, &fakeJev{}
 	r := runHarness(t, d, j, withKey, "-C", dir, "--base=trunk")
-	if r.code != 1 || !strings.Contains(r.stderr, "git merge-base trunk HEAD") {
-		t.Fatalf("exit %d, stderr %q", r.code, r.stderr)
+	if r.code != 1 || !strings.Contains(r.stderr, "git merge-base trunk HEAD") || len(d.checks) != 0 {
+		t.Fatalf("exit %d, stderr %q, ran %q", r.code, r.stderr, d.checks)
 	}
-	if r := runHarness(t, d, j, withKey, "--threshold=2"); r.code != 2 {
-		t.Fatalf("an invalid threshold exited %d", r.code)
+}
+
+// An out-of-range --threshold is rejected before anything runs.
+func TestInvalidThresholdIsRejected(t *testing.T) {
+	t.Parallel()
+	d, j := &fakeDagger{}, &fakeJev{}
+	r := runHarness(t, d, j, withKey, "--threshold=2")
+	if r.code != 2 || len(d.checks) != 0 || len(j.requests) != 0 {
+		t.Fatalf("exit %d, stderr %q, ran %q", r.code, r.stderr, d.checks)
 	}
 }
