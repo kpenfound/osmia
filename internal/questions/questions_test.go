@@ -555,6 +555,11 @@ func TestAskAnswerAndDeliver(t *testing.T) {
 	}
 }
 
+// fakeTurns stands in for the real agent backend that runs a model session:
+// a costly, nondeterministic system. It returns exactly the result and error
+// the test configures, so it leaves unverified whether a real backend session
+// reports its outcome and errors the same way; the test only establishes what
+// Turns.Run does with whatever the backend reports.
 type fakeTurns struct {
 	result coreadapter.SessionResult
 	err    error
@@ -568,6 +573,8 @@ func (f *fakeTurns) Run(context.Context, coreadapter.PreparedTurn) (coreadapter.
 	return f.result, f.err
 }
 
+// resumableTurns adds a resume check to fakeTurns, leaving the same backend
+// boundary unverified.
 type resumableTurns struct {
 	fakeTurns
 	checked int

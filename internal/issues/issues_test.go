@@ -42,6 +42,9 @@ func TestGitHubFetch(t *testing.T) {
 	var auth, path string
 	answer := `{"title":"Add hand-in","body":"Design text"}`
 	status := http.StatusOK
+	// server stands in for the real GitHub REST API: a remote, rate-limited
+	// system. It leaves unverified whether the real API's pagination, rate
+	// limiting and exact response shapes match what this fake returns.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth, path = r.Header.Get("Authorization"), r.URL.Path
 		w.WriteHeader(status)

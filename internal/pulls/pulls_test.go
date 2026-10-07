@@ -13,6 +13,8 @@ import (
 func TestGitHubFindsAndCreatesPullRequestsWithTheToken(t *testing.T) {
 	t.Parallel()
 	var created map[string]string
+	// server stands in for the real GitHub REST API: a remote system whose
+	// real responses and rate limits this fake does not reproduce.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer secret" || r.Header.Get("Accept") != "application/vnd.github+json" {
 			t.Errorf("headers %v", r.Header)
@@ -61,6 +63,8 @@ func TestGitHubFindsAndCreatesPullRequestsWithTheToken(t *testing.T) {
 }
 
 func TestGitHubSameRepositoryCreateAndRetarget(t *testing.T) {
+	// server stands in for the real GitHub REST API, the same remote
+	// boundary noted above.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer secret" {
 			t.Error("missing service credentials")
@@ -98,6 +102,8 @@ func TestGitHubSameRepositoryCreateAndRetarget(t *testing.T) {
 
 func TestGitHubErrorsKeepGitHubsExplanation(t *testing.T) {
 	t.Parallel()
+	// server stands in for the real GitHub REST API, the same remote
+	// boundary noted above.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/acme/permissions/pulls":
