@@ -50,7 +50,10 @@ profiles = ["default", "third"]
 				t.Errorf("member %d system prompt and perspective %s disagree; want only %s", i+1, name, w.perspective)
 			}
 		}
-		if !strings.HasPrefix(req.SystemPrompt, committeeSystemPrompt(f.s.current().Project)) {
+		// A literal fragment of the committee's shared framing, not the output of
+		// committeeSystemPrompt itself: computing the expected text by calling
+		// the function under test would hide a wording bug in that function.
+		if !strings.Contains(req.SystemPrompt, "You are a member of the committee that debates one workstream's feature spec and plan") {
 			t.Errorf("member %d system prompt lost the committee prompt: %s", i+1, req.SystemPrompt)
 		}
 	}
