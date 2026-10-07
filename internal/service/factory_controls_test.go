@@ -10,6 +10,7 @@ import (
 )
 
 func TestChiefControlsAnotherProjectAndRecordsTheTarget(t *testing.T) {
+	t.Parallel()
 	f := newTwoProjectFixture(t)
 	f.opts.Threads = nil
 	s, _ := start(t, f.opts)

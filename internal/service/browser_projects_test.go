@@ -13,7 +13,7 @@ import (
 )
 
 func TestBrowserControlsEachProjectAndKeepsPriorityOrdersSeparate(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	f := newTwoProjectFixture(t)
 	ctx := context.Background()
 	path := filepath.Join(f.opts.Config.Root, "config.toml")
@@ -21,6 +21,7 @@ func TestBrowserControlsEachProjectAndKeepsPriorityOrdersSeparate(t *testing.T) 
 	must(t, err)
 	must(t, os.WriteFile(path, append(data, []byte("[listen]\nweb = \"127.0.0.1:0\"\n")...), 0600))
 	s, c := start(t, f.opts)
+	p := openBrowser(t)
 	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.await("both projects in the priority selector", `document.querySelector('#priority-project').options.length === 2`)
 	p.eval(`window.notReloaded = true`, nil)

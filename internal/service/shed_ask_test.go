@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -585,7 +586,16 @@ func TestInterruptedAnswerTurnIsRetriedWithTheAnswer(t *testing.T) {
 func TestAskingTurnInterruptedByAStopStillParksTheRound(t *testing.T) {
 	t.Parallel()
 	p := &faults{}
-	f, c := newAskingFixture(t, 1, 1, p)
+	// Held back until the restarted round has recorded its park on the
+	// still open question, the chief of staff's review of it, and the
+	// answer it would then queue, cannot reach the member's thread first
+	// and let the round skip the park the assertions below need to see.
+	var parked atomic.Bool
+	f, c := newAskingFixtureWith(t, 1, 1, p, func(opts *Options) {
+		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
+			return op.Action == thread.TurnAction && !parked.Load()
+		}
+	})
 	defer f.stop(t)
 	c.release("1")
 	member := committeeAgent(1)
@@ -608,6 +618,8 @@ func TestAskingTurnInterruptedByAStopStillParksTheRound(t *testing.T) {
 	}
 	f.stop(t)
 	f.start(t)
+	f.awaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
+	parked.Store(true)
 	f.awaitShed(t, stream, "concluded-1")
 	p.check(t)
 	if moves, want := f.shedMoves(t, stream), []string{"round-1", "waiting-1", "round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
@@ -915,10 +927,19 @@ func TestAbandoningAParkedRoundLeavesItParked(t *testing.T) {
 	p := &faults{}
 	// Thread turns run in the pass rather than beside it, so the pass that
 	// would deliver the answer starts only once the chief of staff's turn
-	// that recorded it has ended.
+	// that recorded it has ended. Forcing that on every thread turn reaches
+	// as far as the chief of staff's own review of the question, which the
+	// repository's one operation lock then serializes with the round's own
+	// commit of its park: held back until the round has parked, the review
+	// cannot hold that lock first and starve the park of it.
+	var chiefReviewHeld atomic.Bool
+	chiefReviewHeld.Store(true)
 	f, c := newAskingFixtureWith(t, 1, 1, p, func(opts *Options) {
 		opts.Reconciliation.Concurrent = func(op coreadapter.Operation) bool {
 			return concurrentOperation(op) && op.Action != thread.TurnAction
+		}
+		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
+			return op.Action == thread.TurnAction && chiefReviewHeld.Load()
 		}
 	})
 	defer f.stop(t)
@@ -928,6 +949,9 @@ func TestAbandoningAParkedRoundLeavesItParked(t *testing.T) {
 	answering := f.answer("1", silent)
 	stream := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
+	// The round's park is committed: the chief of staff's review of the now
+	// open question can run without racing it for the operation lock.
+	chiefReviewHeld.Store(false)
 	// The answer is recorded while the chief of staff's turn is held open,
 	// so no pass delivers it before the abandonment.
 	f.awaitQuestion(t, stream, "1", trace.QuestionAnswered)
@@ -935,8 +959,15 @@ func TestAbandoningAParkedRoundLeavesItParked(t *testing.T) {
 		t.Fatal(err)
 	}
 	close(hold)
-	must(t, f.s.answers(f.s.current(), f.repository()).Pass(ctx))
-	must(t, (&debate{s: f.s, repository: f.repository()}).Pass(ctx))
+	// Idle the controller before driving these passes by hand, so nothing
+	// it runs beside its schedule hooks can commit while they do.
+	repo := f.repository()
+	drivePass(t, f.s, repo, func() error {
+		if err := f.s.answers(f.s.current(), repo).Pass(ctx); err != nil {
+			return err
+		}
+		return (&debate{s: f.s, repository: repo}).Pass(ctx)
+	})
 	if moves, want := f.shedMoves(t, stream), []string{"round-1", "waiting-1"}; !slices.Equal(moves, want) {
 		t.Fatalf("shed went %v, want %v", moves, want)
 	}

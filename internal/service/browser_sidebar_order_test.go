@@ -29,7 +29,7 @@ func sidebarFixture(t *testing.T) (Options, *trace.Repository) {
 // The sidebar the web UI renders lists workstreams by last activity, newest
 // first, regardless of the order they were created in.
 func TestBrowserSidebarOrdersWorkstreamsByActivity(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	opts, repo := sidebarFixture(t)
 	ctx := context.Background()
 	first := config.WorkstreamID("w_00000000000000000000000000000001")
@@ -46,6 +46,7 @@ func TestBrowserSidebarOrdersWorkstreamsByActivity(t *testing.T) {
 	must(t, repo.Close())
 
 	s, _ := start(t, opts)
+	p := openBrowser(t)
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.awaitSidebarOrder(first, second, third)
@@ -55,7 +56,7 @@ func TestBrowserSidebarOrdersWorkstreamsByActivity(t *testing.T) {
 // page afterwards with localStorage kept, never changes its position in the
 // sidebar.
 func TestBrowserSelectingWorkstreamDoesNotReorderSidebar(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	opts, repo := sidebarFixture(t)
 	ctx := context.Background()
 	first := config.WorkstreamID("w_00000000000000000000000000000011")
@@ -70,6 +71,7 @@ func TestBrowserSelectingWorkstreamDoesNotReorderSidebar(t *testing.T) {
 	must(t, repo.Close())
 
 	s, _ := start(t, opts)
+	p := openBrowser(t)
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.awaitSidebarOrder(first, second, third)
@@ -91,7 +93,7 @@ func TestBrowserSelectingWorkstreamDoesNotReorderSidebar(t *testing.T) {
 // currently first, it appears first in the sidebar the next time the list
 // loads.
 func TestBrowserNewActivityPromotesWorkstreamInSidebar(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	opts, repo := sidebarFixture(t)
 	ctx := context.Background()
 	first := config.WorkstreamID("w_00000000000000000000000000000021")
@@ -106,6 +108,7 @@ func TestBrowserNewActivityPromotesWorkstreamInSidebar(t *testing.T) {
 	must(t, repo.Close())
 
 	s, _ := start(t, opts)
+	p := openBrowser(t)
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.awaitSidebarOrder(first, second, third)
@@ -122,7 +125,7 @@ func TestBrowserNewActivityPromotesWorkstreamInSidebar(t *testing.T) {
 // Selecting a workstream in the sidebar opens it and marks it with the
 // current-selection marker, while other workstreams carry none.
 func TestBrowserSelectedWorkstreamIsMarkedCurrent(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	opts, repo := sidebarFixture(t)
 	ctx := context.Background()
 	first := config.WorkstreamID("w_00000000000000000000000000000031")
@@ -134,6 +137,7 @@ func TestBrowserSelectedWorkstreamIsMarkedCurrent(t *testing.T) {
 	must(t, repo.Close())
 
 	s, _ := start(t, opts)
+	p := openBrowser(t)
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.awaitSidebarOrder(first, second)

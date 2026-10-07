@@ -29,7 +29,9 @@ func (f *architectFixture) upstream(t *testing.T) string {
 	if _, err := os.Stat(bare); err != nil {
 		must(t, os.MkdirAll(filepath.Dir(bare), 0700))
 		demoGit(t, home, "-C", f.clone, "branch", "-M", "main")
-		demoGit(t, home, "clone", "--quiet", "--bare", f.clone, bare)
+		// --no-hardlinks: a local clone otherwise hardlinks f.clone's object
+		// files into bare instead of copying them.
+		demoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", f.clone, bare)
 	}
 	demoGit(t, home, "-C", f.clone, "remote", "add", "upstream", bare)
 	return strings.TrimSpace(demoGit(t, home, "-C", bare, "rev-parse", "refs/heads/main"))

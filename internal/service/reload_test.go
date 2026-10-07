@@ -291,6 +291,8 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 
 // The default root reads its top-level file from the XDG config directory at
 // startup and on every reload.
+//
+// serial: sets XDG_DATA_HOME and XDG_CONFIG_HOME via t.Setenv
 func TestDefaultRootReloadsXDGConfig(t *testing.T) {
 	ctx := context.Background()
 	opts := fixture(t)

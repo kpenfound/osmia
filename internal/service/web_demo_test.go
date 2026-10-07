@@ -30,10 +30,10 @@ import (
 // and follows the workstream through its event stream. See
 // docs/web-demonstration.md.
 func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	ctx := context.Background()
 	f, masons := newMasonFixture(t, 1, validPlan)
-	defer func() { f.stop(t) }()
+	t.Cleanup(func() { f.stop(t) })
 
 	// The owner serves the page on a loopback web listener.
 	f.stop(t)
@@ -150,6 +150,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 
 	// The owner opens the page at phone width before anything is handed in,
 	// and keeps it open to the end.
+	p := openBrowser(t)
 	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.eval(`window.notReloaded = true`, nil)
@@ -184,7 +185,19 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	p.click(card + "button[type=submit]")
 	p.awaitText("#inbox-result", "Answered inbox entry")
 	p.awaitGone("the answered question", card)
-	if r := f.question(t, stream, "1").Ruling; r == nil || r.OwnerResponse != ownerRuling || r.Actor != ownerActor {
+	// f.question's Ruling is the newest revision: by the time the page has
+	// cleared the card, the fake chief of staff's relay may already have
+	// recorded revision 2 over it. Find the owner's own revision (1) rather
+	// than whichever is latest.
+	rulings, err := trace.Read[trace.Ruling](f.repository(), stream)
+	must(t, err)
+	var r *trace.Ruling
+	for i, ruling := range rulings {
+		if ruling.QuestionID == "1" && ruling.Revision == 1 {
+			r = &rulings[i]
+		}
+	}
+	if r == nil || r.OwnerResponse != ownerRuling || r.Actor != ownerActor {
 		t.Fatalf("the owner's ruling on question 1: %+v", r)
 	}
 

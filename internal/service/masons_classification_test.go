@@ -189,6 +189,7 @@ func TestMasonCleanTurnPolicy(t *testing.T) {
 // TestMasonJevClassification turns the boost on through the configuration
 // and its key's environment variable, so it does not run in parallel.
 func TestMasonJevClassification(t *testing.T) {
+	// serial: sets process env OSMIA_TEST_JEV_KEY via t.Setenv
 	t.Setenv("OSMIA_TEST_JEV_KEY", "key")
 	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{
 		"class":                   jevtest.Choice("claims_done", 0.94, 0.9, "asked_in_prose", "gave_up", "unclear"),

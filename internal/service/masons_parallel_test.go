@@ -94,7 +94,7 @@ func TestMasonStartsStayWithinBothCaps(t *testing.T) {
 	stream := f.seedBuilding(t, "capped", disjointPlan)
 	f.awaitMasonRan(t, stream, "resume")
 	f.awaitMasonRan(t, stream, "upload")
-	settle()
+	f.awaitDeferral(t, stream, "audit", DeferWorkstreamCap)
 	masons.check(t)
 	if got, want := starts(t, f, stream), []string{trace.UnitSubject("resume"), trace.UnitSubject("upload")}; !slices.Equal(got, want) {
 		t.Fatalf("started %v, want %v", got, want)
@@ -118,7 +118,7 @@ func TestWaitingUnitLeavesItsSlotToADisjointUnit(t *testing.T) {
 	f.engine.mu.Unlock()
 	stream := f.seedBuilding(t, "waiting", parallelPlan)
 	f.awaitMasonRan(t, stream, "audit")
-	settle()
+	f.awaitDeferral(t, stream, "dedupe", DeferEntangled)
 	p.check(t)
 	masons.check(t)
 

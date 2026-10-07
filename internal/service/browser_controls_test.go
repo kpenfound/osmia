@@ -43,8 +43,9 @@ func (f *pageFixture) answerChief(t *testing.T, ws config.WorkstreamID, turn, fi
 // message and the chief of staff's answer as the event stream announces
 // them, without a reload.
 func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	f := newPageFixture(t)
+	p := openBrowser(t)
 	ctx := context.Background()
 	card := `[data-workstream="` + string(quiet) + `"] `
 	send := card + "[data-field=send] "
@@ -119,8 +120,9 @@ func pauseOf(rt RuntimeResponse, target runtime.Target) (runtime.Pause, bool) {
 // provider limit's role pause, shows the API's refusal, and keeps a message
 // and a profile being chosen through the reads events cause.
 func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	f := newPageFixture(t)
+	p := openBrowser(t)
 	ctx := context.Background()
 	runtimeView := func() RuntimeResponse {
 		t.Helper()
@@ -306,9 +308,14 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 // loaded one and a reload has something to do. A reload that fails keeps it
 // lit and shows the error; one that applies clears it and shows the new
 // digest; a change only a restart applies is named and does not light it.
+// serial: asserts the config drift indicator, which app.js refreshes only
+// through a setInterval poll gated on document.visibilityState === 'visible'
+// (internal/web/app.js); openBrowser's shared browser window has one visible
+// tab at a time, and a concurrent test's chromedp.BringToFront() races this
+// test's visibility.
 func TestBrowserPageReloadLightsOnDiskDriftAndClears(t *testing.T) {
-	p := openBrowser(t)
 	f := newPageFixture(t)
+	p := openBrowser(t)
 	ctx := context.Background()
 	digest := func() string {
 		t.Helper()
@@ -390,8 +397,9 @@ func TestBrowserPageReloadLightsOnDiskDriftAndClears(t *testing.T) {
 // for the Archived group and the pause targets, the page shows the next
 // workstream in its place, and unarchive returns it.
 func TestBrowserPageArchivesAndUnarchivesWorkstreams(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	f := newPageFixture(t)
+	p := openBrowser(t)
 	ctx := context.Background()
 	row := `[data-select="` + string(quiet) + `"]`
 	menu := func(action string, offered bool) {

@@ -134,6 +134,12 @@ type Options struct {
 	// removeSandbox replaces the removal of the Docker Sandboxes interrupted
 	// sessions left, for tests.
 	removeSandbox func(context.Context, string) error
+	// schedulePassed is called, if set, once every time a reconciliation
+	// pass's schedule stage completes without error - the stage that runs
+	// the scheduler's dispatch pass among its hooks. Nil runs no hook. Tests
+	// use it to wait for a pass to demonstrably complete instead of a fixed
+	// number of ticks or a sleep.
+	schedulePassed func()
 }
 
 // activeProject is the runtime state of one active project: its open trace
@@ -955,6 +961,16 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	p := &pipeline{}
 	p.current.Store(first)
 	options.Schedule = p.schedule
+	if hook := s.options.schedulePassed; hook != nil {
+		schedule := options.Schedule
+		options.Schedule = func(ctx context.Context) error {
+			if err := schedule(ctx); err != nil {
+				return err
+			}
+			hook()
+			return nil
+		}
+	}
 	adapters := maps.Clone(options.Adapters)
 	if adapters == nil {
 		adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{}

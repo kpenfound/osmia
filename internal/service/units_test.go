@@ -176,6 +176,7 @@ func (f unitsFixture) masonTurn(ctx context.Context, t *testing.T, units unitWor
 // symlink it plants in its copy never reaches the workspace. What it wrote,
 // removed, turned from a file into a directory or back, and made executable
 // or not is in the workspace after the turn, ready to be snapshotted.
+// serial: sets GITHUB_TOKEN and GH_TOKEN via t.Setenv
 func TestMasonTurnGetsTheUnitWorkspaceFilesOnly(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_host")
 	t.Setenv("GH_TOKEN", "ghp_host")

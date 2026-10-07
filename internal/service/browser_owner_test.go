@@ -11,7 +11,7 @@ import (
 )
 
 func TestBrowserRegistersHandsInEditsAndInspectsTrace(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	opts, clone := projectFixture(t)
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(path)
@@ -21,6 +21,7 @@ func TestBrowserRegistersHandsInEditsAndInspectsTrace(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(clone, "internal", "trace", "trace.go"), []byte("package trace\n"), 0600))
 	demoGit(t, filepath.Dir(clone), "-C", clone, "add", "internal")
 	s, c := start(t, opts)
+	p := openBrowser(t)
 	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.await("connected", `document.body.dataset.connection === 'live'`)
 	p.openView("project-add")

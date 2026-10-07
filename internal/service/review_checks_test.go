@@ -25,6 +25,7 @@ var passingChecks = checkFunc(func(context.Context, string) (CheckResult, error)
 })
 
 func TestUnitReviewReadsThePinnedCandidate(t *testing.T) {
+	t.Parallel()
 	f, stream, repo := newReviewFixture(t, "checks")
 	ctx := context.Background()
 	r := &reviewers{masons: newMasonController(f.s, repo)}
@@ -55,6 +56,7 @@ func TestUnitReviewReadsThePinnedCandidate(t *testing.T) {
 	}
 }
 
+// serial: sets PATH, GITHUB_TOKEN, ANTHROPIC_API_KEY, SSH_AUTH_SOCK and EXPECTED_HOST_HOME via t.Setenv
 func TestDaggerChecksBoundOutputWithholdCredentialsAndDisableColor(t *testing.T) {
 	bin := t.TempDir()
 	script := `#!/bin/sh
@@ -87,6 +89,7 @@ exit 3
 	}
 }
 
+// serial: sets PATH and GITHUB_TOKEN via t.Setenv
 func TestDaggerChecksListExpandedLinks(t *testing.T) {
 	bin := t.TempDir()
 	script := `#!/bin/sh
@@ -111,6 +114,7 @@ echo 'dag+check://release/version'
 }
 
 func TestFailedChecksReadTheReport(t *testing.T) {
+	t.Parallel()
 	report := `== TRACE ==  ✘ FAILED
 ! dag://go/packages/tests/test?go-package=p&go-test=TestAdd: Go tests in p: exit code: 1
 

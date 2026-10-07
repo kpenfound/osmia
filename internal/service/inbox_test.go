@@ -39,6 +39,7 @@ func apiError(t *testing.T, err error, code Code, message string) {
 }
 
 func TestQuickReplyEligibility(t *testing.T) {
+	t.Parallel()
 	for _, word := range []string{"push", "merge", "deliver", "abandon", "force", "delete", "rebase", "overrule", "deploy", "ratify", "veto", "revert", "reset", "discard", "PUSHES", "merged", "ratified", "vetoing", "abandoned", "force-push", "Merge,please"} {
 		t.Run(word, func(t *testing.T) {
 			entry := trace.InboxEntry{State: trace.QuestionEscalated, Recommendation: "Please " + word + " this.", Questions: []trace.QuestionState{{}}}
@@ -320,12 +321,25 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	if got := states(repo, stream); !reflect.DeepEqual(got, map[string]string{"1": trace.QuestionAnswered, "2": trace.QuestionAnswered}) {
 		t.Fatalf("questions after the relay: %v", got)
 	}
-	// The relay only records the answer. The answer pass, which the
-	// recorded relay wakes while the chief's turn still runs, is the one
-	// path that queues it on the asker's thread.
-	if th := thread(repo, stream, demoAgent); len(th.Turns) > 2 || len(th.Turns) == 2 && (th.Turns[1].Request.TurnID != questions.TurnID("1") || th.Turns[1].Request.Actor != questions.Actor) {
-		t.Fatalf("ruling delivered other than by the answer pass: %v", turnsOf(repo, stream, demoAgent))
+	// The relay only records the answer. The answer pass, which the recorded
+	// relay wakes while the chief's turn still runs, is the one path that
+	// queues it on the asker's thread; it races the chief's own turn, which
+	// is still blocked on the service's cancellation, so wait for it rather
+	// than checking once right after the relay closes.
+	wait, closeWait := serviceChanges(t, s)
+	queuedBy := time.Now().Add(demoTimeout)
+	for {
+		th := thread(repo, stream, demoAgent)
+		if len(th.Turns) == 2 && th.Turns[1].Request.TurnID == questions.TurnID("1") && th.Turns[1].Request.Actor == questions.Actor {
+			break
+		}
+		if len(th.Turns) > 2 || time.Now().After(queuedBy) {
+			closeWait()
+			t.Fatalf("ruling delivered other than by the answer pass: %v", turnsOf(repo, stream, demoAgent))
+		}
+		wait()
 	}
+	closeWait()
 	stop(s, c)
 
 	// Third lifetime, after the relay: each asker's thread gets its answer

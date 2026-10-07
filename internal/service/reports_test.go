@@ -69,6 +69,7 @@ func reportDone(outcome string) func(context.Context, agent.Request, *mcp.Client
 }
 
 func TestFinishNoticeWithOptionalOwnerAction(t *testing.T) {
+	t.Parallel()
 	base := "Unit parser is checking: its mason reported done on turn first; its report is units/parser/report.json revision 2."
 	for _, tc := range []struct {
 		card *coreadapter.Card

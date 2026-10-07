@@ -476,6 +476,7 @@ func TestHandInStatusCodes(t *testing.T) {
 	}
 }
 
+// serial: sets process environment variable GITHUB_TOKEN via t.Setenv
 func TestHandInCredentialsStayInTheService(t *testing.T) {
 	f := newHandInFixture(t)
 	f.handIn(t, HandInRequest{Key: "url", URL: "https://github.com/owner/repo/issues/12"})

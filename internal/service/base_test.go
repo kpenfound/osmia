@@ -39,6 +39,7 @@ func (g *baseProvider) Ancestor(context.Context, string, string) (bool, error) {
 }
 
 func TestBaseResolverUsesDependencyUntilUpstreamIntegration(t *testing.T) {
+	t.Parallel()
 	for _, fork := range []bool{true, false} {
 		name := "without-fork"
 		if fork {
@@ -137,6 +138,7 @@ func testBaseResolver(t *testing.T, fork bool) {
 }
 
 func TestHandInBaseIsPinnedToItsIdempotencyKey(t *testing.T) {
+	t.Parallel()
 	opts, _ := conversationFixture(t, "base-hand-")
 	s, c := start(t, opts)
 	text := "Build on the earlier feature"

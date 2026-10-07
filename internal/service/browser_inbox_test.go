@@ -108,8 +108,9 @@ func entriesOf(t *testing.T, c *Client, kind string) []InboxEntry {
 // page no longer shows the latest of is refused; the page shows the refusal
 // and the refreshed entry and sends nothing again.
 func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	f := newPageFixture(t)
+	p := openBrowser(t)
 	ctx := context.Background()
 	live := f.s.sole().repository
 	at := time.Now().UTC()
@@ -312,9 +313,10 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 // the revisions the redraft's debate concluded at. Each is recorded as the
 // matching command's call records it.
 func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	f := newDebateFixtureWith(t, 2, 1, listenWeb, nil)
-	defer f.stop(t)
+	t.Cleanup(func() { f.stop(t) })
+	p := openBrowser(t)
 	faults := &faults{}
 	veto := shed.ObjectionID(1, committeeAgent(1), 1)
 	size := shed.ObjectionID(1, committeeAgent(2), 1)
@@ -421,11 +423,12 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 // with the description the owner wrote, as osmia approve with and without a
 // description file records them; each approval takes the entry out.
 func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	f, ws, repository, report := deliveryFixtureWith(t, listenWeb)
 	must(t, repository.Close())
 	f.start(t)
-	defer f.stop(t)
+	t.Cleanup(func() { f.stop(t) })
+	p := openBrowser(t)
 	ctx := context.Background()
 	// Publication waits while the workstream is paused.
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: ws}, Mode: "soft", Reason: "Hold the publication", Source: runtime.PauseOwner})
@@ -573,7 +576,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 // failure and what it waits on, and offers no answer: it closes once an
 // attempt publishes.
 func TestBrowserPageShowsAFailingPublication(t *testing.T) {
-	p := openBrowser(t)
+	t.Parallel()
 	f, ws, repository, _ := deliveryFixtureWith(t, listenWeb)
 	ctx := context.Background()
 	presented, api := f.s.deliveryPresentation(ctx, string(ws))
@@ -592,7 +595,8 @@ func TestBrowserPageShowsAFailingPublication(t *testing.T) {
 	refusal := "GitHub answered 403: Resource not accessible by personal access token"
 	f.opts.PullRequests = &fakePulls{findErr: errors.New(refusal), fork: func() string { return "" }}
 	f.start(t)
-	defer f.stop(t)
+	t.Cleanup(func() { f.stop(t) })
+	p := openBrowser(t)
 	var entry InboxEntry
 	for deadline := time.Now().Add(browserTimeout); ; time.Sleep(100 * time.Millisecond) {
 		if entries := entriesOf(t, f.c, InboxPublication); len(entries) == 1 {

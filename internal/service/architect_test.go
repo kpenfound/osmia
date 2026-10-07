@@ -358,6 +358,7 @@ func checkArchitectBoundary(ctx context.Context, req agent.Request, verified *ag
 }
 
 func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
+	// serial: sets process env GITHUB_TOKEN and GH_TOKEN via t.Setenv
 	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
 		t.Setenv(name, demoSecret)
 	}

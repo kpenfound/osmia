@@ -518,6 +518,20 @@ Reload is explicit. It reads the top-level configuration and every project's `co
 
 A new question, a contested unit, a delivery or a budget pause can go out through a configured webhook so the inbox reaches you without the page open. One key, optional.
 
+### 10.6 Service tests
+
+`internal/service`'s own `TestMain` applies two defaults to that package's test binary before running it, on top of the Go check's global flags in `dagger.toml`, which stay the same for every package. Unless the caller passes `-test.shuffle` explicitly, it turns shuffling on, so the binary prints the seed it drew and a failing order-dependent run replays with `-test.shuffle=<seed>`. It also caps `-test.timeout` below the service's 15-minute `dagger check` limit, lowering a larger caller value, including the check's own 30-minute default, and keeping a smaller one, so a hung test fails with Go's own timeout report naming it instead of an opaque check timeout. Independent top-level tests in the package run in parallel. Its browser tests start one headless Chromium process the first time a test needs it, shared for the rest of the package run; each test opens its own tab on that one browser, rather than a separate browser context, and closes it through `t.Cleanup` before its fixture tears down.
+
+Writing a new test in this package follows the conventions its existing tests now hold to:
+
+- Wait for the state an assertion checks, with a bounded deadline, instead of sleeping a fixed duration or counting a fixed number of ticks; drive reconciliation passes explicitly when the assertion depends on how many have run.
+- Prove a negative only after observing the pass, turn or write that would have caused it, for example by blocking a reconciliation pass on a channel and confirming it ran before asserting that a second service lifetime never raced it.
+- Release every browser context, fake server, event stream and service through `t.Cleanup`, never a bare `defer`: cleanups run in last-registered-first-run order, so a fixture created before the browser tab opens tears down after the tab closes, not before.
+- Build git fixtures in the test's own temporary directory without hardlinked objects, so a transient hardlink from a local clone never trips the trace's refusal of hardlink aliases, which stays unchanged.
+- Keep a test helper shared across test files safe for concurrent callers, since parallel tests can call it at the same time.
+- Call `t.Parallel()` first in a new top-level test, and stay serial only when it depends on process-wide state, such as an environment variable set with `t.Setenv`, a package-level variable or hook, the working directory or a fixed port, named in a one-line comment on the test.
+- Never retry a failed assertion or rerun a test until it passes; a flake is a bug to find, not a wait to lengthen.
+
 ---
 
 ## 11. Interfaces

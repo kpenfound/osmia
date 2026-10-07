@@ -314,6 +314,7 @@ func deliver(t *testing.T, repo *trace.Repository, turn string, version uint64, 
 }
 
 func TestThreadContinuityAcrossRestart(t *testing.T) {
+	// serial: subtests set process env GITHUB_TOKEN, GH_TOKEN and OSMIA_DELIVERY_TOKEN via t.Setenv
 	for _, mode := range []string{"resume", "replay"} {
 		t.Run(mode, func(t *testing.T) { demonstrate(t, mode) })
 	}

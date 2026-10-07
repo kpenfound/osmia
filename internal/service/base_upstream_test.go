@@ -74,6 +74,7 @@ func sealDependent(t *testing.T, f *shedFixture, repo *trace.Repository, backend
 // the next drift rebase replays only the workstream's own commit onto
 // upstream and moves its seal there.
 func TestParkedWorkstreamMovesOntoUpstreamOnceItsAbandonedBaseIsIntegrated(t *testing.T) {
+	t.Parallel()
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			if backend == config.WorkspacesJujutsu {
@@ -171,6 +172,7 @@ func TestParkedWorkstreamMovesOntoUpstreamOnceItsAbandonedBaseIsIntegrated(t *te
 // Moving onto upstream is answered over the API, and refused for a
 // workstream that is not parked on its base.
 func TestBaseUpstreamRefusesAWorkstreamThatIsNotParked(t *testing.T) {
+	t.Parallel()
 	opts, _ := conversationFixture(t, "base-upstream-")
 	_, c := start(t, opts)
 	_, err := c.BaseUpstream(context.Background(), stream, quiet)
