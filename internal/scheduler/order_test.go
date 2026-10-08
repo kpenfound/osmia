@@ -9,6 +9,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -202,7 +203,7 @@ func TestPausedWorkstreamKeepsItsPlaceWithoutASlot(t *testing.T) {
 	}
 }
 
-func TestProjectsKeepIndependentSlotsAndRotation(t *testing.T) {
+func TestProjectsKeepIndependentSlots(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	base := t.TempDir()
@@ -225,23 +226,40 @@ func TestProjectsKeepIndependentSlotsAndRotation(t *testing.T) {
 			t.Fatalf("project %d dispatched %v, want %v", i, got, want)
 		}
 	}
+}
 
-	// The per-workstream count and the rotation are keyed by project.
-	used := usage{roles: map[string]int{}, streams: map[streamKey]int{}, local: map[localKey]int{}}
-	used.add(project, stream, "architect")
-	s := schedulers[0]
-	for _, tc := range []struct {
-		project config.ProjectID
-		role    string
-		fits    bool
-	}{{project, "mason", false}, {project, "architect", false}, {otherProject, "mason", true}, {otherProject, "architect", true}} {
-		c := Candidate{Project: tc.project, Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: tc.role}}}
-		if got := s.refusal(used, c) == ""; got != tc.fits {
-			t.Fatalf("%s %s fits %v, want %v", tc.project, tc.role, got, tc.fits)
-		}
+func TestRoleRotationIsKeptIndependentlyPerProject(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	base := t.TempDir()
+	// A single shared mason slot forces the projects to take turns with each
+	// other, so a rotation keyed across projects, rather than per project,
+	// would show up as a dispatch out of each project's own queue order.
+	limits := &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 5}
+	var repos []*trace.Repository
+	shared := &Shared{Traces: func() []*trace.Repository { return repos }}
+	var controllers []*reconcile.Controller
+	var runs []*running
+	for _, id := range []config.ProjectID{project, otherProject} {
+		// Both projects use the same workstream and agent IDs.
+		f, repo := setupIn(t, base, id, "a1", "a2")
+		defer repo.Close()
+		f.queue(t, repo, "a1", "one")
+		f.queue(t, repo, "a2", "one")
+		r := &running{}
+		c := f.controllerWith(t, repo, r.turns(), Options{Capacity: limits, Shared: shared})
+		repos, controllers, runs = append(repos, repo), append(controllers, c), append(runs, r)
 	}
-	if rotationKey(project, stream, "mason") == rotationKey(otherProject, stream, "mason") {
-		t.Fatal("rotation shared across projects")
+	// Each project's turn frees the shared slot before the other project's
+	// pass runs, so both get to dispatch on every round.
+	must(t, controllers[0].Pass(ctx))
+	must(t, controllers[1].Pass(ctx))
+	must(t, controllers[0].Pass(ctx))
+	must(t, controllers[1].Pass(ctx))
+	for i, r := range runs {
+		if got, want := r.got(), []string{"a1", "a2"}; !slices.Equal(got, want) {
+			t.Fatalf("project %d ran %v, want %v", i, got, want)
+		}
 	}
 }
 
