@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -189,11 +190,18 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 	f.engine.mu.Unlock()
 	f.start(t)
 
-	// noJJ fails the test if a .jj is anywhere in the owner's clone.
+	// noJJ fails the test if a .jj is anywhere in the owner's clone. The
+	// service's own git workspace backend can still be adding and removing
+	// worktrees under the clone while this walks it, so a path that
+	// disappears between being listed and being stat'ed is not a failure:
+	// it cannot be the .jj directory being checked for.
 	noJJ := func(when string) {
 		t.Helper()
 		must(t, filepath.WalkDir(f.clone, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					return nil
+				}
 				return err
 			}
 			if d.Name() == ".jj" {

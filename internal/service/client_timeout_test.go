@@ -52,7 +52,10 @@ func TestProjectAddOutlivesDefaultWriteTimeout(t *testing.T) {
 	opts, clone := projectFixture(t)
 	opts.WriteTimeout = 20 * time.Millisecond
 	s, c := start(t, opts)
-	c.addProjectTimeout = time.Second
+	// The contract is that the write timeout alone does not cut the call
+	// short; the client budget here is generous so that registration work
+	// slowed by parallel load, not the write timeout, cannot fail the test.
+	c.addProjectTimeout = demoTimeout
 	entered := make(chan struct{})
 	handler := s.server.Handler
 	s.server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

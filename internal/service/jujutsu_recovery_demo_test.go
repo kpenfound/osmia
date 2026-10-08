@@ -228,6 +228,8 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	}
 	prs := &fakePulls{fork: forkBranch}
 	f.opts.PullRequests = prs
+	var passed atomic.Int64
+	f.opts.schedulePassed = func() { passed.Add(1) }
 
 	demo := &recoveryDemo{units: &landingDemo{reviews: map[string][]UnitReviewIdentity{}}, project: f.project, owner: func() *Client { return f.c },
 		entered: make(chan struct{}), ask: make(chan struct{}), marked: map[string]string{}}
@@ -301,7 +303,7 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
 	checkPauseStop(t, f.awaitCompleted(t, stream, masonAgent("resume"), masonTurnID("resume")), "workstream", "Stop the mason")
-	settle()
+	awaitFurtherPasses(t, &passed, 2)
 	if !holdsEdits(inDirectory(filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(stream), "resume"))) {
 		t.Fatal("the stopped turn's edits are not in resume's workspace")
 	}

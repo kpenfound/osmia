@@ -22,8 +22,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// fakeIssues serves issue text from memory and counts fetches. Its token
-// stands in for a credential that must never leave the service.
+// fakeIssues is a fake remote issue tracker: it serves issue text from
+// memory and counts fetches, standing in for the real network call and the
+// GitHub issues API's own authentication, rate limiting and formatting,
+// which this leaves unverified. Its token stands in for a credential that
+// must never leave the service.
 type fakeIssues struct {
 	mu      sync.Mutex
 	token   string

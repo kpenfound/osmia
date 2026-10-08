@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -84,6 +85,23 @@ func checkReviewedEdits(t *testing.T, f *shedFixture, stream config.WorkstreamID
 	}
 }
 
+// awaitFurtherPasses blocks until n further reconciliation passes have
+// completed since it was called, counted by passed, which an Options'
+// schedulePassed hook increments once per pass's schedule stage. It gives a
+// readiness signal for "nothing more happens while the pause holds" checks
+// in place of a sleep.
+func awaitFurtherPasses(t *testing.T, passed *atomic.Int64, n int64) {
+	t.Helper()
+	target := passed.Load() + n
+	deadline := time.Now().Add(demoTimeout)
+	for passed.Load() < target {
+		if time.Now().After(deadline) {
+			t.Fatalf("reconciliation passes: %d, want at least %d", passed.Load(), target)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // A mason turn a hard pause stops keeps the files it changed in its unit's
 // workspace, and its unit stays implementing: the turn is not retried and
 // nothing continues it while the pause holds. Lifting the pause continues
@@ -96,7 +114,10 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			t.Parallel()
-			f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", validPlan, "")
+			var passed atomic.Int64
+			f, _ := newMasonFixtureWith(t, backend, "masons = 1\n", validPlan, "", func(opts *Options) {
+				opts.schedulePassed = func() { passed.Add(1) }
+			})
 			defer func() { f.stop(t) }()
 			recoverTurn := masonAgent("resume") + "-recover-1"
 			entered := make(chan struct{})
@@ -137,7 +158,7 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 			mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
 			stopped := f.awaitCompleted(t, stream, masonAgent("resume"), masonTurnID("resume"))
 			checkPauseStop(t, stopped, "workstream", "Stop the mason")
-			settle()
+			awaitFurtherPasses(t, &passed, 2)
 			workspace := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(stream), "resume")
 			if !holdsEdits(inDirectory(workspace)) {
 				t.Fatal("the stopped turn's edits are not in the unit's workspace")
@@ -325,7 +346,10 @@ func TestMasonTurnInterruptedByARestartKeepsItsEditsAndTheContinuationNamesThem(
 // so does the workspace, beside what landed.
 func TestJujutsuRebaseCarriesTheEditsOfAStoppedMasonTurn(t *testing.T) {
 	t.Parallel()
-	f, _ := newMasonFixtureOn(t, config.WorkspacesJujutsu, "masons = 1\n", validPlan, "")
+	var passed atomic.Int64
+	f, _ := newMasonFixtureWith(t, config.WorkspacesJujutsu, "masons = 1\n", validPlan, "", func(opts *Options) {
+		opts.schedulePassed = func() { passed.Add(1) }
+	})
 	defer func() { f.stop(t) }()
 	entered := make(chan struct{})
 	f.engine.mu.Lock()
@@ -347,7 +371,7 @@ func TestJujutsuRebaseCarriesTheEditsOfAStoppedMasonTurn(t *testing.T) {
 	target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
 	checkPauseStop(t, f.awaitCompleted(t, stream, masonAgent("resume"), masonTurnID("resume")), "workstream", "Stop the mason")
-	settle()
+	awaitFurtherPasses(t, &passed, 2)
 	f.stop(t)
 
 	ctx := context.Background()

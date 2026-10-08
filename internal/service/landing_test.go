@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -359,6 +360,8 @@ func TestLandingIsSerialAndARebasedApprovalReturnsToReview(t *testing.T) {
 	}
 	_, approved := approvedReview(t, repository, stream, "dedupe")
 	must(t, repository.Close())
+	var passed atomic.Int64
+	f.opts.schedulePassed = func() { passed.Add(1) }
 	f.start(t)
 	defer f.stop(t)
 
@@ -376,7 +379,7 @@ func TestLandingIsSerialAndARebasedApprovalReturnsToReview(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	settle()
+	awaitFurtherPasses(t, &passed, 2)
 	if got := landOperations(t, f.repository(), stream); len(got) != 1 {
 		t.Fatalf("a landing was asked for after the first: %+v", got)
 	}
