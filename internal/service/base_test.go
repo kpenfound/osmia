@@ -14,6 +14,15 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
+// baseProvider stands in for a workspace.Provider's git remote and ancestry
+// operations, so resolveBase's many branches (dependency base, upstream
+// integration, squash publication, deleted branch, merge into another
+// feature) can be driven cheaply and deterministically. It leaves unverified
+// whether a real local git repository actually performs these operations
+// (fetching a remote, reporting ancestry); that is covered instead by the
+// real-git fixtures elsewhere in this package (for example
+// TestParkedWorkstreamMovesOntoUpstreamOnceItsAbandonedBaseIsIntegrated and
+// the drift rebase tests), which move the base with real commits.
 type baseProvider struct {
 	workspace.Provider
 	upstream, tip string

@@ -62,6 +62,7 @@ func recordIntegration(t *testing.T, repo *trace.Repository, stream config.Works
 // integrated, and which is not abandoned, keeps getting base-refresh at the
 // existing cadence.
 func TestBaseRefreshPassKeepsSchedulingUndeliveredWorkstreamWithUnresolvedDependency(t *testing.T) {
+	t.Parallel()
 	_, repo, host, refresh, clock := stopFixture(t)
 	ctx := context.Background()
 	sealStream(t, repo)
@@ -91,6 +92,7 @@ func TestBaseRefreshPassKeepsSchedulingUndeliveredWorkstreamWithUnresolvedDepend
 // not integrated it keeps getting base-refresh, and those refreshes make no
 // own-PR lookup.
 func TestBaseRefreshPassKeepsSchedulingDeliveredWithoutOwnPullRequestAndUnresolvedDependency(t *testing.T) {
+	t.Parallel()
 	_, repo, host, refresh, clock := stopFixture(t)
 	ctx := context.Background()
 	sealStream(t, repo)
@@ -129,6 +131,7 @@ func TestBaseRefreshPassKeepsSchedulingDeliveredWithoutOwnPullRequestAndUnresolv
 // integrated and it is not abandoned, it keeps getting base-refresh at the
 // existing cadence, with each refresh looking the open pull request up.
 func TestBaseRefreshPassKeepsSchedulingDeliveredWithOpenOwnPullRequestAndUnresolvedDependency(t *testing.T) {
+	t.Parallel()
 	cfg, repo, host, refresh, clock := stopFixture(t)
 	ctx := context.Background()
 	sealStream(t, repo)
@@ -170,6 +173,7 @@ func TestBaseRefreshPassKeepsSchedulingDeliveredWithOpenOwnPullRequestAndUnresol
 // the recorded upstream base with no Git fetch and no pull-request lookup,
 // and the declared dependency and its history stay intact.
 func TestBaseRefreshPassStopsAndResolveBaseMakesNoRemoteCallOnceIntegrationIsRecorded(t *testing.T) {
+	t.Parallel()
 	cfg, repo, host, refresh, _ := stopFixture(t)
 	ctx := context.Background()
 	sealStream(t, repo)
@@ -294,10 +298,12 @@ func testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t *testing.T, merged boo
 }
 
 func TestBaseRefreshPassStopsAfterOwnPullRequestRecordedMerged(t *testing.T) {
+	t.Parallel()
 	testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t, true)
 }
 
 func TestBaseRefreshPassStopsAfterOwnPullRequestRecordedClosed(t *testing.T) {
+	t.Parallel()
 	testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t, false)
 }
 
@@ -305,6 +311,7 @@ func TestBaseRefreshPassStopsAfterOwnPullRequestRecordedClosed(t *testing.T) {
 // covers spec#4 and spec#14: an abandoned workstream gets no base-refresh,
 // whether or not its dependency has integrated into upstream.
 func TestBaseRefreshPassStopsForAbandonedWorkstreamRegardlessOfParentIntegration(t *testing.T) {
+	t.Parallel()
 	for _, integrated := range []bool{false, true} {
 		name := "parent-unintegrated"
 		if integrated {
@@ -339,6 +346,7 @@ func TestBaseRefreshPassStopsForAbandonedWorkstreamRegardlessOfParentIntegration
 // (retargeting its open pull request) still complete when a restart happens
 // between recording the integration and finishing them.
 func TestDependentDeliveryMaintenanceCompletesAfterARestartFollowingIntegration(t *testing.T) {
+	t.Parallel()
 	p := maintenanceFixture(t)
 	ctx := context.Background()
 	// Integration was just recorded by maintenanceFixture; restart before
@@ -384,6 +392,7 @@ func TestDependentDeliveryMaintenanceCompletesAfterARestartFollowingIntegration(
 // rebase of the still-building dependent, now that the recorded observation
 // points it onto upstream directly rather than its parent's branch.
 func TestDriftRebaseKeepsSchedulingOnceBaseRefreshStopsForAnIntegratedDependency(t *testing.T) {
+	t.Parallel()
 	f := newDebateFixture(t, 1, 1)
 	f.upstream(t)
 	f.stop(t)
