@@ -25,6 +25,10 @@ func (p jujutsuWorkspaces) Acquire(_ context.Context, req a.WorkspaceRequest) (a
 	return a.WorkspaceLease{Workspace: a.Workspace{Directory: p.w.Path, Access: req.Access}, Lease: leaseFunc(func(context.Context) error { return nil })}, nil
 }
 
+// fakeAgent stands in for a real model session: it runs the mason closure
+// synchronously in the test's own process rather than a real sandboxed
+// backend, so it leaves unverified that a real agent process is as confined
+// to the view as the closure here finds it to be.
 type fakeAgent func(context.Context, *enforcertest.Turn) (*agent.Result, error)
 
 func (e fakeAgent) Enforcer(settings a.ExecutionSettings) (agent.Enforcer, error) {

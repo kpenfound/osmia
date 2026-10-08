@@ -44,7 +44,7 @@ func TestProviderLimitsFallbackPauseOverrideResetAndRestart(t *testing.T) {
 	must(t, s.ClearProfile("mason"))
 	reopened, _, err := Open(in)
 	must(t, err)
-	defer reopened.Close()
+	t.Cleanup(func() { reopened.Close() })
 	state, _ = reopened.EffectiveAt(at)
 	if len(state.ProviderLimits) != 3 || !slices.ContainsFunc(state.Pauses, func(p Pause) bool { return p.Target.Role == "mason" }) {
 		t.Fatalf("restart: %+v", state)

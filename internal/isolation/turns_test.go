@@ -19,6 +19,11 @@ type leaseFunc func(context.Context) error
 
 func (f leaseFunc) Release(ctx context.Context) error { return f(ctx) }
 
+// provider stands in for a real workspace provider (git worktrees, a
+// Jujutsu workspace): it hands out one fixed directory instead of acquiring
+// and releasing a real VCS-backed workspace, so it leaves unverified that a
+// real provider's acquire/release boundary is exactly what internal/workspace
+// exercises against real git and jj.
 type provider struct {
 	directory          string
 	acquired, released int
@@ -29,6 +34,10 @@ func (p *provider) Acquire(_ context.Context, req a.WorkspaceRequest) (a.Workspa
 	return a.WorkspaceLease{Workspace: a.Workspace{Directory: p.directory, Access: req.Access}, Lease: leaseFunc(func(ctx context.Context) error { p.released++; return ctx.Err() })}, nil
 }
 
+// host stands in for the real MCP hosting server: it records each request
+// and returns a fixture token with no real network endpoint, so it leaves
+// unverified that the turn's backend actually reaches its server only over
+// the hosted endpoint and bearer token it was given.
 type host struct {
 	requests []a.HostRequest
 	released int
@@ -42,6 +51,11 @@ func (h *host) Host(_ context.Context, req a.HostRequest) (a.HostedMCP, error) {
 
 func fixture(t *testing.T, role, mode string) (*Turns, *provider, *host, *adaptertest.Engine, a.PreparedTurn) {
 	t.Helper()
+	// adaptertest.Engine stands in for the real model backend: it checks
+	// grants and requests with core's own enforcement code but launches no
+	// process, so it leaves unverified that a real sandboxed process (Claude,
+	// a container) actually honours the mounts, tools and environment Turns
+	// computed for it.
 	p, h, engine := &provider{directory: t.TempDir()}, &host{}, &adaptertest.Engine{}
 	put(t, p.directory, "src/file", "original")
 	put(t, p.directory, ".git", "gitdir: /service/vcs")

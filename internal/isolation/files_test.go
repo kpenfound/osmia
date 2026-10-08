@@ -97,7 +97,7 @@ func TestViewsRejectTraversalSymlinksAndMetadataWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer v.Release(context.Background())
+	t.Cleanup(func() { v.Release(context.Background()) })
 	if err := os.Symlink(outside, filepath.Join(v.workspace.Directory, "escape")); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestViewsListDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer v.Release(context.Background())
+	t.Cleanup(func() { v.Release(context.Background()) })
 	if err := os.Symlink(outside, filepath.Join(v.workspace.Directory, "handed", "escape")); err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestViewsSkipSymlinksInASelectedDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer v.Release(context.Background())
+	t.Cleanup(func() { v.Release(context.Background()) })
 	var held []string
 	if err := filepath.WalkDir(v.workspace.Directory, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -199,7 +199,7 @@ func TestReadOnlyViewAndDisjointStorage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer v.Release(context.Background())
+	t.Cleanup(func() { v.Release(context.Background()) })
 	if err := v.Write("file", []byte("bad")); err == nil {
 		t.Fatal("read-only write accepted")
 	}

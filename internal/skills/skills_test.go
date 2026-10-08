@@ -54,8 +54,11 @@ func TestParseRefresh(t *testing.T) {
 	}
 }
 
-// fakeGit clones by copying the fixture directory the URL names and records
-// every command.
+// fakeGit stands in for the git binary: it clones by copying the fixture
+// directory the URL names and records every command, so it leaves
+// unverified that the real git CLI accepts the arguments Manager builds and
+// reaches a remote over the network. TestPrepareClonesWithGit exercises that
+// against the real git on PATH instead.
 type fakeGit struct {
 	mu       sync.Mutex
 	fixtures map[string]string

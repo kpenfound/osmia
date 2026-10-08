@@ -26,6 +26,7 @@ func TestViewsStripGroupWorldModesAndRejectSpecialFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { v.Release(context.Background()) })
 	for name, want := range map[string]os.FileMode{"src/tool.sh": 0700, "src/data": 0600} {
 		info, err := os.Stat(filepath.Join(v.workspace.Directory, name))
 		if err != nil || info.Mode().Perm() != want {
@@ -52,6 +53,7 @@ func TestViewsStripGroupWorldModesAndRejectSpecialFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { v.Release(context.Background()) })
 	if _, err := os.Lstat(filepath.Join(v.workspace.Directory, "src/pipe")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the view holds the special file: %v", err)
 	}
