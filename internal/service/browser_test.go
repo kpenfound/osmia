@@ -644,7 +644,8 @@ func TestBrowserSelectionMarksActivityWithoutReordering(t *testing.T) {
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.await("both workstreams listed", `document.querySelectorAll('#workstream-list [data-select]').length === 2`)
 	p.await("the feeds read", `document.querySelector('[data-field=feed] .meta')?.textContent !== 'Reading the feed…'`)
-	settle()
+	// markSeen runs synchronously inside app.js's render(), so there is no
+	// transient window to wait out: this await is itself the readiness check.
 	p.await("nothing marked", `document.querySelector('[data-field=unread]') === null`)
 
 	order := p.sidebarIDs()
@@ -676,7 +677,6 @@ func TestBrowserSelectionMarksActivityWithoutReordering(t *testing.T) {
 	p.run(chromedp.Reload())
 	p.await("the live connection after the reload", `document.body.dataset.connection === 'live'`)
 	p.await("the reloaded workstream shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(stream)))
-	settle()
 	p.await("nothing marked after the reload", `document.querySelector('[data-field=unread]') === null`)
 	sameOrder("the reload")
 }

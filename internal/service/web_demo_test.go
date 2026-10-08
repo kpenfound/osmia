@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/chromedp/chromedp"
@@ -55,6 +56,11 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	}
 	prs := &fakePulls{fork: forkBranch}
 	f.opts.PullRequests = prs
+	// passed counts completed reconciliation passes, so the pause-while-
+	// delivering check below waits for the scheduler to have demonstrably
+	// had chances to publish, rather than sleeping a fixed duration.
+	var passed atomic.Int64
+	f.opts.schedulePassed = func() { passed.Add(1) }
 
 	// The fake architect and committee draft and debate the amendment.
 	f.script("amend-1-1", map[string]string{plan.SpecPath: amendedSpec}, nil)
@@ -281,7 +287,10 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	if approval.Description != presented.Draft || approval.DraftHash != presented.DraftHash || approval.Commit != presented.Report.Commit || approval.ReviewRevision != presented.ReviewRevision {
 		t.Fatalf("the recorded delivery approval %+v, presented %+v", approval, presented)
 	}
-	settle()
+	base := passed.Load()
+	eventually(t, "reconciliation never got two passes to try publishing while the workstream was paused", func() bool {
+		return passed.Load()-base >= 2
+	})
 	if feature, err := f.repository().Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AssembledState {
 		t.Fatalf("the paused workstream went on to %+v %v", feature, err)
 	}
