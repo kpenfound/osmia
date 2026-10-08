@@ -10,7 +10,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestParseClassification(t *testing.T) {
+// A classifier response is accepted only as exactly one JSON object with the
+// two recognized string properties, a known class and non-empty, bounded
+// evidence; anything else, including duplicate keys, extra fields or
+// trailing data, is rejected.
+func TestClassificationResponseMustBeExactlyOneValidJSONObject(t *testing.T) {
 	for _, bad := range []string{`{}`, `{"class":"claims_done"}`, `{"class":"other","evidence":"x"}`, `{"class":"unclear","evidence":""}`, `{"class":"unclear","evidence":"x","extra":1}`, `{"class":"unclear","class":"claims_done","evidence":"x"}`, `{"class":"unclear","evidence":"x"} {}`} {
 		if _, ok := parseClassification(bad); ok {
 			t.Fatalf("accepted %q", bad)

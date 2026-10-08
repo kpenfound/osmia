@@ -26,6 +26,12 @@ func TestIsolationFailureIsDurableBeforeExecution(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(source, "file"), []byte("data"), 0600); err != nil {
 				t.Fatal(err)
 			}
+			// The workspace provider and engine are core's own fakes: they grant
+			// or refuse with core's real policy and capability checks, but launch
+			// no real container or host process and mount no real view. This
+			// test leaves unverified whether a real runtime enforces the same
+			// refusal; it verifies that this package reacts to a refusal by
+			// recording a durable failure and releasing every lease.
 			lease := &adaptertest.Lease{Releases: *adaptertest.NewScript[struct{}, struct{}](adaptertest.Reply[struct{}]{})}
 			provider := &adaptertest.Workspaces{Script: *adaptertest.NewScript[a.WorkspaceRequest, a.WorkspaceLease](adaptertest.Reply[a.WorkspaceLease]{Value: a.WorkspaceLease{Workspace: a.Workspace{Directory: source, Access: a.ReadOnly}, Lease: lease}})}
 			// A host session the platform cannot confine is refused by core's

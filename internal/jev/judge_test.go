@@ -140,6 +140,15 @@ func judgment(state string) jev.Judgment {
 	}
 }
 
+// awaitRequest blocks until p has received a request or a bounded deadline
+// passes, so a provider that never receives one cannot hang the test.
+func awaitRequest(p *jevtest.Provider) {
+	deadline := time.Now().Add(5 * time.Second)
+	for len(p.Requests()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func answer(confidence float64) jevtest.Result {
 	return jevtest.Result{Response: systemone.Response{
 		Model:   "jev-1.13.0",
@@ -326,9 +335,7 @@ func TestInterruptedAttemptsAreDistinguishedAndBounded(t *testing.T) {
 	interrupt := func() jev.Decision {
 		ctx, cancel := context.WithCancel(context.Background())
 		go func() {
-			for len(blocking.Requests()) == 0 {
-				time.Sleep(time.Millisecond)
-			}
+			awaitRequest(blocking)
 			cancel()
 		}()
 		d := judge(&settings, blocking, "key").Evaluate(ctx, f.repo, judgment("Done."))
@@ -366,9 +373,7 @@ func TestAnInterruptedAttemptIsRetriedOnce(t *testing.T) {
 	blocking := &jevtest.Provider{Wait: jevtest.BlockUntilDone}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		for len(blocking.Requests()) == 0 {
-			time.Sleep(time.Millisecond)
-		}
+		awaitRequest(blocking)
 		cancel()
 	}()
 	first := judge(&settings, blocking, "key").Evaluate(ctx, f.repo, judgment("Done."))

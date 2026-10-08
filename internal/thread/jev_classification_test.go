@@ -17,7 +17,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestResponseSpans(t *testing.T) {
+// The final response is split into the sentence spans a classification
+// question offers as evidence, each bounded in rune length, with the spans
+// themselves bounded in count and blank responses yielding none.
+func TestResponseSpansSplitsSentencesWithRuneAndCountLimits(t *testing.T) {
 	got := responseSpans("Edited store.go. Should I keep the cache?\n\n  Tests pass!\nnext steps:  ")
 	want := []string{"Edited store.go.", "Should I keep the cache?", "Tests pass!", "next steps:"}
 	if !slices.Equal(got, want) {
