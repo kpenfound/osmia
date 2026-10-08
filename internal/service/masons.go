@@ -522,8 +522,10 @@ func (m *masons) recoverTurn(ctx context.Context, stream config.WorkstreamID, un
 }
 
 // follow moves a unit between implementing and waiting as its mason's thread
-// says, and returns the unit's state. An implementing unit with a question
-// whose waiting transition has not been recorded moves to waiting; a waiting
+// says, and returns the unit's state. An implementing unit whose mason's
+// latest turn asked a question it has not waited on moves to waiting; a
+// question an earlier turn asked was answered, or overtaken by the turn that
+// followed it, as one a move to implementing queues. A waiting
 // unit whose mason's latest turn delivers the answer to one of its questions
 // moves back to implementing. The workspace is left as it is either way. A
 // unit whose state moved since it was read is left to the next pass.
@@ -548,19 +550,12 @@ func (m *masons) follow(ctx context.Context, stream config.WorkstreamID, unit st
 		if err != nil {
 			return "", err
 		}
-		q := ""
-		for _, turn := range th.Turns {
-			candidate := askedBy(asked, th.Identity.ThreadID, turn.Request.TurnID)
-			id := fmt.Sprintf("%s-%s-%s", subject, UnitWaiting, candidate)
-			if candidate != "" && !slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
-				q = candidate
-				break
-			}
-		}
-		if q == "" {
+		q := askedBy(asked, th.Identity.ThreadID, last.Request.TurnID)
+		id = fmt.Sprintf("%s-%s-%s", subject, UnitWaiting, q)
+		if q == "" || slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
 			return state.Value, nil
 		}
-		to, id, cause = UnitWaiting, fmt.Sprintf("%s-%s-%s", subject, UnitWaiting, q), trace.QuestionSubject(q)+"_"+trace.QuestionOpen
+		to, cause = UnitWaiting, trace.QuestionSubject(q)+"_"+trace.QuestionOpen
 		reason = fmt.Sprintf("unit %s is waiting: its mason asked question %s; the unit's workspace is kept and it takes no mason slot until the answer arrives", unit, q)
 	case UnitWaiting:
 		i := slices.IndexFunc(asked, func(q trace.QuestionState) bool {

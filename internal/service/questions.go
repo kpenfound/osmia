@@ -29,11 +29,21 @@ func (s *Service) chiefEventsPrompt(project config.ProjectID, repository *trace.
 
 // answers returns the pass that queues recorded answers on their askers'
 // threads, with the profile each asker would start a new turn with when the
-// answer is delivered. Abandoned workstreams keep their answers undelivered.
+// answer is delivered. Abandoned workstreams keep their answers undelivered,
+// and so does a question whose unit merged before its answer arrived: the
+// unit's workspace is gone and a merged unit changes only through a
+// follow-up.
 func (s *Service) answers(cfg *config.Config, repository *trace.Repository) *questions.Deliverer {
 	return &questions.Deliverer{Repository: repository, Now: s.now,
 		Profile: func(role, agent string) (coreadapter.Profile, error) {
 			return s.agentProfile(cfg, role, agent)
 		},
-		Skip: func(stream config.WorkstreamID) (bool, error) { return abandoned(repository, stream) }}
+		Skip: func(stream config.WorkstreamID) (bool, error) { return abandoned(repository, stream) },
+		Settled: func(q trace.Question) (bool, error) {
+			if q.Unit == "" {
+				return false, nil
+			}
+			state, err := repository.Workflow(q.Workstream, trace.UnitSubject(q.Unit))
+			return state.Value == UnitMerged, err
+		}}
 }

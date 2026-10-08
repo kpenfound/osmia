@@ -209,6 +209,12 @@ func (r *reviewers) Pass(ctx context.Context) error {
 	return nil
 }
 
+// followQuestion moves a unit between reviewing and waiting as its reviewer's
+// thread says, and returns the unit's state. A reviewing unit whose
+// reviewer's latest turn asked a question it has not waited on moves to
+// waiting; a question an earlier turn asked was answered, or overtaken by the
+// turn that followed it. A waiting unit whose reviewer's latest turn delivers
+// the answer to one of its questions moves back to reviewing.
 func (r *reviewers) followQuestion(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) (string, error) {
 	th, err := r.repository.Thread(stream, reviewerAgent(unit))
 	if errors.Is(err, os.ErrNotExist) || err == nil && len(th.Turns) == 0 {
@@ -228,15 +234,9 @@ func (r *reviewers) followQuestion(ctx context.Context, stream config.Workstream
 		if err != nil {
 			return "", err
 		}
-		for _, turn := range th.Turns {
-			candidate := askedBy(asked, th.Identity.ThreadID, turn.Request.TurnID)
-			id := fmt.Sprintf("%s-reviewer-%s-%s", trace.UnitSubject(unit), UnitWaiting, candidate)
-			if candidate != "" && !slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
-				q = candidate
-				break
-			}
-		}
-		if q == "" {
+		q = askedBy(asked, th.Identity.ThreadID, th.Turns[len(th.Turns)-1].Request.TurnID)
+		id := fmt.Sprintf("%s-reviewer-%s-%s", trace.UnitSubject(unit), UnitWaiting, q)
+		if q == "" || slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
 			return state.Value, nil
 		}
 		to, cause = UnitWaiting, trace.QuestionSubject(q)+"_"+trace.QuestionOpen

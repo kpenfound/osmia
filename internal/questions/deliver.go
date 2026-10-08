@@ -84,7 +84,8 @@ func Deliver(ctx context.Context, repository *trace.Repository, q trace.Question
 	return err == nil, err
 }
 
-// Deliverer queues every answered question's answer on its asker's thread.
+// Deliverer queues every answered question's answer on its asker's thread,
+// but those Skip or Settled hold back.
 // The answer tool only records; this pass is the one path that delivers, so
 // an answer recorded before a crash is delivered by the first pass after it.
 type Deliverer struct {
@@ -94,6 +95,9 @@ type Deliverer struct {
 	Profile func(role, agent string) (coreadapter.Profile, error)
 	// Skip reports a workstream whose answers stay undelivered.
 	Skip func(config.WorkstreamID) (bool, error)
+	// Settled reports a question whose asker can no longer take its answer,
+	// which then stays undelivered.
+	Settled func(trace.Question) (bool, error)
 }
 
 // Pass delivers the undelivered answers of every workstream.
@@ -125,6 +129,15 @@ func (d *Deliverer) Pass(ctx context.Context) error {
 		for _, q := range states {
 			if q.State != trace.QuestionAnswered {
 				continue
+			}
+			if d.Settled != nil {
+				settled, err := d.Settled(q.Asked)
+				if err != nil {
+					return fmt.Errorf("workstream %s question %s: %w", stream, q.Asked.ID, err)
+				}
+				if settled {
+					continue
+				}
 			}
 			if _, err := Deliver(ctx, d.Repository, q, d.Profile, d.Now()); err != nil {
 				return fmt.Errorf("workstream %s question %s: %w", stream, q.Asked.ID, err)

@@ -15,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -270,5 +271,138 @@ func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 		if tr.ID == masonTransitionID("resume") && (!found || !b.started.Equal(tr.At)) {
 			t.Fatalf("the workstream last started a unit at %s, want %s", b.started, tr.At)
 		}
+	}
+}
+
+// askOnLatestTurn runs the agent's latest queued turn of the unit to its end,
+// asking text through the question tool as the turn would, and returns the
+// question's number.
+func askOnLatestTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent, role, unit, text string) string {
+	t.Helper()
+	ctx := context.Background()
+	th, err := repository.Thread(stream, agent)
+	must(t, err)
+	turn := th.Turns[len(th.Turns)-1].Request.TurnID
+	token := "asked-" + turn
+	directory := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), agent, token)
+	q, err := repository.ClaimTurn(ctx, stream, agent, token, directory, f.clock.Now())
+	must(t, err)
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: unit, Thread: agent, Turn: turn, Role: role}
+	asked, err := repository.Ask(ctx, agent, scope, text, f.clock.Now())
+	must(t, err)
+	h := q.Request.Header
+	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.clock.Now()
+	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: agent, TurnID: turn, RequestID: q.Request.ID, RequestRevision: q.Request.Revision,
+		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: token}, SessionDirectory: directory, StartedAt: q.Claim.At,
+			Outcome: &coreadapter.Outcome{Status: "waiting", Report: "Asked question " + asked.ID}}}
+	must(t, repository.CaptureTurn(ctx, q.Claim.Token, response))
+	must(t, repository.CompleteTurn(ctx, stream, agent, turn, q.Claim.Token, f.clock.Now()))
+	return asked.ID
+}
+
+// queueFollowingTurn queues a turn of the unit on the agent's thread after the
+// one that asked, as a move queues the turn that carries its note.
+func queueFollowingTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent, unit, turn string) {
+	t.Helper()
+	th, err := repository.Thread(stream, agent)
+	must(t, err)
+	last := th.Turns[len(th.Turns)-1].Request
+	h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: f.project, Workstream: stream, Unit: unit,
+		At: f.clock.Now(), Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "move"}
+	_, err = repository.EnqueueTurn(context.Background(), trace.TurnRequest{Header: h, AgentID: agent, ThreadID: agent, TurnID: turn, Profile: last.Profile, SystemPrompt: last.SystemPrompt, Prompt: "Carry on."})
+	must(t, err)
+}
+
+// waitingTransitions returns the IDs of the unit's recorded moves to waiting.
+func waitingTransitions(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) []string {
+	t.Helper()
+	transitions, err := trace.Read[trace.Transition](repository, stream)
+	must(t, err)
+	var ids []string
+	for _, tr := range transitions {
+		if tr.Subject == trace.UnitSubject(unit) && tr.To == UnitWaiting {
+			ids = append(ids, tr.ID)
+		}
+	}
+	return ids
+}
+
+// A question parks its unit only while the turn that asked it is the mason's
+// latest. When a later turn follows it before the unit waited, as when the
+// owner moves a contested unit to implementing while its mason's question is
+// open, the unit stays implementing for that turn, and the question's answer
+// still reaches the mason when it arrives. The unit then waits on a question
+// the later turn asks.
+func TestAQuestionAnEarlierTurnAskedDoesNotParkTheUnit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f, _ := newMasonFixture(t, 1, independentPlan)
+	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	stream, repository := seedBuild(t, f, "overtaken", independentPlan, config.WorkspacesGit, base)
+	m := newMasonController(f.s, repository)
+	b, found, err := m.read(stream)
+	must(t, err)
+	if !found {
+		t.Fatal("fixture workstream is not building")
+	}
+	if started, blocked, err := m.start(ctx, b, "resume"); err != nil || !started || blocked {
+		t.Fatalf("unit resume did not start: started %v, blocked %v, %v", started, blocked, err)
+	}
+	agent := masonAgent("resume")
+	askOnLatestTurn(t, f, repository, stream, agent, masonRole, "resume", "Should resume keep partial uploads?")
+	queueFollowingTurn(t, f, repository, stream, agent, "resume", agent+"-move-1")
+
+	state, err := repository.Workflow(stream, trace.UnitSubject("resume"))
+	must(t, err)
+	if value, err := m.follow(ctx, stream, "resume", state); err != nil || value != UnitImplementing {
+		t.Fatalf("follow with the asking turn overtaken left the unit %q (%v), want implementing", value, err)
+	}
+	if waits := waitingTransitions(t, repository, stream, "resume"); len(waits) != 0 {
+		t.Fatalf("an overtaken question parked the unit: %v", waits)
+	}
+
+	asked := askOnLatestTurn(t, f, repository, stream, agent, masonRole, "resume", "Which store holds the offsets?")
+	state, err = repository.Workflow(stream, trace.UnitSubject("resume"))
+	must(t, err)
+	if value, err := m.follow(ctx, stream, "resume", state); err != nil || value != UnitWaiting {
+		t.Fatalf("follow after the latest turn asked question %s left the unit %q (%v), want waiting", asked, value, err)
+	}
+	if waits, want := waitingTransitions(t, repository, stream, "resume"), []string{trace.UnitSubject("resume") + "-waiting-" + asked}; !reflect.DeepEqual(waits, want) {
+		t.Fatalf("waiting transitions %v, want %v", waits, want)
+	}
+}
+
+// A reviewer's question parks its unit only while the turn that asked it is
+// the reviewer's latest; a review turn that follows it, as a move to reviewing
+// queues, reviews without waiting on it.
+func TestAQuestionAnEarlierReviewTurnAskedDoesNotParkTheUnit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f, stream, repository := newReviewFixture(t, "overtaken-review")
+	r := &reviewers{masons: newMasonController(f.s, repository)}
+	state, err := repository.Workflow(stream, trace.UnitSubject("resume"))
+	must(t, err)
+	must(t, r.one(ctx, stream, "resume", state, false))
+	agent := reviewerAgent("resume")
+	askOnLatestTurn(t, f, repository, stream, agent, reviewerRole, "resume", "Is the retry bound part of the acceptance?")
+	queueFollowingTurn(t, f, repository, stream, agent, "resume", agent+"-move-1")
+
+	state, err = repository.Workflow(stream, trace.UnitSubject("resume"))
+	must(t, err)
+	if value, err := r.followQuestion(ctx, stream, "resume", state); err != nil || value != UnitReviewing {
+		t.Fatalf("followQuestion with the asking turn overtaken left the unit %q (%v), want reviewing", value, err)
+	}
+	if waits := waitingTransitions(t, repository, stream, "resume"); len(waits) != 0 {
+		t.Fatalf("an overtaken question parked the unit: %v", waits)
+	}
+
+	asked := askOnLatestTurn(t, f, repository, stream, agent, reviewerRole, "resume", "Does the bound cover restarts?")
+	state, err = repository.Workflow(stream, trace.UnitSubject("resume"))
+	must(t, err)
+	if value, err := r.followQuestion(ctx, stream, "resume", state); err != nil || value != UnitWaiting {
+		t.Fatalf("followQuestion after the latest turn asked question %s left the unit %q (%v), want waiting", asked, value, err)
+	}
+	if waits, want := waitingTransitions(t, repository, stream, "resume"), []string{trace.UnitSubject("resume") + "-reviewer-waiting-" + asked}; !reflect.DeepEqual(waits, want) {
+		t.Fatalf("waiting transitions %v, want %v", waits, want)
 	}
 }

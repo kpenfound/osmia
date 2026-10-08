@@ -570,3 +570,57 @@ func TestAnswersAreNotDeliveredToAbandonedWorkstreams(t *testing.T) {
 		t.Fatalf("answer turn: %+v", req)
 	}
 }
+
+// An answer that arrives after its asker's unit merged stays undelivered: the
+// unit's workspace is gone, so the turn could not run. The answer to the same
+// question from a unit still in flight is queued on its asker's thread.
+func TestAnswersAreNotDeliveredToMergedUnits(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	home, err := os.MkdirTemp("", "qm-")
+	must(t, err)
+	t.Cleanup(func() { os.RemoveAll(home) })
+	opts := fixtureAt(t, home)
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	clock := &fixedClock{now: demoStart}
+	owner := trace.Actor{Kind: "owner", ID: "local"}
+	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
+	must(t, err)
+	defer repo.Close()
+	traceDir, err := cfg.Root.ProjectTrace(project)
+	must(t, err)
+	must(t, os.WriteFile(filepath.Join(traceDir, "charter.md"), []byte("# Charter\n\n1. Keep state in files.\n"), 0600))
+	for _, ws := range []config.WorkstreamID{stream, quiet} {
+		must(t, repo.CreateWorkstream(ctx, ws, clock.Now(), owner))
+		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}
+		must(t, repo.CreateThread(ctx, identity))
+		h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_build", Project: project, Workstream: ws, Unit: "resume", At: clock.Now(), Actor: owner, Cause: "dispatch"}
+		_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: demoAgent, ThreadID: demoThread, TurnID: "build", Profile: coreadapter.Profile{Name: "other", Backend: "codex", Model: "other"}, Prompt: "Work"})
+		must(t, err)
+		_, err = repo.ClaimTurn(ctx, ws, demoAgent, "token_build", filepath.Join(home, string(ws), "build"), clock.Now())
+		must(t, err)
+		scope := coreadapter.Scope{Project: string(project), Workstream: string(ws), Unit: "resume", Thread: demoThread, Turn: "build", Role: demoRole}
+		_, err = repo.Ask(ctx, demoAgent, scope, "Where does state live?", clock.Now())
+		must(t, err)
+		_, err = repo.AnswerQuestion(ctx, trace.ChiefOfStaff, claimTurn(t, repo, home, ws, trace.ChiefOfStaff, trace.ChiefOfStaff, "events", clock.Now()), "1", "In files.", []string{"charter#1"}, clock.Now())
+		must(t, err)
+	}
+	recordUnitMerged(t, repo, stream, "resume")
+
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{stream, quiet}}})
+	must(t, err)
+	defer store.Close()
+	s := &Service{options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}, store: store}
+	must(t, s.answers(cfg, repo).Pass(ctx))
+	merged, err := repo.Thread(stream, demoAgent)
+	must(t, err)
+	inFlight, err := repo.Thread(quiet, demoAgent)
+	must(t, err)
+	if len(merged.Turns) != 1 {
+		t.Fatalf("the merged unit's asker has turns %+v, want only the asking turn", merged.Turns)
+	}
+	if len(inFlight.Turns) != 2 || inFlight.Turns[1].Request.TurnID != "answer_1" {
+		t.Fatalf("the in-flight unit's asker has turns %+v, want the asking turn and answer_1", inFlight.Turns)
+	}
+}
