@@ -342,6 +342,10 @@ func TestNewEnforcerKinds(t *testing.T) {
 	}
 }
 
+// allowAll stands in for a real agent.Confiner, which would actually confine
+// and launch a host process. It leaves unverified whether a real confiner
+// enforces its policy; this test only checks which enforcer kind Prepare
+// hands out for each sandbox mode.
 type allowAll struct{}
 
 func (allowAll) Check(agent.Confinement) error { return nil }

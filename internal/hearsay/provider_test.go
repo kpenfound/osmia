@@ -16,6 +16,11 @@ import (
 
 const project config.ProjectID = "p_0123456789abcdef0123456789abcdef"
 
+// local is a fake bundle.Provider standing in for the real file-based bundle
+// assembler that backs Osmia when Hearsay is absent (charter#2). It leaves
+// unverified whether the real assembler reads project state correctly; this
+// package only has to show that Provider layers Hearsay's memory on top of
+// whatever the authoritative local bundle already contains.
 type local struct{}
 
 func (local) Mode(config.ProjectID) bundle.Mode { return bundle.ModeFile }
@@ -27,6 +32,10 @@ func settings(endpoint string) config.Hearsay {
 }
 func secret(name string) string { return "private-" + name }
 
+// server stands in for a live Hearsay instance (charter#4 forbids one in
+// tests): it checks the shape of the request our Client sends and scripts a
+// response, but it never exercises Hearsay's own authentication, storage or
+// stance-merging logic, so this test cannot catch a real Hearsay API change.
 func TestProviderAuthenticatesRoleScopesAndFallsBackLocally(t *testing.T) {
 	var failure atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +79,9 @@ func TestProviderAuthenticatesRoleScopesAndFallsBackLocally(t *testing.T) {
 	}
 }
 
+// source and target stand in for a live Hearsay instance and an attacker's
+// endpoint it might redirect to; they verify our Client withholds credentials
+// on a redirect, not any behavior of a real Hearsay deployment.
 func TestClientRejectsRedirectsMissingCredentialsAndUngrantableCalls(t *testing.T) {
 	var leaked atomic.Bool
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { leaked.Store(true) }))
@@ -95,6 +107,9 @@ func TestClientRejectsRedirectsMissingCredentialsAndUngrantableCalls(t *testing.
 
 func TestProviderRejectsWrongScopeAndOversizedBundles(t *testing.T) {
 	for _, response := range []string{`{"scope":{"id":"other"}}`, `{"scope":{"id":"root"},"text":"` + strings.Repeat("x", 8000) + `"}`} {
+		// server scripts a malformed reply in place of a live Hearsay, so it
+		// leaves unverified whether real Hearsay would ever actually return
+		// a mismatched scope or an oversized bundle.
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, response) }))
 		cfg := &config.Config{Hearsay: settings(server.URL), Projects: []config.Project{{ID: project, HearsayScope: "root"}}}
 		p := Provider{Local: local{}, Config: func() *config.Config { return cfg }, Client: func(h config.Hearsay) Client { return Client{Config: h, LookupEnv: secret} }}
@@ -106,6 +121,10 @@ func TestProviderRejectsWrongScopeAndOversizedBundles(t *testing.T) {
 	}
 }
 
+// server stands in for a live Hearsay instance, scripted to echo the scope it
+// was asked for; it leaves unverified how a real Hearsay enforces agent
+// grants, and tests only that our Tools wiring withholds the call until the
+// turn-scope closure allows it.
 func TestToolsBindRoleAndValidateActiveTurnBeforeCalling(t *testing.T) {
 	var called atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

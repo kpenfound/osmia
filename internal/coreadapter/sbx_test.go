@@ -21,6 +21,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// sbxRunner scripts a fake sbx CLI and agent binary in place of the real
+// costly, externally mutating sandbox daemon and model session. It leaves
+// unverified whether a real sbx sandbox and backend behave this way; these
+// tests only check what core's enforcer and CoreExecutor do with the CLI's
+// output and policy.
 func sbxRunner(t *testing.T, body string) agent.Runner {
 	t.Helper()
 	bin := agenttest.Script(t, "fake-agent", body)

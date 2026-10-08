@@ -13,6 +13,10 @@ import (
 	"github.com/kpenfound/busybees/core/vcs"
 )
 
+// fakeExecutor stands in for a real Executor, which would launch a costly,
+// nondeterministic model session through core. It leaves unverified whether
+// a real backend actually runs the request; these tests only check what
+// TurnRunner builds and does with the executor's result.
 type fakeExecutor struct {
 	checkErr      error
 	checks, calls int
@@ -271,6 +275,11 @@ func TestCleanupAcrossAttemptPaths(t *testing.T) {
 	}
 }
 
+// fakeProvider stands in for a real vcs.Provider, which would acquire a
+// workspace from an externally mutating source such as a clone or worktree
+// pool. It leaves unverified whether a real provider acquires or releases
+// correctly; this test only checks that WorkspaceAdapter calls and cleans up
+// whatever provider Select names.
 type fakeProvider struct {
 	acquired, released int
 	req                vcs.Request

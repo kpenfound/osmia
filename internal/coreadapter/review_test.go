@@ -20,6 +20,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// pipelineExecutor stands in for a real Executor running the committee's
+// costly, nondeterministic model turns (distiller and reviewer passes). It
+// scripts each phase's answer by the request's name, so it leaves unverified
+// whether a real model actually distills or reviews correctly; these tests
+// only check what ReviewAdapter sends each phase and how it assembles their
+// answers.
 type pipelineExecutor struct {
 	mu       sync.Mutex
 	requests []agent.Request
