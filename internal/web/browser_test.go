@@ -94,6 +94,28 @@ func (p *page) await(what, expression string) {
 	}
 }
 
+// awaitQuiet waits until read() stops changing for quiet, bounded by
+// browserTimeout, and returns the settled value. It fails with the last
+// observed value if read() keeps changing until the deadline, rather than
+// assuming a fixed wait was long enough.
+func awaitQuiet(t *testing.T, read func() int, quiet time.Duration) int {
+	t.Helper()
+	deadline := time.Now().Add(browserTimeout)
+	last := read()
+	stableSince := time.Now()
+	for {
+		time.Sleep(10 * time.Millisecond)
+		if current := read(); current != last {
+			last, stableSince = current, time.Now()
+		} else if time.Since(stableSince) >= quiet {
+			return last
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("value never settled; last observed %d", last)
+		}
+	}
+}
+
 // quote returns s as a JavaScript string literal.
 func quote(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
@@ -318,10 +340,10 @@ func TestBrowserFirstLoadRequestsTheWorkstreamListInBoundedRequests(t *testing.T
 
 		p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate(server.URL+"/"))
 		p.await("every workstream listed", fmt.Sprintf(`document.querySelectorAll('#workstream-list [data-select]').length === %d`, workstreams))
-		// Let any further, unwanted requests the first render might still
-		// trigger settle before counting.
-		time.Sleep(200 * time.Millisecond)
-		return api.statusRequests()
+		// Wait for the request count to stop changing, rather than assuming
+		// any further, unwanted requests the first render might still
+		// trigger have settled after a fixed delay.
+		return awaitQuiet(t, api.statusRequests, 200*time.Millisecond)
 	}
 
 	var one, twenty int
