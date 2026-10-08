@@ -32,7 +32,7 @@ const (
 	// Fit says the plan does not realise the handed design, or works against
 	// a decision the knowledge base holds. It is advice to the owner.
 	Fit Kind = "fit"
-	// Size says a unit takes on too much and is to be split.
+	// Size advises splitting when it improves practical capacity or reviewability.
 	Size Kind = "size"
 	// Acceptance says a unit's task is unclear or its acceptance cannot be
 	// verified from the unit's work.
@@ -237,10 +237,9 @@ type Dissent struct {
 }
 
 // Blocking reports whether the dissent stands in the way of ratification: the
-// owner's own objection, a charter veto, or a size or acceptance objection the
-// architect has to settle. A fit objection is advice and never blocks. The
+// owner's own objection or a charter veto. Engineering objections are advice. The
 // owner's disposition of the objection overrides this.
-func (d Dissent) Blocking() bool { return d.Kind != Fit }
+func (d Dissent) Blocking() bool { return d.Kind == Charter || d.Kind == Owner }
 
 // Entry is one line of the dissent record: an objection that stands, whether
 // it blocks, and how the owner disposed of it.

@@ -593,9 +593,15 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 	must(t, err)
 	move(contesting, trace.UnitSubject("resume"), "resume-reviewing", UnitReviewing, tick(3), foremanActor)
 	move(contesting, trace.UnitSubject("resume"), "resume-contested", UnitContested, tick(3), reviewerActor)
+	raiseFixtureContest(t, repository, contesting, "resume")
 	move(contesting, trace.UnitSubject("index"), "index-implementing", UnitImplementing, tick(4), foremanActor)
 	move(contesting, trace.UnitSubject("index"), "index-contested", UnitContested, tick(4), masonActor)
+	raiseFixtureContest(t, repository, contesting, "index")
 
+	presented, api := f.s.deliveryPresentation(ctx, string(assembled))
+	if api != nil {
+		t.Fatal(api)
+	}
 	// A presented amendment in the assembled workstream.
 	sealed, sealDoc, _, err := seal.Latest(repository, assembled)
 	must(t, err)
@@ -604,10 +610,6 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 	amendmentPacket := trace.Document{Header: header(assembled, "osmia.trace.document", "amendment-1-presented-packet", tick(5), shedActor), Path: amendmentPacketPath("1"), Content: `{"round":1,"recommendation":"approve: no objection stands"}` + "\n"}
 	move(assembled, amendmentSubject("1"), "amendment-1-presented", amendmentPresented, tick(5), shedActor, amendmentPacket)
 
-	presented, api := f.s.deliveryPresentation(ctx, string(assembled))
-	if api != nil {
-		t.Fatal(api)
-	}
 	body := func(kv ...any) map[string]any {
 		out := map[string]any{}
 		for i := 0; i < len(kv); i += 2 {
@@ -653,17 +655,17 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 			t.Fatalf("%s: inbox\n%+v\nwant\n%+v", step, got.Entries, want)
 		}
 	}
-	expect("every kind open", delivery, escalation, ratification, skipped, failedTurn, gaveUp, amendment)
+	expect("every kind open", escalation, ratification, skipped, failedTurn, gaveUp, amendment)
 
 	// Answering through each kind's own endpoint takes its entry out.
 	if _, api := f.s.answer(ctx, "1", AnswerRequest{Text: "In files."}); api != nil {
 		t.Fatal(api)
 	}
-	expect("escalation answered", delivery, ratification, skipped, failedTurn, gaveUp, amendment)
+	expect("escalation answered", ratification, skipped, failedTurn, gaveUp, amendment)
 	if _, api := f.s.ruleContested(ctx, string(contesting), "resume", ContestedRulingRequest{Decision: "review", Note: "Review it again."}); api != nil {
 		t.Fatal(api)
 	}
-	expect("contest ruled", delivery, ratification, skipped, gaveUp, amendment)
+	expect("contest ruled", ratification, skipped, gaveUp, amendment)
 	if _, api := f.s.decideAmendment(ctx, string(assembled), "1", AmendmentDecisionRequest{Decision: AmendmentReject, Packet: 1}); api != nil {
 		t.Fatal(api)
 	}

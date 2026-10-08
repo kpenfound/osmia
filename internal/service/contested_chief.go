@@ -20,9 +20,9 @@ var chiefActor = trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
 
 const resolveContestedTool = "resolve_contested"
 
-// chiefContestLimit is how many contests of one unit in a row the chief of
-// staff may rule on before the unit's contests are the owner's.
-const chiefContestLimit = 2
+// chiefContestLimit marks delegated recovery as unbounded by a per-unit counter.
+// The service budget and loop guard bound execution.
+const chiefContestLimit = -1
 
 // escalateContest is the chief of staff's decision to raise a contest to the
 // owner.
@@ -46,14 +46,14 @@ func chiefContestPath(unit, contest string) string {
 // belongs in the system prompt of every chief-of-staff turn.
 const contestGuidance = "A contested unit is stuck until someone rules on it. You rule first, on the owner's behalf: read units/<unit>/activity.json for the contest, the rulings it takes, the unit's recent turns and anything the service refused. " +
 	"When you are confident a ruling resolves it, call resolve_contested with review (the reviewer reviews the candidate again) or revise (the mason revises the unit), and a note the resumed role receives saying exactly what to do differently. " +
-	"When you cannot tell what is wrong, the fix needs a decision the owner has not made, or the unit has been contested again after your ruling, call resolve_contested with escalate and a note for the owner: what is stuck, what you found and your recommendation. " +
-	"A contest you see and do not resolve goes to the owner. When the owner rules on a contested unit in a message, call resolve_contested with owner_decided true and the owner's words as the note. " +
-	"When a unit is stuck or wrong outside a contest, such as checks that keep failing to complete, a block the service reports, or a stage that has to run again, call move_unit to move it to implementing, checking, reviewing or approved with a note; your moves share the limit on your rulings. Move it to contested to hold it for the owner when you cannot fix it. When the owner asks you to move a unit, call move_unit with owner_decided true and the owner's words as the note. " +
+	"Investigate repeated contests with inspect_code and factory_context, commission revised assignments or bounded investigation with route_amendment, and identify what new evidence justifies retrying. When the fix changes approved intent, needs an owner-reserved tradeoff, or requires an unavailable operational capability, call resolve_contested with escalate and a note for the owner: what is stuck, what you found and your recommendation. " +
+	"A contest remains an internal engineering blocker until you explicitly escalate it. When the owner rules on a contested unit in a message, call resolve_contested with owner_decided true and the owner's words as the note. " +
+	"When a unit is stuck or wrong outside a contest, such as checks that keep failing to complete, a block the service reports, or a stage that has to run again, call move_unit to move it to implementing, checking, reviewing with a note; independent review remains required; the service budget and loop guard bound recovery spending. Move it to contested to hold it for the owner when you cannot fix it. When the owner asks you to move a unit, call move_unit with owner_decided true and the owner's words as the note. " +
 	"Hand a unit back to the role that can resolve what stopped it, not to the stage it stopped in. When the service refused its reviews as stale, another review of the same candidate is refused again: move it to implementing so its mason makes a new candidate on the current feature branch, and escalate if its workspace stays behind the feature branch. When its checks did not complete, rule review only once the checks can run again, and escalate when they cannot. When its mason kept leaving conflict markers, rule revise with a note naming the files and what each side holds. When its turns were interrupted again and again, rule review or revise so the work continues, and escalate if the service keeps stopping."
 
 // driftHandbackGuidance tells the chief of staff how to handle a held drift
 // rebase. It belongs in the system prompt of every chief-of-staff turn.
-const driftHandbackGuidance = "A drift rebase is held when review sent its conflict resolution back too many times, its mason kept leaving conflict markers, or its turns kept being interrupted; drift/rebase.json and the feed say which. When you can say what its drift mason or drift reviewer should do differently, such as a reviewer that misreads an upstream already holding the feature's change, call hand_back_drift with that note: the service asks for another drift rebase, and both receive it. Otherwise leave the held drift rebase to the owner, whose inbox lists it. You may hand back twice in a row before the owner acts. When the owner asks you to hand it back, call hand_back_drift with owner_decided true and the owner's words as the note."
+const driftHandbackGuidance = "A drift rebase is held when review sent its conflict resolution back too many times, its mason kept leaving conflict markers, or its turns kept being interrupted; drift/rebase.json and the feed say which. When you can say what its drift mason or drift reviewer should do differently, such as a reviewer that misreads an upstream already holding the feature's change, call hand_back_drift with that note: the service asks for another drift rebase, and both receive it. Otherwise leave the held drift rebase to the owner, whose inbox lists it. Record what new evidence or changed approach justifies another attempt; budgets and the loop guard bound recovery. When the owner asks you to hand it back, call hand_back_drift with owner_decided true and the owner's words as the note."
 
 // unitContest returns the unit's latest move to contested, and whether the
 // unit is contested by it now.
@@ -89,49 +89,12 @@ func chiefDecisions(repo *trace.Repository, stream config.WorkstreamID, unit str
 	return records, decisions, nil
 }
 
-// chiefRulingsLeft returns how many more times the chief of staff may rule on
-// a contest of the unit or move it: chiefContestLimit less its rulings and
-// moves since the owner last ruled on or moved the unit. Escalations and moves
-// to contested raise the unit to the owner and use none.
+// chiefRulingsLeft returns -1: engineering recovery is not an owner gate.
 func chiefRulingsLeft(repo *trace.Repository, stream config.WorkstreamID, unit string) (int, error) {
-	transitions, err := trace.Read[trace.Transition](repo, stream)
-	if err != nil {
-		return 0, err
-	}
-	var owner trace.Transition
-	for _, t := range transitions {
-		if t.Subject == trace.UnitSubject(unit) && t.Actor == ownerActor {
-			owner = t
-		}
-	}
-	records, decisions, err := chiefDecisions(repo, stream, unit)
-	if err != nil {
-		return 0, err
-	}
-	used := 0
-	for i, d := range decisions {
-		if d.Decision != escalateContest && records[i].At.After(owner.At) {
-			used++
-		}
-	}
-	moved, moves, err := recordedMoves(repo, stream, unit)
-	if err != nil {
-		return 0, err
-	}
-	for i, m := range moves {
-		if m.By == rulerName(chiefActor) && m.To != UnitContested && moved[i].At.After(owner.At) {
-			used++
-		}
-	}
-	return max(chiefContestLimit-used, 0), nil
+	return -1, nil
 }
 
-// contestRaised reports whether a contest is the owner's to rule, and the
-// chief of staff's note when it escalated it. It is the owner's when a move
-// to contested raised it, when the chief of staff escalated it, has no
-// rulings left for the unit, or has seen it and left it undecided: its event
-// was acknowledged after a completed chief-of-staff turn or failed to be
-// delivered, or it raised no event.
+// contestRaised reports explicit escalation or an owner-held contest.
 func contestRaised(repo *trace.Repository, stream config.WorkstreamID, unit string, contest trace.Transition) (bool, string, error) {
 	if moveContest(contest, unit) {
 		note, err := moveNote(repo, stream, unit, contest)
@@ -145,30 +108,12 @@ func contestRaised(repo *trace.Repository, stream config.WorkstreamID, unit stri
 		// A ruling that left the unit on this contest did not resolve it.
 		return true, decisions[i].Note, nil
 	}
-	if left, err := chiefRulingsLeft(repo, stream, unit); err != nil || left == 0 {
-		return err == nil, "", err
-	}
-	entries, err := repo.Outbox(stream)
-	if err != nil {
-		return false, "", err
-	}
-	seen := true
-	for _, e := range entries {
-		if e.TransitionID != contest.ID {
-			continue
-		}
-		failed := slices.ContainsFunc(e.History, func(a trace.DeliveryAction) bool { return a.Kind == "release" })
-		seen = e.Acknowledged || failed
-		if !seen {
-			break
-		}
-	}
-	return seen, "", nil
+	return false, "", nil
 }
 
 // resolveContested returns the resolve_contested tool of one claimed
 // chief-of-staff turn. The chief of staff rules on a contested unit of its
-// workstream on the owner's behalf, within chiefContestLimit, or escalates it
+// workstream on the owner's behalf, or explicitly escalates it
 // to the owner; in a turn answering the owner, it records the owner's own
 // ruling. A decision the service refuses is an ordinary result,
 // {"recorded":false,"reason":...}, and records nothing.
@@ -235,13 +180,7 @@ func (c *runtimeControls) resolveContested(repository *trace.Repository, scope c
 		if slices.ContainsFunc(decisions, func(d ChiefContestDecision) bool { return d.Contest == contest.ID }) {
 			return priorityRefusal(fmt.Sprintf("you already decided contest %s of unit %s; the owner rules on it", contest.ID, input.Unit))
 		}
-		if input.Decision != escalateContest {
-			if left, err := chiefRulingsLeft(repository, stream, input.Unit); err != nil {
-				return nil, err
-			} else if left == 0 {
-				return priorityRefusal(fmt.Sprintf("you ruled on unit %s's last %d contests and it is contested again; escalate it to the owner", input.Unit, chiefContestLimit))
-			}
-		}
+
 		record := func() error {
 			data, _ := json.MarshalIndent(ChiefContestDecision{Contest: contest.ID, Decision: input.Decision, Note: note, Turn: scope.Turn}, "", "  ")
 			h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: trace.UnitSubject(input.Unit) + "-chief-" + contest.ID, Revision: 1, Project: repository.Project(), Workstream: stream, Unit: input.Unit, At: s.now(), Actor: chiefActor, Cause: contest.ID}

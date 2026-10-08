@@ -788,6 +788,11 @@ func (s *Service) holds(project config.ProjectID, librarian config.WorkstreamID,
 	if gone, err := abandoned(repository, c.Workstream); err != nil || gone {
 		return gone, err
 	}
+	if (c.Thread.Identity.Role == masonRole || c.Thread.Identity.Role == reviewerRole) && c.Turn.Request.Unit != "" {
+		if held, err := assignmentHeld(repository, c.Workstream, c.Turn.Request.Unit, c.Thread.Identity.Role); err != nil || held {
+			return held, err
+		}
+	}
 	if c.Thread.Identity.Role != trace.ChiefOfStaff {
 		if waiting, err := baseWaiting(repository, c.Workstream); err != nil || waiting {
 			return waiting, err

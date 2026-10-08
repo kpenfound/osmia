@@ -42,7 +42,7 @@ behavior and feature dependencies; the guides describe implemented behavior.
 
 The chief of staff answers what it can, resolves contested units it is
 confident about and moves units the state machine leaves stuck; the
-questions, amendments and contests left for you come to one owner inbox. The trace
+intent questions, spec amendments and explicitly escalated blockers come to one owner inbox. The factory revises engineering assignments and tracks necessary discovered work within your approved intent. The trace
 keeps the documents, decisions and turns through restarts. See the
 [architecture guide](docs/architecture.md) for the components and boundaries.
 

@@ -204,6 +204,9 @@ func (a *finalReviewer) assemble(ctx context.Context, stream config.WorkstreamID
 	if !allMerged(b) {
 		return nil
 	}
+	if pending, err := unresolvedWork(a.repository, stream); err != nil || pending {
+		return err
+	}
 	transitions, err := trace.Read[trace.Transition](a.repository, stream)
 	if err != nil {
 		return err
@@ -315,6 +318,9 @@ func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID)
 	}
 	if !allMerged(b) {
 		return nil
+	}
+	if pending, err := unresolvedWork(a.repository, stream); err != nil || pending {
+		return err
 	}
 	ops, err := a.repository.Operations(stream)
 	if err != nil {

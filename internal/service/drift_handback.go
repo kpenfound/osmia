@@ -137,8 +137,7 @@ func driftHandbackNote(repo *trace.Repository, stream config.WorkstreamID, k int
 
 // handBackDrift returns the hand_back_drift tool of one claimed
 // chief-of-staff turn. The chief of staff hands a held drift rebase back on
-// the owner's behalf at most chiefContestLimit times in a row, since the
-// owner last asked for one or handed one back; in a turn answering the
+// the owner's behalf with a recorded recovery decision; in a turn answering the
 // owner, it records the owner's own handback. A handback the service refuses
 // is an ordinary result, {"recorded":false,"reason":...}, and records
 // nothing.
@@ -183,10 +182,6 @@ func (c *runtimeControls) handBackDrift(repository *trace.Repository, scope core
 				return priorityRefusal("owner_decided is only for a handback the owner asked for in the message this turn answers")
 			}
 			actor = turn.Actor
-		} else if n, err := chiefHandbacks(repository, stream); err != nil {
-			return nil, err
-		} else if n >= chiefContestLimit {
-			return priorityRefusal(fmt.Sprintf("you handed this workstream's drift rebases back %d times since the owner last acted on them; the held drift rebase is the owner's", chiefContestLimit))
 		}
 		k, api := s.handBackDrift(ctx, repository, stream, input.Note, actor, scope.Turn, now())
 		if api != nil {

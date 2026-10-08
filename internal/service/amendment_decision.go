@@ -30,7 +30,7 @@ const (
 	AmendmentOverrule = "overrule"
 )
 
-// Amendment subject states after the owner's decision.
+// Amendment subject states after a recorded decision.
 const (
 	amendmentPresented = "presented"
 	amendmentApproved  = "approved"
@@ -45,18 +45,17 @@ var amendmentActor = trace.Actor{Kind: "service", ID: "amendments"}
 func amendmentDecisionPath(id string) string { return "amendments/" + id + "/decision.json" }
 func amendmentDecisionID(id string) string   { return "amendment_" + id + "_decision" }
 
-// amendmentDecided is the ID of the transition that records the owner's k-th
+// amendmentDecided is the ID of the transition that records the k-th
 // decision on an amendment.
 func amendmentDecided(id string, k int) string { return fmt.Sprintf("amendment-%s-decided-%d", id, k) }
 
-// amendmentRulingTurn is the turn that delivers the owner's ruling on an
+// amendmentRulingTurn is the turn that delivers the recorded ruling on an
 // amendment to its requester's thread.
 func amendmentRulingTurn(id string) string { return "amendment_" + id + "_ruling" }
 
-// AmendmentDecision is one owner decision on a presented amendment, recorded
+// AmendmentDecision is one attributed decision on a presented amendment, recorded
 // as one revision of amendments/<n>/decision.json. Round is the debate round
-// the decided packet followed, Packet the revision of packet.json the owner
-// read, Spec and Plan the revisions of the proposed amendments/<n>/spec.md
+// the decided packet followed, Packet the revision of packet.json considered, Spec and Plan the revisions of the proposed amendments/<n>/spec.md
 // and plan.json, and SealRevision the revision of seal.json in force.
 // Overruled names the objections an overrule set aside.
 type AmendmentDecision struct {
@@ -68,6 +67,7 @@ type AmendmentDecision struct {
 	Plan         int      `json:"plan"`
 	SealRevision int      `json:"seal_revision"`
 	Overruled    []string `json:"overruled,omitempty"`
+	Actor        string   `json:"actor,omitempty"`
 }
 
 // AmendmentDecisionRequest is the owner's decision on the named revision of
@@ -99,7 +99,7 @@ func amendmentSealMatches(repository *trace.Repository, stream config.Workstream
 }
 
 // AmendmentResponse describes one amendment: its state, the debate round it
-// reached, its latest packet and revision, and the owner's latest decision.
+// reached, its latest packet and revision, and its latest decision.
 type AmendmentResponse struct {
 	Project    config.ProjectID    `json:"project"`
 	Workstream config.WorkstreamID `json:"workstream"`
@@ -112,7 +112,7 @@ type AmendmentResponse struct {
 	Detail     string              `json:"detail,omitempty"`
 }
 
-// amendmentDecisions returns the owner's decisions on an amendment, oldest
+// amendmentDecisions returns the recorded decisions on an amendment, oldest
 // first.
 func amendmentDecisions(repository *trace.Repository, stream config.WorkstreamID, id string) ([]AmendmentDecision, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
@@ -134,7 +134,7 @@ func amendmentDecisions(repository *trace.Repository, stream config.WorkstreamID
 }
 
 // amendmentRound returns the debate round an amendment is in: the first, and
-// one more for every round the owner asked for.
+// one more for every additional round requested.
 func amendmentRound(repository *trace.Repository, stream config.WorkstreamID, id string) (int, error) {
 	decisions, err := amendmentDecisions(repository, stream, id)
 	if err != nil {
@@ -149,7 +149,7 @@ func amendmentRound(repository *trace.Repository, stream config.WorkstreamID, id
 	return round, nil
 }
 
-// amendmentCase is what the owner's decision on one amendment reads.
+// amendmentCase is what a decision on one amendment reads.
 type amendmentCase struct {
 	request   trace.Amendment
 	state     trace.WorkflowState
@@ -238,7 +238,7 @@ func (s *Service) decideAmendment(ctx context.Context, raw, id string, req Amend
 // recordAmendmentDecision records one decision on an amendment, as the
 // actor, and moves the amendment to what the decision asks for: approved,
 // rejected, or proposed again for another debate round. A decision on a
-// packet revision the owner already decided returns that decision when it
+// packet revision already decided returns that decision when it
 // is the same and is refused when it differs, so a retry never decides
 // twice. Approval is refused while an objection blocks it, and approval or
 // overrule once the sealed spec or plan moved since the request was filed.
@@ -270,12 +270,12 @@ func (s *Service) recordAmendmentDecision(ctx context.Context, project config.Pr
 			continue
 		}
 		if d.Decision == decision {
-			return c.response(project, stream, fmt.Sprintf("the owner's decision to %s amendment %s on packet revision %d is already recorded", decision, id, req.Packet)), nil
+			return c.response(project, stream, fmt.Sprintf("the recorded decision to %s amendment %s on packet revision %d is already recorded", decision, id, req.Packet)), nil
 		}
 		return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("packet revision %d of amendment %s is already decided: %s", req.Packet, id, d.Decision)}
 	}
 	if c.state.Value != amendmentPresented || c.packet.Revision == 0 {
-		return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("amendment %s of workstream %s is %s; the owner decides it once the chief of staff presents it", id, stream, featureState(c.state.Value))}
+		return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("amendment %s of workstream %s is %s; it can be decided once its packet is presented", id, stream, featureState(c.state.Value))}
 	}
 	if req.Packet != c.packet.Revision {
 		return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("packet revision %d of amendment %s is not the latest; revision %d is presented, read it with osmia amendment", req.Packet, id, c.packet.Revision)}
@@ -289,7 +289,12 @@ func (s *Service) recordAmendmentDecision(ctx context.Context, project config.Pr
 		return AmendmentResponse{}, failed
 	}
 	entries := amendmentDissent(records)
-	record := AmendmentDecision{Decision: decision, Note: strings.TrimSpace(req.Note), Round: c.round, Packet: c.packet.Revision, Spec: c.spec.Revision, Plan: c.plan.Revision, SealRevision: sealDoc.Revision}
+	record := AmendmentDecision{Actor: actor.ID, Decision: decision, Note: strings.TrimSpace(req.Note), Round: c.round, Packet: c.packet.Revision, Spec: c.spec.Revision, Plan: c.plan.Revision, SealRevision: sealDoc.Revision}
+	if actor.Kind != "owner" {
+		if api := engineeringRevision(repository, stream, c, current, entries, req.Note); api != nil {
+			return AmendmentResponse{}, api
+		}
+	}
 	var to, reason string
 	switch decision {
 	case AmendmentApprove, AmendmentOverrule:
@@ -326,6 +331,9 @@ func (s *Service) recordAmendmentDecision(ctx context.Context, project config.Pr
 		to = "proposed"
 		reason = fmt.Sprintf("the owner asked for debate round %d on amendment %s after reading packet revision %d", c.round+1, id, c.packet.Revision)
 	}
+	if actor.Kind != "owner" {
+		reason = strings.ReplaceAll(reason, "the owner", "the chief of staff")
+	}
 	if record.Note != "" {
 		reason += ": " + record.Note
 	}
@@ -354,7 +362,7 @@ func (s *Service) recordAmendmentDecision(ctx context.Context, project config.Pr
 	return c.response(project, stream, reason), nil
 }
 
-// decideAmendmentTool records the owner's decision on an amendment that the
+// decideAmendmentTool records a decision on an amendment that the
 // owner gave the chief of staff in a message.
 const decideAmendmentTool = "decide_amendment"
 
@@ -362,24 +370,25 @@ const decideAmendmentTool = "decide_amendment"
 // decide_amendment. It belongs in the system prompt of every owner message
 // turn.
 const amendmentGuidance = "When the owner's message decides an amendment you presented, call decide_amendment with the amendment's number, the packet revision you presented, the owner's decision and the owner's own words as the note. " +
-	"The decisions are approve, reject, round for one more bounded debate round, and overrule to approve over the objections that still stand. Never decide an amendment the owner has not decided in the message; the owner can also decide it with osmia amendment."
+	"The decisions are approve, reject, round for one more bounded debate round, and overrule to approve over the objections that still stand. For a plan-only revision preserving approved intent, call decide_amendment yourself with owner_decided false and explain why the revised assignments still fulfill the spec. Investigate engineering disagreements and discovered work internally. Spec changes and charter exceptions require an owner decision; use owner_decided true only to relay the decision in this owner message."
 
 // decideAmendment returns the decide_amendment tool of one claimed
 // chief-of-staff turn. It records the same decision as POST
-// /amendment/<workstream>/<n> on the turn's workstream, with the owner whose
-// message the turn answers as its actor. A decision the service refuses is an
+// /amendment/<workstream>/<n> on the turn's workstream. Delegated engineering
+// decisions identify the chief; relayed decisions identify the owner. A refusal is an
 // ordinary result, {"recorded":false,"reason":...}, and records nothing.
 func (c *runtimeControls) decideAmendment(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: decideAmendmentTool, Effect: coreadapter.ToolMemory,
-		Description: "Record the owner's decision on an amendment you presented, only when the owner decides it in a message. amendment: its number; packet: the revision of its packet the owner read; decision: approve, reject, round (one more bounded debate round) or overrule (approve over the objections that stand); note: the owner's words. " +
+		Description: "Decide a plan-only engineering revision that preserves approved intent, with a reason. Set owner_decided true only to relay an explicit owner decision on this turn; spec changes require it. amendment: its number; packet: the presented packet revision; decision: approve, reject, round (one more bounded debate round) or overrule (approve over the objections that stand); note: engineering reasoning, or the owner's words when relaying an owner decision. " +
 			"Approval versions the spec and plan and reseals; rejection keeps the sealed documents; either way the requester receives the ruling and its unit resumes.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"amendment":{"type":"string"},"packet":{"type":"integer","minimum":1},"decision":{"type":"string","enum":["approve","reject","round","overrule"]},"note":{"type":"string"}},"required":["amendment","packet","decision"],"additionalProperties":false}`)}
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"amendment":{"type":"string"},"packet":{"type":"integer","minimum":1},"decision":{"type":"string","enum":["approve","reject","round","overrule"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"}},"required":["amendment","packet","decision"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
-			Amendment string `json:"amendment"`
-			Packet    int    `json:"packet"`
-			Decision  string `json:"decision"`
-			Note      string `json:"note"`
+			Amendment    string `json:"amendment"`
+			Packet       int    `json:"packet"`
+			Decision     string `json:"decision"`
+			Note         string `json:"note"`
+			OwnerDecided bool   `json:"owner_decided"`
 		}
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
@@ -397,11 +406,15 @@ func (c *runtimeControls) decideAmendment(repository *trace.Repository, scope co
 		if err != nil {
 			return nil, err
 		}
-		if !owner {
-			return priorityRefusal("only the owner decides an amendment; this turn does not answer a message from the owner")
+		if input.OwnerDecided && !owner {
+			return priorityRefusal("this turn does not answer an owner message")
+		}
+		actor := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
+		if input.OwnerDecided {
+			actor = request.Actor
 		}
 		out, api := s.recordAmendmentDecision(ctx, repository.Project(), config.WorkstreamID(scope.Workstream), repository, input.Amendment,
-			AmendmentDecisionRequest{Decision: input.Decision, Note: input.Note, Packet: input.Packet}, request.Actor, request.ID)
+			AmendmentDecisionRequest{Decision: input.Decision, Note: input.Note, Packet: input.Packet}, actor, request.ID)
 		if api != nil {
 			if api.Code == Internal {
 				return nil, errors.New(api.Message)
@@ -500,6 +513,17 @@ func (a amendmentDebate) reseal(ctx context.Context, stream config.WorkstreamID,
 	if sealedSpec.ID == "" || sealedPlan.ID == "" || draftSpec.ID == "" || draftPlan.ID == "" || affectedDoc.ID == "" {
 		return fmt.Errorf("amendment %s: the sealed or proposed spec and plan revisions or the affected set are missing", req.ID)
 	}
+	var affected amendmentAffected
+	if err := json.Unmarshal([]byte(affectedDoc.Content), &affected); err != nil {
+		return err
+	}
+	idle, err := revisionWorkersIdle(a.repository, stream, affected.Units)
+	if err != nil {
+		return err
+	}
+	if !idle {
+		return nil
+	}
 	at := a.s.now()
 	document := func(id, path string, revision int, content string) trace.Document {
 		return trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: a.repository.Project(), Workstream: stream, At: at, Actor: amendmentActor, Cause: cause}, Path: path, Content: content}
@@ -570,7 +594,7 @@ func (a amendmentDebate) amendmentHeader(id string, stream config.WorkstreamID, 
 	return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.repository.Project(), Workstream: stream, Unit: unit, At: a.s.now(), Actor: amendmentActor, Cause: cause}
 }
 
-// rule delivers the owner's ruling on a decided amendment, rejected,
+// rule delivers the recorded ruling on a decided amendment, rejected,
 // unapplied or applied, to its requester's thread as the requester's next
 // turn, resumes the unit the request parked in the stage it preserved, and
 // moves the amendment to ruled. Each step finds
@@ -600,11 +624,11 @@ func (a amendmentDebate) rule(ctx context.Context, stream config.WorkstreamID, r
 		return err
 	}
 	verb := map[string]string{amendmentApplied: "approved", amendmentRejected: "rejected", amendmentUnapplied: "approved but could not apply"}[state.Value]
-	if err := a.resumeUnit(ctx, stream, req, cause, verb, transitions); err != nil {
+	if err := a.resumeUnit(ctx, stream, req, cause, verb, d.Actor, transitions); err != nil {
 		return err
 	}
 	id := "amendment-" + req.ID + "-" + amendmentRuled
-	reason := fmt.Sprintf("the owner's ruling on amendment %s is delivered to %s", req.ID, req.Requester.ID)
+	reason := fmt.Sprintf("the recorded ruling on amendment %s is delivered to %s", req.ID, req.Requester.ID)
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: a.amendmentHeader(id, stream, req.Unit, cause), Subject: amendmentSubject(req.ID), From: state.Value, To: amendmentRuled, Reason: reason}}
 	if _, err := a.repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return err
@@ -629,6 +653,16 @@ func (a amendmentDebate) deliverRuling(ctx context.Context, stream config.Workst
 	}
 	if err != nil {
 		return err
+	}
+	if th.Identity.Role == reviewerRole {
+		app, doc, err := a.application(stream, req.ID)
+		if err != nil {
+			return err
+		}
+		// A changed assignment needs a fresh candidate before the reviewer resumes.
+		if doc.Revision > 0 && slices.Contains(app.Rework, req.Unit) {
+			return nil
+		}
 	}
 	turn := amendmentRulingTurn(req.ID)
 	asking := req.Turn
@@ -664,12 +698,12 @@ func (a amendmentDebate) deliverRuling(ctx context.Context, stream config.Workst
 	return err
 }
 
-// amendmentRulingPrompt is the text of the turn that delivers the owner's
-// ruling on an amendment to its requester. The request and the owner's note
+// amendmentRulingPrompt delivers an attributed amendment ruling to its
+// requester. The request and the decision note
 // are quoted in the shared envelope.
 func amendmentRulingPrompt(req trace.Amendment, d AmendmentDecision, role, outcome string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "The owner ruled on amendment %s, which you asked for. Decision: %s.\nOutcome: %s\n", req.ID, d.Decision, outcome)
+	fmt.Fprintf(&b, "A decision was recorded on amendment %s, which you asked for. Decision: %s. Actor: %s.\nOutcome: %s\n", req.ID, d.Decision, d.Actor, outcome)
 	switch role {
 	case masonRole:
 		b.WriteString("Continue the unit in your existing workspace against the sealed spec and plan, and call done when its acceptance holds.\n")
@@ -680,7 +714,11 @@ func amendmentRulingPrompt(req trace.Amendment, d AmendmentDecision, role, outco
 	request := fmt.Sprintf("Citations: %s\nChange: %s\nReason: %s", strings.Join(req.Citations, ", "), req.Change, req.Reason)
 	sections := []envelope.Section{{Name: "question", Text: request}}
 	if d.Note != "" {
-		sections = append(sections, envelope.Section{Name: "owner_response", Text: d.Note})
+		section := "owner_response"
+		if d.Actor == trace.ChiefOfStaff {
+			section = "answer"
+		}
+		sections = append(sections, envelope.Section{Name: section, Text: d.Note})
 	}
 	part, _ := envelope.Render(sections...)
 	b.WriteString(part)
@@ -691,7 +729,7 @@ func amendmentRulingPrompt(req trace.Amendment, d AmendmentDecision, role, outco
 // stage its waiting transition preserved: implementing for a mason's request,
 // reviewing for a reviewer's. A unit the request did not park, or one that
 // left that wait, is not moved.
-func (a amendmentDebate) resumeUnit(ctx context.Context, stream config.WorkstreamID, req trace.Amendment, cause, verb string, transitions []trace.Transition) error {
+func (a amendmentDebate) resumeUnit(ctx context.Context, stream config.WorkstreamID, req trace.Amendment, cause, verb, actor string, transitions []trace.Transition) error {
 	if req.Unit == "" {
 		return nil
 	}
@@ -722,6 +760,9 @@ func (a amendmentDebate) resumeUnit(ctx context.Context, stream config.Workstrea
 		return nil
 	}
 	reason := fmt.Sprintf("unit %s resumes %s: the owner %s amendment %s, and the ruling is the %s's next turn", req.Unit, stage, verb, req.ID, wait.Actor.ID)
+	if actor == trace.ChiefOfStaff {
+		reason = strings.ReplaceAll(reason, "the owner", "the chief of staff")
+	}
 	h := a.amendmentHeader(resumed, stream, req.Unit, cause)
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitWaiting, To: stage, Reason: reason}, Events: []trace.Event{trace.Notice(resumed, "unit", reason)}}
 	if _, err := a.repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {

@@ -23,7 +23,7 @@ func (s *Service) chiefEventsPrompt(project config.ProjectID, repository *trace.
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf(chiefEvents, stream) + "\n\n" + chiefDocumentsGuidance + "\n\n" + questions.Guidance + "\n\n" + contestGuidance + "\n\n" + driftHandbackGuidance + "\n\n" + context, nil
+		return fmt.Sprintf(chiefEvents, stream) + "\n\n" + chiefDocumentsGuidance + "\n\n" + questions.Guidance + "\n\n" + amendmentGuidance + "\n\n" + contestGuidance + "\n\n" + driftHandbackGuidance + "\n\n" + context, nil
 	}
 }
 

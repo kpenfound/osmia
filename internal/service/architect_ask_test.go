@@ -72,7 +72,7 @@ func TestArchitectQuestionParksTheDraftUntilTheAnswerArrives(t *testing.T) {
 		if !strings.Contains(req.SystemPrompt, "architect of the dagger project") || req.Profile.Name != architectRole {
 			p.report("answer turn system prompt %q, profile %+v", req.SystemPrompt, req.Profile)
 		}
-		if names, err := toolNames(ctx, tools); err != nil || !slices.Equal(names, []string{questions.AskTool, DraftTool, "file_read"}) {
+		if names, err := toolNames(ctx, tools); err != nil || !slices.Equal(names, []string{questions.AskTool, DraftTool, "factory_context", "file_read", "inspect_code", "read_remote_file"}) {
 			p.report("answer turn tools %v %v", names, err)
 		}
 		return delivers(p, plan.PlanPath, validPlan)(ctx, req, verified, tools)

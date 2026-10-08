@@ -217,12 +217,9 @@ func (m *moveFixture) moveUnit(t *testing.T, input string) string {
 	return string(out)
 }
 
-// The chief of staff moves a stuck unit on the owner's behalf, within the
-// limit it shares with its contest rulings. A move to contested raises the
-// unit to the owner with its note and is open to it past the limit; the
-// owner's ruling on it moves the unit on and gives the chief of staff its
-// moves again.
-func TestChiefOfStaffMovesAUnitWithinItsLimit(t *testing.T) {
+// Engineering recovery remains internal; explicit escalation and owner
+// rulings retain their own attribution.
+func TestChiefOfStaffRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	m := newMoveFixture(t, "chief-moves")
@@ -235,10 +232,10 @@ func TestChiefOfStaffMovesAUnitWithinItsLimit(t *testing.T) {
 	if out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"Review it again."}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("move_unit: %s", out)
 	}
-	if left, err := chiefRulingsLeft(m.repo, m.stream, "resume"); err != nil || left != 0 {
+	if left, err := chiefRulingsLeft(m.repo, m.stream, "resume"); err != nil || left != -1 {
 		t.Fatalf("rulings left after two moves: %d %v", left, err)
 	}
-	if out := m.moveUnit(t, `{"unit":"resume","to":"implementing","note":"Revise it."}`); !strings.Contains(out, "move it to contested for the owner") {
+	if out := m.moveUnit(t, `{"unit":"resume","to":"implementing","note":"Revise it."}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("a move past the limit was recorded: %s", out)
 	}
 	hold := "Checks pass but every review finds the same gap; I recommend amending the plan."
@@ -273,7 +270,7 @@ func TestChiefOfStaffMovesAUnitWithinItsLimit(t *testing.T) {
 	}
 	actions, err := chiefActions(m.repo, m.stream)
 	must(t, err)
-	if len(actions) != 3 || actions[0].Text != "Moved unit resume from reviewing to checking. Run the checks again." || actions[2].Text != "Held unit resume for you, from reviewing: "+hold || actions[2].Turn != "events_1" {
+	if len(actions) != 4 || actions[0].Text != "Moved unit resume from reviewing to checking. Run the checks again." || actions[3].Text != "Held unit resume for you, from implementing: "+hold || actions[3].Turn != "events_1" {
 		t.Fatalf("conversation actions %+v", actions)
 	}
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/shed"
 )
 
-// Every kind but fit blocks, and the record carries who objected to what.
+// Charter objections block; engineering advice retains its provenance.
 func TestDissentRecordMarksWhatBlocks(t *testing.T) {
 	r := shed.Record{Version: shed.Version, Round: 1, Member: alice, Revision: one}
 	for k, kind := range shed.Kinds {
@@ -22,7 +22,7 @@ func TestDissentRecordMarksWhatBlocks(t *testing.T) {
 	}
 	conceded := record(2, alice, one, 0, shed.ObjectionID(1, alice, 3))
 	got := shed.DissentRecord([]shed.Record{r, conceded}, nil)
-	want := map[shed.Kind]bool{shed.Charter: true, shed.Fit: false, shed.Acceptance: true}
+	want := map[shed.Kind]bool{shed.Charter: true, shed.Fit: false, shed.Acceptance: false}
 	if len(got) != len(want) {
 		t.Fatalf("dissent record %+v", got)
 	}

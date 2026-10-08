@@ -373,9 +373,12 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 		return err
 	}
 	open := shed.DissentRecord(records, rulings)
+	redrafted := slices.ContainsFunc(records, func(r shed.Record) bool { return r.Round == n && r.Revision != latest })
 	round, _ := roundIDs(n)
 	switch {
-	case len(shed.Standing(open)) == 0:
+	case len(shed.Blocked(open)) == 0 && kind != "heard" && !redrafted:
+		return d.conclude(ctx, stream, state, n, round+"-heard", unopposed(records, open, n), open)
+	case kind == "heard" && len(shed.Standing(open)) == 0:
 		return d.conclude(ctx, stream, state, n, round+"-heard", unopposed(records, open, n), open)
 	case kind == "heard":
 		// The reply waits for a service that can run the architect.
@@ -424,8 +427,11 @@ func presentation(recommendation string) string {
 // which every turn failed reviewed nothing, and the reason says so. Dissent
 // the owner disposed of is not agreement either.
 func unopposed(records []shed.Record, open []shed.Entry, n int) string {
-	if len(open) > 0 {
+	if len(open) > 0 && len(shed.Standing(open)) == 0 {
 		return fmt.Sprintf("debate concluded after round %d: the owner disposed of every objection that stood", n)
+	}
+	if len(open) > 0 {
+		return fmt.Sprintf("debate concluded after round %d: no charter or owner objection blocks the proposal; engineering advice remains in the record", n)
 	}
 	members, failed := 0, 0
 	for _, r := range records {
@@ -1433,10 +1439,10 @@ Your view holds:
 Apply two tests and one judgement, and call %s once for each thing you find:
 - charter: a part that violates a charter rule. This is a veto on that part; cite the rule.
 - fit: the plan does not realise the handed design, or works against a decision the knowledge base holds. This is advice to the owner.
-- size: a unit that takes on too much for one mason, or touches too much of the code, and must be split. Name the unit as the part.
-- acceptance: a unit whose task is unclear, or whose acceptance a reviewer could not verify from the unit's work. Name the unit as the part.
+- size: a unit whose practical capacity or reviewability would improve enough from splitting to justify coordination; this is advice. Name the unit as the part.
+- acceptance: unclear outcomes, missing ownership boundaries or insufficient verification; this is engineering advice. Name the unit as the part.
 
-This debate is where units are defined. Once the plan is ratified, each mason builds its unit's task and a reviewer checks its acceptance; nobody reopens how the work is cut. Settle the units here.
+The plan is a revisable engineering approach. Challenge material risks and ownership gaps. Size and acceptance suggestions are advice, not owner gates. Prefer coherent outcomes and split only when coordination buys useful parallelism, reviewability or practical capacity; breadth alone is not a reason. Requirements belong in the spec; implementation guidance remains adaptable.
 
 An objection that is refused comes back with the reason; correct it and call again. Ending your turn without objecting or conceding says you have no new dissent on this revision, and that you accept it in place of any earlier revision you objected to. Call %s when something you must know to judge the revision is not in your view: the round waits for the answer, which arrives as your next turn.
 `, in.Round, in.pin(), shed.EntityCitation, shed.ObjectTool, questions.AskTool)

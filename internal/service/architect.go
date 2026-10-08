@@ -682,7 +682,7 @@ func (d *drafter) turns(stream config.WorkstreamID) *isolation.Turns {
 		Workspaces: stagedWorkspaces{},
 		Views:      isolation.Views{Directory: filepath.Join(d.s.current().Root.String(), "views")},
 		Select:     d.selectView,
-		Grants:     map[string]coreadapter.Capabilities{architectRole: {Tools: []string{"file_read", DraftTool, questions.AskTool}}},
+		Grants:     map[string]coreadapter.Capabilities{architectRole: {Tools: []string{"file_read", factoryContextTool, readRemoteFileTool, "inspect_code", DraftTool, questions.AskTool}}},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Workstream != string(stream) {
 				return nil, errors.New("turn scope denied")
@@ -695,7 +695,7 @@ func (d *drafter) turns(stream config.WorkstreamID) *isolation.Turns {
 			if err != nil {
 				return nil, err
 			}
-			return append([]coreadapter.Tool{d.draftTool(scope, origin)}, ask...), nil
+			return append([]coreadapter.Tool{factoryContext(d.repository, scope), remoteFileTool(d.repository, scope, d.s.now), inspectCode(d.s.about(d.repository), d.repository, scope, d.s.now), d.draftTool(scope, origin)}, ask...), nil
 		},
 		Hosts:  hosts,
 		Engine: engine,
@@ -987,7 +987,7 @@ func (d *drafter) sketch(ctx context.Context, operation string, stream config.Wo
 }
 
 func architectSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the architect of the %s project (%s). You draft one workstream's feature spec and plan from what the owner handed in, the project's charter and its knowledge base, in the vocabulary the knowledge base gives the project. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them. When your view does not settle something you must know, call %s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.", p.Name, p.Upstream, DraftTool, questions.AskTool)
+	return fmt.Sprintf("You are the architect of the %s project (%s). You draft one workstream's feature spec and plan from what the owner handed in, the project's charter and its knowledge base, in the vocabulary the knowledge base gives the project. Use inspect_code to read the repository, read_remote_file to retrieve referenced GitHub files, and factory_context to retrieve workstream records. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them. When your view does not settle something you must know, call %s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.", p.Name, p.Upstream, DraftTool, questions.AskTool)
 }
 
 func architectPrompt(handedPath string, n int, previous string, drafted bool, answers []string) string {
@@ -1012,7 +1012,7 @@ Deliver two files with %s; only what you deliver is kept.
 1. spec.md, in Markdown: the intended behaviour, what the feature must not do, and a section headed "## Acceptance criteria" holding the acceptance criteria as a numbered list ("1. ...", "2. ..."), numbered from 1 without gaps or repeats. Each criterion is one statement that can be shown to hold; the plan cites it as spec#<n>.
 2. plan.json: the directed graph of units, as {"version": 2, "units": [...]}. Each unit is {"id": "...", "title": "...", "task": "...", "acceptance": ["..."], "criteria": ["spec#<n>"], "depends_on": ["..."], "footprint": ["..."]}. An id is 1 to 128 letters, digits, '_' or '-', starting with a letter or digit. task tells one mason what to build, as a developer's ticket would. acceptance lists what a reviewer checks against the unit's work to accept it, including the tests it adds or must keep passing. criteria cites the spec criteria the unit serves. depends_on lists the ids of the units it must wait for, and the dependencies form no cycle. footprint lists the entities the unit will touch, by ID or alias from context.md, at least one per unit; units with disjoint footprints may be built at the same time.
 
-The draft is accepted only when every unit has a task and at least one acceptance item, every criterion in spec.md is served by at least one unit, every citation names a criterion the spec has, every dependency names a unit in the plan without forming a cycle, and every footprint resolves against the entity map. How finely the work is cut into units is your call.
+The draft is accepted only when every unit has a task and at least one acceptance item, every criterion in spec.md is served by at least one unit, every citation names a criterion the spec has, every dependency names a unit in the plan without forming a cycle, and every footprint resolves against the entity map. Start with one coherent unit when the assigned profile can complete and review the outcome. Split only for useful parallelism, reviewability or practical capacity, not file counts. Units may span layers. State neighboring responsibilities and interfaces in boundaries, hard limits in constraints, and optional approaches or assumptions in guidance (each an optional string array). Acceptance states observable outcomes, not report formatting or exact test recipes unless the owner explicitly requires them. Keep the spec focused on owner intent; do not elevate engineering choices into owner constraints. Investigation can be a unit with an evidence outcome.
 
 Call %s when something you must know to draft is not in your view: the draft waits for the answer, which arrives as your next turn.
 `, handedPath, draft, DraftTool, questions.AskTool)

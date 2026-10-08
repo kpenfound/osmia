@@ -337,7 +337,7 @@ func publicationPath(name string) error {
 		if len(parts) >= 5 && (amendmentDraftPath(parts[2:]) || amendmentRoundPath(parts[2:])) {
 			return nil
 		}
-		if shedPath(parts[2:]) || unitPath(parts[2:]) || finalPath(parts[2:]) || driftPath(parts[2:]) || toolPath(parts[2:]) || judgmentPath(parts[2:]) || sealingPath(parts[2:]) || charterProposalPath(parts[2:]) {
+		if shedPath(parts[2:]) || unitPath(parts[2:]) || finalPath(parts[2:]) || driftPath(parts[2:]) || toolPath(parts[2:]) || judgmentPath(parts[2:]) || sealingPath(parts[2:]) || charterProposalPath(parts[2:]) || adaptiveDocumentPath(parts[2:]) {
 			return nil
 		}
 	case len(parts) == 2 && parts[0] == "notes" && strings.HasSuffix(parts[1], ".md") && key(strings.TrimSuffix(parts[1], ".md")):

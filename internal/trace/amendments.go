@@ -145,10 +145,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 	requester := Actor{Kind: "agent", ID: agent}
 	unit := scope.Unit
 	parkRole := scope.Role
-	if scope.Role == ChiefOfStaff {
-		if req.QuestionID == "" {
-			return Amendment{}, refused("an open question is required")
-		}
+	if scope.Role == ChiefOfStaff && req.QuestionID != "" {
 		q, err := openQuestion(questions(records, v, stream), req.QuestionID)
 		if err != nil {
 			return Amendment{}, err
@@ -159,7 +156,7 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 				parkRole = identity.Role
 			}
 		}
-	} else if req.QuestionID != "" {
+	} else if scope.Role != ChiefOfStaff && req.QuestionID != "" {
 		return Amendment{}, refused("only the chief of staff may route a question")
 	}
 	var from string

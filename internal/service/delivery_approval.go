@@ -153,6 +153,12 @@ func (s *Service) deliveryPresentation(ctx context.Context, raw string) (Deliver
 
 // presentDelivery builds the presentation of one workstream of the project.
 func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository) (DeliveryPresentation, *APIError) {
+	if pending, err := unresolvedWork(repository, stream); err != nil {
+		return DeliveryPresentation{}, &APIError{Internal, "cannot read discovered work"}
+	} else if pending {
+		return DeliveryPresentation{}, &APIError{Conflict, "necessary discovered work or a plan revision remains unresolved"}
+	}
+
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Internal, "cannot read feature state"}
@@ -328,6 +334,12 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 // deliveryGate checks the approval against the current review and the exact
 // description publication proposes to send.
 func (s *Service) deliveryGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, description string) (DeliveryApproval, string, error) {
+	if pending, err := unresolvedWork(repository, stream); err != nil {
+		return DeliveryApproval{}, "", err
+	} else if pending {
+		return DeliveryApproval{}, "necessary discovered work or a plan revision remains unresolved", nil
+	}
+
 	report, reason, err := (&finalReviewer{s: s, repository: repository}).finalGate(ctx, stream)
 	if err != nil || reason != "" {
 		return DeliveryApproval{}, reason, err

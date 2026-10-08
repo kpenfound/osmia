@@ -49,7 +49,7 @@ func CoreEnforcement(root config.Root) Enforcement {
 // its read-only view of the workstream's documents, status, runtime controls,
 // owner decisions, unit moves, drift handbacks and question tools. It names
 // every tool chiefTools makes.
-var chiefGrant = coreadapter.Capabilities{Tools: append([]string{"file_read", status.ToolName, "notify", "capacity", "inspect_code", prioritiseTool, pauseTool, resumeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, moveUnitTool, handBackDriftTool}, questions.ChiefTools...)}
+var chiefGrant = coreadapter.Capabilities{Tools: append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, status.ToolName, "notify", "capacity", "inspect_code", prioritiseTool, pauseTool, resumeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, moveUnitTool, handBackDriftTool}, questions.ChiefTools...)}
 
 // chiefTools are the service tools of one chief-of-staff turn.
 func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeControls, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
@@ -58,24 +58,24 @@ func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeContro
 		return nil, err
 	}
 	chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
-	return append([]coreadapter.Tool{set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.moveUnit(r, scope), controls.handBackDrift(r, scope, now)}, chief...), err
+	return append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.moveUnit(r, scope), controls.handBackDrift(r, scope, now)}, chief...), err
 }
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
 // its view, ask the chief of staff, file an amendment and report done. A unit
 // mason is narrowed to unitMasonGrant; the drift mason to the file tools,
 // amend and done.
-var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, doneTool}, WriteFiles: true, Execute: true}
+var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, factoryContextTool, discoveryTool, doneTool}, WriteFiles: true, Execute: true}
 
 // unitMasonGrant is what a unit mason turn may do: read, write and execute in
 // its view of its unit's workspace, ask the chief of staff and report its
 // unit done.
-var unitMasonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, doneTool}, WriteFiles: true, Execute: true}
+var unitMasonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, factoryContextTool, discoveryTool, doneTool}, WriteFiles: true, Execute: true}
 
 // reviewerGrant is what a unit reviewer turn may do: read its candidate and
 // diff, ask the chief of staff and record its verdict. The service runs the
 // candidate's checks before review.
-var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, verdictTool, workstreamDiffTool}}
+var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, factoryContextTool, discoveryTool, verdictTool, workstreamDiffTool}}
 
 // threadExecution is how a thread turn of role runs: in the role's sandbox
 // and image with the role's skills, and for a mason with the Dagger engine the
@@ -200,7 +200,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				}
 				if scope.Role == masonRole {
 					ask, err := questions.Tools(r, masonAgent(scope.Unit), scope, now)
-					return append(ask, reports.tool(r, scope)), err
+					return append(ask, recordDiscovery(r, scope, now), factoryContext(r, scope), reports.tool(r, scope)), err
 				}
 				if scope.Role == reviewerRole {
 					ask, err := questions.Tools(r, reviewerAgent(scope.Unit), scope, now)
@@ -208,7 +208,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					if identityErr != nil {
 						return nil, identityErr
 					}
-					return append(ask, verdicts.tool(scope), reviewDiffTool(cfg, r, scope, identity)), err
+					return append(ask, recordDiscovery(r, scope, now), factoryContext(r, scope), verdicts.tool(scope), reviewDiffTool(cfg, r, scope, identity)), err
 				}
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil

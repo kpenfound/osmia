@@ -326,15 +326,14 @@ func TestOwnerApprovesAPlanOnlyAmendment(t *testing.T) {
 	if doc.Revision != 2 || after.Seal != before.Seal || after.Revision != (shed.Pin{Spec: 1, Plan: 2}) || after.SpecHash != before.SpecHash || after.Base != before.Base || len(after.Footprints) != 2 {
 		t.Fatalf("seal after a plan-only approval %+v, before %+v", after, before)
 	}
-	turns := f.ruling(t, stream, reviewerAgent("resume"))
-	if len(turns) != 1 || !strings.Contains(turns[0].Request.Prompt, "Your review of the same candidate resumes") || !strings.Contains(turns[0].Request.Prompt, "plan.json revision 2") {
-		t.Fatalf("reviewer ruling %+v", turns)
+	if turns := f.ruling(t, stream, reviewerAgent("resume")); len(turns) != 0 {
+		t.Fatalf("reviewer resumed before a new candidate: %+v", turns)
 	}
-	f.resumed(t, stream, UnitReviewing)
-	// The plan change keeps the meaning of the unit's criterion: it was held
-	// while it waited, and is notified in review once the ruling resumed it.
-	f.awaitTransition(t, stream, amendmentUnitID("resume", "1", false), UnitReviewing, UnitReviewing)
-	f.resumed(t, stream, UnitReviewing)
+	// Changing acceptance requires new implementation evidence, even with unchanged intent.
+	f.awaitTransition(t, stream, amendmentUnitID("resume", "1", true), UnitReviewing, UnitImplementing)
+	if st, err := f.repository().Workflow(stream, trace.UnitSubject("resume")); err != nil || st.Value != UnitImplementing {
+		t.Fatalf("changed acceptance did not return to implementation: %+v %v", st, err)
+	}
 }
 
 // Rejecting an amendment leaves the sealed spec, plan and seal in force. The
@@ -589,13 +588,13 @@ func TestChiefOfStaffRecordsTheOwnersAmendmentDecision(t *testing.T) {
 	decide := func(turn string) string {
 		t.Helper()
 		scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: turn}
-		out, err := controls.decideAmendment(repo, scope).Handle(ctx, json.RawMessage(`{"amendment":"1","packet":1,"decision":"reject","note":"Keep the chunk semantics."}`))
+		out, err := controls.decideAmendment(repo, scope).Handle(ctx, json.RawMessage(`{"amendment":"1","packet":1,"decision":"reject","note":"Keep the chunk semantics.","owner_decided":true}`))
 		must(t, err)
 		return string(out)
 	}
 	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token-events", filepath.Join(t.TempDir(), "events"), demoStart)
 	must(t, err)
-	if out := decide("events_1"); out != `{"recorded":false,"reason":"only the owner decides an amendment; this turn does not answer a message from the owner"}` {
+	if out := decide("events_1"); out != `{"recorded":false,"reason":"this turn does not answer an owner message"}` {
 		t.Fatalf("service turn: %s", out)
 	}
 	// A new session finds the service's turn abandoned and claims the owner's.

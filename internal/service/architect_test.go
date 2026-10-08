@@ -302,7 +302,7 @@ func checkArchitectBoundary(ctx context.Context, req agent.Request, verified *ag
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if want := []string{questions.AskTool, DraftTool, "file_read"}; !slices.Equal(names, want) {
+	if want := []string{questions.AskTool, DraftTool, "factory_context", "file_read", "inspect_code", "read_remote_file"}; !slices.Equal(names, want) {
 		fail("role tools %v, want %v", names, want)
 	}
 	for _, name := range []string{"file_write", "shell", "git_push", "set_status", "notes_read", "notes_write"} {
@@ -343,7 +343,7 @@ func checkArchitectBoundary(ctx context.Context, req agent.Request, verified *ag
 			fail("runtime environment exposes %s", key)
 		}
 	}
-	for _, want := range []string{"handed/stdin", "charter.md", "context.md", "intended behaviour", "must not do", `"## Acceptance criteria"`, "numbered list", "spec#<n>", "footprint", "no cycle", "at least one acceptance item", "How finely the work is cut into units is your call", DraftTool} {
+	for _, want := range []string{"handed/stdin", "charter.md", "context.md", "intended behaviour", "must not do", `"## Acceptance criteria"`, "numbered list", "spec#<n>", "footprint", "no cycle", "at least one acceptance item", "Start with one coherent unit", DraftTool} {
 		if !strings.Contains(req.Prompt, want) {
 			fail("prompt lacks %q", want)
 		}

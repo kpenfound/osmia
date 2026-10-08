@@ -6,6 +6,7 @@ package amendment
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -34,13 +35,14 @@ func (p Pin) governs(q Pin) bool { return p.Seal == q.Seal && p.Spec == q.Spec &
 
 // Application is the document amendments/<n>/application.json. Its first
 // revision is recorded with the resealing: the revisions the amendment moved
-// the workstream From and To, the request and the owner's note, the changed
+// the workstream From and To, the request and the decision note, the changed
 // criteria, and how the amendment's affected units are
-// treated. Rework units serve a changed criterion and return to
-// implementing; Notify units had their plan entry changed while their
-// criteria kept their meaning; Added units are new to the plan and Removed
+// treated. Rework units have changed outcomes, constraints, boundaries or
+// dependencies and return to implementing. Notify units have other plan changes.
+// Added units are new to the plan and Removed
 // units left it. Its second revision adds Applied, what applying it recorded.
 type Application struct {
+	Actor     string   `json:"actor,omitempty"`
 	Amendment string   `json:"amendment"`
 	From      Pin      `json:"from"`
 	To        Pin      `json:"to"`
@@ -69,8 +71,8 @@ type Applied struct {
 
 // Classify sorts an amendment's affected units into rework, notify, added
 // and removed. A unit that serves a changed criterion in either plan is
-// reworked, even when the affected set does not list it; any other affected
-// unit in both plans is notified.
+// reworked, even when the affected set does not list it. Assignment changes
+// also require rework; other affected units in both plans are notified.
 func Classify(criteria, units []string, before, after plan.Plan) (rework, notify, added, removed []string) {
 	rework, notify, added, removed = []string{}, []string{}, []string{}, []string{}
 	changed := func(u plan.Unit) bool {
@@ -94,7 +96,7 @@ func Classify(criteria, units []string, before, after plan.Plan) (rework, notify
 		case was && !is:
 			removed = append(removed, id)
 		case !was:
-		case changed(old) || changed(now):
+		case changed(old) || changed(now) || old.Task != now.Task || !reflect.DeepEqual(old.Acceptance, now.Acceptance) || !reflect.DeepEqual(old.Constraints, now.Constraints) || !reflect.DeepEqual(old.Boundaries, now.Boundaries) || !reflect.DeepEqual(old.DependsOn, now.DependsOn):
 			rework = append(rework, id)
 		default:
 			notify = append(notify, id)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -29,13 +30,16 @@ type Plan struct {
 // spec#<n>. Footprint names local entity map entities by ID or alias and
 // decides which units may run in parallel.
 type Unit struct {
-	ID         string   `json:"id"`
-	Title      string   `json:"title,omitempty"`
-	Task       string   `json:"task"`
-	Acceptance []string `json:"acceptance"`
-	Criteria   []string `json:"criteria"`
-	DependsOn  []string `json:"depends_on"`
-	Footprint  []string `json:"footprint"`
+	ID          string   `json:"id"`
+	Title       string   `json:"title,omitempty"`
+	Task        string   `json:"task"`
+	Acceptance  []string `json:"acceptance"`
+	Criteria    []string `json:"criteria"`
+	DependsOn   []string `json:"depends_on"`
+	Footprint   []string `json:"footprint"`
+	Constraints []string `json:"constraints,omitempty"`
+	Boundaries  []string `json:"boundaries,omitempty"`
+	Guidance    []string `json:"guidance,omitempty"`
 }
 
 // Serves reports whether the unit cites criterion n.
@@ -121,6 +125,9 @@ func Encode(p Plan) ([]byte, error) {
 func normalize(p Plan) Plan {
 	out := Plan{Version: p.Version, Units: make([]Unit, 0, len(p.Units))}
 	for _, u := range p.Units {
+		u.Constraints = slices.Clone(u.Constraints)
+		u.Boundaries = slices.Clone(u.Boundaries)
+		u.Guidance = slices.Clone(u.Guidance)
 		u.Acceptance = append([]string{}, u.Acceptance...)
 		u.Criteria = append([]string{}, u.Criteria...)
 		u.DependsOn = append([]string{}, u.DependsOn...)

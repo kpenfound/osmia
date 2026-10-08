@@ -61,7 +61,7 @@ func (m *fakeMasons) turn(ctx context.Context, req agent.Request, _ *agent.Turn,
 	for _, tool := range listed.Tools {
 		names = append(names, tool.Name)
 	}
-	if slices.Sort(names); !slices.Equal(names, []string{"ask", doneTool, "file_read", "file_write"}) {
+	if slices.Sort(names); !slices.Equal(names, []string{"ask", doneTool, "factory_context", "file_read", "file_write", "record_discovery"}) {
 		m.problems = append(m.problems, fmt.Sprintf("mason tools %v", names))
 	}
 	view := req.Workspace.Directory()

@@ -23,12 +23,16 @@ type CodeInspection struct {
 func (r *Repository) RecordCodeInspection(ctx context.Context, scope coreadapter.Scope, inspection CodeInspection, at time.Time) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, turn, err := r.turnScope(ChiefOfStaff, scope, true)
+	agent := ChiefOfStaff
+	if scope.Role == "architect" {
+		agent = "agent_architect"
+	}
+	_, turn, err := r.turnScope(agent, scope, true)
 	if err != nil {
 		return "", err
 	}
-	if scope.Role != ChiefOfStaff {
-		return "", fmt.Errorf("only the chief of staff inspects code")
+	if scope.Role != ChiefOfStaff && scope.Role != "architect" {
+		return "", fmt.Errorf("code inspection is not granted")
 	}
 	data, err := json.Marshal(inspection)
 	if err != nil {
@@ -46,7 +50,7 @@ func (r *Repository) RecordCodeInspection(ctx context.Context, scope coreadapter
 	}
 	h := turn.Request.Header
 	h.Schema, h.ID, h.Revision, h.At, h.Cause = "osmia.trace.document", id, 1, at, turn.Request.ID
-	h.Actor = Actor{Kind: "agent", ID: ChiefOfStaff}
+	h.Actor = Actor{Kind: "agent", ID: agent}
 	h.Depth++
 	doc := Document{Header: h, Path: "inspections/" + id + ".json", Content: string(data)}
 	files, removed, err := r.documentFiles(ctx, []Document{doc})

@@ -96,7 +96,7 @@ func Tools(t Turn) ([]coreadapter.Tool, error) {
 	}
 	object := coreadapter.Tool{Name: ObjectTool, Effect: coreadapter.ToolMemory, InputSchema: schema,
 		Description: "Object to one part of the spec or the plan. kind: charter (the part violates a charter rule; a veto), fit (the plan does not realise the handed design or works against a recorded decision; advice), " +
-			"size (a unit takes on too much and must be split) or acceptance (a unit's task is unclear, or a reviewer could not verify its acceptance from the unit's work). part: " + PartForms + "; size and acceptance objections name a unit. " +
+			"size (splitting could improve practical capacity or reviewability; advice) or acceptance (a unit's task is unclear, or a reviewer could not verify its acceptance from the unit's work). part: " + PartForms + "; size and acceptance objections name a unit. " +
 			"argument: why. citations: at least one of " + CitationForms + "; each must exist, and a charter objection must cite the charter rule."}
 	object.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {

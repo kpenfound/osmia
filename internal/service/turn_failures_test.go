@@ -69,15 +69,20 @@ func checkFailureContest(t *testing.T, f *shedFixture, stream config.WorkstreamI
 	t.Helper()
 	status, err := f.c.Status(context.Background(), stream)
 	must(t, err)
-	var gate trace.OwnerGate
+	var reason string
+	for _, u := range status.Units {
+		if u.Unit == unit {
+			reason = u.Reason
+		}
+	}
 	for _, g := range status.Gates {
 		if g.Kind == UnitContested && g.Reference == unit {
-			gate = g
+			t.Fatal("engineering failure automatically required owner attention")
 		}
 	}
 	for _, want := range []string{"failed on every retry and fallback profile", q.Request.TurnID, fmt.Sprintf("attempt %d on profile default: infrastructure failure", turnRetries+1)} {
-		if !strings.Contains(gate.Reason, want) {
-			t.Fatalf("contested gate %+v lacks %q", status.Gates, want)
+		if !strings.Contains(reason, want) {
+			t.Fatalf("contested status %+v lacks %q", status.Units, want)
 		}
 	}
 	id := failureContestID(q.Response.ID)
@@ -87,14 +92,14 @@ func checkFailureContest(t *testing.T, f *shedFixture, stream config.WorkstreamI
 			contest = tr
 		}
 	}
-	if contest.From != from || contest.To != UnitContested || contest.Cause != q.Response.ID || contest.Reason != gate.Reason {
+	if contest.From != from || contest.To != UnitContested || contest.Cause != q.Response.ID || contest.Reason != reason {
 		t.Fatalf("contest transition %+v", contest)
 	}
 	outbox, err := f.repository().Outbox(stream)
 	must(t, err)
 	notices := 0
 	for _, e := range outbox {
-		if e.Event.ID == trace.EventID(id, "unit") && e.Event.Body == gate.Reason {
+		if e.Event.ID == trace.EventID(id, "unit") && e.Event.Body == reason {
 			notices++
 		}
 	}

@@ -16,6 +16,9 @@ import (
 // memoryTurns adds authenticated context tools to the existing role boundary.
 // Narrowed turns retain their narrower grants, and classifiers receive none.
 func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Repository) *isolation.Turns {
+	turns.Context = func(ctx context.Context, scope coreadapter.Scope) (string, error) {
+		return assignmentContext(repo, scope)
+	}
 	turns.Audit = func(ctx context.Context, scope coreadapter.Scope, tool coreadapter.Tool, raw json.RawMessage) (func(context.Context, json.RawMessage, error) error, error) {
 		return repo.BeginTool(ctx, scope, tool, raw, func() time.Time { return time.Now().UTC() })
 	}

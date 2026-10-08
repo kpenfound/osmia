@@ -22,11 +22,12 @@ import (
 // UnitReviewIdentity is the durable identity of a prepared review. A returned
 // review must match Candidate and DiffSHA256 before its verdict can be used.
 type UnitReviewIdentity struct {
-	Subject    string                `json:"subject"`
-	Candidate  coreadapter.Candidate `json:"candidate"`
-	DiffSHA256 string                `json:"diff_sha256"`
-	Report     string                `json:"report"`
-	Seal       int                   `json:"seal"`
+	Discoveries string                `json:"discoveries,omitempty"`
+	Subject     string                `json:"subject"`
+	Candidate   coreadapter.Candidate `json:"candidate"`
+	DiffSHA256  string                `json:"diff_sha256"`
+	Report      string                `json:"report"`
+	Seal        int                   `json:"seal"`
 }
 
 func (i UnitReviewIdentity) Matches(result coreadapter.ReviewResult) bool {
@@ -182,10 +183,18 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	}
 	sum := sha256.Sum256([]byte(diff))
 	identity := UnitReviewIdentity{Subject: string(stream) + "/" + unit, Candidate: coreadapter.Candidate{Revision: report.Candidate, BaseRevision: report.Base, SpecRevision: fmt.Sprint(s.Revision.Spec), PlanRevision: fmt.Sprint(s.Revision.Plan)}, DiffSHA256: hex.EncodeToString(sum[:]), Report: fmt.Sprintf("%s revision %d", reportDoc.Path, reportDoc.Revision), Seal: s.Seal}
+	discoveries, digest, err := unitDiscoveries(m.repository, stream, unit)
+	if err != nil {
+		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+	}
+	identity.Discoveries = digest
 	items := []coreadapter.ContextItem{
 		{Source: "unit " + unit, Content: mason.RenderTask()},
 		{Source: reportDoc.Path, Content: reportDoc.Content},
 		{Source: mason.Spec.Source, Content: mason.Spec.Content},
+	}
+	if discoveries != "" {
+		items = append(items, coreadapter.ContextItem{Source: "necessary discovered work", Content: discoveries})
 	}
 	if notices := mason.RenderAmendments(); notices != "" {
 		items = append(items, coreadapter.ContextItem{Source: "amendment notices", Content: notices})

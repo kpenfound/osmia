@@ -151,6 +151,7 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	// A reviewer's turn fails on the index unit.
 	move(trace.UnitSubject("index"), "index-reviewing", UnitReviewing, foremanActor)
 	move(trace.UnitSubject("index"), "index-contested", UnitContested, reviewerActor)
+	raiseFixtureContest(t, live, stream, "index")
 	// A budget amendment is presented.
 	sealed, sealDoc, _, err := seal.Latest(live, stream)
 	must(t, err)
@@ -351,7 +352,7 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	p.selectWorkstream(ws)
 	p.awaitText(card+"[data-field=kind]", "Ratification")
 	p.awaitText(card+"[data-field=question]", "Ratify spec.md revision 1 and plan.json revision 1? Debate ended after round 1")
-	p.awaitText(card+"[data-field=recommendation]", "do not ratify yet: ratification is blocked by 2 objections")
+	p.awaitText(card+"[data-field=recommendation]", "do not ratify yet: ratification is blocked by 1 objection")
 	p.awaitText(card+"[data-field=options]", "Options: none until what blocks it is resolved")
 	p.awaitText(card+"[data-field=pins]", "spec revision 1 · plan revision 1")
 	p.awaitText(card+`[data-objection="`+veto+`"] [data-field=standing]`, "blocking")

@@ -248,6 +248,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	// it starts again; nothing already sent is posted again.
 	hook.respond(http.StatusServiceUnavailable)
 	f.awaitUnit(t, stream, "dedupe", UnitContested)
+	raiseFixtureContest(t, f.repository(), stream, "dedupe")
 	eventually(t, "the contested notification was never attempted", func() bool {
 		return slices.ContainsFunc(hook.received(), func(b string) bool { return notifiedKind(b) == InboxContested })
 	})

@@ -47,12 +47,13 @@ func TestMasonContestedRuling(t *testing.T) {
 			stream := f.seedBuilding(t, tc.name+"-ruling", validPlan)
 			f.awaitUnit(t, stream, "resume", UnitContested)
 			status, err := f.c.Status(context.Background(), stream)
-			if err != nil || len(status.Gates) != 1 || !strings.Contains(status.Gates[0].Reason, tc.reason) {
+			if err != nil || len(status.Gates) != 0 {
 				t.Fatalf("mason contest gate: %+v %v", status.Gates, err)
 			}
 			if len(status.Units) == 0 || !strings.Contains(status.Units[0].Reason, tc.reason) {
 				t.Fatalf("mason contest status: %+v", status.Units)
 			}
+			raiseFixtureContest(t, f.repository(), stream, "resume")
 			if entries := f.raisedContests(t, stream); len(entries) != 1 || !slices.Equal(entries[0].Options, []string{"revise"}) || !strings.Contains(entries[0].Question, tc.reason) {
 				t.Fatalf("inbox entries of the mason contest %+v", entries)
 			}

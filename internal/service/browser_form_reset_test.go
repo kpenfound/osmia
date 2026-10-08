@@ -161,6 +161,7 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 	must(t, err)
 	move(trace.UnitSubject("index"), "index-reviewing", UnitReviewing, foremanActor)
 	move(trace.UnitSubject("index"), "index-contested-1", UnitContested, reviewerActor)
+	raiseFixtureContest(t, live, stream, "index")
 	sealed, sealDoc, _, err := seal.Latest(live, stream)
 	must(t, err)
 	_, err = live.FileBudgetAmendment(ctx, stream, trace.AmendmentRequest{Citations: []string{"spec#1"}, Change: "Raise the per-unit budget.", Reason: "The upload unit needs more turns.",
@@ -212,6 +213,7 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 	p.awaitCleared(noteField)
 	p.awaitGone("the ruled unit", contested)
 	move(trace.UnitSubject("index"), "index-contested-2", UnitContested, reviewerActor)
+	raiseFixtureContest(t, live, stream, "index")
 	p.awaitText(contested+"[data-field=kind]", "Contested unit")
 	var decision, note string
 	p.eval(`document.querySelector(`+quote(decisionField)+`).value`, &decision)

@@ -47,9 +47,8 @@ func chiefTurn(t *testing.T, f *shedFixture, repository *trace.Repository, strea
 
 // The chief of staff hands a held drift rebase back with a note: the next
 // drift rebase is asked for, its mason and reviewer receive the note, and
-// the inbox no longer lists the held one. The chief may do so
-// chiefContestLimit times in a row; after that the held drift rebase is the
-// owner's, and the owner's request gives the chief its handbacks again.
+// the inbox no longer lists the held one. Engineering recovery does not
+// require an owner ruling after an arbitrary number of interventions.
 func TestChiefOfStaffHandsAHeldDriftRebaseBack(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, _ := newFinalFixture(t, "drift-handback")
@@ -104,12 +103,13 @@ func TestChiefOfStaffHandsAHeldDriftRebaseBack(t *testing.T) {
 	}
 	op = requestDrift(t, d, stream)
 	holdDrift(t, f, d, stream, op, "/internal/ @feature\n")
-	if out := handBack(`{"note":"Try once more."}`); !strings.Contains(out, fmt.Sprintf("you handed this workstream's drift rebases back %d times", chiefContestLimit)) {
-		t.Fatalf("a handback past the limit: %s", out)
+	if out := handBack(`{"note":"Try the verified conflict resolution."}`); !strings.Contains(out, `"drift":4`) {
+		t.Fatalf("third engineering handback: %s", out)
 	}
-
-	// The owner asks for one, which gives the chief of staff its handbacks again.
-	if k, err := fm.askDrift(ctx, stream, f.s.now()); err != nil || k != 4 {
+	op = requestDrift(t, d, stream)
+	holdDrift(t, f, d, stream, op, "/internal/ @feature\n")
+	// Explicit owner requests retain their attribution.
+	if k, err := fm.askDrift(ctx, stream, f.s.now()); err != nil || k != 5 {
 		t.Fatalf("the owner's request answers drift rebase %d: %v", k, err)
 	}
 	if n, err := chiefHandbacks(repository, stream); err != nil || n != 0 {

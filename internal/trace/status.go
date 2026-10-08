@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -268,8 +269,10 @@ func ownerGates(records []Record, stream config.WorkstreamID, view *workflowView
 				}
 			}
 			gate := OwnerGate{Kind: "contested", Reference: reference}
+			var contest Transition
 			for _, rec := range records {
 				if transition, ok := rec.(Transition); ok && transition.Workstream == stream && transition.Subject == subject && transition.To == "contested" {
+					contest = transition
 					gate.Reason = ""
 					if transition.From == "implementing" && transition.Actor.Kind == "service" && transition.Actor.ID == "mason" ||
 						transition.From == "reviewing" && transition.Actor.Kind == "service" && transition.Actor.ID == "reviewer" && transition.Cause != subject+"-review" {
@@ -277,7 +280,23 @@ func ownerGates(records []Record, stream config.WorkstreamID, view *workflowView
 					}
 				}
 			}
-			gates = append(gates, gate)
+			raised := contest.Actor.Kind == "owner" || strings.HasPrefix(contest.ID, subject+"-move-")
+			for _, rec := range records {
+				d, ok := rec.(Document)
+				if !ok || d.Workstream != stream || d.Path != "units/"+subject+"/chief-"+contest.ID+".json" {
+					continue
+				}
+				var decision struct {
+					Contest  string `json:"contest"`
+					Decision string `json:"decision"`
+				}
+				if json.Unmarshal([]byte(d.Content), &decision) == nil && decision.Contest == contest.ID && decision.Decision == "escalate" {
+					raised = true
+				}
+			}
+			if raised {
+				gates = append(gates, gate)
+			}
 		}
 	}
 	slices.SortFunc(gates, func(a, b OwnerGate) int {

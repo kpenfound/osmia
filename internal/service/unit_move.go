@@ -295,7 +295,7 @@ func (s *Service) ownerMove(ctx context.Context, raw, unit string, req UnitMoveR
 
 // moveUnit returns the move_unit tool of one claimed chief-of-staff turn.
 // The chief of staff moves a unit of its workstream on the owner's behalf,
-// sharing chiefContestLimit with its contest rulings; a move to contested
+// with a recorded recovery decision; a move to contested
 // raises the unit to the owner and is always open to it. A contest the owner
 // holds, or one it already decided, is the owner's to move. In a turn
 // answering the owner, it records the owner's own move. A move the service
@@ -303,7 +303,7 @@ func (s *Service) ownerMove(ctx context.Context, raw, unit string, req UnitMoveR
 // nothing.
 func (c *runtimeControls) moveUnit(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: moveUnitTool, Effect: coreadapter.ToolMemory,
-		Description: "Move a unit of this workstream to another state when the state machine leaves it stuck or wrong. unit: its ID; to: implementing (its mason revises the unit in its workspace, with a fresh clean-turn allowance), checking (the service runs the checks again on the recorded candidate), reviewing (its reviewer reviews the recorded candidate again), approved (you approve the recorded candidate and the foreman lands it) or contested (hold the unit for the owner); " +
+		Description: "Move a unit of this workstream to another state when the state machine leaves it stuck or wrong. unit: its ID; to: implementing (its mason revises the unit in its workspace, with a fresh clean-turn allowance), checking (the service runs the checks again on the recorded candidate), reviewing (its reviewer reviews the recorded candidate again), approved (only to record an explicit owner approval of the candidate) or contested (hold the unit for the owner); " +
 			"note: for the mason or reviewer, what to do differently, which it receives; for approved, why the candidate holds; for contested, what is stuck, what you found and your recommendation. Moving a unit to the state it is in restarts that stage. " +
 			"Move only when you are confident the move resolves the problem; otherwise move it to contested. owner_decided: true only when the owner asked for the move in the message this turn answers, with the owner's words as the note. The unit's state and recent transitions are in units/<unit>/activity.json.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"unit":{"type":"string"},"to":{"type":"string","enum":["implementing","checking","reviewing","approved","contested"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"}},"required":["unit","to","note"],"additionalProperties":false}`)}
@@ -360,13 +360,10 @@ func (c *runtimeControls) moveUnit(repository *trace.Repository, scope coreadapt
 				return priorityRefusal(fmt.Sprintf("you already decided contest %s of unit %s; the owner moves it", contest.ID, input.Unit))
 			}
 		}
-		if input.To != UnitContested {
-			if left, err := chiefRulingsLeft(repository, stream, input.Unit); err != nil {
-				return nil, err
-			} else if left == 0 {
-				return priorityRefusal(fmt.Sprintf("you moved or ruled on unit %s %d times since the owner last acted on it; move it to contested for the owner", input.Unit, chiefContestLimit))
-			}
+		if input.To == UnitApproved {
+			return priorityRefusal("engineering recovery cannot bypass independent review; request reviewing instead")
 		}
+
 		return moveResult(s.moveUnit(ctx, repository, stream, input.Unit, request, chiefActor, scope.Turn))
 	}
 	return tool

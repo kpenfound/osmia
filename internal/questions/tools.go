@@ -30,9 +30,9 @@ const (
 // Guidance tells the chief of staff what to do with a question. It belongs
 // in the system prompt of every turn that may carry one.
 const Guidance = "When a service event says a question is open, choose exactly once for it. " +
-	"Call answer when the project context below or the workstream's spec and plan already settle it, citing what settles it: " + CitationForms + ". " +
-	"Call escalate when answering would be a new decision, or when your answer would contradict an earlier ruling: never answer against a ruling, escalate instead. " +
-	"Call route_amendment when the honest answer changes the sealed spec or plan. " +
+	"Call answer for engineering decisions within the approved intent, including equivalent evidence and necessary supporting changes within an assignment. Cite the requirements and evidence supporting your decision: " + CitationForms + ". " +
+	"Call escalate only when the answer changes owner intent, relaxes a constraint, contradicts an owner ruling, or needs an owner-reserved tradeoff. Missing context calls for investigation, not an intent decision. " +
+	"Call route_amendment for revised assignments, dependencies or newly discovered work. Plan-only revisions preserving approved intent are factory decisions; spec changes remain owner decisions. " +
 	"Escalate several open questions that need the same decision as one batch. Never answer for the owner because time is passing; a question waits as long as it needs. " +
 	"When a service event says the owner ruled on an inbox entry, call relay_ruling exactly once for it, naming one of its questions: rephrase the ruling for the askers without changing what it decides, " +
 	"and choose scope local when it matters only to them, or notify when it applies across the project. " +
@@ -107,9 +107,8 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 	required := `"citations","change","reason"`
 	if routed {
 		properties = `"question":{"type":"string"},` + properties
-		required = `"question",` + required
 	}
-	description := "File an amendment request against sealed spec#<n> and/or plan#<unit> citations. Give the proposed change and reason. The request is recorded; end this turn when accepted."
+	description := "Request a revised plan or spec against spec#<n> and/or plan#<unit> citations. A chief may omit question to commission replanning or bounded investigation for discovered work. Give the proposed change and reason. The request is recorded; end this turn when accepted."
 	next := "End your turn now. The request is with the chief of staff."
 	if move != nil {
 		description = fmt.Sprintf("File an amendment request when upstream's change from %s to %s alters what a sealed criterion means. Cite the sealed spec#<n> and/or plan#<unit> it changes, and give the proposed change and reason; the request cites upstream commit %s and goes to the owner. Nothing waits for it: finish the resolution against the sealed spec as it stands.", move.From, move.To, move.To)
@@ -180,7 +179,7 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time) []coreadapter.Tool {
 	stream := config.WorkstreamID(scope.Workstream)
 	answer := coreadapter.Tool{Name: AnswerTool, Effect: coreadapter.ToolMemory,
-		Description: "Answer an open question from the record. question: its number. text: the answer the asker receives. citations: at least one of " + CitationForms + "; each must exist. An answer that would contradict an earlier ruling must be escalated instead.",
+		Description: "Resolve an open question, including an engineering decision within approved intent. The record need not prescribe the implementation choice: explain your judgment and cite the scope, constraints or evidence it rests on. question: its number. text: the answer and reasoning the asker receives. citations: at least one of " + CitationForms + "; each must exist. An answer that would contradict an earlier ruling must be escalated instead.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"question":{"type":"string"},"text":{"type":"string"},"citations":{"type":"array","items":{"type":"string"}}},"required":["question","text","citations"],"additionalProperties":false}`)}
 	answer.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {

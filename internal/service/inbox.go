@@ -494,6 +494,9 @@ func (s *Service) amendmentEntry(repository *trace.Repository, stream config.Wor
 		}
 	}
 	entries := amendmentDissent(records)
+	if sealed && engineeringRevision(repository, stream, c, current, entries, "Assess delegated authority") == nil {
+		return InboxEntry{}, false, nil
+	}
 	var options []string
 	if matching && len(shed.Blocked(entries)) == 0 {
 		options = append(options, AmendmentApprove)

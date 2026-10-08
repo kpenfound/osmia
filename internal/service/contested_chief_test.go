@@ -127,25 +127,21 @@ func TestChiefOfStaffResolvesAContestOnTheOwnersBehalf(t *testing.T) {
 	}
 }
 
-// The chief of staff rules on at most chiefContestLimit contests of a unit
-// in a row. The next contest is the owner's, with the chief of staff's note
-// when it escalates, and the owner's ruling gives it rulings again.
+// Engineering retries remain internal until the chief explicitly escalates.
 func TestChiefOfStaffRaisesWhatItCannotResolve(t *testing.T) {
 	t.Parallel()
 	c := newContestFixture(t, "chief-raises")
-	for i := range chiefContestLimit {
+	for i := range 3 {
 		c.contest(t)
 		if out := c.resolve(t, `{"unit":"resume","decision":"review","note":"Record a verdict."}`); !strings.Contains(out, `"recorded":true`) {
 			t.Fatalf("ruling %d: %s", i+1, out)
 		}
 	}
 	contest := c.contest(t)
-	if raised, _ := c.raised(t, contest); !raised {
-		t.Fatal("a contest after the chief of staff's last ruling was not raised to the owner")
+	if raised, _ := c.raised(t, contest); raised {
+		t.Fatal("engineering retries alone raised a contest to the owner")
 	}
-	if out := c.resolve(t, `{"unit":"resume","decision":"review","note":"Once more."}`); !strings.Contains(out, "escalate it to the owner") {
-		t.Fatalf("a ruling past the limit was recorded: %s", out)
-	}
+
 	escalation := "The reviewer ends every turn without a verdict; I recommend checking its profile."
 	if out := c.resolve(t, `{"unit":"resume","decision":"escalate","note":"`+escalation+`"}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("escalate: %s", out)
@@ -164,7 +160,7 @@ func TestChiefOfStaffRaisesWhatItCannotResolve(t *testing.T) {
 	}
 	actions, err := chiefActions(c.repo, c.stream)
 	must(t, err)
-	if len(actions) != chiefContestLimit+1 || actions[chiefContestLimit].Text != "Raised contested unit resume to you: "+escalation {
+	if len(actions) != 4 || actions[3].Text != "Raised contested unit resume to you: "+escalation {
 		t.Fatalf("conversation actions %+v", actions)
 	}
 }

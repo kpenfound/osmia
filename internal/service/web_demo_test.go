@@ -233,6 +233,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	// 4. dedupe's mason gives up and the unit is contested; the owner rules
 	// revise with a note on the page.
 	f.awaitUnit(t, stream, "dedupe", UnitContested)
+	raiseFixtureContest(t, f.repository(), stream, "dedupe")
 	card = decisionCard(entry(InboxContested))
 	p.awaitText(card+"[data-field=options]", "revise")
 	p.choose(card+"select", "revise")

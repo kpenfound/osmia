@@ -22,18 +22,21 @@ import (
 // it serves, its footprint and dependencies, the notices of approved amendments that affect
 // it, and the project context scoped to its footprint.
 type Mason struct {
-	Workstream config.WorkstreamID `json:"workstream"`
-	Seal       int                 `json:"seal"`
-	Spec       SealedDocument      `json:"spec"`
-	Plan       SealedDocument      `json:"plan"`
-	Unit       string              `json:"unit"`
-	Title      string              `json:"title,omitempty"`
-	Task       string              `json:"task"`
-	Acceptance []string            `json:"acceptance"`
-	Criteria   []UnitCriterion     `json:"criteria"`
-	DependsOn  []string            `json:"depends_on"`
-	Footprint  []string            `json:"footprint"`
-	Followup   *followup.Unit      `json:"followup,omitempty"`
+	Workstream  config.WorkstreamID `json:"workstream"`
+	Seal        int                 `json:"seal"`
+	Spec        SealedDocument      `json:"spec"`
+	Plan        SealedDocument      `json:"plan"`
+	Unit        string              `json:"unit"`
+	Title       string              `json:"title,omitempty"`
+	Task        string              `json:"task"`
+	Acceptance  []string            `json:"acceptance"`
+	Constraints []string            `json:"constraints,omitempty"`
+	Boundaries  []string            `json:"boundaries,omitempty"`
+	Guidance    []string            `json:"guidance,omitempty"`
+	Criteria    []UnitCriterion     `json:"criteria"`
+	DependsOn   []string            `json:"depends_on"`
+	Footprint   []string            `json:"footprint"`
+	Followup    *followup.Unit      `json:"followup,omitempty"`
 	// Amendments are the approved amendments that rework the unit or
 	// change its plan entry, in the order they were applied.
 	Amendments []AmendmentNotice `json:"amendments,omitempty"`
@@ -63,9 +66,10 @@ type UnitCriterion struct {
 // reworks the unit, because it changed the meaning of a criterion the unit
 // serves, or that changed the unit's plan entry while its criteria kept
 // their meaning. It is read from the amendment's application record: the
-// revisions it sealed, the changed criteria, and the request and the owner's
+// revisions it sealed, the changed criteria, and the request and the decision
 // note as they were recorded.
 type AmendmentNotice struct {
+	Actor     string   `json:"actor,omitempty"`
 	Source    string   `json:"source"`
 	Amendment string   `json:"amendment"`
 	Rework    bool     `json:"rework"`
@@ -133,18 +137,19 @@ func (f Files) Mason(ctx context.Context, project config.ProjectID, stream confi
 	}
 	parsed := plan.ParseSpec(spec.Content)
 	m := Mason{
-		Workstream: stream,
-		Seal:       s.Seal,
-		Spec:       SealedDocument{Source: spec.Path, Record: spec.ID, Revision: s.Revision.Spec, Hash: s.SpecHash, Content: spec.Content},
-		Plan:       SealedDocument{Source: planDoc.Path, Record: planDoc.ID, Revision: planDoc.Revision, Content: planDoc.Content},
-		Unit:       u.ID,
-		Title:      u.Title,
-		Task:       u.Task,
-		Acceptance: append([]string{}, u.Acceptance...),
-		Criteria:   []UnitCriterion{},
-		DependsOn:  append([]string{}, u.DependsOn...),
-		Footprint:  append([]string{}, u.Footprint...),
-		Followup:   added,
+		Workstream:  stream,
+		Seal:        s.Seal,
+		Spec:        SealedDocument{Source: spec.Path, Record: spec.ID, Revision: s.Revision.Spec, Hash: s.SpecHash, Content: spec.Content},
+		Plan:        SealedDocument{Source: planDoc.Path, Record: planDoc.ID, Revision: planDoc.Revision, Content: planDoc.Content},
+		Unit:        u.ID,
+		Title:       u.Title,
+		Task:        u.Task,
+		Acceptance:  append([]string{}, u.Acceptance...),
+		Constraints: append([]string{}, u.Constraints...), Boundaries: append([]string{}, u.Boundaries...), Guidance: append([]string{}, u.Guidance...),
+		Criteria:  []UnitCriterion{},
+		DependsOn: append([]string{}, u.DependsOn...),
+		Footprint: append([]string{}, u.Footprint...),
+		Followup:  added,
 	}
 	for _, citation := range u.Criteria {
 		n, _ := plan.ParseCitation(citation)
@@ -162,7 +167,7 @@ func (f Files) Mason(ctx context.Context, project config.ProjectID, stream confi
 		if !a.Names(u.ID) {
 			continue
 		}
-		n := AmendmentNotice{Source: amendment.Path(a.Amendment), Amendment: a.Amendment, Rework: slices.Contains(a.Rework, u.ID), Seal: a.To.Seal, Spec: a.To.Spec, Plan: a.To.Plan,
+		n := AmendmentNotice{Actor: a.Actor, Source: amendment.Path(a.Amendment), Amendment: a.Amendment, Rework: slices.Contains(a.Rework, u.ID), Seal: a.To.Seal, Spec: a.To.Spec, Plan: a.To.Plan,
 			Criteria: slices.Clone(a.Criteria), Citations: slices.Clone(a.Citations), Change: a.Change, Reason: a.Reason, Note: a.Note}
 		m.Amendments = append(m.Amendments, n)
 	}
@@ -263,6 +268,19 @@ func (m Mason) RenderTask() string {
 		line("- %s", indent(a))
 	}
 	line("")
+	for _, section := range []struct {
+		name  string
+		items []string
+	}{{"Constraints", m.Constraints}, {"Ownership boundaries", m.Boundaries}, {"Adaptable guidance", m.Guidance}} {
+		if len(section.items) == 0 {
+			continue
+		}
+		line("## %s", section.name)
+		for _, item := range section.items {
+			line("- %s", indent(item))
+		}
+		line("")
+	}
 	line("## Criteria served")
 	if len(m.Criteria) == 0 {
 		line("The unit cites no criteria.")
@@ -274,7 +292,7 @@ func (m Mason) RenderTask() string {
 }
 
 // RenderAmendments returns the unit's amendment notices as text, each with
-// the request and the owner's note in the shared envelope, or "" when the
+// the request and the decision note in the shared envelope, or "" when the
 // unit has none.
 func (m Mason) RenderAmendments() string {
 	if len(m.Amendments) == 0 {
@@ -284,9 +302,13 @@ func (m Mason) RenderAmendments() string {
 	line := func(format string, args ...any) { fmt.Fprintf(&w, format+"\n", args...) }
 	line("## Amendments")
 	for _, n := range m.Amendments {
-		line("- %s: the owner approved amendment %s; seal %d governs %s revision %d and %s revision %d", n.Source, n.Amendment, n.Seal, plan.SpecPath, n.Spec, plan.PlanPath, n.Plan)
+		actor, section := "owner", "owner_response"
+		if n.Actor == trace.ChiefOfStaff {
+			actor, section = "chief of staff", "answer"
+		}
+		line("- %s: the %s approved amendment %s; seal %d governs %s revision %d and %s revision %d", n.Source, actor, n.Amendment, n.Seal, plan.SpecPath, n.Spec, plan.PlanPath, n.Plan)
 		if n.Rework {
-			line("  It changed the meaning of criteria this unit serves, so the unit is built again against the amended spec.")
+			line("  It changed this unit's assignment or criteria, so the unit is built again against the amended task and acceptance.")
 		} else {
 			line("  It changed this unit's entry in the plan; the criteria the unit serves keep their meaning.")
 		}
@@ -297,13 +319,13 @@ func (m Mason) RenderAmendments() string {
 		line("  changed criteria: %s", changed)
 		sections := []envelope.Section{{Name: "question", Text: fmt.Sprintf("Citations: %s\nChange: %s\nReason: %s", strings.Join(n.Citations, ", "), n.Change, n.Reason)}}
 		if n.Note != "" {
-			sections = append(sections, envelope.Section{Name: "owner_response", Text: n.Note})
+			sections = append(sections, envelope.Section{Name: section, Text: n.Note})
 		}
-		section, err := envelope.Render(sections...)
+		rendered, err := envelope.Render(sections...)
 		if err != nil {
 			panic(err)
 		}
-		w.WriteString(section)
+		w.WriteString(rendered)
 	}
 	return w.String()
 }

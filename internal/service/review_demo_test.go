@@ -62,7 +62,7 @@ func TestExactReviewDemonstration(t *testing.T) {
 				names = append(names, tool.Name)
 			}
 			slices.Sort(names)
-			if !slices.Equal(names, []string{questions.AskTool, "file_read", verdictTool, workstreamDiffTool}) {
+			if !slices.Equal(names, []string{questions.AskTool, "factory_context", "file_read", "record_discovery", verdictTool, workstreamDiffTool}) {
 				return nil, fmt.Errorf("reviewer tools %+v", listed.Tools)
 			}
 			identity, err := reviewIdentityInPrompt(req.Prompt)

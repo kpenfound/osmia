@@ -113,6 +113,9 @@ func (m *masons) Pass(ctx context.Context) error {
 		blocked := ""
 		for _, u := range b.plan.Units {
 			state := b.states[trace.UnitSubject(u.ID)]
+			if !unitDependenciesMerged(b, u) {
+				continue
+			}
 			if state.Value != UnitImplementing && state.Value != UnitWaiting {
 				continue
 			}
@@ -646,7 +649,7 @@ func startOrder(streams []building, priorities []runtime.Priority, project confi
 // flight, its footprint resolved through entities.
 func nextReady(b building, entities kb.Map) (string, bool, error) {
 	for _, u := range dependencyOrder(b.plan) {
-		if b.states[trace.UnitSubject(u.ID)].Value != UnitReady {
+		if b.states[trace.UnitSubject(u.ID)].Value != UnitReady || !unitDependenciesMerged(b, u) {
 			continue
 		}
 		decision, err := plan.DecideStart(b.plan, entities, u.ID, b.inFlight)
@@ -862,7 +865,7 @@ func (m *masons) enqueue(ctx context.Context, stream config.WorkstreamID, unit s
 }
 
 func masonSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are a mason of the %s project (%s). You build one unit of a ratified plan in a workspace of its own, whose files are your view. You hold no version control tool: the service records your work. Do your unit's task until every acceptance item holds; the sealed spec is the background it serves. The plan is settled: build the unit as planned. When your view and the spec do not settle something you must know, or the task itself looks wrong, call %s: your unit waits for the answer, which arrives as your next turn, and your workspace is kept.", p.Name, p.Upstream, questions.AskTool)
+	return fmt.Sprintf("You are a mason of the %s project (%s). You build one unit of a ratified plan in a workspace of its own, whose files are your view. You hold no version control tool: the service records your work. Do your unit's task until every acceptance item holds; the sealed spec is the background it serves. Own the unit's outcome, not a prescribed implementation. Adapt implementation and evidence within its constraints. Necessary supporting changes belong to your assignment unless another unit owns them. Consult the current plan for neighboring responsibilities; ask the chief of staff to coordinate before taking another unit's work. Record discovered work with record_discovery; the initial unit list does not define workstream scope. Read factory_context whenever you need your current assignment, prior report or evidence. When your view and the spec do not settle something you must know, or the task itself looks wrong, call %s: your unit waits for the answer, which arrives as your next turn, and your workspace is kept.", p.Name, p.Upstream, questions.AskTool)
 }
 
 func masonPrompt(m bundle.Mason) string {
@@ -880,4 +883,13 @@ func interruption(q trace.QueuedTurn) string {
 		return "A hard pause stopped your last turn."
 	}
 	return "The service stopped during your last turn."
+}
+
+func unitDependenciesMerged(b building, u plan.Unit) bool {
+	for _, id := range u.DependsOn {
+		if b.states[trace.UnitSubject(id)].Value != UnitMerged {
+			return false
+		}
+	}
+	return true
 }

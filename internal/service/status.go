@@ -147,7 +147,7 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 		}
 		for i := range view.Units {
 			for _, gate := range view.Gates {
-				if gate.Kind == UnitContested && gate.Reference == view.Units[i].Unit {
+				if gate.Kind == UnitContested && gate.Reference == view.Units[i].Unit && gate.Reason != "" {
 					view.Units[i].Reason = gate.Reason
 				}
 			}

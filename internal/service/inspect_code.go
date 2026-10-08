@@ -21,22 +21,27 @@ import (
 )
 
 func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
-	return coreadapter.Tool{Name: "inspect_code", Effect: coreadapter.ToolRead, Description: "Read committed project code or list a directory. Use the returned inspection citation when answering from code; this queues a librarian knowledge-gap refresh. No checkout or branch can be changed. Path defaults to the root; start is a one-based line, lines defaults to 200 (maximum 1000).", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer"},"lines":{"type":"integer"}},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-		if scope.Role != trace.ChiefOfStaff {
-			return nil, errors.New("only the chief of staff inspects code")
+	return coreadapter.Tool{Name: "inspect_code", Effect: coreadapter.ToolMemory, Description: "Read committed project code or list a directory. Set unit to inspect that mason's latest recorded candidate, or captured true to inspect unfinished changes since its last report. If it has no completed report, the service snapshots its captured workspace after the writer finishes; the returned commit identifies that evidence. Use the returned inspection citation when answering from code; this queues a librarian knowledge-gap refresh. The service owns snapshot creation. Path defaults to the root; start is a one-based line, lines defaults to 200 (maximum 1000).", InputSchema: json.RawMessage(`{"type":"object","properties":{"captured":{"type":"boolean"},"unit":{"type":"string"},"path":{"type":"string"},"start":{"type":"integer"},"lines":{"type":"integer"}},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		if scope.Role != trace.ChiefOfStaff && scope.Role != architectRole {
+			return nil, errors.New("code inspection is not granted")
 		}
 		if err := repo.ActiveTurn(scope); err != nil {
 			return nil, err
 		}
 		var in struct {
-			Path  string `json:"path"`
-			Start int    `json:"start"`
-			Lines int    `json:"lines"`
+			Captured bool   `json:"captured"`
+			Unit     string `json:"unit"`
+			Path     string `json:"path"`
+			Start    int    `json:"start"`
+			Lines    int    `json:"lines"`
 		}
 		decoder := json.NewDecoder(bytes.NewReader(raw))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&in); err != nil {
 			return nil, err
+		}
+		if in.Captured && in.Unit == "" {
+			return nil, errors.New("captured workspace inspection requires a unit")
 		}
 		if in.Path == "" {
 			in.Path = "."
@@ -66,6 +71,38 @@ func inspectCode(cfg *config.Config, repo *trace.Repository, scope coreadapter.S
 				return nil, err
 			}
 			commit = strings.TrimSpace(string(out))
+		}
+		if in.Unit != "" {
+			if _, err := config.ParseWorkstreamID(scope.Workstream); err != nil {
+				return nil, err
+			}
+			docs, err := trace.Read[trace.Document](repo, config.WorkstreamID(scope.Workstream))
+			if err != nil {
+				return nil, err
+			}
+			var report UnitReport
+			for _, doc := range docs {
+				if doc.ID == reportDocument(in.Unit) {
+					if err := json.Unmarshal([]byte(doc.Content), &report); err != nil {
+						return nil, err
+					}
+				}
+			}
+			if report.Candidate == "" || in.Captured {
+				idle, err := revisionWorkersIdle(repo, config.WorkstreamID(scope.Workstream), []string{in.Unit})
+				if err != nil {
+					return nil, err
+				}
+				if !idle {
+					return nil, errors.New("unit writer is still running; inspect its durable activity with factory_context and retry when it finishes")
+				}
+				_, _, commit, err = newUnitWorkspaces(cfg, repo).snapshot(ctx, config.WorkstreamID(scope.Workstream), in.Unit)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				commit = report.Candidate
+			}
 		}
 		dir, err := os.MkdirTemp("", "osmia-inspection-")
 		if err != nil {

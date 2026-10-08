@@ -449,6 +449,7 @@ func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
 	if !ok || result.Bounces != 1 {
 		t.Fatalf("bounce count: %+v", result)
 	}
+	raiseFixtureContest(t, f.repository(), stream, "resume")
 	status, err := f.c.Status(context.Background(), stream)
 	if err != nil || !slices.Contains(status.Gates, trace.OwnerGate{Kind: UnitContested, Reference: "resume"}) {
 		t.Fatalf("contested gate: %+v %v", status.Gates, err)

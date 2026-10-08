@@ -2642,6 +2642,9 @@
       },
       "AmendmentDecision": {
         "properties": {
+          "actor": {
+            "type": "string"
+          },
           "decision": {
             "type": "string"
           },

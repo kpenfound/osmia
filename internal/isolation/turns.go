@@ -30,6 +30,7 @@ type Selection struct {
 // Grants, Tools, Select and Hosts are service configuration, never repo input.
 // Tools are trusted handlers; they must enforce their declared effects and scope.
 type Turns struct {
+	Context func(context.Context, coreadapter.Scope) (string, error)
 	// Audit records a call before execution and returns its completion recorder.
 	Audit      func(context.Context, coreadapter.Scope, coreadapter.Tool, json.RawMessage) (func(context.Context, json.RawMessage, error) error, error)
 	Workspaces coreadapter.Workspaces
@@ -75,14 +76,18 @@ func narrow(grant coreadapter.Capabilities, request *coreadapter.Capabilities) c
 }
 
 // roleTools names tools only one role may hold, whatever the service grant says.
-var roleTools = map[string]string{"inspect_code": "chief_of_staff", "capacity": "chief_of_staff", "notify": "chief_of_staff", "set_status": "chief_of_staff", "prioritise": "chief_of_staff", "decide_amendment": "chief_of_staff", "decide_charter": "chief_of_staff", "resolve_contested": "chief_of_staff", "move_unit": "chief_of_staff", "hand_back_drift": "chief_of_staff", "answer": "chief_of_staff", "escalate": "chief_of_staff", "relay_ruling": "chief_of_staff", "route_amendment": "chief_of_staff", "propose_charter": "chief_of_staff",
+var roleTools = map[string]string{"capacity": "chief_of_staff", "notify": "chief_of_staff", "set_status": "chief_of_staff", "prioritise": "chief_of_staff", "decide_amendment": "chief_of_staff", "decide_charter": "chief_of_staff", "resolve_contested": "chief_of_staff", "move_unit": "chief_of_staff", "hand_back_drift": "chief_of_staff", "answer": "chief_of_staff", "escalate": "chief_of_staff", "relay_ruling": "chief_of_staff", "route_amendment": "chief_of_staff", "propose_charter": "chief_of_staff",
 	"object": "committee", "concede": "committee", "final_report": "committee", "reply": "architect", "verdict": "reviewer"}
 
 // deniedTools names tools one role may never hold, whatever the service grant says.
 var deniedTools = map[string]string{"ask": "chief_of_staff"}
 
 func roleRestrictedTool(role, name string) bool {
-	return name == "amend" && role != "mason" ||
+	return name == "inspect_code" && role != "chief_of_staff" && role != "architect" ||
+		name == "read_remote_file" && role != "chief_of_staff" && role != "architect" ||
+		name == "factory_context" && role != "chief_of_staff" && role != "architect" && role != "mason" && role != "reviewer" ||
+		name == "record_discovery" && role != "chief_of_staff" && role != "mason" && role != "reviewer" ||
+		name == "amend" && role != "mason" ||
 		name == "workstream_diff" && role != "reviewer" && role != "committee"
 }
 
@@ -127,6 +132,13 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	grant, err = roleGrant(input.Scope.Role, grant)
 	if err != nil {
 		return result, err
+	}
+	if r.Context != nil {
+		current, e := r.Context(ctx, input.Scope)
+		if e != nil {
+			return result, e
+		}
+		input.SystemPrompt += current
 	}
 	selected, err := r.Select(ctx, input.Scope)
 	if err != nil {

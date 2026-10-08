@@ -116,3 +116,24 @@ func TestFromDocumentsReadsLatestApplications(t *testing.T) {
 		t.Fatalf("applications %+v", got)
 	}
 }
+
+func TestEngineeringAssignmentChangesRequireRework(t *testing.T) {
+	t.Parallel()
+	for name, change := range map[string]func(*plan.Unit){
+		"task":        func(u *plan.Unit) { u.Task = "Implement resumable transfer" },
+		"acceptance":  func(u *plan.Unit) { u.Acceptance = []string{"Resume after process restart"} },
+		"constraints": func(u *plan.Unit) { u.Constraints = []string{"Preserve wire compatibility"} },
+		"boundaries":  func(u *plan.Unit) { u.Boundaries = []string{"Own the client only"} },
+		"dependency":  func(u *plan.Unit) { u.DependsOn = []string{"protocol"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			before := plan.Plan{Units: []plan.Unit{unit("resume", "client", "spec#1")}}
+			after := plan.Plan{Units: []plan.Unit{unit("resume", "client", "spec#1")}}
+			change(&after.Units[0])
+			rework, notify, _, _ := Classify(nil, []string{"resume"}, before, after)
+			if !slices.Equal(rework, []string{"resume"}) || len(notify) != 0 {
+				t.Fatalf("changed assignment merely notified: %v %v", rework, notify)
+			}
+		})
+	}
+}

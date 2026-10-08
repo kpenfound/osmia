@@ -405,6 +405,13 @@ func unitStates(repository *trace.Repository, stream config.WorkstreamID, states
 		} else if status.Deferral != nil {
 			status.Reason = status.Deferral.Message
 		}
+		if state.Value == UnitContested {
+			contest, _, err := unitContest(repository, stream, u.ID)
+			if err != nil {
+				return nil, err
+			}
+			status.Reason = contest.Reason
+		}
 		out = append(out, status)
 	}
 	return out, nil

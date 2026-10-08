@@ -156,25 +156,26 @@ func refusalStatus(err error) string {
 func TestOwnerGatesForRatificationAndContestedUnit(t *testing.T) {
 	view := &workflowView{states: map[string]WorkflowState{FeatureSubject: {Value: "in-shed"}, UnitSubject("upload-index"): {Value: "contested"}}}
 	packet := Document{Header: Header{Workstream: streamID, Cause: "ratification-packet"}, Path: "shed/round-1/packet.json"}
+	contest := Transition{Header: Header{Workstream: streamID, ID: UnitSubject("upload-index") + "-move-1"}, Subject: UnitSubject("upload-index"), To: "contested"}
 	want := []OwnerGate{{Kind: "contested", Reference: "upload-index"}, {Kind: "ratification", Reference: string(streamID)}}
-	if got := ownerGates([]Record{packet}, streamID, view); !reflect.DeepEqual(got, want) {
+	if got := ownerGates([]Record{packet, contest}, streamID, view); !reflect.DeepEqual(got, want) {
 		t.Fatalf("pending gates: %+v", got)
 	}
 	ratified := Document{Header: Header{Workstream: streamID, Cause: "owner-shed"}, Path: "shed/round-1/ratification.json"}
-	if got := ownerGates([]Record{packet, ratified}, streamID, view); !reflect.DeepEqual(got, want[:1]) {
+	if got := ownerGates([]Record{packet, ratified, contest}, streamID, view); !reflect.DeepEqual(got, want[:1]) {
 		t.Fatalf("ratified gates: %+v", got)
 	}
-	if got := ownerGates([]Record{packet, ratified, packet}, streamID, view); !reflect.DeepEqual(got, want) {
+	if got := ownerGates([]Record{packet, ratified, contest, packet}, streamID, view); !reflect.DeepEqual(got, want) {
 		t.Fatalf("new packet gates: %+v", got)
 	}
 	view.states[UnitSubject("upload-index")] = WorkflowState{Value: "merged"}
-	if got := ownerGates([]Record{packet, ratified}, streamID, view); len(got) != 0 {
+	if got := ownerGates([]Record{packet, ratified, contest}, streamID, view); len(got) != 0 {
 		t.Fatalf("closed gates: %+v", got)
 	}
 	longUnit := strings.Repeat("long-unit-", 8)
 	subject := UnitSubject(longUnit)
 	view.states[subject] = WorkflowState{Value: "contested"}
-	transition := Transition{Header: Header{Workstream: streamID, Unit: longUnit}, Subject: subject, To: "contested"}
+	transition := Transition{Header: Header{Workstream: streamID, Unit: longUnit, ID: subject + "-move-1"}, Subject: subject, To: "contested"}
 	if got := ownerGates([]Record{packet, ratified, transition}, streamID, view); !reflect.DeepEqual(got, []OwnerGate{{Kind: "contested", Reference: longUnit}}) {
 		t.Fatalf("long unit gate: %+v", got)
 	}
@@ -304,5 +305,24 @@ func TestStatusRecordValidation(t *testing.T) {
 	}
 	if recordPath(good) != "workstreams/"+string(streamID)+"/status.jsonl" {
 		t.Fatal(recordPath(good))
+	}
+}
+
+func TestInternalContestDoesNotRequireOwnerAttention(t *testing.T) {
+	subject := UnitSubject("resume")
+	view := &workflowView{states: map[string]WorkflowState{subject: {Value: "contested"}}}
+	contest := Transition{Header: Header{Workstream: streamID, ID: "contest-1"}, Subject: subject, To: "contested"}
+	records := []Record{contest}
+	if got := ownerGates(records, streamID, view); len(got) != 0 {
+		t.Fatalf("internal blocker required owner attention: %v", got)
+	}
+	records = append(records, Document{Header: Header{Workstream: streamID}, Path: "units/" + subject + "/chief-contest-1.json", Content: `{"contest":"contest-1","decision":"escalate"}`})
+	if got := ownerGates(records, streamID, view); len(got) != 1 || got[0].Reference != "resume" {
+		t.Fatalf("explicit escalation has no owner gate: %v", got)
+	}
+	contest.ID = "contest-2"
+	records = append(records, contest)
+	if got := ownerGates(records, streamID, view); len(got) != 0 {
+		t.Fatalf("an older escalation raised a new contest: %v", got)
 	}
 }

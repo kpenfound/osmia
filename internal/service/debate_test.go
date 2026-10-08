@@ -291,7 +291,7 @@ func TestRedraftThenConcessionEndsTheDebate(t *testing.T) {
 	f.script(replyTurnID(1, 1), map[string]string{plan.PlanPath: splitPlan}, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
 		checkReplyBoundary(ctx, p, req, verified, tools, f.clone)
 		for _, want := range []string{"Round 1 of the shed is heard", "The committee debated spec.md revision 1 and plan.json revision 1. 2 objections stand",
-			"- " + size + " (size, blocking, by " + committeeAgent(1) + " in round 1 on plan#resume, citing kb/entities.json#internal.trace): It does not hold.",
+			"- " + size + " (size, advisory, by " + committeeAgent(1) + " in round 1 on plan#resume, citing kb/entities.json#internal.trace): It does not hold.",
 			"- " + fit + " (fit, advisory, by " + committeeAgent(2) + " in round 1 on plan, citing spec#1): It does not hold.", "one reply to this round", shed.ReplyTool, DraftTool} {
 			if !strings.Contains(req.Prompt, want) {
 				p.report("reply prompt lacks %q:\n%s", want, req.Prompt)
@@ -602,7 +602,7 @@ func TestDebateResumesMidRoundAfterARestart(t *testing.T) {
 	f := newDebateFixture(t, 2, 2)
 	p := &faults{}
 	size, fit := shed.ObjectionID(1, committeeAgent(1), 1), shed.ObjectionID(1, committeeAgent(2), 1)
-	f.member(1, 1, 1, objects(p, shed.Size, "plan#resume", "spec#1"))
+	f.member(1, 1, 1, objects(p, shed.Charter, "plan#resume", "charter#1"))
 	f.member(1, 2, 1, objects(p, shed.Fit, "plan", "spec#1"))
 	replying := make(chan struct{})
 	f.script(replyTurnID(1, 1), nil, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
@@ -1149,7 +1149,7 @@ func TestDebateWithoutACommitteeRunnerStillRepliesAndConcludes(t *testing.T) {
 	ctx := context.Background()
 	p := &faults{}
 	size := shed.ObjectionID(1, committeeAgent(1), 1)
-	f.member(1, 1, 1, objects(p, shed.Size, "plan#resume", "spec#1"))
+	f.member(1, 1, 1, objects(p, shed.Charter, "plan#resume", "charter#1"))
 	replying := make(chan struct{})
 	f.script(replyTurnID(1, 1), nil, func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
 		close(replying)

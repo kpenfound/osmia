@@ -37,7 +37,7 @@ func amendmentMasonTurn(unit, id string) string { return masonAgent(unit) + "-am
 
 // classifyAmendment returns the first revision of an amendment's application
 // record: the revisions it moves the workstream from and to, the request and
-// the owner's note, and the affected set the architect's draft recorded with
+// the decision note, and the affected set the architect's draft recorded with
 // its units classified against the sealed and approved plans.
 func classifyAmendment(req trace.Amendment, d AmendmentDecision, affectedDoc, sealedPlan, approvedPlan trace.Document, from, to amendment.Pin) (amendment.Application, error) {
 	var affected amendmentAffected
@@ -54,6 +54,9 @@ func classifyAmendment(req trace.Amendment, d AmendmentDecision, affectedDoc, se
 	}
 	a := amendment.Application{Amendment: req.ID, From: from, To: to, Citations: req.Citations, Change: req.Change, Reason: req.Reason, Note: d.Note,
 		Criteria: append([]string{}, affected.Criteria...)}
+	if d.Actor == trace.ChiefOfStaff {
+		a.Actor = d.Actor
+	}
 	a.Rework, a.Notify, a.Added, a.Removed = amendment.Classify(a.Criteria, affected.Units, before, after)
 	return a, nil
 }
@@ -401,9 +404,12 @@ func (a amendmentDebate) enqueueAmended(ctx context.Context, stream config.Works
 // amendment: what it means for the unit, then the unit's amended bundle with
 // the amendment's notice.
 func amendedMasonPrompt(app amendment.Application, m bundle.Mason, rework bool) string {
-	what := fmt.Sprintf("The owner approved amendment %s. It changed the meaning of criteria unit %s serves, so the unit returns to implementing: build it again in your existing workspace against the amended task and acceptance below.", app.Amendment, m.Unit)
+	what := fmt.Sprintf("The owner approved amendment %s. It changed the assignment or criteria unit %s serves, so the unit returns to implementing: build it again in your existing workspace against the amended task and acceptance below.", app.Amendment, m.Unit)
 	if !rework {
 		what = fmt.Sprintf("The owner approved amendment %s. It changed the entry of unit %s in the plan; the criteria the unit serves keep their meaning. Continue in your existing workspace against the amended task and acceptance below.", app.Amendment, m.Unit)
+	}
+	if app.Actor == trace.ChiefOfStaff {
+		what = strings.ReplaceAll(what, "The owner", "The chief of staff")
 	}
 	return fmt.Sprintf("%s When the task is done and its acceptance holds, call done with the outcome of your work, then end your turn.\n\n%s", what, m.Render())
 }

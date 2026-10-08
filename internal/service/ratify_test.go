@@ -218,7 +218,7 @@ func TestRatifyListsEveryReasonItIsRefused(t *testing.T) {
 	ctx := context.Background()
 	p := &faults{}
 	size := shed.ObjectionID(1, committeeAgent(1), 1)
-	f.member(1, 1, 1, objects(p, shed.Size, "plan#resume", "spec#1"))
+	f.member(1, 1, 1, objects(p, shed.Charter, "plan#resume", "charter#1"))
 	f.script(replyTurnID(1, 1), nil, answers(p, "The unit is one change.", size))
 	stream := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, stream, "concluded-1")
@@ -237,7 +237,7 @@ func TestRatifyListsEveryReasonItIsRefused(t *testing.T) {
 	}
 	for _, want := range []string{
 		"spec.md revision 1 and plan.json revision 1 are ratified, and the current revisions are spec.md revision 2 and plan.json revision 1: read the packet again",
-		fmt.Sprintf("objection %s (size, by %s in round 1 on plan#resume) blocks and has no disposition", size, committeeAgent(1)),
+		fmt.Sprintf("objection %s (charter, by %s in round 1 on plan#resume) blocks and has no disposition", size, committeeAgent(1)),
 		"the plan is not valid: spec#3",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -249,7 +249,7 @@ func TestRatifyListsEveryReasonItIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = f.c.Ratify(ctx, stream, 2, 1)
-	if !failed(err, Conflict) || !strings.Contains(err.Error(), fmt.Sprintf("objection %s (size, by %s in round 1 on plan#resume) blocks and is sustained and is not conceded", size, committeeAgent(1))) {
+	if !failed(err, Conflict) || !strings.Contains(err.Error(), fmt.Sprintf("objection %s (charter, by %s in round 1 on plan#resume) blocks and is sustained and is not conceded", size, committeeAgent(1))) {
 		t.Fatalf("ratifying over a sustained objection: %v", err)
 	}
 	// Revisions are what the packet named, never nothing.
@@ -276,7 +276,7 @@ func TestRedraftGoesBackToTheArchitectAndDebateResumes(t *testing.T) {
 	redraft := roundInput{Round: 1, Redraft: true}
 	f.script(redraft.turnID(1), map[string]string{plan.PlanPath: splitPlan}, func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
 		for _, want := range []string{"the owner read the packet and asked you to redraft spec.md revision 1 and plan.json revision 1", "Split the resume unit into what it addresses.",
-			fmt.Sprintf("- %s (size, blocking, by %s in round 1 on plan#resume, citing spec#1): It does not hold.", size, committeeAgent(1))} {
+			fmt.Sprintf("- %s (size, advisory, by %s in round 1 on plan#resume, citing spec#1): It does not hold.", size, committeeAgent(1))} {
 			if !strings.Contains(req.Prompt, want) {
 				p.report("the redraft prompt lacks %q:\n%s", want, req.Prompt)
 			}
