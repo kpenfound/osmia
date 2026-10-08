@@ -61,6 +61,12 @@ func TestDecideStart(t *testing.T) {
 	}
 }
 
+// DecideStart's result does not depend on the order or duplication of the
+// plan's units, the entity map's entities, or the in-flight list: this
+// compares two calls against permuted, duplicated input, not a hand-written
+// expectation, because that is the only way to state an order-invariance
+// contract. TestDecideStart separately pins the overlap and reverse-dependency
+// reasons the first call below produces as correct.
 func TestDecideStartIgnoresSetOrder(t *testing.T) {
 	m := kb.Map{Version: kb.Version, Entities: []kb.Entity{
 		{ID: "a", Paths: []string{"src/a"}},

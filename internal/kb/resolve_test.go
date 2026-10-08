@@ -89,7 +89,10 @@ func TestResolvePaths(t *testing.T) {
 	}
 }
 
-func TestMatch(t *testing.T) {
+// A pattern matches a path under it, covering every descendant of a matched
+// directory, with the same ** and glob rules ResolvePaths and MatchPathPattern
+// both use.
+func TestMatchPathPatternCoversDirectoriesAndGlobs(t *testing.T) {
 	for _, c := range []struct {
 		pattern, path string
 		want          bool
@@ -106,20 +109,8 @@ func TestMatch(t *testing.T) {
 		{"*.md", "README.md", true},
 		{"*.md", "docs/x.md", false},
 	} {
-		if got := match(split(c.pattern), split(c.path)); got != c.want {
-			t.Errorf("match(%q, %q) = %v", c.pattern, c.path, got)
+		if got := MatchPathPattern(c.pattern, c.path); got != c.want {
+			t.Errorf("MatchPathPattern(%q, %q) = %v, want %v", c.pattern, c.path, got, c.want)
 		}
 	}
-}
-
-func split(p string) []string {
-	var out []string
-	start := 0
-	for i := 0; i <= len(p); i++ {
-		if i == len(p) || p[i] == '/' {
-			out = append(out, p[start:i])
-			start = i + 1
-		}
-	}
-	return out
 }
