@@ -361,8 +361,7 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	}
 	mutation(t, f.c, "DELETE", "pause", factory)
 	f.awaitMasonRan(t, other, "resume")
-	base := passed.Load()
-	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-base >= 3 })
+	awaitPasses(t, &passed, 3)
 	settled(t, func() int { return len(f.blocks(t, blocked, "resume")) })
 	masons.check(t)
 	const prefix = "unit resume stays implementing: its mason reported done, and its candidate cannot be made: git add: "

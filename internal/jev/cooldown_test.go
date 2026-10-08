@@ -12,8 +12,8 @@ func TestOutagesCoolDownAndASuccessClearsThem(t *testing.T) {
 	for range outageThreshold - 1 {
 		c.observe(now, unavailable)
 	}
-	if cooling, _ := c.cooling(now); cooling {
-		t.Fatal("cooling before the outage threshold")
+	if cooling, until := c.cooling(now); cooling {
+		t.Fatalf("cooling = %v until %v before the outage threshold", cooling, until)
 	}
 	c.observe(now, &failure{reason: ReasonRejected})
 	c.observe(now, unavailable)
@@ -34,8 +34,8 @@ func TestOutagesCoolDownAndASuccessClearsThem(t *testing.T) {
 	}
 	success := end.Add(maxCoolDown)
 	c.observe(success, nil)
-	if c.lastFailure() != nil {
-		t.Fatal("success did not clear the last failure")
+	if lf := c.lastFailure(); lf != nil {
+		t.Fatalf("success did not clear the last failure: %v", lf)
 	}
 	// A success resets the escalation: the next episode cools down for
 	// the first interval again, not a further-doubled backoff.

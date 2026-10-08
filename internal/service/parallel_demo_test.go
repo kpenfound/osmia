@@ -156,8 +156,7 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 	// started a unit longer ago.
 	f.awaitMasonRan(t, lo, "resume")
 	f.awaitMasonRan(t, hi, "audit")
-	base := passed.Load()
-	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-base >= 3 })
+	awaitPasses(t, passed, 3)
 	settled(t, func() int { mu.Lock(); defer mu.Unlock(); return dedupeTurns })
 	masons.check(t)
 	mu.Lock()

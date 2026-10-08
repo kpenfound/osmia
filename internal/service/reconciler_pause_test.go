@@ -129,8 +129,7 @@ func checkHeld(t *testing.T, passed *atomic.Int64, fetch func() trace.OperationR
 	}) {
 		t.Fatalf("the stopped operation is not held pending: %+v", op)
 	}
-	base := passed.Load()
-	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-base >= 3 })
+	awaitPasses(t, passed, 3)
 	if again := fetch(); again.Acknowledged || len(again.History) != len(op.History) {
 		t.Fatalf("the held operation was reconciled under the pause: %+v", again.History)
 	}
@@ -345,8 +344,7 @@ func TestSoftPauseLetsARunningDraftFinishAndRequestsNoNewOne(t *testing.T) {
 	f.await(t, running, sketched)
 
 	waiting := f.handIn(t, "waiting", handedDesign)
-	base := passed.Load()
-	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-base >= 3 })
+	awaitPasses(t, passed, 3)
 	settled(t, func() int { return len(f.draftOperations(t, waiting)) })
 	if ops := f.draftOperations(t, waiting); len(ops) != 0 {
 		t.Fatalf("a draft was asked for under a soft pause: %+v", ops)

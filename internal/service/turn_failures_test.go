@@ -161,8 +161,7 @@ func TestMasonBehaviouralFailureIsNotRetried(t *testing.T) {
 		t.Fatalf("turn ended %s with %+v after %d attempts", q.Status(), q.Response, len(q.Attempts))
 	}
 	// Later passes leave the unit implementing, and never contest it.
-	base := passed.Load()
-	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-base >= 3 })
+	awaitPasses(t, &passed, 3)
 	if state, err := f.repository().Workflow(stream, trace.UnitSubject("resume")); err != nil || state.Value != UnitImplementing {
 		t.Fatalf("unit resume is %+v: %v", state, err)
 	}

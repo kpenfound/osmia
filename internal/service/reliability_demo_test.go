@@ -316,8 +316,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 	eventually(t, "audit never waited for the budget pause", func() bool {
 		return reflect.DeepEqual(unitStatus(t, f, stream, "audit"), f.deferred(t, stream, "audit", budgetWait))
 	})
-	passBase := passed.Load()
-	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-passBase >= 3 })
+	awaitPasses(t, passed, 3)
 	settled(t, func() int { return len(starts(t, f, stream)) })
 	if got := starts(t, f, stream); !slices.Equal(got, []string{trace.UnitSubject("upload")}) {
 		t.Fatalf("units started under the budget pause: %v", got)
@@ -345,8 +344,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		}
 		return n
 	}
-	passBase = passed.Load()
-	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-passBase >= 3 })
+	awaitPasses(t, passed, 3)
 	settled(t, attempts)
 	for _, q := range f.thread(t, stream, masonAgent("audit")).Turns[1:] {
 		if len(q.Attempts) != 0 {

@@ -463,8 +463,7 @@ func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
 		t.Fatal("no turn started")
 	}
 	// Periodic passes run while mason1 is in flight; none dispatches mason2.
-	base := passed.Load()
-	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-base >= 3 })
+	awaitPasses(t, &passed, 3)
 	select {
 	case id := <-started:
 		t.Fatalf("%s started beside mason1", id)

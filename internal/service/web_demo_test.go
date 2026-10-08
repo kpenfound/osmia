@@ -298,7 +298,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	opened := len(prs.prs)
 	prs.mu.Unlock()
 	if opened != 0 {
-		t.Fatal("a pull request was opened while the workstream was paused")
+		t.Fatalf("pull requests opened while the workstream was paused: %d, want 0", opened)
 	}
 	p.openPauses()
 	p.click(shownPause + "[data-field=resume]")
