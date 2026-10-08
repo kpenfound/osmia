@@ -24,7 +24,15 @@ import (
 // so a test decides whether it answers a mason's question or escalates it.
 func newAskingMasonFixture(t *testing.T, masons int, drafted string, p *faults) (*shedFixture, *fakeMasons, *chief) {
 	t.Helper()
-	f, fake := newMasonFixture(t, masons, drafted)
+	return newAskingMasonFixturePrepared(t, masons, drafted, p, nil)
+}
+
+// newAskingMasonFixturePrepared is newAskingMasonFixture with prepare, run
+// before the service starts, so a test can set opts.schedulePassed and wait
+// for passes to demonstrably complete instead of a fixed sleep.
+func newAskingMasonFixturePrepared(t *testing.T, masons int, drafted string, p *faults, prepare func(*Options)) (*shedFixture, *fakeMasons, *chief) {
+	t.Helper()
+	f, fake := newMasonFixturePrepared(t, masons, drafted, prepare)
 	c := &chief{p: p, released: map[string]bool{}, held: map[string]chan struct{}{}}
 	f.engine.mu.Lock()
 	defer f.engine.mu.Unlock()
@@ -87,7 +95,8 @@ func resumed(unit, q string) transitionMove {
 func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	t.Parallel()
 	p := &faults{}
-	f, masons, _ := newAskingMasonFixture(t, 1, independentPlan, p)
+	passed, prepare := countingSchedule()
+	f, masons, _ := newAskingMasonFixturePrepared(t, 1, independentPlan, p, prepare)
 	defer func() { f.stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
 	built := f.seedBuildingPaused(t, factory, independentPlan, "first", "second", "third")
@@ -133,7 +142,8 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	}
 	f.awaitMasonTransitions(t, asking, 2)
 	f.awaitMasonRan(t, other, "resume")
-	settle()
+	// Further passes find nothing more to do for either workstream.
+	awaitPasses(t, passed, 3)
 	p.check(t)
 	masons.check(t)
 	want := []transitionMove{started("resume", f.startedReason(t, asking, "resume")), parked("resume", "1")}
@@ -160,7 +170,8 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 
 	f.stop(t)
 	f.start(t)
-	settle()
+	// Further passes after the restart find the parked unit still waiting.
+	awaitPasses(t, passed, 3)
 	f.checkUnits(t, asking, []UnitStatus{{Unit: "resume", State: UnitWaiting}, f.deferred(t, asking, "dedupe", overlapping("resume"))})
 	if th := f.thread(t, asking, masonAgent("resume")); !th.Parked() || len(th.Turns) != 1 {
 		t.Fatalf("the mason's thread after a restart: %+v", th)
@@ -178,7 +189,8 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	settle()
+	// Further passes find no more work beyond resuming the unit.
+	awaitPasses(t, passed, 3)
 	p.check(t)
 	want = append(want, resumed("resume", "1"))
 	if got := masonTransitions(t, f, asking); !reflect.DeepEqual(got, want) {
@@ -207,7 +219,9 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	f.checkUnits(t, other, []UnitStatus{{Unit: "resume", State: UnitImplementing}, f.deferred(t, other, "dedupe", overlapping("resume"))})
 	f.checkUnits(t, third, []UnitStatus{f.deferred(t, third, "resume", slotless(1)), f.deferred(t, third, "dedupe", slotless(1))})
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: other}, Mode: "soft", Source: "owner"})
-	settle()
+	// Further passes still find the third workstream without a free slot,
+	// since the asking workstream still holds one.
+	awaitPasses(t, passed, 3)
 	if got := masonTransitions(t, f, third); len(got) != 0 {
 		t.Fatalf("%s started a unit while one was implementing with one mason slot: %+v", third, got)
 	}
@@ -224,7 +238,8 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 	t.Parallel()
 	p := &faults{}
-	f, fakes, c := newAskingMasonFixture(t, 4, independentPlan, p)
+	passed, prepare := countingSchedule()
+	f, fakes, c := newAskingMasonFixturePrepared(t, 4, independentPlan, p, prepare)
 	defer f.stop(t)
 	c.release("1")
 	c.release("2")
@@ -235,7 +250,8 @@ func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 	f.answer("2", func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error { return nil })
 	stream := f.seedBuilding(t, "design", independentPlan)
 	f.awaitMasonTransitions(t, stream, 5)
-	settle()
+	// Further passes find no more parks or resumes beyond the five.
+	awaitPasses(t, passed, 3)
 	p.check(t)
 	fakes.check(t)
 	want := []transitionMove{started("resume", f.startedReason(t, stream, "resume")), parked("resume", "1"), resumed("resume", "1"), parked("resume", "2"), resumed("resume", "2")}

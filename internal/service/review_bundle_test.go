@@ -13,6 +13,9 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
+// capturedReview is a fake reviewer model session: it never reasons about
+// the diff it is given, only records the request and derives a result from
+// its digest, leaving a real reviewer's judgment of the candidate unverified.
 type capturedReview struct{ request coreadapter.ReviewRequest }
 
 func (f *capturedReview) Review(_ context.Context, req coreadapter.ReviewRequest) (coreadapter.ReviewResult, error) {

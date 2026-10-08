@@ -19,7 +19,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestExactReviewDemonstration exercises review through the local API and trace.
+// TestExactReviewDemonstration exercises review through the local API and
+// trace. Mason and reviewer turns are played by a scripted fake model
+// session here, not a live one, so a real model's judgment of the candidate
+// or its findings is left unverified; the test checks the service's own
+// handling of identities, retries and the question.
 func TestExactReviewDemonstration(t *testing.T) {
 	t.Parallel()
 	p := &faults{}

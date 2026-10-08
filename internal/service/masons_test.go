@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,8 +33,10 @@ const masonRoles = chiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = 
 // masonWrote is the file every fake mason writes into its view.
 const masonWrote = "internal/trace/built.go"
 
-// fakeMasons plays every mason turn of the fixture. Each turn checks that it
-// holds its view's file tools, ask and done, and no amend, records what it saw,
+// fakeMasons is a fake model session standing in for the real mason's model
+// backend: it never calls out to a live model, so a mason's own reasoning,
+// cost and latency are left unverified. Each turn checks that it holds its
+// view's file tools, ask and done, and no amend, records what it saw,
 // writes masonWrote into its view and then plays what play holds for the
 // turn, which ends the turn failed by returning errFailTurn or errCrashTurn.
 type fakeMasons struct {
@@ -158,6 +161,21 @@ func newMasonFixtureOn(t *testing.T, backend, capacity, drafted, classifier stri
 	return newMasonFixtureWith(t, backend, capacity, drafted, classifier, nil)
 }
 
+// newMasonFixturePrepared is newMasonFixture with prepare, run before the
+// service starts, so a test can set opts.schedulePassed and wait for passes
+// to demonstrably complete instead of a fixed sleep.
+func newMasonFixturePrepared(t *testing.T, masons int, drafted string, prepare func(*Options)) (*shedFixture, *fakeMasons) {
+	t.Helper()
+	return newMasonFixtureWith(t, config.WorkspacesGit, fmt.Sprintf("masons = %d\n", masons), drafted, "", prepare)
+}
+
+// countingSchedule returns a passed counter and the prepare func that makes
+// opts.schedulePassed advance it once per completed reconciliation pass.
+func countingSchedule() (*atomic.Int64, func(*Options)) {
+	passed := &atomic.Int64{}
+	return passed, func(opts *Options) { opts.schedulePassed = func() { passed.Add(1) } }
+}
+
 // newMasonFixtureWith is newMasonFixtureOn with prepare, when set, changing
 // the options and the configuration file before the service starts.
 func newMasonFixtureWith(t *testing.T, backend, capacity, drafted, classifier string, prepare func(*Options)) (*shedFixture, *fakeMasons) {
@@ -274,6 +292,28 @@ func started(unit, reason string) transitionMove {
 // settle lets the service's loop run several more passes.
 func settle() { time.Sleep(1500 * time.Millisecond) }
 
+// awaitPasses waits until passed, advanced once per completed reconciliation
+// pass by a schedulePassed hook a fixture's prepare func installed, has
+// counted at least n more passes than when this call began, then returns
+// what the counter observed. It fails at the deadline with the last count,
+// so a check that nothing more happened still runs against passes that
+// demonstrably ran, rather than a fixed sleep that might not have covered
+// any.
+func awaitPasses(t *testing.T, passed *atomic.Int64, n int64) int64 {
+	t.Helper()
+	target := passed.Load() + n
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		if got := passed.Load(); got >= target {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("passes %d, want at least %d", passed.Load(), target)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // awaitEventTurns waits until the workstream's chief of staff has received
 // event turns that together carry every wanted body.
 func (f *shedFixture) awaitEventTurns(t *testing.T, stream config.WorkstreamID, want ...string) {
@@ -334,11 +374,14 @@ func (f *shedFixture) awaitAcknowledgedNotices(t *testing.T, stream config.Works
 // shares its footprint and waits, however many mason slots are free.
 func TestMasonStartsTheFirstOfTwoEntangledUnits(t *testing.T) {
 	t.Parallel()
-	f, masons := newMasonFixture(t, 4, independentPlan)
+	passed, prepare := countingSchedule()
+	f, masons := newMasonFixturePrepared(t, 4, independentPlan, prepare)
 	defer f.stop(t)
 	stream := f.seedBuilding(t, "design", independentPlan)
 	f.awaitMasonRan(t, stream, "resume")
-	settle()
+	// Further passes find no more to do for either unit: run several, then
+	// check that nothing beyond the one start was recorded.
+	awaitPasses(t, passed, 3)
 	masons.check(t)
 
 	if got, want := masonTransitions(t, f, stream), []transitionMove{started("resume", f.startedReason(t, stream, "resume"))}; !reflect.DeepEqual(got, want) {
@@ -473,7 +516,8 @@ func staleReason(prefix string) string {
 // so. Once the owner puts the sealed spec back, the unit starts.
 func TestStaleSpecLeavesTheUnitReady(t *testing.T) {
 	t.Parallel()
-	f, masons := newMasonFixture(t, 4, validPlan)
+	passed, prepare := countingSchedule()
+	f, masons := newMasonFixturePrepared(t, 4, validPlan, prepare)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
 	stream := f.seedBuildingPaused(t, factory, validPlan, "design")[0]
@@ -481,8 +525,7 @@ func TestStaleSpecLeavesTheUnitReady(t *testing.T) {
 	mutation(t, f.c, "DELETE", "pause", factory)
 	f.awaitMasonTransition(t, stream)
 	// Further passes find the unit still blocked and record nothing more.
-	settle()
-	settle()
+	awaitPasses(t, passed, 6)
 
 	if got := masonTransitions(t, f, stream); len(got) != 1 || got[0].Subject != blockedSubject("resume") {
 		t.Fatalf("mason transitions %+v", got)
@@ -519,7 +562,8 @@ func lowHigh(a, b config.WorkstreamID) (config.WorkstreamID, config.WorkstreamID
 // whose unit starts.
 func TestUnitWorkspaceFailureBlocksItsWorkstreamAlone(t *testing.T) {
 	t.Parallel()
-	f, masons := newMasonFixture(t, 1, validPlan)
+	passed, prepare := countingSchedule()
+	f, masons := newMasonFixturePrepared(t, 1, validPlan, prepare)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
 	built := f.seedBuildingPaused(t, factory, validPlan, "first", "second")
@@ -530,7 +574,9 @@ func TestUnitWorkspaceFailureBlocksItsWorkstreamAlone(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(squatter, "notes"), []byte("mine\n"), 0600))
 	mutation(t, f.c, "DELETE", "pause", factory)
 	f.awaitMasonRan(t, other, "resume")
-	settle()
+	// Further passes find the broken unit still blocked and record nothing
+	// more against it.
+	awaitPasses(t, passed, 3)
 	masons.check(t)
 
 	reasons := f.blocks(t, broken, "resume")
@@ -579,7 +625,8 @@ func TestBlockedImplementingUnitHoldsNoSlot(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			f, masons := newMasonFixture(t, 1, validPlan)
+			passed, prepare := countingSchedule()
+			f, masons := newMasonFixturePrepared(t, 1, validPlan, prepare)
 			defer func() { f.stop(t) }()
 			factory := runtime.Target{Scope: "factory"}
 			built := f.seedBuildingPaused(t, factory, validPlan, "first", "second")
@@ -596,7 +643,9 @@ func TestBlockedImplementingUnitHoldsNoSlot(t *testing.T) {
 			f.start(t)
 			mutation(t, f.c, "DELETE", "pause", factory)
 			f.awaitMasonRan(t, other, "resume")
-			settle()
+			// Further passes find the blocked unit still holding no slot and
+			// record nothing more against it.
+			awaitPasses(t, passed, 3)
 			masons.check(t)
 			if got := f.blocks(t, blocked, "resume"); len(got) != 1 || !tc.check(got[0]) {
 				t.Fatalf("blocked %q", got)

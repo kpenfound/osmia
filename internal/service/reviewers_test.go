@@ -149,6 +149,10 @@ func TestRefusedVerdictReviewsTheCandidateAgain(t *testing.T) {
 	}
 }
 
+// staticVerdictTurn is a fake model session that always completes with no
+// output; it never exercises a real reviewer's reasoning, so this test only
+// checks that verdictTurns.Run reports the verdict already recorded through
+// the tool, not that a model session actually produces one.
 type staticVerdictTurn struct{}
 
 func (staticVerdictTurn) Run(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
