@@ -612,7 +612,7 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	var views []string
 	for _, path := range p.paths() {
 		switch {
-		case path == "/" || path == "/app.js" || path == "/style.css":
+		case path == "/" || path == "/app.js" || path == "/style.css" || path == "/favicon.svg":
 		case strings.HasPrefix(path, Prefix+"/"):
 			views = append(views, path)
 		default:

@@ -95,7 +95,8 @@ inside the tailnet's encrypted transport.
 The service serves one page at `/` on every listener. It uses the same API as
 the command line, so an action on the page is validated, recorded and
 announced as the matching command's is. It fits phone and laptop widths and
-updates live from the service's event stream.
+updates live from the service's event stream. The browser tab shows the bee
+emoji (🐝) as the page's favicon.
 
 The page is laid out like a chat client:
 

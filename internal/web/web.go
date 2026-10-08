@@ -10,7 +10,7 @@ import (
 	"strconv"
 )
 
-//go:embed index.html app.js style.css
+//go:embed index.html app.js style.css favicon.svg
 var assets embed.FS
 
 // asset is one embedded file and the content type it is served with.
@@ -21,14 +21,15 @@ type asset struct {
 
 // paths maps each URL path the page is served under to its file.
 var paths = map[string]asset{
-	"/":          {"index.html", "text/html; charset=utf-8"},
-	"/app.js":    {"app.js", "text/javascript; charset=utf-8"},
-	"/style.css": {"style.css", "text/css; charset=utf-8"},
+	"/":            {"index.html", "text/html; charset=utf-8"},
+	"/app.js":      {"app.js", "text/javascript; charset=utf-8"},
+	"/style.css":   {"style.css", "text/css; charset=utf-8"},
+	"/favicon.svg": {"favicon.svg", "image/svg+xml"},
 }
 
-// policy lets the page load only its own script and style and talk only to
-// its own origin, so no other site can frame it and no injected markup can
-// run. The empty data: icon keeps the browser from asking for a favicon.
+// policy lets the page load only its own script, style and icon and talk
+// only to its own origin, so no other site can frame it and no injected
+// markup can run.
 const policy = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 // Serve writes the page file at r's path for a GET or HEAD request and
