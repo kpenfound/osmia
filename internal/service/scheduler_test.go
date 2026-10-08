@@ -22,7 +22,9 @@ import (
 )
 
 // blockingTurns delegates to scripted fake agent results, first calling the
-// per-turn hook with the turn's context.
+// per-turn hook with the turn's context. Its fake, adaptertest.Turns, stands
+// in for a real model session; it leaves the real agent backend's actual
+// behaviour, timing and output unverified.
 type blockingTurns struct {
 	fake  *adaptertest.Turns
 	mu    sync.Mutex
@@ -448,6 +450,8 @@ func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
 				return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(root, "sessions", in.Agent, in.Turn)}, nil
 			}}, nil
 	}
+	var passed atomic.Int64
+	opts.schedulePassed = func() { passed.Add(1) }
 	s, _ := start(t, opts)
 	repo = <-lives
 	select {
@@ -459,7 +463,8 @@ func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
 		t.Fatal("no turn started")
 	}
 	// Periodic passes run while mason1 is in flight; none dispatches mason2.
-	time.Sleep(3 * time.Second)
+	base := passed.Load()
+	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-base >= 3 })
 	select {
 	case id := <-started:
 		t.Fatalf("%s started beside mason1", id)

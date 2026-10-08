@@ -36,7 +36,7 @@ const demoPlan = `{"version": 1, "units": [
 func TestParallelUnitsDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f, masons := newParallelMasonFixture(t, 2, 3, demoPlan)
+	f, masons, passed := newParallelMasonFixtureCounting(t, 2, 3, demoPlan)
 	defer func() { f.stop(t) }()
 	recovered := masonAgent("dedupe") + "-recover-1"
 	masons.play[masonTurnID("resume")] = reportDone("Uploads resume")
@@ -156,7 +156,9 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 	// started a unit longer ago.
 	f.awaitMasonRan(t, lo, "resume")
 	f.awaitMasonRan(t, hi, "audit")
-	settle()
+	base := passed.Load()
+	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-base >= 3 })
+	settled(t, func() int { mu.Lock(); defer mu.Unlock(); return dedupeTurns })
 	masons.check(t)
 	mu.Lock()
 	if dedupeTurns != 1 {

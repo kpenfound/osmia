@@ -22,6 +22,10 @@ func TestMemoryWatchResumesCursorAndDeduplicatesAfterRestart(t *testing.T) {
 	_, cfg := conversationFixture(t, "memory-watch-")
 	var pass atomic.Int32
 	requests := make(chan string, 8)
+	// This httptest server stands in for Hearsay's real HTTP endpoint. It
+	// leaves Hearsay's actual authentication, cursor format and network
+	// behaviour unverified; it only checks that watchMemory sends the
+	// delegated credentials and the cursor it was given.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer owner-secret" || r.Header.Get("Hearsay-Agent-Token") != "agent-secret" {
 			t.Error("watch did not use delegated authentication")

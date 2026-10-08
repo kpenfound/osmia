@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,9 +20,39 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
+
+// newParallelMasonFixtureCounting is newParallelMasonFixture whose service
+// calls passed once per completed reconciliation pass, so a check that
+// nothing happened under a pause can wait for passes that demonstrably ran
+// instead of a fixed sleep. Kept as its own copy, mirroring
+// newParallelMasonFixtureOn's body, because that constructor takes no
+// prepare hook to install the counter before the service starts.
+func newParallelMasonFixtureCounting(t *testing.T, masons, perWorkstream int, drafted string) (*shedFixture, *fakeMasons, *atomic.Int64) {
+	t.Helper()
+	passed, prepare := countingSchedule()
+	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted, "", prepare)
+	mapping, err := kb.Load(f.repository())
+	must(t, err)
+	for _, name := range []string{"upload", "audit"} {
+		mapping.Entities = append(mapping.Entities, kb.Entity{ID: "internal." + name, Name: "internal/" + name, Aliases: []string{}, Paths: []string{"internal/" + name}, Owners: []string{}, PartOf: []string{}})
+	}
+	must(t, kb.Store(context.Background(), f.repository(), mapping, f.clock.Now(), librarianActor, "fixture"))
+	f.engine.mu.Lock()
+	defer f.engine.mu.Unlock()
+	for _, unit := range []string{"upload", "audit"} {
+		f.engine.turns[masonTurnID(unit)] = fake.turn
+		for i := 1; i <= 3; i++ {
+			name := fmt.Sprintf("%s-clarify-%d", masonAgent(unit), i)
+			fake.play[name] = failMasonTurn
+			f.engine.turns[name] = fake.turn
+		}
+	}
+	return f, fake, passed
+}
 
 // reliabilityPlan has four independent units. upload and dedupe share
 // internal.upload; they are never implementing together on the one mason
@@ -117,7 +148,7 @@ func factoryPauseOf(t *testing.T, c *Client) (runtime.Pause, bool) {
 func TestReliabilityDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f, masons := newParallelMasonFixture(t, 1, 4, reliabilityPlan)
+	f, masons, passed := newParallelMasonFixtureCounting(t, 1, 4, reliabilityPlan)
 	defer func() { f.stop(t) }()
 	configPath := filepath.Join(f.opts.Config.Root, "config.toml")
 
@@ -285,7 +316,9 @@ func TestReliabilityDemonstration(t *testing.T) {
 	eventually(t, "audit never waited for the budget pause", func() bool {
 		return reflect.DeepEqual(unitStatus(t, f, stream, "audit"), f.deferred(t, stream, "audit", budgetWait))
 	})
-	settle()
+	passBase := passed.Load()
+	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-passBase >= 3 })
+	settled(t, func() int { return len(starts(t, f, stream)) })
 	if got := starts(t, f, stream); !slices.Equal(got, []string{trace.UnitSubject("upload")}) {
 		t.Fatalf("units started under the budget pause: %v", got)
 	}
@@ -305,7 +338,16 @@ func TestReliabilityDemonstration(t *testing.T) {
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: workstream, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
 	stopped := completedTurn(t, f, stream, masonAgent("audit"), 0)
 	checkPauseStop(t, stopped, "workstream", "Stop the mason")
-	settle()
+	attempts := func() int {
+		n := 0
+		for _, q := range f.thread(t, stream, masonAgent("audit")).Turns[1:] {
+			n += len(q.Attempts)
+		}
+		return n
+	}
+	passBase = passed.Load()
+	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-passBase >= 3 })
+	settled(t, attempts)
 	for _, q := range f.thread(t, stream, masonAgent("audit")).Turns[1:] {
 		if len(q.Attempts) != 0 {
 			t.Fatalf("turn %s of audit's mason ran under the hard pause: %+v", q.Request.TurnID, q.Attempts)

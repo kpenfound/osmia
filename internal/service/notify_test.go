@@ -21,7 +21,9 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// fakeWebhook records the bodies posted to it and answers with status.
+// fakeWebhook records the bodies posted to it and answers with status. It
+// stands in for the owner's real webhook endpoint, leaving that endpoint's
+// actual network behaviour and availability unverified.
 type fakeWebhook struct {
 	*httptest.Server
 	mu     sync.Mutex
@@ -155,6 +157,22 @@ func soon(t *testing.T, what string, ok func() bool) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// settled waits until count stops changing for a 50ms window, so a check
+// right after it returns sees nothing still in flight (such as a webhook
+// post a background pass has not yet made), bounded overall by soon's
+// 20-second deadline.
+func settled(t *testing.T, count func() int) {
+	t.Helper()
+	window := 50 * time.Millisecond
+	last, stableSince := count(), time.Now()
+	soon(t, "activity to settle", func() bool {
+		if n := count(); n != last {
+			last, stableSince = n, time.Now()
+		}
+		return time.Since(stableSince) >= window
+	})
 }
 
 // breakInbox makes the inbox unreadable, or readable again, and announces it.
@@ -311,7 +329,7 @@ func TestNotifyPostsEveryNewInboxEntryOnce(t *testing.T) {
 	next := entryOf(InboxEscalation, 9)
 	inbox.set(append(entries, next)...)
 	hook.await(t, len(kinds)+1)
-	time.Sleep(50 * time.Millisecond)
+	settled(t, func() int { return len(hook.received()) })
 	if bodies := hook.received(); len(bodies) != len(kinds)+1 || !strings.Contains(bodies[len(kinds)], "Decide escalation 9?") {
 		t.Fatalf("posts after restart: %q", bodies[len(kinds):])
 	}
@@ -341,7 +359,7 @@ func TestNotifyRestartSendsPendingAndNeverResendsSent(t *testing.T) {
 	marker := entryOf(InboxEscalation, 3)
 	inbox.set(pending, sent, marker)
 	hook.await(t, 2)
-	time.Sleep(50 * time.Millisecond)
+	settled(t, func() int { return len(hook.received()) })
 	if got := hook.received(); len(got) != 2 || !strings.Contains(got[1], "Decide escalation 3?") {
 		t.Fatalf("posts %q", got)
 	}
@@ -425,7 +443,7 @@ func TestNotifyReloadTurnsNotificationsOnAndOff(t *testing.T) {
 	})
 	inbox.set(e1, e2, e3, e3b, e4, e5)
 	second.await(t, 3)
-	time.Sleep(50 * time.Millisecond)
+	settled(t, func() int { return len(second.received()) })
 	if got := second.received(); len(got) != 3 || !strings.Contains(got[2], "Kind: ratification") || len(first.received()) != 1 {
 		t.Fatalf("posts after turning notifications back on: %q and %q", first.received(), got)
 	}
@@ -467,7 +485,7 @@ func TestNotifyFailingWebhookRetriesThenGivesUp(t *testing.T) {
 	if st[0].Code != want.Code || !strings.Contains(st[0].Message, "after 5 attempts: the webhook responded 503 Service Unavailable") || strings.Contains(st[0].Message, "secret") {
 		t.Fatalf("diagnostic %+v", st[0])
 	}
-	time.Sleep(time.Second)
+	settled(t, func() int { return len(hook.received()) })
 	if n := len(hook.received()); n != notifyAttempts {
 		t.Fatalf("%d posts after giving up", n)
 	}
@@ -613,7 +631,7 @@ func TestNotifyFaultsSendNothingUntilCleared(t *testing.T) {
 	e2 := entryOf(InboxAmendment, 2)
 	inbox.set(e1, e2)
 	fault("cannot record notifications in " + ledger + "; nothing is sent until it can be written")
-	time.Sleep(50 * time.Millisecond)
+	settled(t, func() int { return len(hook.received()) })
 	if got := hook.received(); len(got) != 0 {
 		t.Fatalf("posted without a record: %q", got)
 	}
@@ -629,7 +647,7 @@ func TestNotifyFaultsSendNothingUntilCleared(t *testing.T) {
 	fault("cannot read the inbox; notifications wait until it can be read")
 	e3 := entryOf(InboxContested, 3)
 	inbox.set(e1, e2, e3)
-	time.Sleep(50 * time.Millisecond)
+	settled(t, func() int { return len(hook.received()) })
 	if got := hook.received(); len(got) != 1 {
 		t.Fatalf("posted while the inbox was unreadable: %q", got)
 	}

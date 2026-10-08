@@ -58,6 +58,7 @@ func deliverWithPullRequest(t *testing.T, repo *trace.Repository, cfg *config.Co
 }
 
 func TestBaseRefreshRecordsMergedOwnPullRequest(t *testing.T) {
+	t.Parallel()
 	cfg, repo, host, refresh := ownPRFixture(t)
 	sealStream(t, repo)
 	publication := deliverWithPullRequest(t, repo, cfg, 42)
@@ -93,6 +94,7 @@ func TestBaseRefreshRecordsMergedOwnPullRequest(t *testing.T) {
 }
 
 func TestBaseRefreshRecordsClosedOwnPullRequest(t *testing.T) {
+	t.Parallel()
 	cfg, repo, host, refresh := ownPRFixture(t)
 	sealStream(t, repo)
 	publication := deliverWithPullRequest(t, repo, cfg, 42)
@@ -123,6 +125,7 @@ func TestBaseRefreshRecordsClosedOwnPullRequest(t *testing.T) {
 }
 
 func TestBaseRefreshOpenOwnPullRequestContinuesToExistingParentCheck(t *testing.T) {
+	t.Parallel()
 	cfg, repo, host, refresh := ownPRFixture(t)
 	sealStream(t, repo)
 	publication := deliverWithPullRequest(t, repo, cfg, 42)
@@ -148,6 +151,7 @@ func TestBaseRefreshOpenOwnPullRequestContinuesToExistingParentCheck(t *testing.
 }
 
 func TestBaseRefreshWithNoOwnPullRequestMakesNoLookup(t *testing.T) {
+	t.Parallel()
 	_, repo, host, refresh := ownPRFixture(t)
 	sealStream(t, repo)
 	ctx := context.Background()
@@ -170,6 +174,7 @@ func TestBaseRefreshWithNoOwnPullRequestMakesNoLookup(t *testing.T) {
 }
 
 func TestOwnPullRequestOutcomeIgnoresAnEarlierPullRequestNumber(t *testing.T) {
+	t.Parallel()
 	cfg, repo, _, _ := ownPRFixture(t)
 	deliverWithPullRequest(t, repo, cfg, 7)
 	must(t, recordOwnPullRequestOutcome(context.Background(), repo, demoStart, stream, "fixture", 3, ownPullRequestOutcomeClosed))
@@ -181,6 +186,7 @@ func TestOwnPullRequestOutcomeIgnoresAnEarlierPullRequestNumber(t *testing.T) {
 }
 
 func TestBaseRefreshRestartBetweenOwnPullRequestLookupAndRecordYieldsOneOutcome(t *testing.T) {
+	t.Parallel()
 	cfg, repo, host, refresh := ownPRFixture(t)
 	sealStream(t, repo)
 	publication := deliverWithPullRequest(t, repo, cfg, 42)

@@ -54,7 +54,8 @@ type checkOutcome struct {
 
 // fakeChecks lists links and returns its scripted outcomes in order,
 // repeating the last, recording the links of each run and the candidate file
-// it saw.
+// it saw. It stands in for the real dagger check execution boundary,
+// leaving the real CLI's link discovery, exit codes and output unverified.
 type fakeChecks struct {
 	links    []string
 	listErr  error

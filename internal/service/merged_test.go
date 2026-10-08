@@ -44,11 +44,13 @@ func requestPublication(t *testing.T, f *shedFixture, repo *trace.Repository, st
 // for a GitHub token. Delivery and the trace show the merge in place of a
 // pull request, and the workstream cannot be recorded merged again.
 func TestOwnerRecordsAnAssembledWorkstreamMergedOutsideTheFactory(t *testing.T) {
+	t.Parallel()
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			if backend == config.WorkspacesJujutsu {
 				requireJJ(t)
 			}
+			t.Parallel()
 			f := newDebateFixture(t, 1, 1)
 			f.upstream(t)
 			f.stop(t)
@@ -137,6 +139,7 @@ func TestOwnerRecordsAnAssembledWorkstreamMergedOutsideTheFactory(t *testing.T) 
 // A workstream whose base workstream the owner merged into upstream, here
 // as a fast-forward, rebases onto upstream: the base is integrated.
 func TestDependentOfAMergedBaseRebasesOntoUpstream(t *testing.T) {
+	t.Parallel()
 	f := newDebateFixture(t, 1, 1)
 	f.upstream(t)
 	f.stop(t)

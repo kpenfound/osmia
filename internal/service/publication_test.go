@@ -20,8 +20,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// fakePulls is a pull request host in memory. lose makes the next Create
-// open the pull request and then fail, as a response lost in transit does.
+// fakePulls is a pull request host in memory, standing in for the real
+// remote hosting the delivery publishes to. lose makes the next Create open
+// the pull request and then fail, as a response lost in transit does. It
+// leaves unverified the real host's network behaviour, authentication and
+// actual merge or close semantics.
 type fakePulls struct {
 	mu       sync.Mutex
 	prs      []pulls.PullRequest

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -161,6 +162,8 @@ func TestSeveralProjectsShareCapacityPauseApartAndResumeFromTheirOwnTraces(t *te
 	otherEntered, otherRelease := f.block(otherProject, "first")
 	entered, _ := f.block(project, "first")
 
+	var passed atomic.Int64
+	f.opts.schedulePassed = func() { passed.Add(1) }
 	s, err := Start(ctx, f.opts)
 	must(t, err)
 	stopped := false
@@ -199,7 +202,8 @@ func TestSeveralProjectsShareCapacityPauseApartAndResumeFromTheirOwnTraces(t *te
 		return w.Workstream == stream && w.Turn == turn(project, "first") && w.Reason == "capacity"
 	})
 	// Several passes of both loops run while the slot stays taken.
-	time.Sleep(2500 * time.Millisecond)
+	base := passed.Load()
+	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-base >= 3 })
 	if got := f.dispatchedTurns(t, paused, project); len(got) != 0 {
 		t.Fatalf("first project dispatched %v past the shared capacity", got)
 	}

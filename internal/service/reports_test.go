@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -219,7 +220,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	settle()
+	f.awaitUnit(t, stream, "dedupe", UnitImplementing)
 	masons.check(t)
 	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitReviewing, Card: &exampleCard}, {Unit: "dedupe", State: UnitImplementing}})
 
@@ -331,7 +332,10 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 // the lock is gone, the next pass moves it to reviewing with its candidate.
 func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	t.Parallel()
-	f, masons := newMasonFixture(t, 1, independentPlan)
+	var passed atomic.Int64
+	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", independentPlan, "", func(opts *Options) {
+		opts.schedulePassed = func() { passed.Add(1) }
+	})
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
 	built := f.seedBuildingPaused(t, factory, independentPlan, "first", "second")
@@ -357,7 +361,9 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	}
 	mutation(t, f.c, "DELETE", "pause", factory)
 	f.awaitMasonRan(t, other, "resume")
-	settle()
+	base := passed.Load()
+	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-base >= 3 })
+	settled(t, func() int { return len(f.blocks(t, blocked, "resume")) })
 	masons.check(t)
 	const prefix = "unit resume stays implementing: its mason reported done, and its candidate cannot be made: git add: "
 	if got := f.blocks(t, blocked, "resume"); len(got) != 1 || !strings.HasPrefix(got[0], prefix) || !strings.Contains(got[0], "index.lock") {

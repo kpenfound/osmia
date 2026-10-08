@@ -26,7 +26,8 @@ func providerOf(t *testing.T, w streamWorkspaces, stream config.WorkstreamID) wo
 }
 
 // fakeJJ stands in for the check of the jj on PATH: it reports version, and
-// err when set.
+// err when set. It leaves the real jj binary's actual version output and
+// startup behaviour unverified.
 type fakeJJ struct {
 	mu      sync.Mutex
 	version string

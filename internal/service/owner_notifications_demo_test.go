@@ -23,6 +23,15 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
+// ledgerModTime is the modification time of the notifications ledger at
+// path, which notifier.pass rewrites every time it runs with a webhook set.
+func ledgerModTime(t *testing.T, path string) time.Time {
+	t.Helper()
+	info, err := os.Stat(path)
+	must(t, err)
+	return info.ModTime()
+}
+
 // notifiedKind is the kind a notification body names: the Kind line of an
 // owner decision, or the budget pause.
 func notifiedKind(body string) string {
@@ -191,8 +200,23 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	})
 	f.stop(t)
 	sent := len(hook.received())
+	ledgerPath := filepath.Join(f.opts.Config.Root, "notifications.json")
+	beforeRestart := ledgerModTime(t, ledgerPath)
 	f.start(t)
-	settle()
+	// n.pass rewrites the ledger every time it runs with the webhook set, so
+	// the file's mtime advancing is a positive signal that the notifier
+	// passed at least once after the restart, before checking that none of
+	// its passes posted the already-sent escalation again.
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if last := ledgerModTime(t, ledgerPath); last.After(beforeRestart) {
+			break
+		} else if time.Now().After(deadline) {
+			t.Fatalf("the notifier never passed after the restart: ledger mtime %s, still %s", last, beforeRestart)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	settled(t, func() int { return len(hook.received()) })
 	if since := hook.received()[sent:]; len(since) != 0 {
 		t.Fatalf("posts after the restart with the escalation open: %q", since)
 	}

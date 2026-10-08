@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -148,7 +149,10 @@ func TestMasonInfrastructureFailureContestsUnitAndStreakResets(t *testing.T) {
 
 func TestMasonBehaviouralFailureIsNotRetried(t *testing.T) {
 	t.Parallel()
-	f, fake := newMasonFixture(t, 1, validPlan)
+	var passed atomic.Int64
+	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, "", func(opts *Options) {
+		opts.schedulePassed = func() { passed.Add(1) }
+	})
 	defer f.stop(t)
 	fake.play[masonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return errFailTurn }
 	stream := f.seedBuilding(t, "misreporting-mason", validPlan)
@@ -157,7 +161,8 @@ func TestMasonBehaviouralFailureIsNotRetried(t *testing.T) {
 		t.Fatalf("turn ended %s with %+v after %d attempts", q.Status(), q.Response, len(q.Attempts))
 	}
 	// Later passes leave the unit implementing, and never contest it.
-	time.Sleep(2 * time.Second)
+	base := passed.Load()
+	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-base >= 3 })
 	if state, err := f.repository().Workflow(stream, trace.UnitSubject("resume")); err != nil || state.Value != UnitImplementing {
 		t.Fatalf("unit resume is %+v: %v", state, err)
 	}

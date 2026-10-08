@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -117,8 +118,10 @@ func retries(op trace.OperationRecord) int {
 }
 
 // checkHeld checks that the operation of a paused workstream is pending with
-// one retry naming the pause, and stays so over later passes.
-func checkHeld(t *testing.T, fetch func() trace.OperationRecord) {
+// one retry naming the pause, and stays so over at least 3 further
+// reconciliation passes counted by passed, so the check runs against passes
+// that demonstrably ran under the pause rather than a fixed window.
+func checkHeld(t *testing.T, passed *atomic.Int64, fetch func() trace.OperationRecord) {
 	t.Helper()
 	op := fetch()
 	if op.Acknowledged || op.Result != nil || retries(op) != 1 || !slices.ContainsFunc(op.History, func(a trace.OperationAction) bool {
@@ -126,10 +129,38 @@ func checkHeld(t *testing.T, fetch func() trace.OperationRecord) {
 	}) {
 		t.Fatalf("the stopped operation is not held pending: %+v", op)
 	}
-	settle()
+	base := passed.Load()
+	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-base >= 3 })
 	if again := fetch(); again.Acknowledged || len(again.History) != len(op.History) {
 		t.Fatalf("the held operation was reconciled under the pause: %+v", again.History)
 	}
+}
+
+// newArchitectFixtureCounting is newArchitectFixture whose service calls
+// passed once per completed reconciliation pass, so a check that nothing
+// happened under a pause can wait for passes that demonstrably ran instead of
+// a fixed sleep. Kept as its own copy because newArchitectFixture takes no
+// prepare hook to install the counter before the service starts.
+func newArchitectFixtureCounting(t *testing.T) (*architectFixture, *atomic.Int64) {
+	t.Helper()
+	opts, clone, engine, sessions, clock := newArchitectOptions(t)
+	passed, prepare := countingSchedule()
+	prepare(&opts)
+	f := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
+	f.start(t)
+	added, err := f.c.AddProject(context.Background(), request(clone))
+	must(t, err)
+	f.project, f.trace = added.Project.ID, added.Project.Trace
+	must(t, os.WriteFile(added.Project.Charter, []byte("1. Keep changes small.\n2. Every change has a test.\n"), 0600))
+	return f, passed
+}
+
+// newShedFixtureCounting is newShedFixture whose service calls passed once
+// per completed reconciliation pass.
+func newShedFixtureCounting(t *testing.T, members int) (*shedFixture, *atomic.Int64) {
+	t.Helper()
+	passed, prepare := countingSchedule()
+	return newDebateFixtureWith(t, members, 1, "", prepare), passed
 }
 
 // blockTurn scripts the turn to run work, signal entered and run until its
@@ -209,7 +240,7 @@ func checkContinued(t *testing.T, th trace.Thread, prefix, stopped, continuation
 // continuation adds to what the stopped turn delivered.
 func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 	t.Parallel()
-	f := newArchitectFixture(t)
+	f, passed := newArchitectFixtureCounting(t)
 	defer f.stop(t)
 	entered := make(chan struct{})
 	var runs atomic.Int32
@@ -247,7 +278,7 @@ func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 	f.await(t, other, sketched)
 	draft := func() trace.OperationRecord { return operationRecord(t, f.repository(), paused, DraftAction) }
 	eventually(t, "the stopped draft recorded no retry", func() bool { return retries(draft()) > 0 })
-	checkHeld(t, draft)
+	checkHeld(t, passed, draft)
 	if state, err := f.repository().Workflow(paused, draftSubject); err != nil || state.Value != "drafting-1" {
 		t.Fatalf("the stopped draft is %+v: %v", state, err)
 	}
@@ -284,7 +315,7 @@ func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 // it is cleared.
 func TestSoftPauseLetsARunningDraftFinishAndRequestsNoNewOne(t *testing.T) {
 	t.Parallel()
-	f := newArchitectFixture(t)
+	f, passed := newArchitectFixtureCounting(t)
 	defer f.stop(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
@@ -314,7 +345,9 @@ func TestSoftPauseLetsARunningDraftFinishAndRequestsNoNewOne(t *testing.T) {
 	f.await(t, running, sketched)
 
 	waiting := f.handIn(t, "waiting", handedDesign)
-	settle()
+	base := passed.Load()
+	soon(t, "several more reconciliation passes", func() bool { return passed.Load()-base >= 3 })
+	settled(t, func() int { return len(f.draftOperations(t, waiting)) })
 	if ops := f.draftOperations(t, waiting); len(ops) != 0 {
 		t.Fatalf("a draft was asked for under a soft pause: %+v", ops)
 	}
@@ -331,7 +364,7 @@ func TestSoftPauseLetsARunningDraftFinishAndRequestsNoNewOne(t *testing.T) {
 // contributed.
 func TestHardPauseStopsACommitteeMemberAndResumeContinuesIt(t *testing.T) {
 	t.Parallel()
-	f := newShedFixture(t, 2)
+	f, passed := newShedFixtureCounting(t, 2)
 	defer f.stop(t)
 	member := committeeAgent(1)
 	entered := blockTurn(f.architectFixture, roundTurnID(1, member, 1), func(ctx context.Context, tools *mcp.ClientSession) error {
@@ -352,7 +385,7 @@ func TestHardPauseStopsACommitteeMemberAndResumeContinuesIt(t *testing.T) {
 	checkPauseStop(t, stopped, "project", "Stop the committee")
 	round := func() trace.OperationRecord { return operationRecord(t, f.repository(), stream, RoundAction) }
 	eventually(t, "the stopped round recorded no retry", func() bool { return retries(round()) > 0 })
-	checkHeld(t, round)
+	checkHeld(t, passed, round)
 	if state, err := f.repository().Workflow(stream, shedSubject); err != nil || state.Value != "round-1" {
 		t.Fatalf("the stopped round is %+v: %v", state, err)
 	}
