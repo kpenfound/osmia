@@ -784,8 +784,11 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 		}
 		c.Profiles[name] = p
 	}
-	// TODO: Remove this named-profile graph validation when busybees/core provides
-	// cross-backend named fallback resolution and cycle validation.
+	// TODO: Remove this named-profile fallback-cycle validation when busybees/core
+	// resolves a caller's named profiles into its own agent.Profile.Fallback chain
+	// and validates that chain for cycles. Core's Profile.Fallback only links
+	// already-resolved profiles by pointer; core has no profile registry keyed by
+	// name, so it has nothing to walk or validate before a name is resolved.
 	for _, name := range names {
 		seen := map[string]bool{}
 		for next := name; next != ""; next = c.Profiles[next].Fallback {

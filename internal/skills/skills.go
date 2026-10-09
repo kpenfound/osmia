@@ -1,15 +1,15 @@
-// Package skills prepares the skills a role's configuration references by git
-// URL as Claude Code plugin directories.
-//
-// TODO: busybees/core should provide a skill cache that clones references,
-// refreshes them and wraps them as plugins. Remove this package once it does.
+// Package skills parses and validates the skills a role's configuration
+// references by git URL, and prepares them as Claude Code plugin
+// directories. Cloning, refreshing and wrapping references as plugins is
+// busybees/core's own skills package (github.com/kpenfound/busybees/core/skills);
+// Manager configures a core skills.Manager from Osmia's refresh policy, git
+// runner and clock on every call. Reference parsing and validation (Parse,
+// ParseRefresh) stay Osmia's own: they are used by role configuration and by
+// the execution boundary before a turn's skills ever reach Manager.Prepare.
 package skills
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	coreskills "github.com/kpenfound/busybees/core/skills"
 )
 
 // DefaultRefresh is the refresh policy of a configuration that sets none.
@@ -93,7 +95,10 @@ func ParseRefresh(policy string) (always bool, after time.Duration, err error) {
 }
 
 // Manager clones skill references into Dir and returns plugin directories
-// that expose only their skills. It implements core's agent.SkillPreparer.
+// that expose only their skills. It implements core's agent.SkillPreparer by
+// configuring busybees/core's own skills.Manager on every call: the clone,
+// refresh and plugin-wrapping mechanics are core's, run with the git runner,
+// clock and refresh policy a caller configures on Manager.
 type Manager struct {
 	// Dir holds clones (Dir/repos) and generated plugins (Dir/plugins).
 	Dir string
@@ -114,90 +119,44 @@ type Manager struct {
 // NewManager returns a manager caching under dir that runs the git on PATH
 // without prompting for credentials.
 func NewManager(dir string) *Manager {
-	return &Manager{Dir: dir, Git: func(ctx context.Context, dir string, args ...string) (string, error) {
-		cmd := exec.CommandContext(ctx, "git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-		}
-		return string(out), nil
-	}}
+	return &Manager{Dir: dir, Git: defaultGit}
+}
+
+func defaultGit(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
 }
 
 // Prepare clones every reference that is missing, pulls the stale ones and
-// returns their plugin directories in the same order.
+// returns their plugin directories in the same order. Every call builds a
+// core skills.Manager from the current Dir, Git, Now and Refresh, so a
+// policy change the caller's Refresh closure observes takes effect on the
+// next call.
 func (m *Manager) Prepare(ctx context.Context, refs []string) ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	dirs := make([]string, 0, len(refs))
-	for _, raw := range refs {
-		spec, err := Parse(raw)
-		if err != nil {
-			return nil, err
-		}
-		dir, err := m.prepare(ctx, spec)
-		if err != nil {
-			return nil, fmt.Errorf("skill %s: %w", spec.Raw, err)
-		}
-		dirs = append(dirs, dir)
-	}
-	return dirs, nil
+	cm := coreskills.NewManager(m.Dir, m.Logger)
+	// Osmia always wraps a reference by its SKILL.md or skills/ shape, even
+	// when the clone is itself a full Claude Code plugin: SkillsOnly keeps
+	// that behaviour and refuses anything else, the same two shapes Parse
+	// and the execution boundary expect skill content to have.
+	cm.SkillsOnly = true
+	cm.Git = m.Git
+	cm.Now = m.Now
+	cm.SetRefresh(m.refreshPolicy())
+	return cm.Prepare(ctx, refs)
 }
 
-func (m *Manager) prepare(ctx context.Context, spec Spec) (string, error) {
-	repo, err := m.clone(ctx, spec)
-	if err != nil {
-		return "", err
-	}
-	target := filepath.Join(repo, filepath.FromSlash(spec.Subdir))
-	resolved, err := filepath.EvalSymlinks(target)
-	if err != nil {
-		return "", fmt.Errorf("sub-directory %q not found in repository", spec.Subdir)
-	}
-	root, err := filepath.EvalSymlinks(repo)
-	if err != nil {
-		return "", err
-	}
-	if rel, err := filepath.Rel(root, resolved); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("sub-directory %q leaves the repository", spec.Subdir)
-	}
-	return m.wrap(spec, resolved)
-}
-
-// repoDir is the directory a reference is cloned into.
-func (m *Manager) repoDir(spec Spec) string {
-	sum := sha256.Sum256([]byte(spec.URL + "@" + spec.Ref))
-	return filepath.Join(m.Dir, "repos", spec.Name+"-"+hex.EncodeToString(sum[:4]))
-}
-
-// stamp is the sibling file whose modification time is the clone's last fetch.
-func stamp(dir string) string { return dir + ".fetched" }
-
-func (m *Manager) now() time.Time {
-	if m.Now != nil {
-		return m.Now()
-	}
-	return time.Now()
-}
-
-func (m *Manager) logger() *slog.Logger {
-	if m.Logger != nil {
-		return m.Logger
-	}
-	return slog.Default()
-}
-
-func (m *Manager) touch(dir string) {
-	now := m.now()
-	if err := os.WriteFile(stamp(dir), nil, 0o600); err == nil {
-		_ = os.Chtimes(stamp(dir), now, now)
-	}
-}
-
-// stale reports whether an existing clone is pulled before use.
-func (m *Manager) stale(dir string) bool {
+// refreshPolicy translates the configured policy string into core's
+// RefreshPolicy. An empty policy is DefaultRefresh; an invalid one, or a
+// nonpositive duration, never refreshes.
+func (m *Manager) refreshPolicy() coreskills.RefreshPolicy {
 	policy := DefaultRefresh
 	if m.Refresh != nil {
 		policy = m.Refresh()
@@ -205,101 +164,14 @@ func (m *Manager) stale(dir string) bool {
 	always, after, err := ParseRefresh(policy)
 	switch {
 	case err != nil:
-		return false
+		return coreskills.RefreshNever
 	case always:
-		return true
+		return coreskills.RefreshAlways
 	case after <= 0:
-		return false
-	}
-	info, err := os.Stat(stamp(dir))
-	return err != nil || m.now().Sub(info.ModTime()) >= after
-}
-
-// clone returns the reference's clone, cloning it when it is missing and
-// pulling it when it is stale. A failed pull is logged and the existing clone
-// is used: a reference pinned to a tag cannot be pulled.
-func (m *Manager) clone(ctx context.Context, spec Spec) (string, error) {
-	dir := m.repoDir(spec)
-	if isDir(filepath.Join(dir, ".git")) {
-		if m.stale(dir) {
-			if _, err := m.Git(ctx, dir, "pull", "--ff-only", "--quiet"); err != nil {
-				m.logger().Warn("skill refresh failed", "skill", spec.Raw, "error", err)
-			} else {
-				m.touch(dir)
-			}
-		}
-		return dir, nil
-	}
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-		return "", err
-	}
-	if err := os.RemoveAll(dir); err != nil {
-		return "", err
-	}
-	args := []string{"clone", "--depth", "1", "--quiet"}
-	if spec.Ref != "" {
-		args = append(args, "--branch", spec.Ref)
-	}
-	args = append(args, "--", spec.URL, dir)
-	if _, err := m.Git(ctx, m.Dir, args...); err != nil {
-		_ = os.RemoveAll(dir)
-		return "", err
-	}
-	m.touch(dir)
-	return dir, nil
-}
-
-// wrap returns a generated plugin directory whose skills/ links to the skill
-// or skills collection in target. Nothing else of the repository reaches the
-// plugin, so its hooks, MCP servers, commands and agents are never loaded.
-func (m *Manager) wrap(spec Spec, target string) (string, error) {
-	sum := sha256.Sum256([]byte(spec.Raw))
-	plugin := filepath.Join(m.Dir, "plugins", spec.Name+"-"+hex.EncodeToString(sum[:4]))
-	skills := filepath.Join(plugin, "skills")
-	var link, dest string
-	switch {
-	case isFile(filepath.Join(target, "SKILL.md")):
-		link, dest = filepath.Join(skills, spec.Name), target
-	case isDir(filepath.Join(target, "skills")):
-		link, dest = skills, filepath.Join(target, "skills")
+		return coreskills.RefreshNever
 	default:
-		return "", fmt.Errorf("%s is neither a skill (SKILL.md) nor a skills collection (skills/)", target)
+		return coreskills.RefreshEvery(after)
 	}
-	manifest := filepath.Join(plugin, ".claude-plugin", "plugin.json")
-	// A wrapper already pointing at dest is left alone: a running turn may be
-	// using it.
-	if isFile(manifest) {
-		if got, err := os.Readlink(link); err == nil && got == dest {
-			return plugin, nil
-		}
-	}
-	if err := os.RemoveAll(plugin); err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(manifest), 0o755); err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
-		return "", err
-	}
-	if err := os.Symlink(dest, link); err != nil {
-		return "", err
-	}
-	data, err := json.MarshalIndent(map[string]string{"name": spec.Name, "description": "Osmia skill from " + spec.Raw, "version": "0.0.0"}, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return plugin, os.WriteFile(manifest, data, 0o644)
-}
-
-func isFile(p string) bool {
-	info, err := os.Stat(p)
-	return err == nil && info.Mode().IsRegular()
-}
-
-func isDir(p string) bool {
-	info, err := os.Stat(p)
-	return err == nil && info.IsDir()
 }
 
 func sanitizeName(s string) string {
