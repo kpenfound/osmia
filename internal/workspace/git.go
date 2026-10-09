@@ -8,6 +8,7 @@ package workspace
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -470,6 +471,194 @@ const replayName = ".replay"
 // kept. Its state is kept in the worktree's core-replay.json.
 func (g *Git) replayer() gitvcs.Replayer { return gitvcs.Replayer{} }
 
+// replayRecord is Osmia's own small durable record of a persistent Git
+// replay through core's Replayer: the worktree's Branch, the branch's tip
+// Head held before the replay started, the explicit dependency boundary
+// Base the caller gave, if any, and the new revision Onto the replay
+// targets. It lives in the worktree's git directory, written before Osmia
+// ever calls core's Replay and cleared once the replay is settled or
+// aborted, so a restart anywhere around that call is recoverable: before
+// core's own state is ever saved, and after core has finished every commit
+// and removed its state but before Osmia reattached the branch to it,
+// neither of which core's own state covers.
+//
+// TODO: Remove this record when busybees/core's vcs.Replayer itself records
+// a replay's pre-replay branch and tip, for a worktree that starts
+// attached, so a caller needs no separate bookkeeping to recover across a
+// restart or to abort back to it.
+type replayRecord struct {
+	Branch string `json:"branch"`
+	Head   string `json:"head"`
+	Base   string `json:"base,omitempty"`
+	Onto   string `json:"onto"`
+}
+
+// replayRecordFile is the name Osmia's own replayRecord is kept under, in
+// the worktree's git directory alongside core's own StateFile.
+const replayRecordFile = "osmia-replay.json"
+
+// replayRecordPath returns the absolute path of the worktree at dir's own
+// replayRecord file, in its git directory rather than its working tree.
+func (g *Git) replayRecordPath(ctx context.Context, dir string) (string, error) {
+	return g.runIn(ctx, dir, nil, "rev-parse", "--path-format=absolute", "--git-path", replayRecordFile)
+}
+
+// loadReplayRecord reads the worktree's own replayRecord, or nil when it
+// holds none.
+func (g *Git) loadReplayRecord(ctx context.Context, w Worktree) (*replayRecord, error) {
+	path, err := g.replayRecordPath(ctx, w.Path)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	rec := &replayRecord{}
+	if err := json.Unmarshal(data, rec); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return rec, nil
+}
+
+// saveReplayRecord writes the worktree's own replayRecord through a
+// temporary file, so a process that stops part way leaves the previous
+// record or the new one, matching how core's own StateFile is saved.
+func (g *Git) saveReplayRecord(ctx context.Context, w Worktree, rec replayRecord) error {
+	path, err := g.replayRecordPath(ctx, w.Path)
+	if err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// clearReplayRecord removes the worktree's own replayRecord, once its
+// replay is settled or aborted.
+func (g *Git) clearReplayRecord(ctx context.Context, w Worktree) error {
+	path, err := g.replayRecordPath(ctx, w.Path)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// attachedTo reports whether the worktree at dir's HEAD is attached to
+// branch.
+func (g *Git) attachedTo(ctx context.Context, dir, branch string) (bool, error) {
+	ref, err := g.runIn(ctx, dir, nil, "symbolic-ref", "-q", "HEAD")
+	if err != nil {
+		if exitCode(err, 1) {
+			return false, nil
+		}
+		return false, err
+	}
+	return ref == "refs/heads/"+branch, nil
+}
+
+// ensureAttached reattaches the worktree to rec's branch, from rec's
+// pre-replay head, when a core replay has left it detached: a stop that
+// happened before this call's caller, or an earlier one, ever reattached
+// it. A worktree already attached to the branch is left as it is, since
+// every commit the replay has gone on to make there has already moved the
+// branch with it.
+func (g *Git) ensureAttached(ctx context.Context, w Worktree, rec replayRecord) error {
+	attached, err := g.attachedTo(ctx, w.Path, rec.Branch)
+	if err != nil || attached {
+		return err
+	}
+	return g.reattach(ctx, w, rec.Head)
+}
+
+// replayFinishedButNotSettled reports whether core already finished every
+// commit of the replay rec describes and removed its own state, leaving
+// the worktree's HEAD, attached or not, at the final candidate, before
+// Osmia reattached the branch to it and cleared rec. It is only safe to
+// call when core's own state does not exist.
+func (g *Git) replayFinishedButNotSettled(ctx context.Context, w Worktree, rec replayRecord) (bool, string, error) {
+	attached, err := g.attachedTo(ctx, w.Path, rec.Branch)
+	if err != nil {
+		return false, "", err
+	}
+	head, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return false, "", err
+	}
+	if attached {
+		return head != rec.Head, head, nil
+	}
+	return head != rec.Onto, head, nil
+}
+
+// settleReplay reattaches the worktree's branch to the replay's progress,
+// through ensureAttached, when there is a stop or a result to track, and
+// reports the replay's conflicts; once it holds no more, it clears rec and
+// reports the candidate.
+func (g *Git) settleReplay(ctx context.Context, w Worktree, rec replayRecord, r vcs.Replay) (string, []string, error) {
+	if err := g.ensureAttached(ctx, w, rec); err != nil {
+		return "", nil, err
+	}
+	if r.InProgress || len(r.Conflicts) > 0 {
+		return "", r.Conflicts, nil
+	}
+	return r.Candidate, nil, g.clearReplayRecord(ctx, w)
+}
+
+// advanceReplay resumes or starts the Git replay rec describes through
+// core's Replayer, from wherever core's own state, or, when that does not
+// exist, the worktree's current HEAD shows it stopped, and settles the
+// result as settleReplay does. Calling core's Replay afresh when nothing
+// has happened yet, or redoing it when core already finished and removed
+// its state, both make the same deterministic commits core's own replay
+// always does, so either is safe; replayFinishedButNotSettled avoids the
+// redoing by using the result already there.
+func (g *Git) advanceReplay(ctx context.Context, w Worktree, rec replayRecord) (string, []string, error) {
+	status, err := g.replayer().ReplayStatus(ctx, w)
+	if err != nil {
+		return "", nil, err
+	}
+	if status.InProgress {
+		r, cErr := g.replayer().Continue(ctx, w)
+		if cErr != nil && !errors.Is(cErr, vcs.ErrUnresolved) {
+			return "", nil, cErr
+		}
+		commit, conflicts, err := g.settleReplay(ctx, w, rec, r)
+		if err != nil {
+			return commit, conflicts, err
+		}
+		return commit, conflicts, cErr
+	}
+	if done, head, err := g.replayFinishedButNotSettled(ctx, w, rec); err != nil {
+		return "", nil, err
+	} else if done {
+		return g.settleReplay(ctx, w, rec, vcs.Replay{Candidate: head})
+	}
+	boundary := rec.Base
+	if boundary == "" {
+		if boundary, err = g.MergeBase(ctx, rec.Onto, rec.Head); err != nil {
+			return "", nil, err
+		}
+	}
+	r, err := g.replayer().Replay(ctx, w, vcs.ReplayRequest{OldBase: boundary, Head: rec.Head, Onto: rec.Onto})
+	if err != nil {
+		return "", nil, err
+	}
+	return g.settleReplay(ctx, w, rec, r)
+}
+
 // Replay returns the commit that holds each commit head has and onto does
 // not, applied on top of onto in order, with the paths that conflicted,
 // sorted, when that cannot be done. A commit whose change onto already holds
@@ -579,59 +768,52 @@ func (g *Git) ReplayIn(ctx context.Context, w Worktree, onto string, at time.Tim
 
 // ReplayInFrom continues to use the explicit dependency boundary when a
 // replay needs conflict resolution in a persistent workspace. at is unused:
-// the replayed commits keep their originals' author and committer.
+// the replayed commits keep their originals' author and committer. A
+// worktree Osmia's own record shows already mid-replay, however the
+// service last stopped around the call that started it, is resumed rather
+// than started again from the request's base and head.
 func (g *Git) ReplayInFrom(ctx context.Context, w Worktree, base, onto string, _ time.Time) (string, []string, error) {
-	head, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "HEAD^{commit}")
+	rec, err := g.loadReplayRecord(ctx, w)
 	if err != nil {
 		return "", nil, err
 	}
-	if descends, err := g.Ancestor(ctx, onto, head); err != nil || descends {
-		return head, nil, err
-	}
-	boundary := base
-	if boundary == "" {
-		if boundary, err = g.MergeBase(ctx, onto, head); err != nil {
+	if rec == nil {
+		head, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "HEAD^{commit}")
+		if err != nil {
 			return "", nil, err
 		}
-	}
-	r, err := g.replayer().Replay(ctx, w, vcs.ReplayRequest{OldBase: boundary, Head: head, Onto: onto})
-	if err != nil {
-		if errors.Is(err, vcs.ErrReplayInProgress) {
-			return "", r.Conflicts, nil
+		if descends, err := g.Ancestor(ctx, onto, head); err != nil || descends {
+			return head, nil, err
 		}
-		return "", nil, err
+		fresh := replayRecord{Branch: w.Branch, Head: head, Base: base, Onto: onto}
+		if err := g.saveReplayRecord(ctx, w, fresh); err != nil {
+			return "", nil, err
+		}
+		rec = &fresh
 	}
-	if err := g.reattach(ctx, w, head); err != nil {
-		return "", nil, err
-	}
-	if r.InProgress {
-		return "", r.Conflicts, nil
-	}
-	return r.Candidate, nil, nil
+	return g.advanceReplay(ctx, w, *rec)
 }
 
 // ContinueReplay stages every file of the worktree, as Snapshot does,
 // refuses a conflicted path that still holds a conflict marker, and goes on
 // with the replay ReplayIn or ReplayInFrom stopped, as it stopped: to the
 // next commit that conflicts, whose paths it returns, or to the end, whose
-// commit it returns.
+// commit it returns. A worktree a core replay left detached, however the
+// service last stopped, is reattached first.
 func (g *Git) ContinueReplay(ctx context.Context, w Worktree, at time.Time) (string, []string, error) {
 	if _, native, err := g.nativeRebaseDir(ctx, w.Path); err != nil {
 		return "", nil, err
 	} else if native {
 		return g.continueNativeRebase(ctx, w, at)
 	}
-	r, err := g.replayer().Continue(ctx, w)
+	rec, err := g.loadReplayRecord(ctx, w)
 	if err != nil {
-		if errors.Is(err, vcs.ErrUnresolved) {
-			return "", r.Conflicts, err
-		}
 		return "", nil, err
 	}
-	if r.InProgress {
-		return "", r.Conflicts, nil
+	if rec == nil {
+		return "", nil, vcs.ErrNoReplay
 	}
-	return r.Candidate, nil, nil
+	return g.advanceReplay(ctx, w, *rec)
 }
 
 // AbortReplay drops the replay in progress in the worktree, whatever state
@@ -645,33 +827,82 @@ func (g *Git) AbortReplay(ctx context.Context, w Worktree) error {
 		_, err := g.runIn(ctx, w.Path, nil, "rebase", "--abort")
 		return err
 	}
-	return g.replayer().Abort(ctx, w)
+	rec, err := g.loadReplayRecord(ctx, w)
+	if err != nil {
+		return err
+	}
+	if err := g.replayer().Abort(ctx, w); err != nil {
+		return err
+	}
+	if rec == nil {
+		return nil
+	}
+	// Core's Abort checks out the ref it recorded as the worktree's
+	// pre-replay HEAD, which, once Osmia reattached the branch to track a
+	// conflict stop, is this same branch, now moved to the partly replayed
+	// commit. Move it, and the worktree's index and files, back to the
+	// branch's own pre-replay tip, which only Osmia's record still holds.
+	head, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return err
+	}
+	if head != rec.Head {
+		if _, err := g.runIn(ctx, w.Path, identity, "update-ref", "-m", "osmia: abort replay", "HEAD", rec.Head, head); err != nil {
+			return err
+		}
+		if _, err := g.runIn(ctx, w.Path, identity, "reset", "--hard", "--quiet", rec.Head); err != nil {
+			return err
+		}
+	}
+	return g.clearReplayRecord(ctx, w)
 }
 
 // Replaying returns the commit the replay in the worktree stopped at, with
 // the paths its index holds unmerged, and whether a replay is in progress
-// there. A replay in progress that stopped at no commit returns "".
+// there. A replay in progress that stopped at no commit returns "". A
+// worktree a core replay left detached is reattached: to the stop it is
+// still mid-way through, or all the way to the candidate when core already
+// finished every commit; a worktree a replay has made no progress in at
+// all yet, recorded but not even started by core, is left as it is and
+// reported in progress.
 func (g *Git) Replaying(ctx context.Context, w Worktree) (string, []string, bool, error) {
 	if _, native, err := g.nativeRebaseDir(ctx, w.Path); err != nil {
 		return "", nil, false, err
 	} else if native {
 		return g.nativeRebaseReplaying(ctx, w)
 	}
-	r, err := g.replayer().ReplayStatus(ctx, w)
+	rec, err := g.loadReplayRecord(ctx, w)
+	if err != nil || rec == nil {
+		return "", nil, false, err
+	}
+	status, err := g.replayer().ReplayStatus(ctx, w)
 	if err != nil {
 		return "", nil, false, err
 	}
-	if !r.InProgress {
+	if !status.InProgress {
+		done, head, err := g.replayFinishedButNotSettled(ctx, w, *rec)
+		if err != nil {
+			return "", nil, false, err
+		}
+		if !done {
+			return "", nil, true, nil
+		}
+		if _, _, err := g.settleReplay(ctx, w, *rec, vcs.Replay{Candidate: head}); err != nil {
+			return "", nil, false, err
+		}
 		return "", nil, false, nil
 	}
+	if err := g.ensureAttached(ctx, w, *rec); err != nil {
+		return "", nil, false, err
+	}
 	stop := ""
-	for _, c := range r.Commits {
+	for _, c := range status.Commits {
 		if c.Replayed == "" {
 			stop = c.Original
 			break
 		}
 	}
-	return stop, r.Conflicts, true, nil
+	return stop, status.Conflicts, true, nil
 }
 
 // nativeRebaseEnvironment is the environment continueNativeRebase finishes
@@ -883,13 +1114,30 @@ func (g *Git) Workspace(ctx context.Context, name string) (Worktree, bool, error
 		}
 		branch := entry.branch
 		if branch == "" {
-			if branch, err = g.replayedBranch(ctx, g.path(name)); err != nil {
+			if branch, err = g.detachedBranch(ctx, g.path(name)); err != nil {
 				return Worktree{}, false, err
 			}
 		}
 		return Worktree{Path: g.path(name), Branch: branch, mounts: []string{filepath.Join(g.Clone, ".git")}}, true, nil
 	}
 	return Worktree{}, false, nil
+}
+
+// detachedBranch returns the branch a worktree a replay has left detached
+// returns to: from Git's own native rebase state, for a replay migrated
+// from the replaced native rebase, or, for a core replay, from Osmia's own
+// replayRecord, which covers both a core replay a service stop left
+// detached before core's own state was ever saved and one core finished
+// and removed its own state for before Osmia reattached the branch to it.
+func (g *Git) detachedBranch(ctx context.Context, dir string) (string, error) {
+	if branch, err := g.replayedBranch(ctx, dir); err != nil || branch != "" {
+		return branch, err
+	}
+	rec, err := g.loadReplayRecord(ctx, Worktree{Path: dir})
+	if err != nil || rec == nil {
+		return "", err
+	}
+	return rec.Branch, nil
 }
 
 // replayedBranch returns the branch the replay in progress in the worktree
