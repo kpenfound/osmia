@@ -320,14 +320,22 @@ func TestReapSandboxesRemovesWhatInterruptedSessionsLeft(t *testing.T) {
 	librarian := record("agent-librarian-1", "librarian", project, "extract-1", "session")
 	stuck := record("agent-stuck-1", "final", project, "w_1", "final-1", "session")
 	other := record("agent-other-1", "threads", "p_fedcba9876543210fedcba9876543210", "w_1", "mason-upload", "turn-1")
-	var removed []string
-	reapSandboxes(context.Background(), cfg, func(_ context.Context, name string) error {
-		if name == "agent-stuck-1" {
-			return errors.New("sbx is unavailable")
-		}
-		removed = append(removed, name)
-		return nil
-	})
+	// A fake sbx CLI stands in for the real daemon: core's own
+	// procs.CleanSandboxDirs runs it with `rm --force <name>`, succeeding
+	// for every name but the one a session left stuck.
+	sbxDir := t.TempDir()
+	sbxBin := filepath.Join(sbxDir, "sbx")
+	removedLog := filepath.Join(sbxDir, "removed.txt")
+	script := "#!/bin/sh\n" +
+		`if [ "$1" = rm ] && [ "$3" = agent-stuck-1 ]; then echo "sbx is unavailable" >&2; exit 1; fi` + "\n" +
+		`echo "$3" >> "` + removedLog + `"` + "\n"
+	must(t, os.WriteFile(sbxBin, []byte(script), 0700))
+	reapSandboxes(context.Background(), cfg, sbxBin)
+	removedData, err := os.ReadFile(removedLog)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	removed := strings.Fields(string(removedData))
 	slices.Sort(removed)
 	if want := []string{"agent-architect-1", "agent-librarian-1", "agent-mason-1"}; !slices.Equal(removed, want) {
 		t.Fatalf("removed %v, want %v", removed, want)

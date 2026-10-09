@@ -2,8 +2,6 @@ package coreadapter
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -13,6 +11,14 @@ import (
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/busybees/core/vcs"
 )
+
+// ErrSessionCostCap is the error a turn's run carries when core stopped it,
+// or it ended, at its per-session cost cap (Profile.CostLimitUSD).
+var ErrSessionCostCap = errors.New("per-session cost cap reached")
+
+func sessionCapError(limit float64) error {
+	return fmt.Errorf("%w: budget.per_session %.2f USD", ErrSessionCostCap, limit)
+}
 
 // UnsupportedError identifies a capability that cannot be supplied before launch.
 type UnsupportedError struct{ Capability, Reason string }
@@ -97,16 +103,7 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 	if err = r.Executor.Check(ctx, turn.Sandbox.Verified, turn.Execution); err != nil {
 		return result, err
 	}
-	runCtx := ctx
-	var monitor *costMonitor
-	if turn.Profile.CostLimitUSD > 0 {
-		var cancel context.CancelCauseFunc
-		runCtx, cancel = context.WithCancelCause(ctx)
-		defer cancel(nil)
-		monitor = &costMonitor{backend: turn.Profile.Backend, limit: turn.Profile.CostLimitUSD, cancel: cancel}
-		runCtx = context.WithValue(runCtx, costMonitorKey{}, monitor)
-	}
-	raw, runErr := r.Executor.Run(runCtx, req, turn.Execution)
+	raw, runErr := r.Executor.Run(ctx, req, turn.Execution)
 	if raw != nil {
 		result.Session.ID = raw.ClaudeID
 		result.SessionDirectory = raw.SessionDir
@@ -133,20 +130,11 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 	} else if runErr == nil {
 		runErr = errors.New("executor returned no result")
 	}
-	if monitor != nil {
-		spent, known, reached := monitor.snapshot()
-		if reached {
-			result.Usage.CostUSD, result.Usage.CostKnown = spent, known
-		}
-		if reached || result.Usage.CostKnown && result.Usage.CostUSD >= turn.Profile.CostLimitUSD {
-			if reached && errors.Is(runErr, context.Canceled) && errors.Is(context.Cause(runCtx), ErrSessionCostCap) {
-				runErr = nil
-			}
-			runErr = errors.Join(runErr, sessionCapError(turn.Profile.CostLimitUSD))
-			result.IsError = true
-			result.ErrorSubtype = "session_cost_cap"
-			result.Outcome = nil
-		}
+	if raw != nil && raw.CostCapped {
+		runErr = errors.Join(runErr, sessionCapError(turn.Profile.CostLimitUSD))
+		result.IsError = true
+		result.ErrorSubtype = "session_cost_cap"
+		result.Outcome = nil
 	}
 	if runErr != nil {
 		result.IsError = true
@@ -192,9 +180,9 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 		return req, errors.New("workspace lease does not match verified sandbox workspace")
 	}
 	req = agent.Request{
-		Name: sessionName(t.Scope.Turn), SessionDir: t.SessionDirectory, SystemPrompt: t.SystemPrompt, Prompt: t.Prompt,
+		Name: t.Scope.Turn, SessionDir: t.SessionDirectory, SystemPrompt: t.SystemPrompt, Prompt: t.Prompt,
 		Workspace: vcs.Directory(t.Sandbox.Verified.Workspace.Directory), Env: maps.Clone(t.Sandbox.Verified.Environment),
-		ValidOutcomes: append([]string{}, t.AllowedOutcomes...),
+		ValidOutcomes: append([]string{}, t.AllowedOutcomes...), CostCapUSD: p.CostLimitUSD,
 		Profile: agent.Profile{Name: t.Scope.Role, Agent: p.Backend, Model: p.Model, Effort: p.Effort, Timeout: p.Timeout, MaxTurns: p.MaxTurns,
 			Sandbox: t.Execution.Mode, SandboxImage: t.Execution.Image, SandboxDomains: slices.Clone(t.Execution.Domains), MCP: map[string]agent.MCPEntry{}, VCSAccess: false},
 	}
@@ -229,27 +217,6 @@ func translateTurn(t PreparedTurn) (agent.Request, error) {
 		req.Profile.MCP[servers[i]] = agent.MCPEntry{Type: "http", URL: endpoint.URL, BearerTokenEnv: endpoint.BearerTokenEnvironment}
 	}
 	return req, nil
-}
-
-// maxSessionName is the longest session name whose sandbox name sbx accepts:
-// core names a sandbox "agent-" + session name + "-" + 8 random hex digits,
-// and sbx rejects names longer than 63 characters.
-const maxSessionName = 63 - len("agent-") - len("-01234567")
-
-// sessionName is the turn's name for its session and sandbox. A turn whose ID
-// is longer than maxSessionName keeps the start of the ID and ends with a hash
-// of the whole ID, so turns that share a long prefix stay distinguishable.
-//
-// TODO: busybees/core should bound the sandbox names it builds from session
-// names. Remove this once it does.
-func sessionName(turn string) string {
-	r := []rune(turn)
-	if len(r) <= maxSessionName {
-		return turn
-	}
-	sum := sha256.Sum256([]byte(turn))
-	hash := hex.EncodeToString(sum[:4])
-	return string(r[:maxSessionName-len(hash)-1]) + "-" + hash
 }
 
 // AllowedTools names each granted tool the way the backend identifies MCP

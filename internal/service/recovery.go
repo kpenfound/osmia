@@ -1,13 +1,11 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/kpenfound/busybees/core/agent"
@@ -116,14 +114,15 @@ func (s *Service) recoverWorkspaces(ctx context.Context, cfg *config.Config) err
 }
 
 // reapSandboxes removes the Docker Sandboxes that sessions of an earlier
-// service left behind. A session's directory records its sandbox's name
-// until the sandbox is removed, so a record found before any turn runs names
-// one whose session was interrupted. A sandbox that cannot be removed keeps
-// its record, and the next start tries again.
-//
-// TODO: Remove when busybees/core removes the Docker Sandboxes of interrupted
-// sessions itself; this local reaping must go once it does.
-func reapSandboxes(ctx context.Context, cfg *config.Config, remove func(context.Context, string) error) {
+// service left behind, through busybees/core's own cleanup of interrupted
+// sandbox records (procs.CleanSandboxDirs). A session's directory records
+// its sandbox's name until the sandbox is removed, so a record found before
+// any turn runs names one whose session was interrupted. A sandbox that
+// cannot be removed keeps its record, and the next start tries again.
+func reapSandboxes(ctx context.Context, cfg *config.Config, sbxBin string) {
+	if sbxBin == "" {
+		sbxBin = agent.SandboxCLI
+	}
 	root, project := cfg.Root.String(), string(cfg.Project.ID)
 	patterns := []string{
 		filepath.Join(root, "threads", project, "*", "*", "*", procs.SandboxNameFile),
@@ -132,6 +131,7 @@ func reapSandboxes(ctx context.Context, cfg *config.Config, remove func(context.
 		filepath.Join(root, "final", project, "*", "*", "session", procs.SandboxNameFile),
 		filepath.Join(root, "librarian", project, "*", "session", procs.SandboxNameFile),
 	}
+	var dirs []string
 	for _, pattern := range patterns {
 		records, err := filepath.Glob(pattern)
 		if err != nil {
@@ -139,28 +139,15 @@ func reapSandboxes(ctx context.Context, cfg *config.Config, remove func(context.
 			continue
 		}
 		for _, record := range records {
-			dir := filepath.Dir(record)
-			name := procs.SandboxName(dir)
-			if name != "" {
-				if err := remove(ctx, name); err != nil {
-					log.Printf("osmia: cannot remove sandbox %s an interrupted session of project %s left: %v", name, project, err)
-					continue
-				}
-				log.Printf("osmia: removed sandbox %s an interrupted session of project %s left", name, project)
-			}
-			procs.RemoveSandboxName(dir)
+			dirs = append(dirs, filepath.Dir(record))
 		}
 	}
-}
-
-// removeSandbox removes the Docker Sandbox named name, whether or not it is
-// running.
-func removeSandbox(ctx context.Context, name string) error {
-	out, err := exec.CommandContext(ctx, agent.SandboxCLI, "rm", "--force", name).CombinedOutput()
-	if err != nil && len(out) != 0 {
-		err = fmt.Errorf("%w: %s", err, bytes.TrimSpace(out))
+	if len(dirs) == 0 {
+		return
 	}
-	return err
+	if err := procs.CleanSandboxDirs(ctx, sbxBin, dirs); err != nil {
+		log.Printf("osmia: cannot remove sandboxes interrupted sessions of project %s left: %v", project, err)
+	}
 }
 
 func sessionDirectories(cfg *config.Config, project config.ProjectID, stream config.WorkstreamID, agent trace.Agent, turn string) []string {

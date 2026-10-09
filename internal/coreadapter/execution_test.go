@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/busybees/core/vcs"
@@ -97,6 +95,13 @@ func TestTurnSessionLimitFromResultText(t *testing.T) {
 	}
 }
 
+// TestSessionCostCap shows that a turn with a positive Profile.CostLimitUSD
+// sends core a request whose CostCapUSD equals that limit, and that a fake
+// agent reporting core's CostCapped result (as a session the per-session
+// cap stopped, or one that ended at or over it, would) still ends with
+// IsError, keeps the cost core observed, carries no outcome and is
+// classified and retried as an infrastructure failure. A turn under the
+// cap, and a backend whose cost is unknown, are unaffected.
 func TestSessionCostCap(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -114,55 +119,27 @@ func TestSessionCostCap(t *testing.T) {
 			turn := prepared(t)
 			turn.Profile.CostLimitUSD = tc.limit
 			fake := &fakeExecutor{run: func(context.Context) (*agent.Result, error) {
-				return &agent.Result{ClaudeID: "session", SessionDir: turn.SessionDirectory, CostUSD: tc.cost, CostKnown: tc.known, HasOutcome: true, Outcome: agent.Outcome{Status: "done"}}, nil
+				res := &agent.Result{ClaudeID: "session", SessionDir: turn.SessionDirectory, CostUSD: tc.cost, CostKnown: tc.known, HasOutcome: true, Outcome: agent.Outcome{Status: "done"}}
+				if tc.capped {
+					res.IsError, res.CostCapped, res.ErrorSubtype = true, true, agent.SubtypeCostCap
+				}
+				return res, nil
 			}}
 			result, err := (&TurnRunner{Executor: fake}).Run(context.Background(), turn)
-			if errors.Is(err, ErrSessionCostCap) != tc.capped || result.IsError != tc.capped || (result.ErrorSubtype == "session_cost_cap") != tc.capped || (result.Outcome == nil) != tc.capped {
+			if fake.request.CostCapUSD != tc.limit {
+				t.Fatalf("request cost cap = %v, want %v", fake.request.CostCapUSD, tc.limit)
+			}
+			if errors.Is(err, ErrSessionCostCap) != tc.capped || result.IsError != tc.capped || (result.ErrorSubtype == "session_cost_cap") != tc.capped ||
+				(result.Outcome == nil) != tc.capped || result.Usage != (Usage{tc.cost, tc.known, 0}) {
 				t.Fatalf("result %+v, error %v", result, err)
 			}
+			if tc.capped {
+				decision, decideErr := (RetryAdapter{}).Decide(context.Background(), RetryRequest{Result: result, Err: err, Attempt: 1, MaxRetries: 1})
+				if decideErr != nil || decision.Kind != Infrastructure || !decision.Retry {
+					t.Fatalf("retry advice: %+v %v", decision, decideErr)
+				}
+			}
 		})
-	}
-}
-
-func TestStreamCostMonitorStopsKnownSpend(t *testing.T) {
-	ctx, cancel := context.WithCancelCause(context.Background())
-	m := &costMonitor{backend: "opencode", limit: 1, cancel: cancel}
-	for _, line := range []string{`{"type":"step_finish","part":{"cost":0.4}}`, `{"type":"step_finish","part":{"cost":0.6}}`} {
-		if _, err := m.Write([]byte(line + "\n")); err != nil {
-			t.Fatal(err)
-		}
-	}
-	spent, known, reached := m.snapshot()
-	if spent != 1 || !known || !reached || !errors.Is(context.Cause(ctx), ErrSessionCostCap) {
-		t.Fatalf("monitor: %v %v %v %v", spent, known, reached, context.Cause(ctx))
-	}
-	unknownCtx, unknownCancel := context.WithCancelCause(context.Background())
-	unknown := &costMonitor{backend: "codex", limit: 1, cancel: unknownCancel}
-	unknown.Write([]byte(`{"type":"turn.completed"}` + "\n"))
-	_, known, reached = unknown.snapshot()
-	if known || reached || unknownCtx.Err() != nil {
-		t.Fatalf("unknown cost reached cap: %v %v", known, reached)
-	}
-}
-
-func TestTurnStopsAtStreamCostCap(t *testing.T) {
-	turn := prepared(t)
-	turn.Profile.Backend = "opencode"
-	turn.Profile.MaxTurns = 0
-	turn.Profile.CostLimitUSD = 1
-	fake := &fakeExecutor{run: func(ctx context.Context) (*agent.Result, error) {
-		monitor := ctx.Value(costMonitorKey{}).(*costMonitor)
-		monitor.Write([]byte(`{"type":"step_finish","part":{"cost":1}}` + "\n"))
-		<-ctx.Done()
-		return &agent.Result{ClaudeID: "session", SessionDir: turn.SessionDirectory, CostKnown: false}, ctx.Err()
-	}}
-	result, err := (&TurnRunner{Executor: fake}).Run(context.Background(), turn)
-	if !errors.Is(err, ErrSessionCostCap) || errors.Is(err, context.Canceled) || result.Cancelled || !result.IsError || result.ErrorSubtype != "session_cost_cap" || result.Usage != (Usage{CostUSD: 1, CostKnown: true}) {
-		t.Fatalf("stream cap: %+v %v", result, err)
-	}
-	decision, decideErr := (RetryAdapter{}).Decide(context.Background(), RetryRequest{Result: result, Err: err, Attempt: 1, MaxRetries: 1})
-	if decideErr != nil || decision.Kind != Infrastructure || !decision.Retry {
-		t.Fatalf("retry advice: %+v %v", decision, decideErr)
 	}
 }
 func TestUnsupportedBeforeExecution(t *testing.T) {
@@ -384,35 +361,20 @@ func TestCleanupFailureRetriable(t *testing.T) {
 	}
 }
 
-func TestSessionNameFitsSandboxName(t *testing.T) {
-	long := "mason-startup-kinds-web-listener-and-tailnet-implement"
-	other := "mason-startup-kinds-web-listener-and-tailnet-review"
-	for _, turn := range []string{long, other, strings.Repeat("é", 80)} {
-		name := sessionName(turn)
-		if sandbox := "agent-" + name + "-01234567"; utf8.RuneCountInString(sandbox) > 63 {
-			t.Fatalf("sandbox name for %q has %d characters: %s", turn, utf8.RuneCountInString(sandbox), sandbox)
-		}
-		if name != sessionName(turn) {
-			t.Fatalf("session name for %q is not stable", turn)
-		}
-	}
-	if sessionName(long) == sessionName(other) {
-		t.Fatalf("turns sharing a prefix have the same session name %q", sessionName(long))
-	}
-	if !strings.HasPrefix(sessionName(long), "mason-startup-kinds-web-listener") {
-		t.Fatalf("session name %q does not keep the start of the turn ID", sessionName(long))
-	}
-	if short := "turn-1"; sessionName(short) != short {
-		t.Fatalf("short turn ID changed: %q", sessionName(short))
-	}
-
+// TestTranslateTurnPassesTheTurnIdentifierThrough shows that Osmia no longer
+// shortens or hashes a turn's identifier to fit a sandbox name: core's own
+// sbx sandboxName bounds and hashes a long session name itself (see
+// TestSbxAcceptsTurnIdentifiersLongerThanTheSandboxNameLimit for the sbx
+// path), so the request carries the turn identifier unchanged, however long.
+func TestTranslateTurnPassesTheTurnIdentifierThrough(t *testing.T) {
 	turn := prepared(t)
+	long := "mason-startup-kinds-web-listener-and-tailnet-implement-with-a-very-long-unit-id"
 	turn.Scope.Turn = long
 	req, err := translateTurn(turn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if req.Name != sessionName(long) {
-		t.Fatalf("request name %q, want %q", req.Name, sessionName(long))
+	if req.Name != long {
+		t.Fatalf("request name %q, want the turn identifier %q unchanged", req.Name, long)
 	}
 }

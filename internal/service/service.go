@@ -131,9 +131,10 @@ type Options struct {
 	// checkJJ replaces the check of the jj on PATH that picks the workspace
 	// backend of new workstreams, for tests.
 	checkJJ jjCheck
-	// removeSandbox replaces the removal of the Docker Sandboxes interrupted
-	// sessions left, for tests.
-	removeSandbox func(context.Context, string) error
+	// sbxBin replaces the sbx binary reapSandboxes removes interrupted
+	// sessions' Docker Sandboxes with, for tests. It defaults to
+	// agent.SandboxCLI.
+	sbxBin string
 	// schedulePassed is called, if set, once every time a reconciliation
 	// pass's schedule stage completes without error - the stage that runs
 	// the scheduler's dispatch pass among its hooks. Nil runs no hook. Tests
@@ -391,9 +392,6 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if opts.WriteTimeout <= 0 {
 		opts.WriteTimeout = 10 * time.Second
 	}
-	if opts.removeSandbox == nil {
-		opts.removeSandbox = removeSandbox
-	}
 	s.options = opts
 	if s.tailnet != nil {
 		// A first join that fails leaves the tailnet down for the supervisor
@@ -417,7 +415,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			st.Close()
 			return nil, fmt.Errorf("recover thread sessions: %w", err)
 		}
-		reapSandboxes(ctx, view, s.options.removeSandbox)
+		reapSandboxes(ctx, view, s.options.sbxBin)
 	}
 	// The Beekeeper's thread is recovered by the same existing path every
 	// workstream's threads are: a turn a previous session claimed or

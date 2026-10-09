@@ -251,12 +251,6 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 		return nil, err
 	}
 	engine := e.Runner
-	if monitor, ok := ctx.Value(costMonitorKey{}).(*costMonitor); ok {
-		if core, ok := engine.(CoreEngine); ok {
-			core.Runner.Stream = monitor.stream(core.Runner.Stream)
-			engine = core
-		}
-	}
 	// Core refuses whatever the grants do not cover. These are the request
 	// fields grants do not describe; they also protect callers that invoke
 	// Run without the normal turn translator.

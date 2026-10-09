@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/kpenfound/busybees/core/agent/agenttest"
@@ -88,10 +89,26 @@ if [ "$1" = mcp ]; then
   exit 0
 fi
 if [ "$1" = app-server ]; then
-  read -r init
-  read -r initialized
-  read -r config
-  echo '{"id":2,"result":{"config":{},"origins":{"approval_policy":{"name":{"type":"sessionFlags"}},"orchestrator.mcp.enabled":{"name":{"type":"sessionFlags"}},"agents.enabled":{"name":{"type":"sessionFlags"}},"tools.experimental_request_user_input.enabled":{"name":{"type":"sessionFlags"}},"tools.update_plan.enabled":{"name":{"type":"sessionFlags"}},"web_search":{"name":{"type":"sessionFlags"}}}}}'
+  while IFS= read -r line; do
+    id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+    case "$line" in
+    *'"method":"initialize"'*)
+      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{}}'
+      ;;
+    *'"method":"config/read"'*)
+      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"config":{},"origins":{"approval_policy":{"name":{"type":"sessionFlags"}},"orchestrator.mcp.enabled":{"name":{"type":"sessionFlags"}},"agents.enabled":{"name":{"type":"sessionFlags"}},"tools.experimental_request_user_input.enabled":{"name":{"type":"sessionFlags"}},"tools.update_plan.enabled":{"name":{"type":"sessionFlags"}},"web_search":{"name":{"type":"sessionFlags"}}}}}'
+      ;;
+    *'"method":"thread/start"'*|*'"method":"thread/resume"'*)
+      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"thread":{"id":"fixture"}}}'
+      ;;
+    *'"method":"turn/start"'*)
+      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"turn":{"id":"turn-1"}}}'
+      echo '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agent_message","text":"boxed"}}}'
+      echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"status":"completed"}}}'
+      exit 0
+      ;;
+    esac
+  done
   exit 0
 fi
 if [ "${BUN_BE_BUN:-}" = 1 ]; then
@@ -105,7 +122,9 @@ cat >/dev/null
 				case "claude":
 					body += "echo '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"boxed\"}'\n"
 				case "codex":
-					body += "echo '{\"type\":\"thread.started\",\"thread_id\":\"fixture\"}'\necho '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"boxed\"}}'\necho '{\"type\":\"turn.completed\"}'\n"
+					// codex's turn ends inside the "app-server" branch
+					// above, which drives the whole JSON-RPC conversation
+					// and exits before reaching this fallback body.
 				case "opencode":
 					body += "echo '{\"type\":\"text\",\"sessionID\":\"fixture\",\"part\":{\"type\":\"text\",\"text\":\"boxed\"}}'\necho '{\"type\":\"step_finish\",\"sessionID\":\"fixture\",\"part\":{\"type\":\"step-finish\",\"reason\":\"stop\",\"cost\":0}}'\n"
 				}
@@ -421,5 +440,42 @@ func TestSbxRequestCannotChangePreparedHostPort(t *testing.T) {
 	}
 	if len(engine.Prepared) != 1 || len(engine.Requests) != 1 {
 		t.Fatal("changed endpoint reached preparation")
+	}
+}
+
+// TestSbxAcceptsTurnIdentifiersLongerThanTheSandboxNameLimit shows that a
+// turn identifier longer than sbx's 63-character sandbox-name limit still
+// prepares and runs in an sbx session: Osmia passes the identifier straight
+// through to core's request, and core's own sbx sandboxName bounds and
+// hashes it. Two identifiers sharing a long prefix still get distinct
+// sandboxes.
+func TestSbxAcceptsTurnIdentifiersLongerThanTheSandboxNameLimit(t *testing.T) {
+	long := strings.Repeat("a", 80) + "-attempt-1"
+	sibling := strings.Repeat("a", 80) + "-attempt-2"
+	names := map[string]string{}
+	for _, id := range []string{long, sibling} {
+		turn := toolTurn(t, "sbx")
+		turn.Scope.Turn = id
+		turn.Sandbox.Verified.Environment[a.TokenEnvironment] = turn.SessionDirectory
+		runner := sbxRunner(t, "cat >/dev/null\necho '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"boxed\"}'\n")
+		result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: a.CoreEngine{Runner: runner}}}).Run(context.Background(), turn)
+		if err != nil || result.IsError {
+			t.Fatalf("turn identifier %q (%d characters): %+v %v", id, len(id), result, err)
+		}
+		created := readSbxFile(t, filepath.Join(filepath.Dir(runner.SbxBin), "sbx-create.txt"))
+		args := strings.Split(created, "\n")
+		name := ""
+		for i, arg := range args {
+			if arg == "--name" && i+1 < len(args) {
+				name = args[i+1]
+			}
+		}
+		if name == "" || utf8.RuneCountInString(name) > 63 {
+			t.Fatalf("sandbox name for %q: %q (%d characters)", id, name, utf8.RuneCountInString(name))
+		}
+		names[id] = name
+	}
+	if names[long] == names[sibling] {
+		t.Fatalf("turn identifiers sharing a long prefix share a sandbox name %q", names[long])
 	}
 }
