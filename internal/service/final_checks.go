@@ -17,21 +17,24 @@ import (
 
 // FinalCheckRun is the document final/checks-<k>.json: the run of every
 // project check on the commit final review k reads, with the command, its
-// exit status, the end of its output and the check links Dagger's report
-// shows failed. An incomplete run reported no result, and Error says why.
+// exit status, diagnostic excerpt, captured output path and the check links
+// Dagger's report shows failed. An incomplete run reported no result, and
+// Error says why.
 type FinalCheckRun struct {
-	Review     int       `json:"review"`
-	Operation  string    `json:"operation"`
-	Commit     string    `json:"commit"`
-	Status     string    `json:"status"`
-	Command    []string  `json:"command,omitempty"`
-	ExitCode   int       `json:"exit_code"`
-	Output     string    `json:"output,omitempty"`
-	Truncated  bool      `json:"truncated,omitempty"`
-	Failed     []string  `json:"failed,omitempty"`
-	Error      string    `json:"error,omitempty"`
-	StartedAt  time.Time `json:"started_at"`
-	FinishedAt time.Time `json:"finished_at"`
+	Review         int       `json:"review"`
+	Operation      string    `json:"operation"`
+	Commit         string    `json:"commit"`
+	Status         string    `json:"status"`
+	Command        []string  `json:"command,omitempty"`
+	ExitCode       int       `json:"exit_code"`
+	Output         string    `json:"output,omitempty"`
+	OutputRevision int       `json:"output_revision,omitempty"`
+	OutputPath     string    `json:"output_path,omitempty"`
+	Truncated      bool      `json:"truncated,omitempty"`
+	Failed         []string  `json:"failed,omitempty"`
+	Error          string    `json:"error,omitempty"`
+	StartedAt      time.Time `json:"started_at"`
+	FinishedAt     time.Time `json:"finished_at"`
 }
 
 func finalChecksDocument(k int) string { return fmt.Sprintf("final-checks-%d", k) }
@@ -52,12 +55,19 @@ func (a *finalReviewer) finalChecks(ctx context.Context, cfg *config.Config, str
 	if ctx.Err() != nil {
 		return FinalCheckRun{}, ctx.Err()
 	}
-	run.ExitCode, run.Output, run.Truncated = result.ExitCode, result.Output, result.Truncated
+	run.ExitCode = result.ExitCode
+	run.Output, run.Truncated = summarizeCheckOutput(result.Output, result.ExitCode)
+	run.Truncated = run.Truncated || result.Truncated
+	run.OutputPath = checkOutputPath(finalChecksPath(report.Review))
 	run.Status, run.Failed, err = classifyChecks(result, err)
 	if err != nil {
 		run.Error = err.Error()
 	}
 	run.FinishedAt = a.s.now()
+	run.OutputRevision, err = nextRevision(a.repository, stream, finalChecksDocument(report.Review)+"-output")
+	if err != nil {
+		return FinalCheckRun{}, err
+	}
 	data, err := json.MarshalIndent(run, "", "  ")
 	if err != nil {
 		return FinalCheckRun{}, err
@@ -68,7 +78,11 @@ func (a *finalReviewer) finalChecks(ctx context.Context, cfg *config.Config, str
 	}
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalChecksDocument(report.Review), Revision: revision, Project: a.repository.Project(), Workstream: stream, At: run.FinishedAt, Actor: checksActor, Cause: report.Operation},
 		Path: finalChecksPath(report.Review), Content: string(data) + "\n"}
-	if err := a.repository.RecordDocuments(context.WithoutCancel(ctx), []trace.Document{doc}); err != nil {
+	output := doc
+	output.ID += "-output"
+	output.Revision = run.OutputRevision
+	output.Path, output.Content = run.OutputPath, result.Output
+	if err := a.repository.RecordDocuments(context.WithoutCancel(ctx), []trace.Document{doc, output}); err != nil {
 		return FinalCheckRun{}, err
 	}
 	return run, a.s.step("final-checks-recorded")
@@ -85,7 +99,7 @@ func (a *finalReviewer) runChecks(ctx context.Context, cfg *config.Config, strea
 	if err != nil {
 		return CheckResult{ExitCode: -1}, err
 	}
-	base := filepath.Join(cfg.Root.String(), "checks")
+	base := filepath.Join(cfg.Root.String(), "checks", string(cfg.Project.ID), string(stream))
 	if err := os.MkdirAll(base, 0700); err != nil {
 		return CheckResult{ExitCode: -1}, err
 	}
@@ -97,7 +111,7 @@ func (a *finalReviewer) runChecks(ctx context.Context, cfg *config.Config, strea
 	if err := g.Export(ctx, commit, dir); err != nil {
 		return CheckResult{ExitCode: -1}, fmt.Errorf("commit export: %w", err)
 	}
-	run.Command = []string{"dagger", "check", "--progress=report"}
+	run.Command = []string{"dagger", "check", "--progress=report", "--fail-fast"}
 	timeout := cfg.Project.CheckTimeout()
 	bounded, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -136,10 +150,10 @@ func finalCheckEvidence(run FinalCheckRun) string {
 		out = fmt.Sprintf("The service ran the project's checks on this exact commit before your read, recorded in %s, and they did not complete: %s. The checks show nothing about this commit; a criterion that rests on them is a gap.", finalChecksPath(run.Review), run.Error)
 	}
 	if len(run.Command) > 0 {
-		out += "\nCommand: " + strings.Join(run.Command, " ")
+		out += "\nCommand: " + checkExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048)
 	}
 	if len(run.Failed) > 0 {
-		out += "\nFailed: " + strings.Join(run.Failed, ", ")
+		out += "\nFailed: " + checkExcerpt(strings.Join(run.Failed, ", "), 2048)
 	}
-	return out + outputEvidence(run.Output)
+	return out + outputEvidence(run.Output, run.OutputPath, run.OutputRevision, run.Truncated)
 }

@@ -280,15 +280,18 @@ osmia status --json
   workstream that is not parked, whose base is another workstream or is not
   abandoned, or whose base's changes upstream lacks or conflicts with, fails
   with `conflict` (exit 5) and stays parked.
-- `archive <workstream-id>` archives a delivered or abandoned workstream. It
-  leaves the list of work: `status` names it on its `Archived:` line, the web
-  page moves it to its Archived group, and `status <workstream-id>` marks it
-  `archived=true`. Nothing is deleted: the trace, `handed/` and any branch
-  stay, and the archive is recorded in the root's `runtime.json`. Archiving an
-  archived workstream changes nothing. A workstream in any other state fails
-  with `conflict` (exit 5); abandon it first.
-- `unarchive <workstream-id>` returns an archived workstream to the list of
-  work. A workstream that is not archived is left as it is.
+- `archive <workstream-id>` permanently archives delivered or abandoned work.
+  The archived list retains its title and ID; `status <workstream-id>` marks it
+  `archived=true`. The service deletes the entire trace, including handed
+  inputs, decisions, turns and complete check output, from disk and Git history.
+  The archive metadata remains in `runtime.json`, and target-repository branches
+  remain. Archive cannot be undone; `unarchive` returns a conflict. A repeated
+  archive request changes nothing. Other states fail with `conflict` (exit 5);
+  abandon the workstream first. Previously archived workstreams receive the
+  same one-time cleanup automatically. Cleanup waits for unfinished turns,
+  pending operations, temporary workspace removal and retained dependents;
+  failures are retried. The web archived list distinguishes pending cleanup
+  from a deleted trace.
 - `shed object <workstream-id> <argument>` adds your own objection to the
   current round of a workstream's debate. The argument is one argument; quote
   it. It is recorded as yours, stands in the dissent record and blocks, and the

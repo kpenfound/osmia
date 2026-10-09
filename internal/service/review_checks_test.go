@@ -57,10 +57,10 @@ func TestUnitReviewReadsThePinnedCandidate(t *testing.T) {
 }
 
 // serial: sets PATH, GITHUB_TOKEN, ANTHROPIC_API_KEY, SSH_AUTH_SOCK and EXPECTED_HOST_HOME via t.Setenv
-func TestDaggerChecksBoundOutputWithholdCredentialsAndDisableColor(t *testing.T) {
+func TestDaggerChecksCaptureOutputWithholdCredentialsAndDisableColor(t *testing.T) {
 	bin := t.TempDir()
 	script := `#!/bin/sh
-[ "$#" = 4 ] && [ "$1" = check ] && [ "$2" = --progress=report ] && [ "$3" = 'dag+check://go/packages/tests/test?go-package=a&go-test=TestA' ] && [ "$4" = dag+check://release/version ] || exit 91
+[ "$#" = 5 ] && [ "$1" = check ] && [ "$2" = --progress=report ] && [ "$3" = --fail-fast ] && [ "$4" = 'dag+check://go/packages/tests/test?go-package=a&go-test=TestA' ] && [ "$5" = dag+check://release/version ] || exit 91
 [ -z "$GITHUB_TOKEN$ANTHROPIC_API_KEY$SSH_AUTH_SOCK" ] || exit 92
 [ -d "$HOME" ] && [ "$HOME" = "$TMPDIR" ] || exit 93
 [ -z "$EXPECTED_HOST_HOME" ] || exit 95
@@ -68,7 +68,8 @@ func TestDaggerChecksBoundOutputWithholdCredentialsAndDisableColor(t *testing.T)
 [ "$(git rev-parse --show-toplevel)" = "$(pwd -P)" ] || exit 96
 [ "$NO_COLOR" = 1 ] || exit 97
 head -c 70000 /dev/zero | tr '\000' x
-printf '\n== CHECKS ==  ✘ 1 failed\n✘ dag://release/version 1.0s ERROR\n'
+printf '\n== CHECKS ==  ✘ 1 failed\n✘ dag://release/version 1.0s ERROR\n    version mismatch\n✔ dag://passing 1s OK\n'
+head -c 70000 /dev/zero | tr '\000' y
 exit 3
 `
 	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte(script), 0700))
@@ -81,7 +82,7 @@ exit 3
 	must(t, os.WriteFile(filepath.Join(dir, "candidate.txt"), []byte("candidate"), 0600))
 	result, err := (DaggerChecks{}).Check(context.Background(), dir, []string{"dag+check://go/packages/tests/test?go-package=a&go-test=TestA", "dag+check://release/version"})
 	must(t, err)
-	if result.ExitCode != 3 || !result.Truncated || len(result.Output) != 64*1024 || !strings.HasSuffix(result.Output, "✘ dag://release/version 1.0s ERROR\n") {
+	if result.ExitCode != 3 || result.Truncated || len(result.Output) < 140000 || !strings.Contains(result.Output, "version mismatch") {
 		t.Fatalf("result: exit=%d truncated=%t bytes=%d", result.ExitCode, result.Truncated, len(result.Output))
 	}
 	if got := failedChecks(result.Output); !slices.Equal(got, []string{"dag://release/version"}) {

@@ -52,7 +52,33 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 		for i := range found.list {
 			found.list[i].status.Archived = archivedIn(state, found.list[i].status.Workstream)
 		}
-		out = append(out, found.list...)
+		for _, w := range found.list {
+			if !w.status.Archived {
+				out = append(out, w)
+			}
+		}
+		for _, a := range state.Archived {
+			if a.Project != active.id {
+				continue
+			}
+			title, terminal := a.Title, a.State
+			if title == "" {
+				for _, w := range found.list {
+					if w.status.Workstream == a.Workstream {
+						if w.status.Status != nil {
+							title = w.status.Status.Goal
+						}
+						if w.status.State != nil {
+							terminal = *w.status.State
+						}
+					}
+				}
+			}
+			if title == "" {
+				title = string(a.Workstream)
+			}
+			out = append(out, workstreamActivity{status: WorkstreamStatus{Project: a.Project, Workstream: a.Workstream, Archived: true, TraceDeleted: !a.CleanedAt.IsZero(), State: &terminal, Status: &StatusView{Goal: title}, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}}, lastActivity: a.ArchivedAt, createdAt: a.ArchivedAt})
+		}
 		for id, d := range found.unreadable {
 			unreadable[id] = d
 		}

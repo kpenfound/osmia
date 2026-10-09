@@ -349,12 +349,15 @@ func amendmentRoundPath(parts []string) bool {
 
 // unitPath reports whether parts name a unit record of a workstream,
 // units/<unit>/report.json, review.json, landing.json, rebase.json,
-// change.json, dispatch.json, checks-<n>.json, ruling-<n>.json,
+// change.json, dispatch.json, checks-<n>.json, checks-<n>-output.txt, ruling-<n>.json,
 // mason-ruling-<n>.json, move-<n>.json or chief-<contest>.json, where the
 // unit and the contest are keys.
 func unitPath(parts []string) bool {
 	if len(parts) != 3 || parts[0] != "units" || !key(parts[1]) {
 		return false
+	}
+	if checkOutputName(parts[2]) {
+		return true
 	}
 	if contest, ok := strings.CutPrefix(parts[2], "chief-"); ok && strings.HasSuffix(contest, ".json") && key(strings.TrimSuffix(contest, ".json")) {
 		return true
@@ -385,11 +388,19 @@ func finalPath(parts []string) bool {
 	if len(parts) != 2 || parts[0] != "final" {
 		return false
 	}
+	if checkOutputName(parts[1]) {
+		return true
+	}
 	n := strings.TrimSuffix(strings.TrimPrefix(parts[1], "checks-"), ".json")
 	if strings.HasPrefix(parts[1], "checks-") && strings.HasSuffix(parts[1], ".json") && shedRound.MatchString("round-"+n) {
 		return true
 	}
 	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "delivery.json" || parts[1] == "publication.json" || parts[1] == "merge.json"
+}
+
+func checkOutputName(name string) bool {
+	n := strings.TrimSuffix(strings.TrimPrefix(name, "checks-"), "-output.txt")
+	return strings.HasPrefix(name, "checks-") && strings.HasSuffix(name, "-output.txt") && shedRound.MatchString("round-"+n)
 }
 
 // driftPath reports whether parts name a drift record of a workstream: its

@@ -21,7 +21,7 @@ func TestArchivedWorkstreamsPersistAndClear(t *testing.T) {
 	must(t, s.SetArchived(Archive{Project: pid, Workstream: w2, ArchivedAt: at}))
 	must(t, s.SetArchived(Archive{Project: pid, Workstream: w1, ArchivedAt: at.Add(time.Hour)}))
 	must(t, s.SetArchived(Archive{Project: pid, Workstream: w2, ArchivedAt: at.Add(2 * time.Hour)}))
-	want := []Archive{{pid, w1, at.Add(time.Hour)}, {pid, w2, at}}
+	want := []Archive{{Project: pid, Workstream: w1, ArchivedAt: at.Add(time.Hour)}, {Project: pid, Workstream: w2, ArchivedAt: at}}
 	restarted := open(t, in)
 	effective, ds := restarted.Effective()
 	if len(ds) != 0 || !reflect.DeepEqual(effective.Archived, want) {

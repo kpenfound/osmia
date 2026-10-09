@@ -110,16 +110,13 @@ func TestBrowserPageResetsTheArchiveFormAfterSuccessAndKeepsItAfterFailure(t *te
 		t.Fatalf("the debate-and-abandonment form after a successful action: action %q, note %q, archive %v", action, note, archive)
 	}
 
-	// Abandoning quiet again is refused, because it already is; the owner's
-	// entry stands and the refusal shows.
-	p.click("#archived summary")
-	p.click(`#archived-list [data-select="` + string(quiet) + `"]`)
-	p.await("quiet shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(quiet)))
+	// A stale form targeting archived work is refused and keeps its values.
+	p.setValue("#workstream-action [name=workstream]", string(quiet))
 	p.setValue("#workstream-action [name=action]", "abandon")
 	p.eval(`document.querySelector('#workstream-action [name=archive]').checked = true`, nil)
 	p.typeInto("#workstream-action [name=note]", "Trying again.")
 	p.click("#workstream-action [type=submit]")
-	p.awaitText("#workstream-action .result", "cannot be abandoned")
+	p.awaitText("#workstream-action .result", "permanently archived")
 	if action, note, archive := fields(); action != "abandon" || note != "Trying again." || !archive {
 		t.Fatalf("the debate-and-abandonment form after a refused action: action %q, note %q, archive %v", action, note, archive)
 	}

@@ -175,7 +175,7 @@
     },
     "/v1/archive/{workstream}": {
       "post": {
-        "summary": "Archive a delivered or abandoned workstream",
+        "summary": "Permanently archive a terminal workstream, deleting its trace and retaining its title",
         "operationId": "postArchiveByWorkstream",
         "parameters": [
           {
@@ -213,7 +213,7 @@
         }
       },
       "delete": {
-        "summary": "Return an archived workstream to the list of work",
+        "summary": "Refuse restoration of a permanently archived workstream",
         "operationId": "deleteArchiveByWorkstream",
         "parameters": [
           {
@@ -5077,7 +5077,17 @@
             "format": "date-time",
             "type": "string"
           },
+          "cleaned_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "project": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "title": {
             "type": "string"
           },
           "workstream": {
@@ -6491,6 +6501,9 @@
           },
           "status": {
             "$ref": "#/components/schemas/StatusView"
+          },
+          "trace_deleted": {
+            "type": "boolean"
           },
           "units": {
             "items": {

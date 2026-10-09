@@ -395,8 +395,8 @@ func TestBrowserPageReloadLightsOnDiskDriftAndClears(t *testing.T) {
 // The workstream menu abandons and archives work in progress in one step,
 // and archives finished work. An archived workstream leaves the list of work
 // for the Archived group and the pause targets, the page shows the next
-// workstream in its place, and unarchive returns it.
-func TestBrowserPageArchivesAndUnarchivesWorkstreams(t *testing.T) {
+// workstream in its place, and retains the archived title without history.
+func TestBrowserPagePermanentlyArchivesWorkstreams(t *testing.T) {
 	t.Parallel()
 	f := newPageFixture(t)
 	p := openBrowser(t)
@@ -421,7 +421,6 @@ func TestBrowserPageArchivesAndUnarchivesWorkstreams(t *testing.T) {
 	p.selectWorkstream(quiet)
 	p.await("no archived group", `document.getElementById('archived').hidden`)
 	menu("archive", false)
-	menu("unarchive", false)
 	menu("abandon-archive", true)
 
 	// Work in progress is abandoned with a reason and archived.
@@ -440,27 +439,36 @@ func TestBrowserPageArchivesAndUnarchivesWorkstreams(t *testing.T) {
 		t.Fatalf("quiet was not abandoned: %+v", st)
 	}
 
-	// An archived workstream is still shown when picked from the group, and
-	// unarchive returns it to the list of work.
 	p.click("#archived summary")
-	p.click(`#archived-list ` + row)
-	p.await("quiet shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(quiet)))
-	p.awaitText(`[data-workstream="`+string(quiet)+`"] [data-field=archived]`, "archived")
-	menu("unarchive", true)
-	menu("archive", false)
-	menu("abandon-archive", false)
-	p.click("#workstream-menu-button")
-	p.click(`[data-workstream-action="unarchive"]`)
-	p.awaitText("#inbox-result", "is back in the list of work")
-	p.await("quiet back in the list", `document.querySelector('#workstream-list `+row+`') !== null && document.getElementById('archived').hidden`)
-	archived(false)
+	p.await("archived title cannot open deleted history", `document.querySelector('#archived-list `+row+`').disabled`)
+	if _, err := f.c.Unarchive(ctx, quiet); err == nil {
+		t.Fatal("permanent archive was reversed")
+	}
+	p.await("the same document", `window.notReloaded === true`)
+}
 
-	// Finished work is archived directly.
-	menu("archive", true)
+func TestBrowserArchiveWarnsBeforePermanentDeletion(t *testing.T) {
+	t.Parallel()
+	f := newPageFixture(t)
+	p := openBrowser(t)
+	ctx := context.Background()
+	_, err := f.c.Abandon(ctx, quiet, "Finished with this work")
+	must(t, err)
+	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.await("live connection", `document.body.dataset.connection === 'live'`)
+	p.selectWorkstream(quiet)
+	p.eval(`window.confirm = message => { window.archiveWarning = message; return false; }`, nil)
 	p.click("#workstream-menu-button")
 	p.click(`[data-workstream-action="archive"]`)
-	p.awaitText("#inbox-result", "it is listed under Archived")
-	p.await("the next workstream shown again", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(stream)))
-	archived(true)
-	p.await("the same document", `window.notReloaded === true`)
+	p.await("permanent deletion warning", `window.archiveWarning.includes('check output') && window.archiveWarning.includes('cannot be undone')`)
+	status, err := f.c.Status(ctx, quiet)
+	must(t, err)
+	if status.Archived {
+		t.Fatal("cancelled archive took effect")
+	}
+	p.eval(`window.confirm = () => true`, nil)
+	p.click("#workstream-menu-button")
+	p.click(`[data-workstream-action="archive"]`)
+	p.awaitText("#inbox-result", "history will be permanently deleted")
+	p.await("archived title retained", `document.querySelector('#archived-list [data-select="`+string(quiet)+`"]') !== null`)
 }

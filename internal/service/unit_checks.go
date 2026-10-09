@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -64,26 +63,29 @@ type checkInput struct {
 
 // UnitCheckRun is the document units/<unit>/checks-<run>.json: one run of a
 // unit candidate's checks, bound to the candidate, its base and its diff, with
-// the checks it selected, the command, its exit status and the end of its
-// output. Failed lists the check links Dagger's report shows failed.
+// the checks it selected, the command, its exit status, diagnostic excerpt
+// and the path of its captured output. Failed lists the check links Dagger's
+// report shows failed.
 type UnitCheckRun struct {
-	Unit       string          `json:"unit"`
-	Run        int             `json:"run"`
-	Operation  string          `json:"operation"`
-	Candidate  string          `json:"candidate"`
-	Base       string          `json:"base"`
-	DiffSHA256 string          `json:"diff_sha256"`
-	Report     int             `json:"report"`
-	Status     string          `json:"status"`
-	Selection  *CheckSelection `json:"selection,omitempty"`
-	Command    []string        `json:"command,omitempty"`
-	ExitCode   int             `json:"exit_code"`
-	Output     string          `json:"output,omitempty"`
-	Truncated  bool            `json:"truncated,omitempty"`
-	Failed     []string        `json:"failed,omitempty"`
-	Error      string          `json:"error,omitempty"`
-	StartedAt  time.Time       `json:"started_at"`
-	FinishedAt time.Time       `json:"finished_at"`
+	Unit           string          `json:"unit"`
+	Run            int             `json:"run"`
+	Operation      string          `json:"operation"`
+	Candidate      string          `json:"candidate"`
+	Base           string          `json:"base"`
+	DiffSHA256     string          `json:"diff_sha256"`
+	Report         int             `json:"report"`
+	Status         string          `json:"status"`
+	Selection      *CheckSelection `json:"selection,omitempty"`
+	Command        []string        `json:"command,omitempty"`
+	ExitCode       int             `json:"exit_code"`
+	Output         string          `json:"output,omitempty"`
+	OutputRevision int             `json:"output_revision,omitempty"`
+	OutputPath     string          `json:"output_path,omitempty"`
+	Truncated      bool            `json:"truncated,omitempty"`
+	Failed         []string        `json:"failed,omitempty"`
+	Error          string          `json:"error,omitempty"`
+	StartedAt      time.Time       `json:"started_at"`
+	FinishedAt     time.Time       `json:"finished_at"`
 }
 
 // matches reports whether the run checked the identity's candidate, base and
@@ -353,7 +355,7 @@ func (c *checkers) fail(ctx context.Context, stream config.WorkstreamID, unit st
 		to = UnitContested
 	}
 	id := fmt.Sprintf("%s-%s-checks-%d-%d", trace.UnitSubject(unit), to, run.Run, state.Version)
-	reason := fmt.Sprintf("check run %d failed on candidate %s from %s, recorded in %s: %s failed; %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), strings.Join(run.Failed, ", "), run.Selection.describe())
+	reason := fmt.Sprintf("check run %d failed on candidate %s from %s, recorded in %s: %s failed; %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), checkExcerpt(strings.Join(run.Failed, ", "), 2048), run.Selection.describe())
 	if to == UnitContested {
 		reason += fmt.Sprintf("; %d send-backs reached shed.max_bounces; the owner must rule review or revise before the unit moves", result.Bounces)
 	}
@@ -376,7 +378,7 @@ func (c *checkers) fail(ctx context.Context, stream config.WorkstreamID, unit st
 func checkVerdict(run UnitCheckRun) UnitVerdict {
 	v := UnitVerdict{Decision: "material_findings", Summary: fmt.Sprintf("Check run %d failed on candidate %s: %s.", run.Run, run.Candidate, run.Selection.describe())}
 	for _, link := range run.Failed {
-		v.Findings = append(v.Findings, ReviewFinding{Severity: "blocking", Evidence: fmt.Sprintf("check %s failed in check run %d", link, run.Run), Action: fmt.Sprintf("make %s pass", link)})
+		v.Findings = append(v.Findings, ReviewFinding{Severity: "blocking", Evidence: fmt.Sprintf("check %s failed in %s", checkLinkLabel(link), checkPath(run.Unit, run.Run)), Action: fmt.Sprintf("make %s pass", checkLinkLabel(link))})
 	}
 	return v
 }
@@ -523,19 +525,20 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	var captured string
 	run := UnitCheckRun{Unit: in.Unit, Run: in.Run, Operation: op.ID, Candidate: in.Candidate, Base: in.Base, Report: in.Report, ExitCode: -1, StartedAt: c.s.now()}
 	incomplete := func(err error) (coreadapter.OperationResult, error) {
 		if ctx.Err() != nil {
 			return coreadapter.OperationResult{}, ctx.Err()
 		}
 		run.Status, run.Error = ChecksIncomplete, err.Error()
-		return c.record(ctx, in, run)
+		return c.record(ctx, in, run, captured)
 	}
 	if reason, err := c.superseded(in); err != nil {
 		return coreadapter.OperationResult{}, err
 	} else if reason != "" {
 		run.Status, run.Error = ChecksSuperseded, reason
-		return c.record(ctx, in, run)
+		return c.record(ctx, in, run, captured)
 	}
 	checks := c.s.options.reviewChecks
 	if checks == nil {
@@ -565,7 +568,7 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	}
 	selection := c.selectChecks(ctx, in, dir, diff, checks)
 	run.Selection = &selection
-	run.Command = append([]string{"dagger", "check", "--progress=report"}, selection.Links...)
+	run.Command = append([]string{"dagger", "check", "--progress=report", "--fail-fast"}, selection.Links...)
 	timeout := c.s.about(c.repository).Project.CheckTimeout()
 	bounded, cancel := context.WithTimeout(ctx, timeout)
 	result, err := checks.Check(bounded, dir, selection.Links)
@@ -576,11 +579,15 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	if errors.Is(err, context.DeadlineExceeded) {
 		err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
-	run.ExitCode, run.Output, run.Truncated = result.ExitCode, result.Output, result.Truncated
+	captured, run.ExitCode = result.Output, result.ExitCode
+	run.Output, run.Truncated = summarizeCheckOutput(result.Output, result.ExitCode)
+	run.Truncated = run.Truncated || result.Truncated
+	run.OutputPath = checkOutputPath(checkPath(in.Unit, in.Run))
+	run.OutputRevision = 1
 	if run.Status, run.Failed, err = classifyChecks(result, err); run.Status == ChecksIncomplete {
 		return incomplete(err)
 	}
-	return c.record(ctx, in, run)
+	return c.record(ctx, in, run, captured)
 }
 
 // classifyChecks classifies a finished dagger check from its result and the
@@ -629,14 +636,19 @@ func (c *checkers) superseded(in checkInput) (string, error) {
 
 // record records the run as units/<unit>/checks-<run>.json and returns its
 // operation result. A run already recorded is returned as it was recorded.
-func (c *checkers) record(ctx context.Context, in checkInput, run UnitCheckRun) (coreadapter.OperationResult, error) {
+func (c *checkers) record(ctx context.Context, in checkInput, run UnitCheckRun, captured string) (coreadapter.OperationResult, error) {
 	run.FinishedAt = c.s.now()
 	data, err := json.MarshalIndent(run, "", "  ")
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: checkDocumentID(in.Unit, in.Run), Revision: 1, Project: c.repository.Project(), Workstream: in.Workstream, Unit: in.Unit, At: run.FinishedAt, Actor: checksActor, Cause: checkRequestID(in.Unit, in.Run)}
-	err = c.repository.RecordDocuments(context.WithoutCancel(ctx), []trace.Document{{Header: h, Path: checkPath(in.Unit, in.Run), Content: string(data) + "\n"}})
+	docs := []trace.Document{{Header: h, Path: checkPath(in.Unit, in.Run), Content: string(data) + "\n"}}
+	if run.OutputPath != "" {
+		h.ID += "-output"
+		docs = append(docs, trace.Document{Header: h, Path: run.OutputPath, Content: captured})
+	}
+	err = c.repository.RecordDocuments(context.WithoutCancel(ctx), docs)
 	if errors.Is(err, trace.ErrConflict) {
 		observed, err := c.Inspect(ctx, coreadapter.Operation{Boundary: coreadapter.RunnerBoundary, Action: CheckAction, Input: mustJSON(in)})
 		if err != nil || observed.Result == nil {
@@ -738,26 +750,11 @@ func latestRunFor(repo *trace.Repository, stream config.WorkstreamID, unit strin
 
 // checkEvidence is how a review prompt carries a check run.
 func checkEvidence(run UnitCheckRun) string {
-	out := fmt.Sprintf("The service ran the project's Dagger checks on this exact candidate before review; you do not run them. Check run %d %s: %s.\nCommand: %s", run.Run, run.Status, run.Selection.describe(), strings.Join(quoteLinks(run.Command), " "))
+	out := fmt.Sprintf("The service ran the project's Dagger checks on this exact candidate before review; you do not run them. Check run %d %s: %s.\nCommand: %s", run.Run, run.Status, run.Selection.describe(), checkExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048))
 	if len(run.Failed) > 0 {
-		out += "\nFailed: " + strings.Join(run.Failed, ", ")
+		out += "\nFailed: " + checkExcerpt(strings.Join(run.Failed, ", "), 2048)
 	}
-	return out + outputEvidence(run.Output)
-}
-
-// outputEvidence is how a prompt carries the end of a check run's output,
-// bounded to 16 KiB and starting at a whole UTF-8 character.
-func outputEvidence(output string) string {
-	if over := len(output) - 16*1024; over > 0 {
-		for over < len(output) && !utf8.RuneStart(output[over]) {
-			over++
-		}
-		output = output[over:]
-	}
-	if output == "" {
-		return ""
-	}
-	return "\nThe end of its output:\n" + output
+	return out + outputEvidence(run.Output, run.OutputPath, run.OutputRevision, run.Truncated)
 }
 
 // quoteLinks quotes the arguments of a command that a shell would split.

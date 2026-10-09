@@ -106,6 +106,14 @@ check ran: Jev did not select them (declined: no check reached probability
 notice, in the reviewer's prompt with the check evidence, and in the verdict a
 mason receives when checks fail.
 
+The factory runs checks with `--progress=report --fail-fast`. It records the
+complete combined output beside the check record in `checks-<n>-output.txt`
+and names that document in `output_path` with its `output_revision`. The
+agent-facing `output` holds up to 16 KiB of extracted failure diagnostics, excluding passing check blocks
+and rerun commands. Oversized excerpts are marked `truncated`; agents can
+read the captured output in chunks through `factory_context`. Classification
+uses the complete output, independently of the excerpt limit.
+
 ## Restarts and new runs
 
 A judgment is identified by the check run that asked, the task, its version
@@ -157,8 +165,9 @@ go run ./cmd/smartcheck --base origin/main -- --progress=report
 It diffs the working tree, including uncommitted changes to tracked files but
 not untracked files, against the merge base of `--base` (`main` by default),
 lists the checks of the Dagger workspace at the repository root, and runs
-`dagger check` with the selected links. When the factory would fall back, it
-says why and runs every check; when nothing changed, it runs nothing. It exits
+`dagger check --fail-fast` with the selected links, stopping at the first
+failure. When the factory would fall back, it says why and runs every check;
+when nothing changed, it runs nothing. It exits
 with `dagger check`'s status.
 
 | Flag | Default | Effect |

@@ -46,12 +46,14 @@ type Priority struct {
 }
 
 // Archive records a delivered or abandoned workstream the owner archived.
-// Archiving takes the workstream out of the owner's list of work and deletes
-// nothing.
+// The title survives permanent trace cleanup; CleanedAt marks completion.
 type Archive struct {
 	Project    config.ProjectID    `json:"project"`
 	Workstream config.WorkstreamID `json:"workstream"`
 	ArchivedAt time.Time           `json:"archived_at"`
+	Title      string              `json:"title,omitempty"`
+	State      string              `json:"state,omitempty"`
+	CleanedAt  time.Time           `json:"cleaned_at,omitempty"`
 }
 
 // ProviderLimit records a provider's blocked capacity independently of role bindings.
@@ -307,6 +309,10 @@ func resolveAt(st State, in Inputs, at time.Time) (State, []Diagnostic) {
 		out.Priorities = append(out.Priorities, valid)
 	}
 	for i, a := range st.Archived {
+		if a.Title != "" && in.Config.Active(a.Project) {
+			out.Archived = append(out.Archived, a)
+			continue
+		}
 		if err := targetReference(Target{Scope: "workstream", Project: a.Project, Workstream: a.Workstream}, in); err != nil {
 			ds = append(ds, Diagnostic{fmt.Sprintf("archived[%d]", i), err.Error()})
 		} else {
@@ -735,4 +741,26 @@ func (s *Store) CheckDisk() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.checkDisk()
+}
+
+// UpdateArchive preserves a title before purge and records its completion.
+// It accepts an absent trace because a restart may follow the deletion.
+func (s *Store) UpdateArchive(a Archive) error {
+	return s.mutate(func(st *State, _ Inputs) error {
+		for i, old := range st.Archived {
+			if old.Project == a.Project && old.Workstream == a.Workstream {
+				if a.Title == "" {
+					return fmt.Errorf("archive title is required")
+				}
+				a.ArchivedAt = old.ArchivedAt
+				st.Archived[i] = a
+				st.Pauses = slices.DeleteFunc(st.Pauses, func(p Pause) bool { return p.Target.Workstream == a.Workstream })
+				for i := range st.Priorities {
+					st.Priorities[i].Workstreams = slices.DeleteFunc(st.Priorities[i].Workstreams, func(w config.WorkstreamID) bool { return w == a.Workstream })
+				}
+				return nil
+			}
+		}
+		return fmt.Errorf("archive does not exist")
+	})
 }

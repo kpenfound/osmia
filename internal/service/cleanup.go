@@ -27,7 +27,7 @@ const (
 // of each workstream ran with, by project and workstream: their session
 // directories, with each session's prompts, transcript and result, and the
 // views the chief of staff and drift reviewers are staged.
-var turnDirectories = []string{"threads", "architect", "shed", "final", "chief_of_staff", "workspaces"}
+var turnDirectories = []string{"threads", "architect", "shed", "final", "chief_of_staff", "workspaces", "views", "checks"}
 
 // workspaceCleanup removes the workspaces of the configured project that the
 // workflow is done with: a unit's workspace and its reviewer's export once

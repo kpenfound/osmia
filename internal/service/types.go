@@ -608,6 +608,8 @@ type WorkstreamStatus struct {
 	// Archived is set when the owner archived the workstream, which takes a
 	// delivered or abandoned workstream out of the list of work.
 	Archived bool `json:"archived,omitempty"`
+	// TraceDeleted is set after permanent archive cleanup completes.
+	TraceDeleted bool `json:"trace_deleted,omitempty"`
 }
 
 // AgentStatus is one claimed or parked turn from the durable thread snapshot.

@@ -570,7 +570,7 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 	// A unit's landing, rebase, change, dispatch decision, check runs, moves
 	// and the chief of staff's contest decisions are unit documents; other
 	// paths under units/ are not.
-	for _, path := range []string{"units/parser/other.json", "units/parser", "units/../report.json", "units/a/b/report.json", "units/parser/chief-.json", "units/parser/chief-a b.json", "units/parser/checks-0.json", "units/parser/checks-x.json", "units/parser/move-0.json", "units/parser/move-x.json"} {
+	for _, path := range []string{"units/parser/other.json", "units/parser", "units/../report.json", "units/a/b/report.json", "units/parser/chief-.json", "units/parser/chief-a b.json", "units/parser/checks-0.json", "units/parser/checks-x.json", "units/parser/checks-0-output.txt", "units/parser/checks-x-output.txt", "final/checks-0-output.txt", "final/checks-x-output.txt", "units/parser/move-0.json", "units/parser/move-x.json"} {
 		d := unitReport("{}\n", 2)
 		d.ID, d.Path = "unit-other", path
 		if err := r.RecordDocuments(ctx, []Document{d}); err == nil {
@@ -606,6 +606,13 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 	finalChecks.ID, finalChecks.Path = "final-checks-1", "final/checks-1.json"
 	if err := r.RecordDocuments(ctx, []Document{finalChecks}); err != nil {
 		t.Fatal(err)
+	}
+	for _, path := range []string{"units/parser/checks-1-output.txt", "final/checks-1-output.txt"} {
+		d := unitReport("complete output\n", 1)
+		d.ID, d.Path = strings.ReplaceAll(strings.TrimSuffix(path, ".txt"), "/", "-"), path
+		if err := r.RecordDocuments(ctx, []Document{d}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	finalChecks.ID, finalChecks.Path = "final-checks-x", "final/checks-x.json"
 	if err := r.RecordDocuments(ctx, []Document{finalChecks}); err == nil {

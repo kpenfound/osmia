@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -22,8 +22,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// CheckResult records the exit status of a candidate check and the end of
-// its output, where Dagger's report is, bounded to 64 KiB.
+// CheckResult records the exit status and complete combined stdout/stderr
+// emitted by a candidate check. Truncated indicates an incomplete capture.
 type CheckResult struct {
 	ExitCode  int    `json:"exit_code"`
 	Output    string `json:"output"`
@@ -46,12 +46,8 @@ type ReviewChecks interface {
 // The agent receives neither the engine endpoint nor command selection.
 type DaggerChecks struct{}
 
-// checkOutputLimit bounds a check's recorded output; listOutputLimit bounds
-// the check links read from a listing.
-const (
-	checkOutputLimit = 64 * 1024
-	listOutputLimit  = 4 << 20
-)
+// listOutputLimit bounds the check links read from a listing.
+const listOutputLimit = 4 << 20
 
 func (DaggerChecks) List(ctx context.Context, dir string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -68,9 +64,9 @@ func (DaggerChecks) List(ctx context.Context, dir string) ([]string, error) {
 }
 
 func (DaggerChecks) Check(ctx context.Context, dir string, links []string) (CheckResult, error) {
-	output := &checkOutput{limit: checkOutputLimit}
-	exit, err := dagger(ctx, dir, output, append([]string{"check", "--progress=report"}, links...)...)
-	return CheckResult{ExitCode: exit, Output: output.String(), Truncated: output.truncated}, err
+	output := &bytes.Buffer{}
+	exit, err := dagger(ctx, dir, output, append([]string{"check", "--progress=report", "--fail-fast"}, links...)...)
+	return CheckResult{ExitCode: exit, Output: output.String()}, err
 }
 
 // dagger runs the Dagger CLI in dir with args and returns its exit status,
@@ -153,23 +149,6 @@ func (b *checkOutput) String() string { b.mu.Lock(); defer b.mu.Unlock(); return
 func lastLines(text string, n int) string {
 	lines := slices.DeleteFunc(strings.Split(strings.TrimSpace(text), "\n"), func(l string) bool { return strings.TrimSpace(l) == "" })
 	return strings.Join(lines[max(len(lines)-n, 0):], "\n")
-}
-
-// failedCheck matches a failed check in the CHECKS section of Dagger's
-// report, capturing its link.
-var failedCheck = regexp.MustCompile(`(?m)^✘ (dag(?:\+check)?://\S+)`)
-
-// failedChecks returns the links of the checks Dagger's report shows failed.
-func failedChecks(output string) []string {
-	_, report, found := strings.Cut(output, "== CHECKS ==")
-	if !found {
-		return nil
-	}
-	var links []string
-	for _, m := range failedCheck.FindAllStringSubmatch(report, -1) {
-		links = append(links, m[1])
-	}
-	return links
 }
 
 // unitReviewerIdentity binds reads and checks to the queued turn's candidate,

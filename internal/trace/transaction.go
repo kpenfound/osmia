@@ -207,6 +207,9 @@ func (r *Repository) syncObjects() error {
 var objectID = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 func (r *Repository) recoverPublication(ctx context.Context) error {
+	if err := r.recoverPurge(ctx); err != nil {
+		return err
+	}
 	return r.finishPublication(ctx, nil)
 }
 

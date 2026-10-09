@@ -69,8 +69,7 @@
   <button type="button" data-workstream-action="merged">Record my merge upstream</button>
   <button type="button" data-workstream-action="abandon">Abandon…</button>
   <button type="button" data-workstream-action="abandon-archive">Abandon and archive…</button>
-  <button type="button" data-workstream-action="archive">Archive</button>
-  <button type="button" data-workstream-action="unarchive">Unarchive</button>
+  <button type="button" data-workstream-action="archive">Archive permanently…</button>
 </div>
 
 <div class="shell">
@@ -155,7 +154,7 @@
             <option value="abandon">Abandon workstream</option>
           </select></label>
           <label>Reason or requested change <textarea name="note" rows="3" required></textarea></label>
-          <label class="check" data-field="archive-once"><input name="archive" type="checkbox"> Archive once abandoned</label>
+          <label class="check" data-field="archive-once"><input name="archive" type="checkbox"> Permanently archive once abandoned: delete all history, decisions, turns and check output; retain only the title. Cannot be undone.</label>
           <div class="actions"><button type="submit">Apply action</button></div>
           <p class="result" role="status"></p>
         </form>

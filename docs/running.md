@@ -130,8 +130,9 @@ The page is laid out like a chat client:
   and the debate actions; the Trace tab walks the workstream's record. The
   `…` menu pauses the workstream or jumps to its dependency, debate actions
   or abandonment. It also archives a delivered or abandoned workstream,
-  abandons and archives one in progress, and unarchives an archived one.
-  Archiving deletes nothing; see [the command line](cli.md).
+  abandons and archives one in progress. Archive permanently deletes the entire
+  trace, including full check output, and retains the title in the archived
+  list. It cannot be undone; see [the command line](cli.md).
 - The settings menu opens new projects, projects and their charters, the
   priority order, each role's profile with its provider's usage today, and
   the loaded configuration with any [disk drift](#disk-drift) and settings
@@ -154,7 +155,7 @@ From the page you can:
 - Set or clear a project's priority order and each role's profile.
 - Register a project, read and edit its charter, remove it from active work,
   and hand in new work.
-- Abandon a workstream, archive a finished one and unarchive it.
+- Abandon a workstream or permanently archive a finished one.
 - Reload the configuration.
 
 Submitting a feed action, such as a ruling on a contested unit or ratifying a

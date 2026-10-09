@@ -258,14 +258,14 @@ func (c *Client) BaseUpstream(ctx context.Context, id, base config.WorkstreamID)
 	return v, err
 }
 
-// Archive archives a delivered or abandoned workstream.
+// Archive permanently archives a terminal workstream and schedules trace deletion.
 func (c *Client) Archive(ctx context.Context, id config.WorkstreamID) (ArchiveResponse, error) {
 	var v ArchiveResponse
 	err := c.Do(ctx, "POST", Prefix+"/archive/"+url.PathEscape(string(id)), nil, &v)
 	return v, err
 }
 
-// Unarchive returns an archived workstream to the list of work.
+// Unarchive returns a conflict for permanently archived workstreams.
 func (c *Client) Unarchive(ctx context.Context, id config.WorkstreamID) (ArchiveResponse, error) {
 	var v ArchiveResponse
 	err := c.Do(ctx, "DELETE", Prefix+"/archive/"+url.PathEscape(string(id)), nil, &v)

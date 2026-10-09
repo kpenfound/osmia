@@ -40,8 +40,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   handin <project-id> <path|issue-url|-> [--base WORKSTREAM] [--skip-debate] [--json]
   abandon <workstream-id> <reason> [--json]
   upstream <workstream-id> <base-workstream-id> [--json]
-  archive <workstream-id> [--json]
-  unarchive <workstream-id> [--json]
+  archive <workstream-id> [--json]  permanently delete trace; retain title
   shed object <workstream-id> <argument> [--json]
   shed rule <workstream-id> <objection-id> <sustain|dismiss> [note] [--json]
   shed overrule <workstream-id> <objection-id> [reason] [--json]
@@ -563,7 +562,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		if result.Archived {
-			fmt.Fprintf(stdout, "Workstream %s archived; osmia unarchive %s returns it to the list\n", result.Workstream, result.Workstream)
+			fmt.Fprintf(stdout, "Workstream %s permanently archived; its title remains and its trace will be deleted\n", result.Workstream)
 		} else {
 			fmt.Fprintf(stdout, "Workstream %s is in the list of work\n", result.Workstream)
 		}
@@ -1362,7 +1361,11 @@ func showWorkstreams(w io.Writer, all service.StatusResponse) {
 	var archived []string
 	for _, st := range all.Workstreams {
 		if st.Archived {
-			archived = append(archived, string(st.Workstream))
+			label := string(st.Workstream)
+			if st.Status != nil && st.Status.Goal != "" && st.Status.Goal != label {
+				label += " " + strconv.Quote(st.Status.Goal)
+			}
+			archived = append(archived, label)
 			continue
 		}
 		fmt.Fprintf(w, "  %s %s\n", st.Workstream, facts(st))

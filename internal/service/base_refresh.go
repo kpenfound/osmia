@@ -62,6 +62,9 @@ func (b *baseRefresher) Pass(ctx context.Context) error {
 		return err
 	}
 	for _, stream := range streams {
+		if _, archived := b.s.archivedWorkstream(string(stream)); archived {
+			continue
+		}
 		dependency, err := b.repository.WorkstreamBase(stream)
 		if err != nil {
 			return err

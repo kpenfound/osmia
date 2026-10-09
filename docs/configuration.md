@@ -376,13 +376,25 @@ Core logs cleanup failures; a failed rule removal still attempts sandbox removal
 Unit and final reviewers receive read-only files from the exact candidate commit
 and writable scratch space.
 
-Before a unit is reviewed, the service runs `dagger check --progress=report` on
+Before a unit is reviewed, the service runs `dagger check --progress=report --fail-fast` on
 a separate, fresh export of its candidate, made a Git root of its own so Dagger
 finds the project's workspace. The copy and temporary home are removed
 afterward. The run is bounded by the project's `checks_timeout` and is
 recorded in the trace as `units/<unit>/checks-<n>.json`, with the candidate,
 its base and diff, the checks it ran and why, the command, its exit status and
-the last 64 KiB of output. Passing checks send the unit to review, and its reviewer receives the
+a diagnostic excerpt of at most 16 KiB. The complete combined stdout/stderr is
+recorded atomically beside it as `units/<unit>/checks-<n>-output.txt`, named by
+`output_path` and `output_revision` in the run. Failed-check blocks retain test
+names, assertions and stack traces; passing blocks and rerun commands are omitted. Long check links
+are abbreviated only in excerpts. Up to 32 failed check blocks share the
+excerpt budget, with both ends retained when diagnostics are too large.
+Additional failures remain in the captured output and the complete failed-link list.
+`truncated` marks omitted diagnostics, and line references locate each block
+in the captured output. Unrecognized or infrastructure output keeps a bounded
+excerpt of both ends. Failure classification reads the complete output.
+Agents can read the captured text through `factory_context` with `start` and
+`lines`, continuing oversized lines with `offset` and `next_offset`.
+Passing checks send the unit to review, and its reviewer receives the
 result instead of running checks. Failing checks, which Dagger's report names,
 send it back to its mason with the failures and output; the send-back counts
 toward `shed.max_bounces`. A run that reports no result, because the engine is
@@ -395,7 +407,9 @@ run at a time per workstream; a pause holds runs not yet started.
 Before the final read, the service runs every check the same way on the
 rebased feature branch commit, within `checks_timeout`, and records the run as
 `final/checks-<k>.json` for final review `k`, with the commit, command, exit
-status, failed checks and the last 64 KiB of output. The final reader's prompt
+status, failed checks and the diagnostic excerpt. The complete captured output
+is recorded with it as `final/checks-<k>-output.txt`, accessible the same way.
+The final reader's prompt
 carries the result; neither it nor a unit reviewer runs checks. A final run
 that reports no result is recorded as incomplete, and the reader is told the
 checks show nothing about the commit. A retry of the review reads the recorded
@@ -835,3 +849,21 @@ with the same inputs, after a restart included, returns the recorded decision.
 `degraded`, with the latest failure and any cool-down, and its spend appears
 as the `jev` provider in today's usage. `osmia doctor` warns when the boost is
 on without its key.
+
+### Permanent workstream archives
+
+`osmia archive <workstream>` permanently archives delivered or abandoned work.
+The archived list keeps the title and workstream ID, with the terminal state and
+archive time. The service deletes the entire workstream trace, including all
+check stdout/stderr, documents, decisions and agent turns, from disk and the
+trace repository's Git history. An archive cannot be restored or unarchived.
+Delivery and abandonment alone remove temporary workspaces while retaining the
+trace and target-repository branches.
+
+The cleanup pass first saves the title in `runtime.json`, then waits for
+unfinished turns, pending operations and temporary workspace cleanup. A base's
+trace also waits while another retained workstream depends on it. Cleanup
+retries failures and resumes interrupted deletion after restart. Previously
+archived workstreams undergo this cleanup automatically, once per archive;
+completion is recorded in `runtime.json`. Other workstreams and project records
+are preserved. Copies made outside Osmia's root are outside this cleanup.

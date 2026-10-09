@@ -171,7 +171,7 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	}
 	report := currentReport(t, repository, stream, "resume")
 	run := onlyRun(t, repository, stream)
-	if run.Status != ChecksPassed || run.Candidate != report.Candidate || run.Base != report.Base || run.Report != 1 || run.Selection == nil || run.Selection.Mode != selectionFull || run.Selection.Reason != string(jev.ReasonDisabled) || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report"}) || run.Output != passedReport {
+	if run.Status != ChecksPassed || run.Candidate != report.Candidate || run.Base != report.Base || run.Report != 1 || run.Selection == nil || run.Selection.Mode != selectionFull || run.Selection.Reason != string(jev.ReasonDisabled) || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--fail-fast"}) || run.Output != "== CHECKS ==  ✔ 2 passed\n" {
 		t.Fatalf("check run %+v", run)
 	}
 	// The boost is off: every check runs on the exact candidate, in an
@@ -197,7 +197,7 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	}
 
 	req := reviewTurn(t, f, repository, stream)
-	if !strings.Contains(req.Prompt, "Check run 1 passed: every check ran: the Jev boost is off.") || !strings.Contains(req.Prompt, passedReport) {
+	if !strings.Contains(req.Prompt, "Check run 1 passed: every check ran: the Jev boost is off.") || !strings.Contains(req.Prompt, run.Output) || !strings.Contains(req.Prompt, run.OutputPath) {
 		t.Fatalf("review prompt lacks the check run:\n%s", req.Prompt)
 	}
 }
@@ -224,7 +224,7 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 		t.Fatalf("checks ran %q, want %q", ran, selected)
 	}
 	run := onlyRun(t, repository, stream)
-	if run.Selection.Mode != selectionSelected || !slices.Equal(run.Selection.Links, selected) || run.Selection.Candidates != 4 || run.Selection.Judgment == "" || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report"}, selected...)) {
+	if run.Selection.Mode != selectionSelected || !slices.Equal(run.Selection.Links, selected) || run.Selection.Candidates != 4 || run.Selection.Judgment == "" || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--fail-fast"}, selected...)) {
 		t.Fatalf("check run %+v", run)
 	}
 	requests := p.Requests()
@@ -297,7 +297,8 @@ func TestChecksFallBackToEveryCheck(t *testing.T) {
 func TestFailedChecksReturnTheUnitToItsMason(t *testing.T) {
 	t.Parallel()
 	failing := "dag://go/packages/tests/test?go-package=internal/trace"
-	checks := &fakeChecks{outcomes: []checkOutcome{{result: CheckResult{ExitCode: 1, Output: failedReport(failing)}}, {result: CheckResult{Output: passedReport}}}}
+	rawOutput := failedReport(failing) + "✔ dag://passing 1s OK\n" + strings.Repeat("    passing detail\n", 5000) + "RUN LOCALLY\n" + strings.Repeat("rerun command ", 10000)
+	checks := &fakeChecks{outcomes: []checkOutcome{{result: CheckResult{ExitCode: 1, Output: rawOutput}}, {result: CheckResult{Output: passedReport}}}}
 	f, stream, repository := newChecksFixture(t, "checks-fail", checks)
 	failed := currentReport(t, repository, stream, "resume")
 	runChecks(t, f.s, repository, stream)
@@ -308,6 +309,10 @@ func TestFailedChecksReturnTheUnitToItsMason(t *testing.T) {
 	if run.Status != ChecksFailed || !slices.Equal(run.Failed, []string{failing}) || run.ExitCode != 1 {
 		t.Fatalf("check run %+v", run)
 	}
+	outputDocs := streamDocuments(t, repository, stream, checkDocumentID("resume", 1)+"-output")
+	if len(outputDocs) != 1 || outputDocs[0].Content != rawOutput || outputDocs[0].Path != run.OutputPath || run.OutputPath != "units/resume/checks-1-output.txt" || strings.Contains(run.Output, "passing detail") {
+		t.Fatal("complete check output or extracted diagnostics were not recorded")
+	}
 	r := &reviewers{masons: newMasonController(f.s, repository)}
 	result, ok, err := r.storedResult(stream, "resume", trace.WorkflowState{Value: UnitImplementing})
 	must(t, err)
@@ -317,7 +322,7 @@ func TestFailedChecksReturnTheUnitToItsMason(t *testing.T) {
 	th, err := repository.Thread(stream, masonAgent("resume"))
 	must(t, err)
 	revise := th.Turns[len(th.Turns)-1].Request
-	if revise.TurnID != masonAgent("resume")+"-revise-checks-1" || revise.Actor != checksActor || !strings.Contains(revise.Prompt, "The project's checks failed on candidate "+failed.Candidate) || !strings.Contains(revise.Prompt, "built_test.go:9: wrong chunk") {
+	if revise.TurnID != masonAgent("resume")+"-revise-checks-1" || revise.Actor != checksActor || !strings.Contains(revise.Prompt, "The project's checks failed on candidate "+failed.Candidate) || !strings.Contains(revise.Prompt, "built_test.go:9: wrong chunk") || !strings.Contains(revise.Prompt, run.OutputPath) || strings.Contains(revise.Prompt, "passing detail") {
 		t.Fatalf("revise turn %+v", revise)
 	}
 	// The reviewers' pass does not queue the send-back twice.

@@ -139,9 +139,9 @@
   }
 
   // listedFeeds names the feeds the page reads: those of the workstreams in
-  // the list of work, and the selected one's when it is archived.
+  // the list of work. Archived workstreams have no readable history.
   function listedFeeds() {
-    return views.status ? views.status.workstreams.filter((w) => !w.archived || w.workstream === ui.selected).map((w) => 'feed/' + w.workstream) : [];
+    return views.status ? views.status.workstreams.filter((w) => !w.archived).map((w) => 'feed/' + w.workstream) : [];
   }
 
   // details holds, for each packet and delivery view, the entry it was read
@@ -514,11 +514,11 @@
   }
 
   // shown is the workstream the main area shows: the selected one while the
-  // status lists it, archived or not, and otherwise the first in the list of
+  // status lists it as unarchived, and otherwise the first in the list of
   // work, which the status already orders by last activity.
   function shown() {
     const list = streams();
-    return list.find((w) => w.workstream === ui.selected) || list.find((w) => !w.archived) || null;
+    return list.find((w) => !w.archived && w.workstream === ui.selected) || list.find((w) => !w.archived) || null;
   }
 
   function terminal(w) {
@@ -658,7 +658,9 @@
       r.title.textContent = goal(w);
       r.title.title = goal(w);
       r.project.textContent = projectName(w.project);
-      r.state.textContent = w.state || 'handed';
+      r.state.textContent = w.archived ? (w.trace_deleted ? 'archived · trace deleted' : 'archived · cleanup pending') : (w.state || 'handed');
+      r.button.disabled = !!w.archived;
+      r.button.title = w.archived ? 'Permanently archived; history is unavailable.' : '';
       r.button.setAttribute('aria-current', String(current !== null && current.workstream === w.workstream));
       r.signals.replaceChildren(...[
         paused ? el('span', { class: 'paused', 'data-field': 'paused', title: 'Paused' }, 'paused') : null,
@@ -1039,14 +1041,13 @@
     // The menu offers what the workstream's state allows: asking for a drift
     // rebase of a building or assembled branch, recording your own merge of an
     // assembled branch, abandoning work in progress, archiving finished work
-    // and unarchiving archived work.
+    // with permanent trace cleanup.
     const offered = {
       rebase: w.state === 'building' || w.state === 'assembled',
       merged: w.state === 'assembled',
       abandon: !terminal(w),
       'abandon-archive': !terminal(w),
       archive: terminal(w) && !w.archived,
-      unarchive: !!w.archived,
     };
     for (const button of document.querySelectorAll('[data-workstream-action]')) {
       const action = button.dataset.workstreamAction;
@@ -1183,14 +1184,15 @@
       byId('pause-popover').showPopover();
       return;
     }
-    if (action === 'archive' || action === 'unarchive') {
+    if (action === 'archive') {
+      if (!window.confirm('Permanently archive ' + goal(w) + '? All workstream history, decisions, agent turns and check output will be deleted. Only its title will remain in the archived list. This cannot be undone.')) { return; }
       const button = document.querySelector('[data-workstream-action="' + action + '"]');
-      act(inboxResult, button, () => request(action === 'archive' ? 'POST' : 'DELETE', '/archive/' + w.workstream), (out) => {
+      act(inboxResult, button, () => request('POST', '/archive/' + w.workstream), (out) => {
         if (out.archived) {
           leaveArchived(w.workstream);
         }
         mark(['status', 'runtime']);
-        return out.archived ? 'Archived ' + goal(w) + '; it is listed under Archived.' : goal(w) + ' is back in the list of work.';
+        return 'Archived ' + goal(w) + '; it is listed under Archived. Its history will be permanently deleted.';
       });
       return;
     }

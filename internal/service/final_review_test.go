@@ -269,7 +269,7 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 	var run FinalCheckRun
 	runs := streamDocuments(t, repository, stream, finalChecksDocument(1))
 	if len(runs) != 1 || runs[0].Path != "final/checks-1.json" || json.Unmarshal([]byte(runs[0].Content), &run) != nil ||
-		run.Commit != tip || run.Status != ChecksPassed || run.Output != "all proofs passed" || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report"}) {
+		run.Commit != tip || run.Status != ChecksPassed || run.Output != "all proofs passed" || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--fail-fast"}) {
 		t.Fatalf("the final check run %+v", runs)
 	}
 	reader, err := repository.Thread(stream, committeeAgent(1))
@@ -651,10 +651,15 @@ func TestFinalChecksRunOnceBeforeTheRead(t *testing.T) {
 	_, op := assembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
+	// A check record without captured output does not reserve an output revision.
+	prior, err := json.Marshal(FinalCheckRun{Review: 1, Commit: "another-candidate", Status: ChecksPassed})
+	must(t, err)
+	must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalChecksDocument(1), Revision: 1, Project: repository.Project(), Workstream: stream, At: f.clock.Now(), Actor: checksActor, Cause: "fixture"}, Path: finalChecksPath(1), Content: string(prior)}}))
+	rawOutput := "engine diagnostic start\n" + strings.Repeat("transport detail\n", 6000) + "engine diagnostic end\n"
 	runs := 0
 	f.s.options.reviewChecks = checkFunc(func(context.Context, string) (CheckResult, error) {
 		runs++
-		return CheckResult{ExitCode: -1}, errors.New("engine unreachable")
+		return CheckResult{ExitCode: -1, Output: rawOutput}, errors.New("engine unreachable")
 	})
 	f.s.boundary = func(name string) error {
 		if name == "final-checks-recorded" {
@@ -675,12 +680,16 @@ func TestFinalChecksRunOnceBeforeTheRead(t *testing.T) {
 	}
 	var run FinalCheckRun
 	docs := streamDocuments(t, repository, stream, finalChecksDocument(1))
-	if len(docs) != 1 || json.Unmarshal([]byte(docs[0].Content), &run) != nil || run.Status != ChecksIncomplete || run.Error != "engine unreachable" || run.Commit == "" {
+	if len(docs) != 2 || json.Unmarshal([]byte(docs[1].Content), &run) != nil || run.Status != ChecksIncomplete || run.Error != "engine unreachable" || run.Commit == "" || run.OutputRevision != 1 {
 		t.Fatalf("the final check run %+v", docs)
+	}
+	outputDocs := streamDocuments(t, repository, stream, finalChecksDocument(1)+"-output")
+	if len(outputDocs) != 1 || outputDocs[0].Content != rawOutput || outputDocs[0].Path != run.OutputPath || !run.Truncated || !strings.Contains(run.Output, "engine diagnostic start") || !strings.Contains(run.Output, "engine diagnostic end") {
+		t.Fatal("final check recovery lost captured output or diagnostics")
 	}
 	reader, err := repository.Thread(stream, committeeAgent(1))
 	must(t, err)
-	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "recorded in final/checks-1.json, and they did not complete: engine unreachable. The checks show nothing about this commit") {
+	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "recorded in final/checks-1.json, and they did not complete: engine unreachable. The checks show nothing about this commit") || !strings.Contains(prompt, run.OutputPath) || !strings.Contains(prompt, "engine diagnostic start") || !strings.Contains(prompt, "engine diagnostic end") {
 		t.Fatalf("the reader's prompt lacks the incomplete run:\n%s", prompt)
 	}
 }

@@ -40,6 +40,9 @@ func (s *Service) conversationTrace(raw string) (config.ProjectID, config.Workst
 	if err != nil {
 		return "", "", nil, &APIError{Validation, "workstream must be a workstream ID: w_ followed by 32 lowercase hexadecimal digits"}
 	}
+	if _, ok := s.archivedWorkstream(raw); ok {
+		return "", "", nil, &APIError{Conflict, "workstream is permanently archived; its history is unavailable"}
+	}
 	cfg, projects := s.runtimes()
 	if len(cfg.Projects) == 0 {
 		return "", "", nil, &APIError{NoProject, "no project is configured; add one with osmia project add"}

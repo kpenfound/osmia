@@ -135,7 +135,11 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		return h.failed("reading")
 	}
 	exists := slices.Contains(streams, stream)
-	if req.Base != "" && (req.Base == stream || !slices.Contains(streams, req.Base) || req.Base == librarianWorkstream(req.Project)) {
+	if _, archived := h.s.archivedWorkstream(string(stream)); archived {
+		return HandInResponse{}, false, &APIError{Conflict, "workstream is permanently archived; use a new hand-in key"}
+	}
+	_, archivedBase := h.s.archivedWorkstream(string(req.Base))
+	if req.Base != "" && (archivedBase || req.Base == stream || !slices.Contains(streams, req.Base) || req.Base == librarianWorkstream(req.Project)) {
 		return HandInResponse{}, false, &APIError{Validation, "base must name another feature workstream in the same project"}
 	}
 	var doc *trace.Document

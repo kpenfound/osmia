@@ -856,8 +856,8 @@ func (r *reviewers) enqueueFindings(ctx context.Context, stream config.Workstrea
 		if err != nil {
 			return err
 		}
-		if i := slices.IndexFunc(runs, func(run UnitCheckRun) bool { return run.Unit == unit && run.Run == result.Checks }); i >= 0 && runs[i].Output != "" {
-			prompt += "\n\nThe end of the check output:\n" + runs[i].Output
+		if i := slices.IndexFunc(runs, func(run UnitCheckRun) bool { return run.Unit == unit && run.Run == result.Checks }); i >= 0 {
+			prompt += outputEvidence(runs[i].Output, runs[i].OutputPath, runs[i].OutputRevision, runs[i].Truncated)
 		}
 	}
 	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.now(), Actor: actor, Cause: result.Turn, Depth: 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(r.cfg.Project), Prompt: prompt}

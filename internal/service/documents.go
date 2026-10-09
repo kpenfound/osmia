@@ -80,7 +80,8 @@ func (s *Service) documentRequest(w http.ResponseWriter, r *http.Request) bool {
 			if !decode(w, r, &in) {
 				return true
 			}
-			if in.Base == librarianWorkstream(repo.Project()) {
+			_, archivedBase := s.archivedWorkstream(string(in.Base))
+			if archivedBase || in.Base == librarianWorkstream(repo.Project()) {
 				fail(w, Validation)
 				return true
 			}

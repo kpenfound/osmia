@@ -266,6 +266,40 @@ func TestFactoryContextReadsPriorRevisionsAndEnforcesTurnScope(t *testing.T) {
 	}
 }
 
+func TestFactoryContextReadsCompleteCheckOutput(t *testing.T) {
+	t.Parallel()
+	c := newContestFixture(t, "check-output")
+	captured := "failure at start\n" + strings.Repeat("é", 70000) + "\nfailure at end\n"
+	path := "units/resume/checks-99-output.txt"
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "unit-resume-checks-99-output", Revision: 1, Project: c.repo.Project(), Workstream: c.stream, At: c.f.clock.Now(), Actor: checksActor, Cause: "fixture"}, Path: path, Content: captured}
+	must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{doc}))
+	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
+	tool := factoryContext(c.repo, scope)
+	var recovered strings.Builder
+	offset := 0
+	for {
+		input, _ := json.Marshal(map[string]any{"path": path, "start": 1, "lines": 1000, "offset": offset})
+		raw, err := tool.Handle(context.Background(), input)
+		must(t, err)
+		var page struct {
+			Content string `json:"content"`
+			Next    int    `json:"next_offset"`
+		}
+		must(t, json.Unmarshal(raw, &page))
+		recovered.WriteString(page.Content)
+		if page.Next == 0 {
+			break
+		}
+		if page.Next <= offset {
+			t.Fatal("check output pagination did not advance")
+		}
+		offset = page.Next
+	}
+	if recovered.String() != captured {
+		t.Fatal("captured check output was truncated or changed")
+	}
+}
+
 func TestChiefInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
 	t.Parallel()
 	c := newContestFixture(t, "chief-engineering-tools")
