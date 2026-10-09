@@ -135,6 +135,7 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	}
 	call := calls[0]
 	if call.Scope.Role != trace.ChiefOfStaff || !strings.HasPrefix(call.Prompt, events.Preamble) ||
+		!strings.Contains(call.Prompt, "Reassess this in-flight workstream") ||
 		!strings.Contains(call.Prompt, "Workstream state changed to handed: Owner moved the feature to handed") ||
 		!strings.Contains(call.Prompt, "Workstream state changed from handed to planning: Owner moved the feature to planning") {
 		t.Fatalf("event turn %+v", call)
@@ -160,7 +161,7 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 			t.Fatalf("unacknowledged %+v", e)
 		}
 	}
-	if notices != 2 {
+	if notices != 3 {
 		t.Fatalf("outbox %+v", entries)
 	}
 }

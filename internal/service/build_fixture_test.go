@@ -59,6 +59,7 @@ func recordBuild(t *testing.T, f *shedFixture, repository *trace.Repository, key
 	must(t, err)
 	at := f.s.now()
 	must(t, repository.CreateWorkstreamOn(ctx, stream, backend, at, ownerActor))
+	must(t, recordFactoryPolicy(ctx, repository, stream, at, false))
 	w, err := workspaces(f.s.cfg, branchesDirectory, backend).Acquire(ctx, vcs.Request{
 		Name: string(stream), Ref: base, Branch: featureBranch(stream),
 	})

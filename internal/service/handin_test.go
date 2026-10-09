@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -150,6 +151,7 @@ func (f *handInFixture) checkHanded(t *testing.T, out HandInResponse, key, name,
 	}
 	transitions, err := trace.Read[trace.Transition](r, stream)
 	must(t, err)
+	transitions = slices.DeleteFunc(transitions, func(tr trace.Transition) bool { return tr.Subject != trace.FeatureSubject })
 	if len(transitions) != 1 {
 		t.Fatalf("transitions %+v", transitions)
 	}
@@ -350,6 +352,9 @@ func TestHandInFinishesAnInterruptedHandIn(t *testing.T) {
 		must(t, err)
 		var out []string
 		for _, tr := range transitions {
+			if tr.Subject == factoryPolicySubject {
+				continue
+			}
 			if !tr.At.Equal(at) || tr.Actor != owner {
 				t.Fatalf("transition %+v", tr)
 			}

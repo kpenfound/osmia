@@ -482,7 +482,7 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 	if docs := f.documents(t, stream, plan.SpecDocument); len(docs) != 1 {
 		t.Fatalf("retry duplicated revisions: %+v", docs)
 	}
-	if len(f.transitions(t, stream)) != 3 {
+	if len(slices.DeleteFunc(f.transitions(t, stream), func(tr trace.Transition) bool { return tr.Subject == factoryPolicySubject })) != 3 {
 		t.Fatalf("transitions: %+v", f.transitions(t, stream))
 	}
 	// The turn left nothing behind but its session and delivered files, and

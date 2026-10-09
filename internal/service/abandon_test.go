@@ -50,6 +50,7 @@ func TestAbandonHandedWorkstream(t *testing.T) {
 	}
 	transitions, err := trace.Read[trace.Transition](r, stream)
 	must(t, err)
+	transitions = slices.DeleteFunc(transitions, func(tr trace.Transition) bool { return tr.Subject != trace.FeatureSubject })
 	last := transitions[len(transitions)-1]
 	if len(transitions) != 2 || last.From != HandedState || last.To != AbandonedState || last.Actor != ownerActor || last.Reason != "Superseded." || last.Subject != trace.FeatureSubject {
 		t.Fatalf("transitions %+v", transitions)

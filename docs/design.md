@@ -127,6 +127,8 @@ Masons adapt implementation and necessary supporting changes within their respon
 
 Newly discovered necessary work is recorded under discoveries/ with its criterion and a durable disposition: open, assigned to an unmerged unit, declined with a reason, or retained as an optional suggestion. Workers record discoveries without ending their turns; the chief coordinates dispositions. Assigned work remains necessary until its unit lands. Open discoveries and pending revisions prevent assembly and delivery. Completing the initial unit list is insufficient when necessary work remains unresolved.
 
+In-flight workstreams adopt current factory authority through an idempotent reconciliation recorded in the trace. Adoption and the chief's reassessment notice are committed together, so acknowledged historical blockers can be investigated again without duplicate notices after restart. New workstreams record their policy at intake. Delivered and abandoned workstreams are untouched. Every subsequent role turn, including a queued or resumed turn, receives current operating instructions alongside its original task. Adoption preserves sealed documents, completed work, explicit owner holds, escalations and decisions; it neither rewrites plans nor grants ratification or publication. Any restructuring uses the ordinary revision workflow.
+
 ### 4.5 Where they live
 
 ```

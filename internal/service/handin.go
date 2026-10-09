@@ -221,6 +221,9 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		if err := repository.Append(ctx, *doc); err != nil {
 			return h.failed("copying the input into")
 		}
+		if err := recordFactoryPolicy(ctx, repository, stream, now, false); err != nil {
+			return h.failed("recording factory authority for")
+		}
 	}
 	// The skip is recorded as the owner's skip of debate before the handed
 	// state, so the debate controller never finds the workstream without it.
