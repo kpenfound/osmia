@@ -610,6 +610,49 @@ func TestPublicationReusesSignedCommitBeforePushAfterRestart(t *testing.T) {
 	}
 }
 
+// TestPublicationSigningReusesTheSameCommitWhenRetriedBeforeRecording
+// interrupts publication after signing succeeds but before anything about
+// it is durably recorded, breaks signing itself, then retries. The retry
+// must return the commit core's signer already made under the delivery's
+// signing ID, not attempt to sign again.
+func TestPublicationSigningReusesTheSameCommitWhenRetriedBeforeRecording(t *testing.T) {
+	t.Parallel()
+	p := newPublicationFixture(t, "squash")
+	ctx := context.Background()
+	p.approve(t, nil)
+	op := p.request(t)
+	p.pulls.findErr = errors.New("transient host failure")
+	if _, err := p.publisher().Apply(ctx, op); err == nil {
+		t.Fatal("publication was not interrupted before recording")
+	}
+	records, err := publications(p.repository, p.stream)
+	must(t, err)
+	if len(records) != 0 {
+		t.Fatalf("publication recorded before any signed commit was durable: %+v", records)
+	}
+	signed := strings.TrimSpace(demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "for-each-ref", "--format=%(objectname)", "refs/core-sign"))
+	if signed == "" {
+		t.Fatal("signing was not recorded before the interruption")
+	}
+	demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "config", "gpg.program", "false")
+	p.pulls.findErr = nil
+	result, err := p.publisher().Apply(ctx, op)
+	if err != nil || result.Outcome != "succeeded" {
+		t.Fatalf("retry: %+v %v", result, err)
+	}
+	if tip, _ := p.forkBranch(t); tip != signed {
+		t.Fatalf("retry pushed %s instead of reusing the signed commit %s", tip, signed)
+	}
+	if again := strings.TrimSpace(demoGit(t, filepath.Dir(p.clone), "-C", p.clone, "for-each-ref", "--format=%(objectname)", "refs/core-sign")); again != signed {
+		t.Fatalf("retry signed again under a new ref: %s", again)
+	}
+	recorded, err := publications(p.repository, p.stream)
+	must(t, err)
+	if len(recorded) != 2 || recorded[1].Status != publicationOpened || recorded[1].Commit != signed {
+		t.Fatalf("publications %+v", recorded)
+	}
+}
+
 func TestPublicationUsesOwnerMessageAndRejectsSupersededMessage(t *testing.T) {
 	t.Parallel()
 	p := newPublicationFixture(t, "squash")

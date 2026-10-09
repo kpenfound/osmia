@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestDeliverySigningAndRecovery(t *testing.T) {
@@ -33,7 +32,7 @@ func TestDeliverySigningAndRecovery(t *testing.T) {
 			if squash {
 				messages = []DeliveryMessage{{Commit: head, Message: message}}
 			}
-			signed, err := f.provider.SignDelivery(ctx, "operation", base, head, messages, squash, time.Unix(1700000000, 0))
+			signed, err := f.provider.SignDelivery(ctx, "operation", base, head, messages, squash)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -76,14 +75,84 @@ func TestDeliverySigningAndRecovery(t *testing.T) {
 			if err := os.Remove(key); err != nil {
 				t.Fatal(err)
 			}
-			again, err := f.provider.SignDelivery(ctx, "operation", base, head, messages, squash, time.Now())
+			again, err := f.provider.SignDelivery(ctx, "operation", base, head, messages, squash)
 			if err != nil || again != signed {
 				t.Fatalf("recovery: %s %v", again, err)
 			}
-			if _, err := f.provider.SignDelivery(ctx, "new-operation", base, head, messages, squash, time.Now()); err == nil {
+			if _, err := f.provider.SignDelivery(ctx, "new-operation", base, head, messages, squash); err == nil {
 				t.Fatal("missing key signed a new delivery")
 			}
 		})
+	}
+}
+
+// TestDeliveryRecoversLegacySignedCommit seeds a delivery as the implementation
+// this unit replaced would have left it: a commit kept under the legacy
+// refs/osmia/delivery/<hash> ref, with no signing identity configured in the
+// clone at all. SignDelivery must reuse it rather than attempt to sign
+// again through core.
+func TestDeliveryRecoversLegacySignedCommit(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base := git(t, "-C", f.clone, "rev-parse", "HEAD")
+	git(t, "-C", f.clone, "commit", "--allow-empty", "-m", "Feature")
+	head := git(t, "-C", f.clone, "rev-parse", "HEAD")
+	message := "Feature"
+	messages := []DeliveryMessage{{Commit: head, Message: message}}
+	tree := git(t, "-C", f.clone, "rev-parse", head+"^{tree}")
+	legacy := git(t, "-C", f.clone, "-c", "user.name=Owner Name", "-c", "user.email=owner@example.invalid", "commit-tree", "-p", base, "-m", message+"\n\nSigned-off-by: Owner Name <owner@example.invalid>", tree)
+	hash := deliveryIntentHash("operation", base, head, messages, true)
+	git(t, "-C", f.clone, "update-ref", legacyDeliveryRefPrefix+hash, legacy)
+	signed, err := f.provider.SignDelivery(ctx, "operation", base, head, messages, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signed != legacy {
+		t.Fatalf("recovery signed %s instead of reusing the legacy delivery %s", signed, legacy)
+	}
+	if refs := git(t, "-C", f.clone, "for-each-ref", "refs/core-sign"); refs != "" {
+		t.Fatal("legacy recovery signed again through core")
+	}
+}
+
+// TestDeliverySigningProgramFailureBlocksPublication configures a valid
+// owner identity and signing key, but a signing program that always fails,
+// for a delivery never signed before under its intent hash. SignDelivery
+// must fail rather than return an unsigned commit, and must leave nothing
+// for a retry under the unsigned state to mistake for a completed signing.
+func TestDeliverySigningProgramFailureBlocksPublication(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base := git(t, "-C", f.clone, "rev-parse", "HEAD")
+	git(t, "-C", f.clone, "commit", "--allow-empty", "-m", "Feature")
+	head := git(t, "-C", f.clone, "rev-parse", "HEAD")
+	key := filepath.Join(t.TempDir(), "signing-key")
+	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", key).CombinedOutput(); err != nil {
+		t.Fatalf("ssh-keygen: %v: %s", err, out)
+	}
+	failing := filepath.Join(t.TempDir(), "failing-ssh-keygen")
+	if err := os.WriteFile(failing, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range map[string]string{"user.name": "Owner Name", "user.email": "owner@example.invalid", "user.signingkey": key, "gpg.format": "ssh", "commit.gpgsign": "false", "gpg.ssh.program": failing} {
+		git(t, "-C", f.clone, "config", k, v)
+	}
+	messages := []DeliveryMessage{{Commit: head, Message: "Feature"}}
+	if _, err := f.provider.SignDelivery(ctx, "operation", base, head, messages, true); err == nil {
+		t.Fatal("failing signing program signed a commit")
+	}
+	if refs := git(t, "-C", f.clone, "for-each-ref", "refs/osmia/delivery", "refs/core-sign"); refs != "" {
+		t.Fatalf("failing signing program left a commit ref: %s", refs)
+	}
+	git(t, "-C", f.clone, "config", "gpg.ssh.program", "ssh-keygen")
+	signed, err := f.provider.SignDelivery(ctx, "operation", base, head, messages, true)
+	if err != nil {
+		t.Fatalf("retry after fixing the signing program: %v", err)
+	}
+	if signed == head {
+		t.Fatal("retry reused the unsigned candidate")
 	}
 }
 
@@ -114,11 +183,11 @@ func TestDeliveryRequiresOwnerConfiguration(t *testing.T) {
 				}
 				git(t, "-C", f.clone, "config", k, v)
 			}
-			_, err := f.provider.SignDelivery(context.Background(), "op", base, head, []DeliveryMessage{{Commit: head, Message: "Feature"}}, true, time.Now())
+			_, err := f.provider.SignDelivery(context.Background(), "op", base, head, []DeliveryMessage{{Commit: head, Message: "Feature"}}, true)
 			if err == nil || !strings.Contains(err.Error(), missing) {
 				t.Fatalf("missing %s: %v", missing, err)
 			}
-			if refs := git(t, "-C", f.clone, "for-each-ref", "refs/osmia/delivery"); refs != "" {
+			if refs := git(t, "-C", f.clone, "for-each-ref", "refs/osmia/delivery", "refs/core-sign"); refs != "" {
 				t.Fatal("missing identity recorded delivery")
 			}
 		})

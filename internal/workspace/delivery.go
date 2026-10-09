@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
-	"time"
+
+	"github.com/kpenfound/busybees/core/vcs"
+	coregit "github.com/kpenfound/busybees/core/vcs/git"
 )
 
 // DeliveryMessage pairs an original revision with its owner-approved message.
@@ -70,13 +71,60 @@ func CleanDeliveryMessage(message string) string {
 	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
-// TODO: Remove the signed-commit construction and recovery-ref adapter when
-// busybees/core provides service-owned signed history rewriting.
-//
-// SignDelivery writes owner-attributed, signed commits without moving the
-// working branch. The operation's ref retains the completed result so recovery
-// reuses it even if recording the publication was interrupted.
-func (g *Git) SignDelivery(ctx context.Context, operation, base, head string, messages []DeliveryMessage, squash bool, at time.Time) (string, error) {
+// deliveryIntentHash identifies a delivery's approved intent: the
+// publication operation, the reviewed base and head, the approved messages
+// and the squash or per-unit layout. It is the signing ID core's commit
+// signer records a signing under and the legacy recovery ref's suffix, so
+// one approved delivery maps to one signing and a retry under the same
+// intent finds it rather than making one again.
+func deliveryIntentHash(operation, base, head string, messages []DeliveryMessage, squash bool) string {
+	intent, _ := json.Marshal(struct {
+		Operation, Base, Head string
+		Messages              []DeliveryMessage
+		Squash                bool
+	}{operation, base, head, messages, squash})
+	return fmt.Sprintf("%x", sha256.Sum256(intent))
+}
+
+// legacyDeliveryRefPrefix is where the signed-commit construction this
+// implementation replaced kept its completed result, outside the branches,
+// until a publication reusing it was published or abandoned. A delivery it
+// already signed is still reused from there rather than signed again.
+const legacyDeliveryRefPrefix = "refs/osmia/delivery/"
+
+// legacyDelivery looks for a delivery the replaced implementation signed and
+// kept under legacyDeliveryRefPrefix+hash, verifying its tree against the
+// reviewed head before it is reused.
+func (g *Git) legacyDelivery(ctx context.Context, hash, tree string) (string, bool, error) {
+	saved, err := g.run(ctx, "rev-parse", "--verify", "--quiet", legacyDeliveryRefPrefix+hash)
+	if err != nil {
+		if exitCode(err, 1) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	c, err := g.Commit(ctx, saved)
+	if err != nil {
+		return "", false, err
+	}
+	if c.Tree != tree {
+		return "", false, errors.New("recorded signed delivery differs from reviewed tree")
+	}
+	return saved, true, nil
+}
+
+// SignDelivery makes owner-attributed, signed commits of the reviewed
+// history through core's commit signer (core/vcs/git.Signer), which uses the
+// clone's configured identity, signing key and signing format and never
+// returns a commit it could not sign. Osmia checks the messages against the
+// reviewed linear history, removes agent co-author trailers, adds the
+// owner's Signed-off-by trailer, and derives a durable signing ID from the
+// publication operation and the approved intent, so a retry finds the same
+// signing rather than making one again. A delivery the replaced
+// implementation already signed and kept under the legacy
+// refs/osmia/delivery/<hash> ref is reused the same way, until it is
+// published or abandoned.
+func (g *Git) SignDelivery(ctx context.Context, operation, base, head string, messages []DeliveryMessage, squash bool) (string, error) {
 	original, err := g.Commit(ctx, head)
 	if err != nil {
 		return "", err
@@ -111,25 +159,11 @@ func (g *Git) SignDelivery(ctx context.Context, operation, base, head string, me
 			return "", errors.New("delivery commit message must not be empty or contain NUL")
 		}
 	}
-	intent, _ := json.Marshal(struct {
-		Operation, Base, Head string
-		Messages              []DeliveryMessage
-		Squash                bool
-	}{operation, base, head, messages, squash})
-	ref := fmt.Sprintf("refs/osmia/delivery/%x", sha256.Sum256(intent))
-	saved, err := g.run(ctx, "rev-parse", "--verify", "--quiet", ref)
-	if err == nil {
-		c, err := g.Commit(ctx, saved)
-		if err != nil {
-			return "", err
-		}
-		if c.Tree != original.Tree {
-			return "", errors.New("recorded signed delivery differs from reviewed tree")
-		}
-		return saved, nil
-	}
-	if !exitCode(err, 1) {
+	hash := deliveryIntentHash(operation, base, head, messages, squash)
+	if saved, ok, err := g.legacyDelivery(ctx, hash, original.Tree); err != nil {
 		return "", err
+	} else if ok {
+		return saved, nil
 	}
 	value := func(key string) (string, error) {
 		v, err := g.run(ctx, "config", "--get", key)
@@ -149,40 +183,34 @@ func (g *Git) SignDelivery(ctx context.Context, operation, base, head string, me
 	if err != nil {
 		return "", err
 	}
-	key, err := value("user.signingkey")
-	if err != nil {
+	if _, err := value("user.signingkey"); err != nil {
 		return "", err
 	}
 	if strings.ContainsAny(name+email, "<>") {
 		return "", errors.New("invalid delivery identity")
 	}
-	date := fmt.Sprintf("@%d +0000", at.Unix())
-	env := []string{"GIT_AUTHOR_NAME=" + name, "GIT_AUTHOR_EMAIL=" + email, "GIT_COMMITTER_NAME=" + name, "GIT_COMMITTER_EMAIL=" + email, "GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date}
-	for _, k := range []string{"GNUPGHOME", "GPG_TTY"} {
-		if v, ok := os.LookupEnv(k); ok {
-			env = append(env, k+"="+v)
-		}
-	}
-	parent := base
-	for _, m := range messages {
+	trailer := "Signed-off-by: " + name + " <" + email + ">"
+	req := vcs.SignRequest{ID: hash}
+	for i, m := range messages {
 		c, err := g.Commit(ctx, m.Commit)
 		if err != nil {
 			return "", err
 		}
-		message := CleanDeliveryMessage(m.Message)
-		trailer := "Signed-off-by: " + name + " <" + email + ">"
-		signedOff, err := g.runInput(ctx, g.Clone, nil, strings.NewReader(message+"\n"), "-c", "trailer.ifexists=addIfDifferent", "-c", "trailer.ifmissing=add", "interpret-trailers", "--trailer", trailer)
+		signedOff, err := g.runInput(ctx, g.Clone, nil, strings.NewReader(CleanDeliveryMessage(m.Message)+"\n"), "-c", "trailer.ifexists=addIfDifferent", "-c", "trailer.ifmissing=add", "interpret-trailers", "--trailer", trailer)
 		if err != nil {
 			return "", err
 		}
-		id, err := g.runInput(ctx, g.Clone, env, strings.NewReader(signedOff), "commit-tree", "-S"+key, "-p", parent, "-F", "-", c.Tree)
-		if err != nil {
-			return "", fmt.Errorf("sign delivery commit: %w", err)
+		spec := vcs.CommitSpec{Tree: c.Tree, Message: signedOff}
+		if i == 0 {
+			spec.Parents = []string{base}
+		} else {
+			spec.FollowsPrevious = true
 		}
-		parent = strings.TrimSpace(id)
+		req.Commits = append(req.Commits, spec)
 	}
-	if _, err := g.run(ctx, "update-ref", ref, parent, strings.Repeat("0", len(parent))); err != nil {
-		return "", err
+	signing, err := (coregit.Signer{}).Sign(ctx, vcs.Directory(g.Clone), req)
+	if err != nil {
+		return "", fmt.Errorf("sign delivery commit: %w", err)
 	}
-	return parent, nil
+	return signing.Head, nil
 }

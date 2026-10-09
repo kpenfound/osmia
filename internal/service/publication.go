@@ -427,11 +427,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		}
 	}
 	if published == "" {
-		requested, err := (&foreman{masons: &masons{s: p.s, cfg: cfg, repository: p.repository}}).requestedAt(stream, op.ID)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		published, err = (&workspace.Git{Clone: cfg.Project.Clone}).SignDelivery(ctx, op.ID, report.Upstream.Commit, in.Commit, approval.Messages, in.Style == squashStyle, requested)
+		published, err = (&workspace.Git{Clone: cfg.Project.Clone}).SignDelivery(ctx, op.ID, report.Upstream.Commit, in.Commit, approval.Messages, in.Style == squashStyle)
 		if err != nil {
 			return p.refuse(ctx, stream, in, "pre-publication amendment failed: "+err.Error())
 		}
