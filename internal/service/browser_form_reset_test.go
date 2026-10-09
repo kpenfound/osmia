@@ -111,11 +111,16 @@ func TestBrowserPageResetsTheArchiveFormAfterSuccessAndKeepsItAfterFailure(t *te
 	}
 
 	// A stale form targeting archived work is refused and keeps its values.
-	p.setValue("#workstream-action [name=workstream]", string(quiet))
 	p.setValue("#workstream-action [name=action]", "abandon")
 	p.eval(`document.querySelector('#workstream-action [name=archive]').checked = true`, nil)
 	p.typeInto("#workstream-action [name=note]", "Trying again.")
-	p.click("#workstream-action [type=submit]")
+	// Set and submit the stale target together so a live refresh cannot
+	// replace it with the currently displayed workstream before submission.
+	p.eval(`(() => {
+      const form = document.getElementById('workstream-action');
+      form.elements.workstream.value = `+quote(string(quiet))+`;
+      form.requestSubmit(form.querySelector('[type=submit]'));
+    })()`, nil)
 	p.awaitText("#workstream-action .result", "permanently archived")
 	if action, note, archive := fields(); action != "abandon" || note != "Trying again." || !archive {
 		t.Fatalf("the debate-and-abandonment form after a refused action: action %q, note %q, archive %v", action, note, archive)

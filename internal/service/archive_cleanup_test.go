@@ -109,3 +109,70 @@ func TestArchiveCleanupMigratesOldArchivesAndRetainsTitle(t *testing.T) {
 		t.Fatal("archive restored")
 	}
 }
+
+func TestArchiveCleanupBatchesDependenciesAndWaitsForRetainedDescendants(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	opts, cfg := conversationFixture(t, "archive-batch-")
+	repo, err := trace.Open(cfg.Root, cfg.Project)
+	must(t, err)
+	t.Cleanup(func() { repo.Close() })
+	descendant := config.WorkstreamID("w_00000000000000000000000000000004")
+	independent := config.WorkstreamID("w_00000000000000000000000000000005")
+	for _, id := range []config.WorkstreamID{descendant, independent} {
+		must(t, repo.CreateWorkstream(ctx, id, demoStart, serviceActor))
+	}
+	_, err = repo.SetWorkstreamBase(ctx, quiet, stream, 0, demoStart)
+	must(t, err)
+	_, err = repo.SetWorkstreamBase(ctx, descendant, quiet, 0, demoStart)
+	must(t, err)
+	all := []config.WorkstreamID{stream, quiet, descendant, independent}
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{project: all}})
+	must(t, err)
+	t.Cleanup(func() { store.Close() })
+	s := &Service{cfg: cfg, store: store, options: opts}
+	s.setSole(runtimeFor(repo))
+	for _, id := range all {
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "finish", Revision: 1, Project: project, Workstream: id, At: demoStart, Actor: serviceActor, Cause: "fixture"}
+		_, err = repo.SetFeatureState(ctx, h, AbandonedState, "done")
+		must(t, err)
+		if id != descendant {
+			must(t, store.SetArchived(runtime.Archive{Project: project, Workstream: id, ArchivedAt: demoStart}))
+		}
+	}
+	cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, repository: repo, now: s.now}}
+	must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	state, _ := store.Snapshot()
+	for _, a := range state.Archived {
+		if a.Title == "" || a.CleanedAt.IsZero() != (a.Workstream != independent) {
+			t.Fatalf("cleanup with retained descendant: %+v", a)
+		}
+	}
+	must(t, store.SetArchived(runtime.Archive{Project: project, Workstream: descendant, ArchivedAt: demoStart}))
+	must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	state, _ = store.Snapshot()
+	for _, a := range state.Archived {
+		if a.Title == "" || a.CleanedAt.IsZero() {
+			t.Fatalf("batch incomplete: %+v", a)
+		}
+	}
+	remaining, err := repo.Workstreams()
+	must(t, err)
+	for _, id := range all {
+		if slices.Contains(remaining, id) {
+			t.Fatalf("batched archive remains: %s", id)
+		}
+	}
+	// Completion metadata can lag a successfully published batch after a stop.
+	for _, a := range state.Archived {
+		a.CleanedAt = time.Time{}
+		must(t, store.UpdateArchive(a))
+	}
+	must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	state, _ = store.Snapshot()
+	for _, a := range state.Archived {
+		if a.CleanedAt.IsZero() {
+			t.Fatalf("batch completion not recovered: %+v", a)
+		}
+	}
+}

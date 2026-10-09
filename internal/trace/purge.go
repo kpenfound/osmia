@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -14,18 +15,28 @@ import (
 const purgeFile = ".git/osmia-purge.json"
 
 type purgeJournal struct {
-	Workstream config.WorkstreamID `json:"workstream"`
-	Parent     string              `json:"parent"`
-	Commit     string              `json:"commit"`
+	Workstream  config.WorkstreamID   `json:"workstream,omitempty"`
+	Workstreams []config.WorkstreamID `json:"workstreams,omitempty"`
+	Parent      string                `json:"parent"`
+	Commit      string                `json:"commit"`
 }
 
-// PurgeWorkstream permanently removes a terminal workstream from the files
-// and every Git revision. Other workstreams' revisions remain intact. The
-// caller must durably retain its archive title before calling this method.
-// It can run inside Serialize; the trace mutex fences reads and writes.
+// PurgeWorkstream removes one terminal workstream through PurgeWorkstreams.
 func (r *Repository) PurgeWorkstream(ctx context.Context, stream config.WorkstreamID) error {
-	if err := config.CheckWorkstreamIDs(stream); err != nil {
+	return r.PurgeWorkstreams(ctx, []config.WorkstreamID{stream})
+}
+
+// PurgeWorkstreams permanently removes terminal workstreams in one history
+// rewrite and prune. Retained workstreams' revisions remain intact. The caller
+// must durably retain every archive title before calling this method.
+// It can run inside Serialize; the trace mutex fences reads and writes.
+func (r *Repository) PurgeWorkstreams(ctx context.Context, streams []config.WorkstreamID) error {
+	streams = slices.Compact(slices.Sorted(slices.Values(streams)))
+	if err := config.CheckWorkstreamIDs(streams...); err != nil {
 		return err
+	}
+	if len(streams) == 0 {
+		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -36,10 +47,17 @@ func (r *Repository) PurgeWorkstream(ctx context.Context, stream config.Workstre
 	if _, err := r.checkHistory(ctx); err != nil {
 		return err
 	}
-	if _, err := r.dir.Stat("workstreams/" + string(stream)); os.IsNotExist(err) {
+	selected := map[config.WorkstreamID]bool{}
+	for _, stream := range streams {
+		if _, err := r.dir.Stat("workstreams/" + string(stream)); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		selected[stream] = true
+	}
+	if len(selected) == 0 {
 		return nil
-	} else if err != nil {
-		return err
 	}
 	records, _, err := r.scan()
 	if err != nil {
@@ -49,36 +67,41 @@ func (r *Repository) PurgeWorkstream(ctx context.Context, stream config.Workstre
 	if err != nil {
 		return err
 	}
-	for _, base := range dependencies {
-		if base.Base == stream {
+	for stream, base := range dependencies {
+		if selected[base.Base] && !selected[stream] {
 			return fmt.Errorf("workstream is still a dependency")
 		}
 	}
-	log, v, err := r.loadWorkflow(stream)
-	if err != nil {
-		return err
-	}
-	if state := v.states[FeatureSubject].Value; state != "delivered" && state != "abandoned" {
-		return fmt.Errorf("only terminal workstreams can be purged")
-	}
-	for _, th := range log.Threads {
-		if th.Active != "" {
-			return fmt.Errorf("workstream has an active turn")
+	for _, stream := range streams {
+		if !selected[stream] {
+			continue
 		}
-		for _, q := range th.Turns {
-			if q.CompletedAt.IsZero() && q.Response == nil {
-				return fmt.Errorf("workstream has an unfinished turn")
+		log, v, err := r.loadWorkflow(stream)
+		if err != nil {
+			return err
+		}
+		if state := v.states[FeatureSubject].Value; state != "delivered" && state != "abandoned" {
+			return fmt.Errorf("only terminal workstreams can be purged")
+		}
+		for _, th := range log.Threads {
+			if th.Active != "" {
+				return fmt.Errorf("workstream has an active turn")
+			}
+			for _, q := range th.Turns {
+				if q.CompletedAt.IsZero() && q.Response == nil {
+					return fmt.Errorf("workstream has an unfinished turn")
+				}
 			}
 		}
-	}
-	for _, op := range v.operations {
-		if op.Result == nil || !op.Acknowledged {
-			return fmt.Errorf("workstream has a pending operation")
+		for _, op := range v.operations {
+			if op.Result == nil || !op.Acknowledged {
+				return fmt.Errorf("workstream has a pending operation")
+			}
 		}
-	}
-	for key := range r.attempts {
-		if strings.HasPrefix(key, string(stream)+"/") {
-			return fmt.Errorf("workstream has an operation attempt in flight")
+		for key := range r.attempts {
+			if strings.HasPrefix(key, string(stream)+"/") {
+				return fmt.Errorf("workstream has an operation attempt in flight")
+			}
 		}
 	}
 	if err := r.checkGit(); err != nil {
@@ -114,13 +137,9 @@ func (r *Repository) PurgeWorkstream(ctx context.Context, stream config.Workstre
 			key, value, _ := strings.Cut(line, " ")
 			switch key {
 			case "tree":
-				tree, ok := trees[value]
-				if !ok {
-					tree, err = r.purgeTree(ctx, value, []string{"workstreams", string(stream)})
-					if err != nil {
-						return err
-					}
-					trees[value] = tree
+				tree, err := r.purgeTree(ctx, value, selected, true, trees)
+				if err != nil {
+					return err
 				}
 				lines[i] = "tree " + tree
 			case "parent":
@@ -140,7 +159,7 @@ func (r *Repository) PurgeWorkstream(ctx context.Context, stream config.Workstre
 	if err := r.syncObjects(); err != nil {
 		return err
 	}
-	p := purgeJournal{stream, parent, mapped[parent]}
+	p := purgeJournal{Workstreams: streams, Parent: parent, Commit: mapped[parent]}
 	data, err := json.Marshal(p)
 	if err != nil {
 		return err
@@ -156,7 +175,11 @@ func (r *Repository) PurgeWorkstream(ctx context.Context, stream config.Workstre
 	return r.recoverPurge(ctx)
 }
 
-func (r *Repository) purgeTree(ctx context.Context, tree string, parts []string) (string, error) {
+func (r *Repository) purgeTree(ctx context.Context, tree string, selected map[config.WorkstreamID]bool, root bool, cache map[string]string) (string, error) {
+	key := fmt.Sprintf("%t/%s", root, tree)
+	if rewritten, ok := cache[key]; ok {
+		return rewritten, nil
+	}
 	raw, err := r.gitBytes(ctx, nil, "", "ls-tree", "-z", tree)
 	if err != nil {
 		return "", err
@@ -171,28 +194,34 @@ func (r *Repository) purgeTree(ctx context.Context, tree string, parts []string)
 		if !ok {
 			return "", fmt.Errorf("invalid trace tree")
 		}
-		if string(name) == parts[0] {
+		if !root && selected[config.WorkstreamID(name)] {
 			changed = true
-			if len(parts) == 1 {
-				continue
-			}
+			continue
+		}
+		if root && string(name) == "workstreams" {
 			fields := strings.Fields(string(meta))
 			if len(fields) != 3 || fields[1] != "tree" {
 				return "", fmt.Errorf("invalid workstream tree")
 			}
-			child, err := r.purgeTree(ctx, fields[2], parts[1:])
+			child, err := r.purgeTree(ctx, fields[2], selected, false, cache)
 			if err != nil {
 				return "", err
 			}
+			changed = changed || child != fields[2]
 			entry = []byte(fields[0] + " tree " + child + "\t" + string(name))
 		}
 		kept = append(kept, entry...)
 		kept = append(kept, 0)
 	}
-	if !changed {
-		return tree, nil
+	result := tree
+	if changed {
+		result, err = r.git(ctx, kept, "mktree", "-z")
+		if err != nil {
+			return "", err
+		}
 	}
-	return r.git(ctx, kept, "mktree", "-z")
+	cache[key] = result
+	return result, nil
 }
 
 // recoverPurge resumes an authorized deletion before any trace read or write.
@@ -208,7 +237,13 @@ func (r *Repository) recoverPurge(ctx context.Context) error {
 	if err := decode(data, &p); err != nil {
 		return err
 	}
-	if config.CheckWorkstreamIDs(p.Workstream) != nil || !objectID.MatchString(p.Parent) || !objectID.MatchString(p.Commit) {
+	if p.Workstream != "" {
+		if len(p.Workstreams) != 0 {
+			return fmt.Errorf("invalid trace purge journal")
+		}
+		p.Workstreams = []config.WorkstreamID{p.Workstream}
+	}
+	if len(p.Workstreams) == 0 || config.CheckWorkstreamIDs(p.Workstreams...) != nil || !objectID.MatchString(p.Parent) || !objectID.MatchString(p.Commit) {
 		return fmt.Errorf("invalid trace purge journal")
 	}
 	if err := r.checkGit(); err != nil {
@@ -227,8 +262,10 @@ func (r *Repository) recoverPurge(ctx context.Context) error {
 	if err := r.boundary("purge-ref-published"); err != nil {
 		return err
 	}
-	if err := r.dir.RemoveAll("workstreams/" + string(p.Workstream)); err != nil {
-		return err
+	for _, stream := range p.Workstreams {
+		if err := r.dir.RemoveAll("workstreams/" + string(stream)); err != nil {
+			return err
+		}
 	}
 	if err := syncDir(r.dir, "workstreams"); err != nil {
 		return err

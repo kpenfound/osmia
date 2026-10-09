@@ -290,7 +290,8 @@ osmia status --json
   abandon the workstream first. Previously archived workstreams receive the
   same one-time cleanup automatically. Cleanup waits for unfinished turns,
   pending operations, temporary workspace removal and retained dependents;
-  failures are retried. The web archived list distinguishes pending cleanup
+  failures are retried. Eligible archives on a project share one history rewrite
+  and prune. The web archived list distinguishes pending cleanup
   from a deleted trace.
 - `shed object <workstream-id> <argument>` adds your own objection to the
   current round of a workstream's debate. The argument is one argument; quote
