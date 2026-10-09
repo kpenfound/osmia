@@ -595,6 +595,17 @@ func (j *Jujutsu) Advance(ctx context.Context, w Worktree, from, to string) erro
 	return err
 }
 
+// TODO: Move Jujutsu's persistent replay (ReplayIn, ReplayInFrom,
+// ContinueReplay, Replaying) to busybees/core's revision replay once core's
+// jj.Replayer commits a replayed revision deterministically. Today it
+// duplicates with `jj duplicate`, which gives the duplicate a new random
+// change id on every call, and it commits at the wall-clock time of the
+// call rather than a caller-chosen, reproducible one, so replaying the same
+// range twice, including once before and once after a service restart,
+// would not reproduce the same commit the way Osmia's own implementation
+// and core's own Git replayer both do, risking a changed candidate that
+// skips the owner's approval of it.
+//
 // ReplayIn replays the workspace's branch onto onto in the workspace itself,
 // as Replay does, and returns the commit its branch then points at. Each
 // commit is copied onto the copy of the one before it, keeping its message

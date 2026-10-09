@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/busybees/core/vcs"
+	gitvcs "github.com/kpenfound/busybees/core/vcs/git"
 )
 
 // Git is the worktree provider of one clone. Every workspace is a worktree of
@@ -462,9 +463,15 @@ func (g *Git) Advance(ctx context.Context, w Worktree, from, to string) error {
 // A leading dot keeps it apart from every workspace name.
 const replayName = ".replay"
 
+// replayer is the core replayer that performs every Git replay below: it
+// cherry-picks one commit at a time, keeping each original's message,
+// author and committer, so the same replay of the same commits onto the
+// same revision gives the same commit ids; a commit that becomes empty is
+// kept. Its state is kept in the worktree's core-replay.json.
+func (g *Git) replayer() gitvcs.Replayer { return gitvcs.Replayer{} }
+
 // Replay returns the commit that holds each commit head has and onto does
-// not, applied on top of onto in order, each keeping its message and author
-// and committed by Osmia at the given time, with the paths that conflicted,
+// not, applied on top of onto in order, with the paths that conflicted,
 // sorted, when that cannot be done. A commit whose change onto already holds
 // is dropped, and a head that already descends from onto is returned as it
 // is. The replay runs in a temporary detached worktree under Directory, which
@@ -475,8 +482,9 @@ func (g *Git) Replay(ctx context.Context, head, onto string, at time.Time) (stri
 
 // ReplayFrom replays only commits after base onto onto. An empty base uses
 // the histories' merge base. This excludes an integrated dependency even
-// when upstream used a squash merge.
-func (g *Git) ReplayFrom(ctx context.Context, base, head, onto string, at time.Time) (string, []string, error) {
+// when upstream used a squash merge. at is unused: the replayed commits
+// keep their originals' author and committer, dates included.
+func (g *Git) ReplayFrom(ctx context.Context, base, head, onto string, _ time.Time) (string, []string, error) {
 	descends, err := g.Ancestor(ctx, onto, head)
 	if err != nil || descends {
 		return head, nil, err
@@ -492,34 +500,20 @@ func (g *Git) ReplayFrom(ctx context.Context, base, head, onto string, at time.T
 	if _, err := g.run(ctx, "worktree", "add", "--quiet", "--detach", dir, head); err != nil {
 		return "", nil, err
 	}
-	args := []string{"rebase", "--quiet", "--no-autostash", onto}
-	if base != "" {
-		args = []string{"rebase", "--quiet", "--no-autostash", "--onto", onto, base}
-	}
-	if _, err := g.runIn(ctx, dir, replayEnvironment(at), args...); err != nil {
-		conflicts, unmergedErr := g.unmerged(ctx, dir)
-		if unmergedErr != nil || len(conflicts) == 0 {
-			return "", nil, errors.Join(err, unmergedErr)
+	boundary := base
+	if boundary == "" {
+		if boundary, err = g.MergeBase(ctx, onto, head); err != nil {
+			return "", nil, err
 		}
-		return "", conflicts, nil
 	}
-	commit, err := g.runIn(ctx, dir, nil, "rev-parse", "--verify", "HEAD^{commit}")
-	return commit, nil, err
-}
-
-// replayEnvironment is the environment a replay runs Git in: commits are
-// committed by Osmia at the given time, no editor opens and the owner's
-// rebase settings that would change what is replayed are off.
-func replayEnvironment(at time.Time) []string {
-	date := fmt.Sprintf("@%d +0000", at.Unix())
-	env := append(slices.Clone(identity), "GIT_COMMITTER_DATE="+date, "GIT_EDITOR=true", "GIT_SEQUENCE_EDITOR=true")
-	settings := []string{"rebase.autoStash=false", "rebase.autoSquash=false", "rebase.updateRefs=false", "rebase.rebaseMerges=false", "commit.gpgSign=false"}
-	env = append(env, fmt.Sprintf("GIT_CONFIG_COUNT=%d", len(settings)))
-	for i, setting := range settings {
-		key, value, _ := strings.Cut(setting, "=")
-		env = append(env, fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", i, key), fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", i, value))
+	r, err := g.replayer().Replay(ctx, Worktree{Path: dir}, vcs.ReplayRequest{OldBase: boundary, Head: head, Onto: onto})
+	if err != nil {
+		return "", nil, err
 	}
-	return env
+	if r.InProgress {
+		return "", r.Conflicts, nil
+	}
+	return r.Candidate, nil, nil
 }
 
 // unmerged returns the paths the index of the worktree at dir holds
@@ -539,6 +533,40 @@ func (g *Git) unmerged(ctx context.Context, dir string) ([]string, error) {
 	return paths, nil
 }
 
+// nativeRebaseDir returns the absolute path of the worktree's native Git
+// rebase state directory, and whether it holds one: a replay in Git's own
+// native rebase state, rather than core's replayer's core-replay.json, so
+// it can still be finished or aborted through that same native rebase.
+func (g *Git) nativeRebaseDir(ctx context.Context, dir string) (string, bool, error) {
+	path, err := g.runIn(ctx, dir, nil, "rev-parse", "--path-format=absolute", "--git-path", "rebase-merge")
+	if err != nil {
+		return "", false, err
+	}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return path, false, nil
+	} else if err != nil {
+		return path, false, err
+	}
+	return path, true, nil
+}
+
+// reattach returns the worktree, left detached by a fresh replay, to its
+// branch, moving the branch from its pre-replay tip head to wherever the
+// replay left HEAD. From here on every commit the replay makes, on an
+// attached HEAD, moves the branch with it, so the branch tracks the
+// replay's progress without further action.
+func (g *Git) reattach(ctx context.Context, w Worktree, head string) error {
+	current, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return err
+	}
+	if _, err := g.runIn(ctx, w.Path, identity, "update-ref", "-m", "osmia: replay", "refs/heads/"+w.Branch, current, head); err != nil {
+		return err
+	}
+	_, err = g.runIn(ctx, w.Path, nil, "symbolic-ref", "HEAD", "refs/heads/"+w.Branch)
+	return err
+}
+
 // ReplayIn replays the worktree's branch onto onto in the worktree itself,
 // as Replay does, and returns the commit its branch then points at. A
 // replay that conflicts stops at the commit it cannot apply, with the
@@ -546,34 +574,132 @@ func (g *Git) unmerged(ctx context.Context, dir string) ([]string, error) {
 // returns those paths; ContinueReplay goes on once they are resolved. A
 // worktree that already descends from onto is left as it is.
 func (g *Git) ReplayIn(ctx context.Context, w Worktree, onto string, at time.Time) (string, []string, error) {
-	return g.replayStep(ctx, w, at, "rebase", "--quiet", "--no-autostash", onto)
+	return g.ReplayInFrom(ctx, w, "", onto, at)
 }
 
 // ReplayInFrom continues to use the explicit dependency boundary when a
-// replay needs conflict resolution in a persistent workspace.
-func (g *Git) ReplayInFrom(ctx context.Context, w Worktree, base, onto string, at time.Time) (string, []string, error) {
-	if base == "" {
-		return g.ReplayIn(ctx, w, onto, at)
+// replay needs conflict resolution in a persistent workspace. at is unused:
+// the replayed commits keep their originals' author and committer.
+func (g *Git) ReplayInFrom(ctx context.Context, w Worktree, base, onto string, _ time.Time) (string, []string, error) {
+	head, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return "", nil, err
 	}
-	return g.replayStep(ctx, w, at, "rebase", "--quiet", "--no-autostash", "--onto", onto, base)
+	if descends, err := g.Ancestor(ctx, onto, head); err != nil || descends {
+		return head, nil, err
+	}
+	boundary := base
+	if boundary == "" {
+		if boundary, err = g.MergeBase(ctx, onto, head); err != nil {
+			return "", nil, err
+		}
+	}
+	r, err := g.replayer().Replay(ctx, w, vcs.ReplayRequest{OldBase: boundary, Head: head, Onto: onto})
+	if err != nil {
+		if errors.Is(err, vcs.ErrReplayInProgress) {
+			return "", r.Conflicts, nil
+		}
+		return "", nil, err
+	}
+	if err := g.reattach(ctx, w, head); err != nil {
+		return "", nil, err
+	}
+	if r.InProgress {
+		return "", r.Conflicts, nil
+	}
+	return r.Candidate, nil, nil
 }
 
-// ContinueReplay stages every file of the worktree, as Snapshot does, and
-// goes on with the replay ReplayIn stopped, as it stopped: to the next
-// commit that conflicts, whose paths it returns, or to the end, whose commit
-// it returns. A replay step whose resolution leaves its commit's change
-// empty drops the commit.
+// ContinueReplay stages every file of the worktree, as Snapshot does,
+// refuses a conflicted path that still holds a conflict marker, and goes on
+// with the replay ReplayIn or ReplayInFrom stopped, as it stopped: to the
+// next commit that conflicts, whose paths it returns, or to the end, whose
+// commit it returns.
 func (g *Git) ContinueReplay(ctx context.Context, w Worktree, at time.Time) (string, []string, error) {
+	if _, native, err := g.nativeRebaseDir(ctx, w.Path); err != nil {
+		return "", nil, err
+	} else if native {
+		return g.continueNativeRebase(ctx, w, at)
+	}
+	r, err := g.replayer().Continue(ctx, w)
+	if err != nil {
+		if errors.Is(err, vcs.ErrUnresolved) {
+			return "", r.Conflicts, err
+		}
+		return "", nil, err
+	}
+	if r.InProgress {
+		return "", r.Conflicts, nil
+	}
+	return r.Candidate, nil, nil
+}
+
+// AbortReplay drops the replay in progress in the worktree, whatever state
+// it recorded on disk, and returns the worktree to where it was before the
+// persistent ReplayIn or ReplayInFrom that started it. A worktree with no
+// replay in progress returns vcs.ErrNoReplay.
+func (g *Git) AbortReplay(ctx context.Context, w Worktree) error {
+	if _, native, err := g.nativeRebaseDir(ctx, w.Path); err != nil {
+		return err
+	} else if native {
+		_, err := g.runIn(ctx, w.Path, nil, "rebase", "--abort")
+		return err
+	}
+	return g.replayer().Abort(ctx, w)
+}
+
+// Replaying returns the commit the replay in the worktree stopped at, with
+// the paths its index holds unmerged, and whether a replay is in progress
+// there. A replay in progress that stopped at no commit returns "".
+func (g *Git) Replaying(ctx context.Context, w Worktree) (string, []string, bool, error) {
+	if _, native, err := g.nativeRebaseDir(ctx, w.Path); err != nil {
+		return "", nil, false, err
+	} else if native {
+		return g.nativeRebaseReplaying(ctx, w)
+	}
+	r, err := g.replayer().ReplayStatus(ctx, w)
+	if err != nil {
+		return "", nil, false, err
+	}
+	if !r.InProgress {
+		return "", nil, false, nil
+	}
+	stop := ""
+	for _, c := range r.Commits {
+		if c.Replayed == "" {
+			stop = c.Original
+			break
+		}
+	}
+	return stop, r.Conflicts, true, nil
+}
+
+// nativeRebaseEnvironment is the environment continueNativeRebase finishes
+// a native Git rebase in: commits are committed by Osmia at the given
+// time, no editor opens and the owner's rebase settings that would change
+// what is replayed are off.
+func nativeRebaseEnvironment(at time.Time) []string {
+	date := fmt.Sprintf("@%d +0000", at.Unix())
+	env := append(slices.Clone(identity), "GIT_COMMITTER_DATE="+date, "GIT_EDITOR=true", "GIT_SEQUENCE_EDITOR=true")
+	settings := []string{"rebase.autoStash=false", "rebase.autoSquash=false", "rebase.updateRefs=false", "rebase.rebaseMerges=false", "commit.gpgSign=false"}
+	env = append(env, fmt.Sprintf("GIT_CONFIG_COUNT=%d", len(settings)))
+	for i, setting := range settings {
+		key, value, _ := strings.Cut(setting, "=")
+		env = append(env, fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", i, key), fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", i, value))
+	}
+	return env
+}
+
+// continueNativeRebase is ContinueReplay for a replay in Git's own native
+// rebase state, detached at the point it stopped, with its state under the
+// worktree's rebase-merge directory rather than core-replay.json. It
+// finishes that native rebase directly, rather than migrating its state
+// into core's replayer.
+func (g *Git) continueNativeRebase(ctx context.Context, w Worktree, at time.Time) (string, []string, error) {
 	if _, err := g.runIn(ctx, w.Path, []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.excludesFile", "GIT_CONFIG_VALUE_0=" + os.DevNull}, "add", "--all"); err != nil {
 		return "", nil, err
 	}
-	return g.replayStep(ctx, w, at, "rebase", "--continue")
-}
-
-// replayStep runs one rebase command in the worktree and reports where it
-// left the replay.
-func (g *Git) replayStep(ctx context.Context, w Worktree, at time.Time, args ...string) (string, []string, error) {
-	if _, err := g.runIn(ctx, w.Path, replayEnvironment(at), args...); err != nil {
+	if _, err := g.runIn(ctx, w.Path, nativeRebaseEnvironment(at), "rebase", "--continue"); err != nil {
 		conflicts, unmergedErr := g.unmerged(ctx, w.Path)
 		if unmergedErr != nil || len(conflicts) == 0 {
 			return "", nil, errors.Join(err, unmergedErr)
@@ -584,19 +710,9 @@ func (g *Git) replayStep(ctx context.Context, w Worktree, at time.Time, args ...
 	return commit, nil, err
 }
 
-// Replaying returns the commit the replay in the worktree stopped at, with
-// the paths its index holds unmerged, and whether a replay is in progress
-// there. A replay in progress that stopped at no commit returns "".
-func (g *Git) Replaying(ctx context.Context, w Worktree) (string, []string, bool, error) {
-	dir, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--path-format=absolute", "--git-path", "rebase-merge")
-	if err != nil {
-		return "", nil, false, err
-	}
-	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-		return "", nil, false, nil
-	} else if err != nil {
-		return "", nil, false, err
-	}
+// nativeRebaseReplaying is Replaying for a replay in Git's own native rebase
+// state; see continueNativeRebase.
+func (g *Git) nativeRebaseReplaying(ctx context.Context, w Worktree) (string, []string, bool, error) {
 	stop, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "--quiet", "REBASE_HEAD^{commit}")
 	if err != nil && !exitCode(err, 1) {
 		return "", nil, false, err

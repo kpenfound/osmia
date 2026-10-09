@@ -745,10 +745,10 @@ func (f fixture) replayLeftovers(t *testing.T) {
 }
 
 // A replay applies each commit of the branch onto the new upstream commit in
-// order, keeping each message and author, even where a later commit changes
-// what an earlier one added. It is made the same way every time, moves no
-// branch and leaves no worktree behind; a head already on upstream is
-// returned as it is.
+// order, keeping each message, author and committer, even where a later
+// commit changes what an earlier one added. It is made the same way every
+// time, moves no branch and leaves no worktree behind; a head already on
+// upstream is returned as it is.
 func TestReplayAppliesEachCommitOntoUpstream(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -778,13 +778,10 @@ func TestReplayAppliesEachCommitOntoUpstream(t *testing.T) {
 	}
 	for i, original := range []string{second, first} {
 		replayed := fmt.Sprintf("%s~%d", commit, i)
-		for _, format := range []string{"%B", "%an <%ae> %at"} {
+		for _, format := range []string{"%B", "%an <%ae> %at", "%cn <%ce> %ct"} {
 			if got, want := git(t, "-C", f.clone, "log", "-1", "--format="+format, replayed), git(t, "-C", f.clone, "log", "-1", "--format="+format, original); got != want {
 				t.Fatalf("replayed %s %s is %q, original %q", replayed, format, got, want)
 			}
-		}
-		if committed := git(t, "-C", f.clone, "log", "-1", "--format=%cn <%ce> %ct", replayed); committed != "Osmia <osmia@localhost> "+fmt.Sprint(at.Unix()) {
-			t.Fatalf("replayed %s committed by %s", replayed, committed)
 		}
 	}
 	if a := git(t, "-C", f.clone, "show", commit+":a.go"); a != "a2" {
@@ -970,6 +967,160 @@ func TestReplayInStopsAtEachConflictAndContinuesFromTheResolvedFiles(t *testing.
 	}
 	if tip, _, err := f.provider.Branch(ctx, "osmia/w1"); err != nil || tip != second {
 		t.Fatalf("the replay moved the feature branch to %s, %v", tip, err)
+	}
+}
+
+// A persistent replay stopped on a conflict stays resumable after a service
+// restart: a freshly made provider for the same clone reads the same state
+// from disk and reports the same stop. Continuing with a resolution that
+// still holds a conflict marker is refused, and nothing is committed; once
+// the marker is gone, continuing lands the expected candidate and moves the
+// worktree's branch to it.
+func TestReplayInFromResumesAfterARestartAndRefusesLingeringMarkers(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	base, feature, _ := rebaseFixture(t, f)
+	head := f.commitFiles(t, feature, base, map[string]string{"README": "feature\n"})
+	if err := os.WriteFile(filepath.Join(f.scratch, "README"), []byte("upstream\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, "-C", f.scratch, "commit", "--quiet", "-am", "upstream README")
+	git(t, "-C", f.scratch, "push", "--quiet", "origin", "main")
+	upstream, err := f.provider.Fetch(ctx, "upstream", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired, err := f.provider.Acquire(ctx, vcs.Request{Name: "drift/w1", Ref: head, Branch: "osmia-drift/w1/1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := acquired.(Worktree)
+	at := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	commit, conflicts, err := f.provider.ReplayIn(ctx, w, upstream, at)
+	if err != nil || commit != "" || !slices.Equal(conflicts, []string{"README"}) {
+		t.Fatalf("replay %q %v: %v", commit, conflicts, err)
+	}
+
+	// A freshly made provider for the same clone, as a restarted service
+	// would make, reads the replay in progress from disk.
+	restarted := &Git{Clone: f.provider.Clone, Directory: f.provider.Directory}
+	stop, unmerged, replaying, err := restarted.Replaying(ctx, w)
+	if err != nil || !replaying || stop != head || !slices.Equal(unmerged, []string{"README"}) {
+		t.Fatalf("the restarted provider's view of the stop %s %v %t: %v", stop, unmerged, replaying, err)
+	}
+
+	// The file still holds a conflict marker: continuing is refused and
+	// nothing is committed.
+	if err := os.WriteFile(filepath.Join(w.Path, "README"), []byte("<<<<<<< mine\nupstream and feature\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if commit, conflicts, err := restarted.ContinueReplay(ctx, w, at); err == nil || !errors.Is(err, vcs.ErrUnresolved) || commit != "" || !slices.Equal(conflicts, []string{"README"}) {
+		t.Fatalf("continuing with a marker left %q %v: %v", commit, conflicts, err)
+	}
+	if stop, _, replaying, err := restarted.Replaying(ctx, w); err != nil || !replaying || stop != head {
+		t.Fatalf("a refused continue left the replay %s %t: %v", stop, replaying, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(w.Path, "README"), []byte("upstream and feature\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	commit, conflicts, err = restarted.ContinueReplay(ctx, w, at)
+	if err != nil || commit == "" || len(conflicts) != 0 {
+		t.Fatalf("the resolved continue %q %v: %v", commit, conflicts, err)
+	}
+	if _, _, replaying, err := restarted.Replaying(ctx, w); err != nil || replaying {
+		t.Fatalf("a finished replay is replaying: %t %v", replaying, err)
+	}
+	if tip, _, err := restarted.Branch(ctx, "osmia-drift/w1/1"); err != nil || tip != commit {
+		t.Fatalf("the worktree's branch is at %s, not %s: %v", tip, commit, err)
+	}
+	if got := git(t, "-C", f.clone, "show", commit+":README"); got != "upstream and feature" {
+		t.Fatalf("README holds %q", got)
+	}
+	if parent := git(t, "-C", f.clone, "rev-parse", commit+"^"); parent != upstream {
+		t.Fatalf("the replay starts from %s, not upstream %s", parent, upstream)
+	}
+}
+
+// A replay in Git's own native rebase state, detached in the worktree
+// rather than recorded in core-replay.json, is still continued or aborted
+// cleanly: continued, it lands the expected candidate; aborted instead,
+// the worktree is clean and the unit can replay again.
+func TestNativeRebaseReplayContinuesOrAborts(t *testing.T) {
+	for _, finish := range []string{"continue", "abort"} {
+		t.Run(finish, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture(t)
+			ctx := context.Background()
+			base, feature, _ := rebaseFixture(t, f)
+			head := f.commitFiles(t, feature, base, map[string]string{"README": "feature\n"})
+			if err := os.WriteFile(filepath.Join(f.scratch, "README"), []byte("upstream\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			git(t, "-C", f.scratch, "commit", "--quiet", "-am", "upstream README")
+			git(t, "-C", f.scratch, "push", "--quiet", "origin", "main")
+			upstream, err := f.provider.Fetch(ctx, "upstream", "main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			acquired, err := f.provider.Acquire(ctx, vcs.Request{Name: "drift/w1", Ref: head, Branch: "osmia-drift/w1/1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := acquired.(Worktree)
+
+			// Seed a replay in Git's own native rebase state, stopped on
+			// the same conflict, with no core-replay.json.
+			cmd := exec.CommandContext(ctx, "git", "-C", w.Path, "rebase", "--quiet", "--no-autostash", upstream)
+			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull,
+				"GIT_AUTHOR_NAME=Osmia", "GIT_AUTHOR_EMAIL=osmia@localhost", "GIT_COMMITTER_NAME=Osmia", "GIT_COMMITTER_EMAIL=osmia@localhost", "GIT_EDITOR=true"}
+			if err := cmd.Run(); err == nil {
+				t.Fatal("the seeded rebase did not conflict")
+			}
+			if _, native, err := f.provider.nativeRebaseDir(ctx, w.Path); err != nil || !native {
+				t.Fatalf("the seeded state is not a native rebase: %t %v", native, err)
+			}
+
+			switch finish {
+			case "continue":
+				if err := os.WriteFile(filepath.Join(w.Path, "README"), []byte("upstream and feature\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				at := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+				commit, conflicts, err := f.provider.ContinueReplay(ctx, w, at)
+				if err != nil || commit == "" || len(conflicts) != 0 {
+					t.Fatalf("finishing the native rebase %q %v: %v", commit, conflicts, err)
+				}
+				if _, _, replaying, err := f.provider.Replaying(ctx, w); err != nil || replaying {
+					t.Fatalf("a finished native rebase is replaying: %t %v", replaying, err)
+				}
+				if tip, _, err := f.provider.Branch(ctx, "osmia-drift/w1/1"); err != nil || tip != commit {
+					t.Fatalf("the worktree's branch is at %s, not %s: %v", tip, commit, err)
+				}
+				if got := git(t, "-C", f.clone, "show", commit+":README"); got != "upstream and feature" {
+					t.Fatalf("README holds %q", got)
+				}
+			case "abort":
+				if err := f.provider.AbortReplay(ctx, w); err != nil {
+					t.Fatalf("aborting the native rebase: %v", err)
+				}
+				if _, _, replaying, err := f.provider.Replaying(ctx, w); err != nil || replaying {
+					t.Fatalf("an aborted replay is still replaying: %t %v", replaying, err)
+				}
+				if tip, _, err := f.provider.Branch(ctx, "osmia-drift/w1/1"); err != nil || tip != head {
+					t.Fatalf("the worktree's branch is at %s, not its pre-replay tip %s: %v", tip, head, err)
+				}
+				if status := git(t, "-C", w.Path, "status", "--porcelain"); status != "" {
+					t.Fatalf("the aborted worktree is not clean:\n%s", status)
+				}
+				at := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+				commit, conflicts, err := f.provider.ReplayIn(ctx, w, upstream, at)
+				if err != nil || commit != "" || !slices.Equal(conflicts, []string{"README"}) {
+					t.Fatalf("replaying again after the abort %q %v: %v", commit, conflicts, err)
+				}
+			}
+		})
 	}
 }
 

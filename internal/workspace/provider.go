@@ -43,8 +43,6 @@ type Provider interface {
 	Rebase(ctx context.Context, onto, head, message string, at time.Time) (string, []string, error)
 	RebaseFrom(ctx context.Context, base, onto, head, message string, at time.Time) (string, []string, error)
 	Replay(ctx context.Context, head, onto string, at time.Time) (string, []string, error)
-	// TODO: Remove Osmia's explicit-base replay adapters when busybees/core
-	// provides service-owned revision replay and resumable conflict recovery.
 	ReplayFrom(ctx context.Context, base, head, onto string, at time.Time) (string, []string, error)
 
 	// Change identity.
