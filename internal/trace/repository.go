@@ -446,12 +446,24 @@ func Open(root config.Root, project config.Project) (*Repository, error) {
 	return r, errors.Join(err, historyErr, r.checkWorkflows(streams))
 }
 
+// SessionKind is the Kind a session workstream's manifest records. An
+// ordinary workstream's Kind is empty.
+const SessionKind = "session"
+
 // manifestRecord is a project or workstream manifest. Workspaces is the
 // workspace backend a workstream was created on; it is empty in the project
-// manifest and in a workstream manifest that records none.
+// manifest and in a workstream manifest that records none. Kind, Profile,
+// Base, Branch and Title are set only for a session workstream: its kind,
+// its fixed profile, the base commit it opened from, its branch and its
+// optional title.
 type manifestRecord struct {
 	Header
 	Workspaces string `json:"workspaces,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Profile    string `json:"profile,omitempty"`
+	Base       string `json:"base,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	Title      string `json:"title,omitempty"`
 }
 
 func (r *Repository) manifest(name, schema string, stream config.WorkstreamID) error {
@@ -483,6 +495,9 @@ func (r *Repository) decodeManifest(name string, data []byte, schema string, str
 	if !validWorkspaces(m.Workspaces) || stream == "" && m.Workspaces != "" {
 		return manifestRecord{}, fmt.Errorf("%s: invalid workspace backend %q", name, m.Workspaces)
 	}
+	if err := validSessionFields(stream, m); err != nil {
+		return manifestRecord{}, fmt.Errorf("%s: %w", name, err)
+	}
 	return m, nil
 }
 
@@ -490,6 +505,26 @@ func (r *Repository) decodeManifest(name string, data []byte, schema string, str
 // backend: Git, Jujutsu or none.
 func validWorkspaces(backend string) bool {
 	return backend == "" || backend == config.WorkspacesGit || backend == config.WorkspacesJujutsu
+}
+
+// validSessionFields checks a manifest's Kind, Profile, Base, Branch and
+// Title against each other: the project manifest and an ordinary
+// workstream's carry none of them; a session workstream's Kind is
+// SessionKind with a non-empty profile, base commit and branch.
+func validSessionFields(stream config.WorkstreamID, m manifestRecord) error {
+	if stream == "" || m.Kind == "" {
+		if m.Kind != "" || m.Profile != "" || m.Base != "" || m.Branch != "" || m.Title != "" {
+			return fmt.Errorf("only a session workstream may record kind, profile, base, branch or title")
+		}
+		return nil
+	}
+	if m.Kind != SessionKind {
+		return fmt.Errorf("unknown workstream kind %q", m.Kind)
+	}
+	if !key(m.Profile) || !present(m.Base) || !present(m.Branch) {
+		return fmt.Errorf("a session requires a profile, base commit and branch")
+	}
+	return nil
 }
 
 // Workspaces returns the workspace backend the workstream was created on,
@@ -513,6 +548,21 @@ func (r *Repository) workspaces(stream config.WorkstreamID) (string, error) {
 		return config.WorkspacesGit, nil
 	}
 	return m.Workspaces, nil
+}
+
+// Kind returns a workstream's kind: SessionKind for a session, or "" for an
+// ordinary workstream.
+func (r *Repository) Kind(stream config.WorkstreamID) (string, error) {
+	if err := config.CheckWorkstreamIDs(stream); err != nil {
+		return "", err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m, err := r.workstreamManifest(stream)
+	if err != nil {
+		return "", err
+	}
+	return m.Kind, nil
 }
 
 // workstreamManifest reads a workstream's creation manifest, whose Header.At
@@ -594,6 +644,65 @@ func (r *Repository) CreateWorkstreamOn(ctx context.Context, id config.Workstrea
 	}
 	_, err = r.ensureChiefOfStaff(ctx, id, at, actor)
 	return err
+}
+
+// CreateSessionWorkstream commits a new session workstream: its kind, its
+// fixed profile, the base commit it opened from, its branch and its
+// optional title. It creates no chief-of-staff thread: a session has none.
+// An existing workstream is refused with ErrConflict.
+func (r *Repository) CreateSessionWorkstream(ctx context.Context, id config.WorkstreamID, profile, base, branch, title string, at time.Time, actor Actor) error {
+	if err := config.CheckWorkstreamIDs(id); err != nil {
+		return err
+	}
+	if !key(profile) || !present(base) || !present(branch) {
+		return fmt.Errorf("a session requires a profile, base commit and branch")
+	}
+	if at.IsZero() || !validActor(actor) {
+		return fmt.Errorf("timestamp and actor required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.forget()
+	checked, err := r.checkHistory(ctx)
+	if err != nil {
+		return err
+	}
+	_, _, err = r.scanFiles(checked)
+	if err != nil {
+		return err
+	}
+	prefix := "workstreams/" + string(id)
+	if err := r.checked(prefix); err != nil {
+		return err
+	}
+	if _, err := r.dir.Lstat(prefix); !os.IsNotExist(err) {
+		return fmt.Errorf("%w: workstream %s already exists or is inaccessible", ErrConflict, id)
+	}
+	for _, sub := range []string{"handed", "shed", "amendments", "questions", "units", "agents"} {
+		if err := r.mkdir(prefix + "/" + sub); err != nil {
+			return err
+		}
+	}
+	h := Header{Schema: "osmia.trace.workstream", Version: Version, ID: string(id), Revision: 1, Project: r.project, Workstream: id, At: at, Actor: actor, Cause: "session-open"}
+	data, err := json.MarshalIndent(manifestRecord{Header: h, Kind: SessionKind, Profile: profile, Base: base, Branch: branch, Title: title}, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := r.writeFile(prefix+"/workstream.json", append(data, '\n')); err != nil {
+		return err
+	}
+	paths := []string{prefix + "/workstream.json"}
+	for _, name := range []string{"documents.jsonl", "events.jsonl", "ledger.jsonl"} {
+		name = prefix + "/" + name
+		if err := r.writeFile(name, nil); err != nil {
+			return err
+		}
+		paths = append(paths, name)
+	}
+	return r.commit(ctx, paths, "Create session workstream")
 }
 
 func (r *Repository) Workstreams() ([]config.WorkstreamID, error) {

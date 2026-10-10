@@ -141,3 +141,40 @@ func TestListFactoryToolWithNoProjectRegisteredIsEmptyNotAnError(t *testing.T) {
 		t.Fatalf("expected an empty, non-nil list of projects, got %+v", got)
 	}
 }
+
+// list_factory reports a registered project's session marked as a session,
+// with its profile and state, alongside an ordinary workstream listed as
+// before.
+func TestListFactoryToolReportsASessionWithProfileAndState(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	opts, clone := projectFixture(t)
+	opts.controls = &runtimeControls{}
+	s, c := start(t, opts)
+	added, err := c.AddProject(ctx, request(clone))
+	must(t, err)
+	repo, err := s.repository(added.Project.ID)
+	must(t, err)
+	must(t, repo.CreateWorkstream(ctx, stream, s.now(), ownerActor))
+	session := createTestSession(t, repo)
+
+	scope := claimBeekeeperTurn(t, s.Beekeeper(), "list_session_turn", s.now())
+	out, err := s.options.controls.listFactory(scope).Handle(ctx, json.RawMessage(`{}`))
+	must(t, err)
+	var got FactoryList
+	must(t, json.Unmarshal(out, &got))
+	if len(got.Projects) != 1 {
+		t.Fatalf("projects: %+v", got)
+	}
+	byID := map[config.WorkstreamID]WorkstreamStatus{}
+	for _, w := range got.Projects[0].Workstreams {
+		byID[w.Workstream] = w
+	}
+	found, ok := byID[session]
+	if !ok || found.Kind != trace.SessionKind || found.Profile != "default" || found.State == nil || *found.State != trace.SessionIdle {
+		t.Fatalf("session entry: %+v", found)
+	}
+	if ordinary, ok := byID[stream]; !ok || ordinary.Kind == trace.SessionKind {
+		t.Fatalf("ordinary entry: %+v", ordinary)
+	}
+}

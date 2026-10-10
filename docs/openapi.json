@@ -1996,6 +1996,109 @@
         }
       }
     },
+    "/v1/sessions": {
+      "get": {
+        "summary": "List sessions, optionally filtered by project",
+        "operationId": "getSessions",
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Open a session",
+        "operationId": "postSessions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionOpenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{workstream}": {
+      "get": {
+        "summary": "Show one session",
+        "operationId": "getSessionsByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/shed/more/{workstream}": {
       "post": {
         "summary": "Ask for more debate rounds",
@@ -5277,6 +5380,72 @@
         },
         "type": "object"
       },
+      "SessionOpenRequest": {
+        "properties": {
+          "profile": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SessionResponse": {
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/SessionView"
+          }
+        },
+        "type": "object"
+      },
+      "SessionView": {
+        "properties": {
+          "base": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SessionsResponse": {
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/SessionView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "ShedEntry": {
         "properties": {
           "argument": {
@@ -6472,6 +6641,12 @@
           "archived": {
             "type": "boolean"
           },
+          "base": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
           "context_mode": {
             "type": "string"
           },
@@ -6487,8 +6662,14 @@
               "null"
             ]
           },
+          "kind": {
+            "type": "string"
+          },
           "open_questions": {
             "type": "integer"
+          },
+          "profile": {
+            "type": "string"
           },
           "project": {
             "type": "string"
@@ -6501,6 +6682,9 @@
           },
           "status": {
             "$ref": "#/components/schemas/StatusView"
+          },
+          "title": {
+            "type": "string"
           },
           "trace_deleted": {
             "type": "boolean"

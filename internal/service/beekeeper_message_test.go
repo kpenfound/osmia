@@ -61,6 +61,26 @@ func TestMessageChiefOfStaffRefusesUnknownProjectWorkstreamAndShadow(t *testing.
 	}
 }
 
+// Naming a session is refused with an error and records nothing: a session
+// has no chief of staff to message.
+func TestMessageChiefOfStaffRefusesASession(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, proj, ws := messageFixture(t, "bk-session-")
+	repo, err := s.repository(proj)
+	must(t, err)
+	session := createTestSession(t, repo)
+	if _, err := s.messageChiefOfStaff(ctx, string(proj), string(session), "Status?", "k1"); err == nil {
+		t.Fatal("a message naming a session was accepted")
+	}
+	if th, err := repo.ChiefOfStaffThread(ws); err == nil && len(th.Turns) != 0 {
+		t.Fatalf("a refused session message changed the ordinary workstream's thread: %+v", th.Turns)
+	}
+	if th, err := repo.ChiefOfStaffThread(session); err == nil {
+		t.Fatalf("the session got a chief-of-staff thread: %+v", th)
+	}
+}
+
 // A message lands in the target chief of staff's thread attributed to the
 // Beekeeper, never the owner: its request carries the beekeeper actor kind
 // and the text exactly as given, with no owner actor anywhere in it.

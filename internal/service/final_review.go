@@ -168,6 +168,11 @@ func (a *finalReviewer) Pass(ctx context.Context) error {
 		if stream == librarian {
 			continue
 		}
+		if session, err := isSession(a.repository, stream); err != nil {
+			return fmt.Errorf("workstream %s final review: %w", stream, err)
+		} else if session {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}

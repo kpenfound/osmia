@@ -140,6 +140,11 @@ func (r *reviewers) Pass(ctx context.Context) error {
 		if stream == librarianWorkstream(r.repository.Project()) {
 			continue
 		}
+		if session, err := isSession(r.repository, stream); err != nil {
+			return err
+		} else if session {
+			continue
+		}
 		b, found, err := r.read(stream)
 		if err != nil {
 			return err

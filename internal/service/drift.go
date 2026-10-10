@@ -133,6 +133,11 @@ func (f *foreman) requestDrifts(ctx context.Context, due func(config.WorkstreamI
 		if stream == librarian || reviewing[stream] || scheduler.Paused(state.Pauses, f.cfg.Project.ID, stream) {
 			continue
 		}
+		if session, err := isSession(f.repository, stream); err != nil {
+			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
+		} else if session {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

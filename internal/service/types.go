@@ -593,23 +593,63 @@ type RoleFallback struct {
 // service-owned facts about claimed and parked turns. Workspaces is the
 // workspace backend the workstream was created on, git or jujutsu.
 type WorkstreamStatus struct {
-	Workstream    config.WorkstreamID `json:"workstream"`
-	Project       config.ProjectID    `json:"project"`
-	Workspaces    string              `json:"workspaces"`
-	State         *string             `json:"state"`
-	Units         []UnitStatus        `json:"units"`
-	Advisories    []OverlapAdvisory   `json:"advisories"`
-	OpenQuestions int                 `json:"open_questions"`
-	Gates         []trace.OwnerGate   `json:"gates"`
-	ContextMode   bundle.Mode         `json:"context_mode"`
-	Drift         *DriftStatus        `json:"drift"`
-	Status        *StatusView         `json:"status"`
-	Agents        []AgentStatus       `json:"agents"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	Project    config.ProjectID    `json:"project"`
+	Workspaces string              `json:"workspaces"`
+	// Kind is "session" for a session workstream, omitted for an ordinary
+	// one. Profile, Base and Branch are set only for a session: its fixed
+	// profile, base commit and branch. Title is a session's optional title.
+	Kind          string            `json:"kind,omitempty"`
+	Profile       string            `json:"profile,omitempty"`
+	Base          string            `json:"base,omitempty"`
+	Branch        string            `json:"branch,omitempty"`
+	Title         string            `json:"title,omitempty"`
+	State         *string           `json:"state"`
+	Units         []UnitStatus      `json:"units"`
+	Advisories    []OverlapAdvisory `json:"advisories"`
+	OpenQuestions int               `json:"open_questions"`
+	Gates         []trace.OwnerGate `json:"gates"`
+	ContextMode   bundle.Mode       `json:"context_mode"`
+	Drift         *DriftStatus      `json:"drift"`
+	Status        *StatusView       `json:"status"`
+	Agents        []AgentStatus     `json:"agents"`
 	// Archived is set when the owner archived the workstream, which takes a
 	// delivered or abandoned workstream out of the list of work.
 	Archived bool `json:"archived,omitempty"`
 	// TraceDeleted is set after permanent archive cleanup completes.
 	TraceDeleted bool `json:"trace_deleted,omitempty"`
+}
+
+// SessionOpenRequest opens a session: a registered project and a profile
+// the service can run for mason turns there, with an optional title. No
+// other session request type carries a profile: it is fixed once opened.
+type SessionOpenRequest struct {
+	Project config.ProjectID `json:"project"`
+	Profile string           `json:"profile"`
+	Title   string           `json:"title,omitempty"`
+}
+
+// SessionView is one session: its fixed profile, base commit and branch,
+// its optional title, and its state (idle, working or ended).
+type SessionView struct {
+	Workstream config.WorkstreamID `json:"workstream"`
+	Project    config.ProjectID    `json:"project"`
+	Profile    string              `json:"profile"`
+	Base       string              `json:"base"`
+	Branch     string              `json:"branch"`
+	Title      string              `json:"title,omitempty"`
+	State      string              `json:"state"`
+	CreatedAt  time.Time           `json:"created_at"`
+}
+
+// SessionResponse answers opening or reading one session.
+type SessionResponse struct {
+	Session SessionView `json:"session"`
+}
+
+// SessionsResponse lists sessions, newest first.
+type SessionsResponse struct {
+	Sessions []SessionView `json:"sessions"`
 }
 
 // AgentStatus is one claimed or parked turn from the durable thread snapshot.

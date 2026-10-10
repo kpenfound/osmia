@@ -390,6 +390,31 @@ func (c *Client) Statuses(ctx context.Context) (StatusResponse, error) {
 	return v, err
 }
 
+// OpenSession opens a session.
+func (c *Client) OpenSession(ctx context.Context, req SessionOpenRequest) (SessionResponse, error) {
+	var v SessionResponse
+	err := c.Do(ctx, "POST", Prefix+"/sessions", req, &v)
+	return v, err
+}
+
+// Sessions lists sessions, optionally filtered by project.
+func (c *Client) Sessions(ctx context.Context, project config.ProjectID) (SessionsResponse, error) {
+	var v SessionsResponse
+	path := Prefix + "/sessions"
+	if project != "" {
+		path += "?project=" + url.QueryEscape(string(project))
+	}
+	err := c.Do(ctx, "GET", path, nil, &v)
+	return v, err
+}
+
+// Session reads one session.
+func (c *Client) Session(ctx context.Context, id config.WorkstreamID) (SessionResponse, error) {
+	var v SessionResponse
+	err := c.Do(ctx, "GET", Prefix+"/sessions/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
+}
+
 // Status reads one workstream's status.
 func (c *Client) Status(ctx context.Context, id config.WorkstreamID) (WorkstreamStatus, error) {
 	var v WorkstreamStatus

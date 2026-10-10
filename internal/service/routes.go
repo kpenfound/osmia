@@ -49,6 +49,10 @@ var Routes = []Route{
 	{Method: http.MethodGet, Path: Prefix + "/projects/charter/{project}", Summary: "Read a project's charter", Response: trace.Document{}},
 	{Method: http.MethodPut, Path: Prefix + "/projects/charter/{project}", Summary: "Save a project's charter", Request: CharterEdit{}, Response: trace.Document{}},
 
+	{Method: http.MethodPost, Path: Prefix + "/sessions", Summary: "Open a session", Request: SessionOpenRequest{}, Response: SessionResponse{}},
+	{Method: http.MethodGet, Path: Prefix + "/sessions", Summary: "List sessions, optionally filtered by project", Response: SessionsResponse{}},
+	{Method: http.MethodGet, Path: Prefix + "/sessions/{workstream}", Summary: "Show one session", Response: SessionResponse{}},
+
 	{Method: http.MethodPost, Path: Prefix + "/handin", Summary: "Hand in a workstream", Request: HandInRequest{}, Response: HandInResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/status", Summary: "List workstreams with capacity, usage and diagnostics", Response: StatusResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/status/{workstream}", Summary: "Show one workstream", Response: WorkstreamStatus{}},

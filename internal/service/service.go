@@ -170,6 +170,7 @@ type Service struct {
 	reloadErr *ReloadError
 	projectMu sync.Mutex // serializes project registration, removal and reload
 	handInMu  sync.Mutex // serializes hand-ins
+	sessionMu sync.Mutex // serializes session opens
 	turns     runningTurns
 	options   Options
 	store     *runtime.Store
@@ -416,6 +417,11 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			return nil, fmt.Errorf("recover thread sessions: %w", err)
 		}
 		reapSandboxes(ctx, view, s.options.sbxBin)
+	}
+	if err = s.recoverSessionOpen(ctx); err != nil {
+		s.cleanupSocket()
+		st.Close()
+		return nil, fmt.Errorf("recover an interrupted session open: %w", err)
 	}
 	// The Beekeeper's thread is recovered by the same existing path every
 	// workstream's threads are: a turn a previous session claimed or
@@ -834,13 +840,19 @@ func (s *Service) chiefOverride(cfg *config.Config) (string, coreadapter.Profile
 }
 
 // ensureChiefsOfStaff gives every workstream in the trace its chief-of-staff
-// thread, leaving existing threads untouched.
+// thread, leaving existing threads untouched. A session never gets one: it
+// has no chief of staff.
 func ensureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at time.Time) error {
 	streams, err := repository.Workstreams()
 	if err != nil {
 		return err
 	}
 	for _, stream := range streams {
+		if session, err := isSession(repository, stream); err != nil {
+			return fmt.Errorf("workstream %s: %w", stream, err)
+		} else if session {
+			continue
+		}
 		if _, err := repository.EnsureChiefOfStaff(ctx, stream, at, serviceActor); err != nil {
 			return fmt.Errorf("workstream %s chief-of-staff thread: %w", stream, err)
 		}
@@ -1037,7 +1049,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 			return nil, err
 		}
 		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), ProgressWindow: cfg.EventProgressWindow(), Profile: s.chiefEventsProfile(cfg), System: s.chiefEventsPrompt(cfg.Project.ID, repository),
-			Skip: func(stream config.WorkstreamID) (bool, error) { return abandoned(repository, stream) }})
+			Skip: chiefOfStaffSkip(repository)})
 		if err != nil {
 			return nil, err
 		}

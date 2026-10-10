@@ -171,6 +171,11 @@ func (d *debate) Pass(ctx context.Context) error {
 		if stream == librarian {
 			continue
 		}
+		if session, err := isSession(d.repository, stream); err != nil {
+			return fmt.Errorf("workstream %s shed: %w", stream, err)
+		} else if session {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}

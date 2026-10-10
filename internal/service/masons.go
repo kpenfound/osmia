@@ -100,6 +100,11 @@ func (m *masons) Pass(ctx context.Context) error {
 		if stream == librarian {
 			continue
 		}
+		if session, err := isSession(m.repository, stream); err != nil {
+			return fmt.Errorf("workstream %s masons: %w", stream, err)
+		} else if session {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}

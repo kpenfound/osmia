@@ -258,6 +258,35 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		if r.URL.Path == Prefix+"/sessions" {
+			if out, api := s.sessionList(r.URL.Query().Get("project")); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+		if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/sessions/"); ok {
+			if out, api := s.sessionRead(id); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, SessionResponse{Session: out})
+			}
+			return
+		}
+	}
+	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/sessions" {
+		var v SessionOpenRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		out, api := s.openSession(r.Context(), v)
+		if api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, SessionResponse{Session: out})
+		}
+		return
 	}
 	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/reload" {
 		if out, api := s.reload(); api != nil {
