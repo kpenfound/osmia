@@ -146,8 +146,8 @@ github.com/klauspost/compress v1.19.1 h1:VsB4HPswih7mmZ8WleSFQ75c/Ui1M4trX5oAsJn
 github.com/klauspost/compress v1.19.1/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
 github.com/kortschak/wol v0.0.0-20200729010619-da482cc4850a h1:+RR6SqnTkDLWyICxS1xpjCi/3dhyV+TgZwA6Ww3KncQ=
 github.com/kortschak/wol v0.0.0-20200729010619-da482cc4850a/go.mod h1:YTtCCM3ryyfiu4F7t8HQ1mxvp1UBdWM2r6Xa+nGWvDk=
-github.com/kpenfound/busybees/core v0.5.6 h1:5sFeA4cXpzx2ft4xrG3QV89OFrPtg8bXMcFww8yh9L8=
-github.com/kpenfound/busybees/core v0.5.6/go.mod h1:2Rdbk2GdHqh59BW5roF2n7e6X2yXH5psAYTIgFA5ZyM=
+github.com/kpenfound/busybees/core v0.5.7 h1:Dpolggey2MlYy8xrqY9fmFji3C36H6DB7svfBWcuBmw=
+github.com/kpenfound/busybees/core v0.5.7/go.mod h1:2Rdbk2GdHqh59BW5roF2n7e6X2yXH5psAYTIgFA5ZyM=
 github.com/kr/fs v0.1.0 h1:Jskdu9ieNAYnjxsi0LbQp1ulIKZV1LAFgK1tWhpZgl8=
 github.com/kr/fs v0.1.0/go.mod h1:FFnZGqtBN9Gxj7eW1uZ42v5BccTP0vu6NEaFoC2HwRg=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
