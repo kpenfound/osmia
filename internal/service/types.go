@@ -652,6 +652,11 @@ type SessionsResponse struct {
 	Sessions []SessionView `json:"sessions"`
 }
 
+// SessionMessageRequest is an owner message to a session's agent.
+type SessionMessageRequest struct {
+	Text string `json:"text"`
+}
+
 // AgentStatus is one claimed or parked turn from the durable thread snapshot.
 type AgentStatus struct {
 	Role       string    `json:"role"`
@@ -787,6 +792,10 @@ const (
 	TurnRunning TurnState = "running"
 	TurnDone    TurnState = "done"
 	TurnFailed  TurnState = "failed"
+	// TurnStopped is a session turn the owner stopped directly: it is
+	// recorded as stopped, not as a failure, and the worktree changes it
+	// already made are kept.
+	TurnStopped TurnState = "stopped"
 )
 
 // ConversationResponse lists a workstream's conversation with its chief of

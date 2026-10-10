@@ -469,3 +469,36 @@ func TestNewRequiresRepository(t *testing.T) {
 		t.Fatal("nil repository accepted")
 	}
 }
+
+// sessionStream is a second workstream of the fixture's project, recorded as
+// a session, with its own queued turn of the session role.
+const sessionStream config.WorkstreamID = "w_00000000000000000000000000000002"
+
+// TestPassNeverDispatchesASessionWorkstream covers the part of spec#21
+// about a running session turn taking no mason slot: a session workstream's
+// queued turn is never offered as a candidate, dispatched, or counted
+// against any role's slots, while an ordinary workstream alongside it is
+// unaffected.
+func TestPassNeverDispatchesASessionWorkstream(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t, "alpha")
+	defer func() { repo.Close() }()
+	must(t, repo.CreateSessionWorkstream(ctx, sessionStream, "default", "base", "branch", "", f.clock.Now(), owner))
+	f.thread(t, repo, sessionStream, "session", "session")
+	f.queue(t, repo, "alpha", "one")
+	f.queueOn(t, repo, sessionStream, "session", "one")
+	s, err := New(repo, Options{Now: f.clock.Now})
+	must(t, err)
+	slots, err := s.Slots(func(Candidate) (bool, error) { return false, nil })
+	must(t, err)
+	if n := slots.Used["session"]; n != 0 {
+		t.Fatalf("session role slots in use: %d", n)
+	}
+	must(t, s.Pass(ctx))
+	if got := dispatched(t, repo); !slices.Equal(got, []string{"alpha/one"}) {
+		t.Fatalf("dispatched %v", got)
+	}
+	if got := dispatched(t, repo, sessionStream); len(got) != 0 {
+		t.Fatalf("a session workstream's turn was dispatched: %v", got)
+	}
+}

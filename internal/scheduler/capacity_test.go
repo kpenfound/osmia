@@ -246,6 +246,31 @@ func TestChiefOfStaffTakesNoSlot(t *testing.T) {
 	}
 }
 
+// TestSessionTurnTakesNoMasonSlot shows that a session's turn, which runs
+// under the role "session" on its own dedicated workstream, never competes
+// for a project's mason slots: its turn is dispatched even while the
+// project's only mason slot is held by a claimed mason turn.
+func TestSessionTurnTakesNoMasonSlot(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t, "mason1")
+	defer repo.Close()
+	must(t, repo.CreateWorkstream(ctx, other, f.clock.Now(), owner))
+	limits := &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 1}
+	f.thread(t, repo, other, "session", "session")
+	f.queueOn(t, repo, other, "session", "one")
+	// Hold the project's only mason slot with a claimed turn, on the
+	// session's own separate workstream.
+	f.queue(t, repo, "mason1", "one")
+	_, err := repo.ClaimTurn(ctx, stream, "mason1", "token", t.TempDir(), f.clock.Now())
+	must(t, err)
+	s, err := New(repo, Options{Now: f.clock.Now, Capacity: limits})
+	must(t, err)
+	must(t, s.Pass(ctx))
+	if got := dispatched(t, repo, other); !slices.Equal(got, []string{"session/one"}) {
+		t.Fatalf("the session's turn did not run while the project's only mason slot was held: %v", got)
+	}
+}
+
 // wait names each waiting turn by the last digit of its workstream, its agent
 // and why it waits.
 func wait(slots Slots) []string {

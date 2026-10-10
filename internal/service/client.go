@@ -415,6 +415,20 @@ func (c *Client) Session(ctx context.Context, id config.WorkstreamID) (SessionRe
 	return v, err
 }
 
+// SessionMessage sends an owner message to a session's agent.
+func (c *Client) SessionMessage(ctx context.Context, id config.WorkstreamID, text string) (ConversationEntry, error) {
+	var v ConversationEntry
+	err := c.Do(ctx, "POST", Prefix+"/sessions/"+url.PathEscape(string(id))+"/message", SessionMessageRequest{Text: text}, &v)
+	return v, err
+}
+
+// SessionStop stops a session's running turn.
+func (c *Client) SessionStop(ctx context.Context, id config.WorkstreamID) (SessionResponse, error) {
+	var v SessionResponse
+	err := c.Do(ctx, "POST", Prefix+"/sessions/"+url.PathEscape(string(id))+"/stop", nil, &v)
+	return v, err
+}
+
 // Status reads one workstream's status.
 func (c *Client) Status(ctx context.Context, id config.WorkstreamID) (WorkstreamStatus, error) {
 	var v WorkstreamStatus

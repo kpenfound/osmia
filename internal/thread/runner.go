@@ -29,7 +29,19 @@ type Runner struct {
 	// AdmitRole checks a role pause before claiming a queued turn.
 	AdmitRole func(string) bool
 	// MaxRetries bounds the same-profile retries of an infrastructure failure.
-	MaxRetries        int
+	MaxRetries int
+	// ResumableRoles reports whether a thread's role may look past an
+	// interrupted turn with no explicit Stop to an earlier source (so a
+	// session's restart recovery still finds its last recorded model
+	// session), and whether a CheckResume implementation that has no
+	// verification of its own may fall back to a role-blind heuristic
+	// instead of refusing resume outright (ResumeFallbackAllowed, this
+	// package). It never changes whether CheckResume is asked, or
+	// what a CheckResume implementation that already answers for itself
+	// says, for any role: that generic resume mechanism predates this field
+	// and stays identical for every role. Nil (every role but session,
+	// in production) means neither widening applies.
+	ResumableRoles    func(string) bool
 	Classifier        func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error)
 	ClassifierProfile *coreadapter.Profile
 	// Jev classifies clean mason responses first while the boost is on; a

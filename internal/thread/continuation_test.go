@@ -61,6 +61,11 @@ func TestContinuationAcrossReopen(t *testing.T) {
 			}
 			checks, calls := 0, 0
 			runner.Store = repo
+			// This test exercises the Runner's resume mechanism directly,
+			// independent of which Osmia role may use it; the service confines
+			// resume to the session role through this same field (see
+			// internal/service/enforcement.go).
+			runner.ResumableRoles = func(string) bool { return true }
 			runner.Fallbacks = map[string]coreadapter.Profile{"default": {Name: "fallback", Backend: "other", Model: "small"}}
 			runner.Turns = resumableTurns{
 				check: func(_ context.Context, old, next coreadapter.Profile, s coreadapter.BackendSession) error {

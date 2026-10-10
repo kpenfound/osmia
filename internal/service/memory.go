@@ -29,7 +29,7 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 	}
 	client := hearsay.Client{Config: cfg.Hearsay}
 	for role, grant := range turns.Grants {
-		if role == "classifier" {
+		if role == "classifier" || role == sessionRole {
 			continue
 		}
 		grant.Tools = slices.Clone(grant.Tools)
@@ -48,7 +48,7 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 				return nil, err
 			}
 		}
-		if scope.Role == "classifier" {
+		if scope.Role == "classifier" || scope.Role == sessionRole {
 			return tools, nil
 		}
 		return append(tools, client.Tools(scope.Role, cfg.Project.HearsayScope, func() error { return repo.ActiveTurn(scope) })...), nil

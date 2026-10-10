@@ -52,6 +52,8 @@ var Routes = []Route{
 	{Method: http.MethodPost, Path: Prefix + "/sessions", Summary: "Open a session", Request: SessionOpenRequest{}, Response: SessionResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/sessions", Summary: "List sessions, optionally filtered by project", Response: SessionsResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/sessions/{workstream}", Summary: "Show one session", Response: SessionResponse{}},
+	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/message", Summary: "Send a message to a session's agent; refused as busy while a turn is running", Request: SessionMessageRequest{}, Response: ConversationEntry{}},
+	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/stop", Summary: "Stop a session's running turn, keeping its worktree changes", Response: SessionResponse{}},
 
 	{Method: http.MethodPost, Path: Prefix + "/handin", Summary: "Hand in a workstream", Request: HandInRequest{}, Response: HandInResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/status", Summary: "List workstreams with capacity, usage and diagnostics", Response: StatusResponse{}},

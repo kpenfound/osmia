@@ -88,7 +88,7 @@ func TestStopDuringSessionInterruptsWithoutFailure(t *testing.T) {
 	// The queued turn runs next on the same thread and resumes the stopped
 	// session.
 	var resumed *coreadapter.BackendSession
-	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(2 * time.Second) }, Turns: resumableTurns{check: resumeAll, run: func(_ context.Context, prepared coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	runner := Runner{Store: repo, Now: func() time.Time { return timestamp.Add(2 * time.Second) }, ResumableRoles: func(string) bool { return true }, Turns: resumableTurns{check: resumeAll, run: func(_ context.Context, prepared coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		resumed = prepared.Resume
 		return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "stopped"}, FinalResponse: "Finished"}, nil
 	}}}
@@ -120,6 +120,7 @@ func TestStopBeforeSessionRunsNothing(t *testing.T) {
 
 	// The turn before the stopped one is the source of the next.
 	var resumed *coreadapter.BackendSession
+	runner.ResumableRoles = func(string) bool { return true }
 	runner.Turns = resumableTurns{check: resumeAll, run: func(_ context.Context, prepared coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		resumed = prepared.Resume
 		return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "earlier"}, FinalResponse: "Finished"}, nil

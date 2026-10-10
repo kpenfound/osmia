@@ -183,6 +183,9 @@ func (TurnResponse) traceRecord() {}
 // TurnStopHardPause is the cause of a turn stopped by a hard pause.
 const TurnStopHardPause = "hard_pause"
 
+// TurnStopOwner is the cause of a session turn the owner stopped directly.
+const TurnStopOwner = "owner_stop"
+
 // TurnStop records why the service stopped a turn: the cause, and the
 // scope, source and reason of the pause that stopped it.
 type TurnStop struct {
@@ -291,7 +294,7 @@ func validate(r Record) error {
 		valid = valid && (v.FailureClass == "" || v.Failure != "" && (v.FailureClass == coreadapter.Infrastructure || v.FailureClass == coreadapter.Behavioural))
 		valid = valid && (len(v.ClassifierUsage) == 0 || v.Classification != nil)
 		if s := v.Stop; s != nil {
-			valid = valid && s.Cause == TurnStopHardPause && present(s.Scope) && present(s.Source) && present(s.Reason) && v.Result.Cancelled && v.Failure == "" && v.Classification == nil
+			valid = valid && (s.Cause == TurnStopHardPause || s.Cause == TurnStopOwner) && present(s.Scope) && present(s.Source) && present(s.Reason) && v.Result.Cancelled && v.Failure == "" && v.Classification == nil
 		}
 		for _, usage := range v.ClassifierUsage {
 			valid = valid && validUsage(usage)
@@ -327,10 +330,16 @@ func documentPath(p string, stream bool) error {
 	if !stream && (memoryPath(parts) || p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || (len(parts) == 2 && parts[0] == "notices" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))) || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && ((p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json") || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts)) {
+	if stream && ((p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json") || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)
+}
+
+// sessionEntryPath reports whether parts name a service entry recorded on a
+// session's thread: session-entries/<id>.json.
+func sessionEntryPath(parts []string) bool {
+	return len(parts) == 2 && parts[0] == "session-entries" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
 }
 
 func amendmentDraftPath(parts []string) bool {

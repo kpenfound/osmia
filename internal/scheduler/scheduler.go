@@ -140,7 +140,7 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 		c := candidates[0]
 		candidates = candidates[1:]
 		role := c.Thread.Identity.Role
-		if s.refusal(used, c) != "" {
+		if reason := s.refusal(used, c); reason != "" {
 			continue
 		}
 		if s.options.Admit != nil {
@@ -306,12 +306,26 @@ type loaded struct {
 }
 
 // load reads every workstream's threads of repository, then its turn
-// operations.
+// operations. A session workstream is excluded: it has no spec, plan or unit
+// for this scheduler's roles to serve, and its own turns are dispatched
+// directly, never through this scheduler, so it never takes a slot or a
+// place in the rotation of chief-of-staff, mason, reviewer or committee
+// turns.
 func load(repository *trace.Repository) (loaded, error) {
 	project := repository.Project()
-	streams, err := repository.Workstreams()
+	all, err := repository.Workstreams()
 	if err != nil {
 		return loaded{}, err
+	}
+	streams := make([]config.WorkstreamID, 0, len(all))
+	for _, stream := range all {
+		kind, err := repository.Kind(stream)
+		if err != nil {
+			return loaded{}, fmt.Errorf("workstream %s: %w", stream, err)
+		}
+		if kind != trace.SessionKind {
+			streams = append(streams, stream)
+		}
 	}
 	threads := map[config.WorkstreamID][]trace.Thread{}
 	roles := map[localKey]string{}

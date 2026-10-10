@@ -288,6 +288,30 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if id, ok := strings.CutSuffix(r.URL.Path, "/message"); ok && r.Method == http.MethodPost {
+		if id, ok = strings.CutPrefix(id, Prefix+"/sessions/"); ok {
+			var v SessionMessageRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			if out, api := s.sessionMessage(r.Context(), id, v); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+	}
+	if id, ok := strings.CutSuffix(r.URL.Path, "/stop"); ok && r.Method == http.MethodPost {
+		if id, ok = strings.CutPrefix(id, Prefix+"/sessions/"); ok {
+			if out, api := s.sessionStop(r.Context(), id); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, SessionResponse{Session: out})
+			}
+			return
+		}
+	}
 	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/reload" {
 		if out, api := s.reload(); api != nil {
 			failWith(w, api)

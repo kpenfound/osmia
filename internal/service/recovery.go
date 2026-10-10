@@ -12,6 +12,7 @@ import (
 	"github.com/kpenfound/busybees/core/agent/procs"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service/beekeeper"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -90,6 +91,13 @@ func (s *Service) recoverSessions(ctx context.Context, cfg *config.Config, repos
 					return err
 				}
 			}
+			if th.Identity.Role == sessionRole && s.options.Threads != nil {
+				if err := s.recoverContinuations(ctx, repository, stream, th.Identity.ID, func(turn string) error {
+					return s.recoverSession(ctx, cfg, repository, stream, th.Identity.ID, turn)
+				}); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
@@ -162,9 +170,48 @@ func sessionDirectories(cfg *config.Config, project config.ProjectID, stream con
 		}
 	case librarianRole:
 		return []string{filepath.Join(root, "librarian", string(project), turn, "session")}
+	case sessionRole:
+		return []string{filepath.Join(runtime.ModelSessionDirectory(root, project, stream), turn)}
 	default:
 		return []string{filepath.Join(root, "threads", string(project), string(stream), agent.ID, turn)}
 	}
+}
+
+// sessionProfile returns the profile a session workstream's manifest
+// recorded when it opened.
+func sessionProfile(repository *trace.Repository, stream config.WorkstreamID) (string, error) {
+	list, err := repository.Statuses()
+	if err != nil {
+		return "", err
+	}
+	for _, w := range list {
+		if w.Workstream == stream && w.Kind == trace.SessionKind {
+			return w.Profile, nil
+		}
+	}
+	return "", fmt.Errorf("session %s not found", stream)
+}
+
+// recoverSession enqueues a session's continuation turn with the session's
+// fixed profile and publishes its dispatch, the same way sessionMessage
+// does for an owner's message: a session takes no part in the project's
+// chief-of-staff/mason/reviewer scheduler, so nothing else would ever
+// publish it, and recovery itself only enqueues and dispatches, leaving the
+// turn to run on the project's own reconciliation loop once it starts.
+func (s *Service) recoverSession(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, agent, turn string) error {
+	profileName, err := sessionProfile(repository, stream)
+	if err != nil {
+		return err
+	}
+	profile, _, err := cfg.Execution(masonRole, profileName)
+	if err != nil {
+		return err
+	}
+	next, err := s.recoverContinuation(ctx, repository, stream, agent, turn, profile)
+	if err != nil || next == "" {
+		return err
+	}
+	return dispatchSessionTurn(ctx, repository, repository.Project(), stream, next, s.now())
 }
 
 // recoverContinuations calls recover with the turn ID of every turn of the
@@ -188,42 +235,42 @@ func (s *Service) recoverContinuations(ctx context.Context, repository *trace.Re
 
 // recoverContinuation enqueues turn's continuation on the thread with
 // profile, resuming the interrupted request from the durable thread state,
-// and reports whether it did so: it takes no action, and reports false, if
-// the turn did not end interrupted or its continuation is already enqueued.
-func (s *Service) recoverContinuation(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, agent, turn string, profile coreadapter.Profile) (bool, error) {
+// and reports its new turn ID: it takes no action, and reports "", if the
+// turn did not end interrupted or its continuation is already enqueued.
+func (s *Service) recoverContinuation(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, agent, turn string, profile coreadapter.Profile) (string, error) {
 	th, err := repository.Thread(stream, agent)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	for _, q := range th.Turns {
 		if q.Request.TurnID != turn {
 			continue
 		}
 		if q.Response == nil || q.Status() != "interrupted" {
-			return false, nil
+			return "", nil
 		}
 		// After maxRecoveries interruptions in a row the work is not
 		// continued again; the owner's next message resumes the thread.
 		if interruptedInARow(th) >= maxRecoveries {
-			return false, nil
+			return "", nil
 		}
 		req := q.Request
 		req.ID = fmt.Sprintf("request_%s-recover-%d", agent, q.Sequence)
 		req.TurnID = fmt.Sprintf("%s-recover-%d", agent, q.Sequence)
 		for _, existing := range th.Turns {
 			if existing.Request.TurnID == req.TurnID {
-				return false, nil
+				return "", nil
 			}
 		}
 		req.At, req.Actor, req.Cause = s.now(), recoveryActor, q.Response.ID
 		req.Prompt += "\n\nThe service stopped during your previous turn. Continue this work from the durable thread state."
 		req.Profile = profile
 		if _, err := repository.EnqueueTurn(ctx, req); err != nil {
-			return false, err
+			return "", err
 		}
-		return true, nil
+		return req.TurnID, nil
 	}
-	return false, nil
+	return "", nil
 }
 
 func (s *Service) recoverChief(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, agent, turn string) error {
@@ -246,7 +293,7 @@ func (s *Service) recoverBeekeeper(ctx context.Context, cfg *config.Config, repo
 		return err
 	}
 	queued, err := s.recoverContinuation(ctx, repository, stream, agent, turn, profile)
-	if err != nil || !queued {
+	if err != nil || queued == "" {
 		return err
 	}
 	return beekeeper.Continue(ctx, repository, s.options.BeekeeperTurns, s.beekeeperPrepare(cfg), s.now)
