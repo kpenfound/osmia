@@ -60,7 +60,7 @@ func TestUnitReviewReadsThePinnedCandidate(t *testing.T) {
 func TestDaggerChecksCaptureOutputWithholdCredentialsAndDisableColor(t *testing.T) {
 	bin := t.TempDir()
 	script := `#!/bin/sh
-[ "$#" = 5 ] && [ "$1" = check ] && [ "$2" = --progress=report ] && [ "$3" = --fail-fast ] && [ "$4" = 'dag+check://go/packages/tests/test?go-package=a&go-test=TestA' ] && [ "$5" = dag+check://release/version ] || exit 91
+[ "$#" = 5 ] && [ "$1" = check ] && [ "$2" = --progress=report ] && [ "$3" = --failfast ] && [ "$4" = 'dag+check://go/packages/tests/test?go-package=a&go-test=TestA' ] && [ "$5" = dag+check://release/version ] || exit 91
 [ -z "$GITHUB_TOKEN$ANTHROPIC_API_KEY$SSH_AUTH_SOCK" ] || exit 92
 [ -d "$HOME" ] && [ "$HOME" = "$TMPDIR" ] || exit 93
 [ -z "$EXPECTED_HOST_HOME" ] || exit 95

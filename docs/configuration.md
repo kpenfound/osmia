@@ -376,7 +376,7 @@ Core logs cleanup failures; a failed rule removal still attempts sandbox removal
 Unit and final reviewers receive read-only files from the exact candidate commit
 and writable scratch space.
 
-Before a unit is reviewed, the service runs `dagger check --progress=report --fail-fast` on
+Before a unit is reviewed, the service runs `dagger check --progress=report --failfast` on
 a separate, fresh export of its candidate, made a Git root of its own so Dagger
 finds the project's workspace. The copy and temporary home are removed
 afterward. The run is bounded by the project's `checks_timeout` and is

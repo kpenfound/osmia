@@ -171,7 +171,7 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	}
 	report := currentReport(t, repository, stream, "resume")
 	run := onlyRun(t, repository, stream)
-	if run.Status != ChecksPassed || run.Candidate != report.Candidate || run.Base != report.Base || run.Report != 1 || run.Selection == nil || run.Selection.Mode != selectionFull || run.Selection.Reason != string(jev.ReasonDisabled) || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--fail-fast"}) || run.Output != "== CHECKS ==  ✔ 2 passed\n" {
+	if run.Status != ChecksPassed || run.Candidate != report.Candidate || run.Base != report.Base || run.Report != 1 || run.Selection == nil || run.Selection.Mode != selectionFull || run.Selection.Reason != string(jev.ReasonDisabled) || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--failfast"}) || run.Output != "== CHECKS ==  ✔ 2 passed\n" {
 		t.Fatalf("check run %+v", run)
 	}
 	// The boost is off: every check runs on the exact candidate, in an
@@ -224,7 +224,7 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 		t.Fatalf("checks ran %q, want %q", ran, selected)
 	}
 	run := onlyRun(t, repository, stream)
-	if run.Selection.Mode != selectionSelected || !slices.Equal(run.Selection.Links, selected) || run.Selection.Candidates != 4 || run.Selection.Judgment == "" || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--fail-fast"}, selected...)) {
+	if run.Selection.Mode != selectionSelected || !slices.Equal(run.Selection.Links, selected) || run.Selection.Candidates != 4 || run.Selection.Judgment == "" || !slices.Equal(run.Command, append([]string{"dagger", "check", "--progress=report", "--failfast"}, selected...)) {
 		t.Fatalf("check run %+v", run)
 	}
 	requests := p.Requests()

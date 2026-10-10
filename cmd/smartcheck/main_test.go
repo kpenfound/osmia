@@ -141,7 +141,7 @@ func TestRunsTheSelectedChecks(t *testing.T) {
 	if r.code != 0 || r.stderr != "" {
 		t.Fatalf("exit %d, stderr %q", r.code, r.stderr)
 	}
-	if want := [][]string{{"--fail-fast", "--progress=report", serviceTests, traceTests}}; !slices.EqualFunc(d.checks, want, slices.Equal) {
+	if want := [][]string{{"--failfast", "--progress=report", serviceTests, traceTests}}; !slices.EqualFunc(d.checks, want, slices.Equal) {
 		t.Fatalf("ran %q, want %q", d.checks, want)
 	}
 	c := j.clients[0]
@@ -205,7 +205,7 @@ func TestFallsBackToEveryCheck(t *testing.T) {
 			if r.code != 3 || !strings.Contains(r.stderr, "running every check: "+c.reason) {
 				t.Fatalf("exit %d, stderr %q", r.code, r.stderr)
 			}
-			if want := [][]string{{"--fail-fast"}}; !slices.EqualFunc(d.checks, want, slices.Equal) {
+			if want := [][]string{{"--failfast"}}; !slices.EqualFunc(d.checks, want, slices.Equal) {
 				t.Fatalf("ran %q, want every check", d.checks)
 			}
 			if files := c.jev.requests[0].State.(map[string]any)["changed_files"]; files != "- README.md (+2 -0)\n" {
@@ -246,7 +246,7 @@ func TestHonoursAPIKeyEnvAndBaseFlags(t *testing.T) {
 	d := &fakeDagger{links: []string{traceTests}}
 	j := &fakeJev{probabilities: map[string]float64{traceTests: 0.95}}
 	r := runHarness(t, d, j, map[string]string{"JEV_KEY": "set"}, "-C", dir, "--api-key-env=JEV_KEY", "--base=HEAD")
-	if r.code != 0 || r.stderr != "" || j.clients[0].APIKey != "set" || !slices.EqualFunc(d.checks, [][]string{{"--fail-fast", traceTests}}, slices.Equal) {
+	if r.code != 0 || r.stderr != "" || j.clients[0].APIKey != "set" || !slices.EqualFunc(d.checks, [][]string{{"--failfast", traceTests}}, slices.Equal) {
 		t.Fatalf("exit %d, stderr %q, ran %q", r.code, r.stderr, d.checks)
 	}
 }

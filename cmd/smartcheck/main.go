@@ -117,7 +117,7 @@ func (h harness) run(ctx context.Context, args []string) int {
 		}
 		return 0
 	}
-	exit, err := h.dagger(ctx, o.dir, h.stdout, h.stderr, slices.Concat([]string{"check", "--fail-fast"}, o.checkArgs, links)...)
+	exit, err := h.dagger(ctx, o.dir, h.stdout, h.stderr, slices.Concat([]string{"check", "--failfast"}, o.checkArgs, links)...)
 	if err != nil {
 		fmt.Fprintln(h.stderr, "smartcheck: dagger check:", err)
 		return 1

@@ -65,7 +65,7 @@ func (DaggerChecks) List(ctx context.Context, dir string) ([]string, error) {
 
 func (DaggerChecks) Check(ctx context.Context, dir string, links []string) (CheckResult, error) {
 	output := &bytes.Buffer{}
-	exit, err := dagger(ctx, dir, output, append([]string{"check", "--progress=report", "--fail-fast"}, links...)...)
+	exit, err := dagger(ctx, dir, output, append([]string{"check", "--progress=report", "--failfast"}, links...)...)
 	return CheckResult{ExitCode: exit, Output: output.String()}, err
 }
 

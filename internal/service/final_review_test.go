@@ -269,7 +269,7 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 	var run FinalCheckRun
 	runs := streamDocuments(t, repository, stream, finalChecksDocument(1))
 	if len(runs) != 1 || runs[0].Path != "final/checks-1.json" || json.Unmarshal([]byte(runs[0].Content), &run) != nil ||
-		run.Commit != tip || run.Status != ChecksPassed || run.Output != "all proofs passed" || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--fail-fast"}) {
+		run.Commit != tip || run.Status != ChecksPassed || run.Output != "all proofs passed" || !slices.Equal(run.Command, []string{"dagger", "check", "--progress=report", "--failfast"}) {
 		t.Fatalf("the final check run %+v", runs)
 	}
 	reader, err := repository.Thread(stream, committeeAgent(1))

@@ -111,7 +111,7 @@ func (a *finalReviewer) runChecks(ctx context.Context, cfg *config.Config, strea
 	if err := g.Export(ctx, commit, dir); err != nil {
 		return CheckResult{ExitCode: -1}, fmt.Errorf("commit export: %w", err)
 	}
-	run.Command = []string{"dagger", "check", "--progress=report", "--fail-fast"}
+	run.Command = []string{"dagger", "check", "--progress=report", "--failfast"}
 	timeout := cfg.Project.CheckTimeout()
 	bounded, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
