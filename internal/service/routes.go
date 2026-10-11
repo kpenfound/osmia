@@ -23,7 +23,8 @@ type Route struct {
 
 // Routes lists every endpoint Service.handle serves under Prefix.
 var Routes = []Route{
-	{Method: http.MethodGet, Path: Prefix + "/health", Summary: "Report readiness, API version and build identity", Response: HealthResponse{}},
+	{Method: http.MethodGet, Path: Prefix + "/health", Summary: "Report API availability, backend readiness, API version and build identity", Response: HealthResponse{}},
+	{Method: http.MethodGet, Path: Prefix + "/activity", Summary: "List the backend operations the activity record holds", Response: ActivityResponse{}},
 	{Method: http.MethodPost, Path: Prefix + "/stop", Summary: "Stop the service; refused on the web and tailnet listeners", Response: StopResponse{}, Status: http.StatusAccepted},
 	{Method: http.MethodGet, Path: Prefix + "/events", Summary: "Follow the event stream", Response: Event{}, Stream: true},
 

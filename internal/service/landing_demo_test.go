@@ -307,7 +307,7 @@ func TestLandingDemonstration(t *testing.T) {
 	}
 
 	// dedupe became ready only when resume merged, by the landing.
-	transitions := allTransitions(t, f.trace, stream)
+	transitions := allTransitions(t, f.s.cfg.Root, f.project, stream)
 	merged := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("resume")+"-"+UnitMerged })
 	ready := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("dedupe")+"-"+UnitReady })
 	started := slices.IndexFunc(transitions, func(tr trace.Transition) bool {

@@ -164,7 +164,7 @@ func TestApprovedUnitLandsAndReadiesItsDependent(t *testing.T) {
 		t.Fatalf("landing %+v, want %+v", landing, want)
 	}
 
-	transitions := allTransitions(t, f.trace, stream)
+	transitions := allTransitions(t, f.s.cfg.Root, f.project, stream)
 	merged := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("resume")+"-"+UnitMerged })
 	ready := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("dedupe")+"-"+UnitReady })
 	if merged < 0 || ready < merged {
@@ -252,7 +252,7 @@ func TestInterruptedLandingIsReconciled(t *testing.T) {
 				t.Fatalf("the feature branch gained %d commits: %v", len(commits), commits)
 			}
 			var merged, landed []string
-			for _, tr := range allTransitions(t, f.trace, stream) {
+			for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 				if tr.Subject == trace.UnitSubject("resume") && tr.To == UnitMerged {
 					merged = append(merged, tr.ID)
 				}
@@ -405,11 +405,11 @@ func TestLandingIsSerialAndARebasedApprovalReturnsToReview(t *testing.T) {
 		t.Fatalf("the rebased report %+v %+v", doc.Header, report)
 	}
 	id := trace.UnitSubject("dedupe") + "-checking-rebase-1"
-	i := slices.IndexFunc(allTransitions(t, f.trace, stream), func(tr trace.Transition) bool { return tr.ID == id })
+	i := slices.IndexFunc(allTransitions(t, f.s.cfg.Root, f.project, stream), func(tr trace.Transition) bool { return tr.ID == id })
 	if i < 0 {
 		t.Fatal("the return to review is not recorded")
 	}
-	back := allTransitions(t, f.trace, stream)[i]
+	back := allTransitions(t, f.s.cfg.Root, f.project, stream)[i]
 	if back.From != UnitApproved || back.To != UnitChecking || back.Cause != rebases[0].Operation.ID || !strings.HasPrefix(back.Reason, "the approval no longer holds: ") {
 		t.Fatalf("the return to review %+v", back)
 	}

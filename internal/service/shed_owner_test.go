@@ -376,7 +376,7 @@ func TestOwnerSkipsDebateAcrossARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	// An invalid owner edit is reported, which moves the subject again.
-	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.PlanPath), []byte(cyclicPlan), 0600))
+	must(t, os.WriteFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, plan.PlanPath), []byte(cyclicPlan), 0600))
 	f.awaitOwnerState(t, stream, "invalid-edit")
 	f.stop(t)
 
@@ -489,7 +489,7 @@ func TestARedraftIsGivenUpOverAnUnrecordedOwnerEdit(t *testing.T) {
 	}
 	// The owner edits plan.json while the architect replies. The edit is not
 	// recorded yet, so the redraft must not be written over it.
-	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.PlanPath), []byte(cyclicPlan), 0600))
+	must(t, os.WriteFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, plan.PlanPath), []byte(cyclicPlan), 0600))
 	close(release)
 
 	f.awaitReplied(t, stream, 1)
@@ -508,7 +508,7 @@ func TestARedraftIsGivenUpOverAnUnrecordedOwnerEdit(t *testing.T) {
 		t.Fatalf("reply transition %q", told.Reason)
 	}
 	// The owner's file is untouched, so nothing of the edit is lost.
-	data, err := os.ReadFile(filepath.Join(f.trace, "workstreams", string(stream), plan.PlanPath))
+	data, err := os.ReadFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, plan.PlanPath))
 	must(t, err)
 	if string(data) != cyclicPlan {
 		t.Fatalf("plan.json %q", data)
@@ -604,7 +604,7 @@ func TestOwnerEditsAreRecordedBeforeTheNextRound(t *testing.T) {
 	f.start(t)
 	stream := f.handIn(t, "design", handedDesign)
 	f.await(t, stream, sketched)
-	directory := filepath.Join(f.trace, "workstreams", string(stream))
+	directory := workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, "")
 
 	// An edited spec is the owner's next revision.
 	// The edit sharpens a criterion; the recorded plan still addresses both.

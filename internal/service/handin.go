@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -94,7 +95,12 @@ func (s *Service) handIn(ctx context.Context, req HandInRequest) (HandInResponse
 	if err != nil {
 		return HandInResponse{}, &APIError{NotFound, fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
-	h := handIn{s: s, repository: repository, req: req, stream: HandInWorkstream(req.Project, req.Key), source: source, name: name, trace: view.Trace}
+	stream := HandInWorkstream(req.Project, req.Key)
+	workstreamTrace, err := cfg.Root.WorkstreamTrace(req.Project, stream)
+	if err != nil {
+		return HandInResponse{}, &APIError{Internal, fmt.Sprintf("cannot resolve the trace repository of workstream %s", stream)}
+	}
+	h := handIn{s: s, repository: repository, req: req, stream: stream, source: source, name: name, trace: workstreamTrace}
 	// A key whose input is already copied finishes without reading it again.
 	if out, done, api := h.record(ctx, nil); done || api != nil {
 		return out, api
@@ -287,6 +293,7 @@ func validHandedName(name string) bool {
 // readHanded reads the request's input: the file, the fetched issue or the
 // stdin text.
 func (s *Service) readHanded(ctx context.Context, req HandInRequest) (string, *APIError) {
+	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(req.Project)})
 	var content string
 	switch {
 	case req.Path != "":

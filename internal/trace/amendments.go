@@ -29,6 +29,10 @@ type AmendmentRequest struct {
 // FileBudgetAmendment records one service budget request and its filed state
 // together. It leaves every unit state untouched.
 func (r *Repository) FileBudgetAmendment(ctx context.Context, stream config.WorkstreamID, req AmendmentRequest, at time.Time) (Amendment, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return Amendment{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	log, v, err := r.loadWorkflow(stream)
@@ -95,6 +99,10 @@ func (r *Repository) FileBudgetAmendment(ctx context.Context, stream config.Work
 // an interrupted one files nothing twice. A mason turn with no unit, which
 // resolves the feature branch's conflicts with upstream, parks nothing.
 func (r *Repository) FileAmendment(ctx context.Context, agent string, scope coreadapter.Scope, req AmendmentRequest, at time.Time) (Amendment, error) {
+	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return Amendment{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if scope.Role != "mason" && scope.Role != "reviewer" && scope.Role != ChiefOfStaff {
@@ -216,6 +224,10 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 // chief-of-staff turn and reports whether that turn answers a message from
 // the owner.
 func (r *Repository) OwnerTurn(agent string, scope coreadapter.Scope) (TurnRequest, bool, error) {
+	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return TurnRequest{}, false, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if scope.Role != ChiefOfStaff {

@@ -14,7 +14,7 @@ import (
 func TestAbandonCommand(t *testing.T) {
 	root, project, _ := handInFixture(t)
 	id := handInStdin(t, root, project, "# Design\n")
-	handed := filepath.Join(root, "projects", string(project), "workstreams", id, "handed", "stdin")
+	handed := filepath.Join(root, "workstreams", string(project), id, "workstreams", id, "handed", "stdin")
 
 	text := successful(t, root, "abandon", id, "Superseded by the upload design.")
 	if want := "Workstream " + id + " abandoned\nReason: Superseded by the upload design.\n"; text != want {
@@ -26,7 +26,7 @@ func TestAbandonCommand(t *testing.T) {
 	if data, err := os.ReadFile(handed); err != nil || string(data) != "# Design\n" {
 		t.Fatalf("handed copy %q %v", data, err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "projects", string(project), "workstreams", id, "events.jsonl")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "workstreams", string(project), id, "workstreams", id, "events.jsonl")); err != nil {
 		t.Fatal(err)
 	}
 

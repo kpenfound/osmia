@@ -196,6 +196,11 @@ func (c *Client) Health(ctx context.Context) (HealthResponse, error) {
 	err := c.Do(ctx, "GET", Prefix+"/health", nil, &v)
 	return v, err
 }
+func (c *Client) Activity(ctx context.Context) (ActivityResponse, error) {
+	var v ActivityResponse
+	err := c.Do(ctx, "GET", Prefix+"/activity", nil, &v)
+	return v, err
+}
 func (c *Client) Configuration(ctx context.Context) (ConfigResponse, error) {
 	var v ConfigResponse
 	err := c.Do(ctx, "GET", Prefix+"/config", nil, &v)
@@ -237,8 +242,8 @@ func (c *Client) RebaseProject(ctx context.Context, id config.ProjectID) (Projec
 	return v, err
 }
 
-// RebaseWorkstream asks for a drift rebase of one building or assembled
-// workstream and reports the drift rebase that answers it.
+// RebaseWorkstream asks for a drift rebase of an eligible workstream, including
+// a delivered pull request, and reports the drift rebase that answers it.
 func (c *Client) RebaseWorkstream(ctx context.Context, id config.WorkstreamID) (WorkstreamRebaseResponse, error) {
 	var v WorkstreamRebaseResponse
 	err := c.Do(ctx, "POST", Prefix+"/rebase/"+url.PathEscape(string(id)), nil, &v)

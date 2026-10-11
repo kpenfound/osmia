@@ -333,6 +333,9 @@ func (a *finalReviewer) request(ctx context.Context, stream config.WorkstreamID)
 	}
 	var asked []finalReviewInput
 	for _, o := range ops {
+		if o.Operation.Action == DriftAction && o.Result == nil {
+			return nil
+		}
 		if o.Operation.Action != FinalReviewAction && o.Operation.Action != deliveryReviewAction {
 			continue
 		}

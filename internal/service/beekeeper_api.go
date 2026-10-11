@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -67,7 +68,8 @@ func (s *Service) beekeeperMessages(r *http.Request) (BeekeeperMessagesResponse,
 // postBeekeeperMessage records text as the Beekeeper thread's next owner
 // request and runs the Beekeeper turn through Service.PostBeekeeper. It
 // works whether or not any owner project is registered. A busy Beekeeper
-// refuses the message with a conflict and records nothing.
+// is temporarily unavailable, naming the turn in flight from the activity
+// record when it is still there to name, and records nothing.
 func (s *Service) postBeekeeperMessage(ctx context.Context, req BeekeeperSendRequest) (BeekeeperMessagesResponse, *APIError) {
 	if strings.TrimSpace(req.Text) == "" {
 		return BeekeeperMessagesResponse{}, &APIError{Validation, "text must not be empty"}
@@ -75,7 +77,11 @@ func (s *Service) postBeekeeperMessage(ctx context.Context, req BeekeeperSendReq
 	q, err := s.PostBeekeeper(ctx, req.Text)
 	if err != nil {
 		if errors.Is(err, beekeeper.ErrBusy) {
-			return BeekeeperMessagesResponse{}, &APIError{Conflict, "the beekeeper is busy with a previous message; send it again once that turn finishes"}
+			cause := "the beekeeper's previous message"
+			if e, ok := s.activityEntry(beekeeperActivityKey); ok {
+				cause = activityCause(e)
+			}
+			return BeekeeperMessagesResponse{}, &APIError{Unavailable, fmt.Sprintf("%s is in flight; send this message again once it finishes", cause)}
 		}
 		return BeekeeperMessagesResponse{}, &APIError{Internal, "cannot record or run the beekeeper turn; check the trace repository"}
 	}

@@ -138,8 +138,12 @@ func withPendingReplies(repository *trace.Repository, th trace.Thread, systemPro
 // chief-of-staff turn is recorded; Post still returns the completed turn and
 // a nil error in that case. Only a busy Beekeeper, an empty message or a
 // failure to record or run the turn is returned as an error, and only a busy
-// Beekeeper or an empty message leaves the thread unchanged.
-func Post(ctx context.Context, repository *trace.Repository, profile coreadapter.Profile, turns coreadapter.Turns, prepare Prepare, now func() time.Time, text string) (trace.QueuedTurn, error) {
+// Beekeeper or an empty message leaves the thread unchanged. started, when
+// given, is called exactly once, after both busy checks pass and before the
+// turn is recorded or run, so a caller can report the turn's whole run as
+// one backend operation without ever reporting a call this function refuses
+// as busy.
+func Post(ctx context.Context, repository *trace.Repository, profile coreadapter.Profile, turns coreadapter.Turns, prepare Prepare, now func() time.Time, text string, started func()) (trace.QueuedTurn, error) {
 	if strings.TrimSpace(text) == "" {
 		return trace.QueuedTurn{}, fmt.Errorf("text must not be empty")
 	}
@@ -156,6 +160,9 @@ func Post(ctx context.Context, repository *trace.Repository, profile coreadapter
 	}
 	if unfinished(th) {
 		return trace.QueuedTurn{}, ErrBusy
+	}
+	if started != nil {
+		started()
 	}
 	systemPrompt, err := withPendingReplies(repository, th, RolePrompt)
 	if err != nil {

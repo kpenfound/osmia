@@ -204,6 +204,14 @@ svg {
   color: var(--accent);
 }
 
+#activity-button[data-active="true"] {
+  color: var(--accent);
+}
+
+#activity-button[data-blocked="true"] {
+  color: var(--lost);
+}
+
 #settings-button[data-lit="true"]::after,
 .lit {
   display: inline-block;
@@ -873,21 +881,33 @@ svg {
 }
 
 .pauses,
-.capacity {
+.capacity,
+.activity-entries {
   display: grid;
   gap: 0.5rem;
 }
 
 .pause,
-.role {
+.role,
+.activity-entry {
   min-width: 0;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--line);
   border-radius: 0.5rem;
 }
 
-.pauses .empty {
+.pauses .empty,
+.activity-entries .empty {
   color: var(--muted);
+}
+
+.activity-entry[data-blocked="true"] {
+  border-color: var(--lost);
+}
+
+.activity-entry .failure,
+.activity-entry .blocked-note {
+  color: var(--lost);
 }
 
 .pause button {
@@ -1000,6 +1020,10 @@ button:disabled {
 
 .result[data-outcome="ok"] {
   color: var(--live);
+}
+
+.result[data-outcome="unavailable"] {
+  color: var(--accent);
 }
 
 .result[data-outcome="error"] {

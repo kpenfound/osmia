@@ -24,9 +24,9 @@ Paths are under the root, `~/.local/share/osmia` by default.
 
 | Path | What it answers |
 |---|---|
-| `runtime.json` | Pauses with their sources, archived workstreams, profile overrides |
+| `runtime.json` | Pauses with their sources, archived workstreams (title, outcome, archive time, delivery link), profile overrides |
 | `projects/<p>/config.toml` | The project's clone path, base branch and landing style |
-| `projects/<p>/workstreams/<w>/workstream.json` | When the workstream was created and its workspace backend |
+| `workstreams/<p>/<w>/workstream.json` | When the workstream was created and its workspace backend |
 | `.../events.jsonl` | Every transition: `subject`, `from`, `to`, `reason`, `actor`, `cause`, `at`, `unit` |
 | `.../ledger.jsonl` | One cost record per session: `.entry.Scope` (`Role`, `Unit`, `Thread`, `Turn`), `.entry.At`, `.entry.Usage` (`CostUSD`, `Turns`) |
 | `.../agents/<agent>/log.jsonl` | Each turn's request (`actor`, `cause`, `prompt`, `profile`) and response (`result.FinalResponse`, `result.Outcome`) |
@@ -51,8 +51,8 @@ session count, the span of its events and the goal from its latest status.
 Active, high-session workstreams are where to start.
 
 ```sh
-cd ~/.local/share/osmia/projects
-for w in */workstreams/*/; do
+cd ~/.local/share/osmia/workstreams
+for w in */*/; do
   id=$(basename $w)
   state=$(jq -r 'select(.subject=="feature") | .to' $w/events.jsonl | tail -1)
   sessions=$(wc -l < $w/ledger.jsonl 2>/dev/null)
@@ -69,7 +69,7 @@ sessions far above mason sessions, or nearly all of a role's sessions on one
 or two units, means something repeats.
 
 ```sh
-W=projects/<p>/workstreams/<w>
+W=workstreams/<p>/<w>
 jq -r '[.entry.Scope.Role, .entry.Usage.CostUSD] | @tsv' $W/ledger.jsonl \
   | awk -F'\t' '{n[$1]++; c[$1]+=$2} END {for (r in n) printf "%-16s %5d $%.2f\n", r, n[r], c[r]}'
 jq -r '[.entry.Scope.Role, .entry.Scope.Unit] | @tsv' $W/ledger.jsonl | sort | uniq -c | sort -nr
@@ -176,9 +176,10 @@ what they achieve.
    that only reads files and rewrites its status did not need to run.
 
    ```sh
-   find */workstreams/*/tools -name '*-1.json' -print0 | xargs -0 cat \
+   find */*/tools -name '*-1.json' -print0 | xargs -0 cat \
      | jq -r 'select(.scope.Role=="chief_of_staff") | .name' | sort | uniq -c | sort -nr
    ```
+   (run from `~/.local/share/osmia/workstreams`)
 
 4. Work repeated per item: reviews per merged unit, re-checks caused by
    rebases, librarian refreshes per landing.

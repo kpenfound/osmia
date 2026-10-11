@@ -102,6 +102,10 @@ func (r *Repository) Questions(stream config.WorkstreamID) ([]QuestionState, err
 // QuestionActions reads questions and filed amendment requests from one trace
 // snapshot, so a turn can determine its durable waiting outcome in one scan.
 func (r *Repository) QuestionActions(stream config.WorkstreamID) ([]QuestionState, []Amendment, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return nil, nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	_, v, err := r.loadWorkflow(stream)
@@ -185,6 +189,10 @@ func questionTransition(v *workflowView, h Header, id, from, to, reason string) 
 // the same commit. A chief-of-staff turn fails. An empty question and a second
 // question from the same turn are refused with *QuestionRefused.
 func (r *Repository) Ask(ctx context.Context, agent string, scope coreadapter.Scope, text string, at time.Time) (Question, error) {
+	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return Question{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if scope.Role == ChiefOfStaff {
@@ -276,6 +284,10 @@ func (r *Repository) chiefTurn(ctx context.Context, agent string, scope coreadap
 // that is not open, an empty answer and an answer without a citation are
 // refused with *QuestionRefused.
 func (r *Repository) AnswerQuestion(ctx context.Context, agent string, scope coreadapter.Scope, id, text string, citations []string, at time.Time) (Ruling, error) {
+	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return Ruling{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	turn, log, v, records, err := r.chiefTurn(ctx, agent, scope, at)
@@ -331,6 +343,12 @@ type EscalationRequest struct {
 // batch ID it returns. The escalation takes the project's next inbox number. A turn of another role fails. Unless every question is
 // open, none is escalated and the request is refused with *QuestionRefused.
 func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope coreadapter.Scope, req EscalationRequest, at time.Time) (string, error) {
+	project := r
+	stream := config.WorkstreamID(scope.Workstream)
+	r, err := r.scoped(stream)
+	if err != nil {
+		return "", err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	turn, log, v, records, err := r.chiefTurn(ctx, agent, scope, at)
@@ -352,11 +370,10 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 			return "", refused("options must not contain an empty entry")
 		}
 	}
-	stream := config.WorkstreamID(scope.Workstream)
 	existing := questions(records, v, stream)
-	escalation := &Escalation{Batch: "escalation_" + req.Questions[0], Inbox: nextInbox(records), Questions: slices.Clone(req.Questions), Blocked: req.Blocked, Options: slices.Clone(req.Options), Recommendation: req.Recommendation}
-	var revisions []Record
-	var txs []Transaction
+	// Every question is checked eligible before the inbox number is reserved,
+	// so a refused batch never wastes one.
+	opened := make([]QuestionState, len(req.Questions))
 	for i, id := range req.Questions {
 		if slices.Contains(req.Questions[:i], id) {
 			return "", refused("question %s is listed twice", id)
@@ -365,7 +382,21 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 		if err != nil {
 			return "", err
 		}
-		next := q.Latest
+		opened[i] = q
+	}
+	// The project's inbox number is reserved before the workstream's own
+	// commit, in the project's own trace repository: a crash between the two
+	// leaves the number unused, never reused, and the escalation is retried
+	// with a freshly reserved one.
+	inbox, err := project.reserveInboxNumber(ctx)
+	if err != nil {
+		return "", err
+	}
+	escalation := &Escalation{Batch: "escalation_" + req.Questions[0], Inbox: inbox, Questions: slices.Clone(req.Questions), Blocked: req.Blocked, Options: slices.Clone(req.Options), Recommendation: req.Recommendation}
+	var revisions []Record
+	var txs []Transaction
+	for i, id := range req.Questions {
+		next := opened[i].Latest
 		next.Revision++
 		next.At, next.Actor, next.Cause, next.Depth = at, Actor{Kind: "agent", ID: agent}, turn.Request.ID, turn.Request.Depth+1
 		next.SentToOwner, next.Escalation = req.Rephrasing, escalation

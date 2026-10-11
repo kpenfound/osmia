@@ -395,14 +395,16 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 		if len(docs) != 1 || docs[0].Revision != 1 || docs[0].Path != want.path || docs[0].Content != want.content || docs[0].Actor != architectActor || docs[0].Cause != operation || docs[0].Source != "" {
 			t.Fatalf("%s revisions: %+v", id, docs)
 		}
-		data, err := os.ReadFile(filepath.Join(f.trace, "workstreams", string(stream), want.path))
+		data, err := os.ReadFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, want.path))
 		if err != nil || string(data) != want.content {
 			t.Fatalf("%s on disk: %q %v", want.path, data, err)
 		}
 	}
+	streamTrace, err := f.s.cfg.Root.WorkstreamTrace(f.project, stream)
+	must(t, err)
 	streamDir := "workstreams/" + string(stream) + "/"
-	spec := demoGit(t, filepath.Dir(f.clone), "-C", f.trace, "log", "-1", "--format=%H", "--", streamDir+"spec.md")
-	if other := demoGit(t, filepath.Dir(f.clone), "-C", f.trace, "log", "-1", "--format=%H", "--", streamDir+"plan.json"); other != spec {
+	spec := demoGit(t, filepath.Dir(f.clone), "-C", streamTrace, "log", "-1", "--format=%H", "--", streamDir+"spec.md")
+	if other := demoGit(t, filepath.Dir(f.clone), "-C", streamTrace, "log", "-1", "--format=%H", "--", streamDir+"plan.json"); other != spec {
 		t.Fatalf("revisions landed in separate commits: %s %s", spec, other)
 	}
 	// One transition moves the feature, with its actor and reason, and its
@@ -417,7 +419,7 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 		moves[1].Reason != "the architect's draft 1 passed validation: spec.md revision 1 with 2 acceptance criteria and plan.json revision 1 with 2 units" {
 		t.Fatalf("feature transitions: %+v", moves)
 	}
-	events, err := os.ReadFile(filepath.Join(f.trace, streamDir, "events.jsonl"))
+	events, err := os.ReadFile(filepath.Join(streamTrace, streamDir, "events.jsonl"))
 	must(t, err)
 	if !strings.Contains(string(events), `"from":"handed","to":"sketched"`) {
 		t.Fatalf("events.jsonl:\n%s", events)

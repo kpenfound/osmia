@@ -258,7 +258,7 @@ func TestRebaseProjectThroughTheAPI(t *testing.T) {
 	assertCode(t, f.c.Do(ctx, "POST", Prefix+"/projects/rebase", ProjectRebaseRequest{Project: "not-a-project"}, nil), Validation)
 	_, err := f.c.RebaseProject(ctx, "p_ffffffffffffffffffffffffffffffff")
 	assertCode(t, err, NotFound)
-	idle := DriftSkip{Workstream: idleStream, Reason: "the workstream is not started, not building or assembled"}
+	idle := DriftSkip{Workstream: idleStream, Reason: "the workstream is not started, not building, assembled or delivered with a pull request"}
 
 	pause := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
 	must(t, f.c.Do(ctx, "PUT", Prefix+"/runtime/pause", PauseRequest{Target: pause, Mode: "soft", Reason: "hold", Source: "owner"}, nil))
@@ -355,7 +355,7 @@ func TestRebaseWorkstreamThroughTheAPI(t *testing.T) {
 	assertCode(t, err, Validation)
 	_, err = f.c.RebaseWorkstream(ctx, idleStream)
 	assertCode(t, err, Conflict)
-	if err == nil || !strings.Contains(err.Error(), "takes no drift rebase: the workstream is not started, not building or assembled") {
+	if err == nil || !strings.Contains(err.Error(), "takes no drift rebase: the workstream is not started, not building, assembled or delivered with a pull request") {
 		t.Fatalf("an idle workstream's refusal: %v", err)
 	}
 

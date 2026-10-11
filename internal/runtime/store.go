@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -46,14 +47,18 @@ type Priority struct {
 }
 
 // Archive records a delivered or abandoned workstream the owner archived.
-// The title survives permanent trace cleanup; CleanedAt marks completion.
+// State holds the outcome, delivered or abandoned. DeliveryLink is, where
+// one exists, the pull request URL or the recorded upstream commit of an
+// owner-recorded merge. The title, state and delivery link survive
+// permanent trace cleanup; CleanedAt marks completion.
 type Archive struct {
-	Project    config.ProjectID    `json:"project"`
-	Workstream config.WorkstreamID `json:"workstream"`
-	ArchivedAt time.Time           `json:"archived_at"`
-	Title      string              `json:"title,omitempty"`
-	State      string              `json:"state,omitempty"`
-	CleanedAt  time.Time           `json:"cleaned_at,omitempty"`
+	Project      config.ProjectID    `json:"project"`
+	Workstream   config.WorkstreamID `json:"workstream"`
+	ArchivedAt   time.Time           `json:"archived_at"`
+	Title        string              `json:"title,omitempty"`
+	State        string              `json:"state,omitempty"`
+	DeliveryLink string              `json:"delivery_link,omitempty"`
+	CleanedAt    time.Time           `json:"cleaned_at,omitempty"`
 }
 
 // ProviderLimit records a provider's blocked capacity independently of role bindings.
@@ -105,7 +110,22 @@ type Store struct {
 	ops   fileOps
 	// changed is called after a mutation changes the persisted state.
 	changed func()
+	// generation counts the mutations that have actually changed the
+	// persisted state, so a caller that reads the store more than once
+	// while assembling one response can tell whether a mutation landed
+	// between those reads.
+	generation atomic.Uint64
 }
+
+// Generation reports how many mutations have changed this store's persisted
+// state. It never decreases while the store is open, and it is unchanged
+// exactly when no mutation landed between two calls: a caller that combines
+// a runtime read with a trace read into one response can call it, alongside
+// the trace's own Generation, before and after assembling that response and
+// retry when either differs, so the response never mixes runtime state from
+// before a mutation with state from after it. It never blocks on mu, so it
+// is safe to call around a read held up by a long-running mutation.
+func (s *Store) Generation() uint64 { return s.generation.Load() }
 
 // Observe calls f after each mutation that changes the persisted state,
 // replacing any earlier observer. Set it before the store is shared. f runs
@@ -538,8 +558,11 @@ func (s *Store) mutate(f func(*State, Inputs) error) error {
 	unchanged := bytes.Equal(data, s.disk)
 	s.state = next
 	s.disk = data
-	if !unchanged && s.changed != nil {
-		s.changed()
+	if !unchanged {
+		s.generation.Add(1)
+		if s.changed != nil {
+			s.changed()
+		}
 	}
 	return nil
 }
@@ -743,8 +766,10 @@ func (s *Store) CheckDisk() error {
 	return s.checkDisk()
 }
 
-// UpdateArchive preserves a title before purge and records its completion.
-// It accepts an absent trace because a restart may follow the deletion.
+// UpdateArchive preserves a title, outcome or delivery link read from the
+// trace before it is deleted, and records cleanup's completion once the
+// trace is gone. It accepts an absent trace because a restart may follow
+// the deletion.
 func (s *Store) UpdateArchive(a Archive) error {
 	return s.mutate(func(st *State, _ Inputs) error {
 		for i, old := range st.Archived {

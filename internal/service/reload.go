@@ -9,6 +9,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
 // scheduleHook is one step of the schedule a pass runs before it reconciles
@@ -37,10 +38,13 @@ type pipeline struct {
 
 func (p *pipeline) schedule(ctx context.Context) error {
 	if next := p.next.Swap(nil); next != nil {
+		println("DEBUG schedule swap at", time.Now().Format("15:04:05.000"))
 		p.current.Store(next)
 	}
-	for _, hook := range p.current.Load().hooks {
+	current := p.current.Load()
+	for _, hook := range current.hooks {
 		if err := hook.pass(ctx); err != nil {
+			ghlog.Logger(ctx).Error("reconciliation pass hook failed", "project", string(current.cfg.Project.ID), "hook", hook.name, "error", err.Error())
 			return fmt.Errorf("%s pass: %w", hook.name, err)
 		}
 	}
@@ -79,9 +83,14 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		s.reloadErr = failed
 		s.mu.Unlock()
 		s.hub.publish(Event{Kind: EventConfig})
+		s.log().Error("reload failed", "error", failed.Message)
 		return ReloadResponse{}, &APIError{Validation, failed.Message + "; the loaded configuration is unchanged"}
 	}
 	unchanged := &APIError{Internal, "cannot apply the reloaded configuration to the running project; the loaded configuration is unchanged"}
+	failUnchanged := func() (ReloadResponse, *APIError) {
+		s.log().Error("reload failed", "error", unchanged.Message)
+		return ReloadResponse{}, unchanged
+	}
 	staged := map[*activeProject]*stages{}
 	var added, removed []*activeProject
 	rollback := func() {
@@ -95,7 +104,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 			continue
 		}
 		if staged[p], err = s.stages(next.For(p.id), p.repository); err != nil {
-			return ReloadResponse{}, unchanged
+			return failUnchanged()
 		}
 	}
 	for _, id := range next.ProjectIDs() {
@@ -107,7 +116,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 			p, err := s.open(next.For(id))
 			if err != nil {
 				rollback()
-				return ReloadResponse{}, unchanged
+				return failUnchanged()
 			}
 			if p != nil {
 				added = append(added, p)
@@ -128,13 +137,14 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	if err := s.resolveRuntime(next, projects); err != nil {
 		s.mu.Unlock()
 		rollback()
-		return ReloadResponse{}, unchanged
+		return failUnchanged()
 	}
 	s.cfg, s.projects, s.reloadErr = next, projects, nil
 	for p, stage := range staged {
 		p.pipeline.next.Store(stage)
 	}
 	for _, p := range removed {
+		s.log().Info("project draining", "project", string(p.id), "reason", "reload")
 		p.controller.Drain()
 	}
 	for _, p := range added {
@@ -143,8 +153,10 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	s.mu.Unlock()
 	for _, p := range removed {
 		if err := s.finishDraining(p); err != nil {
+			s.log().Error("project stopped", "project", string(p.id), "reason", "reload", "error", err.Error())
 			return ReloadResponse{}, &APIError{Internal, "configuration applied but a removed project could not finish draining; restart the service"}
 		}
+		s.log().Info("project stopped", "project", string(p.id), "reason", "reload")
 	}
 	// The runtime's effective profiles and the daily budget's limit follow the
 	// configuration.
@@ -156,6 +168,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		events = append(events, Event{Kind: EventSpend})
 	}
 	s.hub.publish(events...)
+	s.log().Info("reload succeeded", "digest", digest(next), "restart_required", len(restart) > 0, "added", len(added), "removed", len(removed))
 	return ReloadResponse{Digest: digest(next), RestartRequired: restart}, nil
 }
 

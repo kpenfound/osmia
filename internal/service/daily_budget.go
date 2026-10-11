@@ -36,8 +36,12 @@ func (d dailyBudget) Pass(ctx context.Context) error {
 	}
 	if current != nil && current.Source == runtime.PauseDailyBudget && day.of(current.SetAt) != day.date {
 		// The owner may have replaced the pause since the snapshot; it stays.
-		if err := d.s.store.ClearPause(factoryTarget, runtime.PauseDailyBudget); err != nil && !errors.Is(err, runtime.ErrValidation) {
+		err := d.s.store.ClearPause(factoryTarget, runtime.PauseDailyBudget)
+		if err != nil && !errors.Is(err, runtime.ErrValidation) {
 			return err
+		}
+		if err == nil {
+			d.s.log().Info("pause cleared", "scope", factoryTarget.Scope, "reason", "the daily budget pause expired at the next local day")
 		}
 		return d.Pass(ctx)
 	}
@@ -69,6 +73,9 @@ func (d dailyBudget) Pass(ctx context.Context) error {
 	// cannot replace it.
 	if errors.Is(err, runtime.ErrValidation) {
 		return nil
+	}
+	if err == nil {
+		d.s.log().Info("pause set", "scope", factoryTarget.Scope, "mode", "soft", "reason", reason)
 	}
 	return err
 }

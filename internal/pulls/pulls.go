@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
 // PullRequest is one pull request of a repository. Head is the head branch,
@@ -128,7 +130,7 @@ func owner(repository string) string {
 func (g GitHub) Find(ctx context.Context, repository, headRepository, branch string) ([]PullRequest, error) {
 	query := url.Values{"head": {owner(headRepository) + ":" + branch}, "state": {"all"}, "per_page": {"100"}}
 	var pulls []githubPull
-	if err := g.do(ctx, http.MethodGet, "/repos/"+repository+"/pulls?"+query.Encode(), nil, http.StatusOK, &pulls); err != nil {
+	if err := g.do(ctx, "pulls.find", ghlog.Read, repository, http.MethodGet, "/repos/"+repository+"/pulls?"+query.Encode(), nil, http.StatusOK, &pulls); err != nil {
 		return nil, fmt.Errorf("find pull requests of %s from %s:%s: %w", repository, headRepository, branch, err)
 	}
 	var out []PullRequest
@@ -149,7 +151,7 @@ func (g GitHub) Create(ctx context.Context, repository string, pr New) (PullRequ
 		body["head"] = pr.Head
 	}
 	var created githubPull
-	if err := g.do(ctx, http.MethodPost, "/repos/"+repository+"/pulls", body, http.StatusCreated, &created); err != nil {
+	if err := g.do(ctx, "pulls.create", ghlog.Write, repository, http.MethodPost, "/repos/"+repository+"/pulls", body, http.StatusCreated, &created); err != nil {
 		return PullRequest{}, fmt.Errorf("open a pull request on %s from %s:%s: %w", repository, pr.HeadRepository, pr.Head, err)
 	}
 	return created.pull(), nil
@@ -158,13 +160,22 @@ func (g GitHub) Create(ctx context.Context, repository string, pr New) (PullRequ
 // Update retargets an existing pull request and applies its approved text.
 func (g GitHub) Update(ctx context.Context, repository string, number int, change Update) (PullRequest, error) {
 	var updated githubPull
-	if err := g.do(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/pulls/%d", repository, number), change, http.StatusOK, &updated); err != nil {
+	if err := g.do(ctx, "pulls.update", ghlog.Write, repository, http.MethodPatch, fmt.Sprintf("/repos/%s/pulls/%d", repository, number), change, http.StatusOK, &updated); err != nil {
 		return PullRequest{}, fmt.Errorf("update pull request %s#%d: %w", repository, number, err)
 	}
 	return updated.pull(), nil
 }
 
-func (g GitHub) do(ctx context.Context, method, path string, in any, want int, out any) error {
+// do performs one GitHub REST request and records one ghlog entry for it,
+// whether it succeeds or fails.
+func (g GitHub) do(ctx context.Context, action, access, repository, method, path string, in any, want int, out any) error {
+	start := time.Now()
+	status, err := g.request(ctx, method, path, in, want, out)
+	ghlog.Log(ctx, start, ghlog.Entry{Action: action, Access: access, Repository: repository, Method: method, Path: path, Status: status, NoResponse: status == 0, Err: err})
+	return err
+}
+
+func (g GitHub) request(ctx context.Context, method, path string, in any, want int, out any) (status int, err error) {
 	base := g.BaseURL
 	if base == "" {
 		base = "https://api.github.com"
@@ -173,13 +184,13 @@ func (g GitHub) do(ctx context.Context, method, path string, in any, want int, o
 	if in != nil {
 		data, err := json.Marshal(in)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		reader = bytes.NewReader(data)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimSuffix(base, "/")+path, reader)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	if in != nil {
@@ -194,20 +205,21 @@ func (g GitHub) do(ctx context.Context, method, path string, in any, want int, o
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("request failed")
+		return 0, fmt.Errorf("request failed")
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != want {
-		return statusError(resp)
+	status = resp.StatusCode
+	if status != want {
+		return status, statusError(resp)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponse+1))
 	if err != nil || len(data) > MaxResponse {
-		return fmt.Errorf("unreadable or oversized response")
+		return status, fmt.Errorf("unreadable or oversized response")
 	}
 	if err := json.Unmarshal(data, out); err != nil {
-		return fmt.Errorf("invalid response")
+		return status, fmt.Errorf("invalid response")
 	}
-	return nil
+	return status, nil
 }
 
 // maxErrorBody bounds the error response statusError reads, and

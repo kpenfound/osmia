@@ -589,12 +589,12 @@ func TestSessionRelayRecordsContextRebuiltEntryBeforeTheIdleTransition(t *testin
 
 	// Sessions take no reconciliation pass, but the project's controller
 	// still runs its own passes on other subjects in the background; halt
-	// it so nothing else commits to the shared project trace while this
-	// test counts sessionRelay's own commits.
+	// it so nothing else commits to the session's trace while this test
+	// counts sessionRelay's own commits.
 	must(t, s.halt(s.sole()))
 
 	repo := s.sole().repository
-	traceDir, err := s.cfg.Root.ProjectTrace(project)
+	traceDir, err := s.cfg.Root.WorkstreamTrace(project, stream)
 	must(t, err)
 	home := t.TempDir()
 	ctx := context.Background()

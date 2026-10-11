@@ -78,6 +78,8 @@ const (
 type exitDemo struct {
 	mu       sync.Mutex
 	trace    string
+	root     config.Root
+	project  config.ProjectID
 	plays    map[string]map[string]demoTurn
 	ran      map[string][]string
 	prompts  map[string]string
@@ -99,7 +101,11 @@ func (d *exitDemo) streamOf(design string) (config.WorkstreamID, bool) {
 // <kind>/<project>/<workstream>/<turn or agent>/<session or turn>.
 func (d *exitDemo) design(req agent.Request) (string, error) {
 	stream := filepath.Base(filepath.Dir(filepath.Dir(req.SessionDir)))
-	data, err := os.ReadFile(filepath.Join(d.trace, "workstreams", stream, "handed", "stdin"))
+	dir, err := d.root.WorkstreamTrace(d.project, config.WorkstreamID(stream))
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "workstreams", stream, "handed", "stdin"))
 	if err != nil {
 		return "", fmt.Errorf("turn %s of workstream %s: %w", req.Name, stream, err)
 	}
@@ -425,7 +431,7 @@ func TestHandInToRatifiedPlan(t *testing.T) {
 	f.start(t)
 	added, err := f.c.AddProject(ctx, request(clone))
 	must(t, err)
-	f.project, f.trace, d.trace = added.Project.ID, added.Project.Trace, added.Project.Trace
+	f.project, f.trace, d.trace, d.root, d.project = added.Project.ID, added.Project.Trace, added.Project.Trace, f.s.cfg.Root, added.Project.ID
 	if x := awaitExtraction(t, f.c); x.State != "succeeded" {
 		t.Fatalf("extraction: %+v", x)
 	}
@@ -730,8 +736,10 @@ func TestHandInToRatifiedPlan(t *testing.T) {
 	if threads, err := f.repository().Threads(gone); err != nil || slices.ContainsFunc(threads, func(th trace.Thread) bool { return th.Identity.Role == committeeRole }) {
 		t.Fatalf("the abandoned workstream has a committee: %+v %v", threads, err)
 	}
+	goneTrace, err := f.s.cfg.Root.WorkstreamTrace(f.project, gone)
+	must(t, err)
 	for _, path := range []string{"handed/stdin", plan.SpecPath, plan.PlanPath} {
-		demoGit(t, home, "-C", f.trace, "cat-file", "blob", "HEAD:workstreams/"+string(gone)+"/"+path)
+		demoGit(t, home, "-C", goneTrace, "cat-file", "blob", "HEAD:workstreams/"+string(gone)+"/"+path)
 	}
 	if refs := demoGit(t, home, "-C", clone, "for-each-ref", "--format=%(refname)", "refs/heads/osmia/"+string(gone)); strings.TrimSpace(refs) != "" {
 		t.Fatalf("the abandoned workstream has a branch: %s", refs)

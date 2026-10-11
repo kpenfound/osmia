@@ -4,16 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
-	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/redact"
 	"tailscale.com/tsnet"
 )
 
@@ -34,17 +35,43 @@ type TailnetListener interface {
 // and listens for HTTP on its port 80.
 type JoinTailnet func(hostname, dir string) (TailnetListener, error)
 
-// joinTailscale joins through embedded Tailscale. The node reads its auth key
-// from TS_AUTHKEY on first login; without one it logs a login URL to stderr
-// until someone opens it.
-func joinTailscale(hostname, dir string) (TailnetListener, error) {
-	server := &tsnet.Server{Dir: dir, Hostname: hostname, UserLogf: log.New(os.Stderr, "osmia tailnet: ", log.LstdFlags).Printf}
-	listener, err := server.Listen("tcp", ":80")
-	if err != nil {
-		server.Close()
-		return nil, err
+// loginURLPattern finds the login URL embedded Tailscale's logger prints
+// while the node waits for approval, so it can travel as a field of its own
+// rather than only within the logged message text.
+var loginURLPattern = regexp.MustCompile(`https?://\S+`)
+
+// tailscaleLogf adapts logger to embedded Tailscale's logf signature: every
+// line it logs becomes one structured record, with any URL the line
+// mentions, such as the tailnet login URL shown while the node waits for
+// approval, as its own field.
+func tailscaleLogf(logger *slog.Logger) func(string, ...any) {
+	return func(format string, args ...any) {
+		line := strings.TrimSpace(fmt.Sprintf(format, args...))
+		if line == "" {
+			return
+		}
+		line = redact.Secrets(line, redact.KnownSecrets()...)
+		attrs := []any{"component", "tailnet", "message", line}
+		if url := loginURLPattern.FindString(line); url != "" {
+			attrs = append(attrs, "login_url", url)
+		}
+		logger.Info("tailnet message", attrs...)
 	}
-	return tsnetListener{Listener: listener, server: server}, nil
+}
+
+// joinTailscale joins through embedded Tailscale. The node reads its auth key
+// from TS_AUTHKEY on first login; without one it logs a login URL, as a
+// field of a structured record, until someone opens it.
+func joinTailscale(logger *slog.Logger) JoinTailnet {
+	return func(hostname, dir string) (TailnetListener, error) {
+		server := &tsnet.Server{Dir: dir, Hostname: hostname, UserLogf: tailscaleLogf(logger)}
+		listener, err := server.Listen("tcp", ":80")
+		if err != nil {
+			server.Close()
+			return nil, err
+		}
+		return tsnetListener{Listener: listener, server: server}, nil
+	}
 }
 
 type tsnetListener struct {
@@ -225,13 +252,14 @@ func (s *Service) superviseTailnet(root config.Root, hostname string) {
 			var err error
 			if node, err = s.joinTailnet(root, hostname); err != nil {
 				s.tailnet.set(nil, err.Error())
-				log.Printf("osmia tailnet: join %s: %v; retrying in %s", hostname, err, s.options.TailnetRetry)
+				s.logger.Warn("tailnet join failed; retrying", "component", "tailnet", "hostname", hostname, "error", redact.Secrets(err.Error(), redact.KnownSecrets()...), "retry", s.options.TailnetRetry.String())
 				if !s.tailnetWait() {
 					return
 				}
 				continue
 			}
 			s.tailnet.set(node, "")
+			s.logger.Info("tailnet joined", "component", "tailnet", "hostname", hostname, "state", "up")
 		}
 		err := s.server.Serve(tagged{Listener: node, kind: tailnetListener})
 		if s.lifetime.Err() != nil || errors.Is(err, http.ErrServerClosed) {
@@ -240,7 +268,7 @@ func (s *Service) superviseTailnet(root config.Root, hostname string) {
 		s.tailnet.set(nil, fmt.Sprintf("the tailnet listener stopped: %v", err))
 		node.Close()
 		node.Leave()
-		log.Printf("osmia tailnet: listener stopped: %v; rejoining in %s", err, s.options.TailnetRetry)
+		s.logger.Warn("tailnet listener stopped; rejoining", "component", "tailnet", "error", redact.Secrets(err.Error(), redact.KnownSecrets()...), "retry", s.options.TailnetRetry.String())
 		if !s.tailnetWait() {
 			return
 		}

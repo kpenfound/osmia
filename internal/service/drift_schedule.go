@@ -108,6 +108,16 @@ func (f *foreman) driftDue(stream config.WorkstreamID, now time.Time) (string, e
 	if h.Held && h.Requested <= h.Drift {
 		return "", nil
 	}
+	feature, err := f.repository.Workflow(stream, trace.FeatureSubject)
+	if err != nil {
+		return "", err
+	}
+	if feature.Value == DeliveredState {
+		if h.Requested > h.Drift {
+			return fmt.Sprintf("the %s asked for drift rebase %d", h.RequestedBy, h.Requested), nil
+		}
+		return "", nil
+	}
 	if changed, err := dependentBaseChanged(context.Background(), f.cfg, f.repository, stream); err != nil || changed {
 		return "the base workstream branch moved", err
 	}
@@ -179,8 +189,9 @@ func (f *foreman) askDrift(ctx context.Context, stream config.WorkstreamID, at t
 }
 
 // rebaseProject records the owner's request for a drift rebase of every
-// building or assembled workstream of the project the request names that is
-// not paused; the project may be left out while exactly one is active. The foreman asks for each on the project's lander, whether or not
+// eligible workstream of the project that is not paused; the project may be
+// left out while exactly one is active. The foreman asks for each on the
+// project's lander, whether or not
 // scheduled drift rebases are enabled. It returns once every request is
 // durable, with the workstreams the request covers and those it skips.
 func (s *Service) rebaseProject(ctx context.Context, req ProjectRebaseRequest) (ProjectRebaseResponse, *APIError) {
@@ -230,8 +241,7 @@ func (s *Service) rebaseProject(ctx context.Context, req ProjectRebaseRequest) (
 }
 
 // rebaseWorkstream records the owner's request for a drift rebase of the
-// workstream named by raw, which must be building or assembled and not
-// paused. The foreman asks for it on the project's lander, whether or not
+// eligible, unpaused workstream named by raw. The foreman asks for it on the project's lander, whether or not
 // scheduled drift rebases are enabled, and a held drift rebase takes it as
 // the owner asking for another. It returns once the request is durable,
 // with the number of the drift rebase that answers it.

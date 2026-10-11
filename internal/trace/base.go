@@ -39,9 +39,7 @@ func bases(records []Record) (map[config.WorkstreamID]WorkstreamBase, error) {
 }
 
 func (r *Repository) WorkstreamBase(stream config.WorkstreamID) (WorkstreamBase, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	records, streams, err := r.scan()
+	records, streams, err := r.scanAll()
 	if err != nil {
 		return WorkstreamBase{}, err
 	}
@@ -61,16 +59,10 @@ func (r *Repository) WorkstreamBase(stream config.WorkstreamID) (WorkstreamBase,
 // SetWorkstreamBase validates the graph and document-state gate in the same
 // transaction as the owner revision. Sealed workstreams keep their declared base.
 func (r *Repository) SetWorkstreamBase(ctx context.Context, stream, base config.WorkstreamID, revision int, at time.Time) (WorkstreamBase, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	_, view, err := r.loadWorkflow(stream)
-	if err != nil {
-		return WorkstreamBase{}, err
-	}
-	if !slices.Contains([]string{"", "handed", "sketched", "in-shed"}, view.states[FeatureSubject].Value) {
-		return WorkstreamBase{}, fmt.Errorf("%w: a sealed workstream's base cannot be edited", ErrConflict)
-	}
-	records, streams, err := r.scan()
+	// The acyclic-graph check reads every workstream's declared base, so it
+	// starts from the aggregate view across the project rather than stream's
+	// own trace alone.
+	records, streams, err := r.scanAll()
 	if err != nil {
 		return WorkstreamBase{}, err
 	}
@@ -91,11 +83,17 @@ func (r *Repository) SetWorkstreamBase(ctx context.Context, stream, base config.
 		if !slices.Contains(streams, base) {
 			return WorkstreamBase{}, fmt.Errorf("base must be a workstream in this project")
 		}
-		_, target, err := r.loadWorkflow(base)
+		target, err := r.scoped(base)
 		if err != nil {
 			return WorkstreamBase{}, err
 		}
-		if target.states[FeatureSubject].Value == "abandoned" {
+		target.mu.Lock()
+		_, targetView, err := target.loadWorkflow(base)
+		target.mu.Unlock()
+		if err != nil {
+			return WorkstreamBase{}, err
+		}
+		if targetView.states[FeatureSubject].Value == "abandoned" {
 			return WorkstreamBase{}, fmt.Errorf("base workstream is abandoned")
 		}
 		seen := map[config.WorkstreamID]bool{stream: true}
@@ -108,6 +106,19 @@ func (r *Repository) SetWorkstreamBase(ctx context.Context, stream, base config.
 	}
 	if current.Base == base {
 		return WorkstreamBase{Workstream: stream, Base: base, Revision: revision}, nil
+	}
+	r, err = r.scoped(stream)
+	if err != nil {
+		return WorkstreamBase{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, view, err := r.loadWorkflow(stream)
+	if err != nil {
+		return WorkstreamBase{}, err
+	}
+	if !slices.Contains([]string{"", "handed", "sketched", "in-shed"}, view.states[FeatureSubject].Value) {
+		return WorkstreamBase{}, fmt.Errorf("%w: a sealed workstream's base cannot be edited", ErrConflict)
 	}
 	next := WorkstreamBase{Workstream: stream, Base: base, Revision: revision + 1}
 	data, err := json.Marshal(next)

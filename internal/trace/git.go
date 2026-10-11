@@ -74,7 +74,11 @@ func (f verifiedFile) unchanged(parent *os.Root, entry fs.DirEntry) bool {
 }
 
 func (r *Repository) checkGit() error {
-	if _, err := r.root.ProjectTrace(r.project); err != nil {
+	if r.stream == "" {
+		if _, err := r.root.ProjectTrace(r.project); err != nil {
+			return err
+		}
+	} else if _, err := r.root.WorkstreamTrace(r.project, r.stream); err != nil {
 		return err
 	}
 	if err := r.checked(".git"); err != nil {

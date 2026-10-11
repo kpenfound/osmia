@@ -24,6 +24,10 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>
       <span id="pause-count" class="count"></span>
     </button>
+    <button type="button" id="activity-button" class="icon" popovertarget="activity-popover" aria-label="Backend activity" data-active="false" data-blocked="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2 7 4-14 2 7h6"/></svg>
+      <span id="activity-count" class="count"></span>
+    </button>
     <button type="button" id="new-workstream" class="icon" aria-label="New workstream" title="New workstream">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
     </button>
@@ -51,6 +55,11 @@
     <div class="actions"><button type="submit">Pause</button></div>
     <p id="pause-result" class="result" role="status"></p>
   </form>
+</div>
+
+<div id="activity-popover" class="popover" popover data-anchor="activity-button">
+  <h3>Backend activity</h3>
+  <ul id="activity-list" class="activity-entries"></ul>
 </div>
 
 <div id="settings-menu" class="popover menu" popover data-anchor="settings-button">

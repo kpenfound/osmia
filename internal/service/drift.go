@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -94,9 +95,9 @@ func driftIDs(k int) (transition, event string) {
 	return transition, trace.EventID(transition, "run")
 }
 
-// requestDrifts asks for a drift rebase of every building or assembled
-// workstream of the project that is not paused and has no final review in
-// flight, for which due returns why it takes one now and that has a seal,
+// requestDrifts asks for a drift rebase of every eligible sealed workstream
+// that is not paused and has no final review or publication in flight,
+// for which due returns why it takes one now,
 // and returns the workstreams it asked for. Drift rebases share the project's
 // lander with landings: while a landing or drift rebase of the project has
 // no result, it asks for nothing.
@@ -122,7 +123,7 @@ func (f *foreman) requestDrifts(ctx context.Context, due func(config.WorkstreamI
 			switch o.Operation.Action {
 			case LandAction, DriftAction:
 				return nil, nil
-			case FinalReviewAction:
+			case FinalReviewAction, deliveryReviewAction, PublishAction, publishUpstreamAction:
 				reviewing[stream] = true
 			}
 		}
@@ -332,8 +333,8 @@ func (d drifter) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 
 // Apply runs drift rebase k. A replay this operation recorded is not
 // replayed again: the branch moves to its commit. Otherwise the workstream
-// must be building or assembled and not paused, and its feature branch must
-// exist; the foreman fetches the configured upstream base branch and replays
+// must be eligible and not paused, and its feature branch must exist;
+// the foreman fetches the configured upstream base branch and replays
 // the feature branch onto it. A conflicted replay records the upstream
 // commit and the conflicted paths and changes neither the branch nor the
 // seal: the conflicts are resolved and reviewed as resolve says, and the
@@ -341,7 +342,7 @@ func (d drifter) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 // project's other drift rebases, until a reviewer approves the resolved
 // branch, which is then the replay's commit, or the resolution stops and
 // the drift rebase is held, as resolve says. A
-// workstream that stops building or being assembled while its conflicts
+// workstream that becomes ineligible for drift while its conflicts
 // are resolved is skipped, and its resolution workspace removed. A clean
 // replay records drift/rebase.json with the rebased commit before
 // the branch moves, so a retry moves it to the same commit. Once the branch
@@ -429,6 +430,35 @@ func (d drifter) drift(ctx context.Context, operation string, stream config.Work
 		}
 		if !exists {
 			return d.skip(ctx, stream, in.Drift, operation, fmt.Sprintf("the clone has no feature branch %s", branch))
+		}
+		feature, err := d.repository.Workflow(stream, trace.FeatureSubject)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if feature.Value == DeliveredState {
+			publication, _, err := currentOwnPublication(d.repository, stream)
+			if err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			if !pulls.Credentialed(d.s.options.PullRequests) {
+				return coreadapter.OperationResult{}, errNoPullRequestCredential
+			}
+			found, err := d.s.options.PullRequests.Find(ctx, publication.Upstream, publication.Fork, publication.Branch)
+			if err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			if err := recordOwnPullRequestOutcomeFromFind(ctx, d.repository, d.s.now(), stream, operation, publication.PullRequest, found); err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			open := false
+			for _, pr := range found {
+				if pr.Number == publication.PullRequest && pr.State == "open" && !pr.Merged {
+					open = true
+				}
+			}
+			if !open {
+				return d.skip(ctx, stream, in.Drift, operation, "the delivered pull request is no longer open")
+			}
 		}
 		_, _, found, err := seal.Latest(d.repository, stream)
 		if err != nil {
@@ -636,7 +666,7 @@ func (d drifter) finishCarry(ctx context.Context, stream config.WorkstreamID, re
 }
 
 // eligible returns why the workstream takes no drift rebase now, or "" when
-// it is building or assembled and not paused.
+// it is building, assembled or delivered with a pull request and not paused.
 func (d drifter) eligible(stream config.WorkstreamID) (string, error) {
 	if reason, err := d.building(stream); err != nil || reason != "" {
 		return reason, err
@@ -648,15 +678,23 @@ func (d drifter) eligible(stream config.WorkstreamID) (string, error) {
 	return "", nil
 }
 
-// building returns why the workstream is neither building nor assembled, or
-// "" when it is one of them.
+// building returns why the workstream cannot rebase its feature branch.
 func (d drifter) building(stream config.WorkstreamID) (string, error) {
 	feature, err := d.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return "", err
 	}
+	if feature.Value == DeliveredState {
+		if _, found, err := currentOwnPublication(d.repository, stream); err != nil || !found {
+			return "the delivered workstream has no pull request", err
+		}
+		if finished, err := ownPullRequestFinished(d.repository, stream); err != nil || finished {
+			return "the pull request is merged or closed", err
+		}
+		return "", nil
+	}
 	if feature.Value != BuildingState && feature.Value != AssembledState {
-		return fmt.Sprintf("the workstream is %s, not building or assembled", featureState(feature.Value)), nil
+		return fmt.Sprintf("the workstream is %s, not building, assembled or delivered with a pull request", featureState(feature.Value)), nil
 	}
 	return "", nil
 }

@@ -3,7 +3,9 @@ package trace
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -29,38 +31,92 @@ type InboxEntry struct {
 	Questions      []QuestionState
 }
 
-// nextInbox returns the inbox number of the project's next escalation.
-func nextInbox(records []Record) int {
-	n := 0
-	for _, rec := range records {
-		if q, ok := rec.(Question); ok && q.Escalation != nil {
-			n = max(n, q.Escalation.Inbox)
+// inboxCounterFile is the project's own durable record of the next inbox
+// number to hand out. It is not a versioned trace record: only its current
+// value matters, and nothing but ReserveInboxNumber ever writes it.
+const inboxCounterFile = "inbox-counter.json"
+
+type inboxCounter struct {
+	Next int `json:"next"`
+}
+
+// reserveInboxNumber durably advances the project's own inbox counter and
+// returns the number it reserves, unique across every workstream of the
+// project and never reused. It must run on the project's own trace instance,
+// not a workstream's: inbox numbering is project-level bookkeeping, held in
+// the project's trace and reserved there before the escalation that uses the
+// number is recorded in its workstream's own trace. A crash between the two
+// leaves the reserved number unused rather than ever handing it out again.
+func (r *Repository) reserveInboxNumber(ctx context.Context) (int, error) {
+	if r.stream != "" {
+		return 0, fmt.Errorf("inbox numbering belongs to the project's own trace")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	r.forget()
+	if _, err := r.checkHistory(ctx); err != nil {
+		return 0, err
+	}
+	data, err := r.readFile(inboxCounterFile)
+	if err != nil && !os.IsNotExist(err) {
+		return 0, err
+	}
+	var c inboxCounter
+	if err == nil {
+		if err := decode(data, &c); err != nil {
+			return 0, err
 		}
 	}
-	return n + 1
+	next := c.Next + 1
+	out, err := json.Marshal(inboxCounter{Next: next})
+	if err != nil {
+		return 0, err
+	}
+	if err := r.writeFile(inboxCounterFile, append(out, '\n')); err != nil {
+		return 0, err
+	}
+	// Past this write the file is already ahead of committed history; see
+	// append's commitContent call for why the commit that reconciles it runs
+	// without the caller's cancellation.
+	if err := r.commit(context.WithoutCancel(ctx), []string{inboxCounterFile}, "Reserve inbox number"); err != nil {
+		return 0, err
+	}
+	return next, nil
 }
 
 // Inbox returns every escalation of the project by inbox number, whatever
 // became of it since.
 func (r *Repository) Inbox() ([]InboxEntry, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	return r.inbox()
 }
 
-// inbox requires r.mu.
 func (r *Repository) inbox() ([]InboxEntry, error) {
-	records, streams, err := r.scan()
+	ids, err := r.diskStreams()
 	if err != nil {
 		return nil, err
 	}
 	var out []InboxEntry
-	for _, stream := range streams {
-		_, v, err := r.loadWorkflow(stream)
+	for _, id := range ids {
+		s, err := r.scoped(id)
 		if err != nil {
-			return nil, fmt.Errorf("workstream %s: %w", stream, err)
+			return nil, err
 		}
-		out = append(out, escalations(questions(records, v, stream))...)
+		s.mu.Lock()
+		records, _, err := s.scan()
+		if err == nil {
+			var v *workflowView
+			_, v, err = s.loadWorkflow(id)
+			if err == nil {
+				out = append(out, escalations(questions(records, v, id))...)
+			}
+		}
+		s.mu.Unlock()
+		if err != nil {
+			return nil, fmt.Errorf("workstream %s: %w", id, err)
+		}
 	}
 	slices.SortFunc(out, func(x, y InboxEntry) int { return cmp.Compare(x.Number, y.Number) })
 	return out, nil
@@ -97,8 +153,6 @@ func escalations(states []QuestionState) []InboxEntry {
 // with ErrRuled; all three write nothing. The checks and the write hold the
 // same lock. Text must not be blank.
 func (r *Repository) Rule(ctx context.Context, number int, text string, owner Actor, at time.Time, refused ...string) (InboxEntry, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return InboxEntry{}, err
 	}
@@ -114,6 +168,12 @@ func (r *Repository) Rule(ctx context.Context, number int, text string, owner Ac
 		return InboxEntry{}, fmt.Errorf("%w: %d", ErrInboxEntry, number)
 	}
 	entry := entries[i]
+	r, err = r.scoped(entry.Workstream)
+	if err != nil {
+		return InboxEntry{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	log, v, err := r.loadWorkflow(entry.Workstream)
 	if err != nil {
 		return InboxEntry{}, err
@@ -158,6 +218,10 @@ func (r *Repository) Rule(ctx context.Context, number int, text string, owner Ac
 // that is not ruled, an empty text and a scope other than ScopeLocal and
 // ScopeNotify are refused with *QuestionRefused.
 func (r *Repository) RelayRuling(ctx context.Context, agent string, scope coreadapter.Scope, id, text, reach string, at time.Time) ([]string, error) {
+	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	turn, log, v, records, err := r.chiefTurn(ctx, agent, scope, at)

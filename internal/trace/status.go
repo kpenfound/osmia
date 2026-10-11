@@ -105,6 +105,10 @@ func (r *Repository) SetStatus(ctx context.Context, agent string, scope coreadap
 	if at.IsZero() || check == nil {
 		return 0, fmt.Errorf("timestamp and status check required")
 	}
+	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return 0, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -197,21 +201,29 @@ type WorkstreamStatus struct {
 // Statuses reports every workstream in manifest order. It fails on any
 // damaged record rather than report a partial view.
 func (r *Repository) Statuses() ([]WorkstreamStatus, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	records, streams, err := r.scan()
+	ids, err := r.diskStreams()
 	if err != nil {
 		return nil, err
 	}
 	var out []WorkstreamStatus
-	for _, stream := range streams {
-		_, view, err := r.loadWorkflow(stream)
+	for _, stream := range ids {
+		s, err := r.scoped(stream)
 		if err != nil {
 			return nil, err
 		}
-		manifest, err := r.workstreamManifest(stream)
-		if err != nil {
-			return nil, err
+		s.mu.Lock()
+		records, _, verr := s.scan()
+		var view *workflowView
+		var manifest manifestRecord
+		if verr == nil {
+			_, view, verr = s.loadWorkflow(stream)
+		}
+		if verr == nil {
+			manifest, verr = s.workstreamManifest(stream)
+		}
+		s.mu.Unlock()
+		if verr != nil {
+			return nil, verr
 		}
 		createdAt := manifest.Header.At
 		lastActivity := createdAt

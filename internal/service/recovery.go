@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/kpenfound/busybees/core/agent/procs"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service/beekeeper"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -115,7 +115,7 @@ func (s *Service) recoverWorkspaces(ctx context.Context, cfg *config.Config) err
 			return err
 		}
 		for _, operation := range operations {
-			log.Printf("osmia: restored the %s workspaces of project %s to their state before operation %s was interrupted", directory, cfg.Project.ID, operation)
+			ghlog.Logger(ctx).Info("restored interrupted workspace operation", "directory", directory, "project", string(cfg.Project.ID), "operation", operation)
 		}
 	}
 	return nil
@@ -143,7 +143,7 @@ func reapSandboxes(ctx context.Context, cfg *config.Config, sbxBin string) {
 	for _, pattern := range patterns {
 		records, err := filepath.Glob(pattern)
 		if err != nil {
-			log.Printf("osmia: cannot look for sandboxes interrupted sessions of project %s left: %v", project, err)
+			ghlog.Logger(ctx).Warn("cannot look for sandboxes interrupted sessions left", "project", project, "error", err.Error())
 			continue
 		}
 		for _, record := range records {
@@ -154,7 +154,7 @@ func reapSandboxes(ctx context.Context, cfg *config.Config, sbxBin string) {
 		return
 	}
 	if err := procs.CleanSandboxDirs(ctx, sbxBin, dirs); err != nil {
-		log.Printf("osmia: cannot remove sandboxes interrupted sessions of project %s left: %v", project, err)
+		ghlog.Logger(ctx).Warn("cannot remove sandboxes interrupted sessions left", "project", project, "error", err.Error())
 	}
 }
 

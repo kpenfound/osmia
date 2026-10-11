@@ -122,11 +122,12 @@ func TestWorkflowPublicationFailures(t *testing.T) {
 	for _, step := range append(pre, post...) {
 		t.Run(step, func(t *testing.T) {
 			r, root, p := create(t)
+			s := mustScoped(t, r, streamID)
 			transact(t, r, transaction("initial", 0, "", "active", 1))
 			tx := transaction("next", 1, "active", "waiting", 2)
 			injected := errors.New("injected publication failure")
 			hit := false
-			r.failPublication = func(got string) error {
+			s.failPublication = func(got string) error {
 				if got == step {
 					hit = true
 					return injected
@@ -136,7 +137,7 @@ func TestWorkflowPublicationFailures(t *testing.T) {
 			if _, err := r.Transact(context.Background(), tx); !errors.Is(err, injected) || !hit {
 				t.Fatalf("injection not reached: %v", err)
 			}
-			r.failPublication = nil
+			s.failPublication = nil
 			if err := r.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -169,7 +170,7 @@ func TestWorkflowPublicationFailures(t *testing.T) {
 			if got := ready(t, r, at); len(got) != 3 {
 				t.Fatalf("duplicate retry: %#v", got)
 			}
-			if _, err := r.dir.Stat(publicationFile); !os.IsNotExist(err) {
+			if _, err := mustScoped(t, r, streamID).dir.Stat(publicationFile); !os.IsNotExist(err) {
 				t.Fatalf("journal retained: %v", err)
 			}
 		})
@@ -345,6 +346,7 @@ func TestDeliveryPublicationFailure(t *testing.T) {
 	for _, step := range []string{"before-ref", "ref-published", "materialized:workflow.json"} {
 		t.Run(step, func(t *testing.T) {
 			r, root, p := create(t)
+			s := mustScoped(t, r, streamID)
 			ctx := context.Background()
 			tx := transaction("tx", 0, "", "active", 1)
 			transact(t, r, tx)
@@ -353,7 +355,7 @@ func TestDeliveryPublicationFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			injected := errors.New("stop")
-			r.failPublication = func(got string) error {
+			s.failPublication = func(got string) error {
 				if got == step {
 					return injected
 				}
@@ -362,7 +364,7 @@ func TestDeliveryPublicationFailure(t *testing.T) {
 			if err := r.Acknowledge(ctx, streamID, event, "attempt", at); !errors.Is(err, injected) {
 				t.Fatal(err)
 			}
-			r.failPublication = nil
+			s.failPublication = nil
 			r.Close()
 			r, err := Open(root, p)
 			if err != nil {
@@ -387,6 +389,7 @@ func TestDeliveryPublicationFailure(t *testing.T) {
 
 func TestWorkflowRejectsInvalidAndCorruptData(t *testing.T) {
 	r, root, p := create(t)
+	s := mustScoped(t, r, streamID)
 	ctx := context.Background()
 	for _, modify := range []func(*Transaction){
 		func(tx *Transaction) { tx.Transition.From = "unobserved" },
@@ -407,15 +410,15 @@ func TestWorkflowRejectsInvalidAndCorruptData(t *testing.T) {
 	tx := transaction("tx", 0, "", "active", 1)
 	transact(t, r, tx)
 	name := "workstreams/" + string(streamID) + "/workflow.json"
-	data, err := r.readFile(name)
+	data, err := s.readFile(name)
 	if err != nil {
 		t.Fatal(err)
 	}
 	data = []byte(strings.Replace(string(data), `"expected_version": 0`, `"expected_version": 99`, 1))
-	if err := r.writeFile(name, data); err != nil {
+	if err := s.writeFile(name, data); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.commit(ctx, []string{name}, "Corrupt fixture"); err != nil {
+	if err := s.commit(ctx, []string{name}, "Corrupt fixture"); err != nil {
 		t.Fatal(err)
 	}
 	r.Close()
@@ -430,6 +433,7 @@ func TestWorkflowRejectsInvalidAndCorruptData(t *testing.T) {
 
 func TestLoadWorkflowCopiesAreIndependent(t *testing.T) {
 	r, _, _ := create(t)
+	s := mustScoped(t, r, streamID)
 	ctx := context.Background()
 	tx := transaction("tx", 0, "", "active", 1)
 	transact(t, r, tx)
@@ -439,7 +443,7 @@ func TestLoadWorkflowCopiesAreIndependent(t *testing.T) {
 	enqueue(t, r, "one")
 	claimTurn(t, r, "token")
 	event := tx.Events[0].ID
-	log, v, err := r.loadWorkflow(streamID)
+	log, v, err := s.loadWorkflow(streamID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +456,7 @@ func TestLoadWorkflowCopiesAreIndependent(t *testing.T) {
 	v.states["feature"] = WorkflowState{Version: 99}
 	v.entries[event].Acknowledged = true
 	v.entries[event].History = append(v.entries[event].History, DeliveryAction{Kind: "claim"})
-	log, v, err = r.loadWorkflow(streamID)
+	log, v, err = s.loadWorkflow(streamID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,24 +471,25 @@ func TestLoadWorkflowCopiesAreIndependent(t *testing.T) {
 
 func TestLoadWorkflowSeesCommittedChanges(t *testing.T) {
 	r, _, _ := create(t)
+	s := mustScoped(t, r, streamID)
 	ctx := context.Background()
 	transact(t, r, transaction("tx", 0, "", "active", 1))
-	if _, _, err := r.loadWorkflow(streamID); err != nil {
+	if _, _, err := s.loadWorkflow(streamID); err != nil {
 		t.Fatal(err)
 	}
 	name := "workstreams/" + string(streamID) + "/workflow.json"
-	data, err := r.readFile(name)
+	data, err := s.readFile(name)
 	if err != nil {
 		t.Fatal(err)
 	}
 	data = []byte(strings.Replace(string(data), `"expected_version": 0`, `"expected_version": 99`, 1))
-	if err := r.writeFile(name, data); err != nil {
+	if err := s.writeFile(name, data); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.commit(ctx, []string{name}, "Corrupt fixture"); err != nil {
+	if err := s.commit(ctx, []string{name}, "Corrupt fixture"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := r.loadWorkflow(streamID); !errors.Is(err, ErrConflict) {
+	if _, _, err := s.loadWorkflow(streamID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed workflow accepted: %v", err)
 	}
 }
@@ -500,7 +505,8 @@ func TestWorkflowProcessInterruption(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r.failPublication = func(got string) error {
+		s := mustScoped(t, r, streamID)
+		s.failPublication = func(got string) error {
 			if got == step {
 				os.Exit(23)
 			}

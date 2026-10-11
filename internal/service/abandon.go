@@ -10,6 +10,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -219,7 +220,26 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 			return coreadapter.OperationResult{}, err
 		}
 	}
+	role, profile, unit := describeQueuedTurn(th, in.Turn)
+	attrs := []any{"project", string(a.repository.Project()), "workstream", string(in.Workstream), "role", role, "profile", profile}
+	if unit != "" {
+		attrs = append(attrs, "unit", unit)
+	}
+	logger := ghlog.Logger(ctx)
+	logger.Info("agent turn dispatched", attrs...)
+	start := a.s.now()
 	result, err := a.Reconciler.Apply(ctx, op)
+	finished := append(append([]any{}, attrs...), "duration", a.s.now().Sub(start).String())
+	switch {
+	case err != nil:
+		logger.Error("agent turn finished", append(finished, "outcome", "failed", "error", err.Error())...)
+	default:
+		outcome := result.Outcome
+		if outcome == "" {
+			outcome = "ok"
+		}
+		logger.Info("agent turn finished", append(finished, "outcome", outcome)...)
+	}
 	// Abandoning while this turn ran left the thread's later turns queued.
 	if gone, _ := abandoned(a.repository, in.Workstream); gone {
 		if _, cancelErr := a.repository.CancelTurns(context.WithoutCancel(ctx), in.Workstream, a.s.now(), abandonActor, cancelReason); cancelErr != nil {
@@ -227,4 +247,18 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 		}
 	}
 	return result, err
+}
+
+// describeQueuedTurn returns the role of th's agent and, for the queued turn
+// named turnID, its profile name and unit, for the agent turn log records.
+// A thread or turn that cannot be found yields empty values rather than an
+// error: logging never changes the operation's outcome.
+func describeQueuedTurn(th trace.Thread, turnID string) (role, profile, unit string) {
+	role = th.Identity.Role
+	for _, q := range th.Turns {
+		if q.Request.TurnID == turnID {
+			return role, q.Request.Profile.Name, q.Request.Unit
+		}
+	}
+	return role, "", ""
 }

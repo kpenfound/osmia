@@ -175,6 +175,33 @@ func TestHealthyRoot(t *testing.T) {
 	must(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
 }
 
+// TestTraceMigrationIncompleteIsReported breaks a project's shared-layout
+// trace so Migrate can never complete, and confirms doctor reports it as a
+// failed check naming the migration, rather than trying to open or repair
+// the trace itself.
+func TestTraceMigrationIncompleteIsReported(t *testing.T) {
+	o, dir := fixture(t)
+	root, err := config.ResolveRoot(dir, "")
+	must(t, err)
+	r, err := trace.Create(context.Background(), root, config.Project{ID: projectID, Name: "widgets", Clone: filepath.Join(filepath.Dir(dir), "clone")}, time.Unix(0, 0).UTC(), trace.Actor{Kind: "owner", ID: "local"})
+	must(t, err)
+	must(t, r.Close())
+	directory, err := root.ProjectTrace(projectID)
+	must(t, err)
+	must(t, os.MkdirAll(filepath.Join(directory, "workstreams", "w_deadbeefdeadbeefdeadbeefdeadbeef"), 0o700))
+
+	checks := Run(context.Background(), o)
+	expect(t, find(t, checks, "widgets trace"), Fail, "trace migration from the shared layout is incomplete")
+	if !Failed(checks) {
+		t.Fatal("an incomplete trace migration passed")
+	}
+	// Doctor never touched the broken shared trace beyond the failed attempt
+	// Migrate itself makes.
+	if _, err := os.Lstat(filepath.Join(directory, "workstreams")); err != nil {
+		t.Fatalf("doctor altered the unmigrated trace: %v", err)
+	}
+}
+
 func TestMissingRootChecksToolchainOnly(t *testing.T) {
 	o, _ := fixture(t)
 	root, err := config.ResolveRoot(filepath.Join(t.TempDir(), "absent"), "")

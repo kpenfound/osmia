@@ -26,14 +26,31 @@ var ErrLocked = errors.New("trace repository already open")
 // Repository is a service-owned trace handle, never a target workspace handle.
 // One process holds its exclusive lock until Close; calls on that handle serialize.
 // External writers must not modify or move the repository while it is open.
+//
+// A Repository value is one Git-backed trace store directory: either the
+// project's own trace, holding only durable project knowledge (the charter,
+// the knowledge base, notes and lasting project decisions), or one
+// workstream's dedicated trace, holding that workstream's complete trace.
+// stream is empty for the project's own instance and set to the workstream
+// a workstream instance is dedicated to. The project instance alone opens
+// and tracks workstream instances, lazily, in workstreams; a workstream
+// instance never recurses into another. Every exported method that names a
+// workstream resolves to the right instance through scoped before it takes
+// any lock, so a call against one workstream never waits on another's lock,
+// only ever on the project's own brief bookkeeping and that workstream's own.
 type Repository struct {
-	mu          sync.Mutex
-	operationMu sync.Mutex
-	// attempts holds the operations an open WithOperation attempt claimed,
-	// by workstream and event.
+	mu sync.Mutex
+	// operationMu is shared by the project instance and every workstream
+	// instance it opens, so Serialize and Close on the project instance
+	// exclude every workstream's WithOperation callback (and vice versa),
+	// matching base's single-Repository-per-project semantics now that a
+	// workstream's operations live in its own instance.
+	operationMu *sync.Mutex
+	// attempts holds the operations an open WithOperation attempt claimed, by event.
 	attempts        map[string]bool
 	root            config.Root
 	project         config.ProjectID
+	stream          config.WorkstreamID
 	directory       string
 	dir             *os.Root
 	lock            *os.File
@@ -41,6 +58,20 @@ type Repository struct {
 	wake            *coreadapter.WakeAdapter
 	failPublication func(string) error
 	observer        atomic.Pointer[func(Commit)]
+	// parent is the project instance that opened this workstream instance
+	// through scoped, nil on the project's own instance. observed delegates
+	// to it so that Observe, called once on the project instance, also
+	// reports commits a workstream instance makes, however and whenever that
+	// instance was opened.
+	parent *Repository
+	// workstreamsMu guards workstreams and closed, the project instance's
+	// lazily opened workstream instances, by ID, and whether this instance's
+	// Close has begun. Unused on a workstream instance.
+	workstreamsMu sync.Mutex
+	workstreams   map[config.WorkstreamID]*Repository
+	// closed is set under workstreamsMu once Close has begun, so a scoped
+	// call racing it never opens a child Close could miss.
+	closed bool
 	// gitMu guards what the handle remembers about the Git store: the tree
 	// listing of the commit treeHead and the object files already flushed.
 	gitMu    sync.Mutex
@@ -125,6 +156,20 @@ func openDirectory(root config.Root, project config.Project) (*Repository, error
 	if err != nil {
 		return nil, err
 	}
+	return openStoreDirectory(root, project.ID, "", directory)
+}
+
+// openWorkstreamDirectory opens stream's own dedicated trace directory,
+// under the Osmia root and outside every target repository.
+func openWorkstreamDirectory(root config.Root, project config.ProjectID, stream config.WorkstreamID) (*Repository, error) {
+	directory, err := root.WorkstreamTrace(project, stream)
+	if err != nil {
+		return nil, err
+	}
+	return openStoreDirectory(root, project, stream, directory)
+}
+
+func openStoreDirectory(root config.Root, project config.ProjectID, stream config.WorkstreamID, directory string) (*Repository, error) {
 	rel, err := filepath.Rel(root.String(), directory)
 	if err != nil {
 		return nil, err
@@ -138,7 +183,144 @@ func openDirectory(root config.Root, project config.Project) (*Repository, error
 	if err != nil {
 		return nil, err
 	}
-	return &Repository{root: root, project: project.ID, directory: directory, dir: dir, session: rand.Text(), wake: coreadapter.NewWakeups()}, nil
+	return &Repository{root: root, project: project, stream: stream, directory: directory, dir: dir, session: rand.Text(), wake: coreadapter.NewWakeups(), operationMu: &sync.Mutex{}}, nil
+}
+
+// scoped returns the Repository instance that owns the files of the given
+// workstream of a project's own trace instance, opening and recovering its
+// dedicated trace repository on this handle's first use of it. An empty id
+// returns r itself: the project's own instance. Calling scoped on a
+// workstream instance, or with a workstream not already known to this
+// project instance, is a programming error the caller must rule out first
+// (for example by checking Workstreams or an earlier scan); it refuses
+// rather than silently creating a workstream's trace. This call only briefly
+// takes r's own bookkeeping lock and, the first time, the opened
+// workstream's lock: it never waits on another workstream's lock, and a
+// later use of the same id reuses the open instance without taking r's lock
+// again. It refuses once r's Close has begun, so it never opens a child that
+// Close could miss and leave with its flock held past this process's
+// lifetime, and its own failure path never takes operationMu, so a
+// first-time open that fails while this goroutine already holds it, for
+// example inside Serialize's schedule hook or another workstream's
+// WithOperation callback, returns an error instead of deadlocking.
+func (r *Repository) scoped(id config.WorkstreamID) (*Repository, error) {
+	if id == "" || id == r.stream {
+		return r, nil
+	}
+	if r.stream != "" {
+		return nil, fmt.Errorf("a workstream trace instance has no workstreams of its own")
+	}
+	if err := config.CheckWorkstreamIDs(id); err != nil {
+		return nil, err
+	}
+	r.workstreamsMu.Lock()
+	defer r.workstreamsMu.Unlock()
+	if r.closed {
+		return nil, fmt.Errorf("%w: trace repository is closed", ErrLocked)
+	}
+	if s := r.workstreams[id]; s != nil {
+		return s, nil
+	}
+	s, err := openWorkstreamDirectory(r.root, r.project, id)
+	if err != nil {
+		return nil, err
+	}
+	// Every workstream shares the project instance's wake signal, so a wait
+	// on the project's WaitWorkflow wakes for any workstream's durable write,
+	// not only the project's own.
+	s.wake = r.wake
+	s.parent = r
+	// Share the project instance's operation lock: Serialize and Close on the
+	// project instance must exclude this workstream's WithOperation callback
+	// just as they did when every workstream shared one Repository.
+	s.operationMu = r.operationMu
+	ok := false
+	defer func() {
+		if !ok {
+			// closeFiles alone: s was never added to r.workstreams, so Close
+			// has nothing of its own to join, and taking operationMu here
+			// could deadlock against a caller that already holds it.
+			s.closeFiles()
+		}
+	}()
+	if err := s.checkGit(); err != nil {
+		return nil, err
+	}
+	if err := s.acquire(); err != nil {
+		return nil, err
+	}
+	if err := s.recoverPublication(context.Background()); err != nil {
+		return nil, err
+	}
+	if r.workstreams == nil {
+		r.workstreams = map[config.WorkstreamID]*Repository{}
+	}
+	r.workstreams[id] = s
+	ok = true
+	return s, nil
+}
+
+// diskStreams lists every workstream that has its own trace directory under
+// the project's workstream traces, the way Workstreams and every aggregate
+// read discover the project's workstreams: from the storage that is
+// authoritative for their existence, not from anything the project trace
+// itself records.
+func (r *Repository) diskStreams() ([]config.WorkstreamID, error) {
+	base, err := r.root.WorkstreamTraces(r.project)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(base)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var ids []config.WorkstreamID
+	for _, entry := range entries {
+		id, err := config.ParseWorkstreamID(entry.Name())
+		if err != nil || !entry.IsDir() {
+			return nil, fmt.Errorf("%s: not a workstream trace directory", entry.Name())
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// scanAll returns every record of the project trace and of every workstream
+// that has its own trace directory, and those workstreams, as scan does for
+// one store. Each workstream's own scan is cached by its own instance and
+// taken under its own lock alone, so one slow or damaged workstream's scan
+// does not hold the project's lock any longer than copying its result, and
+// never holds another workstream's lock at all.
+func (r *Repository) scanAll() ([]Record, []config.WorkstreamID, error) {
+	r.mu.Lock()
+	records, _, err := r.scan()
+	r.mu.Unlock()
+	if err != nil {
+		return nil, nil, err
+	}
+	ids, err := r.diskStreams()
+	if err != nil {
+		return nil, nil, err
+	}
+	streams := make([]config.WorkstreamID, 0, len(ids))
+	for _, id := range ids {
+		s, err := r.scoped(id)
+		if err != nil {
+			return nil, nil, err
+		}
+		s.mu.Lock()
+		recs, _, err := s.scan()
+		s.mu.Unlock()
+		if err != nil {
+			return nil, nil, fmt.Errorf("workstream %s: %w", id, err)
+		}
+		records = append(records, recs...)
+		streams = append(streams, id)
+	}
+	return records, streams, nil
 }
 func (r *Repository) acquire() error {
 	if err := r.checked(".git/osmia.lock"); err != nil {
@@ -171,27 +353,60 @@ func (r *Repository) Observe(f func(Commit)) {
 	r.observer.Store(&f)
 }
 
-// observed passes a published commit to the observer, if any.
+// observed passes a published commit to the observer, if any, and to the
+// project instance's observer when this is a workstream instance: Observe is
+// called once, on the project instance, and must still hear every workstream
+// instance's commits, however and whenever each was opened.
 func (r *Repository) observed(c Commit) {
 	if f := r.observer.Load(); f != nil && *f != nil {
 		(*f)(c)
 	}
+	if r.parent != nil {
+		r.parent.observed(c)
+	}
 }
 
+// Close closes this instance and, on the project's own instance, every
+// workstream instance it opened. Setting closed under the same lock that
+// captures the children to close means a scoped call that arrives after
+// this point finds no workstream to reuse and opens none of its own, so
+// Close never misses a child and leaks its flock past this process's
+// lifetime.
 func (r *Repository) Close() error {
+	r.workstreamsMu.Lock()
+	children := r.workstreams
+	r.workstreams = nil
+	r.closed = true
+	r.workstreamsMu.Unlock()
+	var errs []error
+	for _, s := range children {
+		errs = append(errs, s.Close())
+	}
 	r.operationMu.Lock()
 	defer r.operationMu.Unlock()
+	errs = append(errs, r.closeFiles())
+	return errors.Join(errs...)
+}
+
+// closeFiles releases this instance's own flock and directory handle,
+// without operationMu: scoped's failure path uses it to release a
+// workstream instance it opened but could not finish opening, which may run
+// inside a callback that already holds operationMu, such as Serialize's
+// schedule hook or another workstream's WithOperation callback, where
+// taking it again would deadlock.
+func (r *Repository) closeFiles() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var err error
+	var errs []error
 	if r.lock != nil {
 		// A child process forked but not yet executed shares the open file,
 		// so closing alone would leave the lock held until it executes.
-		err = errors.Join(syscall.Flock(int(r.lock.Fd()), syscall.LOCK_UN), r.lock.Close())
+		errs = append(errs, syscall.Flock(int(r.lock.Fd()), syscall.LOCK_UN), r.lock.Close())
 		r.lock = nil
 	}
 	r.recordFiles, r.scanned, r.history, r.verified, r.workflows = nil, nil, nil, nil, nil
-	return errors.Join(err, r.dir.Close())
+	errs = append(errs, r.dir.Close())
+	return errors.Join(errs...)
 }
 func (r *Repository) Project() config.ProjectID { return r.project }
 
@@ -389,7 +604,7 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 	if err := r.dir.Mkdir(".git", 0700); err != nil {
 		return nil, err
 	}
-	for _, name := range []string{".git/objects", ".git/refs/heads", "kb", "notes", "workstreams"} {
+	for _, name := range []string{".git/objects", ".git/refs/heads", "kb", "notes"} {
 		if err := r.mkdir(name); err != nil {
 			return nil, err
 		}
@@ -422,9 +637,11 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 	return r, nil
 }
 
-// Open finishes journaled workflow publication without rewriting committed history.
-// If records are corrupt it returns both a handle and a diagnostic error; callers
-// must Close that handle. Read returns valid records with corruption diagnostics.
+// Open finishes journaled workflow publication without rewriting committed history,
+// for the project trace and for every workstream that has its own trace
+// directory. If records are corrupt it returns both a handle and a
+// diagnostic error; callers must Close that handle. Read returns valid
+// records with corruption diagnostics.
 func Open(root config.Root, project config.Project) (*Repository, error) {
 	r, err := openDirectory(root, project)
 	if err != nil {
@@ -441,9 +658,36 @@ func Open(root config.Root, project config.Project) (*Repository, error) {
 	if err := r.recoverPublication(context.Background()); err != nil {
 		return r, err
 	}
-	_, streams, err := r.scan()
+	_, _, err = r.scan()
 	_, historyErr := r.checkHistory(context.Background())
-	return r, errors.Join(err, historyErr, r.checkWorkflows(streams))
+	if joined := errors.Join(err, historyErr); joined != nil {
+		return r, joined
+	}
+	ids, err := r.diskStreams()
+	if err != nil {
+		return r, err
+	}
+	var errs []error
+	for _, id := range ids {
+		s, err := r.scoped(id)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("workstream %s: %w", id, err))
+			continue
+		}
+		s.mu.Lock()
+		_, streams, err := s.scan()
+		if err == nil {
+			_, err = s.checkHistory(context.Background())
+		}
+		if err == nil {
+			err = s.checkWorkflows(streams)
+		}
+		s.mu.Unlock()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("workstream %s: %w", id, err))
+		}
+	}
+	return r, errors.Join(errs...)
 }
 
 // SessionKind is the Kind a session workstream's manifest records. An
@@ -534,6 +778,10 @@ func (r *Repository) Workspaces(stream config.WorkstreamID) (string, error) {
 	if err := config.CheckWorkstreamIDs(stream); err != nil {
 		return "", err
 	}
+	r, err := r.scoped(stream)
+	if err != nil {
+		return "", err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.workspaces(stream)
@@ -554,6 +802,10 @@ func (r *Repository) workspaces(stream config.WorkstreamID) (string, error) {
 // ordinary workstream.
 func (r *Repository) Kind(stream config.WorkstreamID) (string, error) {
 	if err := config.CheckWorkstreamIDs(stream); err != nil {
+		return "", err
+	}
+	r, err := r.scoped(stream)
+	if err != nil {
 		return "", err
 	}
 	r.mu.Lock()
@@ -581,135 +833,163 @@ func (r *Repository) CreateWorkstream(ctx context.Context, id config.WorkstreamI
 	return r.CreateWorkstreamOn(ctx, id, "", at, actor)
 }
 
-// CreateWorkstreamOn commits a new workstream whose manifest records the
-// workspace backend it is created on, config.WorkspacesGit,
-// config.WorkspacesJujutsu or none, and then creates its chief-of-staff
-// thread. An error from the thread write leaves the workstream committed;
-// EnsureChiefOfStaff creates the missing thread. An existing workstream is
-// refused with ErrConflict.
+// CreateWorkstreamOn commits a new workstream in its own dedicated trace
+// repository, under the Osmia root and outside every target repository,
+// whose manifest records the workspace backend it is created on,
+// config.WorkspacesGit, config.WorkspacesJujutsu or none, and then creates
+// its chief-of-staff thread. An error from the thread write leaves the
+// workstream committed; EnsureChiefOfStaff creates the missing thread. An
+// existing workstream is refused with ErrConflict.
 func (r *Repository) CreateWorkstreamOn(ctx context.Context, id config.WorkstreamID, workspaces string, at time.Time, actor Actor) error {
+	if r.stream != "" {
+		return fmt.Errorf("a workstream trace instance creates no workstreams of its own")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := createWorkstreamTrace(ctx, r.root, r.project, id, manifestRecord{Workspaces: workspaces}, "workstream-create", "Create workstream trace", at, actor); err != nil {
+		return err
+	}
+	s, err := r.scoped(id)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err = s.ensureChiefOfStaff(ctx, id, at, actor)
+	return err
+}
+
+// createWorkstreamTrace creates and commits id's own dedicated trace
+// repository, whose manifest is m under a header recording cause. It refuses
+// an existing directory with ErrConflict.
+//
+// The repository is built under a staging directory outside
+// WorkstreamTraces and only moved into its final place, by one atomic
+// rename, once its Git history is committed. A directory listing of
+// WorkstreamTraces (diskStreams, which every concurrent read and background
+// pass uses to discover a project's workstreams) therefore never observes
+// the workstream until its trace is complete; without this, a pass that
+// opened the workstream the instant its bare directory appeared, before
+// checkGit had anything to check, would fail with a stray Git repository
+// does not exist error and could bring the service down.
+func createWorkstreamTrace(ctx context.Context, root config.Root, project config.ProjectID, id config.WorkstreamID, m manifestRecord, cause, message string, at time.Time, actor Actor) error {
 	if err := config.CheckWorkstreamIDs(id); err != nil {
 		return err
 	}
-	if !validWorkspaces(workspaces) {
-		return fmt.Errorf("unknown workspace backend %q", workspaces)
+	if !validWorkspaces(m.Workspaces) {
+		return fmt.Errorf("unknown workspace backend %q", m.Workspaces)
 	}
 	if at.IsZero() || !validActor(actor) {
 		return fmt.Errorf("timestamp and actor required")
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	r.forget()
-	checked, err := r.checkHistory(ctx)
+	directory, err := root.WorkstreamTrace(project, id)
 	if err != nil {
 		return err
 	}
-	_, _, err = r.scanFiles(checked)
-	if err != nil {
-		return err
-	}
-	prefix := "workstreams/" + string(id)
-	if err := r.checked(prefix); err != nil {
-		return err
-	}
-	if _, err := r.dir.Lstat(prefix); !os.IsNotExist(err) {
+	if _, err := os.Lstat(directory); !os.IsNotExist(err) {
 		return fmt.Errorf("%w: workstream %s already exists or is inaccessible", ErrConflict, id)
 	}
-	for _, sub := range []string{"handed", "shed", "amendments", "questions", "units", "agents"} {
-		if err := r.mkdir(prefix + "/" + sub); err != nil {
-			return err
-		}
-	}
-	h := Header{Schema: "osmia.trace.workstream", Version: Version, ID: string(id), Revision: 1, Project: r.project, Workstream: id, At: at, Actor: actor, Cause: "workstream-create"}
-	data, err := json.MarshalIndent(manifestRecord{Header: h, Workspaces: workspaces}, "", "  ")
+	base, err := root.WorkstreamTraces(project)
 	if err != nil {
 		return err
 	}
-	if err := r.writeFile(prefix+"/workstream.json", append(data, '\n')); err != nil {
+	if err := os.MkdirAll(base, 0700); err != nil {
 		return err
 	}
-	paths := []string{prefix + "/workstream.json"}
-	for _, name := range []string{"documents.jsonl", "events.jsonl", "ledger.jsonl"} {
-		name = prefix + "/" + name
-		if err := r.writeFile(name, nil); err != nil {
+	staging, err := root.WorkstreamStaging()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(staging, 0700); err != nil {
+		return err
+	}
+	build, err := os.MkdirTemp(staging, "ws-"+string(id)+"-")
+	if err != nil {
+		return err
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			os.RemoveAll(build)
+		}
+	}()
+	s, err := openStoreDirectory(root, project, id, build)
+	if err != nil {
+		return err
+	}
+	if err := func() error {
+		defer s.Close()
+		prefix := "workstreams/" + string(id)
+		if err := s.dir.Mkdir(".git", 0700); err != nil {
 			return err
 		}
-		paths = append(paths, name)
-	}
-	if err := r.commit(ctx, paths, "Create workstream trace"); err != nil {
+		for _, name := range []string{".git/objects", ".git/refs/heads", prefix, prefix + "/handed", prefix + "/shed", prefix + "/amendments", prefix + "/questions", prefix + "/units", prefix + "/agents"} {
+			if err := s.mkdir(name); err != nil {
+				return err
+			}
+		}
+		for _, f := range []struct{ name, data string }{{".git/config", gitConfig}, {".git/HEAD", "ref: refs/heads/main\n"}, {".git/osmia.lock", ""}} {
+			if err := s.writeFile(f.name, []byte(f.data)); err != nil {
+				return err
+			}
+		}
+		if err := s.acquire(); err != nil {
+			return err
+		}
+		m.Header = Header{Schema: "osmia.trace.workstream", Version: Version, ID: string(id), Revision: 1, Project: project, Workstream: id, At: at, Actor: actor, Cause: cause}
+		data, err := json.MarshalIndent(m, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := s.writeFile(prefix+"/workstream.json", append(data, '\n')); err != nil {
+			return err
+		}
+		paths := []string{prefix + "/workstream.json"}
+		for _, name := range []string{"documents.jsonl", "events.jsonl", "ledger.jsonl"} {
+			name = prefix + "/" + name
+			if err := s.writeFile(name, nil); err != nil {
+				return err
+			}
+			paths = append(paths, name)
+		}
+		return s.commit(ctx, paths, message)
+	}(); err != nil {
 		return err
 	}
-	_, err = r.ensureChiefOfStaff(ctx, id, at, actor)
-	return err
+	if err := os.Rename(build, directory); err != nil {
+		if _, statErr := os.Lstat(directory); statErr == nil {
+			return fmt.Errorf("%w: workstream %s already exists or is inaccessible", ErrConflict, id)
+		}
+		return err
+	}
+	ok = true
+	return nil
 }
 
-// CreateSessionWorkstream commits a new session workstream: its kind, its
-// fixed profile, the base commit it opened from, its branch and its
-// optional title. It creates no chief-of-staff thread: a session has none.
-// An existing workstream is refused with ErrConflict.
+// CreateSessionWorkstream commits a new session workstream in its own
+// dedicated trace repository: its kind, its fixed profile, the base commit it
+// opened from, its branch and its optional title. It creates no
+// chief-of-staff thread: a session has none. An existing workstream is
+// refused with ErrConflict.
 func (r *Repository) CreateSessionWorkstream(ctx context.Context, id config.WorkstreamID, profile, base, branch, title string, at time.Time, actor Actor) error {
-	if err := config.CheckWorkstreamIDs(id); err != nil {
-		return err
+	if r.stream != "" {
+		return fmt.Errorf("a workstream trace instance creates no workstreams of its own")
 	}
 	if !key(profile) || !present(base) || !present(branch) {
 		return fmt.Errorf("a session requires a profile, base commit and branch")
 	}
-	if at.IsZero() || !validActor(actor) {
-		return fmt.Errorf("timestamp and actor required")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	r.forget()
-	checked, err := r.checkHistory(ctx)
-	if err != nil {
-		return err
-	}
-	_, _, err = r.scanFiles(checked)
-	if err != nil {
-		return err
-	}
-	prefix := "workstreams/" + string(id)
-	if err := r.checked(prefix); err != nil {
-		return err
-	}
-	if _, err := r.dir.Lstat(prefix); !os.IsNotExist(err) {
-		return fmt.Errorf("%w: workstream %s already exists or is inaccessible", ErrConflict, id)
-	}
-	for _, sub := range []string{"handed", "shed", "amendments", "questions", "units", "agents"} {
-		if err := r.mkdir(prefix + "/" + sub); err != nil {
-			return err
-		}
-	}
-	h := Header{Schema: "osmia.trace.workstream", Version: Version, ID: string(id), Revision: 1, Project: r.project, Workstream: id, At: at, Actor: actor, Cause: "session-open"}
-	data, err := json.MarshalIndent(manifestRecord{Header: h, Kind: SessionKind, Profile: profile, Base: base, Branch: branch, Title: title}, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := r.writeFile(prefix+"/workstream.json", append(data, '\n')); err != nil {
-		return err
-	}
-	paths := []string{prefix + "/workstream.json"}
-	for _, name := range []string{"documents.jsonl", "events.jsonl", "ledger.jsonl"} {
-		name = prefix + "/" + name
-		if err := r.writeFile(name, nil); err != nil {
-			return err
-		}
-		paths = append(paths, name)
-	}
-	return r.commit(ctx, paths, "Create session workstream")
+	m := manifestRecord{Kind: SessionKind, Profile: profile, Base: base, Branch: branch, Title: title}
+	return createWorkstreamTrace(ctx, r.root, r.project, id, m, "session-open", "Create session workstream", at, actor)
 }
 
+// Workstreams lists every workstream that has its own trace directory under
+// the project's trace, which is authoritative for their existence.
 func (r *Repository) Workstreams() ([]config.WorkstreamID, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	_, streams, err := r.scan()
-	return streams, err
+	return r.diskStreams()
 }
 
 // Generation reports how many changes this handle has made to the files of
@@ -719,7 +999,23 @@ func (r *Repository) Workstreams() ([]config.WorkstreamID, error) {
 // after and retry the assembly when it differs, so the response never mixes
 // state from before a commit with state from after it. It never blocks on
 // mu, so it is safe to call around a read held up by a long-running write.
-func (r *Repository) Generation() uint64 { return r.generation.Load() }
+// On the project's own instance it sums its own generation with that of
+// every workstream instance opened so far, so it also advances when a
+// workstream's trace changes; a workstream not yet opened by this handle
+// has contributed no writes of its own to observe.
+func (r *Repository) Generation() uint64 {
+	total := r.generation.Load()
+	r.workstreamsMu.Lock()
+	children := make([]*Repository, 0, len(r.workstreams))
+	for _, s := range r.workstreams {
+		children = append(children, s)
+	}
+	r.workstreamsMu.Unlock()
+	for _, s := range children {
+		total += s.generation.Load()
+	}
+	return total
+}
 func recordKey(v Record) string {
 	h := v.header()
 	return string(h.Workstream) + "/" + kind(v) + "/" + h.ID
@@ -775,7 +1071,11 @@ func (r *Repository) scanFiles(checked *treeFiles) ([]Record, []config.Workstrea
 }
 
 // scanTrace reads and checks every record of the trace, as scanFiles
-// describes.
+// describes. On the project's own instance it reads only durable project
+// knowledge: the project manifest and whatever project documents
+// documents.jsonl holds. On a workstream's own instance it reads only that
+// workstream's own manifest and files. Neither instance's directory holds
+// the other's files, so this never crosses into another store.
 func (r *Repository) scanTrace(checked *treeFiles) ([]Record, []config.WorkstreamID, error) {
 	read := func(name string) ([]byte, error) {
 		if data, ok := checked.read(name); ok {
@@ -791,42 +1091,24 @@ func (r *Repository) scanTrace(checked *treeFiles) ([]Record, []config.Workstrea
 		_, err = r.decodeManifest(name, data, schema, stream)
 		return err
 	}
-	if err := manifest("project.json", "osmia.trace.project", ""); err != nil {
-		return nil, nil, err
-	}
-	if err := r.checked("workstreams"); err != nil {
-		return nil, nil, err
-	}
-	entries, err := fs.ReadDir(r.dir.FS(), "workstreams")
-	if err != nil {
-		return nil, nil, err
-	}
 	var diagnostics []error
 	var streams []config.WorkstreamID
 	known := map[config.WorkstreamID]bool{}
-	for _, entry := range entries {
-		id, err := config.ParseWorkstreamID(entry.Name())
-		name := "workstreams/" + entry.Name()
-		if err == nil {
-			err = r.checked(name)
+	var required []string
+	if r.stream == "" {
+		if err := manifest("project.json", "osmia.trace.project", ""); err != nil {
+			return nil, nil, err
 		}
-		if err == nil && !entry.IsDir() {
-			err = fmt.Errorf("expected workstream directory")
+		required = append(required, "documents.jsonl")
+	} else {
+		prefix := "workstreams/" + string(r.stream)
+		if err := manifest(prefix+"/workstream.json", "osmia.trace.workstream", r.stream); err != nil {
+			return nil, nil, err
 		}
-		if err == nil {
-			err = manifest(name+"/workstream.json", "osmia.trace.workstream", id)
-		}
-		if err != nil {
-			diagnostics = append(diagnostics, fmt.Errorf("%s: %w", name, err))
-			continue
-		}
-		known[id] = true
-		streams = append(streams, id)
-	}
-	required := []string{"documents.jsonl"}
-	for _, id := range streams {
+		known[r.stream] = true
+		streams = append(streams, r.stream)
 		for _, name := range []string{"documents.jsonl", "events.jsonl", "ledger.jsonl"} {
-			required = append(required, "workstreams/"+string(id)+"/"+name)
+			required = append(required, prefix+"/"+name)
 		}
 	}
 	for _, name := range required {
@@ -834,6 +1116,7 @@ func (r *Repository) scanTrace(checked *treeFiles) ([]Record, []config.Workstrea
 			diagnostics = append(diagnostics, fmt.Errorf("%s: %w", name, err))
 		}
 	}
+	var err error
 	var records []Record
 	files := map[string]recordFile{}
 	latest := map[string]Record{}
@@ -921,6 +1204,10 @@ func (r *Repository) Append(ctx context.Context, v Record) error {
 		return fmt.Errorf("%w: status records require SetStatus", ErrConflict)
 	case PriorityChange:
 		return fmt.Errorf("%w: priority records require SetPriority", ErrConflict)
+	}
+	r, err := r.scoped(v.header().Workstream)
+	if err != nil {
+		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1042,7 +1329,13 @@ func (r *Repository) append(ctx context.Context, v Record, writeDocument bool) e
 	if d, ok := v.(Document); ok {
 		content[paths[1]] = []byte(d.Content)
 	}
-	return r.commitContent(ctx, paths, content, fmt.Sprintf("Record %s %s revision %d", kind(v), v.header().ID, v.header().Revision))
+	// The ordinary files above are already ahead of committed history: a
+	// cancellation from here on cannot roll them back, only leave them
+	// requiring reconciliation, so the commit that reconciles them runs
+	// without the caller's cancellation, as publishTree's materialization
+	// does once it is past its own point of no return. A genuine Git
+	// failure, such as another writer's lock, still fails normally.
+	return r.commitContent(context.WithoutCancel(ctx), paths, content, fmt.Sprintf("Record %s %s revision %d", kind(v), v.header().ID, v.header().Revision))
 }
 
 // Read returns all valid revisions of T in file order, with path/line diagnostics
@@ -1052,6 +1345,10 @@ func Read[T Record](r *Repository, stream config.WorkstreamID) ([]T, error) {
 		if err := config.CheckWorkstreamIDs(stream); err != nil {
 			return nil, err
 		}
+	}
+	r, err := r.scoped(stream)
+	if err != nil {
+		return nil, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

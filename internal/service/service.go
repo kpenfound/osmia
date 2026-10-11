@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"maps"
 	"net"
 	"net/http"
@@ -21,11 +21,13 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/events"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/reconcile"
+	"github.com/kpenfound/osmia/internal/redact"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/service/beekeeper"
@@ -120,6 +122,11 @@ type Options struct {
 	// Location is the service host's time zone, whose calendar days the daily
 	// budget counts. It defaults to the host's local time zone.
 	Location *time.Location
+	// Logger is the structured logger every line the service writes to its
+	// standard output and standard error goes through: the service's own
+	// records, embedded Tailscale's and the GitHub activity log. It defaults
+	// to a JSON handler on os.Stderr.
+	Logger *slog.Logger
 	// controls is set by Enforce so the chief-of-staff tools it binds reach
 	// the runtime state of the service started with these options.
 	controls *runtimeControls
@@ -174,6 +181,7 @@ type Service struct {
 	turns     runningTurns
 	options   Options
 	store     *runtime.Store
+	logger    *slog.Logger
 	lock      *os.File
 	listener  *net.UnixListener
 	web       net.Listener // nil unless listen.web is configured
@@ -192,11 +200,20 @@ type Service struct {
 	boundary    func(string) error
 	// hub carries change notifications to the client event stream.
 	hub *hub
+	// activity is the in-process record of long-running backend operations,
+	// separate from the trace and the runtime store: reporting and reading
+	// it never wait on the trace mutex or on operationMu.
+	activity *activityRegistry
 	// notifier posts new inbox entries to notify.webhook.
 	notifier *notifier
 	// driftAsked is set once an owner's drift rebase request is recorded,
 	// so the next pass reads the drift schedule.
 	driftAsked atomic.Bool
+	// statusViews holds the last workstream list statusList produced, so a
+	// request that cannot refresh it within coreReadBound still answers
+	// with that snapshot, marked stale, instead of blocking past the
+	// bound (bounded_read.go, boundedView).
+	statusViews viewCache[StatusResponse]
 	// shadow is the Beekeeper's shadow project: created or reopened at
 	// startup, outside cfg.Projects and this service's own reconciliation
 	// loop. beekeeper.Post and beekeeper.Continue run their own scheduler and
@@ -208,6 +225,16 @@ type Service struct {
 // Beekeeper returns the open repository of the Beekeeper's shadow project,
 // for the Beekeeper's own thread and tools.
 func (s *Service) Beekeeper() *trace.Repository { return s.shadow }
+
+// log returns s's structured logger, or a silent one when a test built s
+// directly without one: a missing logger never fails or panics the action
+// it would have recorded.
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return ghlog.Logger(context.Background())
+}
 
 // BeekeeperBusy reports whether the Beekeeper's latest owner request has no
 // finished turn, for bk-api's conflict response.
@@ -234,12 +261,22 @@ func (s *Service) beekeeperPrepare(cfg *config.Config) beekeeper.Prepare {
 	}
 }
 
+// beekeeperActivityKey names the Beekeeper's own turn in the activity
+// record. The Beekeeper runs at most one turn at a time (postLock in
+// beekeeper.Post), so one fixed key names it for the whole service's
+// lifetime: a fresh start under it supersedes whatever an earlier turn
+// reported, exactly as a reconciled operation's own stable ID would.
+const beekeeperActivityKey = "beekeeper-turn"
+
 // PostBeekeeper records text as the Beekeeper thread's next owner request
 // and runs the Beekeeper turn through beekeeper.Post, on
 // Options.BeekeeperTurns, with the profile and sandbox settings the
 // Beekeeper section of the loaded configuration names alone: no registered
 // project's configuration, charter or capacity bounds it. A busy Beekeeper
-// returns beekeeper.ErrBusy and records nothing.
+// returns beekeeper.ErrBusy and records nothing. The turn that actually
+// runs, never a call beekeeper.Post refuses as busy, is reported in the
+// activity record under beekeeperActivityKey for its whole run, so a
+// concurrent busy refusal can name it.
 func (s *Service) PostBeekeeper(ctx context.Context, text string) (trace.QueuedTurn, error) {
 	cfg := s.current()
 	profile, err := cfg.NamedProfile(cfg.Beekeeper.Profile)
@@ -249,7 +286,13 @@ func (s *Service) PostBeekeeper(ctx context.Context, text string) (trace.QueuedT
 	if s.options.BeekeeperTurns == nil {
 		return trace.QueuedTurn{}, fmt.Errorf("the beekeeper has no turn runner configured")
 	}
-	return beekeeper.Post(ctx, s.shadow, profile, s.options.BeekeeperTurns, s.beekeeperPrepare(cfg), s.now, text)
+	var h *ActivityHandle
+	started := func() {
+		h = s.StartActivity(beekeeperActivityKey, ActivityAgentTurn, config.ShadowProjectID, "", "running the owner's message")
+	}
+	q, err := beekeeper.Post(ctx, s.shadow, profile, s.options.BeekeeperTurns, s.beekeeperPrepare(cfg), s.now, text, started)
+	h.Finish(err)
+	return q, err
 }
 
 // Start loads state and binds before returning. Wait joins shutdown and cleanup.
@@ -258,6 +301,12 @@ func (s *Service) PostBeekeeper(ctx context.Context, text string) (trace.QueuedT
 // active project gets its own runtime: its trace, its reconciliation loop and
 // its restart recovery. Their schedulers share one pool of role capacity.
 func Start(ctx context.Context, opts Options) (_ *Service, err error) {
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	}
+	opts.Logger = logger
+	ctx = ghlog.WithLogger(ctx, logger)
 	root, err := opts.Config.Resolve()
 	if err != nil {
 		return nil, err
@@ -309,16 +358,29 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, fmt.Errorf("ensure the beekeeper's thread: %w", err)
 	}
 	err = nil
-	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), shadow: shadow}
+	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), shadow: shadow, logger: logger}
+	s.activity = newActivityRegistry(s.now)
+	s.activity.notify = func() { s.hub.publish(Event{Kind: EventActivity}) }
 	s.pool = &scheduler.Shared{Traces: s.traces}
-	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider}
+	// Getenv reads the Jev boost's API key the same way the default would,
+	// and registers whatever value it reads for redaction: the owner may
+	// point api_key_env at any environment variable name, not only
+	// EnvSecrets' default, and the key must never reach a log record
+	// whichever name configures it.
+	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider, Getenv: func(name string) string {
+		value := os.Getenv(name)
+		redact.Register(value)
+		return value
+	}}
 	if opts.skills != nil {
 		opts.skills.Refresh = func() string { return s.current().Skills.Refresh }
 	}
 	if opts.controls != nil {
 		opts.controls.service.Store(s)
 	}
+	pendingRecovery := s.StartActivity("recovery-pending", ActivityRecovery, "", "", "recovering an interrupted project registration")
 	cfg, s.pending = s.recoverPending(ctx, cfg)
+	pendingRecovery.Finish(s.pending)
 	projects, err := s.openAll(cfg)
 	if err != nil {
 		return nil, err
@@ -399,19 +461,26 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		// to retry; it never fails startup.
 		if node, err := s.joinTailnet(root, cfg.Listen.Tailnet); err != nil {
 			s.tailnet.set(nil, err.Error())
-			log.Printf("osmia tailnet: join %s: %v; the supervisor will retry", cfg.Listen.Tailnet, err)
+			logger.Warn("tailnet join failed; the supervisor will retry", "component", "tailnet", "hostname", cfg.Listen.Tailnet, "error", redact.Secrets(err.Error(), redact.KnownSecrets()...))
 		} else {
 			s.tailnet.set(node, "")
+			logger.Info("tailnet joined", "component", "tailnet", "hostname", cfg.Listen.Tailnet, "state", "up")
 		}
 	}
 	for _, p := range projects {
 		view := cfg.For(p.id)
-		if err = s.recoverWorkspaces(ctx, view); err != nil {
+		workspaces := s.StartActivity("recovery-workspaces-"+string(p.id), ActivityRecovery, p.id, "", "recovering interrupted workspace operations")
+		err = s.recoverWorkspaces(ctx, view)
+		workspaces.Finish(err)
+		if err != nil {
 			s.cleanupSocket()
 			st.Close()
 			return nil, fmt.Errorf("recover interrupted workspace operations: %w", err)
 		}
-		if err = s.recoverSessions(ctx, view, p.repository); err != nil {
+		sessions := s.StartActivity("recovery-sessions-"+string(p.id), ActivityRecovery, p.id, "", "recovering thread sessions")
+		err = s.recoverSessions(ctx, view, p.repository)
+		sessions.Finish(err)
+		if err != nil {
 			s.cleanupSocket()
 			st.Close()
 			return nil, fmt.Errorf("recover thread sessions: %w", err)
@@ -429,7 +498,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	// interrupted chief-of-staff turn does, and gets the same kind of
 	// continuation turn, run at once since the shadow project has no
 	// background reconciliation loop to pick it up later.
-	if err = s.recoverSessions(ctx, cfg, shadow); err != nil {
+	beekeeperRecovery := s.StartActivity("recovery-beekeeper", ActivityRecovery, config.ShadowProjectID, "", "recovering the beekeeper's interrupted turns")
+	err = s.recoverSessions(ctx, cfg, shadow)
+	beekeeperRecovery.Finish(err)
+	if err != nil {
 		s.cleanupSocket()
 		st.Close()
 		return nil, fmt.Errorf("recover the beekeeper's interrupted turns: %w", err)
@@ -439,23 +511,29 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	s.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.requests.Add(1)
 		defer s.requests.Done()
-		switch arrivedOn(r) {
+		sw := &statusResponseWriter{ResponseWriter: w}
+		started := time.Now()
+		kind := arrivedOn(r)
+		defer func() {
+			ghlog.Logger(r.Context()).Info("api request handled", "listener", listenerName(kind), "method", r.Method, "path", r.URL.Path, "status", sw.status, "duration", time.Since(started).String())
+		}()
+		switch kind {
 		case webListener:
 			if !webAllowed(r) {
-				fail(w, Forbidden)
+				fail(sw, Forbidden)
 				return
 			}
 		case tailnetListener:
 			if !tailnetAllowed(r, hostname, s.tailnetNames) {
-				fail(w, Forbidden)
+				fail(sw, Forbidden)
 				return
 			}
 		}
 		if !s.ready.Load() {
-			fail(w, Unavailable)
+			fail(sw, Unavailable)
 			return
 		}
-		s.handle(w, r)
+		s.handle(sw, r)
 	}), ReadHeaderTimeout: opts.ReadHeaderTimeout, ReadTimeout: opts.ReadTimeout, WriteTimeout: opts.WriteTimeout,
 		BaseContext: func(net.Listener) context.Context { return s.lifetime }, ConnContext: connContext}
 	s.ready.Store(true)
@@ -520,11 +598,65 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.cleanupSocket()
 		s.store.Close()
 		unlock(s.lock)
+		reason := "stopped"
+		if s.err != nil {
+			reason = s.err.Error()
+		}
+		logger.Info("service stopped", "reason", reason)
 		close(s.done)
 	}()
+	logger.Info("service started", "version", opts.Build.Version, "commit", opts.Build.Commit, "root", root.String(), "listeners", startedListeners(s))
 	return s, nil
 }
-func (s *Service) Socket() string { return s.cfg.Listen.Socket }
+
+// startedListeners names every listener the service has bound, for the
+// service-started log record.
+func startedListeners(s *Service) []string {
+	listeners := []string{"socket"}
+	if s.web != nil {
+		listeners = append(listeners, "web")
+	}
+	if s.tailnet != nil {
+		listeners = append(listeners, "tailnet")
+	}
+	return listeners
+}
+
+// listenerName names the listener kind arrivedOn reports, for the
+// api-request-handled log record.
+func listenerName(kind listenerKind) string {
+	switch kind {
+	case webListener:
+		return "web"
+	case tailnetListener:
+		return "tailnet"
+	default:
+		return "socket"
+	}
+}
+
+// statusResponseWriter captures the status code an HTTP handler writes, for
+// the api-request-handled log record. Unwrap lets http.ResponseController
+// reach the underlying writer's Flush and SetWriteDeadline.
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusResponseWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+func (w *statusResponseWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(p)
+}
+func (w *statusResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (s *Service) Socket() string                           { return s.cfg.Listen.Socket }
 
 // WebAddr is the bound address of the web listener, or empty when listen.web
 // is not configured.
@@ -559,7 +691,7 @@ func (s *Service) joinTailnet(root config.Root, hostname string) (TailnetListene
 	}
 	join := s.options.JoinTailnet
 	if join == nil {
-		join = joinTailscale
+		join = joinTailscale(s.logger)
 	}
 	return join(hostname, dir)
 }
@@ -716,12 +848,19 @@ func (s *Service) cleanupSocket() {
 }
 
 // openAll opens the runtime of every active project of cfg that has a trace,
-// in active_projects order. On failure it opens none.
+// in active_projects order. A project whose trace migration from the shared
+// layout could not complete is logged and left unopened, so it is not
+// scheduled this run; every other project still opens. Any other failure
+// opens none.
 func (s *Service) openAll(cfg *config.Config) ([]*activeProject, error) {
 	var out []*activeProject
 	for _, id := range cfg.ProjectIDs() {
 		p, err := s.open(cfg.For(id))
 		if err != nil {
+			if errors.Is(err, trace.ErrMigrationIncomplete) {
+				s.log().Warn("project trace migration incomplete; project not opened", "project", string(id), "error", err.Error())
+				continue
+			}
 			for _, opened := range out {
 				opened.repository.Close()
 			}
@@ -866,6 +1005,7 @@ func (s *Service) launch(active *activeProject) {
 	if active == nil {
 		return
 	}
+	s.log().Info("project started", "project", string(active.id))
 	ctx, cancel := context.WithCancel(s.lifetime)
 	active.cancel = cancel
 	go func() {
@@ -920,12 +1060,30 @@ func (s *Service) stop(projects ...*activeProject) error {
 	}
 	var err error
 	for _, p := range projects {
-		err = errors.Join(err, s.halt(p))
+		haltErr := s.halt(p)
+		err = errors.Join(err, haltErr)
+		if haltErr != nil {
+			s.log().Error("project stopped", "project", string(p.id), "reason", "service stopped", "error", haltErr.Error())
+		} else {
+			s.log().Info("project stopped", "project", string(p.id), "reason", "service stopped")
+		}
 	}
 	for _, p := range projects {
 		err = errors.Join(err, p.repository.Close())
 	}
 	return err
+}
+
+// migrationLog reports trace.Migrate's progress through s's structured
+// logger, naming only the project and workstream, never transcript content
+// or credentials, the way the tailnet supervisor reports its own retries.
+func (s *Service) migrationLog(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	if strings.Contains(format, "failed") {
+		s.log().Warn(msg)
+		return
+	}
+	s.log().Info(msg)
 }
 
 // openReconciliation leaves trace creation to project registration; an existing
@@ -956,6 +1114,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	_, gitErr := os.Lstat(filepath.Join(directory, ".git"))
 	if os.IsNotExist(manifestErr) && os.IsNotExist(gitErr) {
 		return nil, nil, nil, nil
+	}
+	if err := trace.Migrate(context.Background(), cfg.Root, cfg.Project.ID, s.migrationLog); err != nil {
+		return nil, nil, nil, err
 	}
 	repository, err := trace.Open(cfg.Root, cfg.Project)
 	if err != nil {
@@ -990,8 +1151,8 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if adapters == nil {
 		adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{}
 	}
-	adapters[coreadapter.RunnerBoundary] = stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.runner }}
-	adapters[coreadapter.RepositoryBoundary] = stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.repository }}
+	adapters[coreadapter.RunnerBoundary] = activityReconciler{stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.runner }}, s.activity, cfg.Project.ID}
+	adapters[coreadapter.RepositoryBoundary] = activityReconciler{stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.repository }}, s.activity, cfg.Project.ID}
 	options.Adapters = adapters
 	if options.Priority == nil {
 		options.Priority = stagePriority

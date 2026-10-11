@@ -9,7 +9,7 @@ operators and contributors. The [design](design.md) defines product behavior.
 ```mermaid
 flowchart LR
     Owner[Owner: CLI or web page] --> API[Service API]
-    API --> Trace[Project trace]
+    API --> Trace[Project and workstream traces]
     Trace --> Controllers[Go controllers and scheduler]
     Controllers --> Turns[Scoped agent turns]
     Turns --> Trace
@@ -19,11 +19,24 @@ flowchart LR
     Trace --> API
 ```
 
-The trace is a dedicated Git repository for each project under the Osmia root.
-It contains the charter, knowledge base, workstream documents, transitions,
-turn logs and durable operation intents. The target clone and its workspaces
-are separate. The service reads current trace state on each reconciliation pass;
-an event wakes a pass early but does not carry the state transition.
+The trace is split along a durable boundary. Each project has one dedicated
+Git repository holding only durable project knowledge: the charter, the
+knowledge base and role notes. Each workstream has its own dedicated Git
+repository, a sibling of the project's under the Osmia root, holding that
+workstream's complete record: its documents, transitions, turn logs, costs
+and durable operation intents. The target clone and its workspaces are
+separate from every trace repository. The service reads current trace state
+on each reconciliation pass; an event wakes a pass early but does not carry
+the state transition.
+
+A project whose trace still uses the older shared layout, with every
+workstream's records inside the project's own repository, is migrated
+automatically and resumably before it is opened. Permanently archiving a
+workstream deletes its own trace repository and temporary workspaces, once
+any busy or pending work has cleared and the knowledge base has absorbed its
+learnings; it does not rewrite or prune Git history. See
+[design §4.5](design.md#45-where-they-live) and
+[§5.1](design.md#51-feature-states).
 
 ## Responsibilities
 
@@ -56,6 +69,30 @@ that intent to the thread runner, which executes a scoped turn and records its
 response. Landing checks the reviewed candidate, base and governing document
 revisions before merging it. A changed candidate returns to review. Delivery
 requires the owner's approval of the final report and description.
+
+## Staying responsive under backend work
+
+Core reads bound their wait on the trace or runtime lock to short,
+validation-sized critical sections so they answer promptly whatever else is
+blocked; `/status` alone keeps a cached fallback (`coreReadBound`,
+[bounded_read.go](../internal/service/bounded_read.go)), answering with its
+last snapshot, marked with the `X-Osmia-Stale: true` header, when a refresh
+cannot finish in time. `consistentRead`
+([consistent_read.go](../internal/service/consistent_read.go)) retries a
+multi-read response from scratch rather than let it span two generations of
+the trace or the runtime store. The in-process activity record
+([activity.go](../internal/service/activity.go)) is a separately locked
+structure that every long-running operation reports to and that `GET
+/health` and `GET /activity` read without touching the trace mutex or the
+operation lock a factory effect holds, so both stay prompt while the effect
+they describe is blocked. Every owner-action write admits a command as
+accepted, rejected or temporarily unavailable, checks it against the
+revision its client saw, and gives it a stable identity so a resubmission,
+including one recovered after a restart, is never applied twice. Archive
+cleanup reports each pass and each background trace removal to the same
+record ([archive_cleanup.go](../internal/service/archive_cleanup.go)). The
+[design](design.md#101-one-process) document defines the exact guarantees;
+this page only locates the code.
 
 ## Agent boundary
 
@@ -106,8 +143,8 @@ only what every judgment shares, and `systemone` knows nothing of Osmia.
 The root defaults to `~/.local/share/osmia` and the top-level configuration to
 `~/.config/osmia/config.toml`, following the XDG base directories; an explicit
 root holds its own `config.toml`. Runtime overrides, project configuration,
-project trace repositories and workspaces live in the root; the target clone
-remains separate. The
+project trace repositories, workstream trace repositories and workspaces live
+in the root; the target clone remains separate. The
 service binds a Unix socket for local clients and can serve the same API on a
 loopback listener or an embedded tailnet node. Tailnet membership controls access
 to the remote page; there is no separate Osmia login. See

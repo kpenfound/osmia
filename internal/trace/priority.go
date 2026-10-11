@@ -52,6 +52,10 @@ func (r *Repository) SetProjectPriority(ctx context.Context, agent string, scope
 	if at.IsZero() || apply == nil {
 		return PriorityChange{}, fmt.Errorf("timestamp and apply required")
 	}
+	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return PriorityChange{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {

@@ -194,3 +194,51 @@ func (r Root) Workstream(project ProjectID, stream WorkstreamID) (string, error)
 	}
 	return r.managed("projects", string(project), "workstreams", string(stream))
 }
+
+// WorkstreamTraces is the directory under which every workstream of project
+// has its own dedicated trace repository, a sibling of the project's own
+// trace directory and of every other project's. It never shares a parent
+// with any registered project's "projects" tree.
+func (r Root) WorkstreamTraces(project ProjectID) (string, error) {
+	if err := CheckProjectIDs(project); err != nil {
+		return "", err
+	}
+	return r.managed("workstreams", string(project))
+}
+
+// WorkstreamTrace is the workstream's own dedicated trace repository, outside
+// the project trace repository and every target repository.
+func (r Root) WorkstreamTrace(project ProjectID, stream WorkstreamID) (string, error) {
+	if err := CheckProjectIDs(project); err != nil {
+		return "", err
+	}
+	if err := CheckWorkstreamIDs(stream); err != nil {
+		return "", err
+	}
+	return r.managed("workstreams", string(project), string(stream))
+}
+
+// WorkstreamStaging is where a new workstream's dedicated trace repository is
+// built before it is published into WorkstreamTraces by an atomic rename, so
+// a directory listing of WorkstreamTraces never observes a workstream before
+// its trace is complete and committed. It is a sibling of "workstreams" and
+// "projects", never nested under either, so it is never itself read as a
+// project's or workstream's trace.
+func (r Root) WorkstreamStaging() (string, error) {
+	return r.managed("workstreams-staging")
+}
+
+// WorkstreamDeleting is where a workstream's own dedicated trace repository
+// is moved, by one atomic rename out of WorkstreamTraces, before archive
+// cleanup removes it. Its presence there is the durable, restart-safe
+// record that deletion is under way: a directory listing of
+// WorkstreamTraces never again observes the workstream once the rename
+// lands, and anything still here after a crash is finished, not mistaken
+// for a live trace. It is a sibling of "workstreams" and
+// "workstreams-staging".
+func (r Root) WorkstreamDeleting(project ProjectID) (string, error) {
+	if err := CheckProjectIDs(project); err != nil {
+		return "", err
+	}
+	return r.managed("workstreams-deleting", string(project))
+}

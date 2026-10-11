@@ -50,6 +50,10 @@ func (r *Repository) EditCharter(ctx context.Context, revision int, content stri
 // EditDraft replaces the owner's pinned spec and plan together before
 // ratification. Validation and the feature-state gate share the write lock.
 func (r *Repository) EditDraft(ctx context.Context, stream config.WorkstreamID, specRevision, planRevision int, spec, plan string, at time.Time, check func(map[string]string) error) (map[string]Document, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	_, view, err := r.loadWorkflow(stream)

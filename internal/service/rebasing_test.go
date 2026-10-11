@@ -346,7 +346,7 @@ func TestInterruptedRebaseIsReconciled(t *testing.T) {
 				t.Fatalf("rebase records %+v, head %s", rebases, head)
 			}
 			var outcomes []string
-			for _, tr := range allTransitions(t, f.trace, stream) {
+			for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 				if tr.Subject == rebaseSubject("resume") && tr.From != "" {
 					outcomes = append(outcomes, tr.ID)
 				}
@@ -416,7 +416,7 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 	if state.Value != UnitImplementing {
 		t.Fatalf("the conflicted unit is %s", state.Value)
 	}
-	moved := slices.IndexFunc(allTransitions(t, f.trace, stream), func(tr trace.Transition) bool {
+	moved := slices.IndexFunc(allTransitions(t, f.s.cfg.Root, f.project, stream), func(tr trace.Transition) bool {
 		return tr.ID == trace.UnitSubject("dedupe")+"-implementing-rebase-1" && tr.From == UnitApproved && tr.Cause == transition+"-conflicted" && tr.Actor == foremanActor
 	})
 	if moved < 0 {

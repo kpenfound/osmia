@@ -286,6 +286,10 @@ func validateThreads(threads map[string]Thread, records []Record, project config
 // CreateThread atomically records identity and an empty durable queue. An exact
 // retry is harmless; an existing identity cannot be rebound to another role.
 func (r *Repository) CreateThread(ctx context.Context, agent Agent) error {
+	r, err := r.scoped(agent.Workstream)
+	if err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := validate(agent); err != nil {
@@ -319,6 +323,10 @@ const ChiefOfStaff = "chief_of_staff"
 // already exists, and returns the thread. The first creation fixes the identity's
 // timestamp and actor; later calls leave it unchanged.
 func (r *Repository) EnsureChiefOfStaff(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor) (Thread, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return Thread{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.ensureChiefOfStaff(ctx, stream, at, actor)
@@ -359,6 +367,10 @@ func (r *Repository) ChiefOfStaffThread(stream config.WorkstreamID) (Thread, err
 // Thread returns a detached snapshot. A claim from a previous service session
 // without a captured result is exposed as interrupted, never eligible for retry.
 func (r *Repository) Thread(stream config.WorkstreamID, agent string) (Thread, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return Thread{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	log, _, err := r.loadWorkflow(stream)
@@ -375,6 +387,10 @@ func (r *Repository) Thread(stream config.WorkstreamID, agent string) (Thread, e
 // Threads returns detached snapshots of every thread in the workstream, ordered
 // by agent ID, with the same interruption view as Thread.
 func (r *Repository) Threads(stream config.WorkstreamID) ([]Thread, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	log, _, err := r.loadWorkflow(stream)
@@ -400,6 +416,10 @@ func (r *Repository) snapshot(t Thread) Thread {
 // EnqueueTurn fixes the request and its profile at acceptance. Sequence numbers
 // reflect serialized durable acceptance, not timestamps or goroutine launch order.
 func (r *Repository) EnqueueTurn(ctx context.Context, req TurnRequest) (QueuedTurn, error) {
+	r, err := r.scoped(req.Workstream)
+	if err != nil {
+		return QueuedTurn{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	log, _, err := r.loadWorkflow(req.Workstream)
@@ -430,6 +450,10 @@ func (r *Repository) EnqueueTurn(ctx context.Context, req TurnRequest) (QueuedTu
 // ClaimTurn reserves the oldest pending request without an expiring lease. A
 // repeated token returns its original claim; it cannot reserve a successor.
 func (r *Repository) ClaimTurn(ctx context.Context, stream config.WorkstreamID, agent, token, directory string, at time.Time) (QueuedTurn, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return QueuedTurn{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	log, _, err := r.loadWorkflow(stream)
@@ -472,6 +496,10 @@ func (r *Repository) ClaimTurn(ctx context.Context, stream config.WorkstreamID, 
 // CaptureTurn persists the adapter's final/partial result before completion. The
 // exact response is retryable even after reopening; changed evidence is rejected.
 func (r *Repository) CaptureTurn(ctx context.Context, token string, response TurnResponse) error {
+	r, err := r.scoped(response.Workstream)
+	if err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	log, _, err := r.loadWorkflow(response.Workstream)
@@ -519,6 +547,10 @@ func (r *Repository) CaptureTurn(ctx context.Context, token string, response Tur
 // them. A turn reserved by this session, one with a captured result, and one
 // that is not reserved are refused with ErrClaim.
 func (r *Repository) AbandonTurn(ctx context.Context, stream config.WorkstreamID, agent, turn string, at time.Time) error {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -569,6 +601,10 @@ func (r *Repository) AbandonTurn(ctx context.Context, stream config.WorkstreamID
 // assumed. Callers must check for the directory while holding service
 // ownership, before dispatch begins.
 func (r *Repository) RecoverUnclaimedTurn(ctx context.Context, stream config.WorkstreamID, agent, turn, directory string, at time.Time) error {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -640,6 +676,10 @@ func settleAttempt(q *QueuedTurn, response *TurnResponse) {
 // later turns of its thread wait for another call. It returns the number of
 // turns it completed.
 func (r *Repository) CancelTurns(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor, reason string) (int, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return 0, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -701,6 +741,10 @@ func (r *Repository) CancelTurns(ctx context.Context, stream config.WorkstreamID
 // CompleteTurn releases the reservation only after result capture. It can finish
 // a captured turn after restart without running the backend again.
 func (r *Repository) CompleteTurn(ctx context.Context, stream config.WorkstreamID, agent, turn, token string, at time.Time) error {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	log, _, err := r.loadWorkflow(stream)

@@ -34,6 +34,18 @@ func must(t *testing.T, err error) {
 	}
 }
 
+// workstreamTraceFile is the on-disk path of name within stream's own
+// dedicated trace repository, a sibling of the project's trace repository
+// rather than nested under it.
+func workstreamTraceFile(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID, name string) string {
+	t.Helper()
+	dir, err := root.WorkstreamTrace(project, stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, "workstreams", string(stream), name)
+}
+
 // awaitAcknowledged polls fetch until it returns operations and the reconcile
 // controller has acknowledged every one of them. An operation's result and its
 // acknowledgement are committed after the state its Apply commits, so a test

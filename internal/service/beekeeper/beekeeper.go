@@ -7,11 +7,14 @@ package beekeeper
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -47,6 +50,9 @@ func Open(ctx context.Context, root config.Root, b config.Beekeeper, now time.Ti
 	_, manifestErr := os.Lstat(filepath.Join(directory, "project.json"))
 	_, gitErr := os.Lstat(filepath.Join(directory, ".git"))
 	if !os.IsNotExist(manifestErr) || !os.IsNotExist(gitErr) {
+		if err := trace.Migrate(ctx, root, p.ID, migrationLog(ctx)); err != nil {
+			return nil, err
+		}
 		return trace.Open(root, p)
 	}
 	repository, err := trace.Create(ctx, root, p, now, Actor)
@@ -58,4 +64,18 @@ func Open(ctx context.Context, root config.Root, b config.Beekeeper, now time.Ti
 		return nil, err
 	}
 	return repository, nil
+}
+
+// migrationLog reports trace.Migrate's progress through ctx's structured
+// logger, naming only the project and workstream, never transcript content
+// or credentials.
+func migrationLog(ctx context.Context) func(format string, args ...any) {
+	return func(format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		if strings.Contains(format, "failed") {
+			ghlog.Logger(ctx).Warn(msg)
+			return
+		}
+		ghlog.Logger(ctx).Info(msg)
+	}
 }

@@ -272,8 +272,21 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return 2
 	}
 	if cmd == "serve" {
-		if err := runService(ctx, root, o.detach, stdout); err != nil {
-			reportServeFailure(stderr, err, time.Now())
+		logger := newServiceLogger(stderr)
+		if err := runService(ctx, root, o.detach, stdout, logger); err != nil {
+			if o.detach {
+				// detach() returned this error about the launcher's own
+				// attempt to start and wait for the detached child; it never
+				// ran the service itself, so its report stays human-readable
+				// text on this terminal.
+				reportServeFailure(stderr, err, time.Now())
+			} else {
+				// This process ran the service itself, in the foreground or
+				// as the detached child whose stderr is service.log; either
+				// way its own failure is a structured record on its own
+				// standard error.
+				logServeFailure(logger, err)
+			}
 			return 6
 		}
 		return 0
