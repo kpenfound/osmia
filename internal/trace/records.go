@@ -330,7 +330,7 @@ func documentPath(p string, stream bool) error {
 	if !stream && (memoryPath(parts) || p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || (len(parts) == 2 && parts[0] == "notices" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))) || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && ((p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json") || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts)) {
+	if stream && ((p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json") || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts) || sessionCheckPath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)
@@ -340,6 +340,21 @@ func documentPath(p string, stream bool) error {
 // session's thread: session-entries/<id>.json.
 func sessionEntryPath(parts []string) bool {
 	return len(parts) == 2 && parts[0] == "session-entries" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
+}
+
+// sessionCheckPath reports whether parts name a session's check run record:
+// session-checks/checks-<run>.json, or its captured output,
+// session-checks/checks-<run>-output.txt, mirroring how a workstream's own
+// final check runs are kept under final/ instead of session-checks/.
+func sessionCheckPath(parts []string) bool {
+	if len(parts) != 2 || parts[0] != "session-checks" {
+		return false
+	}
+	if checkOutputName(parts[1]) {
+		return true
+	}
+	n := strings.TrimSuffix(strings.TrimPrefix(parts[1], "checks-"), ".json")
+	return strings.HasPrefix(parts[1], "checks-") && strings.HasSuffix(parts[1], ".json") && shedRound.MatchString("round-"+n)
 }
 
 func amendmentDraftPath(parts []string) bool {

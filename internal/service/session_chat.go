@@ -241,6 +241,11 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 	if api != nil {
 		return ConversationEntry{}, api
 	}
+	if ended, err := sessionEnded(repository, stream); err != nil {
+		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
+	} else if ended {
+		return ConversationEntry{}, &APIError{Conflict, "the session has ended"}
+	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
 		return ConversationEntry{}, &APIError{Validation, "text must not be empty"}
@@ -259,6 +264,16 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 		return ConversationEntry{}, &APIError{Conflict, "a turn is running for this session; try again once it finishes"}
 	}
 	defer mu.Unlock()
+	// sessionEnd holds this same lock across its own busy check and the
+	// transition to ended, so re-checking here, now that the lock is held,
+	// closes the window between this function's own earlier, unlocked
+	// ended check and taking the lock: without it, a session that ended in
+	// that window could still have a turn started on it.
+	if ended, err := sessionEnded(repository, stream); err != nil {
+		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
+	} else if ended {
+		return ConversationEntry{}, &APIError{Conflict, "the session has ended"}
+	}
 	at := s.now()
 	th, err := ensureSessionThread(ctx, repository, project, stream, at)
 	if err != nil {

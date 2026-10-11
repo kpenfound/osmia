@@ -452,6 +452,31 @@ func TestOwnPullRequestOutcomeDocumentPathIsAccepted(t *testing.T) {
 	}
 }
 
+// A session's check run and its captured output are recorded under
+// session-checks/, mirroring a workstream's own final check runs under
+// final/; an unlisted name in the same directory is refused.
+func TestSessionCheckDocumentPathIsAccepted(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	dir, err := root.ProjectTrace(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := streamDocument("session-check-1", "session-checks/checks-1.json", "{\"run\":1}\n", 1)
+	output := streamDocument("session-check-1-output", "session-checks/checks-1-output.txt", "CHECKS\n", 1)
+	if err := r.RecordDocuments(ctx, []Document{run, output}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), "session-checks", "checks-1.json"))
+	if err != nil || string(data) != "{\"run\":1}\n" {
+		t.Fatalf("session-checks/checks-1.json on disk: %q %v", data, err)
+	}
+	unlisted := streamDocument("session-check-other", "session-checks/other.json", "x\n", 1)
+	if err := r.RecordDocuments(ctx, []Document{unlisted}); err == nil {
+		t.Fatal("unlisted name under session-checks/ accepted")
+	}
+}
+
 // A shed record is a workstream document under shed/round-<n>/: a batch is one
 // commit through RecordDocuments, Append records one too, a project-scoped
 // shed path is refused, and the trace reopens with the files on disk.

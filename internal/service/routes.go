@@ -54,6 +54,11 @@ var Routes = []Route{
 	{Method: http.MethodGet, Path: Prefix + "/sessions/{workstream}", Summary: "Show one session", Response: SessionResponse{}},
 	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/message", Summary: "Send a message to a session's agent; refused as busy while a turn is running", Request: SessionMessageRequest{}, Response: ConversationEntry{}},
 	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/stop", Summary: "Stop a session's running turn, keeping its worktree changes", Response: SessionResponse{}},
+	{Method: http.MethodGet, Path: Prefix + "/sessions/{workstream}/changes", Summary: "Read a session's uncommitted worktree changes and its branch's commits since its base", Response: SessionChangesResponse{}},
+	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/commit", Summary: "Commit every current worktree change onto the session branch under the owner's message", Request: SessionCommitRequest{}, Response: SessionCommitResponse{}},
+	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/check", Summary: "Check the session head commit: smart under JEV, full otherwise; refused while a check is already running", Response: SessionCheckRun{}},
+	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/push", Summary: "Push the session branch to the project's remote; refused when the remote branch has commits not on it", Response: SessionPushResponse{}},
+	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/end", Summary: "End a session, releasing its worktree and stored model-session state", Response: SessionResponse{}},
 
 	{Method: http.MethodPost, Path: Prefix + "/handin", Summary: "Hand in a workstream", Request: HandInRequest{}, Response: HandInResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/status", Summary: "List workstreams with capacity, usage and diagnostics", Response: StatusResponse{}},

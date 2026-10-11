@@ -171,6 +171,13 @@ func (s *Service) effectiveProfiles(state runtime.State) map[string]EffectivePro
 	}
 	return profiles
 }
+
+// sessionCheckWriteMargin pads the write deadline a session check's HTTP
+// response gets beyond the project's own checks_timeout, the budget the
+// check itself is bounded by, so recording the result after the check
+// finishes is never cut off by the deadline that bounds the check.
+const sessionCheckWriteMargin = time.Minute
+
 func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if web.Serve(w, r) {
 		return
@@ -266,6 +273,16 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		if id, ok := strings.CutSuffix(r.URL.Path, "/changes"); ok {
+			if id, ok = strings.CutPrefix(id, Prefix+"/sessions/"); ok {
+				if out, api := s.sessionChanges(r.Context(), id); api != nil {
+					failWith(w, api)
+				} else {
+					respond(w, 200, out)
+				}
+				return
+			}
+		}
 		if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/sessions/"); ok {
 			if out, api := s.sessionRead(id); api != nil {
 				failWith(w, api)
@@ -305,6 +322,64 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if id, ok := strings.CutSuffix(r.URL.Path, "/stop"); ok && r.Method == http.MethodPost {
 		if id, ok = strings.CutPrefix(id, Prefix+"/sessions/"); ok {
 			if out, api := s.sessionStop(r.Context(), id); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, SessionResponse{Session: out})
+			}
+			return
+		}
+	}
+	if id, ok := strings.CutSuffix(r.URL.Path, "/commit"); ok && r.Method == http.MethodPost {
+		if id, ok = strings.CutPrefix(id, Prefix+"/sessions/"); ok {
+			var v SessionCommitRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			if out, api := s.sessionCommit(r.Context(), id, v); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+	}
+	if id, ok := strings.CutSuffix(r.URL.Path, "/check"); ok && r.Method == http.MethodPost {
+		if id, ok = strings.CutPrefix(id, Prefix+"/sessions/"); ok {
+			// A session check runs the project's own check command inline
+			// (session_controls.go, sessionCheck), which routinely outlives
+			// the server's default WriteTimeout; extend the write deadline
+			// to the project's own checks_timeout, the same budget the
+			// check itself is bounded by, plus a margin for recording the
+			// result, the same way the project-add route extends it to
+			// addProjectTimeout.
+			if _, _, repository, api := s.sessionTrace(id); api != nil {
+				failWith(w, api)
+				return
+			} else if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(s.about(repository).Project.CheckTimeout() + sessionCheckWriteMargin)); err != nil {
+				fail(w, Internal)
+				return
+			}
+			if out, api := s.sessionCheck(r.Context(), id); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+	}
+	if id, ok := strings.CutSuffix(r.URL.Path, "/push"); ok && r.Method == http.MethodPost {
+		if id, ok = strings.CutPrefix(id, Prefix+"/sessions/"); ok {
+			if out, api := s.sessionPush(r.Context(), id); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+	}
+	if id, ok := strings.CutSuffix(r.URL.Path, "/end"); ok && r.Method == http.MethodPost {
+		if id, ok = strings.CutPrefix(id, Prefix+"/sessions/"); ok {
+			if out, api := s.sessionEnd(r.Context(), id); api != nil {
 				failWith(w, api)
 			} else {
 				respond(w, 200, SessionResponse{Session: out})

@@ -5,8 +5,10 @@ import (
 	"fmt"
 
 	"github.com/kpenfound/osmia/internal/checkselect"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/systemone"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // The reasons a selection runs every check without a Jev decision. A Jev
@@ -61,7 +63,19 @@ func fullSelection(reason, detail string) CheckSelection {
 // Every outcome but an accepted judgment runs every check. Listing waits for
 // the project's modules to load, so it is skipped while the boost is off.
 func (c *checkers) selectChecks(ctx context.Context, in checkInput, dir, diff string, checks ReviewChecks) CheckSelection {
-	if c.s.jev.Status().Mode == jev.ModeDisabled {
+	return selectChecksFor(ctx, c.s.jev, c.repository, c.scope(in), checkRequestID(in.Unit, in.Run),
+		[]jev.Source{{Kind: "unit-report", ID: reportDocument(in.Unit), Revision: in.Report}}, dir, diff, checks)
+}
+
+// selectChecksFor is the service's smart-check selection: it asks Jev which
+// of the listed checks a change, described by diff from a disposable export
+// at dir, can affect, scoped to scope and keyed by cause for reuse across a
+// retry. Every outcome but an accepted judgment runs every check. Listing
+// waits for the project's modules to load, so it is skipped while the boost
+// is off. The unit check run and the session check control both ask through
+// this one function, so either reuses exactly the same selection.
+func selectChecksFor(ctx context.Context, j *jev.Judge, repository *trace.Repository, scope coreadapter.Scope, cause string, sources []jev.Source, dir, diff string, checks ReviewChecks) CheckSelection {
+	if j.Status().Mode == jev.ModeDisabled {
 		return fullSelection(string(jev.ReasonDisabled), "")
 	}
 	links, err := checks.List(ctx, dir)
@@ -79,13 +93,13 @@ func (c *checkers) selectChecks(ctx context.Context, in checkInput, dir, diff st
 	if !ok {
 		return fullSelection(selectionTooLarge, "the changed files do not fit a judgment")
 	}
-	decision := c.s.jev.Evaluate(ctx, c.repository, jev.Judgment{
-		Scope:   c.scope(in),
-		Cause:   checkRequestID(in.Unit, in.Run),
+	decision := j.Evaluate(ctx, repository, jev.Judgment{
+		Scope:   scope,
+		Cause:   cause,
 		Depth:   1,
 		Task:    checkselect.Task,
 		Version: checkselect.Version,
-		Sources: []jev.Source{{Kind: "unit-report", ID: reportDocument(in.Unit), Revision: in.Report}},
+		Sources: sources,
 		Request: checkselect.Request(state, candidates),
 		Accept: func(r systemone.Response) string {
 			if len(checkselect.Selected(r, candidates, checkselect.Threshold)) == 0 {

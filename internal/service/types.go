@@ -657,6 +657,68 @@ type SessionMessageRequest struct {
 	Text string `json:"text"`
 }
 
+// SessionCommitSummary is one commit on a session branch: its hash and
+// message.
+type SessionCommitSummary struct {
+	Commit  string `json:"commit"`
+	Message string `json:"message"`
+}
+
+// SessionChangesResponse reads a session's changes: the worktree's
+// uncommitted changes relative to its head, as a unified diff, and the
+// commits on its branch relative to its base commit, oldest first. Changes
+// is empty once the session has ended and its worktree is released; Commits
+// stays readable from the branch's own history.
+type SessionChangesResponse struct {
+	Head    string                 `json:"head"`
+	Changes string                 `json:"changes"`
+	Commits []SessionCommitSummary `json:"commits"`
+}
+
+// SessionCommitRequest commits every current worktree change onto the
+// session branch under the owner's message. RequestKey identifies the
+// request, so a retry with the same key, including across a restart,
+// produces exactly one commit instead of a second one.
+type SessionCommitRequest struct {
+	Message    string `json:"message"`
+	RequestKey string `json:"request_key"`
+}
+
+// SessionCommitResponse is the result of a session commit: the commit the
+// session branch now points at.
+type SessionCommitResponse struct {
+	Commit string `json:"commit"`
+}
+
+// SessionCheckRun is one check run of a session: the commit it checked,
+// whether it was a smart or a full run and, for a smart run, the checks it
+// selected, its status, exit code and output.
+type SessionCheckRun struct {
+	Run            int             `json:"run"`
+	Commit         string          `json:"commit"`
+	Kind           string          `json:"kind"`
+	Checks         []string        `json:"checks,omitempty"`
+	Selection      *CheckSelection `json:"selection,omitempty"`
+	Command        []string        `json:"command,omitempty"`
+	Status         string          `json:"status"`
+	ExitCode       int             `json:"exit_code"`
+	Output         string          `json:"output,omitempty"`
+	OutputRevision int             `json:"output_revision,omitempty"`
+	OutputPath     string          `json:"output_path,omitempty"`
+	Truncated      bool            `json:"truncated,omitempty"`
+	Failed         []string        `json:"failed,omitempty"`
+	Error          string          `json:"error,omitempty"`
+	StartedAt      time.Time       `json:"started_at"`
+	FinishedAt     time.Time       `json:"finished_at"`
+}
+
+// SessionPushResponse is the result of pushing a session branch.
+type SessionPushResponse struct {
+	Remote string `json:"remote"`
+	Branch string `json:"branch"`
+	Commit string `json:"commit"`
+}
+
 // AgentStatus is one claimed or parked turn from the durable thread snapshot.
 type AgentStatus struct {
 	Role       string    `json:"role"`
