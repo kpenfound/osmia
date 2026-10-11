@@ -573,6 +573,141 @@ func TestSessionFallsBackToHistoryWhenModelSessionCannotBeResumed(t *testing.T) 
 	}
 }
 
+// TestSessionRelayRecordsContextRebuiltEntryBeforeTheIdleTransition drives
+// sessionRelay directly, with no sleep and no concurrency, and reads the
+// trace repository's own commit order: the context-rebuilt entry is
+// recorded in a commit that precedes the commit that moves the session to
+// idle, so a reader that waits for idle can never find the session idle
+// without the entry already present. It also shows that retrying the relay
+// for the same turn records no second entry and no second idle transition.
+func TestSessionRelayRecordsContextRebuiltEntryBeforeTheIdleTransition(t *testing.T) {
+	t.Parallel()
+	s, c, project, _ := newSessionFixture(t)
+	resp, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: project, Profile: "default"})
+	must(t, err)
+	stream := resp.Session.Workstream
+
+	// Sessions take no reconciliation pass, but the project's controller
+	// still runs its own passes on other subjects in the background; halt
+	// it so nothing else commits to the shared project trace while this
+	// test counts sessionRelay's own commits.
+	must(t, s.halt(s.sole()))
+
+	repo := s.sole().repository
+	traceDir, err := s.cfg.Root.ProjectTrace(project)
+	must(t, err)
+	home := t.TempDir()
+	ctx := context.Background()
+
+	// A turn is in progress, so the relay's transition to idle is a real
+	// effect rather than a no-op.
+	must(t, setSessionState(ctx, repo, project, stream, time.Now(), "test-working", "test-setup", trace.SessionWorking))
+
+	turn := trace.QueuedTurn{
+		Request:  trace.TurnRequest{Header: trace.Header{Workstream: stream}, TurnID: "turn-1"},
+		Attempts: []trace.TurnAttempt{{Path: "replay", SourceSession: coreadapter.BackendSession{ID: "model-session-x", Backend: "claude"}}},
+	}
+
+	before := strings.TrimSpace(demoGit(t, home, "-C", traceDir, "rev-parse", "HEAD"))
+	must(t, sessionRelay(ctx, repo, time.Now, trace.Thread{}, turn))
+	after := strings.TrimSpace(demoGit(t, home, "-C", traceDir, "rev-parse", "HEAD"))
+
+	commits := strings.Fields(demoGit(t, home, "-C", traceDir, "log", "--format=%H", "--reverse", before+".."+after))
+	if len(commits) != 2 {
+		t.Fatalf("sessionRelay recorded %d commits, want exactly 2 (the entry and the idle transition): %v", len(commits), commits)
+	}
+	changed := func(commit string) string {
+		return demoGit(t, home, "-C", traceDir, "diff-tree", "--no-commit-id", "--name-only", "-r", commit)
+	}
+	if !strings.Contains(changed(commits[0]), "session-entries/") {
+		t.Fatalf("the first commit sessionRelay made was not the context-rebuilt entry: %q", changed(commits[0]))
+	}
+	if !strings.Contains(changed(commits[1]), "workflow.json") {
+		t.Fatalf("the second commit sessionRelay made was not the idle transition: %q", changed(commits[1]))
+	}
+
+	entries, err := sessionEntriesSince(repo, stream, time.Time{})
+	must(t, err)
+	if len(entries) != 1 || !strings.Contains(entries[0].Text, "rebuilt") {
+		t.Fatalf("the context-rebuilt entry was not recorded: %+v", entries)
+	}
+	state, err := repo.Workflow(stream, trace.SessionSubject)
+	must(t, err)
+	if state.Value != trace.SessionIdle {
+		t.Fatalf("the session did not read idle after the relay: %+v", state)
+	}
+
+	// Retrying the relay for the same turn records nothing more.
+	must(t, sessionRelay(ctx, repo, time.Now, trace.Thread{}, turn))
+	retried := strings.TrimSpace(demoGit(t, home, "-C", traceDir, "rev-parse", "HEAD"))
+	if retried != after {
+		t.Fatalf("retrying the relay recorded more trace commits: %s -> %s", after, retried)
+	}
+	entries, err = sessionEntriesSince(repo, stream, time.Time{})
+	must(t, err)
+	if len(entries) != 1 {
+		t.Fatalf("retrying the relay recorded a second context-rebuilt entry: %+v", entries)
+	}
+}
+
+// TestSessionMessageAfterFallbackReceivesTheContextRebuiltEntryOnce shows
+// that an owner message posted once the session has read idle following a
+// fallback turn receives the context-rebuilt entry in its turn input
+// exactly once, and that the turn after that does not receive it again.
+func TestSessionMessageAfterFallbackReceivesTheContextRebuiltEntryOnce(t *testing.T) {
+	t.Parallel()
+	_, c, _, stream, engine, _ := newSessionChatFixture(t)
+	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+		return &agent.Result{ClaudeID: "model-session-1", ResultText: "First reply"}, nil
+	}
+	_, err := c.SessionMessage(context.Background(), stream, "first")
+	must(t, err)
+	awaitSession(t, c, stream, func(v SessionView) bool { return v.State == trace.SessionIdle })
+
+	// The saved model session cannot be resumed, so this turn falls back
+	// and the relay records a context-rebuilt entry before returning to idle.
+	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+		return coreadapter.ErrResumeUnavailable
+	}
+	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+		return &agent.Result{ClaudeID: "model-session-2", ResultText: "Second reply"}, nil
+	}
+	_, err = c.SessionMessage(context.Background(), stream, "second")
+	must(t, err)
+	awaitSession(t, c, stream, func(v SessionView) bool { return v.State == trace.SessionIdle })
+
+	// The session can resume from here on, so no later turn falls back and
+	// records an entry of its own.
+	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+
+	var thirdPrompt string
+	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+		thirdPrompt = req.Prompt
+		return &agent.Result{ClaudeID: "model-session-2", ResultText: "Third reply"}, nil
+	}
+	_, err = c.SessionMessage(context.Background(), stream, "third")
+	must(t, err)
+	awaitSession(t, c, stream, func(v SessionView) bool { return v.State == trace.SessionIdle })
+	if n := strings.Count(thirdPrompt, "rebuilt"); n != 1 {
+		t.Fatalf("the context-rebuilt entry reached the next turn's input %d times, want exactly 1: %q", n, thirdPrompt)
+	}
+	if !strings.Contains(thirdPrompt, "third") {
+		t.Fatalf("the turn's own message was lost alongside the entry: %q", thirdPrompt)
+	}
+
+	var fourthPrompt string
+	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
+		fourthPrompt = req.Prompt
+		return &agent.Result{ClaudeID: "model-session-2", ResultText: "Fourth reply"}, nil
+	}
+	_, err = c.SessionMessage(context.Background(), stream, "fourth")
+	must(t, err)
+	awaitSession(t, c, stream, func(v SessionView) bool { return v.State == trace.SessionIdle })
+	if strings.Contains(fourthPrompt, "rebuilt") {
+		t.Fatalf("the turn after the one that received the context-rebuilt entry received it again: %q", fourthPrompt)
+	}
+}
+
 // TestSessionMessageRefusedWhenProfileNoLongerRunnable covers spec#26: when
 // the session's profile is no longer one the service can run, a message is
 // refused with an error naming the profile, nothing is recorded, and no

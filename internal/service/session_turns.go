@@ -126,25 +126,24 @@ func (w sessionWorkspaces) capture(ctx context.Context, scope coreadapter.Scope,
 }
 
 // sessionRelay runs the part of the thread dispatcher's Relay hook that
-// applies to a session's completed turn: it returns the session to idle and,
-// when the turn's last attempt replayed history because its model session
-// could not be resumed, records a service entry saying so, so the agent's
-// next turn and the owner's chat both see it. A retry of either effect
+// applies to a session's completed turn: when the turn's last attempt
+// replayed history because its model session could not be resumed, it
+// records a service entry saying so before returning the session to idle,
+// so the entry already exists by the time any reader sees the session go
+// idle, and reaches the next turn exactly once. A retry of either effect
 // records nothing more.
 func sessionRelay(ctx context.Context, repository *trace.Repository, now func() time.Time, th trace.Thread, q trace.QueuedTurn) error {
 	stream := config.WorkstreamID(q.Request.Workstream)
 	project := repository.Project()
 	at := now()
-	if err := setSessionState(ctx, repository, project, stream, at, "session-idle-"+q.Request.TurnID, "session-turn-completed", trace.SessionIdle); err != nil {
-		return err
+	if len(q.Attempts) > 0 {
+		last := q.Attempts[len(q.Attempts)-1]
+		if last.Path == "replay" && last.SourceSession.ID != "" {
+			if err := recordSessionEntry(ctx, repository, project, stream, "context-rebuilt-"+q.Request.TurnID, at,
+				"Your earlier model session could not be resumed, so this turn's context was rebuilt from the thread's history."); err != nil {
+				return err
+			}
+		}
 	}
-	if len(q.Attempts) == 0 {
-		return nil
-	}
-	last := q.Attempts[len(q.Attempts)-1]
-	if last.Path != "replay" || last.SourceSession.ID == "" {
-		return nil
-	}
-	return recordSessionEntry(ctx, repository, project, stream, "context-rebuilt-"+q.Request.TurnID, at,
-		"Your earlier model session could not be resumed, so this turn's context was rebuilt from the thread's history.")
+	return setSessionState(ctx, repository, project, stream, at, "session-idle-"+q.Request.TurnID, "session-turn-completed", trace.SessionIdle)
 }
