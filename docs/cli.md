@@ -39,6 +39,11 @@ osmia shed redraft w_0123456789abcdef0123456789abcdef "Split the resume unit in 
 osmia ratify w_0123456789abcdef0123456789abcdef
 osmia amendment w_0123456789abcdef0123456789abcdef 1
 osmia amendment w_0123456789abcdef0123456789abcdef 1 approve "Checkpoints are what we meant."
+osmia session open p_0123456789abcdef0123456789abcdef --profile default --title "Explore the upload API"
+osmia session commit w_0123456789abcdef0123456789abcdef "Try batching the retries."
+osmia session check w_0123456789abcdef0123456789abcdef
+osmia session push w_0123456789abcdef0123456789abcdef
+osmia session end w_0123456789abcdef0123456789abcdef
 osmia pause all --reason "Away for the weekend"
 osmia resume all
 osmia profiles
@@ -493,6 +498,49 @@ osmia status --json
   to apply: <settings>` when the files change settings that only a restart
   applies. A file that fails validation fails with `validation` (exit 4),
   naming the file and field; the loaded configuration stays in force.
+- `session open <project-id> --profile <name> [--title TEXT]` opens a
+  [session](design.md#68-sessions): a direct chat with one agent on its own
+  worktree, outside the rest of the factory. `--profile` is required and
+  must be one the service already runs mason turns on for the project; an
+  unknown profile fails with `validation` (exit 4), recording nothing, and
+  a project ID that is not a registered project fails with `not_found`
+  (exit 4). The output names the
+  session's workstream ID, its fixed profile, its branch and the base
+  commit its worktree starts from (the project's default branch head at
+  opening time). Sending the agent a message is not a command; it happens
+  through the web page or the API.
+- `session commit <session-id> <message>` commits every current change in
+  the session's worktree onto its branch under your message, which is one
+  argument; quote it. The output names the commit the branch now points at.
+  It is refused, recording nothing, while the agent is mid-turn or the
+  session has ended (`conflict`, exit 5), and on an empty message or a
+  worktree with nothing to commit (`validation`, exit 4). The client sends a
+  new request key with each command, so a request the API retries produces
+  one commit rather than a second one.
+- `session check <session-id>` checks the session's latest commit. With the
+  Jev boost on, it runs the same smart-check selection a unit's own check run
+  uses, scoped to what changed between the session's starting commit and its
+  head; with the boost off, it runs the full `dagger check` the service runs
+  before every review. The output names the run number, the checked commit,
+  whether the run was smart or full (with its selected checks when smart),
+  its status and exit code. Only one check per session runs at a time; a
+  second request while one is still running, or one sent after the session
+  has ended, fails with `conflict` (exit 5).
+- `session push <session-id>` pushes the session's branch to the project's
+  remote under its own branch name, using credentials the service holds. It
+  never pushes to the default branch, never forces and never opens a pull
+  request. It is refused, recording nothing, when the remote branch carries
+  commits the session branch does not reach, or once the session has ended:
+  both `conflict` (exit 5).
+- `session end <session-id>` ends a session. It is refused while the agent
+  is mid-turn (`conflict`, exit 5). Once ended, the worktree and the agent's
+  stored context are released and the output shows the session's state as
+  `ended`; its branch, commits, chat and trace stay readable, and every
+  later message, commit, check and push against it fails with `conflict`
+  (exit 5).
+- A session ID is the workstream ID `session open` returned; a session ID
+  not held by any registered project, or the workstream it names is not a
+  session, fails with `not_found` (exit 4).
 
 Every command accepts `--root PATH`, defaulting to `~/.local/share/osmia` with
 its top-level file at `~/.config/osmia/config.toml` (see

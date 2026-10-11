@@ -205,6 +205,65 @@ described above. `[beekeeper]` in the top-level configuration names its
 profile and sandbox; see the
 [configuration reference](configuration.md#top-level-configtoml).
 
+## Sessions
+
+A session is a lighter-weight workstream for exploratory work: a direct chat
+with one agent on its own copy of a registered project's code, without the
+rest of the factory around it. There is no shed, no spec, no plan, no units,
+no reviewer and no committee, and no chief of staff speaks for it; opening,
+listing and reading a session appear alongside your other workstreams, but a
+session is never scheduled for the shed, a mason, a reviewer, a check run
+before review, a dependency refresh or delivery.
+
+You open a session in a registered project with `osmia session open
+<project> --profile <name> [--title ...]` or the matching API call; see the
+[command line](cli.md) for the exact form. The profile is one the service
+already runs mason turns on for that project, and an unknown project or an
+unknown or missing profile is refused. The session starts a worktree of its
+own at the project's default branch head, on a branch and profile that stay
+fixed for its whole life: nothing changes a session's profile once it is
+open, and working on another one means opening another session.
+
+The agent's own chat happens only through the web page or the API, never the
+command line. Its context carries over between messages the way a direct
+Claude or Codex session's does: the first message starts the agent's own
+model session, and every later one resumes it rather than replaying
+everything said before, so the service only has to add what changed since
+the agent's last turn, such as a commit you made or a check you ran. If
+the runtime ever reports that model session unresumable, the next message
+starts a fresh one seeded with the conversation's recent history instead,
+and the chat says plainly that its context was rebuilt. Only one of the
+agent's turns runs at a time; a message sent while one is already running
+is refused as busy, and you can stop a running turn, which keeps whatever
+changes it already made and lets the next message pick up from there.
+
+Because the agent itself cannot touch version control or hold delivery
+credentials, review your session's work and move it along yourself:
+
+- **Changes** shows the worktree's uncommitted edits against the session's
+  head, and the commits already made against its starting commit.
+- **Commit** `osmia session commit <session> "message"` stages every
+  current change onto the session's branch under your message. It is
+  refused while the agent is mid-turn, on an empty message, when there is
+  nothing to commit, or once you have ended the session.
+- **Check** `osmia session check <session>` checks the session's latest
+  commit. With the Jev boost on, it runs the same smart selection of checks
+  a unit's own check run uses for the files that changed since the
+  session's starting commit; with it off, it runs the full `dagger check`
+  the service runs before every review. Either way it tells you whether the
+  run was smart or full, its status and exit code, and keeps its output.
+  Only one check runs at a time.
+- **Push** `osmia session push <session>` sends the session's branch to the
+  project's remote under its own branch name, never the default branch,
+  never forced and never opening a pull request on its own. A push is
+  refused if the remote branch has moved on somewhere the session's own
+  history does not reach.
+- **End** `osmia session end <session>` is refused while the agent is
+  mid-turn. Once ended, the session refuses further messages, commits,
+  checks and pushes; its worktree and the agent's stored context are
+  released, while its branch, its commits, its chat and its trace all stay
+  readable, and it is listed as ended.
+
 ## Reload
 
 `osmia reload` (or the page's reload control) reads the top-level
