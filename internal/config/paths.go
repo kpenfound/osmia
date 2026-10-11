@@ -224,3 +224,18 @@ func (r Root) WorkstreamTrace(project ProjectID, stream WorkstreamID) (string, e
 func (r Root) WorkstreamStaging() (string, error) {
 	return r.managed("workstreams-staging")
 }
+
+// WorkstreamDeleting is where a workstream's own dedicated trace repository
+// is moved, by one atomic rename out of WorkstreamTraces, before archive
+// cleanup removes it. Its presence there is the durable, restart-safe
+// record that deletion is under way: a directory listing of
+// WorkstreamTraces never again observes the workstream once the rename
+// lands, and anything still here after a crash is finished, not mistaken
+// for a live trace. It is a sibling of "workstreams" and
+// "workstreams-staging".
+func (r Root) WorkstreamDeleting(project ProjectID) (string, error) {
+	if err := CheckProjectIDs(project); err != nil {
+		return "", err
+	}
+	return r.managed("workstreams-deleting", string(project))
+}

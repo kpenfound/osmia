@@ -5081,6 +5081,9 @@
             "format": "date-time",
             "type": "string"
           },
+          "delivery_link": {
+            "type": "string"
+          },
           "project": {
             "type": "string"
           },
@@ -6473,6 +6476,9 @@
             "type": "boolean"
           },
           "context_mode": {
+            "type": "string"
+          },
+          "delivery_link": {
             "type": "string"
           },
           "drift": {

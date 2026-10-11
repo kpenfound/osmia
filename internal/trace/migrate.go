@@ -369,8 +369,7 @@ func verifyMigratedWorkstream(ctx context.Context, root config.Root, project con
 }
 
 // migrationReclaimFile journals the one-time history rewrite that drops the
-// shared layout's workstream paths from the project's own trace, the way
-// osmia-purge.json journals an archive purge.
+// shared layout's workstream paths from the project's own trace.
 const migrationReclaimFile = ".git/osmia-migration-reclaim.json"
 
 type migrationReclaimJournal struct {
@@ -508,7 +507,7 @@ func stripWorkstreamsTree(ctx context.Context, r *Repository, tree string, cache
 }
 
 // recoverMigrationReclaim resumes an interrupted reclamation before any
-// trace read or write, as recoverPurge does for an archive purge.
+// trace read or write.
 func recoverMigrationReclaim(ctx context.Context, r *Repository) error {
 	data, err := r.readFile(migrationReclaimFile)
 	if os.IsNotExist(err) {
