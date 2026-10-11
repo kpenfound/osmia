@@ -33,9 +33,26 @@ func (s *Service) inbox(ctx context.Context) (InboxResponse, *APIError) {
 		if !cfg.Active(active.id) {
 			continue
 		}
-		entries, api := s.projectInbox(ctx, active)
-		if api != nil {
-			return InboxResponse{}, api
+		// projectInbox makes many separate repository and runtime-store
+		// reads per workstream (statuses, escalations, operations, outbox,
+		// the loop guard's pause, ...). consistentRead retries the whole
+		// project's inbox from scratch when a commit or runtime mutation
+		// lands partway through, so the response never mixes entries read
+		// from one trace or runtime generation with entries read from
+		// another.
+		entries, err := consistentRead(func() ([]InboxEntry, error) {
+			es, api := s.projectInbox(ctx, active)
+			if api != nil {
+				return nil, apiErrAsError{api}
+			}
+			return es, nil
+		}, active.repository.Generation, s.storeGeneration)
+		if err != nil {
+			var wrapped apiErrAsError
+			if errors.As(err, &wrapped) {
+				return InboxResponse{}, wrapped.api
+			}
+			return InboxResponse{}, &APIError{Internal, err.Error()}
 		}
 		out.Entries = append(out.Entries, entries...)
 	}
@@ -70,6 +87,9 @@ func (s *Service) projectInbox(ctx context.Context, active *activeProject) ([]In
 			continue
 		}
 		entries, err := s.openDecisions(ctx, repository, w)
+		if err == nil {
+			err = s.step("inbox-decisions")
+		}
 		if err != nil {
 			return nil, failed
 		}

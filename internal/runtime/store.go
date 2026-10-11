@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -109,7 +110,22 @@ type Store struct {
 	ops   fileOps
 	// changed is called after a mutation changes the persisted state.
 	changed func()
+	// generation counts the mutations that have actually changed the
+	// persisted state, so a caller that reads the store more than once
+	// while assembling one response can tell whether a mutation landed
+	// between those reads.
+	generation atomic.Uint64
 }
+
+// Generation reports how many mutations have changed this store's persisted
+// state. It never decreases while the store is open, and it is unchanged
+// exactly when no mutation landed between two calls: a caller that combines
+// a runtime read with a trace read into one response can call it, alongside
+// the trace's own Generation, before and after assembling that response and
+// retry when either differs, so the response never mixes runtime state from
+// before a mutation with state from after it. It never blocks on mu, so it
+// is safe to call around a read held up by a long-running mutation.
+func (s *Store) Generation() uint64 { return s.generation.Load() }
 
 // Observe calls f after each mutation that changes the persisted state,
 // replacing any earlier observer. Set it before the store is shared. f runs
@@ -542,8 +558,11 @@ func (s *Store) mutate(f func(*State, Inputs) error) error {
 	unchanged := bytes.Equal(data, s.disk)
 	s.state = next
 	s.disk = data
-	if !unchanged && s.changed != nil {
-		s.changed()
+	if !unchanged {
+		s.generation.Add(1)
+		if s.changed != nil {
+			s.changed()
+		}
 	}
 	return nil
 }

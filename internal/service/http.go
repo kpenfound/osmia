@@ -58,6 +58,8 @@ func failWith(w http.ResponseWriter, api *APIError) {
 		status = 404
 	case Unsupported:
 		status = 501
+	case Unavailable:
+		status = 503
 	}
 	respond(w, status, ErrorResponse{*api})
 }
@@ -190,7 +192,10 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		switch r.URL.Path {
 		case Prefix + "/health":
-			respond(w, 200, HealthResponse{true, "osmia", 1, s.options.Build, s.tailnetStatus(r.Context())})
+			respond(w, 200, s.healthView(r.Context()))
+			return
+		case Prefix + "/activity":
+			respond(w, 200, s.activityView())
 			return
 		case Prefix + "/config":
 			out := s.configuration()
@@ -201,8 +206,15 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			respond(w, 200, s.runtimeView())
 			return
 		case Prefix + "/status":
-			out := s.statusList()
+			// statusList assembles the workstream list from the trace and
+			// the runtime store (status.go); a request whose view cannot
+			// refresh within coreReadBound answers with the last one
+			// instead of blocking past it (bounded_read.go, boundedView).
+			out, stale := boundedView(r.Context(), &s.statusViews, coreReadBound, s.statusList)
 			out.Tailnet = s.tailnetStatus(r.Context())
+			if stale {
+				w.Header().Set(StaleHeader, "true")
+			}
 			respond(w, 200, out)
 			return
 		case Prefix + "/events":

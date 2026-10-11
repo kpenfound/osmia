@@ -53,7 +53,18 @@ type archiveCleanup struct {
 	finish func(config.Root, config.ProjectID, config.WorkstreamID) error
 }
 
+// Pass reports its own progress through the service's activity record, so
+// its phases are visible through the API, the event stream and the web UI
+// while the trace work they drive is blocked.
 func (c *archiveCleanup) Pass(ctx context.Context) error {
+	project := c.workspaces.cfg.Project.ID
+	h := c.s.StartActivity("archive-cleanup:"+string(project), ActivityArchiveCleanup, project, "", "scanning archived workstreams")
+	err := c.pass(ctx, h)
+	h.Finish(err)
+	return err
+}
+
+func (c *archiveCleanup) pass(ctx context.Context, h *ActivityHandle) error {
 	project := c.workspaces.cfg.Project.ID
 	state, _ := c.s.store.Snapshot()
 	ready := map[config.WorkstreamID]bool{}
@@ -62,6 +73,7 @@ func (c *archiveCleanup) Pass(ctx context.Context) error {
 		if a.Project != project || !a.CleanedAt.IsZero() {
 			continue
 		}
+		h.Progress("preparing "+string(a.Workstream), nil)
 		if err := c.workspaces.attempt(ctx, "archive/"+string(a.Workstream), func() error {
 			eligible, reason, err := c.prepare(ctx, a)
 			if err != nil {
@@ -84,6 +96,9 @@ func (c *archiveCleanup) Pass(ctx context.Context) error {
 	}
 	for stream, reason := range reasons {
 		c.logDeferral(stream, reason)
+	}
+	if len(ready) != 0 {
+		h.Progress(fmt.Sprintf("deleting %d workstream traces", len(ready)), nil)
 	}
 	for stream := range ready {
 		c.logDeferral(stream, "")
@@ -231,7 +246,9 @@ func (c *archiveCleanup) beginDeletion(stream config.WorkstreamID) error {
 // startRemoval launches, at most once at a time per workstream, a
 // goroutine that finishes removing stream's moved-aside trace. It holds no
 // repository lock, so a large trace's removal never delays a read, a write
-// or reconciliation of any workstream.
+// or reconciliation of any workstream. The removal reports itself in the
+// activity record for as long as it runs, and keeps a failure there until
+// a later pass retries it.
 func (c *archiveCleanup) startRemoval(stream config.WorkstreamID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -247,8 +264,10 @@ func (c *archiveCleanup) startRemoval(stream config.WorkstreamID) {
 		finish = trace.FinishWorkstreamTraceDeletion
 	}
 	root, project := c.workspaces.cfg.Root, c.workspaces.cfg.Project.ID
+	h := c.s.StartActivity("archive-cleanup:"+string(project)+"/"+string(stream), ActivityArchiveCleanup, project, stream, "removing the workstream's trace")
 	go func() {
 		err := finish(root, project, stream)
+		h.Finish(err)
 		c.mu.Lock()
 		delete(c.removing, stream)
 		c.mu.Unlock()

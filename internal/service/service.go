@@ -199,11 +199,20 @@ type Service struct {
 	boundary    func(string) error
 	// hub carries change notifications to the client event stream.
 	hub *hub
+	// activity is the in-process record of long-running backend operations,
+	// separate from the trace and the runtime store: reporting and reading
+	// it never wait on the trace mutex or on operationMu.
+	activity *activityRegistry
 	// notifier posts new inbox entries to notify.webhook.
 	notifier *notifier
 	// driftAsked is set once an owner's drift rebase request is recorded,
 	// so the next pass reads the drift schedule.
 	driftAsked atomic.Bool
+	// statusViews holds the last workstream list statusList produced, so a
+	// request that cannot refresh it within coreReadBound still answers
+	// with that snapshot, marked stale, instead of blocking past the
+	// bound (bounded_read.go, boundedView).
+	statusViews viewCache[StatusResponse]
 	// shadow is the Beekeeper's shadow project: created or reopened at
 	// startup, outside cfg.Projects and this service's own reconciliation
 	// loop. beekeeper.Post and beekeeper.Continue run their own scheduler and
@@ -251,12 +260,22 @@ func (s *Service) beekeeperPrepare(cfg *config.Config) beekeeper.Prepare {
 	}
 }
 
+// beekeeperActivityKey names the Beekeeper's own turn in the activity
+// record. The Beekeeper runs at most one turn at a time (postLock in
+// beekeeper.Post), so one fixed key names it for the whole service's
+// lifetime: a fresh start under it supersedes whatever an earlier turn
+// reported, exactly as a reconciled operation's own stable ID would.
+const beekeeperActivityKey = "beekeeper-turn"
+
 // PostBeekeeper records text as the Beekeeper thread's next owner request
 // and runs the Beekeeper turn through beekeeper.Post, on
 // Options.BeekeeperTurns, with the profile and sandbox settings the
 // Beekeeper section of the loaded configuration names alone: no registered
 // project's configuration, charter or capacity bounds it. A busy Beekeeper
-// returns beekeeper.ErrBusy and records nothing.
+// returns beekeeper.ErrBusy and records nothing. The turn that actually
+// runs, never a call beekeeper.Post refuses as busy, is reported in the
+// activity record under beekeeperActivityKey for its whole run, so a
+// concurrent busy refusal can name it.
 func (s *Service) PostBeekeeper(ctx context.Context, text string) (trace.QueuedTurn, error) {
 	cfg := s.current()
 	profile, err := cfg.NamedProfile(cfg.Beekeeper.Profile)
@@ -266,7 +285,13 @@ func (s *Service) PostBeekeeper(ctx context.Context, text string) (trace.QueuedT
 	if s.options.BeekeeperTurns == nil {
 		return trace.QueuedTurn{}, fmt.Errorf("the beekeeper has no turn runner configured")
 	}
-	return beekeeper.Post(ctx, s.shadow, profile, s.options.BeekeeperTurns, s.beekeeperPrepare(cfg), s.now, text)
+	var h *ActivityHandle
+	started := func() {
+		h = s.StartActivity(beekeeperActivityKey, ActivityAgentTurn, config.ShadowProjectID, "", "running the owner's message")
+	}
+	q, err := beekeeper.Post(ctx, s.shadow, profile, s.options.BeekeeperTurns, s.beekeeperPrepare(cfg), s.now, text, started)
+	h.Finish(err)
+	return q, err
 }
 
 // Start loads state and binds before returning. Wait joins shutdown and cleanup.
@@ -333,6 +358,8 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	err = nil
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), shadow: shadow, logger: logger}
+	s.activity = newActivityRegistry(s.now)
+	s.activity.notify = func() { s.hub.publish(Event{Kind: EventActivity}) }
 	s.pool = &scheduler.Shared{Traces: s.traces}
 	// Getenv reads the Jev boost's API key the same way the default would,
 	// and registers whatever value it reads for redaction: the owner may
@@ -350,7 +377,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if opts.controls != nil {
 		opts.controls.service.Store(s)
 	}
+	pendingRecovery := s.StartActivity("recovery-pending", ActivityRecovery, "", "", "recovering an interrupted project registration")
 	cfg, s.pending = s.recoverPending(ctx, cfg)
+	pendingRecovery.Finish(s.pending)
 	projects, err := s.openAll(cfg)
 	if err != nil {
 		return nil, err
@@ -439,12 +468,18 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	for _, p := range projects {
 		view := cfg.For(p.id)
-		if err = s.recoverWorkspaces(ctx, view); err != nil {
+		workspaces := s.StartActivity("recovery-workspaces-"+string(p.id), ActivityRecovery, p.id, "", "recovering interrupted workspace operations")
+		err = s.recoverWorkspaces(ctx, view)
+		workspaces.Finish(err)
+		if err != nil {
 			s.cleanupSocket()
 			st.Close()
 			return nil, fmt.Errorf("recover interrupted workspace operations: %w", err)
 		}
-		if err = s.recoverSessions(ctx, view, p.repository); err != nil {
+		sessions := s.StartActivity("recovery-sessions-"+string(p.id), ActivityRecovery, p.id, "", "recovering thread sessions")
+		err = s.recoverSessions(ctx, view, p.repository)
+		sessions.Finish(err)
+		if err != nil {
 			s.cleanupSocket()
 			st.Close()
 			return nil, fmt.Errorf("recover thread sessions: %w", err)
@@ -457,7 +492,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	// interrupted chief-of-staff turn does, and gets the same kind of
 	// continuation turn, run at once since the shadow project has no
 	// background reconciliation loop to pick it up later.
-	if err = s.recoverSessions(ctx, cfg, shadow); err != nil {
+	beekeeperRecovery := s.StartActivity("recovery-beekeeper", ActivityRecovery, config.ShadowProjectID, "", "recovering the beekeeper's interrupted turns")
+	err = s.recoverSessions(ctx, cfg, shadow)
+	beekeeperRecovery.Finish(err)
+	if err != nil {
 		s.cleanupSocket()
 		st.Close()
 		return nil, fmt.Errorf("recover the beekeeper's interrupted turns: %w", err)
@@ -1101,8 +1139,8 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if adapters == nil {
 		adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{}
 	}
-	adapters[coreadapter.RunnerBoundary] = stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.runner }}
-	adapters[coreadapter.RepositoryBoundary] = stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.repository }}
+	adapters[coreadapter.RunnerBoundary] = activityReconciler{stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.runner }}, s.activity, cfg.Project.ID}
+	adapters[coreadapter.RepositoryBoundary] = activityReconciler{stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.repository }}, s.activity, cfg.Project.ID}
 	options.Adapters = adapters
 	if options.Priority == nil {
 		options.Priority = stagePriority

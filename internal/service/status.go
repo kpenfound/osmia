@@ -28,20 +28,57 @@ import (
 // in unreadable, by workstream.
 func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagnostic, *APIError) {
 	cfg, projects := s.runtimes()
-	state, _ := s.effective()
 	var out []workstreamActivity
 	unreadable := map[config.WorkstreamID]Diagnostic{}
 	for _, active := range projects {
 		if !cfg.Active(active.id) {
 			continue
 		}
-		found, err := consistentRead(active.repository, func() (projectStatusResult, error) {
+		// state is read inside the retried attempt, alongside the trace, so
+		// a workstream's archived flag and the runtime-derived rows below
+		// never come from a different runtime generation than the rest of
+		// this project's trace-read rows: a racing archive, or any other
+		// runtime mutation, forces the whole attempt to retry rather than
+		// land in a response assembled from two different moments.
+		found, err := consistentRead(func() (projectStatusResult, error) {
+			state, _ := s.effective()
 			list, projectUnreadable, api := s.projectStatuses(active)
 			if api != nil {
 				return projectStatusResult{}, apiErrAsError{api}
 			}
-			return projectStatusResult{list, projectUnreadable}, nil
-		})
+			var rows []workstreamActivity
+			for i := range list {
+				list[i].status.Archived = archivedIn(state, list[i].status.Workstream)
+			}
+			for _, w := range list {
+				if !w.status.Archived {
+					rows = append(rows, w)
+				}
+			}
+			for _, a := range state.Archived {
+				if a.Project != active.id {
+					continue
+				}
+				title, terminal := a.Title, a.State
+				if title == "" {
+					for _, w := range list {
+						if w.status.Workstream == a.Workstream {
+							if w.status.Status != nil {
+								title = w.status.Status.Goal
+							}
+							if w.status.State != nil {
+								terminal = *w.status.State
+							}
+						}
+					}
+				}
+				if title == "" {
+					title = string(a.Workstream)
+				}
+				rows = append(rows, workstreamActivity{status: WorkstreamStatus{Project: a.Project, Workstream: a.Workstream, Archived: true, TraceDeleted: !a.CleanedAt.IsZero(), DeliveryLink: a.DeliveryLink, State: &terminal, Status: &StatusView{Goal: title}, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}}, lastActivity: a.ArchivedAt, createdAt: a.ArchivedAt})
+			}
+			return projectStatusResult{rows, projectUnreadable}, nil
+		}, active.repository.Generation, s.storeGeneration)
 		if err != nil {
 			var wrapped apiErrAsError
 			if errors.As(err, &wrapped) {
@@ -49,36 +86,7 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 			}
 			return nil, nil, &APIError{Internal, err.Error()}
 		}
-		for i := range found.list {
-			found.list[i].status.Archived = archivedIn(state, found.list[i].status.Workstream)
-		}
-		for _, w := range found.list {
-			if !w.status.Archived {
-				out = append(out, w)
-			}
-		}
-		for _, a := range state.Archived {
-			if a.Project != active.id {
-				continue
-			}
-			title, terminal := a.Title, a.State
-			if title == "" {
-				for _, w := range found.list {
-					if w.status.Workstream == a.Workstream {
-						if w.status.Status != nil {
-							title = w.status.Status.Goal
-						}
-						if w.status.State != nil {
-							terminal = *w.status.State
-						}
-					}
-				}
-			}
-			if title == "" {
-				title = string(a.Workstream)
-			}
-			out = append(out, workstreamActivity{status: WorkstreamStatus{Project: a.Project, Workstream: a.Workstream, Archived: true, TraceDeleted: !a.CleanedAt.IsZero(), DeliveryLink: a.DeliveryLink, State: &terminal, Status: &StatusView{Goal: title}, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}}, lastActivity: a.ArchivedAt, createdAt: a.ArchivedAt})
-		}
+		out = append(out, found.list...)
 		for id, d := range found.unreadable {
 			unreadable[id] = d
 		}

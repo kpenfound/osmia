@@ -70,6 +70,30 @@ response. Landing checks the reviewed candidate, base and governing document
 revisions before merging it. A changed candidate returns to review. Delivery
 requires the owner's approval of the final report and description.
 
+## Staying responsive under backend work
+
+Core reads bound their wait on the trace or runtime lock to short,
+validation-sized critical sections so they answer promptly whatever else is
+blocked; `/status` alone keeps a cached fallback (`coreReadBound`,
+[bounded_read.go](../internal/service/bounded_read.go)), answering with its
+last snapshot, marked with the `X-Osmia-Stale: true` header, when a refresh
+cannot finish in time. `consistentRead`
+([consistent_read.go](../internal/service/consistent_read.go)) retries a
+multi-read response from scratch rather than let it span two generations of
+the trace or the runtime store. The in-process activity record
+([activity.go](../internal/service/activity.go)) is a separately locked
+structure that every long-running operation reports to and that `GET
+/health` and `GET /activity` read without touching the trace mutex or the
+operation lock a factory effect holds, so both stay prompt while the effect
+they describe is blocked. Every owner-action write admits a command as
+accepted, rejected or temporarily unavailable, checks it against the
+revision its client saw, and gives it a stable identity so a resubmission,
+including one recovered after a restart, is never applied twice. Archive
+cleanup reports each pass and each background trace removal to the same
+record ([archive_cleanup.go](../internal/service/archive_cleanup.go)). The
+[design](design.md#101-one-process) document defines the exact guarantees;
+this page only locates the code.
+
 ## Agent boundary
 
 The service selects a workspace and copies only approved files into a private

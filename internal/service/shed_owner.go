@@ -82,6 +82,7 @@ func ownerHeader(id string, project config.ProjectID, stream config.WorkstreamID
 // shedOwner is one owner action on one workstream's shed: the workstream, its
 // trace, the state the action found and the revision it is recorded against.
 type shedOwner struct {
+	s          *Service
 	project    config.ProjectID
 	stream     config.WorkstreamID
 	repository *trace.Repository
@@ -131,7 +132,7 @@ func (s *Service) shedAction(raw string, states ...string) (*shedOwner, *APIErro
 	if err != nil {
 		return nil, &APIError{Conflict, fmt.Sprintf("workstream %s has no recorded spec and plan yet", stream)}
 	}
-	return &shedOwner{project: project, stream: stream, repository: repository, feature: feature.Value, shed: state, owner: owner, skipped: skipped, round: round, pin: pin, now: s.now}, nil
+	return &shedOwner{s: s, project: project, stream: stream, repository: repository, feature: feature.Value, shed: state, owner: owner, skipped: skipped, round: round, pin: pin, now: s.now}, nil
 }
 
 // skippedDebate reports whether the owner has skipped debate on the

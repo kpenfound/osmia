@@ -66,6 +66,34 @@
         }
       }
     },
+    "/v1/activity": {
+      "get": {
+        "summary": "List the backend operations the activity record holds",
+        "operationId": "getActivity",
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/amendment/{workstream}/{amendment}": {
       "get": {
         "summary": "Show an amendment",
@@ -1123,7 +1151,7 @@
     },
     "/v1/health": {
       "get": {
-        "summary": "Report readiness, API version and build identity",
+        "summary": "Report API availability, backend readiness, API version and build identity",
         "operationId": "getHealth",
         "responses": {
           "default": {
@@ -2602,6 +2630,57 @@
           },
           "workstream": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ActivityEntry": {
+        "properties": {
+          "failure": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "last_progress": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "progress": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "project": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ActivityResponse": {
+        "properties": {
+          "activity": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -4419,11 +4498,20 @@
       },
       "HealthResponse": {
         "properties": {
+          "api": {
+            "type": "boolean"
+          },
           "api_version": {
             "type": "integer"
           },
+          "backend": {
+            "type": "string"
+          },
           "build": {
             "$ref": "#/components/schemas/Identity"
+          },
+          "cause": {
+            "type": "string"
           },
           "ready": {
             "type": "boolean"
