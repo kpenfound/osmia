@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -292,6 +293,7 @@ func validHandedName(name string) bool {
 // readHanded reads the request's input: the file, the fetched issue or the
 // stdin text.
 func (s *Service) readHanded(ctx context.Context, req HandInRequest) (string, *APIError) {
+	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(req.Project)})
 	var content string
 	switch {
 	case req.Path != "":

@@ -21,6 +21,7 @@ import (
 
 	"github.com/kpenfound/busybees/core/vcs"
 	gitvcs "github.com/kpenfound/busybees/core/vcs/git"
+	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
 // Git is the worktree provider of one clone. Every workspace is a worktree of
@@ -47,6 +48,13 @@ func (w Worktree) VCS() *vcs.Access  { return &vcs.Access{Mounts: w.mounts} }
 // owner/repository, however the URL spells it: HTTPS, SSH, with or without a
 // .git suffix, or a local path. The first configured one wins.
 func (g *Git) Remote(ctx context.Context, repository string) (string, error) {
+	start := time.Now()
+	remote, err := g.remote(ctx, repository)
+	ghlog.Log(ctx, start, ghlog.Entry{Action: "workspace.remote", Access: ghlog.Read, Repository: repository, Remote: remote, Err: err})
+	return remote, err
+}
+
+func (g *Git) remote(ctx context.Context, repository string) (string, error) {
 	out, err := g.run(ctx, "config", "--get-regexp", `^remote\..*\.url$`)
 	if err != nil && !exitCode(err, 1) {
 		return "", err
@@ -72,6 +80,13 @@ func names(url, repository string) bool {
 // owner configured an SSH command of their own, so a passphrase or an unknown
 // host key fails the fetch instead of waiting for a terminal.
 func (g *Git) Fetch(ctx context.Context, remote, branch string) (string, error) {
+	start := time.Now()
+	commit, err := g.fetch(ctx, remote, branch)
+	ghlog.Log(ctx, start, ghlog.Entry{Action: "workspace.fetch", Access: ghlog.Read, Remote: remote, Branch: branch, Commits: nonEmpty(commit), Err: err})
+	return commit, err
+}
+
+func (g *Git) fetch(ctx context.Context, remote, branch string) (string, error) {
 	env, err := g.sshEnvironment(ctx)
 	if err != nil {
 		return "", err
@@ -90,6 +105,17 @@ func (g *Git) Fetch(ctx context.Context, remote, branch string) (string, error) 
 // RemoteBranch asks a remote which commit one of its branches points at, and
 // whether the branch exists. Nothing is fetched and no ref of the clone moves.
 func (g *Git) RemoteBranch(ctx context.Context, remote, branch string) (string, bool, error) {
+	start := time.Now()
+	commit, exists, err := g.remoteBranch(ctx, remote, branch)
+	outcome := ""
+	if err == nil && !exists {
+		outcome = "absent"
+	}
+	ghlog.Log(ctx, start, ghlog.Entry{Action: "workspace.remote_branch", Access: ghlog.Read, Remote: remote, Branch: branch, Commits: nonEmpty(commit), Outcome: outcome, Err: err})
+	return commit, exists, err
+}
+
+func (g *Git) remoteBranch(ctx context.Context, remote, branch string) (string, bool, error) {
 	env, err := g.sshEnvironment(ctx)
 	if err != nil {
 		return "", false, err
@@ -111,6 +137,17 @@ func (g *Git) RemoteBranch(ctx context.Context, remote, branch string) (string, 
 // expected, or absent when expected is empty; otherwise the remote refuses
 // and nothing moves. SSH runs in batch mode as it does for Fetch.
 func (g *Git) Push(ctx context.Context, remote, commit, branch, expected string) error {
+	start := time.Now()
+	err := g.push(ctx, remote, commit, branch, expected)
+	commits := nonEmpty(commit)
+	if expected != "" {
+		commits = append(commits, expected)
+	}
+	ghlog.Log(ctx, start, ghlog.Entry{Action: "workspace.push", Access: ghlog.Write, Remote: remote, Branch: branch, Commits: commits, Err: err})
+	return err
+}
+
+func (g *Git) push(ctx context.Context, remote, commit, branch, expected string) error {
 	env, err := g.sshEnvironment(ctx)
 	if err != nil {
 		return err
@@ -118,6 +155,14 @@ func (g *Git) Push(ctx context.Context, remote, commit, branch, expected string)
 	ref := "refs/heads/" + branch
 	_, err = g.runEnv(ctx, env, "push", "--quiet", "--no-verify", "--force-with-lease="+ref+":"+expected, remote, commit+":"+ref)
 	return err
+}
+
+// nonEmpty returns a one-element slice holding s, or nil for an empty s.
+func nonEmpty(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return []string{s}
 }
 
 // Branch returns the commit a local branch of the clone points at, and whether

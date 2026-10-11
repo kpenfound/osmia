@@ -201,7 +201,8 @@ starts nor ends with a hyphen, such as `osmia`; anything else is an error that
 names `listen.tailnet`. With it set, the service joins your tailnet through
 embedded Tailscale, keeps the node's state in `<root>/tailnet`, and logs in
 with the auth key in the `TS_AUTHKEY` environment variable or, without one,
-prints a login URL on first run. The auth key never belongs in these files.
+logs a login URL on first run, in its [structured log](running.md#service-log).
+The auth key never belongs in these files.
 Tailnet membership is the boundary: there is no in-app authentication
 ([tailnet listener](running.md#tailnet-listener)). All capacity and shed values
 must be positive integers. `events.window` is a positive Go duration: how long

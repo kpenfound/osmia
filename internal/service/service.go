@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"maps"
 	"net"
 	"net/http"
@@ -21,11 +21,13 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/events"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/reconcile"
+	"github.com/kpenfound/osmia/internal/redact"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/service/beekeeper"
@@ -120,6 +122,11 @@ type Options struct {
 	// Location is the service host's time zone, whose calendar days the daily
 	// budget counts. It defaults to the host's local time zone.
 	Location *time.Location
+	// Logger is the structured logger every line the service writes to its
+	// standard output and standard error goes through: the service's own
+	// records, embedded Tailscale's and the GitHub activity log. It defaults
+	// to a JSON handler on os.Stderr.
+	Logger *slog.Logger
 	// controls is set by Enforce so the chief-of-staff tools it binds reach
 	// the runtime state of the service started with these options.
 	controls *runtimeControls
@@ -173,6 +180,7 @@ type Service struct {
 	turns     runningTurns
 	options   Options
 	store     *runtime.Store
+	logger    *slog.Logger
 	lock      *os.File
 	listener  *net.UnixListener
 	web       net.Listener // nil unless listen.web is configured
@@ -257,6 +265,12 @@ func (s *Service) PostBeekeeper(ctx context.Context, text string) (trace.QueuedT
 // active project gets its own runtime: its trace, its reconciliation loop and
 // its restart recovery. Their schedulers share one pool of role capacity.
 func Start(ctx context.Context, opts Options) (_ *Service, err error) {
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	}
+	opts.Logger = logger
+	ctx = ghlog.WithLogger(ctx, logger)
 	root, err := opts.Config.Resolve()
 	if err != nil {
 		return nil, err
@@ -308,7 +322,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, fmt.Errorf("ensure the beekeeper's thread: %w", err)
 	}
 	err = nil
-	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), shadow: shadow}
+	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), shadow: shadow, logger: logger}
 	s.pool = &scheduler.Shared{Traces: s.traces}
 	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider}
 	if opts.skills != nil {
@@ -398,7 +412,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		// to retry; it never fails startup.
 		if node, err := s.joinTailnet(root, cfg.Listen.Tailnet); err != nil {
 			s.tailnet.set(nil, err.Error())
-			log.Printf("osmia tailnet: join %s: %v; the supervisor will retry", cfg.Listen.Tailnet, err)
+			logger.Warn("tailnet join failed; the supervisor will retry", "component", "tailnet", "hostname", cfg.Listen.Tailnet, "error", redact.Secrets(err.Error(), redact.KnownSecrets()...))
 		} else {
 			s.tailnet.set(node, "")
 		}
@@ -553,7 +567,7 @@ func (s *Service) joinTailnet(root config.Root, hostname string) (TailnetListene
 	}
 	join := s.options.JoinTailnet
 	if join == nil {
-		join = joinTailscale
+		join = joinTailscale(s.logger)
 	}
 	return join(hostname, dir)
 }

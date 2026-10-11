@@ -9,6 +9,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -188,6 +189,7 @@ func (b *baseRefresher) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(b.repository.Project()), Workstream: string(in.Workstream)})
 	if result, done, err := b.checkOwnPullRequest(ctx, in, op); err != nil {
 		return coreadapter.OperationResult{}, err
 	} else if done {

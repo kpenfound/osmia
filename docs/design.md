@@ -564,9 +564,13 @@ Submitting a feed action, such as a ruling on a contested unit or ratifying a pr
 
 The following is the full design; see the [command line](cli.md) for supported
 commands. The service runs in the foreground or with `serve --detach`, which
-returns after the service acknowledges readiness. Detached output is appended
-to the private `service.log` under the root. A failure that stops a running
-service is written to that output, naming the project whose work failed, with
+returns after the service acknowledges readiness; that launcher's own
+terminal output, the "ready" line and a readiness failure, stays
+human-readable text. The service process itself writes only structured,
+JSON-lines records to its own standard output and standard error, detached
+output appended to the private `service.log` under the root; see the
+[service log](running.md#service-log). A failure that stops a running
+service is one such record, naming the project whose work failed, with
 credentials redacted. `osmia stop` requests shutdown over
 the local Unix socket.
 
