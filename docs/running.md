@@ -105,7 +105,12 @@ The page is laid out like a chat client:
   menu. The slots open to each role's use and the work waiting for a slot and
   why. The pauses open to every pause with who set it (you, the daily budget
   or a provider usage limit), why and when, where you resume one or pause the
-  factory, a project or a workstream, softly or hard.
+  factory, a project or a workstream, softly or hard. A backend activity
+  button sits beside them, marked whenever an operation is in flight and
+  distinctly when one is blocked or has failed; opening it lists every entry
+  the backend activity record holds, including an entry that is blocked or
+  failed, with its kind, the workstream or project it concerns, its phase and
+  progress, and any failure.
 - The list on the left holds every workstream, ordered by last activity,
   newest first: a state transition, a trace entry, a thread message, a
   question, an answer, an owner decision or a delivery outcome. Opening,
@@ -166,7 +171,11 @@ its own, actionable again, if the service is still listing it two minutes
 after acknowledging the submission, so it can never disappear for good.
 Submitting one card never hides or changes any other. If a submission fails,
 the card comes back at once with the error shown and what you typed still in
-it. Every form that submits an action, including new project, archive and the
+it. A submission the backend cannot admit right now, because an operation
+such as archive cleanup is briefly in the way, shows distinctly from one the
+service rejects outright: the former names the blocking operation and is
+worth retrying as is, the latter needs the input or the decision changed.
+Every form that submits an action, including new project, archive and the
 feed's own action forms, clears back to its defaults once it succeeds; a
 failed submission leaves it exactly as you left it, with the error shown.
 
@@ -193,9 +202,10 @@ Beekeeper relays it a message also appears in the chat, attributed to that
 workstream's chief of staff, without you having to ask again.
 
 The Beekeeper answers one message at a time. Sending another while it is
-still working on the previous one is refused with a busy notice; wait for the
-reply and send it again. The chat shows only the most recent messages and has
-no way to load older history.
+still working on the previous one gets a `503 unavailable` response naming
+the turn in flight, rather than being queued or recorded; wait for the reply
+and send it again. The chat shows only the most recent messages and has no
+way to load older history.
 
 The Beekeeper cannot approve or refuse a delivery, rule on a contested unit,
 approve a spec or plan, edit or ratify the charter, answer a question a
@@ -295,3 +305,33 @@ Every failure returns `{"error": {"code": ..., "message": ...}}`. `GET
 /v1/events` is a `text/event-stream`: each frame names the event's kind and
 carries the event as JSON, and the first event of every stream is `resync`,
 which asks the client to read every view again.
+
+`GET /v1/health` reports the API as available whenever it answers at all,
+separately from the backend, which is `ready`, `not_ready` while startup or
+project recovery runs, or `degraded` while a backend operation has failed or
+stalled, naming the operation when it is not simply ready. `GET /v1/activity`
+lists every operation the backend activity record holds: its kind, the
+project and workstream it concerns, its phase, its progress when measurable,
+the time of its last progress and any failure. Both answer promptly without
+waiting on the trace or on a factory effect in progress, which is what makes
+them useful while something else is slow.
+
+Every core read endpoint (`/status` and a workstream's status, `/config`,
+`/runtime`, `/inbox`, a conversation, a feed, trace views, and the first read
+behind `/events`) answers within a short bound even while a Git operation, a
+check, an agent turn, reconciliation or recovery is blocked, because none of
+them waits on that work. `/status` alone goes further: when a fresh answer
+cannot be assembled within that bound, it falls back to its last snapshot
+instead, carrying an `X-Osmia-Stale: true` response header; a client that
+cares should retry rather than treat that body as current.
+
+Every owner-action write (hand-in, ratify, a shed action, an amendment
+decision, answering an inbox entry, moving a unit, delivery approval,
+abandon, pause, priority, archive, and the Beekeeper's message) answers with
+one of three outcomes: a success response once the command is durably
+accepted; an error with a `4xx` code and a reason when it is rejected, which
+includes a command whose request or revision is now stale against current
+state; or `503 unavailable` naming the backend operation in the way when a
+bounded wait for something the write needs does not clear in time. None of
+the three is ever silently dropped, and resubmitting the same command,
+including after a restart, never applies it twice.
