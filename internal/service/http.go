@@ -190,7 +190,10 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		switch r.URL.Path {
 		case Prefix + "/health":
-			respond(w, 200, HealthResponse{true, "osmia", 1, s.options.Build, s.tailnetStatus(r.Context())})
+			respond(w, 200, s.healthView(r.Context()))
+			return
+		case Prefix + "/activity":
+			respond(w, 200, s.activityView())
 			return
 		case Prefix + "/config":
 			out := s.configuration()

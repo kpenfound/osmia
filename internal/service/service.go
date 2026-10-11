@@ -191,6 +191,10 @@ type Service struct {
 	boundary    func(string) error
 	// hub carries change notifications to the client event stream.
 	hub *hub
+	// activity is the in-process record of long-running backend operations,
+	// separate from the trace and the runtime store: reporting and reading
+	// it never wait on the trace mutex or on operationMu.
+	activity *activityRegistry
 	// notifier posts new inbox entries to notify.webhook.
 	notifier *notifier
 	// driftAsked is set once an owner's drift rebase request is recorded,
@@ -309,6 +313,8 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	err = nil
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), shadow: shadow}
+	s.activity = newActivityRegistry(s.now)
+	s.activity.notify = func() { s.hub.publish(Event{Kind: EventActivity}) }
 	s.pool = &scheduler.Shared{Traces: s.traces}
 	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider}
 	if opts.skills != nil {
@@ -317,7 +323,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if opts.controls != nil {
 		opts.controls.service.Store(s)
 	}
+	pendingRecovery := s.StartActivity("recovery-pending", ActivityRecovery, "", "", "recovering an interrupted project registration")
 	cfg, s.pending = s.recoverPending(ctx, cfg)
+	pendingRecovery.Finish(s.pending)
 	projects, err := s.openAll(cfg)
 	if err != nil {
 		return nil, err
@@ -405,12 +413,18 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	for _, p := range projects {
 		view := cfg.For(p.id)
-		if err = s.recoverWorkspaces(ctx, view); err != nil {
+		workspaces := s.StartActivity("recovery-workspaces-"+string(p.id), ActivityRecovery, p.id, "", "recovering interrupted workspace operations")
+		err = s.recoverWorkspaces(ctx, view)
+		workspaces.Finish(err)
+		if err != nil {
 			s.cleanupSocket()
 			st.Close()
 			return nil, fmt.Errorf("recover interrupted workspace operations: %w", err)
 		}
-		if err = s.recoverSessions(ctx, view, p.repository); err != nil {
+		sessions := s.StartActivity("recovery-sessions-"+string(p.id), ActivityRecovery, p.id, "", "recovering thread sessions")
+		err = s.recoverSessions(ctx, view, p.repository)
+		sessions.Finish(err)
+		if err != nil {
 			s.cleanupSocket()
 			st.Close()
 			return nil, fmt.Errorf("recover thread sessions: %w", err)
@@ -423,7 +437,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	// interrupted chief-of-staff turn does, and gets the same kind of
 	// continuation turn, run at once since the shadow project has no
 	// background reconciliation loop to pick it up later.
-	if err = s.recoverSessions(ctx, cfg, shadow); err != nil {
+	beekeeperRecovery := s.StartActivity("recovery-beekeeper", ActivityRecovery, config.ShadowProjectID, "", "recovering the beekeeper's interrupted turns")
+	err = s.recoverSessions(ctx, cfg, shadow)
+	beekeeperRecovery.Finish(err)
+	if err != nil {
 		s.cleanupSocket()
 		st.Close()
 		return nil, fmt.Errorf("recover the beekeeper's interrupted turns: %w", err)
@@ -978,8 +995,8 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if adapters == nil {
 		adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{}
 	}
-	adapters[coreadapter.RunnerBoundary] = stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.runner }}
-	adapters[coreadapter.RepositoryBoundary] = stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.repository }}
+	adapters[coreadapter.RunnerBoundary] = activityReconciler{stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.runner }}, s.activity, cfg.Project.ID}
+	adapters[coreadapter.RepositoryBoundary] = activityReconciler{stagedAdapter{p, func(st *stages) coreadapter.Reconciler { return st.repository }}, s.activity, cfg.Project.ID}
 	options.Adapters = adapters
 	if options.Priority == nil {
 		options.Priority = stagePriority

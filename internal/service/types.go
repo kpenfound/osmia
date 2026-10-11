@@ -48,8 +48,20 @@ type Identity struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
 }
+
+// HealthResponse reports the API and the backend separately: API is true
+// whenever this response is sent at all, since the handler answers it
+// without touching the trace or the activity record's lock. Backend is
+// "ready" with no blocking work, "not_ready" while startup or project
+// recovery is in progress, and "degraded" when a backend operation has
+// failed or made no progress for ActivityStallThreshold; Cause then names
+// the operation. Ready is kept for existing clients: it is Backend ==
+// "ready".
 type HealthResponse struct {
 	Ready      bool     `json:"ready"`
+	API        bool     `json:"api"`
+	Backend    string   `json:"backend"`
+	Cause      string   `json:"cause,omitempty"`
 	Service    string   `json:"service"`
 	APIVersion int      `json:"api_version"`
 	Build      Identity `json:"build"`
@@ -57,6 +69,13 @@ type HealthResponse struct {
 	// listen.tailnet is configured.
 	Tailnet *TailnetStatus `json:"tailnet,omitempty"`
 }
+
+// Backend states HealthResponse.Backend reports.
+const (
+	BackendReady    = "ready"
+	BackendNotReady = "not_ready"
+	BackendDegraded = "degraded"
+)
 
 // Tailnet listener states.
 const (
@@ -838,6 +857,9 @@ const (
 	EventRuntime      EventKind = "runtime"
 	EventConfig       EventKind = "config"
 	EventSpend        EventKind = "spend"
+	// EventActivity announces a change to the backend activity record: an
+	// operation started, reported progress, finished or failed.
+	EventActivity EventKind = "activity"
 )
 
 // Event is one notification of the client event stream. It names what

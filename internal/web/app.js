@@ -7,14 +7,24 @@
   // workstream and "feeds" that of every workstream the page shows. Kinds the
   // page does not show are ignored; every stream starts with a resync.
   const reads = {
-    resync: ['status', 'runtime', 'config', 'inbox', 'charter', 'feeds'],
+    resync: ['status', 'runtime', 'config', 'inbox', 'charter', 'feeds', 'activity'],
     workstream: ['status', 'feed'],
     conversation: ['feed'],
     inbox: ['inbox', 'charter'],
     runtime: ['runtime', 'status'],
     config: ['config'],
     spend: ['status'],
+    activity: ['activity'],
   };
+
+  // activityStallMs mirrors the service's ActivityStallThreshold: an
+  // activity entry whose last progress is at least this old is shown as
+  // blocked, the same as a failed one, even without a fresh read. It does
+  // not apply to a turn or a check (activityStallTrackedKinds mirrors the
+  // service's stallTracked): those report only start and finish and
+  // routinely run for minutes, so elapsed time alone does not mean blocked.
+  const activityStallMs = 30000;
+  const activityStallTrackedKinds = new Set(['archive_cleanup', 'git', 'recovery']);
 
   // An edit of a configuration file on disk is not announced, so the page
   // reads /config again this often while it is visible and live.
@@ -482,6 +492,45 @@
       form.elements.reason.value = '';
       return scope(target) + ' paused (' + mode + ').';
     });
+  }
+
+  // activityWorkstream names the workstream an activity entry concerns, from
+  // the workstream list when it still lists one, and its raw ID otherwise.
+  function activityWorkstream(id) {
+    const w = streams().find((w) => w.workstream === id);
+    return w ? goal(w) : id;
+  }
+
+  // activityBlocked reports whether an activity entry is shown as blocked:
+  // failed, or, for a kind whose reporting is expected to keep moving, its
+  // last progress is at least activityStallMs old, the same threshold and
+  // the same per-kind rule the service's own health check uses.
+  function activityBlocked(e) {
+    return !!e.failure ||
+      (activityStallTrackedKinds.has(e.kind) && Date.now() - new Date(e.last_progress).getTime() >= activityStallMs);
+  }
+
+  // renderActivity shows the backend activity record's popover list: every
+  // operation in flight or failed, including one that is blocked or has
+  // failed.
+  function renderActivity() {
+    const list = byId('activity-list');
+    const entries = views.activity ? views.activity.activity : [];
+    if (entries.length === 0) {
+      list.replaceChildren(el('li', { class: 'empty' }, 'Nothing is running.'));
+      return;
+    }
+    list.replaceChildren(...entries.map((e) => {
+      const blocked = activityBlocked(e);
+      const where = [e.workstream ? activityWorkstream(e.workstream) : null, !e.workstream && e.project ? projectName(e.project) : null].filter((s) => s);
+      return el('li', { class: 'activity-entry', 'data-activity': e.id, 'data-blocked': String(blocked) },
+        el('div', { class: 'line' },
+          el('strong', { 'data-field': 'kind' }, e.kind),
+          where.length > 0 ? el('span', { class: 'tag', 'data-field': 'where' }, where.join(' · ')) : null),
+        el('div', { 'data-field': 'phase' }, e.phase + (e.progress !== null && e.progress !== undefined ? ' (' + Math.round(e.progress * 100) + '%)' : '')),
+        e.failure ? el('div', { class: 'failure', 'data-field': 'failure' }, e.failure) : null,
+        el('div', { class: 'meta' }, 'Since ', when(e.started_at), blocked ? el('span', { class: 'blocked-note', 'data-field': 'blocked' }, ' · no progress since ' + when(e.last_progress)) : null));
+    }));
   }
 
   function renderCapacity() {
@@ -1129,6 +1178,13 @@
     button.dataset.paused = String(pauses.length > 0);
     button.title = pauses.length === 0 ? 'Nothing is paused' : pauses.length + ' paused';
     byId('pause-count').textContent = pauses.length > 0 ? String(pauses.length) : '';
+    const activity = views.activity ? views.activity.activity : [];
+    const blocked = activity.filter(activityBlocked).length;
+    const activityButton = byId('activity-button');
+    activityButton.dataset.active = String(activity.length > 0);
+    activityButton.dataset.blocked = String(blocked > 0);
+    activityButton.title = activity.length === 0 ? 'Nothing is running' : activity.length + ' running' + (blocked > 0 ? ', ' + blocked + ' blocked or failed' : '');
+    byId('activity-count').textContent = activity.length > 0 ? String(activity.length) : '';
     const lit = views.config ? reloadable(views.config) : false;
     byId('settings-button').dataset.lit = String(lit);
     byId('config-lit').hidden = !lit;
@@ -2251,6 +2307,7 @@
     renderWorkstreamView();
     renderPauses();
     renderPauseForm();
+    renderActivity();
     renderCapacity();
     renderPriority();
     renderProfiles();
@@ -2286,6 +2343,12 @@
     }
   }, configInterval);
   setInterval(expireDismissals, dismissCheckInterval);
+  // Whether an activity entry counts as blocked depends on the clock, not
+  // only on the last read, so it is kept current on the same tick.
+  setInterval(() => {
+    renderHeader();
+    renderActivity();
+  }, dismissCheckInterval);
   window.addEventListener('online', reconnectNow);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {

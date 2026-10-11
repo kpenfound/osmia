@@ -144,8 +144,9 @@ type fakeAPI struct {
 	inboxHits  int
 	hold       chan struct{}
 
-	inboxEntries []string
-	events       chan string
+	inboxEntries    []string
+	activityEntries []string
+	events          chan string
 
 	// contested and ratify answer the inbox entries' own decision
 	// endpoints that browser_feed_dismiss_test.go's tests submit to.
@@ -265,6 +266,22 @@ func (f *fakeAPI) setInbox(entries ...string) {
 	f.mu.Unlock()
 }
 
+// handleActivity answers the backend activity record with whatever entries
+// setActivity last set, none until a test sets some.
+func (f *fakeAPI) handleActivity(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	entries := strings.Join(f.activityEntries, ",")
+	f.mu.Unlock()
+	writeJSON(w, `{"activity":[`+entries+`]}`)
+}
+
+// setActivity replaces the entries /v1/activity answers with.
+func (f *fakeAPI) setActivity(entries ...string) {
+	f.mu.Lock()
+	f.activityEntries = entries
+	f.mu.Unlock()
+}
+
 // pushEvent sends a server-sent event of the given kind on the page's open
 // event stream, the way the real service announces a change for the page
 // to read again.
@@ -278,6 +295,7 @@ func (f *fakeAPI) handler() http.Handler {
 	mux.HandleFunc("/v1/runtime", handleJSON(`{"effective":{"pauses":[],"priorities":[]},"profiles":{},"diagnostics":[]}`))
 	mux.HandleFunc("/v1/config", handleJSON(`{"root":"","digest":"fake","effective":{"profiles":{}},"project":null,"projects":[],"diagnostics":[],"drift":{"differs":false,"files":[]}}`))
 	mux.HandleFunc("/v1/inbox", f.handleInbox)
+	mux.HandleFunc("/v1/activity", f.handleActivity)
 	mux.HandleFunc("/v1/charter", handleJSON(`{"proposals":[]}`))
 	mux.HandleFunc("/v1/feed/", f.handleFeed)
 	mux.HandleFunc("/v1/events", f.handleEvents)

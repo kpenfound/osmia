@@ -188,6 +188,11 @@ func (c *Client) Health(ctx context.Context) (HealthResponse, error) {
 	err := c.Do(ctx, "GET", Prefix+"/health", nil, &v)
 	return v, err
 }
+func (c *Client) Activity(ctx context.Context) (ActivityResponse, error) {
+	var v ActivityResponse
+	err := c.Do(ctx, "GET", Prefix+"/activity", nil, &v)
+	return v, err
+}
 func (c *Client) Configuration(ctx context.Context) (ConfigResponse, error) {
 	var v ConfigResponse
 	err := c.Do(ctx, "GET", Prefix+"/config", nil, &v)
