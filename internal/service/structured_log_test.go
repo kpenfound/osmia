@@ -34,6 +34,9 @@ func (b *syncBuffer) String() string {
 	defer b.mu.Unlock()
 	return b.buf.String()
 }
+
+// Reset discards everything buffered so far, so a test can assert on only
+// what is logged after a given point.
 func (b *syncBuffer) Reset() {
 	b.mu.Lock()
 	defer b.mu.Unlock()

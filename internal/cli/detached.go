@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode"
@@ -61,6 +63,12 @@ func runService(ctx context.Context, root config.Root, detached bool, stdout io.
 	if detached {
 		return detach(ctx, root, stdout)
 	}
+	// This process is the service itself (foreground or the detached
+	// child): give embedded code's standard log.Printf calls, and any
+	// slog top-level call that bypasses logger, the same structured
+	// handler as the service's own records for as long as it runs.
+	restore := installGlobalLog(logger)
+	defer restore()
 	ready := os.Getenv(readinessEnv) == "3"
 	os.Unsetenv(readinessEnv)
 	var pipe *os.File
@@ -122,6 +130,41 @@ func logServeFailure(logger *slog.Logger, err error) {
 // failureText's own redaction still never carries a known secret.
 func newServiceLogger(w io.Writer) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(redactingWriter{w}, nil))
+}
+
+// globalLogMu guards the standard log package's output and slog's default
+// logger, both process-wide state, across every call to installGlobalLog in
+// this process.
+var globalLogMu sync.Mutex
+
+// installGlobalLog tries to take globalLogMu and route the standard log
+// package's output, and slog's default logger, through logger:
+// slog.SetDefault makes the log package's default Logger write through
+// logger's handler, which catches a dependency linked into serve (e.g.
+// busybees/core or tailscale code other than tsnet's UserLogf) that still
+// calls log.Printf. If another service already running in this process
+// holds the lock, installGlobalLog installs nothing — that service's own
+// structured handler already receives every standard-log call, since both
+// go through the same process-wide defaults — and returns a no-op restore,
+// so a second service started in the same process (as in tests that run
+// serve in-process) never blocks waiting for the first to stop. Otherwise
+// the caller must call the returned restore exactly once, when the service
+// it represents stops, to give back the previous defaults and release the
+// lock.
+func installGlobalLog(logger *slog.Logger) (restore func()) {
+	if !globalLogMu.TryLock() {
+		return func() {}
+	}
+	previousDefault := slog.Default()
+	previousOutput := log.Writer()
+	previousFlags := log.Flags()
+	slog.SetDefault(logger)
+	return func() {
+		slog.SetDefault(previousDefault)
+		log.SetOutput(previousOutput)
+		log.SetFlags(previousFlags)
+		globalLogMu.Unlock()
+	}
 }
 
 // redactingWriter redacts known secrets from every write, a final guard

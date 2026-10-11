@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -216,6 +217,111 @@ func TestForegroundServeFailureIsAStructuredRecordOnStandardError(t *testing.T) 
 	must(t, json.Unmarshal([]byte(strings.TrimRight(diag, "\n")), &record))
 	if record.Level != "ERROR" || record.Msg == "" {
 		t.Fatalf("standard error is not a structured record: %q", diag)
+	}
+}
+
+// TestRunServiceRoutesTheStandardLogPackageThroughItsStructuredLoggerAndRestoresGlobalsAfterward
+// shows that while runService's own process is the running service,
+// embedded code's standard log.Printf calls reach the same structured
+// logger as the service's own records, as a JSON record with a time,
+// level and message, and that the previous log and slog defaults come back
+// once the service stops.
+//
+// serial: installGlobalLog takes the process-wide standard log package
+// output and slog default for as long as the service it serves is
+// running; this test drives that through runService and checks both ends
+// of the handoff, so it cannot run alongside another test that also serves
+// in this process.
+func TestRunServiceRoutesTheStandardLogPackageThroughItsStructuredLoggerAndRestoresGlobalsAfterward(t *testing.T) {
+	dir, err := os.MkdirTemp("", "rsg-")
+	must(t, err)
+	defer os.RemoveAll(dir)
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte("version = 1\nactive_projects = []\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
+	root, err := config.ResolveRoot(dir, "")
+	must(t, err)
+
+	previousDefault := slog.Default()
+	previousOutput := log.Writer()
+	previousFlags := log.Flags()
+
+	var buf bytes.Buffer
+	logger := newServiceLogger(&buf)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- runService(ctx, root, false, io.Discard, logger) }()
+
+	c := service.NewClient(filepath.Join(dir, "osmia.sock"))
+	defer c.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := c.Health(context.Background()); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("service did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	log.Printf("embedded dependency output %d", 7)
+
+	// A second service on the same root, started while the first still
+	// holds globalLogMu, must not block waiting for it: installGlobalLog
+	// installs nothing for the second and the first service's own
+	// socket-ownership check refuses it promptly.
+	var secondBuf bytes.Buffer
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- runService(context.Background(), root, false, io.Discard, newServiceLogger(&secondBuf))
+	}()
+	select {
+	case err := <-secondDone:
+		if err == nil || !strings.Contains(err.Error(), "already owned by another Osmia service") {
+			t.Fatalf("second runService on the same root: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("second runService on the same root did not return promptly")
+	}
+	if slog.Default() != logger {
+		t.Fatal("slog default changed while the first service still runs")
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runService: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("service did not stop")
+	}
+
+	if slog.Default() != previousDefault {
+		t.Fatal("slog default was not restored after the service stopped")
+	}
+	if log.Writer() != previousOutput || log.Flags() != previousFlags {
+		t.Fatal("standard log package defaults were not restored after the service stopped")
+	}
+
+	var sawEmbedded bool
+	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var record struct{ Time, Level, Msg string }
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("line is not a JSON object: %s: %v", line, err)
+		}
+		if record.Time == "" || record.Level == "" || record.Msg == "" {
+			t.Fatalf("record missing time, level or msg: %s", line)
+		}
+		if strings.Contains(record.Msg, "embedded dependency output 7") {
+			sawEmbedded = true
+		}
+	}
+	if !sawEmbedded {
+		t.Fatalf("no structured record for the standard log package call:\n%s", buf.String())
 	}
 }
 
