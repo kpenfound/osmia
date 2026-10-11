@@ -282,9 +282,7 @@ func TestStatusReportsUnreadableTrace(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, store: store}
-	directory, err := cfg.Root.ProjectTrace(project)
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(directory, "workstreams", string(stream), "status.jsonl"), []byte("{not json}\n"), 0600))
+	must(t, os.WriteFile(workstreamTraceFile(t, cfg.Root, project, stream, "status.jsonl"), []byte("{not json}\n"), 0600))
 	message := fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", project)
 	list := s.statusList()
 	streaks := "cannot read the turn attempts of the active project; check the trace repository"

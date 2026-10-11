@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -76,33 +75,28 @@ func TestArchiveCleanupMigratesOldArchivesAndRetainsTitle(t *testing.T) {
 	must(t, err)
 	must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
 	raw, _ = store.Snapshot()
-	if raw.Archived[0].CleanedAt.IsZero() {
-		t.Fatal("archive cleanup did not complete")
+	// Deleting the workstream's own trace repository belongs to
+	// archive-independent-deletion. With every deferral condition clear,
+	// cleanup stays ready but does not mark the archive clean, and the
+	// trace repository is untouched (spec#6, spec#8).
+	if !raw.Archived[0].CleanedAt.IsZero() {
+		t.Fatal("archive cleanup marked clean before its trace repository is gone")
 	}
 	assertGone(t, temp)
 	list, err = repo.Workstreams()
 	must(t, err)
-	if slices.Contains(list, stream) || !slices.Contains(list, quiet) {
-		t.Fatalf("remaining streams: %v", list)
+	if !slices.Contains(list, stream) || !slices.Contains(list, quiet) {
+		t.Fatalf("workstream trace repository removed before archive-independent-deletion: %v", list)
 	}
+	// A repeated pass stays stable: it neither completes nor regresses what
+	// already cleared.
 	must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
-	must(t, store.Close())
-	input.Workstreams[project] = []config.WorkstreamID{quiet}
-	store, _, err = runtime.Open(input)
-	must(t, err)
-	s.store = store
-	// Recover the gap between trace deletion and recording completion.
 	raw, _ = store.Snapshot()
-	interrupted := raw.Archived[0]
-	interrupted.CleanedAt = time.Time{}
-	must(t, store.UpdateArchive(interrupted))
-	must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
-	state, ds := store.Effective()
-	if len(ds) != 0 || len(state.Archived) != 1 || state.Archived[0].Title != "Preserved workstream title" {
-		t.Fatalf("archive lost on restart: %+v %v", state.Archived, ds)
+	if len(raw.Archived) != 1 || raw.Archived[0].Title != "Preserved workstream title" || !raw.Archived[0].CleanedAt.IsZero() {
+		t.Fatalf("repeated pass changed the archive record: %+v", raw.Archived)
 	}
 	got, api := s.workstreamStatus(string(stream))
-	if api != nil || !got.Archived || !got.TraceDeleted || got.Status == nil || got.Status.Goal != "Preserved workstream title" || got.Status.Note != "" {
+	if api != nil || !got.Archived || got.TraceDeleted || got.Status == nil || got.Status.Goal != "Preserved workstream title" || got.Status.Note != "" {
 		t.Fatalf("archived list: %+v %v", got, api)
 	}
 	if _, api := s.unarchive(string(stream)); api == nil || api.Code != Conflict {
@@ -143,36 +137,36 @@ func TestArchiveCleanupBatchesDependenciesAndWaitsForRetainedDescendants(t *test
 	cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, repository: repo, now: s.now}}
 	must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
 	state, _ := store.Snapshot()
+	// Deleting a workstream's own trace repository is archive-independent-deletion's
+	// job (spec#6, spec#8). The retained descendant still defers the batch
+	// exactly as it did before the split; what changes is that even
+	// independent, which clears every deferral, stays uncleaned because its
+	// trace repository is untouched until that unit deletes it.
 	for _, a := range state.Archived {
-		if a.Title == "" || a.CleanedAt.IsZero() != (a.Workstream != independent) {
+		if a.Title == "" || !a.CleanedAt.IsZero() {
 			t.Fatalf("cleanup with retained descendant: %+v", a)
+		}
+	}
+	remaining, err := repo.Workstreams()
+	must(t, err)
+	for _, id := range all {
+		if !slices.Contains(remaining, id) {
+			t.Fatalf("workstream trace repository removed before archive-independent-deletion: %s", id)
 		}
 	}
 	must(t, store.SetArchived(runtime.Archive{Project: project, Workstream: descendant, ArchivedAt: demoStart}))
 	must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
 	state, _ = store.Snapshot()
 	for _, a := range state.Archived {
-		if a.Title == "" || a.CleanedAt.IsZero() {
-			t.Fatalf("batch incomplete: %+v", a)
+		if a.Title == "" || !a.CleanedAt.IsZero() {
+			t.Fatalf("batch marked clean before its trace repository is gone: %+v", a)
 		}
 	}
-	remaining, err := repo.Workstreams()
+	remaining, err = repo.Workstreams()
 	must(t, err)
 	for _, id := range all {
-		if slices.Contains(remaining, id) {
-			t.Fatalf("batched archive remains: %s", id)
-		}
-	}
-	// Completion metadata can lag a successfully published batch after a stop.
-	for _, a := range state.Archived {
-		a.CleanedAt = time.Time{}
-		must(t, store.UpdateArchive(a))
-	}
-	must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
-	state, _ = store.Snapshot()
-	for _, a := range state.Archived {
-		if a.CleanedAt.IsZero() {
-			t.Fatalf("batch completion not recovered: %+v", a)
+		if !slices.Contains(remaining, id) {
+			t.Fatalf("workstream trace repository removed before archive-independent-deletion: %s", id)
 		}
 	}
 }

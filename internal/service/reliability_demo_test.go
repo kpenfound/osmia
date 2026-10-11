@@ -527,7 +527,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		t.Fatalf("landing %+v; the feature branch holds %s", landing, moved[0])
 	}
 	merged := 0
-	for _, tr := range allTransitions(t, f.trace, stream) {
+	for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 		if tr.Subject == trace.UnitSubject("resume") && tr.To == UnitMerged {
 			merged++
 		}

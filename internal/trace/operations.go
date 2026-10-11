@@ -158,6 +158,10 @@ func (v *workflowView) operation(a OperationAction) error {
 
 // Operations scans all operation histories, including completed results awaiting acknowledgement.
 func (r *Repository) Operations(stream config.WorkstreamID) ([]OperationRecord, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	_, v, err := r.loadWorkflow(stream)
@@ -190,6 +194,10 @@ type OperationAttempt struct {
 // or recursively call WithOperation. Acknowledged/not-yet-due work, and work an
 // open attempt of this handle holds, is a no-op.
 func (r *Repository) WithOperation(ctx context.Context, stream config.WorkstreamID, event string, actor Actor, now func() time.Time, fn func(*OperationAttempt, OperationRecord) error) error {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return err
+	}
 	r.operationMu.Lock()
 	defer r.operationMu.Unlock()
 	if err := ctx.Err(); err != nil {

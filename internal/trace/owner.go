@@ -44,6 +44,10 @@ func ownerEdited(name string) bool {
 // whose file differs from the latest revision recorded for it: the edits no
 // revision holds yet.
 func (r *Repository) OwnerEdits(stream config.WorkstreamID) ([]string, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	records, _, err := r.scan()
@@ -89,20 +93,21 @@ func (r *Repository) OwnerEdits(stream config.WorkstreamID) ([]string, error) {
 // the repository is held, so it must not read the trace. A document with no
 // recorded revision is not the owner's to create, and is reported as missing.
 func (r *Repository) OwnerDocuments(ctx context.Context, stream config.WorkstreamID, at time.Time, check func(map[string]string) error) (map[string]Document, error) {
+	if err := config.CheckWorkstreamIDs(stream); err != nil {
+		return nil, err
+	}
+	r, err := r.scoped(stream)
+	if err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := config.CheckWorkstreamIDs(stream); err != nil {
-		return nil, err
-	}
-	records, streams, err := r.scan()
+	records, _, err := r.scan()
 	if err != nil {
 		return nil, err
-	}
-	if !slices.Contains(streams, stream) {
-		return nil, fmt.Errorf("unknown workstream %s", stream)
 	}
 	latest := map[string]Document{}
 	for _, v := range records {

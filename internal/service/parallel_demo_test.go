@@ -234,7 +234,7 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 // to the given state for the first time.
 func movedAt(t *testing.T, f *shedFixture, stream config.WorkstreamID, unit, to string) time.Time {
 	t.Helper()
-	for _, tr := range allTransitions(t, f.trace, stream) {
+	for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 		if tr.Actor == masonActor && tr.Subject == trace.UnitSubject(unit) && tr.To == to {
 			return tr.At
 		}

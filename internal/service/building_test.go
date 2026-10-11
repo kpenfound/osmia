@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net"
 	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -47,10 +46,10 @@ func (f *architectFixture) buildOperations(t *testing.T, stream config.Workstrea
 // buildTransitions returns, in the order events.jsonl holds them, the
 // transitions of the build subject, of the unit subjects and the move to
 // building.
-func buildTransitions(t *testing.T, directory string, stream config.WorkstreamID) []trace.Transition {
+func buildTransitions(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID) []trace.Transition {
 	t.Helper()
 	var out []trace.Transition
-	for _, tr := range allTransitions(t, directory, stream) {
+	for _, tr := range allTransitions(t, root, project, stream) {
 		if tr.Actor == buildingActor || tr.Subject == buildSubject || tr.To == BuildingState {
 			out = append(out, tr)
 		}
@@ -60,9 +59,9 @@ func buildTransitions(t *testing.T, directory string, stream config.WorkstreamID
 
 // allTransitions returns every transition of the workstream's events.jsonl,
 // in the order it holds them.
-func allTransitions(t *testing.T, directory string, stream config.WorkstreamID) []trace.Transition {
+func allTransitions(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID) []trace.Transition {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(directory, "workstreams", string(stream), "events.jsonl"))
+	data, err := os.ReadFile(workstreamTraceFile(t, root, project, stream, "events.jsonl"))
 	must(t, err)
 	var out []trace.Transition
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
@@ -224,7 +223,7 @@ func TestRatifiedWorkstreamBuildsWithTheDependentUnitPlanned(t *testing.T) {
 		{"unit-resume-ready", "unit-resume", UnitPlanned, UnitReady, id, "unit resume is ready: it depends on no unit"},
 		{"unit-dedupe-planned", "unit-dedupe", "", UnitPlanned, id, "unit dedupe is in the plan of seal 1 and waits for resume to merge"},
 	}
-	if got := moves(t, buildTransitions(t, f.trace, stream)); !reflect.DeepEqual(got, want) {
+	if got := moves(t, buildTransitions(t, f.s.cfg.Root, f.project, stream)); !reflect.DeepEqual(got, want) {
 		t.Fatalf("transitions:\n%+v\nwant:\n%+v", got, want)
 	}
 	if op.Result.Evidence != dependentBuilt {
@@ -257,7 +256,7 @@ func TestRatifiedWorkstreamBuildsWithTheDependentUnitPlanned(t *testing.T) {
 	if !reflect.DeepEqual(again, coreadapter.OperationResult{Outcome: "succeeded", Evidence: dependentBuilt}) {
 		t.Fatalf("applied again %+v", again)
 	}
-	if got := moves(t, buildTransitions(t, f.trace, stream)); !reflect.DeepEqual(got, want) {
+	if got := moves(t, buildTransitions(t, f.s.cfg.Root, f.project, stream)); !reflect.DeepEqual(got, want) {
 		t.Fatalf("transitions after the replay:\n%+v", got)
 	}
 }
@@ -280,7 +279,7 @@ func TestRatifiedWorkstreamWithIndependentUnitsHasEveryUnitReady(t *testing.T) {
 		{"unit-dedupe-planned", "unit-dedupe", "", UnitPlanned, id, "unit dedupe is in the plan of seal 1"},
 		{"unit-dedupe-ready", "unit-dedupe", UnitPlanned, UnitReady, id, "unit dedupe is ready: it depends on no unit"},
 	}
-	if got := moves(t, buildTransitions(t, f.trace, stream)); !reflect.DeepEqual(got, want) {
+	if got := moves(t, buildTransitions(t, f.s.cfg.Root, f.project, stream)); !reflect.DeepEqual(got, want) {
 		t.Fatalf("transitions:\n%+v\nwant:\n%+v", got, want)
 	}
 	f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitReady}, {Unit: "dedupe", State: UnitReady}})
@@ -324,7 +323,7 @@ func TestBuildInterruptedAfterItsCommitIsNotRecordedTwice(t *testing.T) {
 		t.Fatalf("the result %+v", op.Result)
 	}
 	var ids []string
-	for _, tr := range buildTransitions(t, f.trace, stream) {
+	for _, tr := range buildTransitions(t, f.s.cfg.Root, f.project, stream) {
 		ids = append(ids, tr.ID)
 	}
 	if !slices.Equal(ids, []string{"build-1", BuildingState, "unit-resume-planned", "unit-resume-ready", "unit-dedupe-planned"}) {
@@ -379,7 +378,7 @@ func TestBuildFailsWithoutRecording(t *testing.T) {
 		if got.Outcome != "failed" || !strings.HasPrefix(got.Evidence, want) {
 			t.Fatalf("build on seal %d: %+v, want %q", k, got, want)
 		}
-		if n := len(buildTransitions(t, f.trace, stream)); n != recorded {
+		if n := len(buildTransitions(t, f.s.cfg.Root, f.project, stream)); n != recorded {
 			t.Fatalf("build on seal %d recorded %d transitions, had %d", k, n, recorded)
 		}
 	}
@@ -388,7 +387,7 @@ func TestBuildFailsWithoutRecording(t *testing.T) {
 	// A unit of the sealed plan has a state already: the commit refuses it.
 	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h("planted-unit"), Subject: trace.UnitSubject("dedupe"), To: UnitPlanned, Reason: "planted"}})
 	must(t, err)
-	recorded = len(buildTransitions(t, f.trace, stream))
+	recorded = len(buildTransitions(t, f.s.cfg.Root, f.project, stream))
 	apply(1, "building on seal 1 failed: the workflow changed while the build ran; the workstream is ratified")
 
 	// A seal of a plan revision that does not parse.
@@ -399,7 +398,7 @@ func TestBuildFailsWithoutRecording(t *testing.T) {
 	must(t, b.Pass(ctx))
 	must(t, b.Pass(ctx))
 	var requests []string
-	for _, tr := range buildTransitions(t, f.trace, stream) {
+	for _, tr := range buildTransitions(t, f.s.cfg.Root, f.project, stream) {
 		if tr.Subject == buildSubject {
 			requests = append(requests, tr.From+"->"+tr.To)
 		}
@@ -414,7 +413,7 @@ func TestBuildFailsWithoutRecording(t *testing.T) {
 	apply(2, "building on seal 2 failed: the workstream is abandoned, not ratified")
 	// An abandoned workstream is asked for no build.
 	must(t, b.Pass(ctx))
-	if n := len(buildTransitions(t, f.trace, stream)); n != recorded {
+	if n := len(buildTransitions(t, f.s.cfg.Root, f.project, stream)); n != recorded {
 		t.Fatalf("a pass over the abandoned workstream recorded %d transitions, had %d", n, recorded)
 	}
 	must(t, repo.Close())

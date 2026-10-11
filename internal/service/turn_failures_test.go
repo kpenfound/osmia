@@ -87,7 +87,7 @@ func checkFailureContest(t *testing.T, f *shedFixture, stream config.WorkstreamI
 	}
 	id := failureContestID(q.Response.ID)
 	var contest trace.Transition
-	for _, tr := range allTransitions(t, f.trace, stream) {
+	for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 		if tr.ID == id {
 			contest = tr
 		}

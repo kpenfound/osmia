@@ -189,7 +189,7 @@ func TestJujutsuLandingCutShortIsRestoredAndLandsOnce(t *testing.T) {
 				t.Fatalf("the feature branch gained %v", commits)
 			}
 			var merged, landed []string
-			for _, tr := range allTransitions(t, f.trace, stream) {
+			for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 				if tr.Subject == trace.UnitSubject(in.Unit) && tr.To == UnitMerged {
 					merged = append(merged, tr.ID)
 				}
@@ -273,7 +273,7 @@ func TestJujutsuUnitRebaseCutShortIsRestoredAndRebasesOnce(t *testing.T) {
 				t.Fatalf("resume's workspace marks %v: %v", marked, err)
 			}
 			var outcomes []string
-			for _, tr := range allTransitions(t, f.trace, stream) {
+			for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 				if tr.Subject == rebaseSubject("resume") && tr.From != "" && !strings.HasPrefix(tr.To, "requested-") {
 					outcomes = append(outcomes, tr.To)
 				}
@@ -406,7 +406,7 @@ func TestJujutsuLandingThatFailsWithoutAStopKeepsNoCheckpoint(t *testing.T) {
 		t.Fatalf("the feature branch gained %v, want the failed attempt's %s", commits, landed)
 	}
 	var merged []string
-	for _, tr := range allTransitions(t, f.trace, stream) {
+	for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 		if tr.Subject == trace.UnitSubject(in.Unit) && tr.To == UnitMerged {
 			merged = append(merged, tr.ID)
 		}

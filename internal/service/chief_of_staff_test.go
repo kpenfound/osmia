@@ -13,10 +13,17 @@ import (
 )
 
 // plantWorkstream commits a workstream without a chief-of-staff thread
-// straight into the trace's Git history.
-func plantWorkstream(t *testing.T, home, traceDir string, project config.ProjectID, id config.WorkstreamID) {
+// straight into its own dedicated trace repository's Git history, which this
+// helper creates from scratch since the workstream was never created through
+// CreateWorkstream.
+func plantWorkstream(t *testing.T, home string, root config.Root, project config.ProjectID, id config.WorkstreamID) {
 	t.Helper()
-	prefix := filepath.Join(traceDir, "workstreams", string(id))
+	dir, err := root.WorkstreamTrace(project, id)
+	must(t, err)
+	must(t, os.MkdirAll(dir, 0700))
+	demoGit(t, home, "init", "--quiet", "--initial-branch=main", dir)
+	must(t, os.WriteFile(filepath.Join(dir, ".git", "osmia.lock"), nil, 0600))
+	prefix := filepath.Join(dir, "workstreams", string(id))
 	must(t, os.MkdirAll(prefix, 0700))
 	h := trace.Header{Schema: "osmia.trace.workstream", Version: trace.Version, ID: string(id), Revision: 1, Project: project, Workstream: id, At: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), Actor: registrationActor, Cause: "workstream-create"}
 	data, err := json.Marshal(h)
@@ -25,8 +32,8 @@ func plantWorkstream(t *testing.T, home, traceDir string, project config.Project
 	for _, name := range []string{"documents.jsonl", "events.jsonl", "ledger.jsonl"} {
 		must(t, os.WriteFile(filepath.Join(prefix, name), nil, 0600))
 	}
-	demoGit(t, home, "-C", traceDir, "add", "workstreams")
-	demoGit(t, home, "-C", traceDir, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "--quiet", "-m", "Create workstream trace")
+	demoGit(t, home, "-C", dir, "add", "workstreams")
+	demoGit(t, home, "-C", dir, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "--quiet", "-m", "Create workstream trace")
 }
 
 func chiefOfStaffAgents(t *testing.T, s *Service, id config.WorkstreamID) []trace.Agent {
@@ -52,7 +59,7 @@ func TestStartGivesExistingWorkstreamsOneChiefOfStaffThread(t *testing.T) {
 	id := added.Project.ID
 	must(t, s.Close())
 	const legacy config.WorkstreamID = "w_00000000000000000000000000000009"
-	plantWorkstream(t, home, added.Project.Trace, id, legacy)
+	plantWorkstream(t, home, s.cfg.Root, id, legacy)
 
 	s, _ = start(t, opts)
 	th, err := s.sole().repository.ChiefOfStaffThread(legacy)

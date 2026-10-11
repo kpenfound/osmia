@@ -228,7 +228,7 @@ func newMasonFixtureWith(t *testing.T, backend, capacity, drafted, classifier st
 func masonTransitions(t *testing.T, f *shedFixture, stream config.WorkstreamID) []transitionMove {
 	t.Helper()
 	var out []transitionMove
-	for _, tr := range allTransitions(t, f.trace, stream) {
+	for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 		if tr.Actor == masonActor && (strings.HasPrefix(tr.Subject, "unit-") || strings.HasPrefix(tr.Subject, "unit_") || strings.HasPrefix(tr.Subject, "blocked-mason")) {
 			out = append(out, transitionMove{tr.ID, tr.Subject, tr.From, tr.To, tr.Cause, tr.Reason})
 		}
@@ -481,7 +481,7 @@ const staleSpec = validSpec + "9. Something new.\n"
 // editSpec writes the workstream's spec.md on disk, as the owner does.
 func (f *shedFixture) editSpec(t *testing.T, stream config.WorkstreamID, content string) {
 	t.Helper()
-	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.SpecPath), []byte(content), 0600))
+	must(t, os.WriteFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, plan.SpecPath), []byte(content), 0600))
 }
 
 // blocks returns the reasons the mason controller recorded the unit of the
@@ -489,7 +489,7 @@ func (f *shedFixture) editSpec(t *testing.T, stream config.WorkstreamID, content
 func (f *shedFixture) blocks(t *testing.T, stream config.WorkstreamID, unit string) []string {
 	t.Helper()
 	var out []string
-	for _, tr := range allTransitions(t, f.trace, stream) {
+	for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 		if tr.Subject != blockedSubject(unit) {
 			continue
 		}

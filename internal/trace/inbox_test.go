@@ -16,6 +16,7 @@ import (
 func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 	ctx := context.Background()
 	r, root, p := create(t)
+	s := mustScoped(t, r, streamID)
 	chief := chiefThread(t, r, "chief1")
 	for i, agent := range []string{"mason1", "mason2", "mason3", "mason4"} {
 		scope := askerThread(t, r, agent, "mason", "build_"+agent)
@@ -91,7 +92,7 @@ func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
-	r.failPublication = func(step string) error {
+	s.failPublication = func(step string) error {
 		if step == "before-ref" {
 			return errors.New("injected")
 		}
@@ -100,7 +101,7 @@ func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 	if _, err := r.Rule(ctx, 1, "Resume uploads.", owner, when); err == nil {
 		t.Fatal("failed publication reported success")
 	}
-	r.failPublication = nil
+	s.failPublication = nil
 	unchanged("a refused or failed ruling")
 
 	ruled, err := r.Rule(ctx, 1, "Resume uploads.", owner, when, "delivered")

@@ -42,6 +42,7 @@ var entities = kb.Map{Version: kb.Version, Entities: []kb.Entity{
 type fixture struct {
 	repo     *trace.Repository
 	dir      string
+	root     config.Root
 	provider bundle.Provider
 }
 
@@ -69,7 +70,7 @@ func setup(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := fixture{repo: repo, dir: dir}
+	f := fixture{repo: repo, dir: dir, root: root}
 	f.provider = bundle.Files{
 		Repository: func(id config.ProjectID) (*trace.Repository, error) {
 			if id != project {
@@ -91,6 +92,17 @@ func (f fixture) write(t *testing.T, name, content string) {
 	if err := os.WriteFile(filepath.Join(f.dir, name), []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// streamFile is the on-disk path of name within stream's own dedicated trace
+// repository.
+func (f fixture) streamFile(t *testing.T, stream config.WorkstreamID, name string) string {
+	t.Helper()
+	dir, err := f.root.WorkstreamTrace(project, stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, "workstreams", string(stream), name)
 }
 
 func (f fixture) assemble(t *testing.T, scope bundle.Scope) bundle.Bundle {

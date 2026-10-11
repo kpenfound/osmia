@@ -38,7 +38,9 @@ func (s *Service) step(name string) error {
 }
 
 func projectView(root config.Root, p config.Project) ProjectView {
-	directory := filepath.Join(root.String(), "projects", string(p.ID))
+	// ProjectTrace resolves the shadow project to its own directory outside
+	// "projects", so this must not hand-join the shared-layout path.
+	directory, _ := root.ProjectTrace(p.ID)
 	return ProjectView{ID: p.ID, Name: p.Name, Upstream: p.Upstream, Fork: p.Fork, Clone: p.Clone, BaseBranch: p.BaseBranch, Trace: directory, Charter: filepath.Join(directory, "charter.md")}
 }
 

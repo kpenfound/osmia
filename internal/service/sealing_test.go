@@ -232,7 +232,7 @@ func TestSealingRecordsTheSealAndCreatesTheFeatureBranch(t *testing.T) {
 	if len(footprint.Entities) == 0 || len(footprint.Paths) == 0 || len(footprint.Unresolved) != 0 || len(record.SpecHash) != 71 {
 		t.Fatalf("the footprint %+v of seal %+v", footprint, record)
 	}
-	if data, err := os.ReadFile(filepath.Join(f.trace, "workstreams", string(stream), seal.Path)); err != nil || string(data) != docs[0].Content {
+	if data, err := os.ReadFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, seal.Path)); err != nil || string(data) != docs[0].Content {
 		t.Fatalf("seal.json on disk: %q %v", data, err)
 	}
 
@@ -434,7 +434,7 @@ func TestSealingSealsTheLatestRatificationOnly(t *testing.T) {
 	stream, _ := f.ratified(t)
 	f.awaitRetry(t, stream, 1, "no remote whose URL names")
 	// The owner rewords a criterion, which is a new revision to ratify.
-	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.SpecPath), []byte(strings.Replace(validSpec, "never sent again", "not sent twice", 1)), 0600))
+	must(t, os.WriteFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, plan.SpecPath), []byte(strings.Replace(validSpec, "never sent again", "not sent twice", 1)), 0600))
 	f.awaitDocument(t, stream, plan.SpecDocument, 2)
 	f.awaitPacket(t, stream, "ratify: no objection stands")
 	second, err := f.c.Ratify(ctx, stream, 2, 1)

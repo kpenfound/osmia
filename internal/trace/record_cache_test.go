@@ -32,6 +32,7 @@ func TestRecordReadsOwnMutableFields(t *testing.T) {
 
 func TestRecordReadsDetectChangedBytes(t *testing.T) {
 	r, _, _ := create(t)
+	s := mustScoped(t, r, streamID)
 	d := specimens()[0].(Document)
 	if err := r.Append(context.Background(), d); err != nil {
 		t.Fatal(err)
@@ -39,7 +40,7 @@ func TestRecordReadsDetectChangedBytes(t *testing.T) {
 	if _, err := Read[Document](r, streamID); err != nil {
 		t.Fatal(err)
 	}
-	name := filepath.Join(r.directory, recordPath(d))
+	name := filepath.Join(s.directory, recordPath(d))
 	original, err := os.ReadFile(name)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +61,7 @@ func TestRecordReadsDetectChangedBytes(t *testing.T) {
 			t.Fatal(err)
 		}
 		// The handle reads the files again once it has changed them.
-		r.changed()
+		s.changed()
 		if _, err := Read[Document](r, streamID); err == nil {
 			t.Fatal("changed history accepted")
 		}
@@ -68,7 +69,7 @@ func TestRecordReadsDetectChangedBytes(t *testing.T) {
 	if err := os.WriteFile(name, original, 0600); err != nil {
 		t.Fatal(err)
 	}
-	r.changed()
+	s.changed()
 	checkTyped[Document](t, r, d)
 	d.Revision++
 	d.Content += "owner revision\n"
@@ -88,10 +89,11 @@ func TestRecordReadsRejectAliasesAfterCaching(t *testing.T) {
 	}{{"symlink", os.Symlink}, {"hardlink", os.Link}} {
 		t.Run(link.name, func(t *testing.T) {
 			r, _, p := create(t)
+			s := mustScoped(t, r, streamID)
 			if _, err := Read[Document](r, streamID); err != nil {
 				t.Fatal(err)
 			}
-			name := filepath.Join(r.directory, "workstreams", string(streamID), "documents.jsonl")
+			name := filepath.Join(s.directory, "workstreams", string(streamID), "documents.jsonl")
 			data, err := os.ReadFile(name)
 			if err != nil {
 				t.Fatal(err)
@@ -106,7 +108,7 @@ func TestRecordReadsRejectAliasesAfterCaching(t *testing.T) {
 			if err := link.make(external, name); err != nil {
 				t.Fatal(err)
 			}
-			r.changed()
+			s.changed()
 			if _, err := Read[Document](r, streamID); err == nil {
 				t.Fatal("aliased history accepted")
 			}
@@ -119,27 +121,28 @@ func TestHistoryCheckReadsOnlyChangedFiles(t *testing.T) {
 	racyWindow = 0
 	t.Cleanup(func() { racyWindow = window })
 	r, _, _ := create(t)
+	s := mustScoped(t, r, streamID)
 	ctx := context.Background()
 	d := specimens()[0].(Document)
 	if err := r.Append(ctx, d); err != nil {
 		t.Fatal(err)
 	}
 	path := recordPath(d)
-	if _, err := r.checkHistory(ctx); err != nil {
+	if _, err := s.checkHistory(ctx); err != nil {
 		t.Fatal(err)
 	}
-	first, ok := r.verified[path]
+	first, ok := s.verified[path]
 	if !ok || !bytes.Contains(first.data, []byte(`"id":"spec"`)) {
 		t.Fatal("checked file not remembered")
 	}
-	r.changed()
-	if _, err := r.checkHistory(ctx); err != nil {
+	s.changed()
+	if _, err := s.checkHistory(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if again := r.verified[path]; &again.data[0] != &first.data[0] {
+	if again := s.verified[path]; &again.data[0] != &first.data[0] {
 		t.Fatal("unchanged file read again")
 	}
-	name := filepath.Join(r.directory, path)
+	name := filepath.Join(s.directory, path)
 	info, err := os.Stat(name)
 	if err != nil {
 		t.Fatal(err)
@@ -151,8 +154,8 @@ func TestHistoryCheckReadsOnlyChangedFiles(t *testing.T) {
 	if err := os.Chtimes(name, info.ModTime(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
-	r.changed()
-	if _, err := r.checkHistory(ctx); err == nil || !strings.Contains(err.Error(), "reconciliation required") {
+	s.changed()
+	if _, err := s.checkHistory(ctx); err == nil || !strings.Contains(err.Error(), "reconciliation required") {
 		t.Fatalf("outside edit of the same size and time accepted: %v", err)
 	}
 }
@@ -189,13 +192,14 @@ func TestDecodedRecordsReuseAppendedFiles(t *testing.T) {
 
 func TestReadsReuseTheTraceUntilTheHandleWrites(t *testing.T) {
 	r, root, p := create(t)
+	s := mustScoped(t, r, streamID)
 	ctx := context.Background()
 	d := specimens()[0].(Document)
 	if err := r.Append(ctx, d); err != nil {
 		t.Fatal(err)
 	}
 	checkTyped[Document](t, r, d)
-	name := filepath.Join(r.directory, recordPath(d))
+	name := filepath.Join(s.directory, recordPath(d))
 	original, err := os.ReadFile(name)
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +211,7 @@ func TestReadsReuseTheTraceUntilTheHandleWrites(t *testing.T) {
 	// Nothing outside the handle writes an open trace, so a read reuses what
 	// the handle last read.
 	checkTyped[Document](t, r, d)
-	ref := filepath.Join(r.directory, ".git", "refs", "heads", "main")
+	ref := filepath.Join(s.directory, ".git", "refs", "heads", "main")
 	head, err := os.ReadFile(ref)
 	if err != nil {
 		t.Fatal(err)

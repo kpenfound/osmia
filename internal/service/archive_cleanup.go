@@ -73,10 +73,23 @@ func (c *archiveCleanup) Pass(ctx context.Context) error {
 			batch = append(batch, stream)
 		}
 		slices.Sort(batch)
+		// PurgeWorkstreams no longer has anything to rewrite: each workstream
+		// now has its own trace repository, outside the project's. Deleting
+		// that repository is archive-independent-deletion's job; until it
+		// lands, a batch whose deferral conditions have cleared stays ready
+		// but is marked clean only once its trace repository is actually
+		// gone.
 		if err := repo.PurgeWorkstreams(ctx, batch); err != nil {
 			return err
 		}
 		for _, stream := range batch {
+			gone, err := c.traceGone(stream)
+			if err != nil {
+				return err
+			}
+			if !gone {
+				continue
+			}
 			a := ready[stream]
 			a.CleanedAt = c.s.now()
 			if err := c.s.store.UpdateArchive(a); err != nil {
@@ -85,6 +98,18 @@ func (c *archiveCleanup) Pass(ctx context.Context) error {
 		}
 		return nil
 	})
+}
+
+// traceGone reports whether the workstream's own trace repository is
+// already absent, the only condition under which cleanup may mark an
+// archive clean.
+func (c *archiveCleanup) traceGone(stream config.WorkstreamID) (bool, error) {
+	dir, err := c.workspaces.cfg.Root.WorkstreamTrace(c.workspaces.cfg.Project.ID, stream)
+	if err != nil {
+		return false, err
+	}
+	present, err := exists(dir)
+	return !present, err
 }
 
 // prepare preserves the title and releases temporary workspaces before a

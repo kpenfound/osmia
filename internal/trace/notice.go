@@ -64,6 +64,10 @@ func (r *Repository) SetFeatureStateUnless(ctx context.Context, h Header, to, re
 }
 
 func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string, to, reason string, refused []string, with ...Transaction) (WorkflowState, error) {
+	r, err := r.scoped(h.Workstream)
+	if err != nil {
+		return WorkflowState{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {

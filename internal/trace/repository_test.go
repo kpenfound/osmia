@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -58,6 +59,19 @@ func create(t *testing.T) (*Repository, config.Root, config.Project) {
 	}
 	return r, root, p
 }
+
+// mustScoped returns the workstream's own trace instance, the way every
+// workstream-scoped write and read resolves it: its own directory, lock and
+// Git history, independent of the project's.
+func mustScoped(t *testing.T, r *Repository, stream config.WorkstreamID) *Repository {
+	t.Helper()
+	s, err := r.scoped(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
 func header(kind, id string) Header {
 	return Header{Schema: "osmia.trace." + kind, Version: Version, ID: id, Revision: 1, Project: projectID, Workstream: streamID, At: at, Actor: Actor{Kind: "service", ID: "controller"}, Cause: "owner-message-1", Depth: 2}
 }
@@ -94,8 +108,14 @@ func checkTyped[T Record](t *testing.T, r *Repository, want Record) {
 }
 func TestCreateRoundTripReopen(t *testing.T) {
 	r, root, p := create(t)
-	for _, name := range []string{".git", "charter.md", "kb/entities.json", "notes", "workstreams/" + string(streamID) + "/handed", "workstreams/" + string(streamID) + "/shed", "workstreams/" + string(streamID) + "/amendments", "workstreams/" + string(streamID) + "/questions", "workstreams/" + string(streamID) + "/units", "workstreams/" + string(streamID) + "/agents"} {
+	for _, name := range []string{".git", "charter.md", "kb/entities.json", "notes"} {
 		if _, err := os.Stat(filepath.Join(r.directory, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := mustScoped(t, r, streamID)
+	for _, name := range []string{".git", "workstreams/" + string(streamID) + "/handed", "workstreams/" + string(streamID) + "/shed", "workstreams/" + string(streamID) + "/amendments", "workstreams/" + string(streamID) + "/questions", "workstreams/" + string(streamID) + "/units", "workstreams/" + string(streamID) + "/agents"} {
+		if _, err := os.Stat(filepath.Join(s.directory, name)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -104,7 +124,7 @@ func TestCreateRoundTripReopen(t *testing.T) {
 			t.Fatalf("append %T: %v", v, err)
 		}
 	}
-	before := r.directory
+	before, beforeStream := r.directory, s.directory
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -124,6 +144,10 @@ func TestCreateRoundTripReopen(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(streams, []config.WorkstreamID{streamID}) {
 		t.Fatalf("streams: %v, %v", streams, err)
 	}
+	reopenedStream := mustScoped(t, reopened, streamID)
+	if reopenedStream.directory != beforeStream {
+		t.Fatal("reopened workstream identity changed")
+	}
 	all := specimens()
 	checkTyped[Document](t, reopened, all[0])
 	checkTyped[Transition](t, reopened, all[1])
@@ -136,9 +160,13 @@ func TestCreateRoundTripReopen(t *testing.T) {
 	if out, err := reopened.git(context.Background(), nil, "fsck", "--full"); err != nil {
 		t.Fatalf("git fsck: %v, %s", err, out)
 	}
+	if out, err := reopenedStream.git(context.Background(), nil, "fsck", "--full"); err != nil {
+		t.Fatalf("workstream git fsck: %v, %s", err, out)
+	}
 }
 func TestRevisionsAndTerminalHistory(t *testing.T) {
 	r, _, _ := create(t)
+	s := mustScoped(t, r, streamID)
 	doc := specimens()[0].(Document)
 	terminal := specimens()[1]
 	if err := r.Append(context.Background(), doc); err != nil {
@@ -147,7 +175,7 @@ func TestRevisionsAndTerminalHistory(t *testing.T) {
 	if err := r.Append(context.Background(), terminal); err != nil {
 		t.Fatal(err)
 	}
-	oldHead, err := r.git(context.Background(), nil, "rev-parse", "HEAD")
+	oldHead, err := s.git(context.Background(), nil, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,11 +189,11 @@ func TestRevisionsAndTerminalHistory(t *testing.T) {
 	if err != nil || len(docs) != 2 || docs[0].Content != "# Feature\n" || docs[1].Content != doc.Content {
 		t.Fatalf("history: %#v %v", docs, err)
 	}
-	oldContent, err := r.git(context.Background(), nil, "show", oldHead+":workstreams/"+string(streamID)+"/spec.md")
+	oldContent, err := s.git(context.Background(), nil, "show", oldHead+":workstreams/"+string(streamID)+"/spec.md")
 	if err != nil || oldContent != "# Feature" {
 		t.Fatalf("Git history: %q %v", oldContent, err)
 	}
-	current, err := r.readFile("workstreams/" + string(streamID) + "/spec.md")
+	current, err := s.readFile("workstreams/" + string(streamID) + "/spec.md")
 	if err != nil || string(current) != doc.Content {
 		t.Fatalf("latest document: %s %v", current, err)
 	}
@@ -338,6 +366,7 @@ func TestSymlinksAndGitRedirection(t *testing.T) {
 	for _, mode := range []string{"document", "agent-directory", "inside-alias", "git-directory", "git-config", "git-objects", "hardlink"} {
 		t.Run(mode, func(t *testing.T) {
 			r, _, p := create(t)
+			s := mustScoped(t, r, streamID)
 			sentinel := filepath.Join(p.Clone, "sentinel")
 			if err := os.WriteFile(sentinel, []byte("untouched"), 0600); err != nil {
 				t.Fatal(err)
@@ -349,7 +378,9 @@ func TestSymlinksAndGitRedirection(t *testing.T) {
 				name = "workstreams/" + string(streamID) + "/agents"
 				target = p.Clone
 			case "inside-alias":
-				target = filepath.Join(r.directory, "charter.md")
+				// Two distinct paths inside the same workstream trace
+				// repository must not alias one file.
+				target = filepath.Join(s.directory, "workstreams/"+string(streamID)+"/workstream.json")
 			case "git-directory":
 				name = ".git"
 				target = filepath.Join(p.Clone, ".git")
@@ -359,7 +390,7 @@ func TestSymlinksAndGitRedirection(t *testing.T) {
 				name = ".git/objects"
 				target = p.Clone
 			}
-			full := filepath.Join(r.directory, name)
+			full := filepath.Join(s.directory, name)
 			if err := os.RemoveAll(full); err != nil {
 				t.Fatal(err)
 			}
@@ -394,6 +425,7 @@ func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
 		for _, op := range []string{"record", "publish", "read", "recover"} {
 			t.Run(mode+"/"+op, func(t *testing.T) {
 				r, _, p := create(t)
+				s := mustScoped(t, r, streamID)
 				ctx := context.Background()
 				var err error
 				switch op {
@@ -401,10 +433,10 @@ func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
 					err = r.Append(ctx, specimens()[0])
 					// A handle that made HEAD knows its tree; one that opened
 					// on it lists the tree with Git.
-					r.tree, r.treeHead = nil, ""
+					s.tree, s.treeHead = nil, ""
 				case "recover":
 					injected := errors.New("injected publication failure")
-					r.failPublication = func(step string) error {
+					s.failPublication = func(step string) error {
 						if step == "ref-published" {
 							return injected
 						}
@@ -413,14 +445,14 @@ func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
 					if _, err := r.SetFeatureState(ctx, header("transition", "handed"), "handed", "the owner handed a design"); !errors.Is(err, injected) {
 						t.Fatalf("injection not reached: %v", err)
 					}
-					r.failPublication = nil
+					s.failPublication = nil
 				default:
 					_, err = r.Workflow(streamID, FeatureSubject)
 				}
 				if err != nil {
 					t.Fatal(err)
 				}
-				git := filepath.Join(r.directory, ".git")
+				git := filepath.Join(s.directory, ".git")
 				if err := os.MkdirAll(filepath.Join(git, "objects", "info"), 0700); err != nil {
 					t.Fatal(err)
 				}
@@ -462,7 +494,7 @@ func TestGitStoreIsCheckedBeforeGitRuns(t *testing.T) {
 				if after, err := os.ReadFile(ref); err != nil || string(after) != string(before) {
 					t.Fatalf("Git committed with a tampered store: %s %v", after, err)
 				}
-				if _, err := os.Stat(filepath.Join(r.directory, publicationFile)); op == "recover" && err != nil {
+				if _, err := os.Stat(filepath.Join(s.directory, publicationFile)); op == "recover" && err != nil {
 					t.Fatalf("recovery finished with a tampered store: %v", err)
 				}
 			})
@@ -506,6 +538,7 @@ func TestCheckedEntryAcceptsAVanishedFile(t *testing.T) {
 // listing Git gives for that commit.
 func TestHandleListsTheTreesItCommits(t *testing.T) {
 	r, _, _ := create(t)
+	s := mustScoped(t, r, streamID)
 	ctx := context.Background()
 	if _, err := r.Workflow(streamID, FeatureSubject); err != nil {
 		t.Fatal(err)
@@ -518,38 +551,47 @@ func TestHandleListsTheTreesItCommits(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	steps := []func(){
-		func() {
-			if err := r.Append(ctx, specimens()[0]); err != nil {
-				t.Fatal(err)
-			}
-		},
-		func() { publish(map[string][]byte{"notes/a.md": []byte("a\n")}, nil) },
-		func() { publish(map[string][]byte{"notes/b.md": []byte("b\n")}, []string{"notes/a.md"}) },
-		func() {
-			if _, err := r.SetFeatureState(ctx, header("transition", "handed"), "handed", "the owner handed a design"); err != nil {
-				t.Fatal(err)
-			}
-		},
-	}
-	for i, step := range steps {
-		step()
-		ref, err := os.ReadFile(filepath.Join(r.directory, ".git", "refs", "heads", "main"))
+	check := func(i int, repo *Repository) {
+		t.Helper()
+		ref, err := os.ReadFile(filepath.Join(repo.directory, ".git", "refs", "heads", "main"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		derived, head := r.tree, r.treeHead
+		derived, head := repo.tree, repo.treeHead
 		if head != strings.TrimSpace(string(ref)) {
 			t.Fatalf("step %d: the handle lists %q, HEAD is %q", i, head, ref)
 		}
-		r.tree, r.treeHead = nil, ""
-		_, listed, err := r.headTree(ctx)
+		repo.tree, repo.treeHead = nil, ""
+		_, listed, err := repo.headTree(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(derived, listed) {
 			t.Fatalf("step %d: the handle lists\n%v\nGit lists\n%v", i, derived, listed)
 		}
+	}
+	steps := []struct {
+		run  func()
+		repo *Repository
+	}{
+		// This document is workstream-scoped, so it lands in the workstream's
+		// own dedicated trace repository, not the project's.
+		{func() {
+			if err := r.Append(ctx, specimens()[0]); err != nil {
+				t.Fatal(err)
+			}
+		}, s},
+		{func() { publish(map[string][]byte{"notes/a.md": []byte("a\n")}, nil) }, r},
+		{func() { publish(map[string][]byte{"notes/b.md": []byte("b\n")}, []string{"notes/a.md"}) }, r},
+		{func() {
+			if _, err := r.SetFeatureState(ctx, header("transition", "handed"), "handed", "the owner handed a design"); err != nil {
+				t.Fatal(err)
+			}
+		}, s},
+	}
+	for i, step := range steps {
+		step.run()
+		check(i, step.repo)
 	}
 	if _, ok := r.tree["notes/a.md"]; ok {
 		t.Fatal("a removed path is still listed")
@@ -562,7 +604,8 @@ func TestHeadTreeRefusesAnInvalidRef(t *testing.T) {
 	for _, ref := range []string{"main~1", "-p", "HEAD", strings.Repeat("a", 39)} {
 		t.Run(ref, func(t *testing.T) {
 			r, _, _ := create(t)
-			if err := os.WriteFile(filepath.Join(r.directory, ".git", "refs", "heads", "main"), []byte(ref+"\n"), 0600); err != nil {
+			s := mustScoped(t, r, streamID)
+			if err := os.WriteFile(filepath.Join(s.directory, ".git", "refs", "heads", "main"), []byte(ref+"\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := r.Workflow(streamID, FeatureSubject); err == nil || !strings.Contains(err.Error(), "invalid trace HEAD") {
@@ -602,11 +645,12 @@ func TestCorruptionPreservesValidHistory(t *testing.T) {
 	for _, damage := range []string{"malformed", "version", "identity", "schema", "duplicate-key", "unknown-field", "partial-line", "revision-gap", "missing-file"} {
 		t.Run(damage, func(t *testing.T) {
 			r, root, p := create(t)
+			s := mustScoped(t, r, streamID)
 			d := specimens()[0].(Document)
 			if err := r.Append(context.Background(), d); err != nil {
 				t.Fatal(err)
 			}
-			name := filepath.Join(r.directory, recordPath(d))
+			name := filepath.Join(s.directory, recordPath(d))
 			data, err := os.ReadFile(name)
 			if err != nil {
 				t.Fatal(err)
@@ -677,6 +721,7 @@ func TestCorruptionPreservesValidHistory(t *testing.T) {
 }
 func TestConcurrentAppendAndFailedCommit(t *testing.T) {
 	r, root, p := create(t)
+	s := mustScoped(t, r, streamID)
 	var wg sync.WaitGroup
 	results := make(chan error, 2)
 	for range 2 {
@@ -700,7 +745,7 @@ func TestConcurrentAppendAndFailedCommit(t *testing.T) {
 	d.Revision = 2
 	d.Content = "pending"
 	// This index lock permits read-only history checks, then refuses the commit.
-	lock := filepath.Join(r.directory, ".git/index.lock")
+	lock := filepath.Join(s.directory, ".git/index.lock")
 	if err := os.WriteFile(lock, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -724,6 +769,93 @@ func TestConcurrentAppendAndFailedCommit(t *testing.T) {
 		t.Fatalf("pending history: %#v %v", docs, err)
 	}
 }
+
+// TestWorkstreamLockDoesNotSerializeAnotherWorkstreamOrTheProject is the
+// isolation the split exists for: each workstream's own trace is its own
+// Git repository with its own lock, so a write that happens to hold one
+// workstream's own lock for a long time never serializes a write to another
+// workstream or a read of the project's own trace, since neither shares a
+// lock or a Git repository with it. Before the split, every workstream and
+// the project shared the one repository's lock, so this would have waited.
+func TestWorkstreamLockDoesNotSerializeAnotherWorkstreamOrTheProject(t *testing.T) {
+	r, _, _ := create(t)
+	second := config.WorkstreamID("w_00000000000000000000000000000002")
+	if err := r.CreateWorkstream(context.Background(), second, at, owner); err != nil {
+		t.Fatal(err)
+	}
+	busy := mustScoped(t, r, second)
+	holding := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		busy.mu.Lock()
+		close(holding)
+		<-release
+		busy.mu.Unlock()
+	}()
+	<-holding
+	defer close(release)
+
+	done := make(chan error, 1)
+	go func() {
+		started := time.Now()
+		if err := r.Append(context.Background(), specimens()[0]); err != nil {
+			done <- err
+			return
+		}
+		if _, err := r.Charter(context.Background(), at); err != nil {
+			done <- err
+			return
+		}
+		if elapsed := time.Since(started); elapsed > time.Second {
+			done <- fmt.Errorf("waited %s on another workstream's own lock", elapsed)
+			return
+		}
+		done <- nil
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a write to one workstream and a read of the project's own trace waited on another workstream's own lock")
+	}
+}
+
+// Observe is called once, on the project instance, before or after a
+// workstream instance exists. Either way it must still hear that
+// workstream's own commits: service.go relies on this to publish the event
+// stream every workstream write feeds, and a missed call here previously
+// left API and test subscribers waiting on a slow fallback poll instead of
+// the commit's own wake.
+func TestObserveReportsWorkstreamCommitsOnTheProjectInstance(t *testing.T) {
+	r, _, _ := create(t)
+	// CreateWorkstream, inside create, already opened and cached the
+	// workstream's own instance before Observe is called below.
+	var commits []Commit
+	r.Observe(func(c Commit) { commits = append(commits, c) })
+	if err := r.Append(context.Background(), specimens()[0]); err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 1 || !slices.Contains(commits[0].Paths, "workstreams/"+string(streamID)+"/documents.jsonl") {
+		t.Fatalf("observed commits: %+v", commits)
+	}
+	// A workstream opened after Observe was called delegates just the same.
+	second := config.WorkstreamID("w_00000000000000000000000000000002")
+	if err := r.CreateWorkstream(context.Background(), second, at, owner); err != nil {
+		t.Fatal(err)
+	}
+	commits = nil
+	h := header("document", "spec")
+	h.Workstream = second
+	if err := r.Append(context.Background(), Document{Header: h, Path: "spec.md", Content: "# Feature\n"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 1 || !slices.Contains(commits[0].Paths, "workstreams/"+string(second)+"/documents.jsonl") {
+		t.Fatalf("observed commits from the second workstream instance: %+v", commits)
+	}
+}
+
 func TestReopenAfterProcessExit(t *testing.T) {
 	if os.Getenv("OSMIA_TRACE_TEST_CHILD") == "1" {
 		root, err := config.ResolveRoot(os.Getenv("OSMIA_TRACE_TEST_ROOT"), "")
@@ -759,7 +891,8 @@ func TestReopenAfterProcessExit(t *testing.T) {
 
 func TestUncommittedNewLog(t *testing.T) {
 	r, root, p := create(t)
-	lock := filepath.Join(r.directory, ".git/index.lock")
+	s := mustScoped(t, r, streamID)
+	lock := filepath.Join(s.directory, ".git/index.lock")
 	if err := os.WriteFile(lock, nil, 0600); err != nil {
 		t.Fatal(err)
 	}

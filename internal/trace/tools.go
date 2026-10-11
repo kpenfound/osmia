@@ -42,9 +42,13 @@ func toolPayload(raw []byte) ToolPayload {
 // BeginTool records the call before its handler runs. A missing completion
 // after restart means the effect is uncertain, never that it did not happen.
 func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, tool coreadapter.Tool, raw json.RawMessage, now func() time.Time) (func(context.Context, json.RawMessage, error) error, error) {
+	stream := config.WorkstreamID(scope.Workstream)
+	r, err := r.scoped(stream)
+	if err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	stream := config.WorkstreamID(scope.Workstream)
 	log, _, err := r.loadWorkflow(stream)
 	if err != nil {
 		return nil, err
