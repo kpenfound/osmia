@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/trace"
@@ -13,7 +15,9 @@ import (
 // trace so that migrating it from the shared layout can never complete,
 // before the service starts, and confirms the service still starts, the
 // broken project is simply not scheduled, and the other project's
-// workstream keeps running normally.
+// workstream keeps running normally. It also shows that the migration
+// failure itself, which the standard log package once reported, now lands
+// as a structured record through the service's own logger.
 func TestTraceMigrationFailureDoesNotBlockOtherProjects(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -25,10 +29,20 @@ func TestTraceMigrationFailureDoesNotBlockOtherProjects(t *testing.T) {
 	must(t, err)
 	must(t, os.MkdirAll(filepath.Join(directory, "workstreams", "w_deadbeefdeadbeefdeadbeefdeadbeef"), 0700))
 
+	var logged syncBuffer
+	f.opts.Logger = slog.New(slog.NewJSONHandler(&logged, nil))
+
 	otherEntered, otherRelease := f.block(otherProject, "first")
 	s, err := Start(ctx, f.opts)
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
+
+	// The migration failure is logged as a structured record naming the
+	// project, not a plain-text line from the standard log package.
+	decodeStructuredLines(t, logged.String())
+	if !strings.Contains(logged.String(), "project trace migration incomplete") || !strings.Contains(logged.String(), string(project)) {
+		t.Fatalf("the migration failure was not logged as a structured record: %s", logged.String())
+	}
 
 	// The broken project never opens a trace and is never scheduled; the
 	// other project runs as usual.

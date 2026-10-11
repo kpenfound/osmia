@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -307,7 +307,7 @@ func (c *workspaceCleanup) attempt(ctx context.Context, name string, remove func
 		c.failures = map[string]cleanupFailure{}
 	}
 	if c.failures[name].err != err.Error() {
-		log.Printf("osmia: workspace %s of project %s stays: %v; retrying in %s", name, c.cfg.Project.ID, err, cleanupRetry)
+		ghlog.Logger(ctx).Warn("workspace cleanup retrying", "workspace", name, "project", string(c.cfg.Project.ID), "error", err.Error(), "retry", cleanupRetry.String())
 	}
 	c.failures[name] = cleanupFailure{err: err.Error(), retry: now.Add(cleanupRetry)}
 	return nil

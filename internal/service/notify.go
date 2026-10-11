@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -294,22 +295,27 @@ func (n *notifier) send(ctx context.Context, path, webhook string, open map[stri
 			}
 			continue
 		}
+		attemptStart := time.Now()
 		err := n.post(ctx, webhook, body)
 		if ctx.Err() != nil {
 			return time.Time{}
 		}
 		now := n.s.now()
 		n.mu.Lock()
+		kind, workstream := rec.Kind, rec.Workstream
+		var attempts int
+		var gaveUp bool
 		if err == nil {
 			rec.settle(notificationSent, now)
 			n.ledger.Failure = nil
 		} else {
 			rec.Attempts++
 			rec.LastError = err.Error()
+			attempts = rec.Attempts
 			failure := &notifyFailure{Kind: rec.Kind, Workstream: rec.Workstream, Reason: rec.LastError, Attempts: rec.Attempts, At: now}
 			if rec.Attempts >= notifyAttempts {
 				rec.settle(notificationGaveUp, now)
-				failure.GaveUp = true
+				failure.GaveUp, gaveUp = true, true
 			} else {
 				rec.Next = time.Now().Add(n.retry << (rec.Attempts - 1))
 				if due.IsZero() || rec.Next.Before(due) {
@@ -319,6 +325,17 @@ func (n *notifier) send(ctx context.Context, path, webhook string, open map[stri
 			n.ledger.Failure = failure
 		}
 		n.mu.Unlock()
+		// Never the webhook URL or the posted body: only the kind, the
+		// workstream and the outcome of the attempt.
+		if err != nil {
+			level := slog.LevelWarn
+			if gaveUp {
+				level = slog.LevelError
+			}
+			n.s.log().Log(ctx, level, "notification post attempt failed", "kind", kind, "workstream", workstream, "attempts", attempts, "gave_up", gaveUp, "duration", time.Since(attemptStart).String(), "error", err.Error())
+		} else {
+			n.s.log().Info("notification post attempt succeeded", "kind", kind, "workstream", workstream, "duration", time.Since(attemptStart).String())
+		}
 		if !n.save(path) {
 			return time.Time{}
 		}

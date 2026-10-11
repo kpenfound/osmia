@@ -582,10 +582,15 @@ never raw file contents.
 
 For exit 3, start the service and verify matching root/socket and permissions.
 For exit 6 at startup, run `osmia doctor`, which names the cause and its fix. Do not delete a
-live-owned socket. When a running service stops after a failure, stderr (the
-`service.log` of a detached service) names it on one line after the time it
-stopped, starting with the project whose work failed. Credentials in URLs and
-the `GITHUB_TOKEN` value are redacted. Unsupported responses identify unavailable operations; restart-required
+live-owned socket. For exit 6, the cause differs by how `serve` was invoked.
+The `serve --detach` launcher reports a child that never became ready as
+human-readable text on the terminal that started it, one line naming the
+cause after the time it happened, with credentials in URLs and the
+`GITHUB_TOKEN` value redacted. A foreground `osmia serve`, or the detached
+child itself stopping after it started, reports its own failure as an
+error-level record in its [structured log](running.md#service-log) — its own
+standard error, or `service.log` for the detached child — with the same
+redaction. Unsupported responses identify unavailable operations; restart-required
 responses instruct the operator to stop and start the service.
 
 Detached management, install/upgrade commands and completion are

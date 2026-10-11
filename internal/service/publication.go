@@ -11,6 +11,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -351,6 +352,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(p.repository.Project()), Workstream: string(stream)})
 	if result, err := p.outcome(stream, in.Approval); err != nil || result != nil {
 		if err != nil {
 			return coreadapter.OperationResult{}, err

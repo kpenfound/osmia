@@ -1,13 +1,18 @@
 package pulls
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
 func TestGitHubFindsAndCreatesPullRequestsWithTheToken(t *testing.T) {
@@ -149,5 +154,181 @@ func TestCredentialed(t *testing.T) {
 	}
 	if Credentialed(nil) || !Credentialed(silentClient{}) {
 		t.Fatal("no client holds no credential, and a client that does not say is assumed to")
+	}
+}
+
+// ghRecord is one decoded GitHub activity log line.
+type ghRecord struct {
+	Activity   string `json:"activity"`
+	Access     string `json:"access"`
+	Action     string `json:"action"`
+	Repository string `json:"repository"`
+	Method     string `json:"method"`
+	Path       string `json:"path"`
+	Status     int    `json:"status"`
+	NoResponse bool   `json:"no_response"`
+	Outcome    string `json:"outcome"`
+	Error      string `json:"error"`
+	Level      string `json:"level"`
+}
+
+// decodeGHRecords parses every line of buf as one JSON object, failing the
+// test if any line does not parse: every line a logger writes must be valid
+// JSON with a level and a message.
+func decodeGHRecords(t *testing.T, buf *bytes.Buffer) []ghRecord {
+	t.Helper()
+	var records []ghRecord
+	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var r struct {
+			ghRecord
+			Msg string `json:"msg"`
+		}
+		if err := json.Unmarshal([]byte(line), &r); err != nil || r.Level == "" || r.Msg == "" {
+			t.Fatalf("line does not parse as a structured record: %s: %v", line, err)
+		}
+		records = append(records, r.ghRecord)
+	}
+	return records
+}
+
+// TestGitHubLogsOneRecordPerRequest shows one GitHub activity record for
+// each of Find, Create and Update, on both success and failure, with the
+// action, method, path, repository, status and the marker that tells them
+// apart from any other kind of record.
+func TestGitHubLogsOneRecordPerRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/pulls":
+			io.WriteString(w, `[{"number":7,"html_url":"u","state":"open","head":{"ref":"osmia/w","sha":"abc","repo":{"full_name":"owner/widgets"}},"base":{"ref":"main"}}]`)
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/widgets/pulls":
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, `{"number":8,"state":"open","head":{"ref":"osmia/w","sha":"abc"},"base":{"ref":"main"}}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/acme/widgets/pulls/8":
+			io.WriteString(w, `{"number":8,"state":"open","head":{"ref":"osmia/w","sha":"abc"},"base":{"ref":"main"}}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	g := GitHub{BaseURL: server.URL, Token: "secret", HTTP: server.Client()}
+	var buf bytes.Buffer
+	ctx := ghlog.WithLogger(context.Background(), slog.New(slog.NewJSONHandler(&buf, nil)))
+	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: "p_1", Workstream: "w_1"})
+
+	if _, err := g.Find(ctx, "acme/widgets", "owner/widgets", "osmia/w"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Create(ctx, "acme/widgets", New{HeadRepository: "owner/widgets", Head: "osmia/w", Base: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Update(ctx, "acme/widgets", 8, Update{Base: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Find(ctx, "acme/missing", "owner/widgets", "osmia/w"); err == nil {
+		t.Fatal("expected a 404")
+	}
+	// A transport failure: no response arrives at all.
+	broken := GitHub{BaseURL: "http://127.0.0.1:1", Token: "secret", HTTP: server.Client()}
+	if _, err := broken.Find(ctx, "acme/widgets", "owner/widgets", "osmia/w"); err == nil {
+		t.Fatal("expected a transport failure")
+	}
+
+	records := decodeGHRecords(t, &buf)
+	if len(records) != 5 {
+		t.Fatalf("records %+v", records)
+	}
+	want := []struct {
+		action, access, method string
+		status                 int
+		noResponse             bool
+	}{
+		{"pulls.find", ghlog.Read, http.MethodGet, http.StatusOK, false},
+		{"pulls.create", ghlog.Write, http.MethodPost, http.StatusCreated, false},
+		{"pulls.update", ghlog.Write, http.MethodPatch, http.StatusOK, false},
+		{"pulls.find", ghlog.Read, http.MethodGet, http.StatusNotFound, false},
+		{"pulls.find", ghlog.Read, http.MethodGet, 0, true},
+	}
+	for i, r := range records {
+		w := want[i]
+		if r.Activity != ghlog.MarkerValue || r.Action != w.action || r.Access != w.access || r.Method != w.method || r.Status != w.status || r.NoResponse != w.noResponse {
+			t.Fatalf("record %d: %+v, want %+v", i, r, w)
+		}
+		if r.Repository != "acme/widgets" && r.Repository != "acme/missing" {
+			t.Fatalf("record %d missing its repository: %+v", i, r)
+		}
+		if i >= 3 && (r.Outcome != "failed" || r.Error == "" || r.Level != "ERROR") {
+			t.Fatalf("failed request %d did not log its failure at Error: %+v", i, r)
+		}
+		if i < 3 && (r.Outcome != "ok" || r.Error != "" || r.Level != "INFO") {
+			t.Fatalf("successful request %d: %+v", i, r)
+		}
+		if strings.Contains(r.Error, "secret") {
+			t.Fatalf("record %d leaked the token: %+v", i, r)
+		}
+	}
+}
+
+// alwaysFailingWriter never writes successfully, standing in for a broken
+// log destination.
+type alwaysFailingWriter struct{}
+
+func (alwaysFailingWriter) Write([]byte) (int, error) { return 0, errBrokenWriter }
+
+var errBrokenWriter = errors.New("broken log writer")
+
+// TestGitHubActionSucceedsEvenWhenTheLogWriterFails shows that a failing log
+// destination never changes the result of the GitHub action it would have
+// logged.
+func TestGitHubActionSucceedsEvenWhenTheLogWriterFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `[{"number":7,"html_url":"u","state":"open","head":{"ref":"osmia/w","sha":"abc","repo":{"full_name":"owner/widgets"}},"base":{"ref":"main"}}]`)
+	}))
+	defer server.Close()
+	g := GitHub{BaseURL: server.URL, Token: "secret", HTTP: server.Client()}
+	ctx := ghlog.WithLogger(context.Background(), slog.New(slog.NewJSONHandler(alwaysFailingWriter{}, nil)))
+	found, err := g.Find(ctx, "acme/widgets", "owner/widgets", "osmia/w")
+	if err != nil || len(found) != 1 || found[0].Number != 7 {
+		t.Fatalf("a failing log writer changed the action's result: %+v %v", found, err)
+	}
+}
+
+// TestGitHubLogNeverCarriesSecretsOrPullRequestBodies shows that creating and
+// updating a pull request with a title and body, while every known secret
+// environment variable holds a sentinel value, logs neither those sentinels
+// nor the title or body text: the GitHub activity record carries only the
+// action, method, path, status and outcome, never the request it sent.
+func TestGitHubLogNeverCarriesSecretsOrPullRequestBodies(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "sentinel-github-token")
+	t.Setenv("TS_AUTHKEY", "sentinel-ts-authkey")
+	t.Setenv("OPENROUTER_API_KEY", "sentinel-jev-key")
+	const title = "sentinel pull request title"
+	const body = "sentinel pull request body text"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, `{"number":8,"state":"open","head":{"ref":"osmia/w","sha":"abc"},"base":{"ref":"main"}}`)
+		default:
+			io.WriteString(w, `{"number":8,"state":"open","head":{"ref":"osmia/w","sha":"abc"},"base":{"ref":"main"}}`)
+		}
+	}))
+	defer server.Close()
+	g := GitHub{BaseURL: server.URL, Token: "sentinel-github-token", HTTP: server.Client()}
+	var buf bytes.Buffer
+	ctx := ghlog.WithLogger(context.Background(), slog.New(slog.NewJSONHandler(&buf, nil)))
+	if _, err := g.Create(ctx, "acme/widgets", New{HeadRepository: "owner/widgets", Head: "osmia/w", Base: "main", Title: title, Body: body}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Update(ctx, "acme/widgets", 8, Update{Title: title, Body: body}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, sentinel := range []string{"sentinel-github-token", "sentinel-ts-authkey", "sentinel-jev-key", title, body} {
+		if strings.Contains(out, sentinel) {
+			t.Fatalf("log leaked %q: %s", sentinel, out)
+		}
 	}
 }

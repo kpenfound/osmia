@@ -14,6 +14,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
 // Ref names one issue.
@@ -76,13 +79,20 @@ type GitHub struct {
 }
 
 func (g GitHub) Fetch(ctx context.Context, ref Ref) (string, error) {
+	start := time.Now()
+	text, status, err := g.fetch(ctx, ref)
+	ghlog.Log(ctx, start, ghlog.Entry{Action: "issues.fetch", Access: ghlog.Read, Repository: ref.Owner + "/" + ref.Repo, Method: http.MethodGet, Path: fmt.Sprintf("/repos/%s/%s/issues/%d", ref.Owner, ref.Repo, ref.Number), Status: status, NoResponse: status == 0, Err: err})
+	return text, err
+}
+
+func (g GitHub) fetch(ctx context.Context, ref Ref) (text string, status int, err error) {
 	base := g.BaseURL
 	if base == "" {
 		base = "https://api.github.com"
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/repos/%s/%s/issues/%d", strings.TrimSuffix(base, "/"), url.PathEscape(ref.Owner), url.PathEscape(ref.Repo), ref.Number), nil)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	if g.Token != "" {
@@ -94,11 +104,12 @@ func (g GitHub) Fetch(ctx context.Context, ref Ref) (string, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetch %s: request failed", ref.URL())
+		return "", 0, fmt.Errorf("fetch %s: request failed", ref.URL())
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("fetch %s: GitHub answered %d", ref.URL(), resp.StatusCode)
+	status = resp.StatusCode
+	if status != http.StatusOK {
+		return "", status, fmt.Errorf("fetch %s: GitHub answered %d", ref.URL(), status)
 	}
 	var issue struct {
 		Title       *string         `json:"title"`
@@ -107,17 +118,17 @@ func (g GitHub) Fetch(ctx context.Context, ref Ref) (string, error) {
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponse+1))
 	if err != nil || len(data) > MaxResponse {
-		return "", fmt.Errorf("fetch %s: unreadable or oversized response", ref.URL())
+		return "", status, fmt.Errorf("fetch %s: unreadable or oversized response", ref.URL())
 	}
 	if err := json.Unmarshal(data, &issue); err != nil || issue.Title == nil {
-		return "", fmt.Errorf("fetch %s: invalid response", ref.URL())
+		return "", status, fmt.Errorf("fetch %s: invalid response", ref.URL())
 	}
 	if issue.PullRequest != nil {
-		return "", fmt.Errorf("fetch %s: the number is a pull request, not an issue", ref.URL())
+		return "", status, fmt.Errorf("fetch %s: the number is a pull request, not an issue", ref.URL())
 	}
 	body := ""
 	if issue.Body != nil {
 		body = *issue.Body
 	}
-	return Render(*issue.Title, body), nil
+	return Render(*issue.Title, body), status, nil
 }

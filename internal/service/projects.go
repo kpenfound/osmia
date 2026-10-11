@@ -460,8 +460,14 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 	s.mu.Unlock()
 	var closed error
 	if active != nil {
+		s.log().Info("project draining", "project", string(active.id), "reason", "removed")
 		active.controller.Drain()
 		closed = s.finishDraining(active)
+		if closed != nil {
+			s.log().Error("project stopped", "project", string(active.id), "reason", "removed", "error", closed.Error())
+		} else {
+			s.log().Info("project stopped", "project", string(active.id), "reason", "removed")
+		}
 	}
 	if err := errors.Join(closed, s.refreshRuntime()); err != nil {
 		return ProjectResponse{}, &APIError{Internal, "the project is removed from configuration but its runtime state did not close cleanly; restart the service"}

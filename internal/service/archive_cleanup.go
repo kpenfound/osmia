@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -223,7 +222,7 @@ func (c *archiveCleanup) beginDeletion(stream config.WorkstreamID) error {
 		return err
 	}
 	if moved {
-		log.Printf("osmia: archive cleanup is deleting the trace of workstream %s of project %s", stream, c.workspaces.cfg.Project.ID)
+		c.s.log().Info(fmt.Sprintf("archive cleanup is deleting the trace of workstream %s of project %s", stream, c.workspaces.cfg.Project.ID), "component", "archive_cleanup", "project", string(c.workspaces.cfg.Project.ID), "workstream", string(stream))
 	}
 	c.startRemoval(stream)
 	return nil
@@ -254,10 +253,10 @@ func (c *archiveCleanup) startRemoval(stream config.WorkstreamID) {
 		delete(c.removing, stream)
 		c.mu.Unlock()
 		if err != nil {
-			log.Printf("osmia: archive cleanup could not remove the trace of workstream %s of project %s: %v; it will retry", stream, project, err)
+			c.s.log().Warn(fmt.Sprintf("archive cleanup could not remove the trace of workstream %s of project %s: %v; it will retry", stream, project, err), "component", "archive_cleanup", "project", string(project), "workstream", string(stream), "error", err.Error())
 			return
 		}
-		log.Printf("osmia: archive cleanup removed the trace of workstream %s of project %s", stream, project)
+		c.s.log().Info(fmt.Sprintf("archive cleanup removed the trace of workstream %s of project %s", stream, project), "component", "archive_cleanup", "project", string(project), "workstream", string(stream))
 	}()
 }
 
@@ -284,7 +283,7 @@ func (c *archiveCleanup) reconcile(archived []runtime.Archive) error {
 				return err
 			}
 			c.logDeferral(a.Workstream, "")
-			log.Printf("osmia: archive cleanup completed for workstream %s of project %s", a.Workstream, project)
+			c.s.log().Info(fmt.Sprintf("archive cleanup completed for workstream %s of project %s", a.Workstream, project), "component", "archive_cleanup", "project", string(project), "workstream", string(a.Workstream))
 			continue
 		}
 		pending, err := trace.WorkstreamTraceDeletionPending(root, project, a.Workstream)
@@ -316,7 +315,7 @@ func (c *archiveCleanup) logDeferral(stream config.WorkstreamID, reason string) 
 		return
 	}
 	c.deferred[stream] = reason
-	log.Printf("osmia: archive cleanup of workstream %s of project %s deferred: %s", stream, c.workspaces.cfg.Project.ID, reason)
+	c.s.log().Info(fmt.Sprintf("archive cleanup of workstream %s of project %s deferred: %s", stream, c.workspaces.cfg.Project.ID, reason), "component", "archive_cleanup", "project", string(c.workspaces.cfg.Project.ID), "workstream", string(stream), "reason", reason)
 }
 
 // learningsIncorporated reports whether the librarian refresh covering

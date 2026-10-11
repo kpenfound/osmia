@@ -5,17 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/redact"
 	"github.com/kpenfound/osmia/internal/service"
 )
 
@@ -43,13 +47,28 @@ func rootFlag(root config.Root) string {
 	return ""
 }
 
-func runService(ctx context.Context, root config.Root, detached bool, stdout io.Writer) error {
+// baseServiceOptions builds the service's own Options from root and its
+// structured logger, before enforcement. Tests override it, the same way
+// they override detachedCommand and enforcement, to inject a fake GitHub
+// client into a detached child subprocess that exercises a real GitHub
+// action through serve's actual process boundary against a fake server.
+var baseServiceOptions = func(root config.Root, logger *slog.Logger) service.Options {
+	return service.Options{Config: root.Options(""), Build: build(), Logger: logger}
+}
+
+func runService(ctx context.Context, root config.Root, detached bool, stdout io.Writer, logger *slog.Logger) error {
 	if err := os.MkdirAll(root.String(), 0700); err != nil {
 		return err
 	}
 	if detached {
 		return detach(ctx, root, stdout)
 	}
+	// This process is the service itself (foreground or the detached
+	// child): give embedded code's standard log.Printf calls, and any
+	// slog top-level call that bypasses logger, the same structured
+	// handler as the service's own records for as long as it runs.
+	restore := installGlobalLog(logger)
+	defer restore()
 	ready := os.Getenv(readinessEnv) == "3"
 	os.Unsetenv(readinessEnv)
 	var pipe *os.File
@@ -57,7 +76,7 @@ func runService(ctx context.Context, root config.Root, detached bool, stdout io.
 		pipe = os.NewFile(3, "service-readiness")
 		defer pipe.Close()
 	}
-	s, err := service.Start(ctx, service.Enforce(service.Options{Config: root.Options(""), Build: build()}, enforcement(root)))
+	s, err := service.Start(ctx, service.Enforce(baseServiceOptions(root, logger), enforcement(root)))
 	if err != nil {
 		return err
 	}
@@ -89,6 +108,74 @@ func reportServeFailure(stderr io.Writer, err error, at time.Time) {
 		return
 	}
 	fmt.Fprintln(stderr, "service startup failed; run osmia doctor to find the cause, and stop any existing owner before starting another")
+}
+
+// logServeFailure records why the service process itself failed, at
+// startup or after it started, as one error-level structured record on
+// logger: a foreground osmia serve logs it to its own standard error, and
+// the detached child logs it to <root>/service.log, which is its own
+// standard error. It keeps failureText's redaction and today's guidance.
+func logServeFailure(logger *slog.Logger, err error) {
+	if stopped := (stoppedError{}); errors.As(err, &stopped) {
+		logger.Error("service stopped after a failure", "error", failureText(stopped.err), "guidance", "fix the cause above, then start the service again")
+		return
+	}
+	logger.Error("service startup failed", "guidance", "run osmia doctor to find the cause, and stop any existing owner before starting another")
+}
+
+// newServiceLogger builds the structured logger every line the service
+// process writes to w, its own standard error, goes through: the service's
+// own records, embedded Tailscale's and the GitHub activity log. A
+// redacting writer bounds it underneath, so a record built without
+// failureText's own redaction still never carries a known secret.
+func newServiceLogger(w io.Writer) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(redactingWriter{w}, nil))
+}
+
+// globalLogMu guards the standard log package's output and slog's default
+// logger, both process-wide state, across every call to installGlobalLog in
+// this process.
+var globalLogMu sync.Mutex
+
+// installGlobalLog tries to take globalLogMu and route the standard log
+// package's output, and slog's default logger, through logger:
+// slog.SetDefault makes the log package's default Logger write through
+// logger's handler, which catches a dependency linked into serve (e.g.
+// busybees/core or tailscale code other than tsnet's UserLogf) that still
+// calls log.Printf. If another service already running in this process
+// holds the lock, installGlobalLog installs nothing — that service's own
+// structured handler already receives every standard-log call, since both
+// go through the same process-wide defaults — and returns a no-op restore,
+// so a second service started in the same process (as in tests that run
+// serve in-process) never blocks waiting for the first to stop. Otherwise
+// the caller must call the returned restore exactly once, when the service
+// it represents stops, to give back the previous defaults and release the
+// lock.
+func installGlobalLog(logger *slog.Logger) (restore func()) {
+	if !globalLogMu.TryLock() {
+		return func() {}
+	}
+	previousDefault := slog.Default()
+	previousOutput := log.Writer()
+	previousFlags := log.Flags()
+	slog.SetDefault(logger)
+	return func() {
+		slog.SetDefault(previousDefault)
+		log.SetOutput(previousOutput)
+		log.SetFlags(previousFlags)
+		globalLogMu.Unlock()
+	}
+}
+
+// redactingWriter redacts known secrets from every write, a final guard
+// under the structured logger besides each record's own redaction.
+type redactingWriter struct{ w io.Writer }
+
+func (r redactingWriter) Write(p []byte) (int, error) {
+	if _, err := io.WriteString(r.w, redact.Secrets(string(p), redact.KnownSecrets()...)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 // credentialURL matches the user information of a URL, which may hold a

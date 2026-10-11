@@ -636,7 +636,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		if !decode(w, r, &v) {
 			return
 		}
-		err = s.store.ClearPause(v, runtime.PauseOwner)
+		err = s.clearPause(v)
 	case r.Method == http.MethodPut && r.URL.Path == Prefix+"/runtime/priority":
 		var v PriorityRequest
 		if !decode(w, r, &v) {

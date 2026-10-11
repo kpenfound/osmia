@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -457,5 +460,65 @@ func TestReplanningWaitsForWritersWithoutHoldingReadOnlyReview(t *testing.T) {
 	must(t, json.Unmarshal(raw, &evidence))
 	if evidence.Commit == "" || evidence.Content != "work captured before done\n" {
 		t.Fatalf("chief cannot inspect unfinished captured work: %s", raw)
+	}
+}
+
+// TestRemoteFileLogsOneGitHubActivityRecordPerRequest shows one record for
+// the commit resolution and one for the content read, each with the
+// marker, a read access, the repository and a status, whether the overall
+// call succeeds or a later request fails.
+func TestRemoteFileLogsOneGitHubActivityRecordPerRequest(t *testing.T) {
+	t.Parallel()
+	const commit = "0123456789012345678901234567890123456789"
+	calls := 0
+	status := http.StatusOK
+	client := &http.Client{Transport: remoteFileTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		body := `{"sha":"` + commit + `"}`
+		if calls == 2 {
+			if status != http.StatusOK {
+				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(`{}`)), Header: http.Header{}}, nil
+			}
+			body = `{"type":"file","encoding":"base64","content":"` + base64.StdEncoding.EncodeToString([]byte("# Referenced design\n")) + `"}`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+	})}
+	var buf bytes.Buffer
+	ctx := ghlog.WithLogger(context.Background(), slog.New(slog.NewJSONHandler(&buf, nil)))
+	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: "p_1", Workstream: "w_1", Unit: "u_1"})
+
+	if _, err := githubFile(ctx, client, "fixture-token", remoteFile{Repository: "https://github.com/example/project.git", Ref: "main", Path: "docs/design.md"}); err != nil {
+		t.Fatal(err)
+	}
+	status = http.StatusForbidden
+	calls = 0
+	if _, err := githubFile(ctx, client, "fixture-token", remoteFile{Repository: "https://github.com/example/project.git", Ref: "main", Path: "docs/design.md"}); err == nil {
+		t.Fatal("expected the contents request to fail")
+	}
+
+	var records []struct {
+		Activity, Access, Action, Repository, Method, Project, Workstream, Unit string
+		Status                                                                  int
+	}
+	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+		var r struct {
+			Activity, Access, Action, Repository, Method, Project, Workstream, Unit string
+			Status                                                                  int
+		}
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("line does not parse as JSON: %s: %v", line, err)
+		}
+		records = append(records, r)
+	}
+	if len(records) != 4 {
+		t.Fatalf("records %+v", records)
+	}
+	wantActions := []string{"remote_file.commit", "remote_file.contents", "remote_file.commit", "remote_file.contents"}
+	wantStatus := []int{http.StatusOK, http.StatusOK, http.StatusOK, http.StatusForbidden}
+	for i, r := range records {
+		if r.Activity != ghlog.MarkerValue || r.Access != ghlog.Read || r.Action != wantActions[i] || r.Method != http.MethodGet ||
+			r.Repository != "example/project" || r.Status != wantStatus[i] || r.Project != "p_1" || r.Workstream != "w_1" || r.Unit != "u_1" {
+			t.Fatalf("record %d: %+v", i, r)
+		}
 	}
 }
