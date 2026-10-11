@@ -805,7 +805,7 @@ func (s *Service) openAll(cfg *config.Config) ([]*activeProject, error) {
 		p, err := s.open(cfg.For(id))
 		if err != nil {
 			if errors.Is(err, trace.ErrMigrationIncomplete) {
-				log.Printf("osmia: %v", err)
+				s.log().Warn("project trace migration incomplete; project not opened", "project", string(id), "error", err.Error())
 				continue
 			}
 			for _, opened := range out {
@@ -1015,10 +1015,17 @@ func (s *Service) stop(projects ...*activeProject) error {
 	return err
 }
 
-// migrationLog reports trace.Migrate's progress through the standard log,
-// naming only the project and workstream, never transcript content or
-// credentials, the way the tailnet supervisor reports its own retries.
-func migrationLog(format string, args ...any) { log.Printf(format, args...) }
+// migrationLog reports trace.Migrate's progress through s's structured
+// logger, naming only the project and workstream, never transcript content
+// or credentials, the way the tailnet supervisor reports its own retries.
+func (s *Service) migrationLog(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	if strings.Contains(format, "failed") {
+		s.log().Warn(msg)
+		return
+	}
+	s.log().Info(msg)
+}
 
 // openReconciliation leaves trace creation to project registration; an existing
 // trace must open cleanly before the service can report readiness. The runner
@@ -1049,7 +1056,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if os.IsNotExist(manifestErr) && os.IsNotExist(gitErr) {
 		return nil, nil, nil, nil
 	}
-	if err := trace.Migrate(context.Background(), cfg.Root, cfg.Project.ID, migrationLog); err != nil {
+	if err := trace.Migrate(context.Background(), cfg.Root, cfg.Project.ID, s.migrationLog); err != nil {
 		return nil, nil, nil, err
 	}
 	repository, err := trace.Open(cfg.Root, cfg.Project)

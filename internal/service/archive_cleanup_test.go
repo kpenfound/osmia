@@ -1,11 +1,10 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,15 +18,14 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// captureLog redirects the standard logger to a buffer for the rest of the
-// test, restoring it on cleanup. Tests that use it must not run in
-// parallel with another test that also redirects the shared logger.
-func captureLog(t *testing.T) *bytes.Buffer {
+// captureLog returns a buffer and a structured logger backed by it; the
+// caller sets it as the test's Service's logger so every line archive
+// cleanup logs through it, including from the background goroutine that
+// removes a trace, lands in the buffer.
+func captureLog(t *testing.T) (*syncBuffer, *slog.Logger) {
 	t.Helper()
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
-	return &buf
+	var buf syncBuffer
+	return &buf, slog.New(slog.NewJSONHandler(&buf, nil))
 }
 
 // awaitArchiveCleaned drives cleanup.Pass, which starts a background
@@ -70,9 +68,8 @@ func requestRefresh(t *testing.T, repository *trace.Repository, librarian, strea
 }
 
 func TestArchiveCleanupMigratesOldArchivesAndRetainsTitle(t *testing.T) {
-	// serial: captureLog redirects the package-wide logger
 	ctx := context.Background()
-	logged := captureLog(t)
+	logged, logger := captureLog(t)
 	opts, cfg := conversationFixture(t, "archive-cleanup-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
@@ -83,7 +80,7 @@ func TestArchiveCleanupMigratesOldArchivesAndRetainsTitle(t *testing.T) {
 	store, _, err := runtime.Open(input)
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
-	s := &Service{cfg: cfg, store: store, options: opts}
+	s := &Service{cfg: cfg, store: store, options: opts, logger: logger}
 	s.setSole(runtimeFor(repo))
 	h := func(kind, id string) trace.Header {
 		return trace.Header{Schema: "osmia.trace." + kind, Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: serviceActor, Cause: "fixture"}
@@ -125,6 +122,7 @@ func TestArchiveCleanupMigratesOldArchivesAndRetainsTitle(t *testing.T) {
 	if !strings.Contains(logged.String(), fmt.Sprintf("archive cleanup of workstream %s", stream)) || !strings.Contains(logged.String(), "unfinished turn") {
 		t.Fatalf("deferral for a busy workstream was not logged: %s", logged.String())
 	}
+	decodeStructuredLines(t, logged.String())
 	// Logging the deferral never carries the planted sensitive status note
 	// or document content.
 	if strings.Contains(logged.String(), "Sensitive detail") || strings.Contains(logged.String(), "sensitive stdout and stderr") {
@@ -174,6 +172,10 @@ func TestArchiveCleanupMigratesOldArchivesAndRetainsTitle(t *testing.T) {
 	if !strings.Contains(logged.String(), fmt.Sprintf("archive cleanup removed the trace of workstream %s of project %s", stream, project)) || !strings.Contains(logged.String(), fmt.Sprintf("archive cleanup completed for workstream %s of project %s", stream, project)) {
 		t.Fatalf("deletion progress and completion were not logged: %s", logged.String())
 	}
+	// Every line archive cleanup wrote, through the deferral, the deletion's
+	// start, its progress and its completion, is a structured record, never
+	// a plain-text line from the standard log package.
+	decodeStructuredLines(t, logged.String())
 	// Across the start, progress and completion logging of the actual
 	// deletion, the log still never carries the sensitive status note or
 	// document content.
@@ -300,9 +302,8 @@ func TestArchiveCleanupBatchesDependenciesAndWaitsForRetainedDescendants(t *test
 // cleanup waits, with a logged reason, for an operation without a result,
 // and proceeds once it is acknowledged.
 func TestArchiveCleanupDefersForAPendingOperationThenProceeds(t *testing.T) {
-	// serial: captureLog redirects the package-wide logger
 	ctx := context.Background()
-	logged := captureLog(t)
+	logged, logger := captureLog(t)
 	opts, cfg := conversationFixture(t, "archive-pending-op-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
@@ -310,7 +311,7 @@ func TestArchiveCleanupDefersForAPendingOperationThenProceeds(t *testing.T) {
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{project: {stream}}})
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
-	s := &Service{cfg: cfg, store: store, options: opts}
+	s := &Service{cfg: cfg, store: store, options: opts, logger: logger}
 	s.setSole(runtimeFor(repo))
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "finish", Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: serviceActor, Cause: "fixture"}
 	_, err = repo.SetFeatureState(ctx, h, AbandonedState, "done")
@@ -326,6 +327,7 @@ func TestArchiveCleanupDefersForAPendingOperationThenProceeds(t *testing.T) {
 	if !strings.Contains(logged.String(), "operation without a result") {
 		t.Fatalf("deferral for a pending operation was not logged: %s", logged.String())
 	}
+	decodeStructuredLines(t, logged.String())
 	err = repo.WithOperation(ctx, stream, "pending-work", trace.Actor{Kind: "service", ID: "test"}, s.now, func(a *trace.OperationAttempt, current trace.OperationRecord) error {
 		observe := a.Action("observe", s.now())
 		observe.Observation = &coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "not started"}
@@ -354,9 +356,8 @@ func TestArchiveCleanupDefersForAPendingOperationThenProceeds(t *testing.T) {
 // cleanup waits, with a logged reason, for the librarian refresh covering
 // the archived workstream's landings, and proceeds once it completes.
 func TestArchiveCleanupDefersUntilLearningsIncorporatedThenProceeds(t *testing.T) {
-	// serial: captureLog redirects the package-wide logger
 	ctx := context.Background()
-	logged := captureLog(t)
+	logged, logger := captureLog(t)
 	opts, cfg := conversationFixture(t, "archive-learnings-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
@@ -366,7 +367,7 @@ func TestArchiveCleanupDefersUntilLearningsIncorporatedThenProceeds(t *testing.T
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{project: {stream, librarian}}})
 	must(t, err)
 	t.Cleanup(func() { store.Close() })
-	s := &Service{cfg: cfg, store: store, options: opts}
+	s := &Service{cfg: cfg, store: store, options: opts, logger: logger}
 	s.setSole(runtimeFor(repo))
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "finish", Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: serviceActor, Cause: "fixture"}
 	_, err = repo.SetFeatureState(ctx, h, AbandonedState, "done")
@@ -388,6 +389,7 @@ func TestArchiveCleanupDefersUntilLearningsIncorporatedThenProceeds(t *testing.T
 	if !strings.Contains(logged.String(), "incorporated") {
 		t.Fatalf("deferral for unincorporated learnings was not logged: %s", logged.String())
 	}
+	decodeStructuredLines(t, logged.String())
 	in := refreshInput{Workstream: stream, Commit: "0123456789abcdef0123456789abcdef01234567"}
 	err = repo.WithOperation(ctx, librarian, trace.EventID(in.key(), "run"), trace.Actor{Kind: "service", ID: "test"}, s.now, func(at *trace.OperationAttempt, current trace.OperationRecord) error {
 		observe := at.Action("observe", s.now())

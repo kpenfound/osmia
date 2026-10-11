@@ -30,6 +30,11 @@ func (b *syncBuffer) String() string {
 	defer b.mu.Unlock()
 	return b.buf.String()
 }
+func (b *syncBuffer) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
 
 // decodeStructuredLines fails the test if any line of text is not a JSON
 // object with a timestamp, a level and a message.
