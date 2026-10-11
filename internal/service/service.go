@@ -334,7 +334,16 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	err = nil
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), shadow: shadow, logger: logger}
 	s.pool = &scheduler.Shared{Traces: s.traces}
-	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider}
+	// Getenv reads the Jev boost's API key the same way the default would,
+	// and registers whatever value it reads for redaction: the owner may
+	// point api_key_env at any environment variable name, not only
+	// EnvSecrets' default, and the key must never reach a log record
+	// whichever name configures it.
+	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider, Getenv: func(name string) string {
+		value := os.Getenv(name)
+		redact.Register(value)
+		return value
+	}}
 	if opts.skills != nil {
 		opts.skills.Refresh = func() string { return s.current().Skills.Refresh }
 	}

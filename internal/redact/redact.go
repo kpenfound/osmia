@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // CredentialURL matches the user information of a URL, which may hold a
@@ -30,12 +31,40 @@ func Secrets(s string, secrets ...string) string {
 // variable.
 var EnvSecrets = []string{"GITHUB_TOKEN", "TS_AUTHKEY", "OPENROUTER_API_KEY"}
 
-// KnownSecrets reads the current values of EnvSecrets, for callers that
-// redact without a narrower list of secrets to hand.
+// registered holds secret values Register has recorded: configured values
+// with no fixed environment variable name, such as the Jev boost's API key
+// when an owner points api_key_env at a name other than EnvSecrets' default.
+var (
+	registerMu sync.Mutex
+	registered = map[string]struct{}{}
+)
+
+// Register notes secret as one more value KnownSecrets must always return,
+// for a configured secret whose owner-chosen name EnvSecrets cannot list in
+// advance. A caller registers each value it actually reads, as soon as it
+// reads it, so every record written afterward redacts it; an empty secret
+// is a no-op.
+func Register(secret string) {
+	if secret == "" {
+		return
+	}
+	registerMu.Lock()
+	defer registerMu.Unlock()
+	registered[secret] = struct{}{}
+}
+
+// KnownSecrets reads the current values of EnvSecrets and every value
+// Register has recorded, for callers that redact without a narrower list of
+// secrets to hand.
 func KnownSecrets() []string {
 	values := make([]string, len(EnvSecrets))
 	for i, name := range EnvSecrets {
 		values[i] = os.Getenv(name)
+	}
+	registerMu.Lock()
+	defer registerMu.Unlock()
+	for secret := range registered {
+		values = append(values, secret)
 	}
 	return values
 }
