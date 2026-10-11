@@ -29,6 +29,19 @@ var ErrLocked = errors.New("trace repository already open")
 type Repository struct {
 	mu          sync.Mutex
 	operationMu sync.Mutex
+	// pruneMu excludes a purge's prune step from any write that creates a Git
+	// object, for the short time pruning itself takes. It is taken by those
+	// writes and by prunePurged alone; a read never waits on it.
+	pruneMu sync.Mutex
+	// purgeMu excludes a purge's history rewrite and publication from a
+	// concurrent prune: the rewrite creates commits and trees that stay
+	// unreachable, and so eligible for prunePurged's gc, until the publish
+	// step that follows flips main to them. It is held across one
+	// PurgeWorkstreams rewrite-and-publish attempt and across prunePurged's
+	// destructive steps, never across preparePurgeTargets's or
+	// recoverPurge's fast locked checks alone. A read or an ordinary write
+	// never waits on it.
+	purgeMu sync.Mutex
 	// attempts holds the operations an open WithOperation attempt claimed,
 	// by workstream and event.
 	attempts        map[string]bool

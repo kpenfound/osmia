@@ -34,6 +34,18 @@ func (r *Repository) boundary(name string) error {
 	return nil
 }
 
+// FailPublication installs f as the hook every named publication or purge
+// boundary in this package calls, for tests outside it that interrupt one
+// (returning an error) or show that a read or a write does not wait on it
+// (blocking until the test releases it, then returning nil). nil, the
+// default, calls nothing. The named boundaries include, for a purge,
+// "purge-rewriting", "purge-journal-written", "purge-ref-published",
+// "purge-files-removed", "purge-pruning" (purgeMu and pruneMu already held,
+// before the destructive repack and prune run) and "purge-objects-pruned".
+func (r *Repository) FailPublication(f func(string) error) {
+	r.failPublication = f
+}
+
 // publish prepares immutable objects before updating the single authoritative
 // ref. The journal makes interrupted ordinary-file materialization recoverable.
 // The repository lock must be held by the caller.
@@ -42,8 +54,11 @@ func (r *Repository) publish(ctx context.Context, files map[string][]byte) error
 }
 
 // publishTree is publish with paths that leave the tree: they are removed from
-// the commit and, once the ref is published, from disk.
+// the commit and, once the ref is published, from disk. It takes pruneMu,
+// since it creates Git objects a concurrent purge's prune step must not race.
 func (r *Repository) publishTree(ctx context.Context, files map[string][]byte, removed []string) error {
+	r.pruneMu.Lock()
+	defer r.pruneMu.Unlock()
 	r.forget()
 	if _, err := r.checkHistory(ctx); err != nil {
 		return err

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,7 +16,7 @@ import (
 )
 
 func TestPurgeWorkstreamErasesOutputAndPreservesOtherHistory(t *testing.T) {
-	for _, boundary := range []string{"", "purge-journal-written", "purge-ref-published", "purge-files-removed", "purge-objects-pruned"} {
+	for _, boundary := range []string{"", "purge-journal-written", "purge-ref-published", "purge-files-removed", "purge-pruning", "purge-objects-pruned"} {
 		t.Run(boundary, func(t *testing.T) {
 			r, root, project := create(t)
 			ctx := context.Background()
@@ -152,7 +154,7 @@ func TestPurgeWaitsForOperationAcknowledgement(t *testing.T) {
 
 func TestPurgeBatchErasesOutputAndPreservesOtherHistory(t *testing.T) {
 	t.Parallel()
-	for _, boundary := range []string{"", "purge-journal-written", "purge-ref-published", "purge-files-removed", "purge-objects-pruned"} {
+	for _, boundary := range []string{"", "purge-journal-written", "purge-ref-published", "purge-files-removed", "purge-pruning", "purge-objects-pruned"} {
 		t.Run(boundary, func(t *testing.T) {
 			r, root, project := create(t)
 			ctx := context.Background()
@@ -192,7 +194,7 @@ func TestPurgeBatchErasesOutputAndPreservesOtherHistory(t *testing.T) {
 			if err := r.RecordDocuments(ctx, []Document{kept}); err != nil {
 				t.Fatal(err)
 			}
-			if err := r.PurgeWorkstreams(ctx, []config.WorkstreamID{streamID, second, streamID}); err == nil {
+			if err := r.PurgeWorkstreams(ctx, []config.WorkstreamID{streamID, second, streamID}, nil); err == nil {
 				t.Fatal("purged a nonterminal workstream")
 			}
 			if _, err := r.SetFeatureState(ctx, header("transition", "finish"), "abandoned", "owner ended work"); err != nil {
@@ -215,7 +217,7 @@ func TestPurgeBatchErasesOutputAndPreservesOtherHistory(t *testing.T) {
 				}
 				return nil
 			}
-			err := r.PurgeWorkstreams(ctx, []config.WorkstreamID{streamID, second, streamID})
+			err := r.PurgeWorkstreams(ctx, []config.WorkstreamID{streamID, second, streamID}, nil)
 			if boundary == "" && err != nil || boundary != "" && !errors.Is(err, injected) {
 				t.Fatalf("purge: %v", err)
 			}
@@ -231,7 +233,7 @@ func TestPurgeBatchErasesOutputAndPreservesOtherHistory(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { reopened.Close() })
-			if err := reopened.PurgeWorkstreams(ctx, []config.WorkstreamID{streamID, second}); err != nil {
+			if err := reopened.PurgeWorkstreams(ctx, []config.WorkstreamID{streamID, second}, nil); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := reopened.dir.Stat("workstreams/" + string(streamID)); !os.IsNotExist(err) {
@@ -261,5 +263,190 @@ func TestPurgeBatchErasesOutputAndPreservesOtherHistory(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+// TestPruningDoesNotFailAReadOrAConcurrentWriteOfRetainedObjects covers
+// spec#6 and plan#archive-cleanup acceptance item 3: pruning (prunePurged's
+// reflog expiry and destructive gc --prune=now) must never fail a read or a
+// write that still needs objects a purge did not touch. It stalls a purge at
+// "purge-pruning", which the prune reaches only once pruneMu is already held,
+// the same exclusion a concurrent object-creating write relies on. While
+// stalled, it shows a read of a retained workstream's committed history
+// succeeds immediately, unaffected by the in-progress prune. It then starts a
+// concurrent write to that workstream and shows it is fenced (it does not
+// race the destructive gc step; it blocks until pruning finishes) rather than
+// failing, and that the write is durably recorded once pruning completes.
+func TestPruningDoesNotFailAReadOrAConcurrentWriteOfRetainedObjects(t *testing.T) {
+	t.Parallel()
+	r, _, _ := create(t)
+	ctx := context.Background()
+	other := config.WorkstreamID("w_00000000000000000000000000000002")
+	if err := r.CreateWorkstream(ctx, other, at, owner); err != nil {
+		t.Fatal(err)
+	}
+	kept := Document{Header: header("document", "spec"), Path: "spec.md", Content: "Retained spec revision one\n"}
+	kept.Workstream = other
+	if err := r.RecordDocuments(ctx, []Document{kept}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.SetFeatureState(ctx, header("transition", "finish"), "abandoned", "owner ended work"); err != nil {
+		t.Fatal(err)
+	}
+
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	r.failPublication = func(at string) error {
+		if at != "purge-pruning" {
+			return nil
+		}
+		once.Do(func() { close(started) })
+		<-release
+		return nil
+	}
+	defer func() { r.failPublication = nil }()
+
+	purgeDone := make(chan error, 1)
+	go func() { purgeDone <- r.PurgeWorkstream(ctx, streamID) }()
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("purge never reached pruning")
+	}
+
+	// Pruning is stalled, holding pruneMu, with nothing else in flight yet:
+	// a read of the retained workstream's history must still succeed.
+	if docs, err := Read[Document](r, other); err != nil || len(docs) != 1 {
+		t.Fatalf("read failed while pruning was in progress: %+v %v", docs, err)
+	}
+
+	// A concurrent write that creates Git objects must be fenced against
+	// the destructive gc step rather than racing it or failing.
+	kept.Revision, kept.Content = 2, "Retained spec revision two\n"
+	writeDone := make(chan error, 1)
+	go func() { writeDone <- r.RecordDocuments(ctx, []Document{kept}) }()
+	select {
+	case err := <-writeDone:
+		t.Fatalf("write was not fenced against the in-progress prune: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("write failed once pruning finished: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("fenced write never completed")
+	}
+	select {
+	case err := <-purgeDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("purge never finished")
+	}
+	r.failPublication = nil
+
+	if _, err := r.dir.Stat("workstreams/" + string(streamID)); !os.IsNotExist(err) {
+		t.Fatalf("trace still present: %v", err)
+	}
+	docs, err := Read[Document](r, other)
+	if err != nil || len(docs) != 2 {
+		t.Fatalf("write fenced during pruning was lost: %+v %v", docs, err)
+	}
+}
+
+// TestPruningExcludesAConcurrentRewriteFromCreatingUnreachableObjects covers
+// the other half of spec#6: a history rewrite's commits and trees are
+// unreachable from any ref until the publish that follows flips main to
+// them, so a prune running at the same time could collect them before they
+// are ever reachable. purgeMu, held by rewriteAndPublish for a whole attempt
+// and by prunePurged for its destructive steps, rules this out structurally
+// rather than relying on PurgeWorkstreams's single caller never overlapping
+// itself: it stalls a purge's prune at "purge-pruning", holding purgeMu, and
+// shows a second, independent purge's rewriteAndPublish call blocks
+// acquiring purgeMu rather than proceeding to create objects the stalled
+// prune could race, and completes only once the prune finishes.
+func TestPruningExcludesAConcurrentRewriteFromCreatingUnreachableObjects(t *testing.T) {
+	t.Parallel()
+	r, _, _ := create(t)
+	ctx := context.Background()
+	other := config.WorkstreamID("w_00000000000000000000000000000002")
+	if err := r.CreateWorkstream(ctx, other, at, owner); err != nil {
+		t.Fatal(err)
+	}
+	otherHeader := header("transition", "other-finish")
+	otherHeader.Workstream = other
+	if _, err := r.SetFeatureState(ctx, otherHeader, "abandoned", "owner ended work"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.SetFeatureState(ctx, header("transition", "finish"), "abandoned", "owner ended work"); err != nil {
+		t.Fatal(err)
+	}
+
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	r.failPublication = func(at string) error {
+		if at != "purge-pruning" {
+			return nil
+		}
+		once.Do(func() { close(started) })
+		<-release
+		return nil
+	}
+	defer func() { r.failPublication = nil }()
+
+	purgeDone := make(chan error, 1)
+	go func() { purgeDone <- r.PurgeWorkstream(ctx, streamID) }()
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("purge never reached pruning")
+	}
+
+	rewriteStarted := make(chan struct{})
+	rewriteDone := make(chan error, 1)
+	go func() {
+		close(rewriteStarted)
+		rewriteDone <- r.rewriteAndPublish(ctx, []config.WorkstreamID{other}, nil)
+	}()
+	<-rewriteStarted
+	select {
+	case err := <-rewriteDone:
+		t.Fatalf("a concurrent rewrite proceeded while a prune held purgeMu: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case err := <-purgeDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("purge never finished")
+	}
+	select {
+	case err := <-rewriteDone:
+		if err != nil {
+			t.Fatalf("rewrite failed once the prune released purgeMu: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("rewrite excluded by purgeMu never completed")
+	}
+	r.failPublication = nil
+	if err := r.FinishPurge(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	remaining, err := r.Workstreams()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(remaining, streamID) || slices.Contains(remaining, other) {
+		t.Fatalf("unexpected remaining workstreams: %v", remaining)
 	}
 }

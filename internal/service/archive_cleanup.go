@@ -17,13 +17,32 @@ type archiveCleanup struct {
 	workspaces *workspaceCleanup
 }
 
+// Pass reports its own progress through the service's activity record, so
+// its phases are visible through the API, the event stream and the web UI
+// while the trace work they drive is blocked.
 func (c *archiveCleanup) Pass(ctx context.Context) error {
+	project := c.workspaces.cfg.Project.ID
+	h := c.s.StartActivity("archive-cleanup:"+string(project), ActivityArchiveCleanup, project, "", "scanning archived workstreams")
+	err := c.pass(ctx, h)
+	h.Finish(err)
+	return err
+}
+
+func (c *archiveCleanup) pass(ctx context.Context, h *ActivityHandle) error {
+	repo := c.workspaces.repository
+	// Finish whatever an earlier pass's purge left pending, including its
+	// prune, even when nothing new is ready today: a stalled or interrupted
+	// prune otherwise waits for the next batch, which may never come.
+	if err := repo.FinishPurge(ctx, h.Progress); err != nil {
+		return err
+	}
 	state, _ := c.s.store.Snapshot()
 	ready := map[config.WorkstreamID]runtime.Archive{}
 	for _, a := range state.Archived {
 		if a.Project != c.workspaces.cfg.Project.ID || !a.CleanedAt.IsZero() {
 			continue
 		}
+		h.Progress("preparing "+string(a.Workstream), nil)
 		if err := c.workspaces.attempt(ctx, "archive/"+string(a.Workstream), func() error {
 			prepared, eligible, err := c.prepare(ctx, a)
 			if err == nil && eligible {
@@ -38,7 +57,6 @@ func (c *archiveCleanup) Pass(ctx context.Context) error {
 		return nil
 	}
 	return c.workspaces.attempt(ctx, "archive-batch", func() error {
-		repo := c.workspaces.repository
 		streams, err := repo.Workstreams()
 		if err != nil {
 			return err
@@ -73,7 +91,8 @@ func (c *archiveCleanup) Pass(ctx context.Context) error {
 			batch = append(batch, stream)
 		}
 		slices.Sort(batch)
-		if err := repo.PurgeWorkstreams(ctx, batch); err != nil {
+		h.Progress(fmt.Sprintf("purging %d workstreams", len(batch)), nil)
+		if err := repo.PurgeWorkstreams(ctx, batch, h.Progress); err != nil {
 			return err
 		}
 		for _, stream := range batch {
