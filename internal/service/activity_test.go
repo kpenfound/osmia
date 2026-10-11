@@ -162,7 +162,12 @@ func TestHealthReportsBackendAvailabilityFromTheActivityRecord(t *testing.T) {
 	}
 	failing.Finish(nil)
 
+	// The stall rule only catches an operation once its own reporting has
+	// demonstrably started and then stopped (activity.go, reported); a bare
+	// start with no progress report is covered by
+	// TestHealthDoesNotDegradeOnAGitOperationThatNeverReportsProgress below.
 	stalled := s.StartActivity("health-stall", ActivityGit, project, stream, "cloning")
+	stalled.Progress("cloning", nil)
 	clock.Advance(ActivityStallThreshold)
 	degradedByStall, err := c.Health(ctx)
 	must(t, err)
@@ -177,6 +182,43 @@ func TestHealthReportsBackendAvailabilityFromTheActivityRecord(t *testing.T) {
 	if !readyAgain.API || !readyAgain.Ready || readyAgain.Backend != BackendReady || readyAgain.Cause != "" {
 		t.Fatalf("expected a ready backend once every operation finished: %+v", readyAgain)
 	}
+}
+
+// TestHealthDoesNotDegradeOnAGitOperationThatNeverReportsProgress covers
+// spec#5: activityReconciler.Apply reports a reconciled Git or workspace
+// operation (seal, build, land, rebase, drift, publish) with only a start
+// and a finish, nothing in between, so an ordinary one that simply takes
+// longer than ActivityStallThreshold must not read degraded. The stall rule
+// only applies once an entry's own reporting has demonstrably started and
+// then gone quiet (activity.go, ActivityEntry.reported): a bare start with
+// no progress report yet says nothing about whether the operation is stuck.
+func TestHealthDoesNotDegradeOnAGitOperationThatNeverReportsProgress(t *testing.T) {
+	t.Parallel()
+	clock := &fixedClock{now: demoStart}
+	opts := fixture(t)
+	opts.Reconciliation.Now = clock.Now
+	s, c := start(t, opts)
+	ctx := context.Background()
+
+	running := s.StartActivity("long-git", ActivityGit, project, stream, "pushing")
+	clock.Advance(10 * ActivityStallThreshold)
+
+	stillReady, err := c.Health(ctx)
+	must(t, err)
+	if !stillReady.API || !stillReady.Ready || stillReady.Backend != BackendReady || stillReady.Cause != "" {
+		t.Fatalf("expected a ready backend while a Git operation that never reports progress is still running: %+v", stillReady)
+	}
+
+	// Once it does report progress and then goes quiet past the threshold,
+	// the same entry is caught.
+	running.Progress("pushing", nil)
+	clock.Advance(ActivityStallThreshold)
+	degraded, err := c.Health(ctx)
+	must(t, err)
+	if !degraded.API || degraded.Ready || degraded.Backend != BackendDegraded || !strings.Contains(degraded.Cause, "pushing") {
+		t.Fatalf("expected a degraded backend once the operation reported progress and then stalled: %+v", degraded)
+	}
+	running.Finish(nil)
 }
 
 // TestHealthDoesNotDegradeOnOrdinaryLongRunningTurnsAndChecks covers spec#5:

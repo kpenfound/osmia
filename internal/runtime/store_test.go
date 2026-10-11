@@ -129,6 +129,45 @@ func TestOperatorPauseSourceOpensAsOwner(t *testing.T) {
 		t.Fatal("operator pause was not persisted as owner")
 	}
 }
+// TestGenerationAdvancesOnlyOnAChangeAndNeverBlocks covers spec#8: a reader
+// that assembles a response from more than one call into the store can tell,
+// from Generation alone, whether a mutation landed between them, without
+// ever waiting on the store's lock itself. Generation advances once per
+// mutation that actually changes the persisted state, stays put across a
+// read-only call and a mutation that changes nothing, and a reader never
+// retries forever when mutations keep landing: it just sees a later value.
+func TestGenerationAdvancesOnlyOnAChangeAndNeverBlocks(t *testing.T) {
+	in := fixture(t)
+	s := open(t, in)
+	first := s.Generation()
+	if first != 0 {
+		t.Fatalf("generation %d before any mutation, want 0", first)
+	}
+
+	must(t, s.SetProfile("mason", "other"))
+	afterChange := s.Generation()
+	if afterChange != first+1 {
+		t.Fatalf("generation %d after a change, want %d", afterChange, first+1)
+	}
+
+	s.Snapshot()
+	if s.Generation() != afterChange {
+		t.Fatalf("a read-only call changed the generation: %d, want %d", s.Generation(), afterChange)
+	}
+
+	// Setting the same profile again changes nothing on disk, so it must
+	// not advance the generation either.
+	must(t, s.SetProfile("mason", "other"))
+	if s.Generation() != afterChange {
+		t.Fatalf("a no-op mutation changed the generation: %d, want %d", s.Generation(), afterChange)
+	}
+
+	must(t, s.SetProfile("mason", "default"))
+	if got := s.Generation(); got != afterChange+1 {
+		t.Fatalf("generation %d after a second real change, want %d", got, afterChange+1)
+	}
+}
+
 func TestRoundTripsAndChangedDefaults(t *testing.T) {
 	in := fixture(t)
 	s := open(t, in)

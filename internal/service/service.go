@@ -200,6 +200,11 @@ type Service struct {
 	// driftAsked is set once an owner's drift rebase request is recorded,
 	// so the next pass reads the drift schedule.
 	driftAsked atomic.Bool
+	// statusViews holds the last workstream list statusList produced, so a
+	// request that cannot refresh it within coreReadBound still answers
+	// with that snapshot, marked stale, instead of blocking past the
+	// bound (bounded_read.go, boundedView).
+	statusViews viewCache[StatusResponse]
 	// shadow is the Beekeeper's shadow project: created or reopened at
 	// startup, outside cfg.Projects and this service's own reconciliation
 	// loop. beekeeper.Post and beekeeper.Continue run their own scheduler and

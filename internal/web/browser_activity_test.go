@@ -30,7 +30,14 @@ func activityEntry(id, kind, workstream, phase, lastProgress, failure string) st
 // those kinds report only start and finish and routinely run for minutes,
 // the same exemption from the no-progress rule the service's own health
 // check applies (app.js, activityStallTrackedKinds; service's activity.go,
-// stallTracked).
+// stallTracked). A Git or workspace operation (seal, build, land, rebase,
+// drift, publish) is reported the same way, with only a start and a finish
+// and no progress report in between, and routinely takes longer than the
+// stall threshold for ordinary reasons (a slow fetch or push, a large
+// rebase); it never shows as blocked from elapsed time alone either,
+// matching the service's own rule that only an entry which has reported
+// progress at least once and then gone quiet counts as stalled
+// (service's activity.go, ActivityEntry.reported).
 func TestBrowserActivityShowsBackendOperationsIncludingBlockedAndFailed(t *testing.T) {
 	api := newFakeAPI(1)
 	current := time.Now().UTC().Format(time.RFC3339)
@@ -38,6 +45,7 @@ func TestBrowserActivityShowsBackendOperationsIncludingBlockedAndFailed(t *testi
 	api.setActivity(
 		activityEntry("git-1", "git", "w_000", "rebasing onto upstream", current, ""),
 		activityEntry("git-2", "git", "w_000", "cloning", stale, ""),
+		activityEntry("cleanup-1", "archive_cleanup", "w_000", "rewriting history", stale, ""),
 		activityEntry("check-1", "check", "w_000", "checking unit demo (run 1)", stale, ""),
 		activityEntry("turn-1", "turn", "w_000", "mason turn t1", stale, "the sandbox could not be created"),
 	)
@@ -48,18 +56,20 @@ func TestBrowserActivityShowsBackendOperationsIncludingBlockedAndFailed(t *testi
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate(server.URL+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 
-	p.awaitText("#activity-count", "4")
+	p.awaitText("#activity-count", "5")
 	p.await("the activity button marked blocked", `document.getElementById('activity-button').dataset.blocked === 'true'`)
 
 	p.click("#activity-button")
 	p.await("the activity popover", `document.getElementById('activity-popover').matches(':popover-open')`)
-	p.await("four activity entries", `document.querySelectorAll('#activity-list [data-activity]').length === 4`)
+	p.await("five activity entries", `document.querySelectorAll('#activity-list [data-activity]').length === 5`)
 
-	p.await("the current operation shown as not blocked",
+	p.await("the current git operation shown as not blocked",
 		`document.querySelector('[data-activity="git-1"]').dataset.blocked === 'false'`)
-	p.await("the stalled git operation shown as blocked",
-		`document.querySelector('[data-activity="git-2"]').dataset.blocked === 'true'`)
-	p.awaitText(`[data-activity="git-2"] [data-field="blocked"]`, "no progress")
+	p.await("the stalled but merely busy git operation shown as not blocked",
+		`document.querySelector('[data-activity="git-2"]').dataset.blocked === 'false'`)
+	p.await("the stalled archive cleanup shown as blocked",
+		`document.querySelector('[data-activity="cleanup-1"]').dataset.blocked === 'true'`)
+	p.awaitText(`[data-activity="cleanup-1"] [data-field="blocked"]`, "no progress")
 
 	p.await("the stalled but merely busy check shown as not blocked",
 		`document.querySelector('[data-activity="check-1"]').dataset.blocked === 'false'`)

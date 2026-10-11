@@ -58,6 +58,16 @@ type ActivityEntry struct {
 	StartedAt    time.Time           `json:"started_at"`
 	LastProgress time.Time           `json:"last_progress"`
 	Failure      string              `json:"failure,omitempty"`
+	// reported is true once Progress has been called at least once for this
+	// entry. It is unexported: it only gates backendStatus's no-progress
+	// rule (below) and is never serialized, so it needs no OpenAPI change.
+	// Ordinary Git and workspace operations are reconciled as one Apply call
+	// with no progress in between (activityOf), so without this gate the
+	// no-progress rule would call any Git operation that simply runs longer
+	// than ActivityStallThreshold "degraded", even though nothing is stuck.
+	// archive cleanup and recovery report real progress and so stay subject
+	// to the rule once they are stalled, not merely busy.
+	reported bool
 }
 
 // ActivityResponse lists the backend operations the activity record holds,
@@ -149,7 +159,7 @@ func (h *ActivityHandle) Progress(phase string, progress *float64) {
 		return
 	}
 	now := h.r.now()
-	if h.live(func(e *ActivityEntry) { e.Phase, e.Progress, e.LastProgress = phase, progress, now }) {
+	if h.live(func(e *ActivityEntry) { e.Phase, e.Progress, e.LastProgress, e.reported = phase, progress, now, true }) {
 		h.r.changed()
 	}
 }
@@ -237,17 +247,25 @@ func (s *Service) healthView(ctx context.Context) HealthResponse {
 // failing or stalled one reports degraded. It never touches the trace mutex
 // or operationMu.
 //
-// "No progress for ActivityStallThreshold" only counts against kinds whose
-// own reporting is expected to keep moving within that window: ordinary Git
-// and workspace operations reported through the reconcile controller, and
-// (once wired) archive cleanup's phases. An agent turn or a check run is
-// reported once at start and once at finish, with nothing in between, and
-// routinely runs for minutes under this project's own checks_timeout and
-// profile timeout — so the same no-progress rule would call a perfectly
-// healthy turn or check "degraded" for simply still running. Those kinds are
-// bounded by their own configured timeout instead: when one is exceeded, the
-// wrapped call returns an error and the operation is reported failed, which
-// the failure check above already catches.
+// "No progress for ActivityStallThreshold" only counts against an entry
+// whose kind is stall-tracked (stallTracked) and that has reported progress
+// at least once (ActivityEntry.reported): an entry's own reporting has
+// demonstrably started moving, so a later gap of ActivityStallThreshold with
+// no further report means it has stopped, not merely that it has not begun.
+// Ordinary Git and workspace operations are reconciled as one Apply call
+// with no progress report in between (activityOf), so gating on reported
+// keeps a Git operation that simply takes longer than the threshold out of
+// this rule, while archive cleanup and recovery, which do report progress
+// through their phases, are still caught once they stall for real.
+//
+// An agent turn or a check run is excluded by stallTracked regardless of
+// reported: they are reported once at start and once at finish, with
+// nothing in between, and routinely run for minutes under this project's
+// own checks_timeout and profile timeout — so the same rule would call a
+// perfectly healthy turn or check "degraded" for simply still running.
+// Those kinds are bounded by their own configured timeout instead: when one
+// is exceeded, the wrapped call returns an error and the operation is
+// reported failed, which the failure check above already catches.
 func (s *Service) backendStatus() (status, cause string) {
 	now := s.now()
 	entries := s.activity.snapshot()
@@ -262,7 +280,7 @@ func (s *Service) backendStatus() (status, cause string) {
 		}
 	}
 	for _, e := range entries {
-		if stallTracked(e.Kind) && now.Sub(e.LastProgress) >= ActivityStallThreshold {
+		if stallTracked(e.Kind) && e.reported && now.Sub(e.LastProgress) >= ActivityStallThreshold {
 			return BackendDegraded, activityCause(e) + " has made no progress since " + e.LastProgress.UTC().Format(time.RFC3339)
 		}
 	}

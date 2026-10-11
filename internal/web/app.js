@@ -23,8 +23,15 @@
   // not apply to a turn or a check (activityStallTrackedKinds mirrors the
   // service's stallTracked): those report only start and finish and
   // routinely run for minutes, so elapsed time alone does not mean blocked.
+  // Reconciled Git and workspace operations (seal, build, land, rebase,
+  // drift, publish) are the same: the service reports them with only a
+  // start and a finish and never calls Progress on them today, so the
+  // server-side rule never flags one as blocked from elapsed time alone
+  // either (activity.go, ActivityEntry.reported) and "git" is left out here
+  // to match. archive_cleanup and recovery do report progress through their
+  // phases, so a stall in either still shows as blocked.
   const activityStallMs = 30000;
-  const activityStallTrackedKinds = new Set(['archive_cleanup', 'git', 'recovery']);
+  const activityStallTrackedKinds = new Set(['archive_cleanup', 'recovery']);
 
   // An edit of a configuration file on disk is not announced, so the page
   // reads /config again this often while it is visible and live.

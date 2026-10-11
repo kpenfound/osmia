@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -106,11 +109,98 @@ func readFeed(t *testing.T, c *Client, id config.WorkstreamID) FeedResponse {
 	return v
 }
 
+// coreReadEndpointChecks lists, by name, a bounded check of every core read
+// endpoint named in plan#read-boundaries, plus the project list and charter
+// proposals the web UI's own resync reads alongside them (internal/web/
+// app.js, the "reads" map's resync entry), since those share the same
+// trace and runtime locks.
+func coreReadEndpointChecks(c *Client, workstream config.WorkstreamID) map[string]func() error {
+	ctx := context.Background()
+	return map[string]func() error{
+		"project list (/config)":    func() error { _, err := c.Configuration(ctx); return err },
+		"workstream list (/status)": func() error { _, err := c.Statuses(ctx); return err },
+		"one workstream (/status/{workstream})": func() error {
+			_, err := c.Status(ctx, workstream)
+			return err
+		},
+		"workstream feed (/feed/{workstream})": func() error {
+			var v FeedResponse
+			return c.Do(ctx, "GET", Prefix+"/feed/"+string(workstream), nil, &v)
+		},
+		"conversation (/conversation/{workstream})": func() error {
+			_, err := c.Conversation(ctx, workstream)
+			return err
+		},
+		"trace summary (/trace/{workstream})": func() error {
+			_, err := c.Trace(ctx, workstream)
+			return err
+		},
+		"runtime (/runtime)":           func() error { _, err := c.Runtime(ctx); return err },
+		"inbox (/inbox)":               func() error { _, err := c.Inbox(ctx); return err },
+		"charter proposals (/charter)": func() error { _, err := c.CharterProposals(ctx); return err },
+	}
+}
+
+// assertCoreReadEndpointsRespondWithin checks that every endpoint
+// coreReadEndpointChecks names, and the event stream's first event, answers
+// within bound.
+func assertCoreReadEndpointsRespondWithin(t *testing.T, c *Client, workstream config.WorkstreamID, bound time.Duration) {
+	t.Helper()
+	for name, check := range coreReadEndpointChecks(c, workstream) {
+		started := time.Now()
+		if err := check(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if elapsed := time.Since(started); elapsed > bound {
+			t.Errorf("%s took %s, want within %s", name, elapsed, bound)
+		}
+	}
+	started := time.Now()
+	events, _ := eventStream(t, c)
+	nextEvent(t, events)
+	if elapsed := time.Since(started); elapsed > bound {
+		t.Errorf("event stream's first event took %s, want within %s", elapsed, bound)
+	}
+}
+
+// awaitActivityEntry polls GET /activity until an entry matches, or fails
+// the test after 10s.
+func awaitActivityEntry(t *testing.T, c *Client, match func(ActivityEntry) bool) ActivityEntry {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		out, err := c.Activity(context.Background())
+		must(t, err)
+		if i := slices.IndexFunc(out.Activity, match); i >= 0 {
+			return out.Activity[i]
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no matching activity entry within 10s: %+v", out.Activity)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// requestTurnOperation durably records a RunnerBoundary operation of
+// streamID with the real thread.TurnAction, so the reconcile controller
+// routes it to the test's own fake turns adapter exactly as it would a real
+// queued agent turn (service.go, concurrentOperation, runnerAdapter), and
+// runs it concurrently with the rest of the pass through
+// trace.OperationAttempt.Unlocked.
+func requestTurnOperation(t *testing.T, repository *trace.Repository, streamID config.WorkstreamID, eventID string) {
+	t.Helper()
+	event := trace.Event{ID: eventID, Kind: "local-effect", Body: "simulated agent turn"}
+	event.Operation = &coreadapter.Operation{ID: trace.OperationID(project, streamID, event.ID), Boundary: coreadapter.RunnerBoundary, Action: thread.TurnAction, Input: json.RawMessage(`{}`)}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: eventID + "-start", Revision: 1, Project: project, Workstream: streamID, At: demoStart, Actor: serviceActor, Cause: "owner"}
+	_, err := repository.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: h, Subject: "fake-" + eventID, To: "pending", Reason: "owner requested"}, Events: []trace.Event{event}})
+	must(t, err)
+}
+
 // TestReadEndpointsStayResponsiveWhileAFactoryOperationIsBlocked covers
 // spec#1: the read endpoints the web UI calls on first load and on feed
-// refresh answer within one second while a factory operation that does not
-// call trace.OperationAttempt.Unlocked, such as a rebase, merge, build, seal
-// or publish, is still in progress.
+// refresh answer within the latency bound while a Git or workspace
+// operation that does not call trace.OperationAttempt.Unlocked, such as a
+// rebase, merge, build, seal or publish, is still in progress.
 func TestReadEndpointsStayResponsiveWhileAFactoryOperationIsBlocked(t *testing.T) {
 	t.Parallel()
 	blocking := newBlockedFactoryOperation()
@@ -124,31 +214,68 @@ func TestReadEndpointsStayResponsiveWhileAFactoryOperationIsBlocked(t *testing.T
 	}
 	defer close(blocking.release)
 
-	ctx := context.Background()
-	// The web UI's stream resync reads status, runtime, config, inbox,
-	// charter proposals and every listed workstream's feed (internal/web/
-	// app.js, the "reads" map's resync entry), so every one of them must
-	// answer promptly while a factory operation is in progress.
-	checks := map[string]func() error{
-		"project list (/config)":    func() error { _, err := c.Configuration(ctx); return err },
-		"workstream list (/status)": func() error { _, err := c.Statuses(ctx); return err },
-		"workstream feed (/feed/{workstream})": func() error {
-			var v FeedResponse
-			return c.Do(ctx, "GET", Prefix+"/feed/"+string(stream), nil, &v)
-		},
-		"runtime (/runtime)":           func() error { _, err := c.Runtime(ctx); return err },
-		"inbox (/inbox)":               func() error { _, err := c.Inbox(ctx); return err },
-		"charter proposals (/charter)": func() error { _, err := c.CharterProposals(ctx); return err },
+	assertCoreReadEndpointsRespondWithin(t, c, stream, coreReadBound)
+}
+
+// TestReadEndpointsStayResponsiveWhileAFakeAgentTurnIsBlocked covers
+// spec#1: a queued thread turn, a RunnerBoundary operation the reconcile
+// controller runs beside the rest of its pass through
+// trace.OperationAttempt.Unlocked (service.go, concurrentOperation), still
+// lets every core read endpoint answer within the latency bound while it is
+// blocked.
+func TestReadEndpointsStayResponsiveWhileAFakeAgentTurnIsBlocked(t *testing.T) {
+	t.Parallel()
+	blocking := newBlockedFactoryOperation()
+	opts := fixture(t)
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, serviceActor)
+	must(t, err)
+	must(t, repository.CreateWorkstream(context.Background(), stream, demoStart, serviceActor))
+	must(t, repository.Close())
+
+	opts.Reconciliation.Adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: blocking}
+	s, c := start(t, opts)
+	_, active := s.runtimeOf(project)
+	if active == nil {
+		t.Fatal("no active project")
 	}
-	for name, check := range checks {
-		started := time.Now()
-		if err := check(); err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if elapsed := time.Since(started); elapsed > time.Second {
-			t.Errorf("%s took %s while a factory operation was blocked", name, elapsed)
-		}
+	requestTurnOperation(t, active.repository, stream, "busy-reads-turn")
+
+	select {
+	case <-blocking.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the fake agent turn never started")
 	}
+	defer close(blocking.release)
+
+	assertCoreReadEndpointsRespondWithin(t, c, stream, coreReadBound)
+}
+
+// TestReadEndpointsStayResponsiveWhileACheckRunIsBlocked covers spec#1: a
+// unit's checks, a RunnerBoundary operation with the real CheckAction that
+// the reconcile controller also runs concurrently (service.go,
+// concurrentOperation; unit_checks.go, checkers.Apply), running the real
+// checks pipeline against a fake check runner that blocks the way an
+// unresponsive dagger check would, still lets every core read endpoint
+// answer within the latency bound while it is blocked.
+func TestReadEndpointsStayResponsiveWhileACheckRunIsBlocked(t *testing.T) {
+	t.Parallel()
+	checks := &fakeChecks{links: []string{"dag://x"}, outcomes: []checkOutcome{{block: true}}}
+	f, _ := newMasonFixturePrepared(t, 1, independentPlan, func(opts *Options) { opts.reviewChecks = checks })
+	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	workstream, repository := seedBuild(t, f, "stall-check", independentPlan, config.WorkspacesGit, base)
+	seedChecking(t, f, repository, workstream, "resume", resumeReport)
+	must(t, repository.Close())
+	// Restart with a live reconcile loop: seedBuild and seedChecking work
+	// against a stopped service's own repository handle, which must be
+	// closed before the service can reopen it.
+	f.start(t)
+	t.Cleanup(func() { f.stop(t) })
+
+	awaitActivityEntry(t, f.c, func(e ActivityEntry) bool { return e.Kind == ActivityCheck })
+
+	assertCoreReadEndpointsRespondWithin(t, f.c, workstream, coreReadBound)
 }
 
 // featureTransition commits a transition of stream's feature subject to to,
@@ -248,7 +375,7 @@ func TestConsistentReadRetriesAcrossARacingCommit(t *testing.T) {
 	raced := false
 	attempts := 0
 	type snapshot struct{ before, after int }
-	result, err := consistentRead(repository, func() (snapshot, error) {
+	result, err := consistentRead(func() (snapshot, error) {
 		attempts++
 		before, err := repository.Workstreams()
 		if err != nil {
@@ -268,7 +395,7 @@ func TestConsistentReadRetriesAcrossARacingCommit(t *testing.T) {
 			return snapshot{}, err
 		}
 		return snapshot{len(before), len(after)}, nil
-	})
+	}, repository.Generation)
 	must(t, err)
 	if attempts < 2 {
 		t.Fatalf("the racing commit did not force a retry: attempts=%d", attempts)
@@ -278,6 +405,108 @@ func TestConsistentReadRetriesAcrossARacingCommit(t *testing.T) {
 	}
 	if result.before != 2 {
 		t.Fatalf("consistentRead did not settle on the latest generation: %+v", result)
+	}
+}
+
+// TestWorkstreamListDoesNotMixRuntimeArchiveStateAcrossGenerations covers
+// spec#8's runtime half: statuses (status.go) reads the runtime store and
+// the trace together, inside one consistentRead attempt scoped to both the
+// repository's generation and the runtime store's own (runtime/store.go,
+// Store.Generation). A runtime mutation that lands while that attempt is
+// assembling its response, here archiving the workstream, forces the whole
+// attempt to retry, so the response never shows a workstream's archived
+// flag from one runtime generation alongside the rest of its fields from
+// another.
+func TestWorkstreamListDoesNotMixRuntimeArchiveStateAcrossGenerations(t *testing.T) {
+	t.Parallel()
+	opts := fixture(t)
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, serviceActor)
+	must(t, err)
+	must(t, repository.CreateWorkstream(context.Background(), stream, demoStart, serviceActor))
+	must(t, repository.Close())
+	s, c := start(t, opts)
+	_, active := s.runtimeOf(project)
+	if active == nil {
+		t.Fatal("no active project")
+	}
+
+	attempts := 0
+	var raceOnce sync.Once
+	s.boundary = func(name string) error {
+		if name == "status-agents" {
+			attempts++
+			raceOnce.Do(func() {
+				if err := s.store.SetArchived(runtime.Archive{Project: project, Workstream: stream, ArchivedAt: s.now()}); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		return nil
+	}
+	defer func() { s.boundary = nil }()
+
+	raced, err := c.Statuses(context.Background())
+	must(t, err)
+	if attempts < 2 {
+		t.Fatalf("the racing runtime mutation did not force the workstream list read to retry: attempts=%d", attempts)
+	}
+	idx := slices.IndexFunc(raced.Workstreams, func(w WorkstreamStatus) bool { return w.Workstream == stream })
+	if idx == -1 || !raced.Workstreams[idx].Archived {
+		t.Fatalf("workstream list returned a stale or inconsistent archived flag after a racing runtime mutation: %+v", raced.Workstreams)
+	}
+}
+
+// TestInboxDoesNotMixRuntimeStateAcrossGenerations covers spec#8: inbox
+// (inbox.go) reads a project's statuses, escalations and, per workstream,
+// many further trace and runtime-store facts (operations, outbox, the loop
+// guard's pause, ...), inside one consistentRead attempt scoped to both the
+// repository's and the runtime store's generation. A runtime mutation that
+// lands partway through that attempt, here the owner's loop guard pausing
+// the workstream, forces the whole attempt to retry rather than return a
+// response built from entries read across two different runtime
+// generations: the earlier entries this attempt already assembled, from
+// before the pause, and the loop guard's own entry, which only a fresh
+// attempt would see.
+func TestInboxDoesNotMixRuntimeStateAcrossGenerations(t *testing.T) {
+	t.Parallel()
+	opts := fixture(t)
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, serviceActor)
+	must(t, err)
+	must(t, repository.CreateWorkstream(context.Background(), stream, demoStart, serviceActor))
+	must(t, repository.Close())
+	s, c := start(t, opts)
+	_, active := s.runtimeOf(project)
+	if active == nil {
+		t.Fatal("no active project")
+	}
+
+	attempts := 0
+	var raceOnce sync.Once
+	s.boundary = func(name string) error {
+		if name == "inbox-decisions" {
+			attempts++
+			raceOnce.Do(func() {
+				pause := runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Source: runtime.PauseLoopGuard, Reason: "loop guard engaged", SetAt: s.now()}
+				if err := s.store.SetPause(pause); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		return nil
+	}
+	defer func() { s.boundary = nil }()
+
+	raced, err := c.Inbox(context.Background())
+	must(t, err)
+	if attempts < 2 {
+		t.Fatalf("the racing runtime mutation did not force the inbox read to retry: attempts=%d", attempts)
+	}
+	if !slices.ContainsFunc(raced.Entries, func(e InboxEntry) bool { return e.Kind == InboxLoop && e.Workstream == stream }) {
+		t.Fatalf("inbox returned a stale or inconsistent view after a racing runtime mutation, missing the loop guard entry: %+v", raced.Entries)
 	}
 }
 
@@ -363,10 +592,10 @@ func TestConsistentReadReturnsWithoutARacingWrite(t *testing.T) {
 	t.Cleanup(func() { repository.Close() })
 
 	attempts := 0
-	_, err = consistentRead(repository, func() (uint64, error) {
+	_, err = consistentRead(func() (uint64, error) {
 		attempts++
 		return repository.Generation(), nil
-	})
+	}, repository.Generation)
 	must(t, err)
 	if attempts != 1 {
 		t.Fatalf("fn ran %d times with nothing racing it", attempts)
