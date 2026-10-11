@@ -95,7 +95,7 @@ func TestPostRecordsOwnerMessageAndRunsBeekeeperTurn(t *testing.T) {
 		t.Fatalf("fresh beekeeper busy: %v %v", busy, err)
 	}
 	turns := &recordingTurns{result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Every workstream is quiet."}}
-	q, err := Post(ctx, repo, testProfile(), turns, testPrepare(t), func() time.Time { return at }, "Which workstreams need me?")
+	q, err := Post(ctx, repo, testProfile(), turns, testPrepare(t), func() time.Time { return at }, "Which workstreams need me?", nil)
 	must(t, err)
 	if q.Response == nil || q.Response.Result.FinalResponse != "Every workstream is quiet." || q.Status() != "idle" {
 		t.Fatalf("completed turn: %+v", q)
@@ -128,7 +128,7 @@ func TestPostFailedTurnRecordsFailureEndsBusyAndAllowsNextMessage(t *testing.T) 
 	repo := openShadow(t)
 	failing := &recordingTurns{result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "partial", IsError: true}}
 	now := func() time.Time { return at }
-	q, err := Post(ctx, repo, testProfile(), failing, testPrepare(t), now, "Build the plan.")
+	q, err := Post(ctx, repo, testProfile(), failing, testPrepare(t), now, "Build the plan.", nil)
 	must(t, err)
 	if q.Status() != "failed" || q.Response == nil || q.Response.Failure == "" {
 		t.Fatalf("failed turn not recorded as a failure: %+v", q)
@@ -143,7 +143,7 @@ func TestPostFailedTurnRecordsFailureEndsBusyAndAllowsNextMessage(t *testing.T) 
 	}
 
 	succeeding := &recordingTurns{result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session-2"}, FinalResponse: "Back online."}}
-	q2, err := Post(ctx, repo, testProfile(), succeeding, testPrepare(t), now, "Try again.")
+	q2, err := Post(ctx, repo, testProfile(), succeeding, testPrepare(t), now, "Try again.", nil)
 	must(t, err)
 	if q2.Status() != "idle" || q2.Response.Result.FinalResponse != "Back online." {
 		t.Fatalf("next message after a failure: %+v", q2)
@@ -166,7 +166,7 @@ func TestPostWhileBusyReturnsErrorAndRecordsNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	turns := &recordingTurns{result: coreadapter.SessionResult{FinalResponse: "should not run"}}
-	_, err := Post(ctx, repo, testProfile(), turns, testPrepare(t), func() time.Time { return at }, "New message")
+	_, err := Post(ctx, repo, testProfile(), turns, testPrepare(t), func() time.Time { return at }, "New message", nil)
 	if err != ErrBusy {
 		t.Fatalf("expected ErrBusy, got %v", err)
 	}
@@ -191,7 +191,7 @@ func TestPostConcurrentCallsRecordExactlyOneMessageAndRunOneTurn(t *testing.T) {
 
 	first := make(chan error, 1)
 	go func() {
-		_, err := Post(ctx, repo, testProfile(), blocker, testPrepare(t), now, "First message")
+		_, err := Post(ctx, repo, testProfile(), blocker, testPrepare(t), now, "First message", nil)
 		first <- err
 	}()
 	select {
@@ -208,7 +208,7 @@ func TestPostConcurrentCallsRecordExactlyOneMessageAndRunOneTurn(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			turns := &recordingTurns{result: coreadapter.SessionResult{FinalResponse: "should not run"}}
-			_, err := Post(ctx, repo, testProfile(), turns, testPrepare(t), now, "Concurrent message")
+			_, err := Post(ctx, repo, testProfile(), turns, testPrepare(t), now, "Concurrent message", nil)
 			results <- err
 		}()
 	}
@@ -254,7 +254,7 @@ func TestBeekeeperTurnWorksWithHearsayNotConfigured(t *testing.T) {
 	profile, err := cfg.NamedProfile(cfg.Beekeeper.Profile)
 	must(t, err)
 	turns := &recordingTurns{result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "claude", ID: "session"}, FinalResponse: "Still here."}}
-	q, err := Post(ctx, repo, profile, turns, testPrepare(t), func() time.Time { return at }, "Are you there?")
+	q, err := Post(ctx, repo, profile, turns, testPrepare(t), func() time.Time { return at }, "Are you there?", nil)
 	must(t, err)
 	if q.Response == nil || q.Response.Result.FinalResponse != "Still here." {
 		t.Fatalf("turn with hearsay unconfigured: %+v", q)

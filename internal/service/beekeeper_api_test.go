@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -222,15 +223,24 @@ func TestBeekeeperHandlersWithNoProjectRegistered(t *testing.T) {
 }
 
 // Posting while the Beekeeper's first turn is still in flight returns a
-// conflict status through the HTTP layer and records nothing. The first
-// turn's model session blocks on a channel until released, so the second
-// post is deterministically issued while the first is genuinely in flight,
-// never before it starts and never after it finishes.
-func TestPostBeekeeperHandlerWhileBusyReturnsConflict(t *testing.T) {
+// temporarily-unavailable status through the HTTP layer and records
+// nothing. The first turn's model session blocks on a channel until
+// released, so the second post is deterministically issued while the first
+// is genuinely in flight, never before it starts and never after it
+// finishes.
+func TestPostBeekeeperHandlerWhileBusyReturnsUnavailable(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	entered := make(chan struct{})
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseTurn := func() { releaseOnce.Do(func() { close(release) }) }
+	// Release the blocked turn on any exit path, including a failed
+	// assertion: otherwise the first turn's model session stays blocked on
+	// <-release forever, and the service's shutdown in t.Cleanup waits on
+	// that turn, hanging the whole test binary rather than just failing
+	// this test.
+	t.Cleanup(releaseTurn)
 	opts.BeekeeperTurns = turnsFunc(func(_ context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		close(entered)
 		<-release
@@ -252,7 +262,13 @@ func TestPostBeekeeperHandlerWhileBusyReturnsConflict(t *testing.T) {
 
 	_, err := c.SendBeekeeper(ctx, "New message")
 	api := beekeeperAPIError(t, err)
-	if api.Code != Conflict {
+	// Busy is reported as temporarily unavailable, naming the Beekeeper's
+	// turn in flight from the activity record, not as a generic conflict:
+	// the owner's view is current (there is nothing stale about the
+	// request), the backend simply cannot admit it yet. The shadow
+	// project's identifier never appears in the message: the shadow
+	// project is never named in an API response.
+	if api.Code != Unavailable || !strings.Contains(api.Message, "Beekeeper's turn") || strings.Contains(api.Message, string(s.shadow.Project())) {
 		t.Fatalf("busy post: %+v", api)
 	}
 
@@ -263,7 +279,7 @@ func TestPostBeekeeperHandlerWhileBusyReturnsConflict(t *testing.T) {
 		t.Fatalf("a message was recorded while busy: %+v", th.Turns)
 	}
 
-	close(release)
+	releaseTurn()
 	select {
 	case err := <-first:
 		if err != nil {

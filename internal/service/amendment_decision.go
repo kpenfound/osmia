@@ -232,7 +232,7 @@ func (s *Service) decideAmendment(ctx context.Context, raw, id string, req Amend
 	if api != nil {
 		return AmendmentResponse{}, api
 	}
-	return s.recordAmendmentDecision(ctx, project, stream, repository, id, req, ownerActor, "owner-amendment")
+	return s.recordAmendmentDecision(trace.OwnerCommand(ctx), project, stream, repository, id, req, ownerActor, "owner-amendment")
 }
 
 // recordAmendmentDecision records one decision on an amendment, as the
@@ -351,6 +351,9 @@ func (s *Service) recordAmendmentDecision(ctx context.Context, project config.Pr
 	if _, err := repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			return AmendmentResponse{}, &APIError{Conflict, fmt.Sprintf("amendment %s changed while the decision was recorded; read it again with osmia amendment and retry", id)}
+		}
+		if api := s.pruneFenceUnavailable(project, err); api != nil {
+			return AmendmentResponse{}, api
 		}
 		return AmendmentResponse{}, failed
 	}

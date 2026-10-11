@@ -242,12 +242,22 @@ func (s *Service) beekeeperPrepare(cfg *config.Config) beekeeper.Prepare {
 	}
 }
 
+// beekeeperActivityKey names the Beekeeper's own turn in the activity
+// record. The Beekeeper runs at most one turn at a time (postLock in
+// beekeeper.Post), so one fixed key names it for the whole service's
+// lifetime: a fresh start under it supersedes whatever an earlier turn
+// reported, exactly as a reconciled operation's own stable ID would.
+const beekeeperActivityKey = "beekeeper-turn"
+
 // PostBeekeeper records text as the Beekeeper thread's next owner request
 // and runs the Beekeeper turn through beekeeper.Post, on
 // Options.BeekeeperTurns, with the profile and sandbox settings the
 // Beekeeper section of the loaded configuration names alone: no registered
 // project's configuration, charter or capacity bounds it. A busy Beekeeper
-// returns beekeeper.ErrBusy and records nothing.
+// returns beekeeper.ErrBusy and records nothing. The turn that actually
+// runs, never a call beekeeper.Post refuses as busy, is reported in the
+// activity record under beekeeperActivityKey for its whole run, so a
+// concurrent busy refusal can name it.
 func (s *Service) PostBeekeeper(ctx context.Context, text string) (trace.QueuedTurn, error) {
 	cfg := s.current()
 	profile, err := cfg.NamedProfile(cfg.Beekeeper.Profile)
@@ -257,7 +267,13 @@ func (s *Service) PostBeekeeper(ctx context.Context, text string) (trace.QueuedT
 	if s.options.BeekeeperTurns == nil {
 		return trace.QueuedTurn{}, fmt.Errorf("the beekeeper has no turn runner configured")
 	}
-	return beekeeper.Post(ctx, s.shadow, profile, s.options.BeekeeperTurns, s.beekeeperPrepare(cfg), s.now, text)
+	var h *ActivityHandle
+	started := func() {
+		h = s.StartActivity(beekeeperActivityKey, ActivityAgentTurn, config.ShadowProjectID, "", "running the owner's message")
+	}
+	q, err := beekeeper.Post(ctx, s.shadow, profile, s.options.BeekeeperTurns, s.beekeeperPrepare(cfg), s.now, text, started)
+	h.Finish(err)
+	return q, err
 }
 
 // Start loads state and binds before returning. Wait joins shutdown and cleanup.

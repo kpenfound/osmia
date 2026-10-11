@@ -516,8 +516,14 @@ func (r *Repository) prunePurged(ctx context.Context, progress PurgeProgress) er
 	progress.report("pruning", nil)
 	r.purgeMu.Lock()
 	defer r.purgeMu.Unlock()
-	r.pruneMu.Lock()
-	defer r.pruneMu.Unlock()
+	// prunePurged is the one caller that holds the prune fence rather than
+	// waiting to acquire it against someone else holding it, so it passes a
+	// context with no OwnerCommand marker: lockPruneMu always waits for it
+	// unconditionally here, exactly as a plain mutex would.
+	if err := r.lockPruneMu(ctx); err != nil {
+		return err
+	}
+	defer r.unlockPruneMu()
 	if err := ctx.Err(); err != nil {
 		return err
 	}

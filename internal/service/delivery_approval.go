@@ -322,9 +322,12 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 	id := fmt.Sprintf("delivery-owner-%d", prior.Revision+1)
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: deliveryDocument, Revision: prior.Revision + 1, Project: project, Workstream: stream, At: approval.At, Actor: ownerActor, Cause: id}, Path: deliveryPath, Content: string(content)}
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: ownerHeader(id, project, stream, "delivery-approval", approval.At), Subject: deliverySubject, From: state.Value, To: fmt.Sprintf("approved-%d", prior.Revision+1), Reason: fmt.Sprintf("the owner approved description %s for final review %d at %s", approval.DescriptionHash, approval.Review, approval.Commit)}}
-	if _, err := repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
+	if _, err := repository.RecordDocumentsWith(trace.OwnerCommand(ctx), []trace.Document{doc}, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			return DeliveryApproval{}, &APIError{Conflict, "delivery decision changed; read the current presentation"}
+		}
+		if api := s.pruneFenceUnavailable(project, err); api != nil {
+			return DeliveryApproval{}, api
 		}
 		return DeliveryApproval{}, &APIError{Internal, "cannot record delivery approval"}
 	}

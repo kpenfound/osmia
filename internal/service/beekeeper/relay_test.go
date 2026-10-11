@@ -69,7 +69,7 @@ func TestPostIncludesRelayedRepliesSinceThePreviousTurnOnly(t *testing.T) {
 	must(t, RecordRelayedReply(ctx, repo, relayProject, "w_11111111111111111111111111111111", "request_before", "Before the first turn.", now.Add(-time.Minute)))
 
 	first := &recordingTurns{result: successResult("Noted.")}
-	if _, err := Post(ctx, repo, testProfile(), first, testPrepare(t), clock, "Status?"); err != nil {
+	if _, err := Post(ctx, repo, testProfile(), first, testPrepare(t), clock, "Status?", nil); err != nil {
 		t.Fatal(err)
 	}
 	calls := first.Calls()
@@ -84,7 +84,7 @@ func TestPostIncludesRelayedRepliesSinceThePreviousTurnOnly(t *testing.T) {
 
 	second := &recordingTurns{result: successResult("Noted again.")}
 	now = at.Add(2 * time.Hour)
-	if _, err := Post(ctx, repo, testProfile(), second, testPrepare(t), clock, "Anything new?"); err != nil {
+	if _, err := Post(ctx, repo, testProfile(), second, testPrepare(t), clock, "Anything new?", nil); err != nil {
 		t.Fatal(err)
 	}
 	calls = second.Calls()
@@ -94,7 +94,7 @@ func TestPostIncludesRelayedRepliesSinceThePreviousTurnOnly(t *testing.T) {
 
 	third := &recordingTurns{result: successResult("Still quiet.")}
 	now = at.Add(3 * time.Hour)
-	if _, err := Post(ctx, repo, testProfile(), third, testPrepare(t), clock, "Still nothing?"); err != nil {
+	if _, err := Post(ctx, repo, testProfile(), third, testPrepare(t), clock, "Still nothing?", nil); err != nil {
 		t.Fatal(err)
 	}
 	calls = third.Calls()

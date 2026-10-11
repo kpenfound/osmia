@@ -31,8 +31,13 @@ type Repository struct {
 	operationMu sync.Mutex
 	// pruneMu excludes a purge's prune step from any write that creates a Git
 	// object, for the short time pruning itself takes. It is taken by those
-	// writes and by prunePurged alone; a read never waits on it.
-	pruneMu sync.Mutex
+	// writes and by prunePurged alone; a read never waits on it. It is a
+	// buffered channel of capacity one, not a sync.Mutex: lockPruneMu
+	// (transaction.go) acquires it exactly like a mutex for every caller
+	// except an owner command (OwnerCommand), which gives up waiting after
+	// ownerCommandPruneFenceBound instead of blocking for however long
+	// prunePurged's destructive repack and prune steps take.
+	pruneMu chan struct{}
 	// purgeMu excludes a purge's history rewrite and publication from a
 	// concurrent prune: the rewrite creates commits and trees that stay
 	// unreachable, and so eligible for prunePurged's gc, until the publish
@@ -151,7 +156,7 @@ func openDirectory(root config.Root, project config.Project) (*Repository, error
 	if err != nil {
 		return nil, err
 	}
-	return &Repository{root: root, project: project.ID, directory: directory, dir: dir, session: rand.Text(), wake: coreadapter.NewWakeups()}, nil
+	return &Repository{root: root, project: project.ID, directory: directory, dir: dir, session: rand.Text(), wake: coreadapter.NewWakeups(), pruneMu: make(chan struct{}, 1)}, nil
 }
 func (r *Repository) acquire() error {
 	if err := r.checked(".git/osmia.lock"); err != nil {

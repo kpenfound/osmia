@@ -31,12 +31,15 @@ func soon(t *testing.T, message string, condition func() bool) {
 
 // fakeAction answers one inbox entry's own decision endpoint: a fixed body
 // by default, held open until release is called so a test can see what the
-// page does before the server responds, or made to fail so a test can see
-// what it does when a submission is refused.
+// page does before the server responds, made to fail so a test can see
+// what it does when a submission is rejected, or made temporarily
+// unavailable so a test can see what it does when the backend cannot admit
+// the command yet.
 type fakeAction struct {
-	mu   sync.Mutex
-	hold chan struct{}
-	fail string
+	mu          sync.Mutex
+	hold        chan struct{}
+	fail        string
+	unavailable string
 }
 
 // holdResponse makes every response already in flight, and every one
@@ -50,10 +53,21 @@ func (a *fakeAction) holdResponse() (release func()) {
 }
 
 // failNext makes every request from now on fail with message, instead of
-// answering okBody, until cleared.
+// answering okBody, until cleared by another call to failNext,
+// failNextUnavailable, or failNext("").
 func (a *fakeAction) failNext(message string) {
 	a.mu.Lock()
-	a.fail = message
+	a.fail, a.unavailable = message, ""
+	a.mu.Unlock()
+}
+
+// failNextUnavailable makes every request from now on fail as temporarily
+// unavailable, with message naming the blocking operation, instead of
+// answering okBody, until cleared by another call to failNext or
+// failNextUnavailable.
+func (a *fakeAction) failNextUnavailable(message string) {
+	a.mu.Lock()
+	a.fail, a.unavailable = "", message
 	a.mu.Unlock()
 }
 
@@ -62,9 +76,15 @@ func (a *fakeAction) serve(w http.ResponseWriter, r *http.Request, okBody string
 	a.mu.Lock()
 	hold := a.hold
 	fail := a.fail
+	unavailable := a.unavailable
 	a.mu.Unlock()
 	if hold != nil {
 		<-hold
+	}
+	if unavailable != "" {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		writeJSON(w, fmt.Sprintf(`{"error":{"code":"unavailable","message":%s}}`, quote(unavailable)))
+		return
 	}
 	if fail != "" {
 		w.WriteHeader(http.StatusConflict)

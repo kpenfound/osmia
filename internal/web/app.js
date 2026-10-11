@@ -132,7 +132,11 @@
   }
 
   // request calls the API and returns its answer, or throws an error with
-  // the API's message when it refuses.
+  // the API's message when it refuses. The thrown error's code is the
+  // API's error code, 'unavailable' for a command the backend cannot admit
+  // right now (a blocking operation is named in the message), or undefined
+  // when the API gave no structured error, so act can tell that outcome
+  // apart from an ordinary rejection.
   async function request(method, path, body) {
     const init = { method, cache: 'no-store', headers: { Accept: 'application/json' } };
     if (method !== 'GET') {
@@ -150,7 +154,11 @@
     const out = await response.json().catch(() => null);
     if (!response.ok) {
       const refusal = out && out.error && out.error.message ? out.error.message : response.status + ' ' + response.statusText;
-      throw new Error(refusal);
+      const err = new Error(refusal);
+      if (out && out.error && out.error.code) {
+        err.code = out.error.code;
+      }
+      throw err;
     }
     return out;
   }
@@ -310,16 +318,20 @@
     }
   }
 
-  // show writes an action's outcome: pending, ok or error.
+  // show writes an action's outcome: pending, ok, unavailable or error.
   function show(result, outcome, text) {
     result.dataset.outcome = outcome;
     result.textContent = text;
   }
 
   // act runs one owner action with its button disabled and shows what the
-  // API answered in result: done's text on success, the refusal otherwise,
-  // after which refused runs, when given. Once the action ends, the button
-  // is enabled again unless a render has blocked it meanwhile.
+  // API answered in result: done's text once the command is accepted and
+  // durably recorded ('ok'), the API's message naming the blocking
+  // operation when the command is temporarily unavailable
+  // ('unavailable'), or the refusal's reason when it is rejected
+  // ('error'); refused runs after either kind of refusal, when given. Once
+  // the action ends, the button is enabled again unless a render has
+  // blocked it meanwhile.
   async function act(result, button, call, done, refused) {
     button.dataset.busy = 'true';
     button.disabled = true;
@@ -327,7 +339,7 @@
     try {
       show(result, 'ok', done(await call()));
     } catch (err) {
-      show(result, 'error', err.message);
+      show(result, err.code === 'unavailable' ? 'unavailable' : 'error', err.message);
       if (refused) {
         refused();
       }

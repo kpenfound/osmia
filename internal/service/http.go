@@ -58,6 +58,8 @@ func failWith(w http.ResponseWriter, api *APIError) {
 		status = 404
 	case Unsupported:
 		status = 501
+	case Unavailable:
+		status = 503
 	}
 	respond(w, status, ErrorResponse{*api})
 }

@@ -152,8 +152,10 @@ func (r *Repository) commit(ctx context.Context, paths []string, message string)
 // content from there instead of from the work tree. It takes pruneMu, since
 // it creates Git objects a concurrent purge's prune step must not race.
 func (r *Repository) commitContent(ctx context.Context, paths []string, content map[string][]byte, message string) error {
-	r.pruneMu.Lock()
-	defer r.pruneMu.Unlock()
+	if err := r.lockPruneMu(ctx); err != nil {
+		return err
+	}
+	defer r.unlockPruneMu()
 	parent, err := r.readFile(".git/refs/heads/main")
 	if err != nil && !os.IsNotExist(err) {
 		return err

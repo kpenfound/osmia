@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -73,12 +74,21 @@ func TestBrowserBeekeeperSidebarItemOpensChatWithMessagesAuthorsAndComposer(t *t
 
 // Sending a message to the Beekeeper posts it and shows the reply once the
 // turn finishes, without a page reload, and a message sent while a previous
-// turn is still in flight is refused with a busy error the composer shows.
+// turn is still in flight is refused as temporarily unavailable, naming the
+// Beekeeper's turn, the way the composer shows it.
 func TestBrowserBeekeeperSendAndReplyAppearWithoutReloadAndBusyRefusal(t *testing.T) {
 	p := openBrowser(t)
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	finished := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseTurn := func() { releaseOnce.Do(func() { close(release) }) }
+	// Release the blocked turn on any exit path, including a failed
+	// assertion below: otherwise the blocked turn's model session stays
+	// parked on <-release forever, and the fixture's t.Cleanup, which
+	// closes the service and waits for every running turn, hangs the
+	// whole test binary rather than just failing this test.
+	t.Cleanup(releaseTurn)
 	run := func(_ context.Context, in coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		if in.Prompt == "Hold please" {
 			close(entered)
@@ -103,10 +113,11 @@ func TestBrowserBeekeeperSendAndReplyAppearWithoutReloadAndBusyRefusal(t *testin
 	p.await("the same document", `window.notReloaded === true`)
 
 	// A second owner message sent while the Beekeeper's turn is still in
-	// flight is refused as busy; the first is fired as a raw request (not
-	// through the composer's own button, which the UI disables for the
-	// duration of its own request) so the refusal is genuine, not merely
-	// the composer disabling itself.
+	// flight is refused as temporarily unavailable, naming the Beekeeper's
+	// turn, never the shadow project's identifier (activityCause); the
+	// first is fired as a raw request (not through the composer's own
+	// button, which the UI disables for the duration of its own request)
+	// so the refusal is genuine, not merely the composer disabling itself.
 	p.eval(`(() => { fetch('/v1/beekeeper', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text: 'Hold please'})}).catch(() => {}); })()`, nil)
 	select {
 	case <-entered:
@@ -115,9 +126,9 @@ func TestBrowserBeekeeperSendAndReplyAppearWithoutReloadAndBusyRefusal(t *testin
 	}
 	p.typeInto("#beekeeper-form textarea", "Are you there?")
 	p.click("#beekeeper-form [type=submit]")
-	p.awaitText("#beekeeper-result", "busy")
+	p.awaitText("#beekeeper-result", "Beekeeper's turn")
 
-	close(release)
+	releaseTurn()
 	select {
 	case <-finished:
 	case <-time.After(5 * time.Second):

@@ -82,6 +82,7 @@ func ownerHeader(id string, project config.ProjectID, stream config.WorkstreamID
 // shedOwner is one owner action on one workstream's shed: the workstream, its
 // trace, the state the action found and the revision it is recorded against.
 type shedOwner struct {
+	s          *Service
 	project    config.ProjectID
 	stream     config.WorkstreamID
 	repository *trace.Repository
@@ -131,7 +132,7 @@ func (s *Service) shedAction(raw string, states ...string) (*shedOwner, *APIErro
 	if err != nil {
 		return nil, &APIError{Conflict, fmt.Sprintf("workstream %s has no recorded spec and plan yet", stream)}
 	}
-	return &shedOwner{project: project, stream: stream, repository: repository, feature: feature.Value, shed: state, owner: owner, skipped: skipped, round: round, pin: pin, now: s.now}, nil
+	return &shedOwner{s: s, project: project, stream: stream, repository: repository, feature: feature.Value, shed: state, owner: owner, skipped: skipped, round: round, pin: pin, now: s.now}, nil
 }
 
 // skippedDebate reports whether the owner has skipped debate on the
@@ -178,6 +179,7 @@ func (o *shedOwner) document(path string) (trace.Document, bool, error) {
 // interruption between the two leaves the owner's action recorded and
 // readable, never a transition that names a file that is not there.
 func (o *shedOwner) record(ctx context.Context, id, path, content, value, reason string) *APIError {
+	ctx = trace.OwnerCommand(ctx)
 	latest, found, err := o.document(path)
 	failed := &APIError{Internal, fmt.Sprintf("cannot record the owner's shed action on workstream %s; check the trace repository", o.stream)}
 	if err != nil {
@@ -189,6 +191,9 @@ func (o *shedOwner) record(ctx context.Context, id, path, content, value, reason
 	}
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: o.project, Workstream: o.stream, At: o.now(), Actor: ownerActor, Cause: "owner-shed"}, Path: path, Content: content}
 	if err := o.repository.RecordDocuments(ctx, []trace.Document{doc}); err != nil {
+		if api := o.s.pruneFenceUnavailable(o.project, err); api != nil {
+			return api
+		}
 		return failed
 	}
 	transition := fmt.Sprintf("%s-%d", id, revision)
@@ -198,6 +203,9 @@ func (o *shedOwner) record(ctx context.Context, id, path, content, value, reason
 	if _, err := o.repository.Transact(ctx, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			return &APIError{Conflict, fmt.Sprintf("workstream %s changed while recording the action; check osmia status and retry", o.stream)}
+		}
+		if api := o.s.pruneFenceUnavailable(o.project, err); api != nil {
+			return api
 		}
 		return failed
 	}

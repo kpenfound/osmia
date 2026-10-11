@@ -1006,6 +1006,10 @@ button:disabled {
   color: var(--live);
 }
 
+.result[data-outcome="unavailable"] {
+  color: var(--accent);
+}
+
 .result[data-outcome="error"] {
   color: var(--lost);
 }
