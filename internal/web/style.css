@@ -910,6 +910,22 @@ svg {
   border-radius: 0.75rem;
 }
 
+.row .sub .tag {
+  margin-right: 0.3rem;
+}
+
+.diff {
+  overflow-x: auto;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  white-space: pre;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+}
+
 label {
   display: grid;
   gap: 0.25rem;

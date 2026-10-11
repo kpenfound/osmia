@@ -83,6 +83,9 @@
     <button type="button" id="sidebar-new" class="new">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> New workstream
     </button>
+    <button type="button" id="sidebar-new-session" class="new" data-open="session-add">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> New session
+    </button>
     <button type="button" id="beekeeper-button" class="row beekeeper">
       <span class="title">Beekeeper</span>
     </button>
@@ -184,6 +187,58 @@
           </div>
           <p id="beekeeper-result" class="result" role="status"></p>
         </form>
+      </div>
+    </section>
+
+    <section class="view" data-view="session-add" aria-labelledby="session-add-title" hidden>
+      <div class="view-head"><h2 id="session-add-title">New session</h2><button type="button" class="icon" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <form id="session-add-form" class="control">
+        <label>Project <select name="project" data-project-select required></select></label>
+        <label>Profile <select name="profile" required></select></label>
+        <label>Title (optional) <input name="title" type="text"></label>
+        <div class="actions"><button type="submit">Open session</button></div>
+        <p class="result" role="status"></p>
+      </form>
+    </section>
+
+    <section class="view" data-view="session" aria-labelledby="session-title" hidden>
+      <div class="view-head"><h2 id="session-title">Session</h2></div>
+      <div id="session-meta" class="id"></div>
+      <div class="thread">
+        <div id="session-feed" class="feed" data-field="feed"></div>
+        <form id="session-form" class="send composer">
+          <div class="box">
+            <textarea name="text" rows="2" aria-label="Message the session's agent" placeholder="Message the agent"></textarea>
+            <div class="actions"><button type="submit" class="primary">Send</button></div>
+          </div>
+          <p id="session-result" class="result" role="status"></p>
+        </form>
+      </div>
+      <div class="control">
+        <div class="actions"><button type="button" id="session-stop">Stop</button></div>
+      </div>
+      <div class="control">
+        <h3>Changes</h3>
+        <pre id="session-diff" class="diff" data-field="diff"></pre>
+        <ul id="session-commits" class="notes" data-field="commits"></ul>
+      </div>
+      <form id="session-commit-form" class="control">
+        <h3>Commit</h3>
+        <label>Message <textarea name="message" rows="3" required></textarea></label>
+        <div class="actions"><button type="submit">Commit</button></div>
+        <p class="result" role="status"></p>
+      </form>
+      <div class="control">
+        <h3>Check</h3>
+        <div class="actions"><button type="button" id="session-check">Run check</button></div>
+        <p id="session-check-result" class="meta" data-field="check-result"></p>
+      </div>
+      <div class="control">
+        <div class="actions">
+          <button type="button" id="session-push">Push</button>
+          <button type="button" id="session-end">End session</button>
+        </div>
+        <p id="session-control-result" class="result" role="status"></p>
       </div>
     </section>
 
