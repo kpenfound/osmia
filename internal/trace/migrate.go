@@ -203,6 +203,13 @@ func copyWorkstreamTrace(ctx context.Context, root config.Root, project config.P
 	if err != nil {
 		return err
 	}
+	base, err := root.WorkstreamTraces(project)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(base, 0700); err != nil {
+		return err
+	}
 	staging, err := root.WorkstreamStaging()
 	if err != nil {
 		return err

@@ -82,6 +82,14 @@ func legacyFixture(t *testing.T, root config.Root, p config.Project, streams []c
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
+	base, err := root.WorkstreamTraces(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A shared-layout project has no destination directory for its traces.
+	if err := os.Remove(base); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // collapseToSharedLayout moves every one of streams' dedicated trace
