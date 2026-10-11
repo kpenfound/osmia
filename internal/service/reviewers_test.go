@@ -587,7 +587,7 @@ func TestRepeatedlyRefusedReviewsContestTheUnit(t *testing.T) {
 	if contested.Value != UnitContested {
 		t.Fatalf("refused review %d left the unit %s", maxReviewRefreshes, contested.Value)
 	}
-	transitions := allTransitions(t, f.trace, stream)
+	transitions := allTransitions(t, f.s.cfg.Root, f.project, stream)
 	contest := transitions[len(transitions)-1]
 	if contest.Subject != subject || !failedReview(contest, "resume") || !strings.Contains(contest.Reason, fmt.Sprintf("refused %d reviews of unit resume in a row", maxReviewRefreshes)) {
 		t.Fatalf("the contest %+v", contest)
@@ -639,7 +639,7 @@ func TestRepeatedlyInterruptedReviewContestsTheUnit(t *testing.T) {
 	if ids := turnIDs(t, repository, stream, reviewerAgent("resume")); len(ids) != maxRecoveries {
 		t.Fatalf("reviewer turns %v", ids)
 	}
-	transitions := allTransitions(t, f.trace, stream)
+	transitions := allTransitions(t, f.s.cfg.Root, f.project, stream)
 	contest := transitions[len(transitions)-1]
 	if !failedReview(contest, "resume") || !strings.Contains(contest.Reason, fmt.Sprintf("the latest %d reviewer turns of unit resume were interrupted in a row", maxRecoveries)) {
 		t.Fatalf("the contest %+v", contest)

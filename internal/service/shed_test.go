@@ -360,8 +360,10 @@ func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T
 		moves[2].Reason != "spec.md revision 1 and plan.json revision 1 enter the shed with a committee of 3" {
 		t.Fatalf("feature transitions: %+v", moves)
 	}
+	streamTrace, err := f.s.cfg.Root.WorkstreamTrace(f.project, stream)
+	must(t, err)
 	streamDir := "workstreams/" + string(stream) + "/"
-	events, err := os.ReadFile(filepath.Join(f.trace, streamDir, "events.jsonl"))
+	events, err := os.ReadFile(filepath.Join(streamTrace, streamDir, "events.jsonl"))
 	must(t, err)
 	if !strings.Contains(string(events), `"from":"sketched","to":"in-shed"`) {
 		t.Fatalf("events.jsonl:\n%s", events)
@@ -412,11 +414,11 @@ func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T
 		if len(docs) != 1 || docs[0].Path != "shed/round-1/"+member+".json" || docs[0].Actor != (trace.Actor{Kind: "agent", ID: member}) || docs[0].Cause != ops[0].Operation.ID {
 			t.Fatalf("document of %s: %+v", member, docs)
 		}
-		data, err := os.ReadFile(filepath.Join(f.trace, streamDir, docs[0].Path))
+		data, err := os.ReadFile(filepath.Join(streamTrace, streamDir, docs[0].Path))
 		if err != nil || string(data) != docs[0].Content || !strings.Contains(string(data), `"revision": {`) {
 			t.Fatalf("%s on disk: %q %v", docs[0].Path, data, err)
 		}
-		landed := demoGit(t, filepath.Dir(f.clone), "-C", f.trace, "log", "-1", "--format=%H", "--", streamDir+docs[0].Path)
+		landed := demoGit(t, filepath.Dir(f.clone), "-C", streamTrace, "log", "-1", "--format=%H", "--", streamDir+docs[0].Path)
 		if commit != "" && landed != commit {
 			t.Fatalf("records landed in separate commits: %s %s", commit, landed)
 		}

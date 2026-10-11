@@ -26,6 +26,13 @@ func prose(p string) bool {
 // edit is read and recorded first. Revisions are checked against the recorded
 // history before anything is written.
 func (r *Repository) RecordDocuments(ctx context.Context, docs []Document) error {
+	if len(docs) == 0 {
+		return fmt.Errorf("no documents to record")
+	}
+	r, err := r.scoped(docs[0].Workstream)
+	if err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	files, removed, err := r.documentFiles(ctx, docs)
@@ -40,15 +47,22 @@ func (r *Repository) RecordDocuments(ctx context.Context, docs []Document) error
 // same commit: either the revisions and every transaction are recorded, or
 // none is. It returns the state each transaction produced.
 func (r *Repository) RecordDocumentsWith(ctx context.Context, docs []Document, txs ...Transaction) ([]WorkflowState, error) {
+	if len(docs) == 0 {
+		return nil, fmt.Errorf("no documents to record")
+	}
+	stream := docs[0].Workstream
+	if stream == "" {
+		return nil, fmt.Errorf("project documents have no workflow")
+	}
+	r, err := r.scoped(stream)
+	if err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	files, removed, err := r.documentFiles(ctx, docs)
 	if err != nil {
 		return nil, err
-	}
-	stream := docs[0].Workstream
-	if stream == "" {
-		return nil, fmt.Errorf("project documents have no workflow")
 	}
 	for _, tx := range txs {
 		if tx.Transition.Workstream != stream {

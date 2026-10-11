@@ -17,9 +17,18 @@ const missingNotesSHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495
 // NotesTools binds private project/role memory to a queued turn. Handlers accept
 // no path or scope selectors and recheck the active turn on every access.
 func (r *Repository) NotesTools(agent string, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, _, err := r.turnScope(agent, scope, false); err != nil {
+	// The triggering turn is checked against its own workstream's trace; the
+	// notes themselves are a role's private project knowledge, held in the
+	// project's own trace.
+	project := r
+	workstream, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return nil, err
+	}
+	workstream.mu.Lock()
+	_, _, err = workstream.turnScope(agent, scope, false)
+	workstream.mu.Unlock()
+	if err != nil {
 		return nil, err
 	}
 	read := coreadapter.Tool{Name: "notes_read", Description: "Read this role's private project notes before writing; use the returned sha256 as the write precondition.", Effect: coreadapter.ToolRead,
@@ -29,15 +38,18 @@ func (r *Repository) NotesTools(agent string, scope coreadapter.Scope) ([]coread
 		if err := decode(input, &args); err != nil {
 			return nil, err
 		}
-		r.mu.Lock()
-		defer r.mu.Unlock()
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if _, _, err := r.turnScope(agent, scope, true); err != nil {
+		workstream.mu.Lock()
+		_, _, err := workstream.turnScope(agent, scope, true)
+		workstream.mu.Unlock()
+		if err != nil {
 			return nil, err
 		}
-		content, err := r.readFile("notes/" + scope.Role + ".md")
+		project.mu.Lock()
+		defer project.mu.Unlock()
+		content, err := project.readFile("notes/" + scope.Role + ".md")
 		if err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}
@@ -64,19 +76,22 @@ func (r *Repository) NotesTools(agent string, scope coreadapter.Scope) ([]coread
 		if args.Text == nil || args.ExpectedSHA256 == nil || len(*args.Text) > 64*1024 {
 			return nil, fmt.Errorf("notes require text of at most 65536 bytes")
 		}
-		r.mu.Lock()
-		defer r.mu.Unlock()
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if _, _, err := r.turnScope(agent, scope, true); err != nil {
+		workstream.mu.Lock()
+		_, _, err := workstream.turnScope(agent, scope, true)
+		workstream.mu.Unlock()
+		if err != nil {
 			return nil, err
 		}
+		project.mu.Lock()
+		defer project.mu.Unlock()
 		name := "notes/" + scope.Role + ".md"
-		if err := r.checked(name); err != nil {
+		if err := project.checked(name); err != nil {
 			return nil, err
 		}
-		current, err := r.readFile(name)
+		current, err := project.readFile(name)
 		if err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}
@@ -92,7 +107,7 @@ func (r *Repository) NotesTools(agent string, scope coreadapter.Scope) ([]coread
 				SHA256  string `json:"sha256"`
 			}{false, "notes changed since they were read; re-read, merge, and retry", currentSHA256})
 		}
-		if err := r.publish(ctx, map[string][]byte{name: []byte(*args.Text)}); err != nil {
+		if err := project.publish(ctx, map[string][]byte{name: []byte(*args.Text)}); err != nil {
 			return nil, err
 		}
 		return json.RawMessage(`{"written":true}`), nil
@@ -132,6 +147,10 @@ func (r *Repository) turnScope(agent string, scope coreadapter.Scope, active boo
 // ActiveTurn requires the exact role, thread, unit and current service claim.
 // It lets service-owned auxiliary tools share the workflow's execution boundary.
 func (r *Repository) ActiveTurn(scope coreadapter.Scope) error {
+	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if scope.Project != string(r.project) {

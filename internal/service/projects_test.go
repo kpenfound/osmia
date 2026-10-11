@@ -416,8 +416,15 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 					t.Fatalf("extraction: %+v", x)
 				}
 				awaitExtractionAcknowledged(t, s)
-				if out := demoGit(t, filepath.Dir(root), "--git-dir="+filepath.Join(root, "projects", string(id), ".git"), "rev-list", "--count", "HEAD"); strings.TrimSpace(out) != "10" {
-					t.Fatalf("trace history: %s", out)
+				if out := demoGit(t, filepath.Dir(root), "--git-dir="+filepath.Join(root, "projects", string(id), ".git"), "rev-list", "--count", "HEAD"); strings.TrimSpace(out) != "1" {
+					t.Fatalf("project trace history: %s", out)
+				}
+				loaded, err := config.Load(opts.Config)
+				must(t, err)
+				librarianTrace, err := loaded.Root.WorkstreamTrace(id, librarianWorkstream(id))
+				must(t, err)
+				if out := demoGit(t, filepath.Dir(root), "--git-dir="+filepath.Join(librarianTrace, ".git"), "rev-list", "--count", "HEAD"); strings.TrimSpace(out) != "9" {
+					t.Fatalf("librarian workstream trace history: %s", out)
 				}
 				// The seed is committed with the trace, so recovery never leaves a
 				// trace without its first entity map revision.

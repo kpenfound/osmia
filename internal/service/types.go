@@ -610,6 +610,10 @@ type WorkstreamStatus struct {
 	Archived bool `json:"archived,omitempty"`
 	// TraceDeleted is set after permanent archive cleanup completes.
 	TraceDeleted bool `json:"trace_deleted,omitempty"`
+	// DeliveryLink is, for an archived workstream and where one exists, the
+	// pull request URL or the recorded upstream commit of an owner-recorded
+	// merge.
+	DeliveryLink string `json:"delivery_link,omitempty"`
 }
 
 // AgentStatus is one claimed or parked turn from the durable thread snapshot.

@@ -494,7 +494,7 @@ func TestFinalReviewGapBecomesAnAssembledFollowupAndRequiresRereview(t *testing.
 	if report, reason, err := a.finalGate(ctx, stream); err != nil || reason != "" || report.Review != 2 {
 		t.Fatalf("rerun did not clear gap: review %+v, reason %q: %v", report, reason, err)
 	}
-	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.SpecPath), []byte(strings.Replace(validSpec, "never sent again", "sometimes resent", 1)), 0600))
+	must(t, os.WriteFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, plan.SpecPath), []byte(strings.Replace(validSpec, "never sent again", "sometimes resent", 1)), 0600))
 	if _, err := (&masons{s: f.s, cfg: f.s.cfg, repository: repository}).bundle(ctx, stream, id); !errors.Is(err, bundle.ErrStaleSpec) {
 		t.Fatalf("follow-up accepted unratified spec change: %v", err)
 	}

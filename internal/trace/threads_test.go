@@ -227,6 +227,7 @@ func TestThreadPublicationFailures(t *testing.T) {
 			t.Run(action+"/"+step, func(t *testing.T) {
 				ctx := context.Background()
 				r, root, p := create(t)
+				s := mustScoped(t, r, streamID)
 				var q QueuedTurn
 				var res TurnResponse
 				if action != "create" {
@@ -264,8 +265,8 @@ func TestThreadPublicationFailures(t *testing.T) {
 				}
 				injected := errors.New("injected")
 				hit := false
-				r.failPublication = func(s string) error {
-					if s == step {
+				s.failPublication = func(step2 string) error {
+					if step2 == step {
 						hit = true
 						return injected
 					}
@@ -274,7 +275,7 @@ func TestThreadPublicationFailures(t *testing.T) {
 				if err := apply(); !errors.Is(err, injected) || !hit {
 					t.Fatalf("missing injection: %v %v", err, hit)
 				}
-				r.failPublication = nil
+				s.failPublication = nil
 				// Same-session retry reconciles either side of the publication boundary.
 				if err := apply(); err != nil {
 					t.Fatalf("retry: %v", err)
@@ -320,12 +321,13 @@ func TestThreadReopenAtPublicationBoundary(t *testing.T) {
 	for _, step := range []string{"before-ref", "ref-published", "materialized:log.jsonl"} {
 		t.Run(step, func(t *testing.T) {
 			r, root, p := create(t)
+			s := mustScoped(t, r, streamID)
 			ctx := context.Background()
 			if err := r.CreateThread(ctx, threadAgent()); err != nil {
 				t.Fatal(err)
 			}
-			r.failPublication = func(s string) error {
-				if s == step {
+			s.failPublication = func(step2 string) error {
+				if step2 == step {
 					return errors.New("crash")
 				}
 				return nil
@@ -333,7 +335,7 @@ func TestThreadReopenAtPublicationBoundary(t *testing.T) {
 			if _, err := r.EnqueueTurn(ctx, threadRequest("one")); err == nil {
 				t.Fatal("missing injection")
 			}
-			r.failPublication = nil
+			s.failPublication = nil
 			r.Close()
 			r, err := Open(root, p)
 			if err != nil {
@@ -403,6 +405,7 @@ func TestThreadRestartDuringCaptureAndCompletion(t *testing.T) {
 		for _, committed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/committed=%t", action, committed), func(t *testing.T) {
 				r, root, p := create(t)
+				s := mustScoped(t, r, streamID)
 				ctx := context.Background()
 				if err := r.CreateThread(ctx, threadAgent()); err != nil {
 					t.Fatal(err)
@@ -426,8 +429,8 @@ func TestThreadRestartDuringCaptureAndCompletion(t *testing.T) {
 				if committed {
 					step = "ref-published"
 				}
-				r.failPublication = func(s string) error {
-					if s == step {
+				s.failPublication = func(step2 string) error {
+					if step2 == step {
 						return errors.New("crash")
 					}
 					return nil
@@ -444,7 +447,7 @@ func TestThreadRestartDuringCaptureAndCompletion(t *testing.T) {
 				if err == nil {
 					t.Fatal("missing crash")
 				}
-				r.failPublication = nil
+				s.failPublication = nil
 				r.Close()
 				r, err = Open(root, p)
 				if err != nil {
@@ -515,6 +518,7 @@ func TestThreadOwnedRecordValidation(t *testing.T) {
 	for _, mode := range []string{"missing-log", "changed-embedded-queue", "unknown-request"} {
 		t.Run(mode, func(t *testing.T) {
 			r, root, p := create(t)
+			s := mustScoped(t, r, streamID)
 			ctx := context.Background()
 			if err := r.CreateThread(ctx, threadAgent()); err != nil {
 				t.Fatal(err)
@@ -522,7 +526,7 @@ func TestThreadOwnedRecordValidation(t *testing.T) {
 			enqueue(t, r, "one")
 			files := map[string][]byte{}
 			name := "workstreams/" + string(streamID) + "/workflow.json"
-			log, _, err := r.loadWorkflow(streamID)
+			log, _, err := s.loadWorkflow(streamID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -544,7 +548,7 @@ func TestThreadOwnedRecordValidation(t *testing.T) {
 				}
 				files[name] = data
 			}
-			if err := r.publish(ctx, files); err != nil {
+			if err := s.publish(ctx, files); err != nil {
 				t.Fatal(err)
 			}
 			r.Close()
@@ -561,6 +565,7 @@ func TestThreadOwnedRecordValidation(t *testing.T) {
 
 func TestWorkflowStoresTurnReferences(t *testing.T) {
 	r, root, p := create(t)
+	s := mustScoped(t, r, streamID)
 	ctx := context.Background()
 	if err := r.CreateThread(ctx, threadAgent()); err != nil {
 		t.Fatal(err)
@@ -575,7 +580,7 @@ func TestWorkflowStoresTurnReferences(t *testing.T) {
 	}
 	enqueue(t, r, "two")
 	before := mustThread(t, r)
-	data, err := r.readFile("workstreams/" + string(streamID) + "/workflow.json")
+	data, err := s.readFile("workstreams/" + string(streamID) + "/workflow.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,6 +618,7 @@ func TestWorkflowStoresTurnReferences(t *testing.T) {
 
 func TestWorkflowLoadsEmbeddedTurns(t *testing.T) {
 	r, root, p := create(t)
+	s := mustScoped(t, r, streamID)
 	ctx := context.Background()
 	if err := r.CreateThread(ctx, threadAgent()); err != nil {
 		t.Fatal(err)
@@ -623,12 +629,12 @@ func TestWorkflowLoadsEmbeddedTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := mustThread(t, r)
-	log, _, err := r.loadWorkflow(streamID)
+	log, _, err := s.loadWorkflow(streamID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	name := "workstreams/" + string(streamID) + "/workflow.json"
-	if err := r.publish(ctx, map[string][]byte{name: embeddedWorkflow(t, log)}); err != nil {
+	if err := s.publish(ctx, map[string][]byte{name: embeddedWorkflow(t, log)}); err != nil {
 		t.Fatal(err)
 	}
 	r.Close()
@@ -643,7 +649,8 @@ func TestWorkflowLoadsEmbeddedTurns(t *testing.T) {
 	if err := reopened.CompleteTurn(ctx, streamID, "mason", "one", "token", at.Add(2*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	data, err := reopened.readFile(name)
+	reopenedStream := mustScoped(t, reopened, streamID)
+	data, err := reopenedStream.readFile(name)
 	if err != nil {
 		t.Fatal(err)
 	}

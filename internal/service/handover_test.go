@@ -152,7 +152,7 @@ func TestHandInToSketchedPlan(t *testing.T) {
 		in.req.Project = f.project
 		out, err := f.c.HandIn(ctx, in.req)
 		must(t, err)
-		path := filepath.Join(f.trace, "workstreams", string(out.Workstream), "handed", in.handed)
+		path := workstreamTraceFile(t, f.s.cfg.Root, f.project, out.Workstream, "handed/"+in.handed)
 		if out.Project != f.project || out.State != HandedState || out.Source != in.source || out.Handed != path {
 			t.Fatalf("hand-in %s: %+v", in.req.Key, out)
 		}
@@ -205,7 +205,7 @@ func TestHandInToSketchedPlan(t *testing.T) {
 			t.Fatalf("sketched transition of %s: %+v", stream, sketch)
 		}
 		sketches[stream] = sketch.Reason
-		events, err := os.ReadFile(filepath.Join(f.trace, "workstreams", string(stream), "events.jsonl"))
+		events, err := os.ReadFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, "events.jsonl"))
 		must(t, err)
 		if !strings.Contains(string(events), `"from":"handed","to":"sketched"`) {
 			t.Fatalf("events.jsonl of %s:\n%s", stream, events)

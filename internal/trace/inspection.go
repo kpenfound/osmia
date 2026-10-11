@@ -21,6 +21,10 @@ type CodeInspection struct {
 }
 
 func (r *Repository) RecordCodeInspection(ctx context.Context, scope coreadapter.Scope, inspection CodeInspection, at time.Time) (string, error) {
+	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return "", err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	agent := ChiefOfStaff

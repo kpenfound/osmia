@@ -2,7 +2,6 @@ package trace
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"sync"
@@ -14,32 +13,11 @@ import (
 
 const threadlessStream config.WorkstreamID = "w_00000000000000000000000000000002"
 
-// threadlessWorkstream lays out a committed workstream whose chief-of-staff
-// thread was never written.
+// threadlessWorkstream lays out a committed workstream, in its own dedicated
+// trace repository, whose chief-of-staff thread was never written.
 func threadlessWorkstream(t *testing.T, r *Repository, id config.WorkstreamID) {
 	t.Helper()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	prefix := "workstreams/" + string(id)
-	if err := r.mkdir(prefix); err != nil {
-		t.Fatal(err)
-	}
-	h := Header{Schema: "osmia.trace.workstream", Version: Version, ID: string(id), Revision: 1, Project: r.project, Workstream: id, At: at, Actor: owner, Cause: "workstream-create"}
-	data, err := json.Marshal(h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.writeFile(prefix+"/workstream.json", append(data, '\n')); err != nil {
-		t.Fatal(err)
-	}
-	paths := []string{prefix + "/workstream.json"}
-	for _, name := range []string{"documents.jsonl", "events.jsonl", "ledger.jsonl"} {
-		if err := r.writeFile(prefix+"/"+name, nil); err != nil {
-			t.Fatal(err)
-		}
-		paths = append(paths, prefix+"/"+name)
-	}
-	if err := r.commit(context.Background(), paths, "Create workstream trace"); err != nil {
+	if err := createWorkstreamTrace(context.Background(), r.root, r.project, id, "", at, owner); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -56,11 +56,12 @@ func TestSetPriorityRecordsTheOwnersRequest(t *testing.T) {
 	if err != nil || second.Revision != 2 || second.Order == nil || len(second.Order) != 0 {
 		t.Fatalf("second change %+v %v", second, err)
 	}
-	data, err := os.ReadFile(r.directory + "/workstreams/" + string(streamID) + "/priority.jsonl")
+	s := mustScoped(t, r, streamID)
+	data, err := os.ReadFile(s.directory + "/workstreams/" + string(streamID) + "/priority.jsonl")
 	if err != nil || strings.Count(string(data), "\n") != 2 {
 		t.Fatalf("priority log: %q %v", data, err)
 	}
-	if out, err := r.git(ctx, nil, "status", "--porcelain", "--", "workstreams"); err != nil || strings.TrimSpace(out) != "" {
+	if out, err := s.git(ctx, nil, "status", "--porcelain", "--", "workstreams"); err != nil || strings.TrimSpace(out) != "" {
 		t.Fatalf("priority not committed: %q %v", out, err)
 	}
 

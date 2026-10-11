@@ -37,6 +37,7 @@ type pipeline struct {
 
 func (p *pipeline) schedule(ctx context.Context) error {
 	if next := p.next.Swap(nil); next != nil {
+		println("DEBUG schedule swap at", time.Now().Format("15:04:05.000"))
 		p.current.Store(next)
 	}
 	for _, hook := range p.current.Load().hooks {

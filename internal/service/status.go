@@ -77,7 +77,7 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 			if title == "" {
 				title = string(a.Workstream)
 			}
-			out = append(out, workstreamActivity{status: WorkstreamStatus{Project: a.Project, Workstream: a.Workstream, Archived: true, TraceDeleted: !a.CleanedAt.IsZero(), State: &terminal, Status: &StatusView{Goal: title}, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}}, lastActivity: a.ArchivedAt, createdAt: a.ArchivedAt})
+			out = append(out, workstreamActivity{status: WorkstreamStatus{Project: a.Project, Workstream: a.Workstream, Archived: true, TraceDeleted: !a.CleanedAt.IsZero(), DeliveryLink: a.DeliveryLink, State: &terminal, Status: &StatusView{Goal: title}, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}}, lastActivity: a.ArchivedAt, createdAt: a.ArchivedAt})
 		}
 		for id, d := range found.unreadable {
 			unreadable[id] = d

@@ -281,18 +281,25 @@ osmia status --json
   abandoned, or whose base's changes upstream lacks or conflicts with, fails
   with `conflict` (exit 5) and stays parked.
 - `archive <workstream-id>` permanently archives delivered or abandoned work.
-  The archived list retains its title and ID; `status <workstream-id>` marks it
-  `archived=true`. The service deletes the entire trace, including handed
-  inputs, decisions, turns and complete check output, from disk and Git history.
-  The archive metadata remains in `runtime.json`, and target-repository branches
-  remain. Archive cannot be undone; `unarchive` returns a conflict. A repeated
-  archive request changes nothing. Other states fail with `conflict` (exit 5);
-  abandon the workstream first. Previously archived workstreams receive the
-  same one-time cleanup automatically. Cleanup waits for unfinished turns,
-  pending operations, temporary workspace removal and retained dependents;
-  failures are retried. Eligible archives on a project share one history rewrite
-  and prune. The web archived list distinguishes pending cleanup
-  from a deleted trace.
+  The archived list retains its title, ID, outcome, archive time and, where one
+  exists, its delivery link (the pull request URL, or the recorded upstream
+  commit for an owner-recorded merge); `status <workstream-id>` marks it
+  `archived=true`. The service then deletes the workstream's own independent
+  storage, its dedicated trace repository and its temporary workspaces,
+  including handed inputs, decisions, turns and complete check output, from
+  disk. It does not rewrite or prune any Git history. The archive record
+  remains in `runtime.json`, and target-repository branches remain. Archive
+  cannot be undone; `unarchive` returns a conflict. A repeated archive request
+  changes nothing. Other states fail with `conflict` (exit 5); abandon the
+  workstream first. Previously archived workstreams receive the same one-time
+  cleanup automatically, with their title, outcome and delivery link filled in
+  while the trace is still present. Cleanup is deferred, with a logged reason,
+  while the workstream has unfinished turns, pending or unacknowledged
+  operations or a temporary workspace still being cleaned, while a retained
+  workstream depends on it as a base, or until the knowledge base has
+  incorporated its learnings; failures are retried, and an interrupted deletion
+  is resumed, not mistaken for a live trace. The web archived list distinguishes
+  pending cleanup from a deleted trace.
 - `shed object <workstream-id> <argument>` adds your own objection to the
   current round of a workstream's debate. The argument is one argument; quote
   it. It is recorded as yours, stands in the dissent record and blocks, and the
@@ -437,9 +444,10 @@ osmia status --json
   resumes a workstream whose drift rebase is held. A project ID that is
   not the active project fails with `not_found` (exit 4).
 - `project remove <project-id>` takes the active project out of
-  `active_projects` and closes its runtime state. The trace directory and the
-  clone are kept. Adding the same upstream again afterwards creates a new
-  project ID and a new trace; see [configuration](configuration.md#project-registration).
+  `active_projects` and closes its runtime state. Its trace repository, every
+  workstream's own trace repository and the clone are kept. Adding the same
+  upstream again afterwards creates a new project ID and new trace
+  repositories; see [configuration](configuration.md#project-registration).
 - `handin <project-id> <path|issue-url|-> [--skip-debate]` hands one input to the active
   project and creates a workstream in state `handed`. The input is a file
   (made absolute by the client and read by the service), a GitHub issue URL
@@ -447,8 +455,8 @@ osmia status --json
   `-` for stdin (read by the client, at most 512 KiB of UTF-8 text; the client
   refuses larger or non-UTF-8 stdin itself with exit 4, before sending a
   request, and that message has no `validation:` prefix). The output names the
-  workstream ID, its state, the path of the copy under the trace's
-  `workstreams/<id>/handed/` and the recorded source. The client sends a new
+  workstream ID, its state, the path of the copy under its own trace
+  repository's `handed/` directory and the recorded source. The client sends a new
   idempotency key with each command, so a request the API retries creates one
   workstream, and running the command again creates another. A project whose
   charter has no rules fails with `charter_empty` (exit 4), naming the project
@@ -630,7 +638,9 @@ no root only the toolchain and GitHub checks run, and with a configuration
 that does not load neither do the project checks. While a service owns the
 root, the `state` checks and the `listen.web` check are left to it; `osmia
 status` reports them. Otherwise doctor holds the root's ownership lock while it
-runs and opens each trace the way `serve` does, which completes a trace
+runs and opens each trace the way `serve` does: it resumes any incomplete
+migration from the shared trace layout to a dedicated repository per
+workstream, and completes a trace
 publication a stopped service left unfinished.
 
 ```

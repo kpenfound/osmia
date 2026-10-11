@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -115,7 +114,7 @@ func TestMasonBundleHoldsExactlyTheUnit(t *testing.T) {
 func TestMasonBundleRefusesASpecEditedAfterTheSeal(t *testing.T) {
 	t.Parallel()
 	f := sealed(t)
-	path := filepath.Join(f.dir, "workstreams", string(first), plan.SpecPath)
+	path := f.streamFile(t, first, plan.SpecPath)
 	if err := os.WriteFile(path, []byte(masonSpec+"4. Something new.\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +144,7 @@ func TestMasonBundleReadsTheSealedPlan(t *testing.T) {
 	t.Parallel()
 	f := sealed(t)
 	edited := strings.Replace(masonPlan, `"footprint": ["cmd"]`, `"footprint": ["internal"]`, 1)
-	if err := os.WriteFile(filepath.Join(f.dir, "workstreams", string(first), plan.PlanPath), []byte(edited), 0600); err != nil {
+	if err := os.WriteFile(f.streamFile(t, first, plan.PlanPath), []byte(edited), 0600); err != nil {
 		t.Fatal(err)
 	}
 	m, err := f.mason("dedupe")
@@ -160,7 +159,7 @@ func TestMasonBundleReadsTheSealedPlan(t *testing.T) {
 func TestMasonBundleNamesTheSealedSpecRevision(t *testing.T) {
 	t.Parallel()
 	f := sealed(t)
-	path := filepath.Join(f.dir, "workstreams", string(first), plan.SpecPath)
+	path := f.streamFile(t, first, plan.SpecPath)
 	for _, content := range []string{masonSpec + "4. Later.\n", masonSpec} {
 		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 			t.Fatal(err)

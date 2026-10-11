@@ -31,6 +31,7 @@ type walkFixture struct {
 	t    *testing.T
 	repo *trace.Repository
 	dir  string
+	root config.Root
 	at   time.Time
 }
 
@@ -47,7 +48,7 @@ func newWalkFixture(t *testing.T) *walkFixture {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
-	f := &walkFixture{t: t, at: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)}
+	f := &walkFixture{t: t, root: root, at: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)}
 	f.repo, err = trace.Create(context.Background(), root, config.Project{ID: project, Clone: clone}, f.now(), ownerActor)
 	must(t, err)
 	t.Cleanup(func() { f.repo.Close() })
@@ -207,19 +208,24 @@ func (f *walkFixture) deliver() {
 	f.move(trace.FeatureSubject, "", DeliveredState)
 }
 
-// snapshot returns the content of every file of the trace repository,
-// Git metadata included.
+// snapshot returns the content of every file of the project trace repository
+// and of the workstream's own dedicated trace repository, Git metadata
+// included, so a walk that wrote to either is caught.
 func (f *walkFixture) snapshot() map[string]string {
 	f.t.Helper()
+	streamDir, err := f.root.WorkstreamTrace(project, stream)
+	must(f.t, err)
 	files := map[string]string{}
-	must(f.t, filepath.WalkDir(f.dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	for _, dir := range []string{f.dir, streamDir} {
+		must(f.t, filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			data, err := os.ReadFile(path)
+			files[path] = string(data)
 			return err
-		}
-		data, err := os.ReadFile(path)
-		files[path] = string(data)
-		return err
-	}))
+		}))
+	}
 	return files
 }
 

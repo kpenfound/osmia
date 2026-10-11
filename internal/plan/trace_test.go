@@ -99,7 +99,11 @@ func TestDocumentsRoundTripThroughTrace(t *testing.T) {
 	if err != nil || len(docs) != 3 {
 		t.Fatalf("revisions: %d %v", len(docs), err)
 	}
-	current, err := os.ReadFile(filepath.Join(root.String(), "projects", string(project), "workstreams", string(stream), PlanPath))
+	streamTrace, err := root.WorkstreamTrace(project, stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.ReadFile(filepath.Join(streamTrace, "workstreams", string(stream), PlanPath))
 	if err != nil || string(current) != string(reencoded) {
 		t.Fatalf("latest plan file: %v\n%s", err, current)
 	}

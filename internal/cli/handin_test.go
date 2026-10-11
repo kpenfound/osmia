@@ -54,7 +54,7 @@ func handInFixture(t *testing.T) (string, config.ProjectID, string) {
 
 func handedWorkstream(t *testing.T, root string, project config.ProjectID, stream config.WorkstreamID) (trace.Document, string) {
 	t.Helper()
-	path := filepath.Join(root, "projects", string(project), "workstreams", string(stream), "documents.jsonl")
+	path := filepath.Join(root, "workstreams", string(project), string(stream), "workstreams", string(stream), "documents.jsonl")
 	data, err := os.ReadFile(path)
 	must(t, err)
 	var doc trace.Document
@@ -67,7 +67,7 @@ func handedWorkstream(t *testing.T, root string, project config.ProjectID, strea
 // handedCount counts the project's workstreams other than the librarian's.
 func handedCount(t *testing.T, root string, project config.ProjectID) int {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(root, "projects", string(project), "workstreams"))
+	entries, err := os.ReadDir(filepath.Join(root, "workstreams", string(project)))
 	must(t, err)
 	sum := sha256.Sum256([]byte("librarian:" + string(project)))
 	librarian := "w_" + hex.EncodeToString(sum[:16])
@@ -107,7 +107,7 @@ func TestHandInCommand(t *testing.T) {
 		t.Fatalf("URL hand-in output:\n%s", text)
 	}
 	id := config.WorkstreamID(stream)
-	want := "Handed: " + filepath.Join(root, "projects", string(project), "workstreams", stream, "handed", "issue-3.md")
+	want := "Handed: " + filepath.Join(root, "workstreams", string(project), stream, "workstreams", stream, "handed", "issue-3.md")
 	if lines[2] != want {
 		t.Fatalf("URL hand-in output:\n%s\nwant %s", text, want)
 	}
@@ -188,7 +188,7 @@ func TestHandInSkipDebate(t *testing.T) {
 	}
 	skips := func(stream string) []trace.Transition {
 		t.Helper()
-		data, err := os.ReadFile(filepath.Join(root, "projects", string(project), "workstreams", stream, "events.jsonl"))
+		data, err := os.ReadFile(filepath.Join(root, "workstreams", string(project), stream, "workstreams", stream, "events.jsonl"))
 		must(t, err)
 		var out []trace.Transition
 		for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
