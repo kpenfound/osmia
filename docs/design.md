@@ -51,7 +51,7 @@ Four choices give the design its shape.
 | amendment | A durable revision proposal. The chief of staff decides plan-only engineering revisions; spec changes and charter exceptions require the owner. |
 | question | Anything a role cannot answer from its bundle. Goes to the chief of staff, which answers or asks you. |
 | ruling | Your answer to a question. Recorded locally, rephrased for the asker, and also asserted to Hearsay when enabled. |
-| trace | The complete record of a workstream: documents and their revisions, debate, questions, every agent turn, every transition, every cost. Files in a git repository under the Osmia root. |
+| trace | The complete record of a workstream: documents and their revisions, debate, questions, every agent turn, every transition, every cost. Kept in that workstream's own git repository under the Osmia root, outside every target repository. The project's own trace repository holds only durable project knowledge: the charter, the knowledge base, role notes and lasting project decisions, with their own history. |
 | profile | A named agent configuration: which agent binary, which model, effort, fallback. Roles bind to profiles, and the binding can change while the factory runs. |
 | capacity | The number of sessions of each role kind that may run at once, across every workstream and project. |
 | the service | The one long-running Osmia process. Everything else, the web interface, the command line, the agents' tools, is a client of it. |
@@ -89,7 +89,7 @@ Roles take names from the trade. All but the owner are agents.
 
 ## 4. Documents
 
-Every project has two standing documents, and every workstream has two of its own. All are files under the Osmia root, versioned by a dedicated trace git repository for that project, and none is ever committed to the target repository. The trace repository and the target clone are separate repositories.
+Every project has two standing documents, and every workstream has two of its own. All are files under the Osmia root, and none is ever committed to the target repository. The charter and the knowledge base are versioned in the project's own dedicated trace git repository. Each workstream's documents, and everything else about it, are versioned in that workstream's own dedicated trace git repository, a sibling of the project's and of every other workstream's, outside the project's and outside every target repository. Every trace repository is separate from the target clone.
 
 ### 4.1 Charter
 
@@ -134,32 +134,38 @@ In-flight workstreams adopt current factory authority through an idempotent reco
 ```
 ~/.config/osmia/config.toml      profiles, capacity, budget, Hearsay, listen addresses
 <root>/                          default ~/.local/share/osmia
-  runtime.json                   profile overrides, pause states, workstream priority
+  runtime.json                   profile overrides, pause states, workstream priority, archive records
   skills/                        clones of the skills roles name, and their generated plugins
-  projects/<project-id>/         one git repository per project
-    config.toml                  upstream, optional fork, clone path, landing style, per-project caps
+  projects/<project-id>/         one git repository per project: durable project knowledge only
+    config.toml                 upstream, optional fork, clone path, landing style, per-project caps
     charter.md
     kb/<subsystem>.md
     kb/entities.json             local footprint entities and path mappings
     notes/<role>.md              a role's private craft memory
-    workstreams/<id>/
-      handed/                    what you gave, never modified
-      spec.md                    every revision in the repository's history
-      plan.json
-      shed/round-<n>/            one file per committee member, the architect's reply, your rulings
-      amendments/<n>/            request, draft spec and plan, affected set, its round, the decision
-      questions/<n>/             as asked, the decision, what you were sent, what you said, what went back
-      units/<u>/                 bundle, checks-<n>.json, review/, landing.json
-      agents/<id>/log.jsonl      every turn's request and final response, with provenance
-      events.jsonl               every transition, with who and why
-      ledger.jsonl               cost per session
+  workstreams/<project-id>/<id>/ one git repository per workstream: that workstream's complete trace
+    handed/                      what you gave, never modified
+    spec.md                      every revision in the repository's history
+    plan.json
+    shed/round-<n>/              one file per committee member, the architect's reply, your rulings
+    amendments/<n>/              request, draft spec and plan, affected set, its round, the decision
+    questions/<n>/               as asked, the decision, what you were sent, what you said, what went back
+    units/<u>/                  bundle, checks-<n>.json, review/, landing.json
+    agents/<id>/log.jsonl        every turn's request and final response, with provenance
+    events.jsonl                 every transition, with who and why
+    ledger.jsonl                 cost per session
+  workstreams-staging/           a workstream's trace is built here, then published by one atomic rename
+  workstreams-deleting/<project-id>/  a trace archive cleanup moved aside, durably marked for removal
 ```
+
+`workstreams/<project-id>/` is a sibling of `projects/<project-id>/` and of every other project's: a workstream's trace never shares a parent directory with the project tree. `workstreams-staging/` and `workstreams-deleting/<project-id>/` are working areas of the service, not a stable public layout: a directory listing of `workstreams/<project-id>/` never observes a workstream before its trace is complete, and never observes one once cleanup has begun removing it.
 
 The defaults follow the XDG base directories: the top-level configuration is `osmia/config.toml` under `$XDG_CONFIG_HOME`, and the root is `osmia` under `$XDG_DATA_HOME`, falling back to `~/.config` and `~/.local/share`. Everything else Osmia keeps is in the root. An explicit `--root` is self-contained and holds its own `config.toml`.
 
-The project repository's history is the decision trail. `osmia trace` walks it in either direction: criterion to unit to turns to review to commit, or commit back to the ruling that shaped it.
+Each workstream's own trace repository's history is its decision trail. `osmia trace` walks it in either direction: criterion to unit to turns to review to commit, or commit back to the ruling that shaped it. The project's own trace repository's history is project knowledge's decision trail: the charter's revisions, the knowledge base and the lasting decisions behind it.
 
-State updates and their outbox entries form one recoverable commit: after a restart both are visible or neither is. Appends alone are not a transaction. Durable operation identifiers connect an intended side effect to its result, so recovery can inspect a workspace, branch or existing pull request before retrying. Each consecutive failed attempt of an operation doubles the wait before the next, up to five minutes, so a persistent failure does not become a retry storm. Revisions and records remain available after delivery or abandonment; removing a project from active configuration does not delete its trace or the owner's clone.
+When the service opens a project whose trace still uses the older shared layout, every workstream recorded inside the project's own repository, it migrates each retained workstream into its own dedicated trace repository automatically, before the project is opened or scheduled; other projects keep running meanwhile. Migration is resumable: a crash at any step, and a restart mid-copy, both resume or complete on the next start without losing or duplicating a record, and a workstream is never authoritative in two places at once. For each workstream it builds the new repository from the workstream's subtree of the shared trace, verifies that it holds exactly the same records, latest content and revision history before relying on it, and only once every workstream is verified reclaims the obsolete shared storage: it rewrites the project's own history to drop the workstream paths and prunes the objects that history alone held, while keeping the charter, knowledge base, notes and decision history intact. An archived workstream not yet cleaned up is migrated the same way as any other, so archive cleanup still finds a real trace for it; its archive record is kept either way. Migration logs its start, each workstream's copy, verification and switch, reclamation, completion and any failure or reason, naming the project and workstream and never transcript content or credentials.
+
+State updates and their outbox entries form one recoverable commit: after a restart both are visible or neither is. Appends alone are not a transaction. Durable operation identifiers connect an intended side effect to its result, so recovery can inspect a workspace, branch or existing pull request before retrying. Each consecutive failed attempt of an operation doubles the wait before the next, up to five minutes, so a persistent failure does not become a retry storm. A change that must write both project knowledge and a workstream's trace, such as a charter revision and its notice, a librarian refresh point, or a ruling promoted to a project decision, stays recoverable as a whole: after a restart neither store ever shows half of it. Writes to one workstream's trace do not serialize behind another workstream's, beyond the project's own brief bookkeeping of which workstreams exist. Revisions and records remain available after delivery or abandonment; removing a project from active configuration does not delete its trace or the owner's clone.
 
 ---
 
@@ -187,7 +193,11 @@ terminal: delivered, abandoned
 
 The feature states move forward. Amendments revise the documents without moving the feature backward. An assembled feature whose final review finds gaps remains assembled while explicit follow-up units use the normal implementation, review and landing loop; its final review runs again after those units land. Changes to ratified intent require an owner amendment; changes to the execution plan use a factory-approved revision. Neither a failed final review nor the end of a debate cap authorises delivery.
 
-The owner may abandon an undelivered workstream. Abandonment stops new turns, cancels active turns while retaining their recorded work, releases capacity and preserves the trace. It does not delete the owner's branch or close an existing pull request. Delivered and abandoned workstreams are terminal. The owner may permanently archive a terminal workstream. Archive retains its title, ID, terminal state and archive time in the archived list and schedules deletion of the entire durable trace: handed inputs, specifications, decisions, questions, turns, logs, checks and complete check output, including their Git history. Archive cannot be undone; the UI states this before submission. Delivery and abandonment alone preserve the trace and remove temporary workspaces. Archive cleanup waits for unfinished turns, pending operations, temporary workspace cleanup and any retained workstream that still depends on this base. Eligible archives on one project are deleted together in one Git history rewrite and prune; archived bases can leave with their eligible dependents. Cleanup retries failures and resumes after a restart. Previously archived workstreams receive the same one-time cleanup automatically, saving their titles before deleting anything and recording completion outside the trace. Other workstreams, project records and target-repository branches remain intact.
+The owner may abandon an undelivered workstream. Abandonment stops new turns, cancels active turns while retaining their recorded work, releases capacity and preserves the trace. It does not delete the owner's branch or close an existing pull request. Delivered and abandoned workstreams are terminal.
+
+The owner may permanently archive a terminal workstream. Archive keeps a small archive record outside the deleted storage: the project, the workstream ID, the title, the outcome (delivered or abandoned), the archive time and, where one exists, the delivery link, the pull request URL or the recorded upstream commit for an owner-recorded merge. Archive cannot be undone; the UI states this before submission.
+
+Delivery and abandonment alone preserve the trace and remove temporary workspaces. Archive cleanup then deletes the workstream's independent storage, its own dedicated trace repository and its temporary workspaces, without rewriting or pruning any Git history. Cleanup is deferred, with a logged reason, while the workstream has unfinished turns, pending or unacknowledged operations, or a temporary workspace still being cleaned; while any retained workstream still depends on it as a base (an archived base can leave together with its archived dependents); or until the librarian refresh covering its landed units, and any knowledge gap filed against it, has incorporated the workstream's learnings into project knowledge. Once every deferral clears, the trace repository is moved aside by one atomic rename, a durable, restart-safe intent to delete it, and its removal then runs without holding any repository lock, so deleting even a large trace never delays a read, a write or reconciliation of any other workstream. The archive record is marked clean only once the storage is confirmed gone; a later pass reconciles whether an earlier attempt was interrupted by a crash or is simply still in flight, so a half-deleted trace is never mistaken for a live one. Previously archived workstreams, recorded before this behaviour existed, receive the same cleanup automatically, with their title, outcome and delivery link filled in while the trace is still present. Other workstreams, project records and target-repository branches remain intact.
 
 ### 5.2 Unit states
 
@@ -787,10 +797,10 @@ The workflow builds on durable local state, planning and owner ratification befo
 
 | Feature | Scope | Required behavior |
 |---|---|---|
-| Durable local service | Core integration; personal service, configuration and local API; durable records and outbox; isolated durable threads. | A role receives successive turns and survives a restart with an inspectable record. |
+| Durable local service | Core integration; personal service, configuration and local API; per-project and per-workstream trace repositories; durable records and outbox; isolated durable threads. | A role receives successive turns and survives a restart with an inspectable record. |
 | Planning and ratification | Project onboarding and local knowledge; chief of staff and inbox; feature intake and planning; debate and ratification. | An owner can hand in a design and ratify a buildable plan using local context. |
 | Feature delivery | Sequential implementation; exact-candidate review; serial landing and librarian updates; final review and delivery; trace navigation. | A small feature reaches an owner-approved pull request with a complete trace. |
-| Concurrency and recovery | Parallel workstreams and shared capacity; amendments and standing rulings; concurrent landing and drift; budgets, profiles, pause, reload and recovery. | Several workstreams on one project progress through interruptions, questions and conflicts without lost work or duplicate landings. |
+| Concurrency and recovery | Parallel workstreams, each in its own trace repository, and shared capacity; amendments and standing rulings; concurrent landing and drift; trace migration and archive cleanup; budgets, profiles, pause, reload and recovery. | Several workstreams on one project progress through interruptions, questions and conflicts, and through another workstream's migration or archive cleanup, without lost work, duplicate landings or waiting on another workstream's storage. |
 | Phone operation and notifications | Embedded web interface; tailnet access; notifications and the product's installation, release and first-run experience. | The full lifecycle and every owner decision are available from a phone, with local context. |
 | Jujutsu workspaces | Jujutsu provider; rebase and interruption recovery. | The complete lifecycle works with either workspace backend. |
 | Multiple projects and dependent features | Multi-project operation; cross-workstream bases and dependent pull requests. | One service handles several projects and sequences of dependent features. |
@@ -812,7 +822,7 @@ acceptance   observable conditions; reviewers judge applicable evidence against 
 seal         (upstream main commit, spec hash); moves on rebase
 the shed     debate; charter veto, size and acceptance tests, fit; bounded engineering debate; owner intent ratification
 question     ask -> chief of staff -> answer | escalate | amend | charter | rephrase
-trace        the workstream's record; files in the project's git repository under the root
+trace        the workstream's own record, in its own git repository under the root; project knowledge lives in the project's own repository
 profile      agent, model, effort, fallback; bound per role; switchable while running
 
 feature      handed -> sketched -> in-shed -> ratified -> building -> assembled -> delivered

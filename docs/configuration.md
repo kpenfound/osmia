@@ -36,22 +36,31 @@ only the canonical format, so traversal, absolute names and case aliases cannot
 become identities. `CheckProjectIDs`/`CheckWorkstreamIDs` reject duplicates with
 `ErrCollision`; constructors also accept existing IDs to check. Generation does
 not reserve a key: persistence callers must reserve it atomically and retry
-generation on collision. The trace repository reserves project and
-workstream identities when creating their directories. Workstream keys are not a
+generation on collision. The trace repositories reserve project and
+workstream identities when creating their directories: a project's own trace
+repository for its ID, and a workstream's own dedicated trace repository for
+its ID. Workstream keys are not a
 configuration list; they belong to persisted workstream manifests.
 
 ```text
 <root>/config.toml                             top-level file of an explicit root; the default is ~/.config/osmia/config.toml
-<root>/runtime.json
+<root>/runtime.json                            also holds archive records of permanently archived workstreams
 <root>/osmia.sock
 <root>/tailnet/                                embedded Tailscale node state, when listen.tailnet is set
 <root>/project-add.json                       journal of one interrupted project registration
 <root>/notifications.json                     ledger of owner notifications, once notify.webhook has been set
 <root>/projects/<project-id>/config.toml
-<root>/projects/<project-id>/                  dedicated project trace repository
-<root>/projects/<project-id>/workstreams/<workstream-id>/
+<root>/projects/<project-id>/                  dedicated project trace repository: durable project knowledge only
+<root>/workstreams/<project-id>/<workstream-id>/  the workstream's own dedicated trace repository, a sibling of projects/<project-id>/
+<root>/workstreams-staging/                    a new or migrating workstream's trace is built here before an atomic rename publishes it
+<root>/workstreams-deleting/<project-id>/      a workstream's trace archive cleanup has moved aside, durably marked for removal
 <root>/branches/<project-id>/<workstream-id>  the workstream's feature branch, a workspace of the clone
 ```
+
+A project whose trace still uses the older layout, with every workstream's
+records inside the project's own repository under `workstreams/<workstream-id>/`,
+is migrated automatically into the layout above the next time the service
+opens it; see [trace migration](#trace-migration).
 
 `Root` provides checked helpers for these paths. Managed state paths reject
 symlink aliases, including aliases within the root that could collapse two
@@ -61,6 +70,27 @@ symlinks. Relative clone paths resolve from the project configuration
 directory; missing clones are accepted for configuration purposes. Loading
 configuration writes nothing in the clone. Helpers check existing paths, not future filesystem changes;
 state writers must protect against concurrent symlink replacement.
+
+### Trace migration
+
+The service detects the older shared layout by the presence of a
+`workstreams/` directory inside the project's own trace repository, and
+migrates it before the project opens or is scheduled; other projects keep
+running meanwhile. For each workstream still in that directory it builds the
+workstream's own dedicated trace repository, verifies that it holds exactly
+the same records and history as the shared copy, and only once every
+workstream is verified rewrites the project's own history to drop the
+`workstreams/` paths and prunes the objects that history alone held, keeping
+the charter, knowledge base, notes and decision history intact. An archived
+workstream not yet cleaned up is migrated the same way as any other, so
+archive cleanup still has a real trace to apply its checks to; its archive
+record in `runtime.json` is kept either way. Migration is resumable: a crash
+at any step, and a restart mid-copy, both resume or complete on the next
+start without losing or duplicating a record, and a workstream is never
+authoritative in two places at once. `osmia serve` and `osmia doctor` both run
+it before opening a project's trace; progress, completion and any failure are
+logged, naming the project and workstream and never transcript content or
+credentials.
 
 ## Top-level config.toml
 
@@ -547,12 +577,14 @@ writing anything, then:
    absolute `clone`, `base_branch` (default `main`) and
    `landing = "commit-per-unit"`; capacity is inherited from the top level;
 3. seeds the local entity map from the clone's
-   tracked CODEOWNERS and directory structure, and creates the trace repository with
+   tracked CODEOWNERS and directory structure, and creates the project's
+   dedicated trace repository with
    a [charter](charter.md) template in `charter.md` and the seed as the first
    revisions of the charter and `kb/entities.json`;
 4. adds the ID to `active_projects` in the top-level `config.toml` as a text
    edit, so the owner's comments, ordering and formatting survive;
-5. creates the librarian's workstream and thread in the trace and requests
+5. creates the librarian's workstream, its own dedicated trace repository and
+   its thread, and requests
    the first knowledge-base extraction as a
    durable operation;
 6. activates the project (opens the trace and starts reconciliation, which
@@ -582,9 +614,10 @@ are retained.
 
 `osmia project remove <project-id>` (API: `DELETE /v1/projects`) removes the
 active ID from `active_projects` as a text edit, stops admitting new work,
-and waits for in-flight operations to finish before closing its runtime; other active projects keep running. The trace directory and the owner's clone are not deleted. Adding the
-same upstream again afterwards generates a new project ID and a new trace
-repository; the archived trace stays untouched under `projects/<old-id>/` and is
+and waits for in-flight operations to finish before closing its runtime; other active projects keep running. The project's and every workstream's trace repositories, and the owner's clone, are not deleted. Adding the
+same upstream again afterwards generates a new project ID and new trace
+repositories; the old ones stay untouched under `projects/<old-id>/` and
+`workstreams/<old-id>/` and are
 never reused, so archived history is immutable and every add is a fresh start.
 
 The service's loaded configuration changes only in its project after add and
@@ -853,17 +886,34 @@ on without its key.
 ### Permanent workstream archives
 
 `osmia archive <workstream>` permanently archives delivered or abandoned work.
-The archived list keeps the title and workstream ID, with the terminal state and
-archive time. The service deletes the entire workstream trace, including all
-check stdout/stderr, documents, decisions and agent turns, from disk and the
-trace repository's Git history. An archive cannot be restored or unarchived.
-Delivery and abandonment alone remove temporary workspaces while retaining the
-trace and target-repository branches.
+`runtime.json` keeps a small archive record outside the deleted storage: the
+project, the workstream ID, the title, the outcome (delivered or abandoned),
+the archive time and, where one exists, the delivery link (the pull request
+URL, or the recorded upstream commit for an owner-recorded merge). The
+service then deletes the workstream's own independent storage, its dedicated
+trace repository and its temporary workspaces, including all check
+stdout/stderr, documents, decisions and agent turns, from disk, as files; it
+does not rewrite or prune any Git history. An archive
+cannot be restored or unarchived. Delivery and abandonment alone remove
+temporary workspaces while retaining the trace and target-repository
+branches.
 
-The cleanup pass first saves the title in `runtime.json`, then waits for
-unfinished turns, pending operations and temporary workspace cleanup. A base's
-trace also waits while another retained workstream depends on it. Cleanup
-retries failures and resumes interrupted deletion after restart. Previously
-archived workstreams undergo this cleanup automatically, once per archive;
-completion is recorded in `runtime.json`. Other workstreams and project records
-are preserved. Copies made outside Osmia's root are outside this cleanup.
+The cleanup pass first fills in the title, outcome and delivery link in
+`runtime.json`, for an archive recorded before this behaviour existed too,
+while the trace is still present. It then waits for unfinished turns, pending
+or unacknowledged operations and temporary workspace cleanup. A base's trace
+also waits while another retained workstream depends on it as a base
+(archived bases may leave together with their archived dependents), and until
+the librarian refresh covering its landed units has incorporated the
+workstream's learnings into project knowledge. Once every wait clears, the
+trace repository is moved aside by one atomic rename, a durable, restart-safe
+intent to delete it that a directory listing never again shows as live, and
+its removal then runs without holding any repository lock, so deleting even a
+large trace never delays a read, a write or reconciliation of any other
+workstream. The archive record is marked clean, `trace_deleted` in the API,
+only once the storage is confirmed gone; a later pass reconciles whether an
+earlier attempt was interrupted by a crash or is simply still in flight, so a
+half-deleted trace is never mistaken for a live one. Previously archived
+workstreams undergo this same cleanup automatically, once per archive. Other
+workstreams and project records are preserved. Copies made outside Osmia's
+root are outside this cleanup.

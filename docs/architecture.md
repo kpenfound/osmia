@@ -9,7 +9,7 @@ operators and contributors. The [design](design.md) defines product behavior.
 ```mermaid
 flowchart LR
     Owner[Owner: CLI or web page] --> API[Service API]
-    API --> Trace[Project trace]
+    API --> Trace[Project and workstream traces]
     Trace --> Controllers[Go controllers and scheduler]
     Controllers --> Turns[Scoped agent turns]
     Turns --> Trace
@@ -19,11 +19,24 @@ flowchart LR
     Trace --> API
 ```
 
-The trace is a dedicated Git repository for each project under the Osmia root.
-It contains the charter, knowledge base, workstream documents, transitions,
-turn logs and durable operation intents. The target clone and its workspaces
-are separate. The service reads current trace state on each reconciliation pass;
-an event wakes a pass early but does not carry the state transition.
+The trace is split along a durable boundary. Each project has one dedicated
+Git repository holding only durable project knowledge: the charter, the
+knowledge base and role notes. Each workstream has its own dedicated Git
+repository, a sibling of the project's under the Osmia root, holding that
+workstream's complete record: its documents, transitions, turn logs, costs
+and durable operation intents. The target clone and its workspaces are
+separate from every trace repository. The service reads current trace state
+on each reconciliation pass; an event wakes a pass early but does not carry
+the state transition.
+
+A project whose trace still uses the older shared layout, with every
+workstream's records inside the project's own repository, is migrated
+automatically and resumably before it is opened. Permanently archiving a
+workstream deletes its own trace repository and temporary workspaces, once
+any busy or pending work has cleared and the knowledge base has absorbed its
+learnings; it does not rewrite or prune Git history. See
+[design §4.5](design.md#45-where-they-live) and
+[§5.1](design.md#51-feature-states).
 
 ## Responsibilities
 
@@ -106,8 +119,8 @@ only what every judgment shares, and `systemone` knows nothing of Osmia.
 The root defaults to `~/.local/share/osmia` and the top-level configuration to
 `~/.config/osmia/config.toml`, following the XDG base directories; an explicit
 root holds its own `config.toml`. Runtime overrides, project configuration,
-project trace repositories and workspaces live in the root; the target clone
-remains separate. The
+project trace repositories, workstream trace repositories and workspaces live
+in the root; the target clone remains separate. The
 service binds a Unix socket for local clients and can serve the same API on a
 loopback listener or an embedded tailnet node. Tailnet membership controls access
 to the remote page; there is no separate Osmia login. See
