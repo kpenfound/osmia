@@ -134,7 +134,7 @@ func (f *handInFixture) checkHanded(t *testing.T, out HandInResponse, key, name,
 	ctx := context.Background()
 	stream := HandInWorkstream(f.project, key)
 	if out.Project != f.project || out.Workstream != stream || out.State != HandedState || out.Source != source ||
-		out.Handed != filepath.Join(f.trace, "workstreams", string(stream), "handed", name) {
+		out.Handed != workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, "handed/"+name) {
 		t.Fatalf("response %+v", out)
 	}
 	data, err := os.ReadFile(out.Handed)
@@ -159,7 +159,7 @@ func (f *handInFixture) checkHanded(t *testing.T, out HandInResponse, key, name,
 	if tr.Subject != trace.FeatureSubject || tr.From != "" || tr.To != "handed" || tr.Actor != owner || !strings.Contains(tr.Reason, "owner handed in handed/"+name+" from "+source) {
 		t.Fatalf("transition %+v", tr)
 	}
-	events, err := os.ReadFile(filepath.Join(f.trace, "workstreams", string(stream), "events.jsonl"))
+	events, err := os.ReadFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, "events.jsonl"))
 	must(t, err)
 	if !strings.Contains(string(events), `"to":"handed"`) {
 		t.Fatalf("events.jsonl:\n%s", events)

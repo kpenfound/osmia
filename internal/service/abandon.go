@@ -10,6 +10,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -50,29 +51,17 @@ func (s *Service) abandon(ctx context.Context, raw string, req AbandonRequest) (
 	}
 	failed := &APIError{Internal, fmt.Sprintf("cannot abandon workstream %s; check the trace repository", stream)}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: project, Workstream: stream, At: s.now(), Actor: ownerActor, Cause: abandonTransition}
-	state, err := repository.SetFeatureStateUnless(trace.OwnerCommand(ctx), h, AbandonedState, reason, AbandonedState, DeliveredState)
+	state, err := repository.SetFeatureStateUnless(ctx, h, AbandonedState, reason, AbandonedState, DeliveredState)
 	switch {
 	case errors.Is(err, trace.ErrFeatureState):
 		return AbandonResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s is %s and cannot be abandoned", stream, state.Value)}
 	case errors.Is(err, trace.ErrConflict):
 		return AbandonResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s changed state while abandoning it; check osmia status and retry", stream)}
 	case err != nil:
-		if api := s.pruneFenceUnavailable(project, err); api != nil {
-			return AbandonResponse{}, api
-		}
 		return AbandonResponse{}, failed
 	}
 	s.turns.cancel(stream)
-	// The feature state above already landed, so this second write must
-	// never make the whole request wait out an unbounded prune: it is
-	// bounded by the same owner-command fence, and a fence timeout here
-	// is not reported as a failed abandonment (the state change already
-	// happened, and the scheduler already refuses turns of an abandoned
-	// workstream regardless) -- only the trace record of the queued
-	// turns' cancellation is deferred, to the next restart's
-	// cancelAbandoned, exactly as an interruption for any other reason
-	// already defers it.
-	if _, err := repository.CancelTurns(trace.OwnerCommand(context.WithoutCancel(ctx)), stream, s.now(), abandonActor, cancelReason); err != nil && !errors.Is(err, trace.ErrPruneFenceBusy) {
+	if _, err := repository.CancelTurns(context.WithoutCancel(ctx), stream, s.now(), abandonActor, cancelReason); err != nil {
 		return AbandonResponse{}, &APIError{Internal, fmt.Sprintf("workstream %s is abandoned but its queued turns could not be cancelled; they are cancelled at the next start. Check the trace repository", stream)}
 	}
 	return AbandonResponse{Project: project, Workstream: stream, State: AbandonedState, Reason: reason}, nil
@@ -215,7 +204,26 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 			return coreadapter.OperationResult{}, err
 		}
 	}
+	role, profile, unit := describeQueuedTurn(th, in.Turn)
+	attrs := []any{"project", string(a.repository.Project()), "workstream", string(in.Workstream), "role", role, "profile", profile}
+	if unit != "" {
+		attrs = append(attrs, "unit", unit)
+	}
+	logger := ghlog.Logger(ctx)
+	logger.Info("agent turn dispatched", attrs...)
+	start := a.s.now()
 	result, err := a.Reconciler.Apply(ctx, op)
+	finished := append(append([]any{}, attrs...), "duration", a.s.now().Sub(start).String())
+	switch {
+	case err != nil:
+		logger.Error("agent turn finished", append(finished, "outcome", "failed", "error", err.Error())...)
+	default:
+		outcome := result.Outcome
+		if outcome == "" {
+			outcome = "ok"
+		}
+		logger.Info("agent turn finished", append(finished, "outcome", outcome)...)
+	}
 	// Abandoning while this turn ran left the thread's later turns queued.
 	if gone, _ := abandoned(a.repository, in.Workstream); gone {
 		if _, cancelErr := a.repository.CancelTurns(context.WithoutCancel(ctx), in.Workstream, a.s.now(), abandonActor, cancelReason); cancelErr != nil {
@@ -223,4 +231,18 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 		}
 	}
 	return result, err
+}
+
+// describeQueuedTurn returns the role of th's agent and, for the queued turn
+// named turnID, its profile name and unit, for the agent turn log records.
+// A thread or turn that cannot be found yields empty values rather than an
+// error: logging never changes the operation's outcome.
+func describeQueuedTurn(th trace.Thread, turnID string) (role, profile, unit string) {
+	role = th.Identity.Role
+	for _, q := range th.Turns {
+		if q.Request.TurnID == turnID {
+			return role, q.Request.Profile.Name, q.Request.Unit
+		}
+	}
+	return role, "", ""
 }

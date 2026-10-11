@@ -29,6 +29,10 @@ type TurnAttempt struct {
 // RecordAttempt appends a new intent or captures the exact current attempt.
 // It never grants permission to relaunch an existing intent.
 func (r *Repository) RecordAttempt(ctx context.Context, stream config.WorkstreamID, agent, turn, token string, a TurnAttempt) error {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	log, _, err := r.loadWorkflow(stream)

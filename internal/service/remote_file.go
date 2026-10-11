@@ -19,6 +19,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -45,39 +46,45 @@ func githubFile(ctx context.Context, client *http.Client, token string, f remote
 	if f.Ref == "" {
 		f.Ref = "HEAD"
 	}
-	get := func(path string, out any) error {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+url.PathEscape(parts[0])+"/"+url.PathEscape(parts[1])+path, nil)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Accept", "application/vnd.github+json")
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-		// Redirects must never forward a credential to a different endpoint.
-		copyClient := *client
-		copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-		res, err := copyClient.Do(req)
-		if err != nil {
-			return errors.New("remote repository request failed")
-		}
-		defer res.Body.Close()
-		if res.StatusCode != http.StatusOK {
-			return fmt.Errorf("remote repository returned HTTP %d", res.StatusCode)
-		}
-		data, err := io.ReadAll(io.LimitReader(res.Body, 2*1024*1024+1))
-		if err != nil {
-			return err
-		}
-		if len(data) > 2*1024*1024 {
-			return errors.New("remote response exceeds 2 MiB")
-		}
-		return json.Unmarshal(data, out)
+	repository := parts[0] + "/" + parts[1]
+	get := func(action, path string, out any) error {
+		start := time.Now()
+		status, err := func() (int, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+url.PathEscape(parts[0])+"/"+url.PathEscape(parts[1])+path, nil)
+			if err != nil {
+				return 0, err
+			}
+			req.Header.Set("Accept", "application/vnd.github+json")
+			if token != "" {
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+			// Redirects must never forward a credential to a different endpoint.
+			copyClient := *client
+			copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+			res, err := copyClient.Do(req)
+			if err != nil {
+				return 0, errors.New("remote repository request failed")
+			}
+			defer res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				return res.StatusCode, fmt.Errorf("remote repository returned HTTP %d", res.StatusCode)
+			}
+			data, err := io.ReadAll(io.LimitReader(res.Body, 2*1024*1024+1))
+			if err != nil {
+				return res.StatusCode, err
+			}
+			if len(data) > 2*1024*1024 {
+				return res.StatusCode, errors.New("remote response exceeds 2 MiB")
+			}
+			return res.StatusCode, json.Unmarshal(data, out)
+		}()
+		ghlog.Log(ctx, start, ghlog.Entry{Action: action, Access: ghlog.Read, Repository: repository, Method: http.MethodGet, Path: path, Status: status, NoResponse: status == 0, Err: err})
+		return err
 	}
 	var commit struct {
 		SHA string `json:"sha"`
 	}
-	if err := get("/commits/"+url.PathEscape(f.Ref), &commit); err != nil {
+	if err := get("remote_file.commit", "/commits/"+url.PathEscape(f.Ref), &commit); err != nil {
 		return f, err
 	}
 	if _, err := hex.DecodeString(commit.SHA); err != nil || len(commit.SHA) != 40 {
@@ -89,7 +96,7 @@ func githubFile(ctx context.Context, client *http.Client, token string, f remote
 		Encoding string `json:"encoding"`
 		Content  string `json:"content"`
 	}
-	if err := get("/contents/"+strings.Join(escapePath(f.Path), "/")+"?ref="+f.Commit, &body); err != nil {
+	if err := get("remote_file.contents", "/contents/"+strings.Join(escapePath(f.Path), "/")+"?ref="+f.Commit, &body); err != nil {
 		return f, err
 	}
 	if body.Type != "file" || body.Encoding != "base64" {
@@ -125,6 +132,7 @@ func remoteFileTool(r *trace.Repository, scope coreadapter.Scope, now func() tim
 		if err := json.Unmarshal(raw, &f); err != nil {
 			return nil, err
 		}
+		ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(r.Project()), Workstream: scope.Workstream, Unit: scope.Unit})
 		f, err := githubFile(ctx, &http.Client{Timeout: 30 * time.Second}, os.Getenv("GITHUB_TOKEN"), f)
 		if err != nil {
 			return nil, err

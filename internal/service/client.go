@@ -234,8 +234,8 @@ func (c *Client) RebaseProject(ctx context.Context, id config.ProjectID) (Projec
 	return v, err
 }
 
-// RebaseWorkstream asks for a drift rebase of one building or assembled
-// workstream and reports the drift rebase that answers it.
+// RebaseWorkstream asks for a drift rebase of an eligible workstream, including
+// a delivered pull request, and reports the drift rebase that answers it.
 func (c *Client) RebaseWorkstream(ctx context.Context, id config.WorkstreamID) (WorkstreamRebaseResponse, error) {
 	var v WorkstreamRebaseResponse
 	err := c.Do(ctx, "POST", Prefix+"/rebase/"+url.PathEscape(string(id)), nil, &v)

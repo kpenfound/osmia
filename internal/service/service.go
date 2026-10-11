@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"maps"
 	"net"
 	"net/http"
@@ -21,11 +21,13 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/events"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/reconcile"
+	"github.com/kpenfound/osmia/internal/redact"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/service/beekeeper"
@@ -120,6 +122,11 @@ type Options struct {
 	// Location is the service host's time zone, whose calendar days the daily
 	// budget counts. It defaults to the host's local time zone.
 	Location *time.Location
+	// Logger is the structured logger every line the service writes to its
+	// standard output and standard error goes through: the service's own
+	// records, embedded Tailscale's and the GitHub activity log. It defaults
+	// to a JSON handler on os.Stderr.
+	Logger *slog.Logger
 	// controls is set by Enforce so the chief-of-staff tools it binds reach
 	// the runtime state of the service started with these options.
 	controls *runtimeControls
@@ -173,6 +180,7 @@ type Service struct {
 	turns     runningTurns
 	options   Options
 	store     *runtime.Store
+	logger    *slog.Logger
 	lock      *os.File
 	listener  *net.UnixListener
 	web       net.Listener // nil unless listen.web is configured
@@ -216,6 +224,16 @@ type Service struct {
 // Beekeeper returns the open repository of the Beekeeper's shadow project,
 // for the Beekeeper's own thread and tools.
 func (s *Service) Beekeeper() *trace.Repository { return s.shadow }
+
+// log returns s's structured logger, or a silent one when a test built s
+// directly without one: a missing logger never fails or panics the action
+// it would have recorded.
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return ghlog.Logger(context.Background())
+}
 
 // BeekeeperBusy reports whether the Beekeeper's latest owner request has no
 // finished turn, for bk-api's conflict response.
@@ -282,6 +300,12 @@ func (s *Service) PostBeekeeper(ctx context.Context, text string) (trace.QueuedT
 // active project gets its own runtime: its trace, its reconciliation loop and
 // its restart recovery. Their schedulers share one pool of role capacity.
 func Start(ctx context.Context, opts Options) (_ *Service, err error) {
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	}
+	opts.Logger = logger
+	ctx = ghlog.WithLogger(ctx, logger)
 	root, err := opts.Config.Resolve()
 	if err != nil {
 		return nil, err
@@ -333,11 +357,20 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, fmt.Errorf("ensure the beekeeper's thread: %w", err)
 	}
 	err = nil
-	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), shadow: shadow}
+	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), shadow: shadow, logger: logger}
 	s.activity = newActivityRegistry(s.now)
 	s.activity.notify = func() { s.hub.publish(Event{Kind: EventActivity}) }
 	s.pool = &scheduler.Shared{Traces: s.traces}
-	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider}
+	// Getenv reads the Jev boost's API key the same way the default would,
+	// and registers whatever value it reads for redaction: the owner may
+	// point api_key_env at any environment variable name, not only
+	// EnvSecrets' default, and the key must never reach a log record
+	// whichever name configures it.
+	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider, Getenv: func(name string) string {
+		value := os.Getenv(name)
+		redact.Register(value)
+		return value
+	}}
 	if opts.skills != nil {
 		opts.skills.Refresh = func() string { return s.current().Skills.Refresh }
 	}
@@ -427,9 +460,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		// to retry; it never fails startup.
 		if node, err := s.joinTailnet(root, cfg.Listen.Tailnet); err != nil {
 			s.tailnet.set(nil, err.Error())
-			log.Printf("osmia tailnet: join %s: %v; the supervisor will retry", cfg.Listen.Tailnet, err)
+			logger.Warn("tailnet join failed; the supervisor will retry", "component", "tailnet", "hostname", cfg.Listen.Tailnet, "error", redact.Secrets(err.Error(), redact.KnownSecrets()...))
 		} else {
 			s.tailnet.set(node, "")
+			logger.Info("tailnet joined", "component", "tailnet", "hostname", cfg.Listen.Tailnet, "state", "up")
 		}
 	}
 	for _, p := range projects {
@@ -471,23 +505,29 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	s.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.requests.Add(1)
 		defer s.requests.Done()
-		switch arrivedOn(r) {
+		sw := &statusResponseWriter{ResponseWriter: w}
+		started := time.Now()
+		kind := arrivedOn(r)
+		defer func() {
+			ghlog.Logger(r.Context()).Info("api request handled", "listener", listenerName(kind), "method", r.Method, "path", r.URL.Path, "status", sw.status, "duration", time.Since(started).String())
+		}()
+		switch kind {
 		case webListener:
 			if !webAllowed(r) {
-				fail(w, Forbidden)
+				fail(sw, Forbidden)
 				return
 			}
 		case tailnetListener:
 			if !tailnetAllowed(r, hostname, s.tailnetNames) {
-				fail(w, Forbidden)
+				fail(sw, Forbidden)
 				return
 			}
 		}
 		if !s.ready.Load() {
-			fail(w, Unavailable)
+			fail(sw, Unavailable)
 			return
 		}
-		s.handle(w, r)
+		s.handle(sw, r)
 	}), ReadHeaderTimeout: opts.ReadHeaderTimeout, ReadTimeout: opts.ReadTimeout, WriteTimeout: opts.WriteTimeout,
 		BaseContext: func(net.Listener) context.Context { return s.lifetime }, ConnContext: connContext}
 	s.ready.Store(true)
@@ -552,11 +592,65 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.cleanupSocket()
 		s.store.Close()
 		unlock(s.lock)
+		reason := "stopped"
+		if s.err != nil {
+			reason = s.err.Error()
+		}
+		logger.Info("service stopped", "reason", reason)
 		close(s.done)
 	}()
+	logger.Info("service started", "version", opts.Build.Version, "commit", opts.Build.Commit, "root", root.String(), "listeners", startedListeners(s))
 	return s, nil
 }
-func (s *Service) Socket() string { return s.cfg.Listen.Socket }
+
+// startedListeners names every listener the service has bound, for the
+// service-started log record.
+func startedListeners(s *Service) []string {
+	listeners := []string{"socket"}
+	if s.web != nil {
+		listeners = append(listeners, "web")
+	}
+	if s.tailnet != nil {
+		listeners = append(listeners, "tailnet")
+	}
+	return listeners
+}
+
+// listenerName names the listener kind arrivedOn reports, for the
+// api-request-handled log record.
+func listenerName(kind listenerKind) string {
+	switch kind {
+	case webListener:
+		return "web"
+	case tailnetListener:
+		return "tailnet"
+	default:
+		return "socket"
+	}
+}
+
+// statusResponseWriter captures the status code an HTTP handler writes, for
+// the api-request-handled log record. Unwrap lets http.ResponseController
+// reach the underlying writer's Flush and SetWriteDeadline.
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusResponseWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+func (w *statusResponseWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(p)
+}
+func (w *statusResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (s *Service) Socket() string                           { return s.cfg.Listen.Socket }
 
 // WebAddr is the bound address of the web listener, or empty when listen.web
 // is not configured.
@@ -591,7 +685,7 @@ func (s *Service) joinTailnet(root config.Root, hostname string) (TailnetListene
 	}
 	join := s.options.JoinTailnet
 	if join == nil {
-		join = joinTailscale
+		join = joinTailscale(s.logger)
 	}
 	return join(hostname, dir)
 }
@@ -748,12 +842,19 @@ func (s *Service) cleanupSocket() {
 }
 
 // openAll opens the runtime of every active project of cfg that has a trace,
-// in active_projects order. On failure it opens none.
+// in active_projects order. A project whose trace migration from the shared
+// layout could not complete is logged and left unopened, so it is not
+// scheduled this run; every other project still opens. Any other failure
+// opens none.
 func (s *Service) openAll(cfg *config.Config) ([]*activeProject, error) {
 	var out []*activeProject
 	for _, id := range cfg.ProjectIDs() {
 		p, err := s.open(cfg.For(id))
 		if err != nil {
+			if errors.Is(err, trace.ErrMigrationIncomplete) {
+				s.log().Warn("project trace migration incomplete; project not opened", "project", string(id), "error", err.Error())
+				continue
+			}
 			for _, opened := range out {
 				opened.repository.Close()
 			}
@@ -892,6 +993,7 @@ func (s *Service) launch(active *activeProject) {
 	if active == nil {
 		return
 	}
+	s.log().Info("project started", "project", string(active.id))
 	ctx, cancel := context.WithCancel(s.lifetime)
 	active.cancel = cancel
 	go func() {
@@ -946,12 +1048,30 @@ func (s *Service) stop(projects ...*activeProject) error {
 	}
 	var err error
 	for _, p := range projects {
-		err = errors.Join(err, s.halt(p))
+		haltErr := s.halt(p)
+		err = errors.Join(err, haltErr)
+		if haltErr != nil {
+			s.log().Error("project stopped", "project", string(p.id), "reason", "service stopped", "error", haltErr.Error())
+		} else {
+			s.log().Info("project stopped", "project", string(p.id), "reason", "service stopped")
+		}
 	}
 	for _, p := range projects {
 		err = errors.Join(err, p.repository.Close())
 	}
 	return err
+}
+
+// migrationLog reports trace.Migrate's progress through s's structured
+// logger, naming only the project and workstream, never transcript content
+// or credentials, the way the tailnet supervisor reports its own retries.
+func (s *Service) migrationLog(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	if strings.Contains(format, "failed") {
+		s.log().Warn(msg)
+		return
+	}
+	s.log().Info(msg)
 }
 
 // openReconciliation leaves trace creation to project registration; an existing
@@ -982,6 +1102,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	_, gitErr := os.Lstat(filepath.Join(directory, ".git"))
 	if os.IsNotExist(manifestErr) && os.IsNotExist(gitErr) {
 		return nil, nil, nil, nil
+	}
+	if err := trace.Migrate(context.Background(), cfg.Root, cfg.Project.ID, s.migrationLog); err != nil {
+		return nil, nil, nil, err
 	}
 	repository, err := trace.Open(cfg.Root, cfg.Project)
 	if err != nil {

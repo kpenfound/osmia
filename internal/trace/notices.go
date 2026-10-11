@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
@@ -36,12 +37,19 @@ func (r *Repository) NotifyTool(scope coreadapter.Scope, now func() time.Time) c
 		if strings.TrimSpace(in.Text) == "" || len(in.Text) > 16384 || !utf8.ValidString(in.Text) || strings.ContainsRune(in.Text, 0) {
 			return nil, errors.New("notice requires UTF-8 text of at most 16384 bytes")
 		}
-		r.mu.Lock()
-		defer r.mu.Unlock()
 		if scope.Role != ChiefOfStaff {
 			return nil, errors.New("only the chief of staff can publish notices")
 		}
-		_, turn, err := r.turnScope(ChiefOfStaff, scope, true)
+		// The triggering turn is checked against its own workstream's trace;
+		// the notice itself is project knowledge, recorded in the project's
+		// own trace once that check has passed.
+		workstream, err := r.scoped(config.WorkstreamID(scope.Workstream))
+		if err != nil {
+			return nil, err
+		}
+		workstream.mu.Lock()
+		_, turn, err := workstream.turnScope(ChiefOfStaff, scope, true)
+		workstream.mu.Unlock()
 		if err != nil {
 			return nil, err
 		}
@@ -51,6 +59,8 @@ func (r *Repository) NotifyTool(scope coreadapter.Scope, now func() time.Time) c
 		}
 		sum := sha256.Sum256(data)
 		id := "notice-" + hex.EncodeToString(sum[:16])
+		r.mu.Lock()
+		defer r.mu.Unlock()
 		records, _, err := r.scan()
 		if err != nil {
 			return nil, err

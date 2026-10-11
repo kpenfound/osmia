@@ -69,11 +69,12 @@ func TestSetStatusStoresWholeRevisions(t *testing.T) {
 	if got == nil || !reflect.DeepEqual(got.StatusContent, second) || got.Revision != 2 || got.Actor != (Actor{Kind: "agent", ID: "chief"}) || got.Cause != "request_turn1" || got.Depth != 3 || !got.At.Equal(at.Add(2*time.Minute)) {
 		t.Fatalf("latest: %+v", got)
 	}
-	data, err := os.ReadFile(r.directory + "/workstreams/" + string(streamID) + "/status.jsonl")
+	s := mustScoped(t, r, streamID)
+	data, err := os.ReadFile(s.directory + "/workstreams/" + string(streamID) + "/status.jsonl")
 	if err != nil || strings.Count(string(data), "\n") != 2 {
 		t.Fatalf("status log: %q %v", data, err)
 	}
-	if out, err := r.git(ctx, nil, "status", "--porcelain", "--", "workstreams"); err != nil || strings.TrimSpace(out) != "" {
+	if out, err := s.git(ctx, nil, "status", "--porcelain", "--", "workstreams"); err != nil || strings.TrimSpace(out) != "" {
 		t.Fatalf("status not committed: %q %v", out, err)
 	}
 

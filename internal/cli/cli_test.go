@@ -274,9 +274,10 @@ func TestServeLifecycle(t *testing.T) {
 			cancel()
 			select {
 			case code := <-result:
-				if code != 0 || diag.Len() != 0 {
+				if code != 0 {
 					t.Fatalf("%d %s", code, diag.String())
 				}
+				assertStructuredServiceLog(t, diag.String())
 			case <-time.After(5 * time.Second):
 				t.Fatal("serve did not stop")
 			}
@@ -287,5 +288,45 @@ func TestServeLifecycle(t *testing.T) {
 			must(t, err)
 			must(t, s.Close())
 		})
+	}
+}
+
+// assertStructuredServiceLog checks that a clean serve stop's standard error
+// is structured JSON-lines output with the service start and stop records,
+// and no record at ERROR level or above, rather than requiring it be empty.
+func assertStructuredServiceLog(t *testing.T, diag string) {
+	t.Helper()
+	sawStart, sawStop := false, false
+	for _, line := range strings.Split(diag, "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("not a JSON object: %q: %v", line, err)
+		}
+		if _, ok := rec["time"]; !ok {
+			t.Fatalf("record missing time: %q", line)
+		}
+		level, _ := rec["level"].(string)
+		if level == "" {
+			t.Fatalf("record missing level: %q", line)
+		}
+		if strings.HasPrefix(level, "ERROR") {
+			t.Fatalf("record at ERROR level or above: %q", line)
+		}
+		msg, _ := rec["msg"].(string)
+		if msg == "" {
+			t.Fatalf("record missing msg: %q", line)
+		}
+		switch msg {
+		case "service started":
+			sawStart = true
+		case "service stopped":
+			sawStop = true
+		}
+	}
+	if !sawStart || !sawStop {
+		t.Fatalf("missing service start/stop records (start=%v stop=%v): %s", sawStart, sawStop, diag)
 	}
 }

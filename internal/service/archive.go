@@ -35,10 +35,33 @@ func (s *Service) archive(raw string) (ArchiveResponse, *APIError) {
 		return ArchiveResponse{}, &APIError{Internal, err.Error()}
 	}
 	a.ArchivedAt = s.now()
+	a.DeliveryLink, err = deliveryLinkFor(repository, stream)
+	if err != nil {
+		return ArchiveResponse{}, &APIError{Internal, err.Error()}
+	}
 	if api := archiveError(s.store.SetArchived(a)); api != nil {
 		return ArchiveResponse{}, api
 	}
 	return ArchiveResponse{Project: project, Workstream: stream, Archived: true}, nil
+}
+
+// deliveryLinkFor returns the delivery link to keep in a workstream's
+// archive record: the recorded upstream commit of an owner-recorded merge,
+// or, failing that, the pull request URL of the workstream's own
+// publication. It returns "" when neither is recorded, such as for an
+// abandoned workstream.
+func deliveryLinkFor(repository *trace.Repository, stream config.WorkstreamID) (string, error) {
+	if merge, found, err := deliveryMerge(repository, stream); err != nil {
+		return "", err
+	} else if found {
+		return merge.Upstream.Commit, nil
+	}
+	if pub, found, err := currentOwnPublication(repository, stream); err != nil {
+		return "", err
+	} else if found {
+		return pub.URL, nil
+	}
+	return "", nil
 }
 
 // unarchive refuses to reverse an archive, including one awaiting cleanup.

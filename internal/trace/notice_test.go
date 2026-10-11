@@ -46,8 +46,9 @@ func TestSetFeatureStateCommitsANotice(t *testing.T) {
 
 func TestSetFeatureStateFailureLeavesNoEvent(t *testing.T) {
 	r, root, p := create(t)
+	s := mustScoped(t, r, streamID)
 	injected := errors.New("injected publication failure")
-	r.failPublication = func(step string) error {
+	s.failPublication = func(step string) error {
 		if step == "before-ref" {
 			return injected
 		}
@@ -56,7 +57,7 @@ func TestSetFeatureStateFailureLeavesNoEvent(t *testing.T) {
 	if _, err := r.SetFeatureState(context.Background(), header("transition", "handed"), "handed", "Owner handed in a design"); !errors.Is(err, injected) {
 		t.Fatalf("injection not reached: %v", err)
 	}
-	r.failPublication = nil
+	s.failPublication = nil
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -12,7 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/thread"
-	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // ActivityKind names the long-running backend operation an activity entry
@@ -221,23 +219,6 @@ func (r *activityRegistry) snapshot() []ActivityEntry {
 		return out[i].ID < out[j].ID
 	})
 	return out
-}
-
-// pruneFenceUnavailable reports err as Unavailable, naming project's
-// archive-cleanup activity entry the way the Beekeeper's busy message names
-// its turn (activityCause), when err is trace.ErrPruneFenceBusy: the typed
-// error an owner command's write (trace.OwnerCommand) gets back when its
-// bounded wait for the prune fence expires while a purge's prune step still
-// holds it. It returns nil for any other error, so the caller falls back to
-// its own failure message.
-func (s *Service) pruneFenceUnavailable(project config.ProjectID, err error) *APIError {
-	if !errors.Is(err, trace.ErrPruneFenceBusy) {
-		return nil
-	}
-	if e, ok := s.activityEntry("archive-cleanup:" + string(project)); ok {
-		return &APIError{Unavailable, activityCause(e) + "; try again once it finishes"}
-	}
-	return &APIError{Unavailable, "archive cleanup is pruning the objects a purge replaced; try again once it finishes"}
 }
 
 // activityEntry returns a copy of the entry the activity record holds under

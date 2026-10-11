@@ -79,8 +79,9 @@ webhook = "https://ntfy.sh/your-private-topic"
 - **`listen.tailnet`** makes the service join your tailnet under that hostname
   so a phone signed in to the same tailnet can open `http://osmia/`. On first
   run the node must log in: start the service with `TS_AUTHKEY` set to a
-  Tailscale auth key, or without one and open the login URL the service prints
-  to stderr (`osmia status` shows it on its `Tailnet:` line). The node's state
+  Tailscale auth key, or without one and open the login URL from its
+  [structured log](running.md#service-log) (`osmia status` also shows it on
+  its `Tailnet:` line). The node's state
   is kept in `<root>/tailnet`, so later starts need neither. There is no login
   of Osmia's own: your tailnet's access rules decide who can reach the page and
   make decisions. Leave `tailnet` out to use the command line alone.

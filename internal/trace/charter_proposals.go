@@ -72,15 +72,23 @@ type CharterProposalState struct {
 // CharterProposals returns every charter proposal of the project, oldest
 // first, from one trace snapshot.
 func (r *Repository) CharterProposals() ([]CharterProposalState, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	records, streams, err := r.scan()
+	ids, err := r.diskStreams()
 	if err != nil {
 		return nil, err
 	}
 	var out []CharterProposalState
-	for _, stream := range streams {
-		_, v, err := r.loadWorkflow(stream)
+	for _, stream := range ids {
+		s, err := r.scoped(stream)
+		if err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		records, _, err := s.scan()
+		var v *workflowView
+		if err == nil {
+			_, v, err = s.loadWorkflow(stream)
+		}
+		s.mu.Unlock()
 		if err != nil {
 			return nil, fmt.Errorf("workstream %s: %w", stream, err)
 		}
@@ -139,6 +147,11 @@ func charterProposalPath(parts []string) bool {
 // is empty, spans lines or holds an HTML comment marker, are refused with
 // *QuestionRefused.
 func (r *Repository) ProposeCharter(ctx context.Context, agent string, scope coreadapter.Scope, id, rule string, next func(charter string) int, at time.Time) (CharterProposal, error) {
+	project := r
+	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return CharterProposal{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	turn, log, v, records, err := r.chiefTurn(ctx, agent, scope, at)
@@ -164,7 +177,9 @@ func (r *Repository) ProposeCharter(ctx context.Context, agent string, scope cor
 	case strings.Contains(rule, "<!--") || strings.Contains(rule, "-->"):
 		return CharterProposal{}, refused("rule must not contain an HTML comment marker")
 	}
-	current, err := r.readFile("charter.md")
+	project.mu.Lock()
+	current, err := project.readFile("charter.md")
+	project.mu.Unlock()
 	if err != nil {
 		return CharterProposal{}, err
 	}

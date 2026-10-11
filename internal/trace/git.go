@@ -74,7 +74,11 @@ func (f verifiedFile) unchanged(parent *os.Root, entry fs.DirEntry) bool {
 }
 
 func (r *Repository) checkGit() error {
-	if _, err := r.root.ProjectTrace(r.project); err != nil {
+	if r.stream == "" {
+		if _, err := r.root.ProjectTrace(r.project); err != nil {
+			return err
+		}
+	} else if _, err := r.root.WorkstreamTrace(r.project, r.stream); err != nil {
 		return err
 	}
 	if err := r.checked(".git"); err != nil {
@@ -149,13 +153,8 @@ func (r *Repository) commit(ctx context.Context, paths []string, message string)
 }
 
 // commitContent commits paths like commit, taking the bytes of any path in
-// content from there instead of from the work tree. It takes pruneMu, since
-// it creates Git objects a concurrent purge's prune step must not race.
+// content from there instead of from the work tree.
 func (r *Repository) commitContent(ctx context.Context, paths []string, content map[string][]byte, message string) error {
-	if err := r.lockPruneMu(ctx); err != nil {
-		return err
-	}
-	defer r.unlockPruneMu()
 	parent, err := r.readFile(".git/refs/heads/main")
 	if err != nil && !os.IsNotExist(err) {
 		return err

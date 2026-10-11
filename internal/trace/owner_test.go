@@ -43,13 +43,14 @@ func drafted(t *testing.T, r *Repository, root string, spec, plan string) {
 // read that finds no edit records nothing.
 func TestOwnerDocumentsRecordAnEditOnceAndNothingWithoutOne(t *testing.T) {
 	r, root, p := create(t)
+	s := mustScoped(t, r, streamID)
 	ctx := context.Background()
-	dir, err := root.ProjectTrace(p.ID)
+	dir, err := root.WorkstreamTrace(p.ID, streamID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	drafted(t, r, dir, "# Uploads\n", "{}\n")
-	commits := func() string { return gitOutput(t, r, "rev-list", "--count", "HEAD") }
+	commits := func() string { return gitOutput(t, s, "rev-list", "--count", "HEAD") }
 	before := commits()
 	got, err := r.OwnerDocuments(ctx, streamID, at, nil)
 	if err != nil || got["spec"].Revision != 1 || got["plan"].Revision != 1 || got["spec"].Actor.Kind != "agent" {
@@ -79,7 +80,7 @@ func TestOwnerDocumentsRecordAnEditOnceAndNothingWithoutOne(t *testing.T) {
 	}
 	// The commit takes the recorded bytes, so the edit is in the trace, and
 	// a second read records nothing again.
-	if got := gitOutput(t, r, "cat-file", "blob", "HEAD:workstreams/"+string(streamID)+"/spec.md"); !strings.Contains(got, "Uploads resume.") {
+	if got := gitOutput(t, s, "cat-file", "blob", "HEAD:workstreams/"+string(streamID)+"/spec.md"); !strings.Contains(got, "Uploads resume.") {
 		t.Fatalf("committed spec.md %q", got)
 	}
 	again, err := r.OwnerDocuments(ctx, streamID, at, nil)
@@ -108,7 +109,7 @@ func TestOwnerDocumentsRecordAnEditOnceAndNothingWithoutOne(t *testing.T) {
 func TestOwnerDocumentsRefuseAnInvalidEditOfEither(t *testing.T) {
 	r, root, p := create(t)
 	ctx := context.Background()
-	dir, err := root.ProjectTrace(p.ID)
+	dir, err := root.WorkstreamTrace(p.ID, streamID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +152,7 @@ func TestOwnerDocumentsRefuseAnInvalidEditOfEither(t *testing.T) {
 func TestOwnerDocumentsRefuseWhatItDoesNotOwn(t *testing.T) {
 	r, root, p := create(t)
 	ctx := context.Background()
-	dir, err := root.ProjectTrace(p.ID)
+	dir, err := root.WorkstreamTrace(p.ID, streamID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +181,7 @@ func TestOwnerDocumentsRefuseWhatItDoesNotOwn(t *testing.T) {
 func TestOwnerEditsNamesUnrecordedEdits(t *testing.T) {
 	r, root, p := create(t)
 	ctx := context.Background()
-	dir, err := root.ProjectTrace(p.ID)
+	dir, err := root.WorkstreamTrace(p.ID, streamID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +210,7 @@ func TestOwnerEditsNamesUnrecordedEdits(t *testing.T) {
 func TestRecordDocumentsRefusesAnUnrecordedOwnerEdit(t *testing.T) {
 	r, root, p := create(t)
 	ctx := context.Background()
-	dir, err := root.ProjectTrace(p.ID)
+	dir, err := root.WorkstreamTrace(p.ID, streamID)
 	if err != nil {
 		t.Fatal(err)
 	}

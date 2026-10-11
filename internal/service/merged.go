@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -54,6 +55,7 @@ func (s *Service) recordMerge(ctx context.Context, raw string) (MergeResponse, *
 // publication, the merge is refused until the publication has an outcome.
 func (s *Service) mergedOutside(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (MergeResponse, *APIError) {
 	project := repository.Project()
+	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(project), Workstream: string(stream)})
 	failed := &APIError{Internal, fmt.Sprintf("cannot record workstream %s merged; check the trace repository", stream)}
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {

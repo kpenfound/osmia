@@ -267,7 +267,7 @@ func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 	// first moved to implementing, which orders it among equal workstreams.
 	b, found, err := (&masons{s: f.s, repository: f.repository()}).read(stream)
 	must(t, err)
-	for _, tr := range allTransitions(t, f.trace, stream) {
+	for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 		if tr.ID == masonTransitionID("resume") && (!found || !b.started.Equal(tr.At)) {
 			t.Fatalf("the workstream last started a unit at %s, want %s", b.started, tr.At)
 		}

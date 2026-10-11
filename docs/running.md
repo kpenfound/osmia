@@ -32,7 +32,8 @@ The socket and any web listener keep serving beside it.
 The node's state, including its identity and keys, lives in `<root>/tailnet`,
 mode 0700, outside every target repository. On first run the node needs to log
 in. With `TS_AUTHKEY` set in the service's environment it uses that auth key;
-without one it prints a login URL to stderr every few seconds until someone
+without one it logs a message every few seconds, in the [service's structured
+log](#service-log), with the login URL as its `login_url` field, until someone
 opens it and approves the node. Later starts reuse the stored node state and
 need no key. The auth key is read only from the environment, never written to
 configuration or runtime state, and agent sessions never inherit the
@@ -79,9 +80,9 @@ the order of a first run.
    ```
 
 2. Log the node in. Start the service with `TS_AUTHKEY` set to a Tailscale
-   auth key, or start it without one and open the login URL it prints to
-   stderr and that `osmia status` shows as `Tailnet:`. The node's state is kept
-   in `<root>/tailnet`, so later starts need neither.
+   auth key, or start it without one and open the login URL from its
+   [structured log](#service-log) or from `osmia status`'s `Tailnet:` line.
+   The node's state is kept in `<root>/tailnet`, so later starts need neither.
 3. On a phone or laptop signed in to the same tailnet, open
    `http://osmia/` (or the node's MagicDNS name).
 
@@ -135,9 +136,10 @@ The page is laid out like a chat client:
   and the debate actions; the Trace tab walks the workstream's record. The
   `…` menu pauses the workstream or jumps to its dependency, debate actions
   or abandonment. It also archives a delivered or abandoned workstream,
-  abandons and archives one in progress. Archive permanently deletes the entire
-  trace, including full check output, and retains the title in the archived
-  list. It cannot be undone; see [the command line](cli.md).
+  abandons and archives one in progress. Archive keeps the title and a few
+  other facts in the archived list, then permanently deletes the workstream's
+  own trace, including full check output. It cannot be undone; see
+  [the command line](cli.md).
 - The settings menu opens new projects, projects and their charters, the
   priority order, each role's profile with its provider's usage today, and
   the loaded configuration with any [disk drift](#disk-drift) and settings
@@ -172,7 +174,7 @@ after acknowledging the submission, so it can never disappear for good.
 Submitting one card never hides or changes any other. If a submission fails,
 the card comes back at once with the error shown and what you typed still in
 it. A submission the backend cannot admit right now, because an operation
-such as archive cleanup is briefly in the way, shows distinctly from one the
+such as a Beekeeper turn is still in flight, shows distinctly from one the
 service rejects outright: the former names the blocking operation and is
 worth retrying as is, the latter needs the input or the decision changed.
 Every form that submits an action, including new project, archive and the
@@ -292,6 +294,101 @@ changed or removed webhook.
 
 While a notification problem stands, `osmia status` and `osmia config` show a
 `notify` diagnostic describing it. They never show the webhook's URL.
+
+## Service log
+
+While `osmia serve` runs, foreground or detached, everything it writes to its
+standard output and standard error is a structured log record: one JSON
+object per line, with a `time`, a `level` and a `msg`, and the record's
+details as named fields rather than only in the message text. In detached
+mode that output goes to `<root>/service.log`, so that file is JSON lines
+too. This covers the service's own messages, embedded Tailscale's (including
+the tailnet login URL, as the `login_url` field of a record whose `msg` is
+`tailnet message`) and any subprocess output that reaches the service's own
+output.
+
+A failure of the service process, at startup or after it started, is one
+`"level":"ERROR"` record on that same stream, with the same credential
+redaction and guidance `osmia doctor` points to as before, and the same exit
+code. The `osmia serve --detach` launcher is not the service process: its own
+"ready" line and, when the detached service does not become ready, its own
+failure message stay human-readable text on the terminal that started it,
+never log records.
+
+Filter the stream with any JSON-lines tool, for example `jq`:
+
+```sh
+osmia serve 2>&1 | jq -c 'select(.level == "ERROR")'
+```
+
+### GitHub activity log
+
+Every GitHub touch point the service makes produces one record once it
+completes, whether it succeeds or fails: a GitHub REST API request (finding,
+opening or updating a pull request; fetching a handed-in issue; the commit
+and content requests of the `read_remote_file` tool) or a git remote
+operation against a project's upstream or fork (resolving the remote,
+fetching, looking up a remote branch, pushing). Every such record carries
+`"activity":"github"`, the one field value that marks it as GitHub activity;
+no other kind of record carries it. Filter on it to see every GitHub touch
+point and nothing else:
+
+```sh
+osmia serve 2>&1 | jq -c 'select(.activity == "github")'
+```
+
+Each GitHub activity record also carries:
+
+- `action`: what was done, such as `pulls.find`, `issues.fetch` or
+  `workspace.push`.
+- `access`: `read` or `write`.
+- `repository`, for a REST request, or `remote` and `branch`, for a git
+  remote operation.
+- `method` and `path`, for a REST request.
+- `status`, the REST response status, or `no_response` when none arrived.
+- `commits`, for a git remote operation that involved any, such as the pushed
+  commit and the expected remote commit.
+- `outcome` and `duration`.
+- `error`, when the touch point failed; redacted of credentials, never the
+  text of an issue, pull request, remote file or commit message.
+- `project`, and `workstream` and `unit` when there are any, naming what the
+  request was made for, when the service knows them.
+
+A failed request, including an unexpected status, a transport failure or a
+rejected push, logs at `ERROR`; a successful one logs at `INFO`.
+
+### Factory action log
+
+Beside the GitHub activity log, the service logs its own internal actions,
+each carrying `project`, and `workstream` and `unit` when there are any:
+
+- `service started` (`version`, `commit`, `root`, `listeners`) and
+  `service stopped` (`reason`).
+- `project started`, `project draining` and `project stopped` (`reason`).
+- `reload succeeded` (`digest`, `restart_required`, `added`, `removed`) and
+  `reload failed` (`error`).
+- `api request handled` (`listener`, `method`, `path`, `status`,
+  `duration`), with no request or response body.
+- `operation started`, then `operation finished` (`outcome`, `duration`) or
+  `operation failed` (`error`, `duration`): the start and outcome of an
+  operation the service runs, such as a draft, a debate round, sealing,
+  building, checks, landing, rebasing, publication or cleanup, named by its
+  `action` and `boundary`.
+- `agent turn dispatched`, then `agent turn finished` (`outcome`,
+  `duration`): a queued turn handed to an agent, named by its `role`,
+  `profile` and `unit`, with no prompt or transcript.
+- `pause set` (`scope`, `mode`, `reason`) and `pause cleared` (`scope`).
+- `tailnet joined`, a join failure and `tailnet listener stopped; rejoining`:
+  the tailnet's own state changes, as distinct from the `tailnet message`
+  records embedded Tailscale's own logging produces.
+- `notification post attempt succeeded` (`kind`, `duration`) and
+  `notification post attempt failed` (`kind`, `attempts`, `gave_up`,
+  `duration`, `error`): never the webhook URL.
+- `reconciliation pass hook failed` (`hook`, `error`): a schedule hook that
+  stopped a reconciliation pass.
+
+A failed or error-level outcome logs at `ERROR` or `WARN`, higher than the
+matching routine record's `INFO`.
 
 ## API reference
 

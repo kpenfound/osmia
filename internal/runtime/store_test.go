@@ -129,6 +129,7 @@ func TestOperatorPauseSourceOpensAsOwner(t *testing.T) {
 		t.Fatal("operator pause was not persisted as owner")
 	}
 }
+
 // TestGenerationAdvancesOnlyOnAChangeAndNeverBlocks covers spec#8: a reader
 // that assembles a response from more than one call into the store can tell,
 // from Generation alone, whether a mutation landed between them, without

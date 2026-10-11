@@ -45,7 +45,7 @@ func TestBrowserActivityShowsBackendOperationsIncludingBlockedAndFailed(t *testi
 	api.setActivity(
 		activityEntry("git-1", "git", "w_000", "rebasing onto upstream", current, ""),
 		activityEntry("git-2", "git", "w_000", "cloning", stale, ""),
-		activityEntry("cleanup-1", "archive_cleanup", "w_000", "rewriting history", stale, ""),
+		activityEntry("cleanup-1", "archive_cleanup", "w_000", "removing the workstream's trace", stale, ""),
 		activityEntry("check-1", "check", "w_000", "checking unit demo (run 1)", stale, ""),
 		activityEntry("turn-1", "turn", "w_000", "mason turn t1", stale, "the sandbox could not be created"),
 	)

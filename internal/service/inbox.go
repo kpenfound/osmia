@@ -630,7 +630,7 @@ func (s *Service) answer(ctx context.Context, raw string, req AnswerRequest) (An
 	}
 	failed := &APIError{Internal, fmt.Sprintf("cannot record the ruling on inbox entry %d; check the trace repository", number)}
 	at := s.now()
-	entry, err := active.repository.Rule(trace.OwnerCommand(ctx), number, req.Text, ownerActor, at, AbandonedState)
+	entry, err := active.repository.Rule(ctx, number, req.Text, ownerActor, at, AbandonedState)
 	switch {
 	case errors.Is(err, trace.ErrInboxEntry):
 		return AnswerResponse{}, unknown
@@ -639,9 +639,6 @@ func (s *Service) answer(ctx context.Context, raw string, req AnswerRequest) (An
 	case errors.Is(err, trace.ErrRuled):
 		return AnswerResponse{}, &APIError{Conflict, fmt.Sprintf("inbox entry %d is already answered", number)}
 	case err != nil:
-		if api := s.pruneFenceUnavailable(project, err); api != nil {
-			return AnswerResponse{}, api
-		}
 		return AnswerResponse{}, failed
 	}
 	out := AnswerResponse{Number: number, Workstream: entry.Workstream, Batch: entry.Batch, Questions: []string{}, Ruling: req.Text, At: at}

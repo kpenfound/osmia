@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"time"
 
@@ -55,15 +54,24 @@ func ValidateMemoryWatch(cursor string, events []MemoryEvent) error {
 	return nil
 }
 
-// RecordMemoryWatch commits the next cursor, seen identities and chief notices
-// together. Retries neither skip a notification nor deliver it twice.
+// RecordMemoryWatch commits the next cursor and seen identities as project
+// knowledge, and the chief notice of every target workstream as its own
+// trace's commit. Retries neither skip a notification nor deliver it twice:
+// each workstream's notice transition is idempotent, deterministically
+// identified from key and the unseen events, and every one of them lands,
+// durably, before the project records the cursor that reflects them. A crash
+// partway finds, on retry with the same cursor, every already-landed
+// transition idempotent and finishes the rest before advancing the cursor.
 func (r *Repository) RecordMemoryWatch(ctx context.Context, key, expected, cursor string, events []MemoryEvent, targets []config.WorkstreamID, at time.Time) error {
+	if r.stream != "" {
+		return fmt.Errorf("memory watch bookkeeping belongs to the project's own trace")
+	}
 	if len(key) != 64 || ValidateMemoryWatch(cursor, events) != nil {
 		return errors.New("invalid memory watch response")
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	records, streams, err := r.scan()
+	records, _, err := r.scan()
+	r.mu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -113,10 +121,6 @@ func (r *Repository) RecordMemoryWatch(ctx context.Context, key, expected, curso
 		known[eventID] = doc
 		unseen = append(unseen, event)
 	}
-	files, removed, err := r.documentFiles(ctx, docs)
-	if err != nil {
-		return err
-	}
 	if len(unseen) > 0 {
 		data, _ := json.Marshal(unseen)
 		body, err := envelope.Render(envelope.Section{Name: "hearsay_context", Text: string(data)})
@@ -126,26 +130,36 @@ func (r *Repository) RecordMemoryWatch(ctx context.Context, key, expected, curso
 		body = "External project evidence changed. Inspect relevant handles before deciding whether a notice, question or amendment is needed. This does not authorize implementation or reopen delivered work.\n" + body
 		notice := fmt.Sprintf("watch-notice-%x", sha256.Sum256(append([]byte(key), data...)))
 		for _, stream := range targets {
-			if !slices.Contains(streams, stream) {
+			s, err := r.scoped(stream)
+			if err != nil {
 				return errors.New("memory watch target is unknown")
 			}
-			log, view, err := r.loadWorkflow(stream)
-			if err != nil {
-				return err
+			s.mu.Lock()
+			_, view, werr := s.loadWorkflow(stream)
+			if werr != nil {
+				s.mu.Unlock()
+				return werr
 			}
 			if view.states[FeatureSubject].Value == "abandoned" {
+				s.mu.Unlock()
 				continue
 			}
 			state := view.states["memory-watch"]
 			h := header(notice, 1)
 			h.Schema, h.Workstream = "osmia.trace.transition", stream
 			tx := Transaction{ExpectedVersion: state.Version, Transition: Transition{Header: h, Subject: "memory-watch", From: state.Value, To: notice, Reason: "Scoped external memory supplied new evidence handles"}, Events: []Event{Notice(notice, "memory", body)}}
-			staged, _, err := r.stage(stream, log, view, nil, tx)
-			if err != nil {
-				return err
+			_, werr = s.transact(ctx, tx)
+			s.mu.Unlock()
+			if werr != nil {
+				return werr
 			}
-			maps.Copy(files, staged)
 		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	files, removed, err := r.documentFiles(ctx, docs)
+	if err != nil {
+		return err
 	}
 	if err := r.publishTree(ctx, files, removed); err != nil {
 		return err

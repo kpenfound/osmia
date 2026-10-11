@@ -94,7 +94,12 @@ type publicationFixture struct {
 // request host, and configures the delivery style.
 func newPublicationFixture(t *testing.T, style string) *publicationFixture {
 	t.Helper()
-	f, stream, repository, report := deliveryFixture(t)
+	return newPublicationFixtureWith(t, style, "")
+}
+
+func newPublicationFixtureWith(t *testing.T, style, extra string) *publicationFixture {
+	t.Helper()
+	f, stream, repository, report := deliveryFixtureWith(t, extra)
 	home := filepath.Dir(f.clone)
 	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
 	must(t, os.MkdirAll(filepath.Dir(fork), 0700))

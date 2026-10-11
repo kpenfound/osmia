@@ -164,7 +164,7 @@ func TestExactReviewDemonstration(t *testing.T) {
 	// The revision also changed docs/proof.md, outside the unit's footprint;
 	// the reviewer's satisfactory verdict approves it as it stands.
 	var refreshed, approved bool
-	for _, move := range allTransitions(t, f.trace, stream) {
+	for _, move := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 		if move.Subject != trace.UnitSubject("resume") {
 			continue
 		}

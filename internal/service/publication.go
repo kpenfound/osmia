@@ -11,6 +11,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -200,18 +201,13 @@ func (p *publisher) request(ctx context.Context, stream config.WorkstreamID) err
 		in.Base = report.Upstream.Branch
 		in.BaseWorkstream = report.Upstream.Workstream
 	}
-	if in.Maintenance && in.Fork == in.Upstream {
-		records, err := publications(p.repository, stream)
+	if in.Maintenance {
+		previous, found, err := currentOwnPublication(p.repository, stream)
 		if err != nil {
 			return err
 		}
-		for _, d := range records {
-			if d.Status == publicationOpened && d.Upstream == in.Upstream && !canonicalPublication(d, cfg) {
-				in.Retarget = &retargetInput{Number: d.PullRequest, URL: d.URL, Base: d.Base, Description: d.Description}
-			}
-		}
-		if in.Retarget == nil {
-			return fmt.Errorf("delivery maintenance has no dependent pull request to retarget")
+		if found && previous.Upstream == in.Upstream && (previous.Base == in.Base || in.Fork == in.Upstream && !canonicalPublication(previous, cfg)) {
+			in.Retarget = &retargetInput{Number: previous.PullRequest, URL: previous.URL, Base: previous.Base, Description: previous.Description}
 		}
 	}
 	input, err := json.Marshal(in)
@@ -230,7 +226,7 @@ func (p *publisher) request(ctx context.Context, stream config.WorkstreamID) err
 	op := coreadapter.Operation{ID: trace.OperationID(p.repository.Project(), stream, event), Boundary: coreadapter.RepositoryBoundary, Action: action, Input: input}
 	requestAction := "opens a pull request"
 	if in.Retarget != nil {
-		requestAction = fmt.Sprintf("retargets pull request #%d", in.Retarget.Number)
+		requestAction = fmt.Sprintf("updates pull request #%d", in.Retarget.Number)
 	}
 	reason := fmt.Sprintf("the owner approved description %s for %s at %s; publication pushes it (%s) to %s of %s and %s against %s of %s", in.DescriptionHash, featureBranch(stream), in.Commit, in.Style, featureBranch(stream), in.Fork, requestAction, in.Base, in.Upstream)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: transition, Revision: 1, Project: p.repository.Project(), Workstream: stream, At: p.s.now(), Actor: foremanActor, Cause: decision.Cause}
@@ -259,8 +255,8 @@ func decodePublish(op coreadapter.Operation) (publishInput, error) {
 	if in.Approval < 1 || in.Commit == "" || in.DescriptionHash == "" || in.Style == "" || in.Fork == "" || in.Upstream == "" || in.Base == "" {
 		return in, errors.New("publish operation requires a positive approval revision, a commit, a description hash, a style, a push repository, an upstream and a base branch")
 	}
-	if in.Retarget != nil && (!in.Maintenance || in.Fork != in.Upstream || in.BaseWorkstream != "" || in.Retarget.Number < 1 || in.Retarget.URL == "" || in.Retarget.Base == "" || in.Retarget.Base == in.Base) {
-		return in, errors.New("invalid dependent pull request retarget operation")
+	if in.Retarget != nil && (!in.Maintenance || in.Retarget.Number < 1 || in.Retarget.URL == "" || in.Retarget.Base == "") {
+		return in, errors.New("invalid pull request update operation")
 	}
 	return in, nil
 }
@@ -356,6 +352,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(p.repository.Project()), Workstream: string(stream)})
 	if result, err := p.outcome(stream, in.Approval); err != nil || result != nil {
 		if err != nil {
 			return coreadapter.OperationResult{}, err
@@ -398,8 +395,8 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	if in.Maintenance && (!report.Maintenance || in.Upstream != cfg.Project.Upstream || in.Base != cfg.Project.BaseBranch || report.Upstream == nil || report.Upstream.Workstream != "") {
-		return p.refuse(ctx, stream, in, "upstream publication requires a fresh delivery maintenance review of the integrated base")
+	if in.Maintenance && (!report.Maintenance || report.Upstream == nil || report.Upstream.Workstream == "" && (in.Upstream != cfg.Project.Upstream || in.Base != cfg.Project.BaseBranch)) {
+		return p.refuse(ctx, stream, in, "publication requires a fresh delivery maintenance review of its current base")
 	}
 	g, err := featureWorkspaces(cfg, p.repository).of(stream)
 	if err != nil {
@@ -480,7 +477,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		return coreadapter.OperationResult{}, err
 	}
 	if in.Retarget != nil && len(before) == 0 {
-		return p.refuse(ctx, stream, in, "the dependent pull request is missing")
+		return p.refuse(ctx, stream, in, "the delivered pull request is missing")
 	}
 	if len(before) != 0 && (len(before) != 1 || !matchingPublicationPR(before[0], in, branch, approval.Description, tip) && !matchingRetargetPR(before[0], in, branch, tip)) {
 		return p.refusePR(ctx, stream, in, branch, published, before)
@@ -553,7 +550,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 }
 
 func matchingPublicationPR(pr pulls.PullRequest, in publishInput, branch, description, commit string) bool {
-	return (in.Retarget == nil || pr.Number == in.Retarget.Number && pr.URL == in.Retarget.URL) && pr.Number > 0 && pr.URL != "" && pr.State == "open" && pr.HeadRepository == in.Fork && pr.Head == branch && pr.Base == in.Base && pr.HeadCommit == commit && pr.Body == description
+	return (in.Retarget == nil || pr.Number == in.Retarget.Number && pr.URL == in.Retarget.URL) && pr.Number > 0 && pr.URL != "" && pr.State == "open" && !pr.Merged && pr.HeadRepository == in.Fork && pr.Head == branch && pr.Base == in.Base && pr.HeadCommit == commit && pr.Body == description
 }
 
 func (p *publisher) refusePR(ctx context.Context, stream config.WorkstreamID, in publishInput, branch, commit string, found []pulls.PullRequest) (coreadapter.OperationResult, error) {
@@ -672,7 +669,7 @@ func (p *publisher) deliver(ctx context.Context, stream config.WorkstreamID, in 
 			return coreadapter.OperationResult{}, errors.New("delivery maintenance requires a delivered feature")
 		}
 		txs = txs[1:]
-		txs[0].Events = []trace.Event{trace.Notice(transition, "delivery", fmt.Sprintf("Upstream pull request opened at %s; dependent request retained at %s. The feature remains delivered.", record.URL, record.PriorURL))}
+		txs[0].Events = []trace.Event{trace.Notice(transition, "delivery", fmt.Sprintf("Delivery maintenance published at %s. The feature remains delivered.", record.URL))}
 	}
 	if _, err := p.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, txs...); err != nil {
 		if errors.Is(err, trace.ErrConflict) {

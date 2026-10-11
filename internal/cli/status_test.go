@@ -350,7 +350,7 @@ func TestProjectRebaseAndDriftStatus(t *testing.T) {
 	must(t, err)
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
-	reason := "drift rebase 1 changed nothing: the workstream is handed, not building or assembled"
+	reason := "drift rebase 1 changed nothing: the workstream is handed, not building, assembled or delivered with a pull request"
 	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "drift-1-skipped", Revision: 1, Project: project, Workstream: stream, At: written, Actor: trace.Actor{Kind: "service", ID: "foreman"}, Cause: "drift-1-run"}
 	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: "drift", To: "skipped-1", Reason: reason}})
 	must(t, err)
@@ -372,7 +372,7 @@ func TestProjectRebaseAndDriftStatus(t *testing.T) {
 		t.Fatalf("status drift %+v, want %+v", one.Drift, want)
 	}
 
-	skipped := []service.DriftSkip{{Workstream: stream, Reason: "the workstream is handed, not building or assembled"}, {Workstream: quiet, Reason: "the workstream is not started, not building or assembled"}}
+	skipped := []service.DriftSkip{{Workstream: stream, Reason: "the workstream is handed, not building, assembled or delivered with a pull request"}, {Workstream: quiet, Reason: "the workstream is not started, not building, assembled or delivered with a pull request"}}
 	if out := successful(t, root, "project", "rebase", project); out != "Drift rebase requested for project "+project+"\nCovered: none\nSkipped: "+stream+": "+skipped[0].Reason+"\nSkipped: "+quiet+": "+skipped[1].Reason+"\n" {
 		t.Fatalf("project rebase:\n%s", out)
 	}

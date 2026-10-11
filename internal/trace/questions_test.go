@@ -70,12 +70,13 @@ func questionStates(t *testing.T, r *Repository) map[string]QuestionState {
 // it is on disk.
 func committed(t *testing.T, r *Repository, name string) {
 	t.Helper()
+	s := mustScoped(t, r, streamID)
 	name = "workstreams/" + string(streamID) + "/questions/" + name
-	disk, err := os.ReadFile(r.directory + "/" + name)
+	disk, err := os.ReadFile(s.directory + "/" + name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	head, err := r.gitBytes(context.Background(), nil, "", "cat-file", "blob", "HEAD:"+name)
+	head, err := s.gitBytes(context.Background(), nil, "", "cat-file", "blob", "HEAD:"+name)
 	if err != nil || string(head) != string(disk) || len(disk) == 0 {
 		t.Fatalf("%s is not committed as written: %v", name, err)
 	}
@@ -84,6 +85,7 @@ func committed(t *testing.T, r *Repository, name string) {
 func TestAskRecordsTheQuestionAndOneEventTogether(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
+	s := mustScoped(t, r, streamID)
 	chief := chiefThread(t, r, "chief1")
 	mason := askerThread(t, r, "mason1", "mason", "build1")
 	before, err := r.Outbox(streamID)
@@ -97,7 +99,7 @@ func TestAskRecordsTheQuestionAndOneEventTogether(t *testing.T) {
 	}
 	// A publication that fails before the ref moves leaves neither the
 	// question nor its event.
-	r.failPublication = func(step string) error {
+	s.failPublication = func(step string) error {
 		if step == "before-ref" {
 			return errors.New("injected")
 		}
@@ -106,7 +108,7 @@ func TestAskRecordsTheQuestionAndOneEventTogether(t *testing.T) {
 	if _, err := r.Ask(ctx, "mason1", mason, "Which store?", at); err == nil {
 		t.Fatal("failed publication reported success")
 	}
-	r.failPublication = nil
+	s.failPublication = nil
 	if got, _ := r.Outbox(streamID); len(questionStates(t, r)) != 0 || len(got) != len(before) {
 		t.Fatalf("failed ask left records: %d events", len(got))
 	}

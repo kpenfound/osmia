@@ -635,17 +635,19 @@ func demonstrate(t *testing.T, mode string) {
 	}
 
 	// Ordinary files hold the same history, and nothing leaked or escaped.
+	streamTrace, err := cfg.Root.WorkstreamTrace(project, stream)
+	must(t, err)
 	for _, name := range []string{"workflow.json", "events.jsonl", "ledger.jsonl", "agents/" + demoAgent + "/log.jsonl", "agents/" + demoAgent + "/identity.jsonl"} {
 		path := "workstreams/" + string(stream) + "/" + name
-		data, err := os.ReadFile(filepath.Join(traceDir, path))
+		data, err := os.ReadFile(filepath.Join(streamTrace, path))
 		if err != nil || len(data) == 0 {
 			t.Fatalf("trace file %s: %v", name, err)
 		}
-		if committed := demoGit(t, home, "-C", traceDir, "show", "HEAD:"+path); committed != string(data) {
+		if committed := demoGit(t, home, "-C", streamTrace, "show", "HEAD:"+path); committed != string(data) {
 			t.Fatalf("trace file %s differs from its committed version", name)
 		}
 	}
-	log, err := os.ReadFile(filepath.Join(traceDir, "workstreams", string(stream), "agents", demoAgent, "log.jsonl"))
+	log, err := os.ReadFile(filepath.Join(streamTrace, "workstreams", string(stream), "agents", demoAgent, "log.jsonl"))
 	must(t, err)
 	if lines := bytes.Split(bytes.TrimSpace(log), []byte("\n")); len(lines) != 4 {
 		t.Fatalf("owned log has %d records", len(lines))

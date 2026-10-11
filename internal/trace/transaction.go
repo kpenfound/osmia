@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 )
@@ -35,18 +34,6 @@ func (r *Repository) boundary(name string) error {
 	return nil
 }
 
-// FailPublication installs f as the hook every named publication or purge
-// boundary in this package calls, for tests outside it that interrupt one
-// (returning an error) or show that a read or a write does not wait on it
-// (blocking until the test releases it, then returning nil). nil, the
-// default, calls nothing. The named boundaries include, for a purge,
-// "purge-rewriting", "purge-journal-written", "purge-ref-published",
-// "purge-files-removed", "purge-pruning" (purgeMu and pruneMu already held,
-// before the destructive repack and prune run) and "purge-objects-pruned".
-func (r *Repository) FailPublication(f func(string) error) {
-	r.failPublication = f
-}
-
 // publish prepares immutable objects before updating the single authoritative
 // ref. The journal makes interrupted ordinary-file materialization recoverable.
 // The repository lock must be held by the caller.
@@ -54,71 +41,9 @@ func (r *Repository) publish(ctx context.Context, files map[string][]byte) error
 	return r.publishTree(ctx, files, nil)
 }
 
-// ownerCommandContextKey marks a context as carrying an owner-submitted
-// command, so lockPruneMu bounds its wait for the prune fence instead of
-// blocking on it unconditionally.
-type ownerCommandContextKey struct{}
-
-// OwnerCommand marks ctx as an owner-submitted command: publishTree's wait
-// for the prune fence that a purge's destructive prune step holds
-// (Repository.pruneMu) is bounded by ownerCommandPruneFenceBound, so a
-// command submitted while a prune is running answers ErrPruneFenceBusy
-// within that bound instead of waiting, however long the prune's repack and
-// prune steps take, for it to finish. A context without this marker waits
-// for the fence unconditionally, exactly as a plain mutex would: every
-// background writer -- a reconcile pass, an agent turn, or the purge
-// itself -- keeps that behavior.
-func OwnerCommand(ctx context.Context) context.Context {
-	return context.WithValue(ctx, ownerCommandContextKey{}, true)
-}
-
-// ownerCommandPruneFenceBound is how long an owner command (OwnerCommand)
-// waits for the prune fence before lockPruneMu gives up with
-// ErrPruneFenceBusy.
-const ownerCommandPruneFenceBound = time.Second
-
-// ErrPruneFenceBusy is returned when an owner command's bounded wait for the
-// prune fence (pruneMu) expires while an archive cleanup prune still holds
-// it. The fence is never acquired, so nothing is written.
-var ErrPruneFenceBusy = errors.New("trace: archive cleanup is pruning the objects a purge replaced")
-
-// lockPruneMu acquires the prune fence a purge's destructive prune step
-// (prunePurged) holds against any write that creates a Git object.
-// prunePurged itself calls this with a context that carries no
-// OwnerCommand marker, so it, like every other caller except an owner
-// command, waits unconditionally. A context from OwnerCommand instead
-// waits at most ownerCommandPruneFenceBound, or until ctx itself ends,
-// before returning ErrPruneFenceBusy without ever acquiring the fence.
-func (r *Repository) lockPruneMu(ctx context.Context) error {
-	if ctx.Value(ownerCommandContextKey{}) == nil {
-		r.pruneMu <- struct{}{}
-		return nil
-	}
-	timer := time.NewTimer(ownerCommandPruneFenceBound)
-	defer timer.Stop()
-	select {
-	case r.pruneMu <- struct{}{}:
-		return nil
-	case <-timer.C:
-		return ErrPruneFenceBusy
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// unlockPruneMu releases the prune fence lockPruneMu acquired.
-func (r *Repository) unlockPruneMu() {
-	<-r.pruneMu
-}
-
 // publishTree is publish with paths that leave the tree: they are removed from
-// the commit and, once the ref is published, from disk. It takes pruneMu,
-// since it creates Git objects a concurrent purge's prune step must not race.
+// the commit and, once the ref is published, from disk.
 func (r *Repository) publishTree(ctx context.Context, files map[string][]byte, removed []string) error {
-	if err := r.lockPruneMu(ctx); err != nil {
-		return err
-	}
-	defer r.unlockPruneMu()
 	r.forget()
 	if _, err := r.checkHistory(ctx); err != nil {
 		return err
@@ -282,9 +207,6 @@ func (r *Repository) syncObjects() error {
 var objectID = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 func (r *Repository) recoverPublication(ctx context.Context) error {
-	if err := r.recoverPurge(ctx); err != nil {
-		return err
-	}
 	return r.finishPublication(ctx, nil)
 }
 

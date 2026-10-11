@@ -61,7 +61,7 @@ func onWorkspaces(t *testing.T, opts Options, backend string) {
 // backendOf returns the workspace backend the workstream's manifest records.
 func backendOf(t *testing.T, f *shedFixture, stream config.WorkstreamID) string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(f.trace, "workstreams", string(stream), "workstream.json"))
+	data, err := os.ReadFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, "workstream.json"))
 	must(t, err)
 	var manifest struct {
 		Workspaces string `json:"workspaces"`
@@ -384,7 +384,7 @@ func TestJujutsuCandidateHoldingAConflictIsNeitherReviewedNorLanded(t *testing.T
 	if th, err := repository.Thread(stream, reviewerAgent("audit")); err == nil && len(th.Turns) != 0 || err != nil && !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the candidate holding a conflict was offered for review: %+v %v", th.Turns, err)
 	}
-	blocked := slices.IndexFunc(allTransitions(t, f.trace, stream), func(tr trace.Transition) bool {
+	blocked := slices.IndexFunc(allTransitions(t, f.s.cfg.Root, f.project, stream), func(tr trace.Transition) bool {
 		return tr.Subject == reviewBlockedSubject("audit") && tr.Reason == "unit audit stays reviewing: its reviewer bundle cannot be assembled: "+refused
 	})
 	if blocked < 0 {
@@ -542,7 +542,7 @@ func crashedRebase(t *testing.T, f *shedFixture, repository *trace.Repository, r
 	}
 	transition, _ := rebaseIDs(unit, last.Rebase)
 	var outcomes []string
-	for _, tr := range allTransitions(t, f.trace, stream) {
+	for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
 		if tr.Subject == rebaseSubject(unit) && strings.HasPrefix(tr.ID, transition+"-") {
 			outcomes = append(outcomes, tr.ID)
 		}
@@ -804,7 +804,7 @@ func TestJujutsuRebasedUnitKeepsItsChangeAndReturnsToReview(t *testing.T) {
 	if report.Candidate != rebase.Commit || report.Base != landed[0] {
 		t.Fatalf("dedupe's report after its rebase %+v", report)
 	}
-	back := slices.IndexFunc(allTransitions(t, f.trace, stream), func(tr trace.Transition) bool {
+	back := slices.IndexFunc(allTransitions(t, f.s.cfg.Root, f.project, stream), func(tr trace.Transition) bool {
 		return tr.ID == trace.UnitSubject("dedupe")+"-checking-rebase-1" && tr.From == UnitApproved && tr.To == UnitChecking && strings.HasPrefix(tr.Reason, "the approval no longer holds: ")
 	})
 	if back < 0 {

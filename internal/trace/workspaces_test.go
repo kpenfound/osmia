@@ -52,15 +52,16 @@ func TestWorkstreamRecordsItsWorkspaceBackend(t *testing.T) {
 		}
 	}
 
+	jjRepo := mustScoped(t, r, jj)
 	manifest := "workstreams/" + string(jj) + "/workstream.json"
-	data, err := r.readFile(manifest)
+	data, err := jjRepo.readFile(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), `"workspaces": "jujutsu"`) {
 		t.Fatalf("the manifest does not record the backend:\n%s", data)
 	}
-	if err := r.writeFile(manifest, []byte(strings.Replace(string(data), `"jujutsu"`, `"svn"`, 1))); err != nil {
+	if err := jjRepo.writeFile(manifest, []byte(strings.Replace(string(data), `"jujutsu"`, `"svn"`, 1))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.Workspaces(jj); err == nil || !strings.Contains(err.Error(), `invalid workspace backend "svn"`) {

@@ -366,6 +366,10 @@ func (r *Repository) checkWorkflows(streams []config.WorkstreamID) error {
 // Transact atomically publishes state, transition provenance and delivery intent.
 // An error after publication may still mean committed: retry the identical request.
 func (r *Repository) Transact(ctx context.Context, tx Transaction) (WorkflowState, error) {
+	r, err := r.scoped(tx.Transition.Workstream)
+	if err != nil {
+		return WorkflowState{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.transact(ctx, tx)
@@ -481,6 +485,10 @@ func (r *Repository) appendRecords(files map[string][]byte, records []Record) er
 }
 
 func (r *Repository) Workflow(stream config.WorkstreamID, subject string) (WorkflowState, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return WorkflowState{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	_, v, err := r.loadWorkflow(stream)
@@ -496,6 +504,10 @@ func (r *Repository) Workflow(stream config.WorkstreamID, subject string) (Workf
 // WorkflowStates returns the state of every subject of the workstream's
 // workflow that has one, by subject.
 func (r *Repository) WorkflowStates(stream config.WorkstreamID) (map[string]WorkflowState, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	_, v, err := r.loadWorkflow(stream)
@@ -507,6 +519,10 @@ func (r *Repository) WorkflowStates(stream config.WorkstreamID) (map[string]Work
 
 // Outbox returns all entries and their retained delivery history, ordered by ID.
 func (r *Repository) Outbox(stream config.WorkstreamID) ([]OutboxEntry, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.outbox(stream, time.Time{})
@@ -516,6 +532,10 @@ func (r *Repository) Outbox(stream config.WorkstreamID) ([]OutboxEntry, error) {
 // Claims from another repository session are abandoned.
 // A newly opened handle needs no wakeup signal to discover pending work.
 func (r *Repository) Ready(stream config.WorkstreamID, now time.Time) ([]OutboxEntry, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if now.IsZero() {
@@ -543,6 +563,10 @@ func (r *Repository) outbox(stream config.WorkstreamID, now time.Time) ([]Outbox
 // Claim uses a caller-retained attempt token. Reusing a token with different
 // claim parameters fails; retrying it never extends or resurrects its lease.
 func (r *Repository) Claim(ctx context.Context, stream config.WorkstreamID, event, token, worker string, now time.Time, lease time.Duration) (DeliveryAction, error) {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return DeliveryAction{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -588,6 +612,10 @@ func (r *Repository) Release(ctx context.Context, stream config.WorkstreamID, ev
 	return r.finishDelivery(ctx, stream, event, token, at, "release")
 }
 func (r *Repository) finishDelivery(ctx context.Context, stream config.WorkstreamID, event, token string, at time.Time, kind string) error {
+	r, err := r.scoped(stream)
+	if err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {

@@ -1107,11 +1107,11 @@
     const status = w.status;
     head.dataset.workstream = w.workstream;
     // The menu offers what the workstream's state allows: asking for a drift
-    // rebase of a building or assembled branch, recording your own merge of an
+    // rebase of a building, assembled or delivered branch, recording your own merge of an
     // assembled branch, abandoning work in progress, archiving finished work
     // with permanent trace cleanup.
     const offered = {
-      rebase: w.state === 'building' || w.state === 'assembled',
+      rebase: !w.archived && ['building', 'assembled', 'delivered'].includes(w.state),
       merged: w.state === 'assembled',
       abandon: !terminal(w),
       'abandon-archive': !terminal(w),

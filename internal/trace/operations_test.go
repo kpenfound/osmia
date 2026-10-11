@@ -71,6 +71,7 @@ func TestOperationPublicationRecovery(t *testing.T) {
 		for _, boundary := range []string{"before-ref", "ref-published"} {
 			t.Run(kind+"/"+boundary, func(t *testing.T) {
 				r, root, project := create(t)
+				s := mustScoped(t, r, streamID)
 				tx := operationTransaction()
 				transact(t, r, tx)
 				injected := errors.New("publication interrupted")
@@ -83,7 +84,7 @@ func TestOperationPublicationRecovery(t *testing.T) {
 					return nil
 				}
 				if kind == "claim" {
-					r.failPublication = fail
+					s.failPublication = fail
 				}
 				err := r.WithOperation(context.Background(), streamID, tx.Events[0].ID, Actor{Kind: "service", ID: "test"}, func() time.Time { return at }, func(a *OperationAttempt, _ OperationRecord) error {
 					steps := []string{"observe", "effect", "result", "acknowledge"}
@@ -92,7 +93,7 @@ func TestOperationPublicationRecovery(t *testing.T) {
 					}
 					for _, step := range steps {
 						if step == kind {
-							r.failPublication = fail
+							s.failPublication = fail
 						}
 						action := a.Action(step, at)
 						switch step {
@@ -112,7 +113,7 @@ func TestOperationPublicationRecovery(t *testing.T) {
 				if !errors.Is(err, injected) || !hit {
 					t.Fatalf("did not inject: %v", err)
 				}
-				r.failPublication = nil
+				s.failPublication = nil
 				if err := r.Close(); err != nil {
 					t.Fatal(err)
 				}

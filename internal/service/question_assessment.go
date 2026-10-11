@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"slices"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/followup"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -82,7 +82,7 @@ func (s *Service) questionSignals(repository *trace.Repository) func(context.Con
 		a := assessor{judge: s.jev, repository: repository, stream: config.WorkstreamID(scope.Workstream), scope: scope}
 		advice, err := a.advise(ctx, req)
 		if err != nil {
-			log.Printf("osmia: workstream %s turn %s has no Jev signals: %v", scope.Workstream, scope.Turn, err)
+			ghlog.Logger(ctx).Warn("no Jev signals for turn", "workstream", scope.Workstream, "turn", scope.Turn, "error", err.Error())
 			return ""
 		}
 		return advice

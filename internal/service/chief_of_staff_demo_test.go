@@ -140,7 +140,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	s, c := start(t, opts)
 	added, err := c.AddProject(ctx, request(lf.clone))
 	must(t, err)
-	id, traceDir := added.Project.ID, added.Project.Trace
+	id := added.Project.ID
 	if x := awaitExtraction(t, c); x.State != "succeeded" {
 		t.Fatalf("extraction: %+v", x)
 	}
@@ -523,13 +523,15 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	if r := ruled.Ruling; r == nil || r.Decision != trace.DecisionRuling || r.OwnerResponse != chiefDemoRuling || r.ReturnedAnswer != chiefDemoRelayed || r.Scope != "notify" || r.Revision != 2 {
 		t.Fatalf("ruling: %+v", r)
 	}
+	streamTrace, err := cfg.Root.WorkstreamTrace(id, stream)
+	must(t, err)
 	for path, wants := range map[string][]string{
 		"workstreams/" + string(stream) + "/questions/2/question.jsonl": {chiefDemoQuestion, `"batch":"escalation_2"`},
 		"workstreams/" + string(stream) + "/questions/2/rulings.jsonl":  {`"owner_response":"` + chiefDemoRuling, `"returned_answer":"` + chiefDemoRelayed},
 		"workstreams/" + string(stream) + "/questions/1/question.jsonl": {"Where does state live?"},
 		"workstreams/" + string(stream) + "/questions/1/rulings.jsonl":  {`"returned_answer":"` + chiefDemoAnswer, `"citations":["charter#1"]`},
 	} {
-		committed := demoGit(t, "", "-C", traceDir, "cat-file", "blob", "HEAD:"+path)
+		committed := demoGit(t, "", "-C", streamTrace, "cat-file", "blob", "HEAD:"+path)
 		for _, w := range wants {
 			if !strings.Contains(committed, w) {
 				t.Fatalf("committed %s lacks %q:\n%s", path, w, committed)

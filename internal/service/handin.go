@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -50,7 +51,6 @@ func HandInWorkstream(project config.ProjectID, key string) config.WorkstreamID 
 // copies the input into a new workstream and moves it to the handed state. The
 // project may be left out while exactly one project is active.
 func (s *Service) handIn(ctx context.Context, req HandInRequest) (HandInResponse, *APIError) {
-	ctx = trace.OwnerCommand(ctx)
 	project, api := s.projectFor(req.Project)
 	if api != nil {
 		return HandInResponse{}, api
@@ -95,7 +95,12 @@ func (s *Service) handIn(ctx context.Context, req HandInRequest) (HandInResponse
 	if err != nil {
 		return HandInResponse{}, &APIError{NotFound, fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
-	h := handIn{s: s, repository: repository, req: req, stream: HandInWorkstream(req.Project, req.Key), source: source, name: name, trace: view.Trace}
+	stream := HandInWorkstream(req.Project, req.Key)
+	workstreamTrace, err := cfg.Root.WorkstreamTrace(req.Project, stream)
+	if err != nil {
+		return HandInResponse{}, &APIError{Internal, fmt.Sprintf("cannot resolve the trace repository of workstream %s", stream)}
+	}
+	h := handIn{s: s, repository: repository, req: req, stream: stream, source: source, name: name, trace: workstreamTrace}
 	// A key whose input is already copied finishes without reading it again.
 	if out, done, api := h.record(ctx, nil); done || api != nil {
 		return out, api
@@ -204,9 +209,6 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 			err = repository.CreateWorkstreamOn(ctx, stream, backend.Backend, now, ownerActor)
 		}
 		if err != nil {
-			if api := h.s.pruneFenceUnavailable(req.Project, err); api != nil {
-				return HandInResponse{}, false, api
-			}
 			return h.failed("creating")
 		}
 		if req.Base != "" {
@@ -215,9 +217,6 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 				return h.failed("reading base of")
 			}
 			if _, err := repository.SetWorkstreamBase(ctx, stream, req.Base, recorded.Revision, now); err != nil {
-				if api := h.s.pruneFenceUnavailable(req.Project, err); api != nil {
-					return HandInResponse{}, false, api
-				}
 				return HandInResponse{}, false, &APIError{Validation, "base must form an acyclic graph of available workstreams in this project"}
 			}
 		}
@@ -230,15 +229,9 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		doc = &trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: handedDocument, Revision: 1, Project: req.Project, Workstream: stream, At: now, Actor: ownerActor, Cause: handInTransition},
 			Path: "handed/" + h.name, Content: *content, Source: h.source}
 		if err := repository.Append(ctx, *doc); err != nil {
-			if api := h.s.pruneFenceUnavailable(req.Project, err); api != nil {
-				return HandInResponse{}, false, api
-			}
 			return h.failed("copying the input into")
 		}
 		if err := recordFactoryPolicy(ctx, repository, stream, now, false); err != nil {
-			if api := h.s.pruneFenceUnavailable(req.Project, err); api != nil {
-				return HandInResponse{}, false, api
-			}
 			return h.failed("recording factory authority for")
 		}
 	}
@@ -248,9 +241,6 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 	if req.SkipDebate && !skipped {
 		tx := trace.Transaction{Transition: trace.Transition{Header: ownerHeader(skipTransition, req.Project, stream, handInTransition, doc.At), Subject: ownerSubject, To: skippedValue, Reason: handInSkipReason}}
 		if _, err := repository.Transact(ctx, tx); err != nil {
-			if api := h.s.pruneFenceUnavailable(req.Project, err); api != nil {
-				return HandInResponse{}, false, api
-			}
 			return h.failed("recording the skipped debate of")
 		}
 	}
@@ -263,9 +253,6 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 	}
 	state, err := repository.SetFeatureState(ctx, header, HandedState, reason)
 	if err != nil {
-		if api := h.s.pruneFenceUnavailable(req.Project, err); api != nil {
-			return HandInResponse{}, false, api
-		}
 		return h.failed("recording the handed state of")
 	}
 	return HandInResponse{Project: req.Project, Workstream: stream, State: state.Value,
@@ -306,6 +293,7 @@ func validHandedName(name string) bool {
 // readHanded reads the request's input: the file, the fetched issue or the
 // stdin text.
 func (s *Service) readHanded(ctx context.Context, req HandInRequest) (string, *APIError) {
+	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(req.Project)})
 	var content string
 	switch {
 	case req.Path != "":

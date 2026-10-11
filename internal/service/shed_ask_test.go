@@ -415,7 +415,7 @@ func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 		t.Fatalf("owner ruling while parked: %+v %v", ruled, err)
 	}
 	edited := strings.Replace(validSpec, "never sent again", "never sent twice", 1)
-	must(t, os.WriteFile(filepath.Join(f.trace, "workstreams", string(stream), plan.SpecPath), []byte(edited), 0600))
+	must(t, os.WriteFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, plan.SpecPath), []byte(edited), 0600))
 
 	// The question reaches the owner's inbox through the chief of staff, and
 	// a restart keeps the round parked: the pass after it requests nothing.

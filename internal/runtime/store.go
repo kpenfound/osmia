@@ -47,14 +47,18 @@ type Priority struct {
 }
 
 // Archive records a delivered or abandoned workstream the owner archived.
-// The title survives permanent trace cleanup; CleanedAt marks completion.
+// State holds the outcome, delivered or abandoned. DeliveryLink is, where
+// one exists, the pull request URL or the recorded upstream commit of an
+// owner-recorded merge. The title, state and delivery link survive
+// permanent trace cleanup; CleanedAt marks completion.
 type Archive struct {
-	Project    config.ProjectID    `json:"project"`
-	Workstream config.WorkstreamID `json:"workstream"`
-	ArchivedAt time.Time           `json:"archived_at"`
-	Title      string              `json:"title,omitempty"`
-	State      string              `json:"state,omitempty"`
-	CleanedAt  time.Time           `json:"cleaned_at,omitempty"`
+	Project      config.ProjectID    `json:"project"`
+	Workstream   config.WorkstreamID `json:"workstream"`
+	ArchivedAt   time.Time           `json:"archived_at"`
+	Title        string              `json:"title,omitempty"`
+	State        string              `json:"state,omitempty"`
+	DeliveryLink string              `json:"delivery_link,omitempty"`
+	CleanedAt    time.Time           `json:"cleaned_at,omitempty"`
 }
 
 // ProviderLimit records a provider's blocked capacity independently of role bindings.
@@ -762,8 +766,10 @@ func (s *Store) CheckDisk() error {
 	return s.checkDisk()
 }
 
-// UpdateArchive preserves a title before purge and records its completion.
-// It accepts an absent trace because a restart may follow the deletion.
+// UpdateArchive preserves a title, outcome or delivery link read from the
+// trace before it is deleted, and records cleanup's completion once the
+// trace is gone. It accepts an absent trace because a restart may follow
+// the deletion.
 func (s *Store) UpdateArchive(a Archive) error {
 	return s.mutate(func(st *State, _ Inputs) error {
 		for i, old := range st.Archived {

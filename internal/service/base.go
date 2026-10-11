@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
@@ -22,6 +23,7 @@ var errBaseUnavailable = errors.New("workstream base is unavailable")
 // fetch or any pull-request lookup, parent or own (spec#8): the check runs
 // before any remote operation.
 func (s *Service) resolveBase(ctx context.Context, cfg *config.Config, repo *trace.Repository, stream config.WorkstreamID, g workspace.Provider) (seal.Base, error) {
+	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(cfg.Project.ID), Workstream: string(stream)})
 	dependency, err := repo.WorkstreamBase(stream)
 	if err != nil {
 		return seal.Base{}, err

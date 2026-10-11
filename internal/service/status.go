@@ -75,7 +75,7 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 				if title == "" {
 					title = string(a.Workstream)
 				}
-				rows = append(rows, workstreamActivity{status: WorkstreamStatus{Project: a.Project, Workstream: a.Workstream, Archived: true, TraceDeleted: !a.CleanedAt.IsZero(), State: &terminal, Status: &StatusView{Goal: title}, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}}, lastActivity: a.ArchivedAt, createdAt: a.ArchivedAt})
+				rows = append(rows, workstreamActivity{status: WorkstreamStatus{Project: a.Project, Workstream: a.Workstream, Archived: true, TraceDeleted: !a.CleanedAt.IsZero(), DeliveryLink: a.DeliveryLink, State: &terminal, Status: &StatusView{Goal: title}, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}}, lastActivity: a.ArchivedAt, createdAt: a.ArchivedAt})
 			}
 			return projectStatusResult{rows, projectUnreadable}, nil
 		}, active.repository.Generation, s.storeGeneration)

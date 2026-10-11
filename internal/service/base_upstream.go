@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
@@ -39,6 +40,7 @@ func (s *Service) baseUpstream(ctx context.Context, raw string, req BaseUpstream
 // transaction; the next drift rebase replays the workstream's own commits
 // onto upstream and moves its seal there.
 func (s *Service) moveOntoUpstream(ctx context.Context, cfg *config.Config, repository *trace.Repository, g workspace.Provider, stream, base config.WorkstreamID) (BaseUpstreamResponse, *APIError) {
+	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(cfg.Project.ID), Workstream: string(stream)})
 	failed := &APIError{Internal, fmt.Sprintf("cannot move workstream %s onto upstream; check the trace repository", stream)}
 	wait, err := repository.Workflow(stream, baseWaitSubject)
 	if err != nil {
