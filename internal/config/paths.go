@@ -163,6 +163,9 @@ func (r Root) Notifications() (string, error) { return r.managed("notifications.
 // PendingProject is the journal of one interrupted project registration.
 func (r Root) PendingProject() (string, error) { return r.managed("project-add.json") }
 
+// PendingSessionOpen is the journal of one interrupted session open.
+func (r Root) PendingSessionOpen() (string, error) { return r.managed("session-open.json") }
+
 // ProjectTrace is the project directory and dedicated trace repository. The
 // Beekeeper's shadow project is kept out of the "projects" tree entirely, in
 // its own managed directory, so it never shares a parent directory with any

@@ -23,6 +23,28 @@ const StatusRole = "chief_of_staff"
 // FeatureSubject is the workflow subject holding a workstream's feature state.
 const FeatureSubject = "feature"
 
+// SessionSubject is the workflow subject holding a session workstream's
+// state: SessionWorking while an agent turn runs, SessionEnded once the
+// session has ended, or no recorded value, which SessionState reports as
+// SessionIdle.
+const SessionSubject = "session"
+
+// The values SessionSubject's workflow state takes.
+const (
+	SessionIdle    = "idle"
+	SessionWorking = "working"
+	SessionEnded   = "ended"
+)
+
+// SessionState reports a session's state from its SessionSubject workflow
+// value: the value itself, or SessionIdle when none is recorded yet.
+func SessionState(value string) string {
+	if value == "" {
+		return SessionIdle
+	}
+	return value
+}
+
 // UnitSubject returns the workflow subject holding the state of the plan unit
 // with the given ID: unit-<id>, or unit_ and a hash of the ID for an ID longer
 // than 64 characters, so that the subject and the IDs of its transitions stay
@@ -147,7 +169,10 @@ func latestStatus(records []Record, stream config.WorkstreamID) *Status {
 // WorkstreamStatus is a workstream's latest status with the facts the trace
 // owns. Status is nil until the chief of staff first writes one. State is the
 // FeatureSubject workflow state, empty until one is recorded, and Subjects
-// the state of every workflow subject that has one, read with it.
+// the state of every workflow subject that has one, read with it. For a
+// session workstream (Kind SessionKind), State is instead its SessionState
+// (idle, working or ended), and Profile, Base and Branch hold its fixed
+// profile, base commit and branch, with Title its optional title.
 // Workspaces is the workspace backend the workstream was created on.
 // OpenQuestions counts questions without a ruling that have not been routed
 // to an amendment. Gates lists open owner
@@ -159,6 +184,11 @@ func latestStatus(records []Record, stream config.WorkstreamID) *Status {
 type WorkstreamStatus struct {
 	Workstream    config.WorkstreamID
 	Workspaces    string
+	Kind          string
+	Profile       string
+	Base          string
+	Branch        string
+	Title         string
 	State         string
 	Subjects      map[string]WorkflowState
 	OpenQuestions int
@@ -222,7 +252,12 @@ func (r *Repository) Statuses() ([]WorkstreamStatus, error) {
 		if workspaces == "" {
 			workspaces = config.WorkspacesGit
 		}
-		out = append(out, WorkstreamStatus{Workstream: stream, Workspaces: workspaces, State: view.states[FeatureSubject].Value, Subjects: view.states, OpenQuestions: open, Gates: ownerGates(records, stream, view), Status: latestStatus(records, stream), CreatedAt: createdAt, LastActivity: lastActivity})
+		state := view.states[FeatureSubject].Value
+		if manifest.Kind == SessionKind {
+			state = SessionState(view.states[SessionSubject].Value)
+		}
+		out = append(out, WorkstreamStatus{Workstream: stream, Workspaces: workspaces, Kind: manifest.Kind, Profile: manifest.Profile, Base: manifest.Base, Branch: manifest.Branch, Title: manifest.Title,
+			State: state, Subjects: view.states, OpenQuestions: open, Gates: ownerGates(records, stream, view), Status: latestStatus(records, stream), CreatedAt: createdAt, LastActivity: lastActivity})
 	}
 	return out, nil
 }

@@ -65,6 +65,11 @@ const usage = `Usage: osmia <command> [--root PATH]
   resume <all|project-id|workstream-id> [--json]
   priority set <workstream-id>... | priority clear [--json]
   profiles [set <role> <profile>|clear <role>|clear-limit <backend>] [--json]
+  session open <project-id> --profile <name> [--title TEXT] [--json]
+  session commit <session-id> <message> [--json]
+  session check <session-id> [--json]
+  session push <session-id> [--json]
+  session end <session-id> [--json]
   config [--json]
   reload [--json]
 Client commands also accept --socket PATH (relative to root).
@@ -75,6 +80,7 @@ type options struct {
 	root, socket, reason, project, base         string
 	messageFile, messagesFile                   string
 	upstream, fork, clone, baseBranch           string
+	profile, title                              string
 	json, hard, reasonSet, help, target, accept bool
 	skipDebate, version, detach                 bool
 	args                                        []string
@@ -94,7 +100,7 @@ func parse(args []string) (o options, err error) {
 		}
 		seen[key] = true
 		switch key {
-		case "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base":
+		case "--message-file", "--messages-file", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--project", "--base", "--profile", "--title":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -102,7 +108,7 @@ func parse(args []string) (o options, err error) {
 				}
 				value = args[i]
 			}
-			if value == "" && key != "--reason" {
+			if value == "" && key != "--reason" && key != "--title" {
 				return o, errors.New("empty value")
 			}
 			switch key {
@@ -133,6 +139,10 @@ func parse(args []string) (o options, err error) {
 				o.base = value
 			case "--project":
 				o.project = value
+			case "--profile":
+				o.profile = value
+			case "--title":
+				o.title = value
 			}
 		case "--detach", "--json", "--hard", "--skip-debate", "--accept", "--version", "--help", "-h":
 			if has {
@@ -247,9 +257,13 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
 		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
+	case "session":
+		valid = len(a) == 2 && a[0] == "open" && o.profile != "" ||
+			len(a) == 3 && a[0] == "commit" ||
+			len(a) == 2 && (a[0] == "check" || a[0] == "push" || a[0] == "end")
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
-	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && (o.accept || o.project != "") || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" {
+	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && (o.accept || o.project != "") || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -290,7 +304,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "stop" {
 		if err := c.Do(ctx, "POST", service.Prefix+"/stop", nil, nil); err != nil {
@@ -966,6 +980,77 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintf(stdout, "Moved unit %s of %s from %s to %s\n", result.Unit, result.Workstream, result.Move.From, result.Move.To)
 		return 0
 	}
+	if cmd == "session" && a[0] == "open" {
+		id, err := config.ParseProjectID(a[1])
+		if err != nil {
+			return invalid()
+		}
+		result, err := c.OpenSession(ctx, service.SessionOpenRequest{Project: id, Profile: o.profile, Title: o.title})
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		showSession(stdout, result.Session)
+		return 0
+	}
+	if cmd == "session" {
+		id, err := config.ParseWorkstreamID(a[1])
+		if err != nil {
+			return invalid()
+		}
+		switch a[0] {
+		case "commit":
+			key, err := handInKey()
+			if err != nil {
+				fmt.Fprintln(stderr, "cannot generate a request key")
+				return 1
+			}
+			result, err := c.SessionCommit(ctx, id, a[2], key)
+			if err != nil {
+				return fail(err)
+			}
+			if o.json {
+				return output(stdout, stderr, result)
+			}
+			fmt.Fprintf(stdout, "Committed %s onto session %s\n", result.Commit, id)
+			return 0
+		case "check":
+			result, err := c.SessionCheck(ctx, id)
+			if err != nil {
+				return fail(err)
+			}
+			if o.json {
+				return output(stdout, stderr, result)
+			}
+			fmt.Fprintf(stdout, "Check run %d on commit %s: %s (%s check, exit %d)\n", result.Run, result.Commit, result.Status, result.Kind, result.ExitCode)
+			if result.Kind == "smart" {
+				fmt.Fprintf(stdout, "Selected checks: %s\n", strings.Join(result.Checks, ", "))
+			}
+			return 0
+		case "push":
+			result, err := c.SessionPush(ctx, id)
+			if err != nil {
+				return fail(err)
+			}
+			if o.json {
+				return output(stdout, stderr, result)
+			}
+			fmt.Fprintf(stdout, "Pushed %s to %s as branch %s\n", result.Commit, result.Remote, result.Branch)
+			return 0
+		case "end":
+			result, err := c.SessionEnd(ctx, id)
+			if err != nil {
+				return fail(err)
+			}
+			if o.json {
+				return output(stdout, stderr, result)
+			}
+			showSession(stdout, result.Session)
+			return 0
+		}
+	}
 	if cmd == "status" && len(a) == 1 {
 		id, err := config.ParseWorkstreamID(a[0])
 		if err != nil {
@@ -1173,6 +1258,16 @@ func projectOf(ctx context.Context, c *service.Client, cfg service.ConfigRespons
 		return "", err
 	}
 	return st.Project, nil
+}
+
+// showSession prints a session's fixed profile, branch, base and state. The
+// chat itself is not shown here: it happens through the web page or the API.
+func showSession(w io.Writer, s service.SessionView) {
+	fmt.Fprintf(w, "Session %s project=%s profile=%s state=%s\n", s.Workstream, s.Project, s.Profile, s.State)
+	fmt.Fprintf(w, "Branch: %s base: %s\n", s.Branch, s.Base)
+	if s.Title != "" {
+		fmt.Fprintf(w, "Title: %s\n", s.Title)
+	}
 }
 
 func showProject(w io.Writer, p *service.ProjectView) {

@@ -80,6 +80,11 @@ func (s *Service) beekeeperTarget(rawProject, rawWorkstream string) (config.Proj
 		if !slices.Contains(streams, stream) {
 			return "", "", nil, fmt.Errorf("workstream %s is not in project %s; list workstreams with osmia status", stream, project)
 		}
+		if session, err := isSession(p.repository, stream); err != nil {
+			return "", "", nil, fmt.Errorf("cannot read workstream %s; check the trace repository", stream)
+		} else if session {
+			return "", "", nil, fmt.Errorf("workstream %s is a session; it has no chief of staff", stream)
+		}
 		return project, stream, p.repository, nil
 	}
 	return "", "", nil, fmt.Errorf("project %s has no open trace; check osmia status", project)

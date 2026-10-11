@@ -581,12 +581,34 @@
     return views.status ? views.status.workstreams : [];
   }
 
-  // shown is the workstream the main area shows: the selected one while the
-  // status lists it as unarchived, and otherwise the first in the list of
-  // work, which the status already orders by last activity.
+  // shown is the ordinary workstream the main area shows: the selected one
+  // while the status lists it as unarchived and not a session, and otherwise
+  // the first such workstream in the list of work, which the status already
+  // orders by last activity. Sessions have their own view and shownSession.
   function shown() {
-    const list = streams();
+    const list = streams().filter((w) => w.kind !== 'session');
     return list.find((w) => !w.archived && w.workstream === ui.selected) || list.find((w) => !w.archived) || null;
+  }
+
+  // shownSession is the session the session view shows: the selected
+  // workstream, when the status lists it as a session. Unlike shown, it
+  // never falls back to another session, so the view is empty until one is
+  // chosen.
+  function shownSession() {
+    return streams().find((w) => w.kind === 'session' && !w.archived && w.workstream === ui.selected) || null;
+  }
+
+  // sessionIds names every session this page has opened or seen listed, so
+  // select can route to the session view the moment a session opens, before
+  // the next status read lists it.
+  const sessionIds = new Set();
+
+  function isSessionId(id) {
+    if (sessionIds.has(id)) {
+      return true;
+    }
+    const w = views.status ? views.status.workstreams.find((x) => x.workstream === id) : undefined;
+    return !!(w && w.kind === 'session');
   }
 
   function terminal(w) {
@@ -689,13 +711,14 @@
       return r;
     }
     r = {
+      kind: el('span', { class: 'tag', 'data-field': 'kind' }, 'Session'),
       title: el('span', { class: 'title', 'data-field': 'goal' }),
       project: el('span', { 'data-field': 'project' }),
       state: el('span', { 'data-field': 'state' }),
       signals: el('span', { class: 'signals' }),
     };
     r.button = el('button', { type: 'button', class: 'row', 'data-select': id },
-      r.title, el('span', { class: 'sub' }, r.project, ' · ', r.state), r.signals);
+      r.title, el('span', { class: 'sub' }, r.kind, r.project, ' · ', r.state), r.signals);
     r.button.addEventListener('click', () => select(id));
     r.node = el('li', {}, r.button);
     rows.set(id, r);
@@ -723,8 +746,13 @@
       const r = row(w.workstream);
       const needs = inboxOf(w.workstream).length + proposalsOf(w.workstream).length;
       const paused = pausedIn(w).length > 0;
-      r.title.textContent = goal(w);
-      r.title.title = goal(w);
+      r.kind.hidden = w.kind !== 'session';
+      if (w.kind === 'session') {
+        sessionIds.add(w.workstream);
+      }
+      const label = w.kind === 'session' ? (w.title || w.workstream) : goal(w);
+      r.title.textContent = label;
+      r.title.title = label;
       r.project.textContent = projectName(w.project);
       r.state.textContent = w.archived ? (w.trace_deleted ? 'archived · trace deleted' : 'archived · cleanup pending') : (w.state || 'handed');
       r.button.disabled = !!w.archived;
@@ -754,14 +782,15 @@
     byId('picker-toggle').setAttribute('aria-expanded', String(open));
   }
 
-  // select shows a workstream in the main area and marks it as the current
-  // selection, without changing the sidebar order.
+  // select shows a workstream or session in the main area and marks it as
+  // the current selection, without changing the sidebar order.
   function select(id) {
     const changed = ui.selected !== id;
     ui.selected = id;
     store('selected', id);
     setPicker(false);
-    openView('workstream');
+    const session = isSessionId(id);
+    openView(session ? 'session' : 'workstream');
     if (changed) {
       clearWorkstreamForms();
       ui.toEnd = true;
@@ -776,10 +805,13 @@
     if (changed && ui.tab === 'documents') {
       readWorkstreamDocuments();
     }
+    if (session) {
+      mark(['status', 'sessions/' + id + '/changes']);
+    }
   }
 
-  // openView shows a view in the main area: the selected workstream, or one
-  // of the views the header opens.
+  // openView shows a view in the main area: the selected workstream or
+  // session, or one of the views the header opens.
   function openView(view) {
     for (const popover of document.querySelectorAll('[popover]')) {
       if (popover.matches(':popover-open')) {
@@ -789,6 +821,13 @@
     if (view === 'handin') {
       const w = shown();
       const project = byId('handin-form').elements.project;
+      if (w && project.value === '') {
+        project.value = w.project;
+      }
+    }
+    if (view === 'session-add') {
+      const w = shown();
+      const project = byId('session-add-form').elements.project;
       if (w && project.value === '') {
         project.value = w.project;
       }
@@ -979,8 +1018,12 @@
     }
   }
 
-  function renderConversationEntry(e) {
-    const who = { message: 'You', action: 'Chief of staff acted' }[e.kind] || 'Chief of staff';
+  // renderConversationEntry shows one message, response or action of a
+  // conversation. agentLabel names who answered: it defaults to the chief
+  // of staff, but a session (which has no chief of staff, spec#5, spec#20)
+  // passes its own agent's label instead.
+  function renderConversationEntry(e, agentLabel) {
+    const who = { message: 'You', action: (agentLabel || 'Chief of staff') + ' acted' }[e.kind] || agentLabel || 'Chief of staff';
     return el('li', { class: 'entry', 'data-kind': e.kind, 'data-turn': e.turn, 'data-state': e.state },
       el('div', { class: 'meta' },
         el('span', { 'data-ann': 'role' }, who), ' · ',
@@ -1170,6 +1213,252 @@
       main.scrollTop = main.scrollHeight;
       ui.toEnd = false;
     }
+  }
+
+  // sessionEchoes holds, per session, the owner's own sent messages by turn
+  // ID, keyed the way the POST response names them. The session's feed
+  // (read through the ordinary feed endpoint) never carries the owner's
+  // prompt text back, only the agent's reply once a turn finishes, so the
+  // page keeps its own echo to show the sent message at once and keep
+  // showing it once the reply arrives.
+  const sessionEchoes = new Map();
+
+  function sessionEchoesFor(id) {
+    let m = sessionEchoes.get(id);
+    if (!m) {
+      m = new Map();
+      sessionEchoes.set(id, m);
+    }
+    return m;
+  }
+
+  // sessionTurnState maps a session's feed entry state to the conversation
+  // state renderConversationEntry shows.
+  function sessionTurnState(state) {
+    switch (state) {
+      case 'running':
+        return 'running';
+      case 'failed':
+        return 'failed';
+      case 'interrupted':
+        return 'stopped';
+      default:
+        return 'done';
+    }
+  }
+
+  // sessionConversationEntries builds the session's chat, oldest first, the
+  // same shape the chief-of-staff conversation uses: the owner's message,
+  // from this page's own echo, and the agent's reply, from the session's
+  // feed, once the turn that answers it finishes. A turn just sent, not yet
+  // in the feed, still shows from its echo alone.
+  function sessionConversationEntries(id) {
+    const echoes = sessionEchoesFor(id);
+    const feed = views['feed/' + id];
+    const out = [];
+    const seen = new Set();
+    if (feed) {
+      for (const e of feed.entries) {
+        if (e.kind !== 'session') {
+          continue;
+        }
+        const s = e.session;
+        seen.add(s.turn);
+        const echo = echoes.get(s.turn);
+        const state = sessionTurnState(s.state);
+        out.push({ turn: s.turn, kind: 'message', text: echo ? echo.text : '', at: e.at, state });
+        const reply = s.failure || s.summary;
+        if (state !== 'running' && reply) {
+          out.push({ turn: s.turn, kind: 'response', text: reply, at: s.ended_at || e.at, state });
+        }
+      }
+    }
+    for (const [turn, echo] of echoes) {
+      if (!seen.has(turn)) {
+        out.push(echo);
+      }
+    }
+    return out;
+  }
+
+  let sessionFeedShown = null;
+
+  function renderSessionFeed(id) {
+    const entries = sessionConversationEntries(id);
+    const key = id + ':' + JSON.stringify(entries);
+    if (sessionFeedShown === key) {
+      return;
+    }
+    sessionFeedShown = key;
+    const box = byId('session-feed');
+    if (entries.length === 0) {
+      box.replaceChildren(el('p', { class: 'meta' }, 'Nothing has happened yet.'));
+    } else {
+      box.replaceChildren(el('ol', {}, ...entries.map((e) => renderConversationEntry(e, 'Agent'))));
+    }
+  }
+
+  // sendSession posts the owner's message to the session's agent, the same
+  // way the chief-of-staff composer's send does: the sent message shows at
+  // once, from the echo this records, and the reply appears once the
+  // session's feed is read again, without a reload. A busy refusal, or one
+  // naming a session that has ended, shows in the composer's result.
+  function sendSession(id) {
+    const form = byId('session-form');
+    const result = byId('session-result');
+    const text = form.elements.text.value.trim();
+    if (text === '') {
+      show(result, 'error', 'Write a message first.');
+      return;
+    }
+    act(result, form.querySelector('button'), () => request('POST', '/sessions/' + id + '/message', { text }), (entry) => {
+      form.elements.text.value = '';
+      sessionEchoesFor(id).set(entry.turn, entry);
+      mark(['status', 'feed/' + id]);
+      renderSessionFeed(id);
+      return 'Sent; the agent answers in its next turn (' + entry.state + ').';
+    });
+  }
+
+  function stopSession(id) {
+    act(byId('session-control-result'), byId('session-stop'), () => request('POST', '/sessions/' + id + '/stop'), () => {
+      mark(['status']);
+      return 'Stopped; the worktree keeps what the turn already changed.';
+    });
+  }
+
+  // sessionCheckResults keeps each session's latest check result, by
+  // workstream, for the check button's own result area; it holds only what
+  // this page itself has run, since the API has no endpoint to read a
+  // session's past check runs back.
+  const sessionCheckResults = new Map();
+
+  function renderSessionCheckResult(id) {
+    const run = sessionCheckResults.get(id);
+    byId('session-check-result').textContent = run
+      ? 'Latest check, run ' + run.run + ' (' + run.kind + '): ' + run.status + ' (exit ' + run.exit_code + ') on ' + run.commit.slice(0, 10) + '.'
+      : 'No check has run yet.';
+  }
+
+  function checkSession(id) {
+    act(byId('session-control-result'), byId('session-check'), () => request('POST', '/sessions/' + id + '/check'), (run) => {
+      sessionCheckResults.set(id, run);
+      renderSessionCheckResult(id);
+      return 'Check run ' + run.run + ' (' + run.kind + '): ' + run.status + '.';
+    });
+  }
+
+  function pushSession(id) {
+    act(byId('session-control-result'), byId('session-push'), () => request('POST', '/sessions/' + id + '/push'),
+      (out) => 'Pushed ' + out.commit.slice(0, 10) + ' to ' + out.remote + '/' + out.branch + '.');
+  }
+
+  function endSession(id) {
+    act(byId('session-control-result'), byId('session-end'), () => request('POST', '/sessions/' + id + '/end'), () => {
+      mark(['status', 'sessions/' + id + '/changes']);
+      return 'Session ended; its branch, commits and thread stay readable.';
+    });
+  }
+
+  // sessionCommitRetries keeps each session's last attempted commit message
+  // with the request key it was sent under, the way handinRetry does for
+  // hand-in, so retrying the same message after a failure or a restart
+  // produces exactly one commit.
+  const sessionCommitRetries = new Map();
+
+  function randomRequestKey() {
+    return 'web-' + Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  function commitSession(id) {
+    const form = byId('session-commit-form');
+    const result = form.querySelector('.result');
+    const message = form.elements.message.value.trim();
+    if (message === '') {
+      show(result, 'error', 'Write a commit message first.');
+      return;
+    }
+    let retry = sessionCommitRetries.get(id);
+    if (!retry || retry.message !== message) {
+      retry = { message, key: randomRequestKey() };
+      sessionCommitRetries.set(id, retry);
+    }
+    act(result, form.querySelector('[type=submit]'), () => request('POST', '/sessions/' + id + '/commit', { message, request_key: retry.key }), (out) => {
+      sessionCommitRetries.delete(id);
+      form.reset();
+      mark(['sessions/' + id + '/changes']);
+      return 'Committed ' + out.commit.slice(0, 10) + '.';
+    });
+  }
+
+  function renderSessionChanges(id) {
+    const view = views['sessions/' + id + '/changes'];
+    byId('session-diff').textContent = view ? (view.changes || 'No uncommitted changes.') : 'Reading changes…';
+    const list = byId('session-commits');
+    if (!view || view.commits.length === 0) {
+      list.replaceChildren(el('li', { class: 'meta' }, 'No commits yet.'));
+    } else {
+      list.replaceChildren(...view.commits.map((c) => el('li', { 'data-commit': c.commit },
+        el('code', {}, c.commit.slice(0, 10)), ' ', c.message.split('\n')[0])));
+    }
+  }
+
+  // renderSessionView shows the session the owner selected: its profile with
+  // no control to change it, its chat, a stop control, its changes, a commit
+  // form, a check button with its latest result, push and end. It shows no
+  // spec, plan, unit, review or delivery panel; sessions have none of those.
+  function renderSessionView() {
+    const w = shownSession();
+    if (!w) {
+      byId('session-title').textContent = 'Session';
+      byId('session-meta').replaceChildren();
+      byId('session-feed').replaceChildren(el('p', { class: 'meta' }, 'No session selected.'));
+      byId('session-diff').textContent = '';
+      byId('session-commits').replaceChildren();
+      return;
+    }
+    byId('session-title').textContent = w.title || w.workstream;
+    byId('session-meta').replaceChildren(
+      el('span', { 'data-field': 'project' }, projectName(w.project)), ' · ', w.workstream, ' · profile ',
+      el('span', { class: 'tag', 'data-field': 'profile' }, w.profile), ' · ',
+      el('span', { class: 'tag', 'data-field': 'state' }, w.state));
+    renderSessionFeed(w.workstream);
+    renderSessionChanges(w.workstream);
+    renderSessionCheckResult(w.workstream);
+    const ended = w.state === 'ended';
+    const form = byId('session-form');
+    form.elements.text.disabled = ended;
+    block(form.querySelector('button'), ended);
+    block(byId('session-stop'), ended || w.state !== 'working');
+    block(byId('session-check'), ended);
+    block(byId('session-push'), ended);
+    block(byId('session-end'), ended);
+    byId('session-commit-form').elements.message.disabled = ended;
+    block(byId('session-commit-form').querySelector('[type=submit]'), ended);
+  }
+
+  // sessionProfiles lists the project's selectable profiles, the same set
+  // the service runs mason turns on: the mason role's configured profile,
+  // then its fallback chain, from the loaded configuration the page already
+  // reads.
+  function sessionProfiles() {
+    const cfg = views.config ? views.config.effective : null;
+    const mason = cfg && cfg.roles ? cfg.roles.mason : null;
+    if (!mason || !cfg.profiles) {
+      return [];
+    }
+    const seen = new Set();
+    const out = [];
+    for (let name = mason.profile; name && cfg.profiles[name] && !seen.has(name); name = cfg.profiles[name].fallback) {
+      seen.add(name);
+      out.push(name);
+    }
+    return out;
+  }
+
+  function renderSessionAddForm() {
+    const form = byId('session-add-form');
+    setOptions(form.elements.profile, [['', 'Choose a profile'], ...sessionProfiles().map((p) => [p, p])]);
   }
 
   // renderHeader shows the slots in use per role, the pauses in force and
@@ -2303,6 +2592,74 @@
     });
   }
 
+  // setupSessionForms wires the "New session" form and the session view's
+  // chat, stop, commit, check, push and end controls. Each control's action
+  // runs against the session the view shows, read again at the moment it is
+  // used, since only one session is shown at a time.
+  function setupSessionForms() {
+    const add = byId('session-add-form');
+    add.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const body = { project: add.elements.project.value, profile: add.elements.profile.value };
+      const title = add.elements.title.value.trim();
+      if (title !== '') {
+        body.title = title;
+      }
+      formAction(add, event.submitter, () => request('POST', '/sessions', body), (out) => {
+        sessionIds.add(out.session.workstream);
+        select(out.session.workstream);
+        return 'Opened session ' + out.session.workstream + '.';
+      }, { reset: true });
+    });
+    const form = byId('session-form');
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const w = shownSession();
+      if (w) {
+        sendSession(w.workstream);
+      }
+    });
+    // Enter sends and Shift+Enter starts a new line where there is a
+    // keyboard; on a touch screen Enter starts a new line.
+    form.elements.text.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && window.matchMedia('(pointer: fine)').matches) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    byId('session-stop').addEventListener('click', () => {
+      const w = shownSession();
+      if (w) {
+        stopSession(w.workstream);
+      }
+    });
+    byId('session-check').addEventListener('click', () => {
+      const w = shownSession();
+      if (w) {
+        checkSession(w.workstream);
+      }
+    });
+    byId('session-push').addEventListener('click', () => {
+      const w = shownSession();
+      if (w) {
+        pushSession(w.workstream);
+      }
+    });
+    byId('session-end').addEventListener('click', () => {
+      const w = shownSession();
+      if (w) {
+        endSession(w.workstream);
+      }
+    });
+    byId('session-commit-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      const w = shownSession();
+      if (w) {
+        commitSession(w.workstream);
+      }
+    });
+  }
+
   function traceTree(value) {
     if (value === null || typeof value !== 'object') {
       return el('span', {class: 'text'}, value === null ? 'None' : String(value));
@@ -2324,6 +2681,8 @@
     renderHeader();
     renderSidebar();
     renderWorkstreamView();
+    renderSessionView();
+    renderSessionAddForm();
     renderPauses();
     renderPauseForm();
     renderActivity();
@@ -2338,6 +2697,7 @@
 
   setupLayout();
   setupOwnerForms();
+  setupSessionForms();
   render();
   byId('beekeeper-form').addEventListener('submit', sendBeekeeper);
   // Enter sends and Shift+Enter starts a new line where there is a

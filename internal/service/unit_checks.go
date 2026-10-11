@@ -162,6 +162,11 @@ func (c *checkers) Pass(ctx context.Context) error {
 		if stream == librarianWorkstream(c.repository.Project()) {
 			continue
 		}
+		if session, err := isSession(c.repository, stream); err != nil {
+			return err
+		} else if session {
+			continue
+		}
 		b, found, err := c.read(stream)
 		if err != nil {
 			return err

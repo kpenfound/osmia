@@ -19,21 +19,29 @@ import (
 )
 
 type Client struct {
-	http              *http.Client
-	transport         *http.Transport
-	defaultTimeout    time.Duration
-	addProjectTimeout time.Duration
+	http                *http.Client
+	transport           *http.Transport
+	defaultTimeout      time.Duration
+	addProjectTimeout   time.Duration
+	sessionCheckTimeout time.Duration
 }
 
 const defaultClientTimeout = 15 * time.Second
 const addProjectTimeout = 60 * time.Second
+
+// sessionCheckTimeout is the client's response budget for a session check.
+// A check runs inline on the server (session_controls.go, sessionCheck) and
+// the caller waits for it to finish, so the budget must outlive any
+// project's configured checks_timeout; config.MaxChecksTimeout bounds how
+// large that can be, plus a margin for recording the result.
+const sessionCheckTimeout = config.MaxChecksTimeout + time.Minute
 
 // NewClient never reads state files and never dials TCP or follows redirects.
 func NewClient(socket string) *Client {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
-	return &Client{http: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, transport: transport, defaultTimeout: defaultClientTimeout, addProjectTimeout: addProjectTimeout}
+	return &Client{http: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, transport: transport, defaultTimeout: defaultClientTimeout, addProjectTimeout: addProjectTimeout, sessionCheckTimeout: sessionCheckTimeout}
 }
 func (c *Client) Close() { c.transport.CloseIdleConnections() }
 
@@ -392,6 +400,83 @@ func (c *Client) shed(ctx context.Context, action string, id config.WorkstreamID
 func (c *Client) Statuses(ctx context.Context) (StatusResponse, error) {
 	var v StatusResponse
 	err := c.Do(ctx, "GET", Prefix+"/status", nil, &v)
+	return v, err
+}
+
+// OpenSession opens a session.
+func (c *Client) OpenSession(ctx context.Context, req SessionOpenRequest) (SessionResponse, error) {
+	var v SessionResponse
+	err := c.Do(ctx, "POST", Prefix+"/sessions", req, &v)
+	return v, err
+}
+
+// Sessions lists sessions, optionally filtered by project.
+func (c *Client) Sessions(ctx context.Context, project config.ProjectID) (SessionsResponse, error) {
+	var v SessionsResponse
+	path := Prefix + "/sessions"
+	if project != "" {
+		path += "?project=" + url.QueryEscape(string(project))
+	}
+	err := c.Do(ctx, "GET", path, nil, &v)
+	return v, err
+}
+
+// Session reads one session.
+func (c *Client) Session(ctx context.Context, id config.WorkstreamID) (SessionResponse, error) {
+	var v SessionResponse
+	err := c.Do(ctx, "GET", Prefix+"/sessions/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
+}
+
+// SessionMessage sends an owner message to a session's agent.
+func (c *Client) SessionMessage(ctx context.Context, id config.WorkstreamID, text string) (ConversationEntry, error) {
+	var v ConversationEntry
+	err := c.Do(ctx, "POST", Prefix+"/sessions/"+url.PathEscape(string(id))+"/message", SessionMessageRequest{Text: text}, &v)
+	return v, err
+}
+
+// SessionStop stops a session's running turn.
+func (c *Client) SessionStop(ctx context.Context, id config.WorkstreamID) (SessionResponse, error) {
+	var v SessionResponse
+	err := c.Do(ctx, "POST", Prefix+"/sessions/"+url.PathEscape(string(id))+"/stop", nil, &v)
+	return v, err
+}
+
+// SessionChanges reads a session's uncommitted and committed changes.
+func (c *Client) SessionChanges(ctx context.Context, id config.WorkstreamID) (SessionChangesResponse, error) {
+	var v SessionChangesResponse
+	err := c.Do(ctx, "GET", Prefix+"/sessions/"+url.PathEscape(string(id))+"/changes", nil, &v)
+	return v, err
+}
+
+// SessionCommit commits every current worktree change onto the session
+// branch under message, deduplicated by requestKey.
+func (c *Client) SessionCommit(ctx context.Context, id config.WorkstreamID, message, requestKey string) (SessionCommitResponse, error) {
+	var v SessionCommitResponse
+	err := c.Do(ctx, "POST", Prefix+"/sessions/"+url.PathEscape(string(id))+"/commit", SessionCommitRequest{Message: message, RequestKey: requestKey}, &v)
+	return v, err
+}
+
+// SessionCheck checks a session's head commit. It runs inline on the
+// server, so it uses the heavier sessionCheckTimeout budget rather than the
+// default, the same way AddProject uses addProjectTimeout.
+func (c *Client) SessionCheck(ctx context.Context, id config.WorkstreamID) (SessionCheckRun, error) {
+	var v SessionCheckRun
+	err := c.do(ctx, "POST", Prefix+"/sessions/"+url.PathEscape(string(id))+"/check", nil, &v, c.sessionCheckTimeout)
+	return v, err
+}
+
+// SessionPush pushes the session branch to the project's remote.
+func (c *Client) SessionPush(ctx context.Context, id config.WorkstreamID) (SessionPushResponse, error) {
+	var v SessionPushResponse
+	err := c.Do(ctx, "POST", Prefix+"/sessions/"+url.PathEscape(string(id))+"/push", nil, &v)
+	return v, err
+}
+
+// SessionEnd ends a session.
+func (c *Client) SessionEnd(ctx context.Context, id config.WorkstreamID) (SessionResponse, error) {
+	var v SessionResponse
+	err := c.Do(ctx, "POST", Prefix+"/sessions/"+url.PathEscape(string(id))+"/end", nil, &v)
 	return v, err
 }
 

@@ -142,6 +142,22 @@ func (r *runningTurns) cancel(stream config.WorkstreamID) {
 	}
 }
 
+// stopStream stops every held thread turn running for stream directly,
+// whatever its cause, and returns how many it stopped. It is used for an
+// owner-initiated session stop, which is not gated by any pause.
+func (r *runningTurns) stopStream(stream config.WorkstreamID, stop *thread.Stop) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stopped := 0
+	for _, turn := range r.streams[stream] {
+		if turn.stop != nil {
+			turn.stop(stop)
+			stopped++
+		}
+	}
+	return stopped
+}
+
 // stop stops every held thread turn that a hard pause among pauses covers,
 // and returns how many it stopped.
 func (r *runningTurns) stop(pauses []runtime.Pause) int {

@@ -159,7 +159,9 @@ func (e *demoEngine) Run(ctx context.Context, req agent.Request) (*agent.Result,
 	e.sessions.mu.Lock()
 	tools := e.sessions.byKey[req.Env["OSMIA_MCP_TOKEN"]]
 	e.sessions.mu.Unlock()
-	if turn == nil || (tools == nil && req.Profile.Name != "classifier") {
+	// A session turn is granted no tool, so it has no MCP host to lend it
+	// one either, the same way a classifier turn has none.
+	if turn == nil || (tools == nil && req.Profile.Name != "classifier" && req.Profile.Name != sessionRole) {
 		return nil, fmt.Errorf("unexpected turn %q", req.Name)
 	}
 	return turn(ctx, req, verified, tools)
@@ -391,7 +393,11 @@ func demonstrate(t *testing.T, mode string) {
 			},
 			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}},
 		}
-		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
+		// This demonstration exercises the Runner's resume mechanism directly,
+		// independent of Osmia's own role confinement (which only the session
+		// role gets in production; see thread.Runner.ResumableRoles and
+		// internal/service/enforcement.go).
+		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now, ResumableRoles: func(string) bool { return true }},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				directory := filepath.Join(root, "sessions", in.Agent, in.Turn)
 				return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)

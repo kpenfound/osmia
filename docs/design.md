@@ -329,6 +329,18 @@ When that chief-of-staff turn finishes, its reply is recorded once in the Beekee
 
 The Beekeeper holds none of the owner's gates: it cannot approve or refuse delivery, rule on a contested unit, approve a spec or plan, edit or ratify the charter, answer a question or open a workstream. This first version only lets it see the factory and talk to chiefs of staff; answering the questions chiefs of staff escalate to the owner, and opening workstreams, are not part of the role yet.
 
+### 6.8 Sessions
+
+A session is a workstream kind for exploratory work rather than a planned feature: a direct chat with one agent on its own worktree, with none of the rest of the factory around it. A session never runs the shed, the architect, a chief of staff, a mason, a reviewer, the committee or delivery; it never gets a spec, a plan or units; and the scheduler never runs the pre-review check, base refresh or drift-rebase passes for it. The chat feels like the Beekeeper's, one durable thread and one turn at a time, but a session belongs to a registered project, has a worktree the agent can change, and runs on the profile the owner chose when opening it.
+
+The owner opens a session by naming a registered project and a profile, the same kind the service already runs mason turns on for that project, and may add a title. An unknown project or an unknown or missing profile is refused, and nothing is recorded. Opening records the session's kind, its fixed profile, the base commit (the project's default branch head at opening time) and its branch, and creates a dedicated worktree at that base commit through the same workspace machinery a unit's worktree uses, under the service root and outside the target repository. Sessions appear in the project's workstream list marked as sessions, with their profile and a state of `idle`, `working` or `ended`.
+
+The profile is fixed for the life of the session: opening is the only operation that takes one, and nothing changes it afterward. A resumed backend session belongs to one runtime, so working on another profile means opening another session. The first turn on a session starts a model session on the profile's runtime, which the service records for the session; every later turn resumes it instead of replaying the whole thread, with input limited to the owner's new message plus whatever the service itself recorded since the previous turn, such as a commit or a check result. That model-session state is kept per session under the service root, outside the worktree and the target repository, and survives a restart. If a runtime reports a session's model session missing or unresumable, the turn falls back: it starts a new model session on the same profile, seeds it with the thread's history through the same bounded window a chief-of-staff turn's replay gets, records the new model session for later turns, and adds a thread entry saying its context was rebuilt from history. A message to an idle session starts exactly one turn; a message sent while one is already running is refused as busy and recorded nowhere, since there is no message queue. The owner can stop a running turn, which is recorded as stopped with whatever worktree changes it had already made kept, returning the session to `idle` for the next message to resume the same model session.
+
+The session's agent runs in a sandbox whose workspace is the worktree, so its changes persist into the next turn, with the same reading, writing and command-running tools a mason's sandbox has. Charter rule 5 still holds: the agent has no version-control access, no delivery credentials and none of the factory tools (`done`, `amend`, `ask`, `list_factory`, `message_chief_of_staff`), so nothing it does can commit, check or push on its own. Those become the owner's controls instead. The owner can read the worktree's uncommitted changes against the session head and the branch's commits against the base commit. A commit takes a message, stages every current worktree change onto the session branch, moves the head and adds a thread entry naming the commit; it is refused, recording nothing, while a turn is running, on an empty message, when the worktree has no changes, or once the session has ended, and a retry carrying the same request key, including one that crosses a restart, produces exactly one commit rather than a second. A check runs on the session head, one at a time: when the service has Jev enabled it is a smart check, the same smart-check selection a unit's own check run uses, scoped to the changes between the session's base commit and its head, and otherwise it is the same full `dagger check` the pre-review check run uses. Either way the service records the commit checked, whether the run was smart or full, with its selected checks when smart, the status, exit code and output, and adds a thread entry summarising the result and naming the commit. Pushing sends the session branch to the project's remote under the session's own branch name with credentials the service holds; it never pushes to the default branch, never forces, and never opens a pull request, and is refused when the remote branch already carries commits the session branch does not. Ending is refused while a turn is running; once a session has ended, its messages, commits, checks and pushes are all refused, its worktree and stored model-session state are released, and its branch, commits, thread and trace stay readable, with the session listed as `ended`.
+
+A session must never acquire a spec, a plan, units, a chief of staff or delivery, must never change its profile or run a turn on any other one, and must never replay its whole thread while the recorded model session can still be resumed. The owner opens it and works its commit, check, push and end controls from the command line (section 11.2) or any API client; the agent's own chat happens only through the web page and the API, never through the command line.
+
 ---
 
 ## 7. Version control and landing
@@ -527,6 +539,7 @@ Every owner-action write (hand-in, ratification, a shed action, an amendment dec
 - Profile bindings: get, override, clear. Usage per provider.
 - Configuration: what is loaded and its digest, reload, last error.
 - Projects: add, remove, extract the knowledge base. Workstreams: hand in, abandon and permanently archive.
+- Sessions: open, list and read; send a message, stop a turn; read changes, commit, check, push and end (section 6.8).
 - Trace: walk a workstream's record.
 
 ### 10.3 Runtime state is not configuration
@@ -603,6 +616,11 @@ osmia reload
 osmia trace <workstream> [unit|criterion|commit]
 osmia ratify <workstream>            after reading the packet
 osmia merged <workstream>            an assembled branch you merged into upstream yourself, recorded delivered
+osmia session open dagger --profile default   a session for exploratory work; chat happens on the web page or the API
+osmia session commit <session> "..."          commit every worktree change onto the session's branch
+osmia session check <session>                 check the session's head commit
+osmia session push <session>                  push the session's branch to the project's remote
+osmia session end <session>                   end the session, releasing its worktree
 osmia rebase <workstream>            a drift rebase of building, assembled or delivered PR work now
 osmia amendment <workstream> <n> [approve|reject|round|overrule]
 ```

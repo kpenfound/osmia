@@ -66,6 +66,11 @@ func (b *baseRefresher) Pass(ctx context.Context) error {
 		if _, archived := b.s.archivedWorkstream(string(stream)); archived {
 			continue
 		}
+		if session, err := isSession(b.repository, stream); err != nil {
+			return err
+		} else if session {
+			continue
+		}
 		dependency, err := b.repository.WorkstreamBase(stream)
 		if err != nil {
 			return err

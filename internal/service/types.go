@@ -612,18 +612,26 @@ type RoleFallback struct {
 // service-owned facts about claimed and parked turns. Workspaces is the
 // workspace backend the workstream was created on, git or jujutsu.
 type WorkstreamStatus struct {
-	Workstream    config.WorkstreamID `json:"workstream"`
-	Project       config.ProjectID    `json:"project"`
-	Workspaces    string              `json:"workspaces"`
-	State         *string             `json:"state"`
-	Units         []UnitStatus        `json:"units"`
-	Advisories    []OverlapAdvisory   `json:"advisories"`
-	OpenQuestions int                 `json:"open_questions"`
-	Gates         []trace.OwnerGate   `json:"gates"`
-	ContextMode   bundle.Mode         `json:"context_mode"`
-	Drift         *DriftStatus        `json:"drift"`
-	Status        *StatusView         `json:"status"`
-	Agents        []AgentStatus       `json:"agents"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	Project    config.ProjectID    `json:"project"`
+	Workspaces string              `json:"workspaces"`
+	// Kind is "session" for a session workstream, omitted for an ordinary
+	// one. Profile, Base and Branch are set only for a session: its fixed
+	// profile, base commit and branch. Title is a session's optional title.
+	Kind          string            `json:"kind,omitempty"`
+	Profile       string            `json:"profile,omitempty"`
+	Base          string            `json:"base,omitempty"`
+	Branch        string            `json:"branch,omitempty"`
+	Title         string            `json:"title,omitempty"`
+	State         *string           `json:"state"`
+	Units         []UnitStatus      `json:"units"`
+	Advisories    []OverlapAdvisory `json:"advisories"`
+	OpenQuestions int               `json:"open_questions"`
+	Gates         []trace.OwnerGate `json:"gates"`
+	ContextMode   bundle.Mode       `json:"context_mode"`
+	Drift         *DriftStatus      `json:"drift"`
+	Status        *StatusView       `json:"status"`
+	Agents        []AgentStatus     `json:"agents"`
 	// Archived is set when the owner archived the workstream, which takes a
 	// delivered or abandoned workstream out of the list of work.
 	Archived bool `json:"archived,omitempty"`
@@ -633,6 +641,105 @@ type WorkstreamStatus struct {
 	// pull request URL or the recorded upstream commit of an owner-recorded
 	// merge.
 	DeliveryLink string `json:"delivery_link,omitempty"`
+}
+
+// SessionOpenRequest opens a session: a registered project and a profile
+// the service can run for mason turns there, with an optional title. No
+// other session request type carries a profile: it is fixed once opened.
+type SessionOpenRequest struct {
+	Project config.ProjectID `json:"project"`
+	Profile string           `json:"profile"`
+	Title   string           `json:"title,omitempty"`
+}
+
+// SessionView is one session: its fixed profile, base commit and branch,
+// its optional title, and its state (idle, working or ended).
+type SessionView struct {
+	Workstream config.WorkstreamID `json:"workstream"`
+	Project    config.ProjectID    `json:"project"`
+	Profile    string              `json:"profile"`
+	Base       string              `json:"base"`
+	Branch     string              `json:"branch"`
+	Title      string              `json:"title,omitempty"`
+	State      string              `json:"state"`
+	CreatedAt  time.Time           `json:"created_at"`
+}
+
+// SessionResponse answers opening or reading one session.
+type SessionResponse struct {
+	Session SessionView `json:"session"`
+}
+
+// SessionsResponse lists sessions, newest first.
+type SessionsResponse struct {
+	Sessions []SessionView `json:"sessions"`
+}
+
+// SessionMessageRequest is an owner message to a session's agent.
+type SessionMessageRequest struct {
+	Text string `json:"text"`
+}
+
+// SessionCommitSummary is one commit on a session branch: its hash and
+// message.
+type SessionCommitSummary struct {
+	Commit  string `json:"commit"`
+	Message string `json:"message"`
+}
+
+// SessionChangesResponse reads a session's changes: the worktree's
+// uncommitted changes relative to its head, as a unified diff, and the
+// commits on its branch relative to its base commit, oldest first. Changes
+// is empty once the session has ended and its worktree is released; Commits
+// stays readable from the branch's own history.
+type SessionChangesResponse struct {
+	Head    string                 `json:"head"`
+	Changes string                 `json:"changes"`
+	Commits []SessionCommitSummary `json:"commits"`
+}
+
+// SessionCommitRequest commits every current worktree change onto the
+// session branch under the owner's message. RequestKey identifies the
+// request, so a retry with the same key, including across a restart,
+// produces exactly one commit instead of a second one.
+type SessionCommitRequest struct {
+	Message    string `json:"message"`
+	RequestKey string `json:"request_key"`
+}
+
+// SessionCommitResponse is the result of a session commit: the commit the
+// session branch now points at.
+type SessionCommitResponse struct {
+	Commit string `json:"commit"`
+}
+
+// SessionCheckRun is one check run of a session: the commit it checked,
+// whether it was a smart or a full run and, for a smart run, the checks it
+// selected, its status, exit code and output.
+type SessionCheckRun struct {
+	Run            int             `json:"run"`
+	Commit         string          `json:"commit"`
+	Kind           string          `json:"kind"`
+	Checks         []string        `json:"checks,omitempty"`
+	Selection      *CheckSelection `json:"selection,omitempty"`
+	Command        []string        `json:"command,omitempty"`
+	Status         string          `json:"status"`
+	ExitCode       int             `json:"exit_code"`
+	Output         string          `json:"output,omitempty"`
+	OutputRevision int             `json:"output_revision,omitempty"`
+	OutputPath     string          `json:"output_path,omitempty"`
+	Truncated      bool            `json:"truncated,omitempty"`
+	Failed         []string        `json:"failed,omitempty"`
+	Error          string          `json:"error,omitempty"`
+	StartedAt      time.Time       `json:"started_at"`
+	FinishedAt     time.Time       `json:"finished_at"`
+}
+
+// SessionPushResponse is the result of pushing a session branch.
+type SessionPushResponse struct {
+	Remote string `json:"remote"`
+	Branch string `json:"branch"`
+	Commit string `json:"commit"`
 }
 
 // AgentStatus is one claimed or parked turn from the durable thread snapshot.
@@ -770,6 +877,10 @@ const (
 	TurnRunning TurnState = "running"
 	TurnDone    TurnState = "done"
 	TurnFailed  TurnState = "failed"
+	// TurnStopped is a session turn the owner stopped directly: it is
+	// recorded as stopped, not as a failure, and the worktree changes it
+	// already made are kept.
+	TurnStopped TurnState = "stopped"
 )
 
 // ConversationResponse lists a workstream's conversation with its chief of

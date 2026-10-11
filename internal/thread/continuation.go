@@ -9,22 +9,63 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func source(t trace.Thread, before uint64) (coreadapter.Profile, coreadapter.BackendSession, uint64, bool) {
-	var profile coreadapter.Profile
-	var session coreadapter.BackendSession
-	var boundary uint64
-	healthy := false
+// resumeFallbackKey is the context key carrying fallbackAllowed into a
+// CheckResume call, the only way an implementation reached through
+// coreadapter.Turns can learn which role's turn is asking: the interface
+// itself carries no scope. A CheckResume that already has its own way to
+// verify a saved session, such as a fixture's fake engine or a real
+// backend's own API, has no reason to consult it; it exists only for an
+// implementation that would otherwise have no verification at all and
+// wants to confine a heuristic trust fallback to the role thread.Runner's
+// ResumableRoles grants it to.
+type resumeFallbackKey struct{}
+
+// withResumeFallbackAllowed attaches whether a CheckResume implementation
+// may use a role-blind heuristic fallback for the turn ctx belongs to.
+func withResumeFallbackAllowed(ctx context.Context, allowed bool) context.Context {
+	return context.WithValue(ctx, resumeFallbackKey{}, allowed)
+}
+
+// ResumeFallbackAllowed reports whether ctx, as passed to a CheckResume
+// call, authorizes a role-blind heuristic fallback. Every other caller gets
+// false, including a direct call outside the runner's own CheckResume
+// invocation.
+func ResumeFallbackAllowed(ctx context.Context) bool {
+	allowed, _ := ctx.Value(resumeFallbackKey{}).(bool)
+	return allowed
+}
+
+// source finds the most recent completed turn whose session the next turn
+// could continue from. It reports two distinct kinds of continuation
+// separately: stopped reports a turn that was interrupted by an explicit
+// Stop, whose exact in-flight session every role has always resumed so no
+// work is lost (existing behaviour, unconditional on role); clean reports an
+// ordinarily completed turn's session, which every role may try to resume,
+// subject to whatever the configured Turns answers for CheckResume. Either
+// kind returns healthy so a caller that does not need the distinction can
+// still use it.
+//
+// A turn stopped by an explicit Stop before its session started leaves the
+// source as it was: the turn before it, not this one, is still what the next
+// turn may continue from (base behaviour, unconditional on role). A turn a
+// restart abandoned unanswered, with no session and no explicit Stop, gets
+// the same treatment, but only for a role resumableRoles grants: that is the
+// one place session turns look past an interrupted turn to the session's
+// last recorded model session, confined to the session role so every other
+// role's source selection is exactly what it was before that role existed.
+func source(t trace.Thread, before uint64, resumableRoles func(string) bool) (profile coreadapter.Profile, session coreadapter.BackendSession, boundary uint64, stopped, clean bool) {
 	for _, q := range t.Turns {
 		if q.Sequence >= before {
 			break
 		}
-		// A turn stopped before its session started leaves the source as it was.
-		if !q.CompletedAt.IsZero() && q.Response != nil && q.Response.Stop != nil && !coreadapter.ValidSession(q.Response.Result.Session) {
+		cancelledBeforeSession := !q.CompletedAt.IsZero() && q.Response != nil && q.Response.Result.Cancelled && !coreadapter.ValidSession(q.Response.Result.Session)
+		if cancelledBeforeSession && (q.Response.Stop != nil || resumableRoles != nil && resumableRoles(t.Identity.Role)) {
 			continue
 		}
 		boundary = q.Sequence
-		healthy = q.Response != nil && !q.CompletedAt.IsZero()
-		if !healthy {
+		responded := q.Response != nil && !q.CompletedAt.IsZero()
+		if !responded {
+			stopped, clean = false, false
 			continue
 		}
 		res := q.Response
@@ -34,9 +75,10 @@ func source(t trace.Thread, before uint64) (coreadapter.Profile, coreadapter.Bac
 		}
 		session = res.Result.Session
 		// A stopped session did not fail, so the next turn resumes it.
-		healthy = res.Stop != nil || res.Failure == "" && !res.Result.IsError && !res.Result.Cancelled && !res.Result.TimedOut && res.Result.ExitCode == 0 && res.Result.Signal == 0
+		stopped = res.Stop != nil
+		clean = !stopped && res.Failure == "" && !res.Result.IsError && !res.Result.Cancelled && !res.Result.TimedOut && res.Result.ExitCode == 0 && res.Result.Signal == 0
 	}
-	return profile, session, boundary, healthy
+	return profile, session, boundary, stopped, clean
 }
 
 // failed reports whether an attempt that was not stopped ended in failure.
@@ -74,7 +116,7 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		copy.Lease = nil
 		prepared.WorkspaceLease = &copy
 	}
-	previous, session, boundary, healthy := source(t, q.Sequence)
+	previous, session, boundary, stoppedSource, cleanSource := source(t, q.Sequence, r.ResumableRoles)
 	history, from, omitted, err := Replay(t, q.Sequence, r.ReplayLimits)
 	if err != nil {
 		return result, nil, err
@@ -84,12 +126,21 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 	attempts, tried := 1, map[string]bool{prepared.Profile.Name: true}
 	forceReplay := false
 	reason, retry := "no compatible completed session", ""
+	// Every role may try to resume a stopped or clean source: this is base
+	// behaviour, unconditional on role, deciding only whether CheckResume is
+	// asked at all. What CheckResume itself may answer is a separate matter:
+	// fallbackAllowed below confines a role-blind heuristic fallback (used
+	// when the configured Turns cannot verify resumability itself) to the
+	// one role resumableRoles grants, so a role CheckResume already answers
+	// for directly, the same way on base, keeps that exact answer.
+	healthy := stoppedSource || cleanSource
+	fallbackAllowed := r.ResumableRoles != nil && r.ResumableRoles(t.Identity.Role)
 	for {
 		prepared.Resume, prepared.History = nil, history
 		path := "replay"
 		if healthy && !forceReplay && coreadapter.ValidSession(session) && previous.Backend == prepared.Profile.Backend {
 			if checker, ok := r.Turns.(coreadapter.ResumeChecker); ok {
-				err := checker.CheckResume(ctx, previous, prepared.Profile, session)
+				err := checker.CheckResume(withResumeFallbackAllowed(ctx, fallbackAllowed), previous, prepared.Profile, session)
 				switch {
 				case err == nil:
 					prepared.Resume, prepared.History, path, reason = &session, "", "resume", "compatible available session"

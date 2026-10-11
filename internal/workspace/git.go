@@ -184,6 +184,25 @@ func (g *Git) Ancestor(ctx context.Context, commit, tip string) (bool, error) {
 	return err == nil, err
 }
 
+// Known reports whether commit's object already exists in the clone, such
+// as a remote branch tip the clone has fetched before through one of its
+// own branches. Ancestor cannot answer about a commit the clone has never
+// fetched; it fails outright instead.
+//
+// rev-parse --verify --quiet resolves the name first and exits 1 with no
+// output when it doesn't resolve to a commit (git-rev-parse(1)), whether
+// because the object is absent or exists but isn't a commit. cat-file -e
+// exits 1 the same way for a missing object, but exits 128 when the name
+// fails to resolve at all (as "<commit>^{commit}" does for an absent
+// object), so it cannot tell "unknown" apart from a real error here.
+func (g *Git) Known(ctx context.Context, commit string) (bool, error) {
+	_, err := g.run(ctx, "rev-parse", "--verify", "--quiet", commit+"^{commit}")
+	if exitCode(err, 1) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // MergeBase returns the best common ancestor of two commits.
 func (g *Git) MergeBase(ctx context.Context, a, b string) (string, error) {
 	return g.run(ctx, "merge-base", a, b)

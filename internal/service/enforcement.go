@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service/beekeeper"
 	"github.com/kpenfound/osmia/internal/skills"
 	"github.com/kpenfound/osmia/internal/status"
@@ -135,10 +136,10 @@ func Enforce(opts Options, e Enforcement) Options {
 		reports := &masonReports{}
 		verdicts := &reviewerReports{}
 		turns := &isolation.Turns{
-			Workspaces:         threadWorkspaces{units: units, drifts: drifts},
+			Workspaces:         threadWorkspaces{units: units, drifts: drifts, sessions: sessionWorkspaces{cfg: cfg}},
 			Views:              isolation.Views{Directory: views},
 			PreserveMasonViews: true,
-			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, "classifier": {}},
+			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, "classifier": {}, sessionRole: {WriteFiles: true, Execute: true}},
 			Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 				if scope.Role == "classifier" && scope.Project == project {
 					workspace := filepath.Join(root, "classifier", project)
@@ -147,6 +148,9 @@ func Enforce(opts Options, e Enforcement) Options {
 					}
 					role := cfg.Roles[masonRole]
 					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Execution: coreadapter.ExecutionSettings{Mode: role.Sandbox, Image: role.Image}}, nil
+				}
+				if scope.Role == sessionRole && scope.Project == project {
+					return sessionSelection(ctx, cfg, scope, threadExecution(masonRole, cfg.Roles[masonRole]))
 				}
 				role, ok := cfg.Roles[scope.Role]
 				if !ok || scope.Project != project {
@@ -215,9 +219,16 @@ func Enforce(opts Options, e Enforcement) Options {
 				}
 				return chiefTools(cfg, r, controls, scope, now)
 			},
-			Hosts:  e.Hosts,
-			Engine: e.Engine,
+			Hosts: e.Hosts,
+			// resumableEngine's heuristic fallback (used only when e.Engine has
+			// no CheckResume of its own) only ever answers for a session turn:
+			// Runner.ResumableRoles below confines it. Every other role's
+			// CheckResume call reaches e.Engine exactly as it would unwrapped.
+			Engine: resumableEngine{e.Engine},
 			Capture: func(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView, result coreadapter.SessionResult) error {
+				if scope.Role == sessionRole {
+					return sessionWorkspaces{cfg: cfg}.capture(ctx, scope, view)
+				}
 				if scope.Role != masonRole {
 					return nil
 				}
@@ -248,12 +259,19 @@ func Enforce(opts Options, e Enforcement) Options {
 				return turns.Run(ctx, input)
 			}
 		}
+		runner.ResumableRoles = func(role string) bool { return role == sessionRole }
 		return thread.Dispatcher{Runner: runner,
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				directory := filepath.Join(root, "threads", project, string(in.Workstream), in.Agent, in.Turn)
+				if in.Agent == sessionAgentID {
+					directory = filepath.Join(runtime.ModelSessionDirectory(root, r.Project(), in.Workstream), in.Turn)
+				}
 				return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 			},
 			Relay: func(ctx context.Context, t trace.Thread, q trace.QueuedTurn) error {
+				if t.Identity.Role == sessionRole {
+					return sessionRelay(ctx, r, now, t, q)
+				}
 				if service := controls.service.Load(); service != nil {
 					return service.relayBeekeeperReply(ctx, t, q)
 				}
@@ -264,11 +282,13 @@ func Enforce(opts Options, e Enforcement) Options {
 }
 
 // threadWorkspaces lends a drift mason turn its workstream's resolution
-// workspace, every other mason turn its unit's workspace and every other
-// thread turn the directory its selection stages.
+// workspace, every other mason turn its unit's workspace, a session turn
+// its session's worktree and every other thread turn the directory its
+// selection stages.
 type threadWorkspaces struct {
-	units  unitWorkspaces
-	drifts resolutions
+	units    unitWorkspaces
+	drifts   resolutions
+	sessions sessionWorkspaces
 }
 
 func (w threadWorkspaces) Acquire(ctx context.Context, req coreadapter.WorkspaceRequest) (coreadapter.WorkspaceLease, error) {
@@ -277,6 +297,9 @@ func (w threadWorkspaces) Acquire(ctx context.Context, req coreadapter.Workspace
 	}
 	if req.Scope.Role == masonRole {
 		return w.units.Acquire(ctx, req)
+	}
+	if req.Scope.Role == sessionRole {
+		return w.sessions.Acquire(ctx, req)
 	}
 	return stagedWorkspaces{}.Acquire(ctx, req)
 }

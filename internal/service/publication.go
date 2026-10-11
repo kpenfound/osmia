@@ -135,6 +135,11 @@ func (p *publisher) Pass(ctx context.Context) error {
 		if stream == librarian || scheduler.Paused(state.Pauses, p.repository.Project(), stream) {
 			continue
 		}
+		if session, err := isSession(p.repository, stream); err != nil {
+			return fmt.Errorf("workstream %s publication: %w", stream, err)
+		} else if session {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
