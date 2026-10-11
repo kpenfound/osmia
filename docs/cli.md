@@ -253,7 +253,8 @@ osmia status --json
   active project does not hold, fails with `validation` (exit 4); a delivered
   or already abandoned workstream fails with `conflict` (exit 5).
 - `rebase <workstream-id>` asks for a drift rebase of one `building` or
-  `assembled` workstream that is not paused, whatever its project's
+  `assembled` workstream, or a delivered workstream with an open pull request,
+  that is not paused, whatever its project's
   `upstream_rebase` cadence: the foreman fetches upstream, or the base
   workstream's branch, and rebases the feature branch and every unit in flight
   onto it. The command returns once the request is recorded and names the
@@ -262,9 +263,14 @@ osmia status --json
   one. The foreman runs it on the project's lander once no landing or other
   drift rebase holds it; follow it with `status <workstream-id>`. A request
   also resumes a workstream whose drift rebase is held. A workstream that is
-  not building or assembled, or is paused, fails with `conflict` (exit 5) and
+  not eligible for drift, or is paused, fails with `conflict` (exit 5) and
   why. The web page offers the same as Check for drift in a building or
-  assembled workstream's menu. `project rebase` asks the same of every
+  assembled or delivered workstream's menu. Delivered PRs are checked only
+  on request, with no GitHub polling. A changed branch passes conflict
+  resolution and final review, then asks for fresh owner approval before
+  updating the existing remote branch and PR. An unchanged branch needs no
+  approval or push; closed or merged PRs cannot be updated. The workstream
+  stays delivered. `project rebase` asks the same of every eligible
   workstream of a project.
 - `upstream <workstream-id> <base-workstream-id>` continues a workstream
   parked on its abandoned base from upstream instead. The base is the

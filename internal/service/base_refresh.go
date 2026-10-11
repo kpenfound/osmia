@@ -326,9 +326,9 @@ func (b *baseRefresher) completeOwnPullRequestOutcome(ctx context.Context, in ba
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
 }
 
-// upstreamDeliveryPending allows only delivery maintenance of a terminal
+// dependentDeliveryPending allows delivery maintenance of a terminal
 // feature with a recorded dependent request, after its dependency integrated.
-func upstreamDeliveryPending(repo *trace.Repository, cfg *config.Config, stream config.WorkstreamID) (bool, error) {
+func dependentDeliveryPending(repo *trace.Repository, cfg *config.Config, stream config.WorkstreamID) (bool, error) {
 	observed, revision, err := baseObservationAt(repo, stream)
 	if err != nil || revision == 0 || observed.Unavailable || observed.Base.Workstream != "" {
 		return false, err
@@ -355,4 +355,41 @@ func upstreamDeliveryPending(repo *trace.Repository, cfg *config.Config, stream 
 // canonicalPublication identifies delivery against the project's base branch.
 func canonicalPublication(p DeliveryPublication, cfg *config.Config) bool {
 	return p.BaseWorkstream == "" && p.Upstream == cfg.Project.Upstream && p.Base == cfg.Project.BaseBranch
+}
+
+// upstreamDeliveryPending reports whether a delivered branch needs reviewed,
+// owner-approved publication after drift or dependency integration.
+func upstreamDeliveryPending(repo *trace.Repository, cfg *config.Config, stream config.WorkstreamID) (bool, error) {
+	if finished, err := ownPullRequestFinished(repo, stream); err != nil || finished {
+		return false, err
+	}
+	docs, err := trace.Read[trace.Document](repo, stream)
+	if err != nil {
+		return false, err
+	}
+	published, pending := false, false
+	for _, doc := range docs {
+		switch doc.ID {
+		case publicationDocument:
+			var p DeliveryPublication
+			if err := json.Unmarshal([]byte(doc.Content), &p); err != nil {
+				return false, err
+			}
+			if p.Status == publicationOpened {
+				published, pending = true, false
+			}
+		case driftDocument:
+			var d DriftRebase
+			if err := json.Unmarshal([]byte(doc.Content), &d); err != nil {
+				return false, err
+			}
+			if published && d.Outcome == driftRebased && (d.Before != d.Commit || d.From != d.Upstream.Commit) {
+				pending = true
+			}
+		}
+	}
+	if pending {
+		return true, nil
+	}
+	return dependentDeliveryPending(repo, cfg, stream)
 }
