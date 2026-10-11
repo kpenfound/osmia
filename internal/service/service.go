@@ -710,12 +710,19 @@ func (s *Service) cleanupSocket() {
 }
 
 // openAll opens the runtime of every active project of cfg that has a trace,
-// in active_projects order. On failure it opens none.
+// in active_projects order. A project whose trace migration from the shared
+// layout could not complete is logged and left unopened, so it is not
+// scheduled this run; every other project still opens. Any other failure
+// opens none.
 func (s *Service) openAll(cfg *config.Config) ([]*activeProject, error) {
 	var out []*activeProject
 	for _, id := range cfg.ProjectIDs() {
 		p, err := s.open(cfg.For(id))
 		if err != nil {
+			if errors.Is(err, trace.ErrMigrationIncomplete) {
+				log.Printf("osmia: %v", err)
+				continue
+			}
 			for _, opened := range out {
 				opened.repository.Close()
 			}
@@ -916,6 +923,11 @@ func (s *Service) stop(projects ...*activeProject) error {
 	return err
 }
 
+// migrationLog reports trace.Migrate's progress through the standard log,
+// naming only the project and workstream, never transcript content or
+// credentials, the way the tailnet supervisor reports its own retries.
+func migrationLog(format string, args ...any) { log.Printf(format, args...) }
+
 // openReconciliation leaves trace creation to project registration; an existing
 // trace must open cleanly before the service can report readiness. The runner
 // boundary is served by the bound thread reconciler for turns and by the
@@ -944,6 +956,9 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	_, gitErr := os.Lstat(filepath.Join(directory, ".git"))
 	if os.IsNotExist(manifestErr) && os.IsNotExist(gitErr) {
 		return nil, nil, nil, nil
+	}
+	if err := trace.Migrate(context.Background(), cfg.Root, cfg.Project.ID, migrationLog); err != nil {
+		return nil, nil, nil, err
 	}
 	repository, err := trace.Open(cfg.Root, cfg.Project)
 	if err != nil {

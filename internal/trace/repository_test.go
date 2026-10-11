@@ -770,6 +770,33 @@ func TestConcurrentAppendAndFailedCommit(t *testing.T) {
 	}
 }
 
+// TestAppendCommitOutlivesTheCallersCancellation shows that once append has
+// already written an ordinary file ahead of committed history, a caller's
+// context cancelling during the commit that reconciles it does not fail that
+// commit and leave the mismatch for checkHistory to catch: Close cancels a
+// project's context before closing its trace, and a write already past this
+// point must not be turned into exactly the "ahead of history" state
+// TestConcurrentAppendAndFailedCommit shows a genuine Git failure leaves.
+func TestAppendCommitOutlivesTheCallersCancellation(t *testing.T) {
+	r, _, _ := create(t)
+	s := mustScoped(t, r, streamID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	paths := []string{"workstreams/" + string(streamID) + "/documents.jsonl"}
+	content := map[string][]byte{paths[0]: []byte("")}
+	if err := s.commitContent(ctx, paths, content, "cancelled"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled context should fail an ordinary commit: %v", err)
+	}
+	if err := s.commitContent(context.WithoutCancel(ctx), paths, content, "outlives cancellation"); err != nil {
+		t.Fatalf("a commit past the point of no return must not fail on the caller's cancellation: %v", err)
+	}
+	if _, err := s.checkHistory(context.Background()); err != nil {
+		t.Fatalf("the commit should leave history consistent: %v", err)
+	}
+}
+
 // TestWorkstreamLockDoesNotSerializeAnotherWorkstreamOrTheProject is the
 // isolation the split exists for: each workstream's own trace is its own
 // Git repository with its own lock, so a write that happens to hold one

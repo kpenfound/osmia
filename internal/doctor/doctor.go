@@ -523,6 +523,10 @@ func (r *run) state(cfg *config.Config, projects []config.Project) {
 			r.add(GroupState, check, Warn, "the project has no trace, so it runs idle", "add it again with osmia project add")
 			continue
 		}
+		if err := trace.Migrate(context.Background(), cfg.Root, p.ID, nil); err != nil {
+			r.add(GroupState, check, Fail, "trace migration from the shared layout is incomplete: "+reason(err), "start the service so it can resume the migration, or repair the trace at "+directory)
+			continue
+		}
 		repository, err := trace.Open(cfg.Root, p)
 		if err != nil {
 			if repository != nil {

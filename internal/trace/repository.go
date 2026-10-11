@@ -64,10 +64,14 @@ type Repository struct {
 	// reports commits a workstream instance makes, however and whenever that
 	// instance was opened.
 	parent *Repository
-	// workstreamsMu guards workstreams, the project instance's lazily opened
-	// workstream instances, by ID. Unused on a workstream instance.
+	// workstreamsMu guards workstreams and closed, the project instance's
+	// lazily opened workstream instances, by ID, and whether this instance's
+	// Close has begun. Unused on a workstream instance.
 	workstreamsMu sync.Mutex
 	workstreams   map[config.WorkstreamID]*Repository
+	// closed is set under workstreamsMu once Close has begun, so a scoped
+	// call racing it never opens a child Close could miss.
+	closed bool
 	// gitMu guards what the handle remembers about the Git store: the tree
 	// listing of the commit treeHead and the object files already flushed.
 	gitMu    sync.Mutex
@@ -193,7 +197,12 @@ func openStoreDirectory(root config.Root, project config.ProjectID, stream confi
 // takes r's own bookkeeping lock and, the first time, the opened
 // workstream's lock: it never waits on another workstream's lock, and a
 // later use of the same id reuses the open instance without taking r's lock
-// again.
+// again. It refuses once r's Close has begun, so it never opens a child that
+// Close could miss and leave with its flock held past this process's
+// lifetime, and its own failure path never takes operationMu, so a
+// first-time open that fails while this goroutine already holds it, for
+// example inside Serialize's schedule hook or another workstream's
+// WithOperation callback, returns an error instead of deadlocking.
 func (r *Repository) scoped(id config.WorkstreamID) (*Repository, error) {
 	if id == "" || id == r.stream {
 		return r, nil
@@ -206,6 +215,9 @@ func (r *Repository) scoped(id config.WorkstreamID) (*Repository, error) {
 	}
 	r.workstreamsMu.Lock()
 	defer r.workstreamsMu.Unlock()
+	if r.closed {
+		return nil, fmt.Errorf("%w: trace repository is closed", ErrLocked)
+	}
 	if s := r.workstreams[id]; s != nil {
 		return s, nil
 	}
@@ -225,7 +237,10 @@ func (r *Repository) scoped(id config.WorkstreamID) (*Repository, error) {
 	ok := false
 	defer func() {
 		if !ok {
-			s.Close()
+			// closeFiles alone: s was never added to r.workstreams, so Close
+			// has nothing of its own to join, and taking operationMu here
+			// could deadlock against a caller that already holds it.
+			s.closeFiles()
 		}
 	}()
 	if err := s.checkGit(); err != nil {
@@ -352,11 +367,16 @@ func (r *Repository) observed(c Commit) {
 }
 
 // Close closes this instance and, on the project's own instance, every
-// workstream instance it opened.
+// workstream instance it opened. Setting closed under the same lock that
+// captures the children to close means a scoped call that arrives after
+// this point finds no workstream to reuse and opens none of its own, so
+// Close never misses a child and leaks its flock past this process's
+// lifetime.
 func (r *Repository) Close() error {
 	r.workstreamsMu.Lock()
 	children := r.workstreams
 	r.workstreams = nil
+	r.closed = true
 	r.workstreamsMu.Unlock()
 	var errs []error
 	for _, s := range children {
@@ -364,8 +384,20 @@ func (r *Repository) Close() error {
 	}
 	r.operationMu.Lock()
 	defer r.operationMu.Unlock()
+	errs = append(errs, r.closeFiles())
+	return errors.Join(errs...)
+}
+
+// closeFiles releases this instance's own flock and directory handle,
+// without operationMu: scoped's failure path uses it to release a
+// workstream instance it opened but could not finish opening, which may run
+// inside a callback that already holds operationMu, such as Serialize's
+// schedule hook or another workstream's WithOperation callback, where
+// taking it again would deadlock.
+func (r *Repository) closeFiles() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	var errs []error
 	if r.lock != nil {
 		// A child process forked but not yet executed shares the open file,
 		// so closing alone would leave the lock held until it executes.
@@ -1223,7 +1255,13 @@ func (r *Repository) append(ctx context.Context, v Record, writeDocument bool) e
 	if d, ok := v.(Document); ok {
 		content[paths[1]] = []byte(d.Content)
 	}
-	return r.commitContent(ctx, paths, content, fmt.Sprintf("Record %s %s revision %d", kind(v), v.header().ID, v.header().Revision))
+	// The ordinary files above are already ahead of committed history: a
+	// cancellation from here on cannot roll them back, only leave them
+	// requiring reconciliation, so the commit that reconciles them runs
+	// without the caller's cancellation, as publishTree's materialization
+	// does once it is past its own point of no return. A genuine Git
+	// failure, such as another writer's lock, still fails normally.
+	return r.commitContent(context.WithoutCancel(ctx), paths, content, fmt.Sprintf("Record %s %s revision %d", kind(v), v.header().ID, v.header().Revision))
 }
 
 // Read returns all valid revisions of T in file order, with path/line diagnostics

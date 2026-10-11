@@ -7,6 +7,7 @@ package beekeeper
 
 import (
 	"context"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -47,6 +48,9 @@ func Open(ctx context.Context, root config.Root, b config.Beekeeper, now time.Ti
 	_, manifestErr := os.Lstat(filepath.Join(directory, "project.json"))
 	_, gitErr := os.Lstat(filepath.Join(directory, ".git"))
 	if !os.IsNotExist(manifestErr) || !os.IsNotExist(gitErr) {
+		if err := trace.Migrate(ctx, root, p.ID, func(format string, args ...any) { log.Printf(format, args...) }); err != nil {
+			return nil, err
+		}
 		return trace.Open(root, p)
 	}
 	repository, err := trace.Create(ctx, root, p, now, Actor)

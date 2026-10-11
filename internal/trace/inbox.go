@@ -78,7 +78,10 @@ func (r *Repository) reserveInboxNumber(ctx context.Context) (int, error) {
 	if err := r.writeFile(inboxCounterFile, append(out, '\n')); err != nil {
 		return 0, err
 	}
-	if err := r.commit(ctx, []string{inboxCounterFile}, "Reserve inbox number"); err != nil {
+	// Past this write the file is already ahead of committed history; see
+	// append's commitContent call for why the commit that reconciles it runs
+	// without the caller's cancellation.
+	if err := r.commit(context.WithoutCancel(ctx), []string{inboxCounterFile}, "Reserve inbox number"); err != nil {
 		return 0, err
 	}
 	return next, nil
