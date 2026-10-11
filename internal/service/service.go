@@ -216,6 +216,16 @@ type Service struct {
 // for the Beekeeper's own thread and tools.
 func (s *Service) Beekeeper() *trace.Repository { return s.shadow }
 
+// log returns s's structured logger, or a silent one when a test built s
+// directly without one: a missing logger never fails or panics the action
+// it would have recorded.
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return ghlog.Logger(context.Background())
+}
+
 // BeekeeperBusy reports whether the Beekeeper's latest owner request has no
 // finished turn, for bk-api's conflict response.
 func (s *Service) BeekeeperBusy() (bool, error) {
@@ -415,6 +425,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			logger.Warn("tailnet join failed; the supervisor will retry", "component", "tailnet", "hostname", cfg.Listen.Tailnet, "error", redact.Secrets(err.Error(), redact.KnownSecrets()...))
 		} else {
 			s.tailnet.set(node, "")
+			logger.Info("tailnet joined", "component", "tailnet", "hostname", cfg.Listen.Tailnet, "state", "up")
 		}
 	}
 	for _, p := range projects {
@@ -447,23 +458,29 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	s.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.requests.Add(1)
 		defer s.requests.Done()
-		switch arrivedOn(r) {
+		sw := &statusResponseWriter{ResponseWriter: w}
+		started := time.Now()
+		kind := arrivedOn(r)
+		defer func() {
+			ghlog.Logger(r.Context()).Info("api request handled", "listener", listenerName(kind), "method", r.Method, "path", r.URL.Path, "status", sw.status, "duration", time.Since(started).String())
+		}()
+		switch kind {
 		case webListener:
 			if !webAllowed(r) {
-				fail(w, Forbidden)
+				fail(sw, Forbidden)
 				return
 			}
 		case tailnetListener:
 			if !tailnetAllowed(r, hostname, s.tailnetNames) {
-				fail(w, Forbidden)
+				fail(sw, Forbidden)
 				return
 			}
 		}
 		if !s.ready.Load() {
-			fail(w, Unavailable)
+			fail(sw, Unavailable)
 			return
 		}
-		s.handle(w, r)
+		s.handle(sw, r)
 	}), ReadHeaderTimeout: opts.ReadHeaderTimeout, ReadTimeout: opts.ReadTimeout, WriteTimeout: opts.WriteTimeout,
 		BaseContext: func(net.Listener) context.Context { return s.lifetime }, ConnContext: connContext}
 	s.ready.Store(true)
@@ -528,11 +545,65 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.cleanupSocket()
 		s.store.Close()
 		unlock(s.lock)
+		reason := "stopped"
+		if s.err != nil {
+			reason = s.err.Error()
+		}
+		logger.Info("service stopped", "reason", reason)
 		close(s.done)
 	}()
+	logger.Info("service started", "version", opts.Build.Version, "commit", opts.Build.Commit, "root", root.String(), "listeners", startedListeners(s))
 	return s, nil
 }
-func (s *Service) Socket() string { return s.cfg.Listen.Socket }
+
+// startedListeners names every listener the service has bound, for the
+// service-started log record.
+func startedListeners(s *Service) []string {
+	listeners := []string{"socket"}
+	if s.web != nil {
+		listeners = append(listeners, "web")
+	}
+	if s.tailnet != nil {
+		listeners = append(listeners, "tailnet")
+	}
+	return listeners
+}
+
+// listenerName names the listener kind arrivedOn reports, for the
+// api-request-handled log record.
+func listenerName(kind listenerKind) string {
+	switch kind {
+	case webListener:
+		return "web"
+	case tailnetListener:
+		return "tailnet"
+	default:
+		return "socket"
+	}
+}
+
+// statusResponseWriter captures the status code an HTTP handler writes, for
+// the api-request-handled log record. Unwrap lets http.ResponseController
+// reach the underlying writer's Flush and SetWriteDeadline.
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusResponseWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+func (w *statusResponseWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(p)
+}
+func (w *statusResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (s *Service) Socket() string                           { return s.cfg.Listen.Socket }
 
 // WebAddr is the bound address of the web listener, or empty when listen.web
 // is not configured.
@@ -875,6 +946,7 @@ func (s *Service) launch(active *activeProject) {
 	if active == nil {
 		return
 	}
+	s.log().Info("project started", "project", string(active.id))
 	ctx, cancel := context.WithCancel(s.lifetime)
 	active.cancel = cancel
 	go func() {
@@ -929,7 +1001,13 @@ func (s *Service) stop(projects ...*activeProject) error {
 	}
 	var err error
 	for _, p := range projects {
-		err = errors.Join(err, s.halt(p))
+		haltErr := s.halt(p)
+		err = errors.Join(err, haltErr)
+		if haltErr != nil {
+			s.log().Error("project stopped", "project", string(p.id), "reason", "service stopped", "error", haltErr.Error())
+		} else {
+			s.log().Info("project stopped", "project", string(p.id), "reason", "service stopped")
+		}
 	}
 	for _, p := range projects {
 		err = errors.Join(err, p.repository.Close())

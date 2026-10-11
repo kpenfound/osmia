@@ -11,8 +11,15 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/trace"
 )
+
+// turnAction mirrors thread.TurnAction, the runner-boundary action that
+// delivers one queued turn. The controller logs those separately, with the
+// role and profile only the service's turn adapter knows, so it leaves them
+// out of its own generic operation records to keep the log readable.
+const turnAction = "thread-turn"
 
 type Options struct {
 	Worker   string
@@ -214,7 +221,7 @@ func (c *Controller) start(ctx context.Context, stream config.WorkstreamID, even
 	go func() {
 		defer c.group.Done()
 		err := c.repository.WithOperation(ctx, stream, event, trace.Actor{Kind: "service", ID: c.options.Worker}, c.options.Now, func(attempt *trace.OperationAttempt, current trace.OperationRecord) error {
-			return c.reconcile(ctx, attempt, current, launch)
+			return c.reconcile(ctx, stream, attempt, current, launch)
 		})
 		c.mu.Lock()
 		delete(c.running, key)
@@ -307,7 +314,7 @@ func (c *Controller) Pass(ctx context.Context) error {
 			continue
 		}
 		err := c.repository.WithOperation(ctx, p.stream, p.record.EventID, trace.Actor{Kind: "service", ID: c.options.Worker}, c.options.Now, func(attempt *trace.OperationAttempt, current trace.OperationRecord) error {
-			return c.reconcile(ctx, attempt, current, nil)
+			return c.reconcile(ctx, p.stream, attempt, current, nil)
 		})
 		if err != nil {
 			return err
@@ -319,7 +326,7 @@ func (c *Controller) Pass(ctx context.Context) error {
 // reconcile claims, inspects and completes one operation. A concurrent
 // operation, one with launch, applies its effect outside the repository's
 // operation lock and calls launch once the lock is released.
-func (c *Controller) reconcile(ctx context.Context, attempt *trace.OperationAttempt, record trace.OperationRecord, launch func()) error {
+func (c *Controller) reconcile(ctx context.Context, stream config.WorkstreamID, attempt *trace.OperationAttempt, record trace.OperationRecord, launch func()) error {
 	if err := c.step(ctx, "after-claim"); err != nil {
 		return err
 	}
@@ -367,6 +374,15 @@ func (c *Controller) reconcile(ctx context.Context, attempt *trace.OperationAtte
 			if err := c.step(ctx, "before-effect"); err != nil {
 				return err
 			}
+			// Agent turns are logged separately, with the role and profile
+			// only the service's turn adapter knows; every other operation
+			// is logged here, the one place they all pass through.
+			logger, routine := ghlog.Logger(ctx), record.Operation.Action == turnAction
+			logAttrs := []any{"project", string(c.repository.Project()), "workstream", string(stream), "action", record.Operation.Action, "boundary", string(record.Operation.Boundary)}
+			if !routine {
+				logger.Info("operation started", logAttrs...)
+			}
+			start := c.options.Now()
 			if launch != nil {
 				attempt.Unlocked(ctx, func(ctx context.Context) {
 					launch()
@@ -377,6 +393,18 @@ func (c *Controller) reconcile(ctx context.Context, attempt *trace.OperationAtte
 			}
 			if e := c.step(ctx, "after-effect"); e != nil {
 				return e
+			}
+			if !routine {
+				logAttrs = append(logAttrs, "duration", c.options.Now().Sub(start).String())
+				if err != nil {
+					logger.Error("operation failed", append(logAttrs, "error", err.Error())...)
+				} else {
+					outcome := result.Outcome
+					if outcome == "" {
+						outcome = "ok"
+					}
+					logger.Info("operation finished", append(logAttrs, "outcome", outcome)...)
+				}
 			}
 			if err != nil {
 				reason := fmt.Sprintf("Effect returned error: %v", err)

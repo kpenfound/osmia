@@ -259,6 +259,7 @@ func (s *Service) superviseTailnet(root config.Root, hostname string) {
 				continue
 			}
 			s.tailnet.set(node, "")
+			s.logger.Info("tailnet joined", "component", "tailnet", "hostname", hostname, "state", "up")
 		}
 		err := s.server.Serve(tagged{Listener: node, kind: tailnetListener})
 		if s.lifetime.Err() != nil || errors.Is(err, http.ErrServerClosed) {

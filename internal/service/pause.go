@@ -69,7 +69,7 @@ func (c *runtimeControls) pauseControl(repository *trace.Repository, scope corea
 			return priorityRefusal("the requested project is not active")
 		}
 		if resume {
-			err = s.store.ClearPause(target, runtime.PauseOwner)
+			err = s.clearPause(target)
 		} else {
 			if strings.TrimSpace(input.Reason) == "" {
 				return priorityRefusal("pause reason must be non-empty")
@@ -98,8 +98,18 @@ func (s *Service) setPause(p runtime.Pause) error {
 	if err := s.store.SetPause(p); err != nil {
 		return err
 	}
+	s.log().Info("pause set", "scope", p.Target.Scope, "project", string(p.Target.Project), "workstream", string(p.Target.Workstream), "mode", p.Mode, "reason", p.Reason)
 	st, _ := s.effective()
 	s.turns.stop(st.Pauses)
+	return nil
+}
+
+// clearPause clears the owner's pause on target and logs it.
+func (s *Service) clearPause(target runtime.Target) error {
+	if err := s.store.ClearPause(target, runtime.PauseOwner); err != nil {
+		return err
+	}
+	s.log().Info("pause cleared", "scope", target.Scope, "project", string(target.Project), "workstream", string(target.Workstream))
 	return nil
 }
 

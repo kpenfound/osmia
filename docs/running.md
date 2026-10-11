@@ -347,6 +347,39 @@ Each GitHub activity record also carries:
 A failed request, including an unexpected status, a transport failure or a
 rejected push, logs at `ERROR`; a successful one logs at `INFO`.
 
+### Factory action log
+
+Beside the GitHub activity log, the service logs its own internal actions,
+each carrying `project`, and `workstream` and `unit` when there are any:
+
+- `service started` (`version`, `commit`, `root`, `listeners`) and
+  `service stopped` (`reason`).
+- `project started`, `project draining` and `project stopped` (`reason`).
+- `reload succeeded` (`digest`, `restart_required`, `added`, `removed`) and
+  `reload failed` (`error`).
+- `api request handled` (`listener`, `method`, `path`, `status`,
+  `duration`), with no request or response body.
+- `operation started`, then `operation finished` (`outcome`, `duration`) or
+  `operation failed` (`error`, `duration`): the start and outcome of an
+  operation the service runs, such as a draft, a debate round, sealing,
+  building, checks, landing, rebasing, publication or cleanup, named by its
+  `action` and `boundary`.
+- `agent turn dispatched`, then `agent turn finished` (`outcome`,
+  `duration`): a queued turn handed to an agent, named by its `role`,
+  `profile` and `unit`, with no prompt or transcript.
+- `pause set` (`scope`, `mode`, `reason`) and `pause cleared` (`scope`).
+- `tailnet joined`, a join failure and `tailnet listener stopped; rejoining`:
+  the tailnet's own state changes, as distinct from the `tailnet message`
+  records embedded Tailscale's own logging produces.
+- `notification post attempt succeeded` (`kind`, `duration`) and
+  `notification post attempt failed` (`kind`, `attempts`, `gave_up`,
+  `duration`, `error`): never the webhook URL.
+- `reconciliation pass hook failed` (`hook`, `error`): a schedule hook that
+  stopped a reconciliation pass.
+
+A failed or error-level outcome logs at `ERROR` or `WARN`, higher than the
+matching routine record's `INFO`.
+
 ## API reference
 
 [`openapi.json`](openapi.json) is an OpenAPI 3.1 description of every endpoint
