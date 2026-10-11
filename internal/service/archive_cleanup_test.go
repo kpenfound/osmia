@@ -125,6 +125,11 @@ func TestArchiveCleanupMigratesOldArchivesAndRetainsTitle(t *testing.T) {
 	if !strings.Contains(logged.String(), fmt.Sprintf("archive cleanup of workstream %s", stream)) || !strings.Contains(logged.String(), "unfinished turn") {
 		t.Fatalf("deferral for a busy workstream was not logged: %s", logged.String())
 	}
+	// Logging the deferral never carries the planted sensitive status note
+	// or document content.
+	if strings.Contains(logged.String(), "Sensitive detail") || strings.Contains(logged.String(), "sensitive stdout and stderr") {
+		t.Fatalf("log carries sensitive status or document content: %s", logged.String())
+	}
 	// The existing turn must finish before any trace or session output goes.
 	must(t, repo.CaptureTurn(ctx, "title-token", trace.TurnResponse{Header: h("turn-response", "response-title"), AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "title", RequestID: "request-title", RequestRevision: 1, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "test-session"}, SessionDirectory: session, StartedAt: demoStart, FinalResponse: "Done"}}))
 	must(t, repo.CompleteTurn(ctx, stream, trace.ChiefOfStaff, "title", "title-token", demoStart))
@@ -162,6 +167,18 @@ func TestArchiveCleanupMigratesOldArchivesAndRetainsTitle(t *testing.T) {
 	raw, _ = store.Snapshot()
 	if len(raw.Archived) != 1 || raw.Archived[0].Title != "Preserved workstream title" || raw.Archived[0].CleanedAt.IsZero() {
 		t.Fatalf("repeated pass changed the archive record: %+v", raw.Archived)
+	}
+	// The actual deletion's progress and completion are logged with the
+	// workstream and project identifiers, so the absence check below is not
+	// vacuously true against an empty or silently-broken log.
+	if !strings.Contains(logged.String(), fmt.Sprintf("archive cleanup removed the trace of workstream %s of project %s", stream, project)) || !strings.Contains(logged.String(), fmt.Sprintf("archive cleanup completed for workstream %s of project %s", stream, project)) {
+		t.Fatalf("deletion progress and completion were not logged: %s", logged.String())
+	}
+	// Across the start, progress and completion logging of the actual
+	// deletion, the log still never carries the sensitive status note or
+	// document content.
+	if strings.Contains(logged.String(), "Sensitive detail") || strings.Contains(logged.String(), "sensitive stdout and stderr") {
+		t.Fatalf("log carries sensitive status or document content: %s", logged.String())
 	}
 	got, api := s.workstreamStatus(string(stream))
 	if api != nil || !got.Archived || !got.TraceDeleted || got.Status == nil || got.Status.Goal != "Preserved workstream title" || got.Status.Note != "" {
