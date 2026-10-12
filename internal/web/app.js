@@ -1967,9 +1967,15 @@
       d.detail.replaceChildren(el('p', { class: 'meta', 'data-field': 'reading' }, failures[name] ? 'The final report is unavailable.' : 'Reading the final report…'));
       return;
     }
-    d.detail.replaceChildren(el('ul', { class: 'criteria', 'data-field': 'criteria' }, ...view.report.criteria.map((c) => el('li', { 'data-criterion': c.criterion },
-      el('strong', {}, c.criterion), ' ', c.text,
-      el('div', { class: 'meta' }, c.evidence ? c.evidence : 'Gap: ' + c.gap)))));
+    // The title is not owner-editable; it is shown alongside the draft body
+    // the owner can edit, and keeps the title an already-approved delivery
+    // records even if the workstream's title changes later.
+    const title = view.approval ? (view.approval.title || view.title) : view.title;
+    d.detail.replaceChildren(
+      el('p', { class: 'meta', 'data-field': 'title' }, 'Pull request title: ' + title),
+      el('ul', { class: 'criteria', 'data-field': 'criteria' }, ...view.report.criteria.map((c) => el('li', { 'data-criterion': c.criterion },
+        el('strong', {}, c.criterion), ' ', c.text,
+        el('div', { class: 'meta' }, c.evidence ? c.evidence : 'Gap: ' + c.gap)))));
     const previous = new Map(d.messages.map((m) => [m.commit, m]));
     d.messages = (view.approval ? view.approval.messages : (view.messages || [])).map((m) => {
       const old = previous.get(m.commit);

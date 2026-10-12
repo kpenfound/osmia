@@ -94,7 +94,10 @@ func TestDeliveryPresentationOrdersGapsAndKeepsEvidence(t *testing.T) {
 	if len(p.Report.Criteria) != 2 || p.Report.Criteria[0].Criterion != "spec#2" || p.Report.Criteria[0].Gap != "No duplicate test" || p.Report.Criteria[1].Evidence != "resume.go and TestResume" {
 		t.Fatalf("presentation %+v", p.Report.Criteria)
 	}
-	if !strings.Contains(p.Draft, "No duplicate test") || !strings.Contains(p.Draft, "resume.go and TestResume") {
+	// The drafted body is a short spec summary, not an account of the work:
+	// it never held the criteria evidence or gap, only the report the
+	// presentation carries alongside it does (spec#3, spec#9).
+	if strings.Contains(p.Draft, "No duplicate test") || strings.Contains(p.Draft, "resume.go and TestResume") {
 		t.Fatalf("draft %q", p.Draft)
 	}
 	if _, api := f.s.approveDelivery(context.Background(), string(stream), DeliveryDecision{Review: 1, ReviewRevision: p.ReviewRevision, Commit: report.Commit, DraftHash: p.DraftHash}); api == nil || api.Code != Conflict {

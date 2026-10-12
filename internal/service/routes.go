@@ -100,7 +100,7 @@ var Routes = []Route{
 	{Method: http.MethodGet, Path: Prefix + "/charter/{workstream}/{question}", Summary: "Show a charter proposal", Response: CharterProposalView{}},
 	{Method: http.MethodPost, Path: Prefix + "/charter/{workstream}/{question}", Summary: "Ratify or decline a charter proposal", Request: CharterDecisionRequest{}, Response: CharterProposalView{}},
 
-	{Method: http.MethodGet, Path: Prefix + "/delivery/{workstream}", Summary: "Show the final report and pull request draft", Response: DeliveryPresentation{}},
+	{Method: http.MethodGet, Path: Prefix + "/delivery/{workstream}", Summary: "Show the final report and the drafted pull request title and body", Response: DeliveryPresentation{}},
 	{Method: http.MethodPost, Path: Prefix + "/delivery/{workstream}", Summary: "Approve delivery", Request: DeliveryDecision{}, Response: DeliveryApproval{}},
 	{Method: http.MethodPost, Path: Prefix + "/delivery/{workstream}/merged", Summary: "Record an assembled workstream delivered by the owner's own merge into upstream", Response: MergeResponse{}},
 

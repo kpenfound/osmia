@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/issues"
+	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -19,15 +22,16 @@ const deliveryPath = "final/delivery.json"
 const deliveryDocument = "final-delivery"
 const deliverySubject = "delivery-owner"
 
-// DeliveryPresentation is the final review and the description presented to
-// the owner. Criteria with a gap precede criteria with evidence. A delivered
-// workstream presents the report, approval and publication it was delivered
-// with, and no draft.
+// DeliveryPresentation is the final review and the title and description
+// presented to the owner. Criteria with a gap precede criteria with
+// evidence. A delivered workstream presents the report, approval and
+// publication it was delivered with, and no draft.
 type DeliveryPresentation struct {
 	Project        config.ProjectID            `json:"project"`
 	Workstream     config.WorkstreamID         `json:"workstream"`
 	Report         FinalReport                 `json:"report"`
 	ReviewRevision int                         `json:"review_revision"`
+	Title          string                      `json:"title,omitempty"`
 	Draft          string                      `json:"draft"`
 	DraftHash      string                      `json:"draft_hash"`
 	Messages       []workspace.DeliveryMessage `json:"messages"`
@@ -42,8 +46,11 @@ type DeliveryPresentation struct {
 	Maintenance bool                 `json:"maintenance,omitempty"`
 }
 
-// DeliveryApproval preserves the exact text and reviewed identity the owner
-// approved. DescriptionHash allows publication to check the text it will send.
+// DeliveryApproval preserves the exact title and text and reviewed identity
+// the owner approved. Title is empty in an approval recorded before the
+// title became part of the draft; deliveryTitle(Description, stream) is
+// then used instead, as it was when that approval was recorded.
+// DescriptionHash allows publication to check the text it will send.
 type DeliveryApproval struct {
 	Review          int                         `json:"review"`
 	ReviewRevision  int                         `json:"review_revision"`
@@ -54,11 +61,23 @@ type DeliveryApproval struct {
 	Plan            int                         `json:"plan"`
 	Charter         int                         `json:"charter"`
 	DraftHash       string                      `json:"draft_hash"`
+	Title           string                      `json:"title,omitempty"`
 	Description     string                      `json:"description"`
 	DescriptionHash string                      `json:"description_hash"`
 	At              time.Time                   `json:"at"`
 	Messages        []workspace.DeliveryMessage `json:"messages"`
 	Style           string                      `json:"style"`
+}
+
+// publishedTitle is the title to publish for an approval: the title it
+// recorded, or, for an approval recorded before this field existed,
+// deliveryTitle(Description, stream), which is what was published for it
+// then.
+func publishedTitle(approval DeliveryApproval, stream config.WorkstreamID) string {
+	if approval.Title != "" {
+		return approval.Title
+	}
+	return deliveryTitle(approval.Description, stream)
 }
 
 // DeliveryDecision approves the draft as shown, or supplies the owner's edit.
@@ -73,6 +92,15 @@ type DeliveryDecision struct {
 }
 
 func descriptionHash(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) }
+
+// boundSubject truncates s to subjectLength runes, as deliveryTitle and a
+// landing commit subject do.
+func boundSubject(s string) string {
+	if runes := []rune(s); len(runes) > subjectLength {
+		return string(append(runes[:subjectLength-1], '…'))
+	}
+	return s
+}
 
 func deliveryDocuments(repository *trace.Repository, stream config.WorkstreamID) (trace.Document, trace.Document, *DeliveryApproval, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
@@ -98,49 +126,137 @@ func deliveryDocuments(repository *trace.Repository, stream config.WorkstreamID)
 	return review, decision, &approval, nil
 }
 
-// draftDelivery uses recorded evidence and landed-unit records, so repeated
-// presentations of one trace produce the same description.
-func draftDelivery(repository *trace.Repository, stream config.WorkstreamID, report FinalReport) (string, error) {
-	docs, err := trace.Read[trace.Document](repository, stream)
+// headingLine matches a Markdown heading line, capturing its text.
+var headingLine = regexp.MustCompile(`^ {0,3}#{1,6}[ \t]+(.*?)[ \t]*$`)
+
+// firstHeading returns the text of the first Markdown heading in content, or
+// "" if content holds none.
+func firstHeading(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		if m := headingLine.FindStringSubmatch(strings.TrimRight(line, "\r")); m != nil {
+			if title := strings.TrimSpace(m[1]); title != "" {
+				return title
+			}
+		}
+	}
+	return ""
+}
+
+// summaryStructural matches a Markdown line that specSummary excludes from
+// the prose it extracts: a heading, a bullet or numbered list item, a code
+// fence or an HTML comment.
+var summaryStructural = regexp.MustCompile(`^ {0,3}(#{1,6}[ \t]|[-*+][ \t]|[0-9]{1,9}[.)][ \t]|` + "```" + `|~~~|<!--)`)
+
+// specSummaryBound is the longest specSummary returns, in runes.
+const specSummaryBound = 600
+
+// specSummary returns a short prose summary of the sealed spec: its first
+// paragraph of plain text, skipping headings, list items, fenced code and
+// HTML comments, bounded to specSummaryBound runes. It is deterministic:
+// presenting the same spec revision twice yields the same summary.
+func specSummary(content string) string {
+	var paragraph []string
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimRight(raw, "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if len(paragraph) > 0 {
+				break
+			}
+			continue
+		}
+		if summaryStructural.MatchString(line) {
+			continue
+		}
+		paragraph = append(paragraph, trimmed)
+	}
+	text := strings.Join(paragraph, " ")
+	if runes := []rune(text); len(runes) > specSummaryBound {
+		text = string(runes[:specSummaryBound-1]) + "…"
+	}
+	return text
+}
+
+// workstreamTitle is the title shown to the owner and used as the pull
+// request title: the chief of staff's latest status goal, the value
+// archiveTitle and status also use; when none is recorded, a fallback
+// derived from recorded documents (the sealed spec's first heading, or the
+// handed issue's title) before the bare workstream ID. It is bounded to the
+// same subject length as a landing commit.
+func workstreamTitle(repository *trace.Repository, stream config.WorkstreamID, spec, handed trace.Document) (string, error) {
+	statuses, err := repository.Statuses()
 	if err != nil {
 		return "", err
 	}
-	title := strings.TrimSpace(report.Summary)
-	if title == "" {
-		title = "Workstream " + string(stream)
-	}
-	var lines []string
-	lines = append(lines, "# "+title, "", "## Final review", "", fmt.Sprintf("Reviewed commit: `%s`", report.Commit), "")
-	for _, c := range report.Criteria {
-		line := "- **" + c.Criterion + "** " + c.Text + " — "
-		if c.Gap != "" {
-			line += "Gap: " + c.Gap
-		} else {
-			line += "Evidence: " + c.Evidence
+	for _, w := range statuses {
+		if w.Workstream == stream && w.Status != nil && w.Status.Goal != "" {
+			return boundSubject(w.Status.Goal), nil
 		}
-		lines = append(lines, line)
 	}
-	lines = append(lines, "", "## Landed units", "")
-	latest := map[string]UnitLanding{}
+	if title := firstHeading(spec.Content); title != "" {
+		return boundSubject(title), nil
+	}
+	if title := firstHeading(handed.Content); title != "" {
+		return boundSubject(title), nil
+	}
+	return "Workstream " + string(stream), nil
+}
+
+// closingReference is a GitHub closing reference to the issue handed
+// recorded as its source: "closes #N" when the issue is in targetRepo, or
+// "closes OWNER/REPO#N" otherwise. It is "" for a workstream handed in from
+// a file or stdin, or with no handed document recorded.
+func closingReference(handed trace.Document, targetRepo string) string {
+	if handed.Revision == 0 {
+		return ""
+	}
+	ref, err := issues.Parse(handed.Source)
+	if err != nil {
+		return ""
+	}
+	if strings.EqualFold(targetRepo, ref.Owner+"/"+ref.Repo) {
+		return fmt.Sprintf("closes #%d", ref.Number)
+	}
+	return fmt.Sprintf("closes %s/%s#%d", ref.Owner, ref.Repo, ref.Number)
+}
+
+// draftDelivery is the workstream's title and pull request body: the title
+// (see workstreamTitle) and a short prose summary of the sealed spec,
+// closing the issue the workstream was handed in from when one is recorded
+// and its repository can be compared with the one the pull request would
+// target. Both come from documents already in the trace, so presenting the
+// same recorded trace twice produces the same draft, and no agent is called.
+func draftDelivery(cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, report FinalReport) (title, body string, err error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return "", "", err
+	}
+	var spec, handed trace.Document
 	for _, d := range docs {
-		if strings.HasPrefix(d.Path, "units/") && strings.HasSuffix(d.Path, "/landing.json") {
-			var landing UnitLanding
-			if err := json.Unmarshal([]byte(d.Content), &landing); err != nil {
-				return "", err
-			}
-			latest[landing.Unit] = landing
+		switch {
+		case d.ID == plan.SpecDocument && d.Revision == report.Spec:
+			spec = d
+		case d.ID == handedDocument:
+			handed = d
 		}
 	}
-	var landings []string
-	for _, landing := range latest {
-		landings = append(landings, fmt.Sprintf("- %s: `%s` (%s)", landing.Unit, landing.Commit, strings.Join(landing.Criteria, ", ")))
+	title, err = workstreamTitle(repository, stream, spec, handed)
+	if err != nil {
+		return "", "", err
 	}
-	slices.Sort(landings)
-	if len(landings) == 0 {
-		landings = []string{"- No landing records are recorded."}
+	summary := specSummary(spec.Content)
+	if summary == "" {
+		summary = title
 	}
-	lines = append(lines, landings...)
-	return strings.Join(lines, "\n") + "\n", nil
+	targetRepo := cfg.Project.Upstream
+	if report.Upstream != nil && report.Upstream.Workstream != "" {
+		targetRepo = cfg.Project.PushRepository()
+	}
+	body = summary + "\n"
+	if ref := closingReference(handed, targetRepo); ref != "" {
+		body += "\n" + ref + "\n"
+	}
+	return title, body, nil
 }
 
 func (s *Service) deliveryPresentation(ctx context.Context, raw string) (DeliveryPresentation, *APIError) {
@@ -223,11 +339,11 @@ func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID,
 		}
 		return 1
 	})
-	draft, err := draftDelivery(repository, stream, report)
+	title, draft, err := draftDelivery(s.about(repository), repository, stream, report)
 	if err != nil {
-		return DeliveryPresentation{}, &APIError{Internal, "cannot draft the description from trace records"}
+		return DeliveryPresentation{}, &APIError{Internal, "cannot draft the title and description from trace records"}
 	}
-	if approval != nil && (approval.Style != s.about(repository).Project.Landing || len(approval.Messages) == 0 || approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter || approval.Seal != report.Seal) {
+	if approval != nil && (approval.Style != s.about(repository).Project.Landing || len(approval.Messages) == 0 || approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter || approval.Seal != report.Seal || publishedTitle(*approval, stream) != title) {
 		approval = nil
 	}
 	style := s.about(repository).Project.Landing
@@ -236,11 +352,12 @@ func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID,
 		return DeliveryPresentation{}, &APIError{Internal, "cannot read delivery commit messages"}
 	}
 	pinned, _ := json.Marshal(struct {
+		Title       string
 		Description string
 		Style       string
 		Messages    []workspace.DeliveryMessage
-	}{draft, style, messages})
-	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Draft: draft, DraftHash: descriptionHash(string(pinned)), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance}, nil
+	}{title, draft, style, messages})
+	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: descriptionHash(string(pinned)), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance}, nil
 }
 
 func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryDecision) (DeliveryApproval, *APIError) {
@@ -310,7 +427,7 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 		return *existing, nil
 	}
 	r := presented.Report
-	approval := DeliveryApproval{Review: r.Review, ReviewRevision: review.Revision, Commit: r.Commit, Seal: r.Seal, SpecHash: r.SpecHash, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter, DraftHash: req.DraftHash, Description: description, DescriptionHash: descriptionHash(description), Messages: messages, Style: presented.Style, At: s.now()}
+	approval := DeliveryApproval{Review: r.Review, ReviewRevision: review.Revision, Commit: r.Commit, Seal: r.Seal, SpecHash: r.SpecHash, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter, DraftHash: req.DraftHash, Title: presented.Title, Description: description, DescriptionHash: descriptionHash(description), Messages: messages, Style: presented.Style, At: s.now()}
 	content, err := json.Marshal(approval)
 	if err != nil {
 		return DeliveryApproval{}, &APIError{Internal, "cannot encode delivery approval"}

@@ -56,6 +56,7 @@ type retargetInput struct {
 	Number      int    `json:"number"`
 	URL         string `json:"url"`
 	Base        string `json:"base"`
+	Title       string `json:"title,omitempty"`
 	Description string `json:"description"`
 }
 
@@ -212,7 +213,7 @@ func (p *publisher) request(ctx context.Context, stream config.WorkstreamID) err
 			return err
 		}
 		if found && previous.Upstream == in.Upstream && (previous.Base == in.Base || in.Fork == in.Upstream && !canonicalPublication(previous, cfg)) {
-			in.Retarget = &retargetInput{Number: previous.PullRequest, URL: previous.URL, Base: previous.Base, Description: previous.Description}
+			in.Retarget = &retargetInput{Number: previous.PullRequest, URL: previous.URL, Base: previous.Base, Title: previous.Title, Description: previous.Description}
 		}
 	}
 	input, err := json.Marshal(in)
@@ -411,7 +412,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if branch == cfg.Project.BaseBranch {
 		return p.refuse(ctx, stream, in, "delivery cannot push to the project base branch")
 	}
-	title := deliveryTitle(approval.Description, stream)
+	title := publishedTitle(approval, stream)
 	if approval.Style != in.Style || len(approval.Messages) == 0 {
 		return p.refuse(ctx, stream, in, "delivery messages and style require current owner approval")
 	}
@@ -484,7 +485,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if in.Retarget != nil && len(before) == 0 {
 		return p.refuse(ctx, stream, in, "the delivered pull request is missing")
 	}
-	if len(before) != 0 && (len(before) != 1 || !matchingPublicationPR(before[0], in, branch, approval.Description, tip) && !matchingRetargetPR(before[0], in, branch, tip)) {
+	if len(before) != 0 && (len(before) != 1 || !matchingPublicationPR(before[0], in, branch, title, approval.Description, tip) && !matchingRetargetPR(before[0], in, branch, tip)) {
 		return p.refusePR(ctx, stream, in, branch, published, before)
 	}
 	if !exists || tip != published {
@@ -511,7 +512,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		if len(found) != 1 || found[0].Number != in.Retarget.Number || found[0].URL != in.Retarget.URL {
 			return p.refusePR(ctx, stream, in, branch, published, found)
 		}
-		if !matchingPublicationPR(found[0], in, branch, approval.Description, published) {
+		if !matchingPublicationPR(found[0], in, branch, title, approval.Description, published) {
 			if !matchingRetargetPR(found[0], in, branch, published) {
 				return p.refusePR(ctx, stream, in, branch, published, found)
 			}
@@ -546,7 +547,7 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 			return coreadapter.OperationResult{}, fmt.Errorf("cannot verify pull request from %s:%s after creation", in.Fork, branch)
 		}
 	}
-	if len(found) != 1 || !matchingPublicationPR(found[0], in, branch, approval.Description, published) {
+	if len(found) != 1 || !matchingPublicationPR(found[0], in, branch, title, approval.Description, published) {
 		return p.refusePR(ctx, stream, in, branch, published, found)
 	}
 	pr := found[0]
@@ -554,8 +555,8 @@ func (p *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	return p.deliver(ctx, stream, in, record)
 }
 
-func matchingPublicationPR(pr pulls.PullRequest, in publishInput, branch, description, commit string) bool {
-	return (in.Retarget == nil || pr.Number == in.Retarget.Number && pr.URL == in.Retarget.URL) && pr.Number > 0 && pr.URL != "" && pr.State == "open" && !pr.Merged && pr.HeadRepository == in.Fork && pr.Head == branch && pr.Base == in.Base && pr.HeadCommit == commit && pr.Body == description
+func matchingPublicationPR(pr pulls.PullRequest, in publishInput, branch, title, description, commit string) bool {
+	return (in.Retarget == nil || pr.Number == in.Retarget.Number && pr.URL == in.Retarget.URL) && pr.Number > 0 && pr.URL != "" && pr.State == "open" && !pr.Merged && pr.HeadRepository == in.Fork && pr.Head == branch && pr.Base == in.Base && pr.HeadCommit == commit && pr.Title == title && pr.Body == description
 }
 
 func (p *publisher) refusePR(ctx context.Context, stream config.WorkstreamID, in publishInput, branch, commit string, found []pulls.PullRequest) (coreadapter.OperationResult, error) {
@@ -566,15 +567,15 @@ func (p *publisher) refusePR(ctx context.Context, stream config.WorkstreamID, in
 	return p.refuse(ctx, stream, in, fmt.Sprintf("%s of %s already has pull requests %s, and none is the one open against %s at %s with the approved description", branch, in.Fork, strings.Join(seen, ", "), in.Base, commit))
 }
 
-// deliveryTitle is the pull request title and delivery commit subject: the
-// description's first non-empty line without its heading marks.
+// deliveryTitle is the pull request title and delivery commit subject an
+// approval recorded before the title became part of the draft still
+// publishes with: the description's first non-empty line without its
+// heading marks. publishedTitle calls this only as that approval's
+// fallback; a current approval records its own Title.
 func deliveryTitle(description string, stream config.WorkstreamID) string {
 	for _, line := range strings.Split(description, "\n") {
 		if line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#")); line != "" {
-			if runes := []rune(line); len(runes) > subjectLength {
-				line = string(append(runes[:subjectLength-1], '…'))
-			}
-			return line
+			return boundSubject(line)
 		}
 	}
 	return "Workstream " + string(stream)
@@ -718,5 +719,5 @@ func matchingRetargetPR(pr pulls.PullRequest, in publishInput, branch, commit st
 	if in.Retarget == nil {
 		return false
 	}
-	return pr.Number == in.Retarget.Number && pr.URL == in.Retarget.URL && pr.State == "open" && !pr.Merged && pr.HeadRepository == in.Fork && pr.Head == branch && pr.HeadCommit == commit && pr.Base == in.Retarget.Base && pr.Body == in.Retarget.Description
+	return pr.Number == in.Retarget.Number && pr.URL == in.Retarget.URL && pr.State == "open" && !pr.Merged && pr.HeadRepository == in.Fork && pr.Head == branch && pr.HeadCommit == commit && pr.Base == in.Retarget.Base && pr.Title == in.Retarget.Title && pr.Body == in.Retarget.Description
 }
