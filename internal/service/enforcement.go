@@ -62,9 +62,10 @@ func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeContro
 }
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
-// its view, ask the chief of staff, file an amendment and report done. A unit
-// mason is narrowed to unitMasonGrant; the drift mason to the file tools,
-// amend and done.
+// its view, ask the chief of staff, read factory context, record a
+// discovery, file an amendment and report done. A unit mason is narrowed to
+// unitMasonGrant; the drift mason keeps every tool here but amend, which it
+// narrows to cite the drift rebase's upstream commit.
 var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, factoryContextTool, discoveryTool, doneTool}, WriteFiles: true, Execute: true}
 
 // unitMasonGrant is what a unit mason turn may do: read, write and execute in
@@ -73,8 +74,10 @@ var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_wri
 var unitMasonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, factoryContextTool, discoveryTool, doneTool}, WriteFiles: true, Execute: true}
 
 // reviewerGrant is what a unit reviewer turn may do: read its candidate and
-// diff, ask the chief of staff and record its verdict. The service runs the
-// candidate's checks before review.
+// diff, ask the chief of staff, read factory context, record a discovery and
+// record its verdict. The service runs the candidate's checks before review.
+// The drift reviewer holds the same tools, over the resolved candidate it
+// reads instead of a unit's.
 var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, factoryContextTool, discoveryTool, verdictTool, workstreamDiffTool}}
 
 // threadExecution is how a thread turn of role runs: in the role's sandbox
@@ -96,9 +99,15 @@ func threadExecution(role string, r config.Role) coreadapter.ExecutionSettings {
 // into the workspace after the turn, and a mason turn whose done the service
 // accepted ends with the outcome done, the mason's report and its card. A
 // drift mason turn works the same way on its workstream's drift resolution
-// workspace, with file tools, amend and done alone, and a drift reviewer
-// turn holds file_read and verdict alone. An amendment a drift mason files,
-// or a unit reviewer files while it reads a candidate a drift rebase
+// workspace, with file tools, ask, factory_context, discovery recording,
+// amend and done. A drift reviewer turn reads a read-only export of the
+// resolved candidate it reviews, with file_read, ask, factory_context,
+// discovery recording, workstream_diff and verdict; it writes nothing and
+// executes nothing. Both resolve to the same drift rebase, and the reviewer
+// to the same review, for an answer continuation as for the original turn,
+// from durable question and drift/rebase.json records rather than the turn
+// ID, so the attribution survives a restart. An amendment a drift mason
+// files, or a unit reviewer files while it reads a candidate a drift rebase
 // carried, cites that drift rebase's upstream commit. Each role's
 // sandbox comes from its configuration, and a sandbox the platform cannot
 // enforce fails the turn with core's reason. Thread turns take their role's sandbox and the root from the
@@ -161,7 +170,10 @@ func Enforce(opts Options, e Enforcement) Options {
 				if scope.Role == masonRole {
 					return units.selection(ctx, scope, execution)
 				}
-				if scope.Role == reviewerRole && scope.Thread != driftReviewerAgent {
+				if scope.Role == reviewerRole && scope.Thread == driftReviewerAgent {
+					return driftReviewerSelection(ctx, cfg, r, scope, execution)
+				}
+				if scope.Role == reviewerRole {
 					return unitReviewerSelection(ctx, cfg, r, scope, execution)
 				}
 				if scope.Role == trace.ChiefOfStaff {
@@ -176,29 +188,23 @@ func Enforce(opts Options, e Enforcement) Options {
 					}
 					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: execution}, nil
 				}
-				// A drift reviewer is handed an empty workspace; it may only
-				// read it and record its verdict.
-				workspace := filepath.Join(root, "workspaces", project, scope.Workstream)
-				if err := os.MkdirAll(workspace, 0700); err != nil {
-					return isolation.Selection{}, err
-				}
-				selection := isolation.Selection{
-					Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace},
-					Execution: execution,
-				}
-				if scope.Role == reviewerRole && scope.Thread == driftReviewerAgent {
-					selection.Narrow = &coreadapter.Capabilities{Tools: []string{"file_read", verdictTool, workstreamDiffTool}}
-				}
-				return selection, nil
+				return isolation.Selection{}, errors.New("view selection denied")
 			},
 			Scoped: func(ctx context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 				if scope.Role == masonRole && scope.Thread == driftMasonAgent {
 					amend, err := driftMasonTools(r, scope, now)
-					return append([]coreadapter.Tool{reports.driftTool(scope)}, amend...), err
+					return append([]coreadapter.Tool{reports.driftTool(scope), recordDiscovery(r, scope, now), factoryContext(r, scope)}, amend...), err
 				}
 				if scope.Role == reviewerRole && scope.Thread == driftReviewerAgent {
+					ask, err := questions.Tools(r, driftReviewerAgent, scope, now)
+					if err != nil {
+						return nil, err
+					}
 					diff, err := driftDiffTool(ctx, cfg, r, scope)
-					return []coreadapter.Tool{verdicts.tool(scope), diff}, err
+					if err != nil {
+						return nil, err
+					}
+					return append(ask, verdicts.tool(scope), recordDiscovery(r, scope, now), factoryContext(r, scope), diff), nil
 				}
 				if scope.Role == masonRole {
 					ask, err := questions.Tools(r, masonAgent(scope.Unit), scope, now)

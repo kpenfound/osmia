@@ -860,10 +860,14 @@ func (a *finalReviewer) enqueue(ctx context.Context, cfg *config.Config, stream 
 	if err != nil {
 		return err
 	}
+	notes, err := driftRebaseNotes(a.repository, stream)
+	if err != nil {
+		return err
+	}
 	turn := finalTurnID(in.Review, member, attempt)
 	transition, _ := finalReviewIDs(in.Review)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: finalReviewActor, Cause: transition, Depth: 1},
-		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: finalSystemPrompt(cfg.Project), Prompt: finalPrompt(report, checks)}
+		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: finalSystemPrompt(cfg.Project), Prompt: finalPrompt(report, checks, notes)}
 	_, err = a.repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -1410,7 +1414,11 @@ func finalSystemPrompt(p config.Project) string {
 	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s): every planned unit has landed on the feature branch, and you read the whole branch against the feature's sealed spec and the project's charter before the owner decides whether it is delivered. You judge one thing: whether the branch meets each criterion of the sealed spec without breaking a charter rule. Your view is read-only. The service ran every project check on the exact commit you read, and your prompt carries the result; cite it as evidence rather than re-deriving what the checks prove. Code style, formatting and lint belong to the checks, not to your read. You record your report with %s: for every criterion, what in the branch shows it holds, or the gap. A criterion you cannot see shown is a gap, never a guess.", p.Name, p.Upstream, FinalReportTool)
 }
 
-func finalPrompt(report FinalReport, checks FinalCheckRun) string {
+func finalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string) string {
+	notes := ""
+	if len(driftNotes) > 0 {
+		notes = "\n" + strings.Join(driftNotes, "\n") + "\n"
+	}
 	return fmt.Sprintf(`Final review %d of the assembled feature branch at commit %s, rebased onto %s/%s at %s. The spec is revision %d, the plan revision %d, sealed as seal %d; the charter is revision %d.
 
 Your view holds:
@@ -1419,11 +1427,11 @@ Your view holds:
 - charter.md: the owner's rules for contributing to this project.
 - context.md: local decisions, knowledge and notices, plus optional scoped external memory.
 - units/<unit>/report.json and landing.json: each unit's last report and how it landed.
-
+%s
 Call %s to read the whole change the branch makes to upstream: files_only lists the changed files, and paths and lines narrow the diff.
 
 Read the whole branch, not unit by unit. For every criterion of spec.md, call %s once with all of them: evidence names what in the branch shows the criterion holds, such as files, tests, behaviour and the checks below; a gap says what is missing, wrong or not shown, including anything that breaks a charter rule or a failed check the criterion rests on. Then end your turn.
 
 %s
-`, report.Review, report.Commit, report.Upstream.Remote, report.Upstream.Branch, report.Upstream.Commit, report.Spec, report.Plan, report.Seal, report.Charter, workstreamDiffTool, FinalReportTool, finalCheckEvidence(checks))
+`, report.Review, report.Commit, report.Upstream.Remote, report.Upstream.Branch, report.Upstream.Commit, report.Spec, report.Plan, report.Seal, report.Charter, notes, workstreamDiffTool, FinalReportTool, finalCheckEvidence(checks))
 }

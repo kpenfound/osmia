@@ -506,8 +506,8 @@ func TestRestartDuringDriftResolutionResumesWithoutDuplicates(t *testing.T) {
 }
 
 // A drift mason turn is lent its workstream's resolution workspace, sees all
-// of it but its VCS metadata, holds file tools, amend and done alone, and has
-// its view copied back. Its done takes an outcome.
+// of it but its VCS metadata, holds exactly masonGrant's tools with no
+// narrowing, and has its view copied back. Its done takes an outcome.
 func TestDriftMasonTurnWorksInTheResolutionWorkspace(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, _ := newFinalFixture(t, "drift-workspace")
@@ -532,8 +532,11 @@ func TestDriftMasonTurnWorksInTheResolutionWorkspace(t *testing.T) {
 	if slices.Contains(selection.Paths, ".git") || !slices.Contains(selection.Paths, "CODEOWNERS") {
 		t.Fatalf("the drift mason's view selects %v", selection.Paths)
 	}
-	if n := selection.Narrow; n == nil || !slices.Equal(n.Tools, []string{"file_read", "file_write", questions.AmendTool, doneTool}) || !n.WriteFiles || !n.Execute {
-		t.Fatalf("the drift mason's capabilities %+v", n)
+	if selection.Narrow != nil {
+		t.Fatalf("the drift mason's selection narrows the role grant: %+v", selection.Narrow)
+	}
+	if !slices.Equal(masonGrant.Tools, []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, factoryContextTool, discoveryTool, doneTool}) || !masonGrant.WriteFiles || !masonGrant.Execute {
+		t.Fatalf("masonGrant %+v", masonGrant)
 	}
 
 	viewRoot := filepath.Join(t.TempDir(), "views")

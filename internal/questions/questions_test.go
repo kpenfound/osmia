@@ -850,7 +850,7 @@ func upstreamMoved(t *testing.T, f fixture) []trace.OutboxEntry {
 
 // A turn that reads what a drift rebase did files amendments that cite its
 // upstream commit and raise an upstream moved event with the filing. A drift
-// mason, which has no unit, holds amend alone, parks nothing and keeps its
+// mason, which has no unit, holds ask and amend, parks nothing and keeps its
 // turn's result; a turn that recovers an interrupted one, after a restart,
 // gets the request already filed. A unit reviewer's request parks its unit
 // as any amendment does.
@@ -884,8 +884,11 @@ func TestDriftAmendmentCitesUpstreamAndIsFiledOnce(t *testing.T) {
 
 	mason := f.unitlessTurn(t, "drift-mason", "mason", "resolve-1")
 	tools := driftTools("drift-mason", mason)
-	if len(tools) != 1 || !strings.Contains(tools[questions.AmendTool].Description, move.To) {
+	if len(tools) != 2 || !strings.Contains(tools[questions.AmendTool].Description, move.To) {
 		t.Fatalf("the drift mason's tools %v", tools)
+	}
+	if _, ok := tools[questions.AskTool]; !ok {
+		t.Fatalf("the drift mason's tools lack ask: %v", tools)
 	}
 	input := `{"citations":["spec#1"],"change":"Resume from the upstream checkpoint","reason":"Upstream now checkpoints uploads itself"}`
 	if got := call(t, tools[questions.AmendTool], input); !strings.Contains(got, `"amendment":"1"`) || !strings.Contains(got, "Finish the resolution") {
