@@ -221,23 +221,6 @@ func (r *activityRegistry) snapshot() []ActivityEntry {
 	return out
 }
 
-// activityEntry returns a copy of the entry the activity record holds under
-// key, for a handler that must name a specific blocking operation in a
-// "temporarily unavailable" response. It never touches the trace mutex or
-// operationMu.
-func (s *Service) activityEntry(key string) (ActivityEntry, bool) {
-	if s.activity == nil {
-		return ActivityEntry{}, false
-	}
-	s.activity.mu.Lock()
-	defer s.activity.mu.Unlock()
-	e := s.activity.entries[key]
-	if e == nil {
-		return ActivityEntry{}, false
-	}
-	return *e, true
-}
-
 // activityView answers GET /v1/activity: a snapshot of the activity record,
 // read without touching the trace mutex or operationMu.
 func (s *Service) activityView() ActivityResponse {
@@ -314,13 +297,6 @@ func stallTracked(kind ActivityKind) bool {
 }
 
 func activityCause(e ActivityEntry) string {
-	// The shadow project and its reserved workstream never appear in an API
-	// list or on the page (docs/design.md §6.7, §11.1): naming them here,
-	// even inside a "temporarily unavailable" or /health message, would leak
-	// an identifier the rest of the API treats as unknown.
-	if e.Project == config.ShadowProjectID || e.Workstream == config.BeekeeperWorkstreamID {
-		return "the Beekeeper's " + string(e.Kind) + ": " + e.Phase
-	}
 	if e.Workstream != "" {
 		return string(e.Kind) + " (" + string(e.Workstream) + "): " + e.Phase
 	}

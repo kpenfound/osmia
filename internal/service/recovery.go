@@ -13,7 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/service/beekeeper"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -80,13 +79,6 @@ func (s *Service) recoverSessions(ctx context.Context, cfg *config.Config, repos
 			if th.Identity.Role == trace.ChiefOfStaff && s.options.Threads != nil {
 				if err := s.recoverContinuations(ctx, repository, stream, th.Identity.ID, func(turn string) error {
 					return s.recoverChief(ctx, repository, stream, th.Identity.ID, turn)
-				}); err != nil {
-					return err
-				}
-			}
-			if th.Identity.Role == beekeeper.AgentID && s.options.BeekeeperTurns != nil {
-				if err := s.recoverContinuations(ctx, repository, stream, th.Identity.ID, func(turn string) error {
-					return s.recoverBeekeeper(ctx, cfg, repository, stream, th.Identity.ID, turn)
 				}); err != nil {
 					return err
 				}
@@ -280,21 +272,4 @@ func (s *Service) recoverChief(ctx context.Context, repository *trace.Repository
 	}
 	_, err = s.recoverContinuation(ctx, repository, stream, agent, turn, profile)
 	return err
-}
-
-// recoverBeekeeper enqueues the Beekeeper's continuation turn with the
-// profile the Beekeeper section of the loaded configuration names, the same
-// way recoverChief does for an interrupted chief-of-staff turn, and runs it
-// at once through beekeeper.Continue: the shadow project has no background
-// reconciliation loop of its own to pick the continuation up later.
-func (s *Service) recoverBeekeeper(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, agent, turn string) error {
-	profile, err := cfg.NamedProfile(cfg.Beekeeper.Profile)
-	if err != nil {
-		return err
-	}
-	queued, err := s.recoverContinuation(ctx, repository, stream, agent, turn, profile)
-	if err != nil || queued == "" {
-		return err
-	}
-	return beekeeper.Continue(ctx, repository, s.options.BeekeeperTurns, s.beekeeperPrepare(cfg), s.now)
 }

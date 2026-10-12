@@ -127,14 +127,6 @@ func location(root config.Root, project config.Project) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// The Beekeeper's shadow project has no target repository: nothing is
-	// cloned or configured for it.
-	if project.ID == config.ShadowProjectID {
-		if project.Clone != "" {
-			return "", fmt.Errorf("the shadow project must not configure a target clone")
-		}
-		return directory, nil
-	}
 	if !filepath.IsAbs(project.Clone) {
 		return "", fmt.Errorf("target clone must be an absolute configured path")
 	}

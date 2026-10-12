@@ -416,11 +416,6 @@ svg {
   background: var(--selected);
 }
 
-.beekeeper {
-  margin: 0 0.5rem 0.5rem;
-  font-weight: 500;
-}
-
 .row .title,
 .row .sub {
   min-width: 0;

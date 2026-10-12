@@ -30,7 +30,6 @@ import (
 	"github.com/kpenfound/osmia/internal/redact"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
-	"github.com/kpenfound/osmia/internal/service/beekeeper"
 	"github.com/kpenfound/osmia/internal/skills"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -71,14 +70,6 @@ type Options struct {
 	// rulings before the mason controller starts more work.
 	// Callers must not close the repository.
 	Threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error)
-	// BeekeeperTurns runs the Beekeeper's own turns: the same runner-boundary
-	// adapter chief-of-staff turns use, on the runtime agent-session
-	// machinery, bound only to the shadow project's repository and the
-	// Beekeeper section of the loaded configuration. No registered project's
-	// configuration, charter or capacity bounds these turns, and none of
-	// Threads, Librarian, Architect or Committee ever runs one. Without it,
-	// PostBeekeeper fails and records nothing.
-	BeekeeperTurns coreadapter.Turns
 	// Librarian supplies the execution boundary of the librarian's
 	// knowledge-base extraction and refresh turns. Without it those operations
 	// fail with a recorded reason and the project stays usable.
@@ -214,17 +205,7 @@ type Service struct {
 	// with that snapshot, marked stale, instead of blocking past the
 	// bound (bounded_read.go, boundedView).
 	statusViews viewCache[StatusResponse]
-	// shadow is the Beekeeper's shadow project: created or reopened at
-	// startup, outside cfg.Projects and this service's own reconciliation
-	// loop. beekeeper.Post and beekeeper.Continue run their own scheduler and
-	// reconcile.Controller pass directly against it, on demand rather than on
-	// a continuous loop; no other workflow ever runs on it.
-	shadow *trace.Repository
 }
-
-// Beekeeper returns the open repository of the Beekeeper's shadow project,
-// for the Beekeeper's own thread and tools.
-func (s *Service) Beekeeper() *trace.Repository { return s.shadow }
 
 // log returns s's structured logger, or a silent one when a test built s
 // directly without one: a missing logger never fails or panics the action
@@ -234,65 +215,6 @@ func (s *Service) log() *slog.Logger {
 		return s.logger
 	}
 	return ghlog.Logger(context.Background())
-}
-
-// BeekeeperBusy reports whether the Beekeeper's latest owner request has no
-// finished turn, for bk-api's conflict response.
-func (s *Service) BeekeeperBusy() (bool, error) {
-	return beekeeper.Busy(s.shadow)
-}
-
-// beekeeperPrepare supplies a Beekeeper turn's session directory alone, for
-// beekeeper.Post and beekeeper.Continue alike. Its execution settings come
-// from Options.BeekeeperTurns' own selection, the way a chief-of-staff
-// turn's come from the Threads runner's selection, never from the prepared
-// turn: Options.BeekeeperTurns refuses a turn that supplies them twice.
-func (s *Service) beekeeperPrepare(cfg *config.Config) beekeeper.Prepare {
-	root := cfg.Root.String()
-	return func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
-		// The same layout sessionDirectories' default case expects, so a
-		// crash between this call and ClaimTurn is found by the existing
-		// recovery path.
-		directory := filepath.Join(root, "threads", string(config.ShadowProjectID), string(in.Workstream), in.Agent, in.Turn)
-		if err := os.MkdirAll(directory, 0700); err != nil {
-			return coreadapter.PreparedTurn{}, err
-		}
-		return coreadapter.PreparedTurn{SessionDirectory: directory}, nil
-	}
-}
-
-// beekeeperActivityKey names the Beekeeper's own turn in the activity
-// record. The Beekeeper runs at most one turn at a time (postLock in
-// beekeeper.Post), so one fixed key names it for the whole service's
-// lifetime: a fresh start under it supersedes whatever an earlier turn
-// reported, exactly as a reconciled operation's own stable ID would.
-const beekeeperActivityKey = "beekeeper-turn"
-
-// PostBeekeeper records text as the Beekeeper thread's next owner request
-// and runs the Beekeeper turn through beekeeper.Post, on
-// Options.BeekeeperTurns, with the profile and sandbox settings the
-// Beekeeper section of the loaded configuration names alone: no registered
-// project's configuration, charter or capacity bounds it. A busy Beekeeper
-// returns beekeeper.ErrBusy and records nothing. The turn that actually
-// runs, never a call beekeeper.Post refuses as busy, is reported in the
-// activity record under beekeeperActivityKey for its whole run, so a
-// concurrent busy refusal can name it.
-func (s *Service) PostBeekeeper(ctx context.Context, text string) (trace.QueuedTurn, error) {
-	cfg := s.current()
-	profile, err := cfg.NamedProfile(cfg.Beekeeper.Profile)
-	if err != nil {
-		return trace.QueuedTurn{}, fmt.Errorf("beekeeper profile %q: %w", cfg.Beekeeper.Profile, err)
-	}
-	if s.options.BeekeeperTurns == nil {
-		return trace.QueuedTurn{}, fmt.Errorf("the beekeeper has no turn runner configured")
-	}
-	var h *ActivityHandle
-	started := func() {
-		h = s.StartActivity(beekeeperActivityKey, ActivityAgentTurn, config.ShadowProjectID, "", "running the owner's message")
-	}
-	q, err := beekeeper.Post(ctx, s.shadow, profile, s.options.BeekeeperTurns, s.beekeeperPrepare(cfg), s.now, text, started)
-	h.Finish(err)
-	return q, err
 }
 
 // Start loads state and binds before returning. Wait joins shutdown and cleanup.
@@ -341,24 +263,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	shadow, err := beekeeper.Open(ctx, root, cfg.Beekeeper, time.Now().UTC())
-	if err != nil {
-		return nil, fmt.Errorf("open the Beekeeper's shadow project: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			shadow.Close()
-		}
-	}()
-	// EnsureThread's identity carries this call's timestamp, which almost
-	// never matches an earlier session's creation time; a thread the
-	// Beekeeper already has, from any earlier session, reports that
-	// mismatch as trace.ErrConflict, not as a problem to fail startup over.
-	if _, err = beekeeper.EnsureThread(ctx, shadow, time.Now().UTC()); err != nil && !errors.Is(err, trace.ErrConflict) {
-		return nil, fmt.Errorf("ensure the beekeeper's thread: %w", err)
-	}
-	err = nil
-	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), shadow: shadow, logger: logger}
+	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), logger: logger}
 	s.activity = newActivityRegistry(s.now)
 	s.activity.notify = func() { s.hub.publish(Event{Kind: EventActivity}) }
 	s.pool = &scheduler.Shared{Traces: s.traces}
@@ -492,20 +397,6 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		st.Close()
 		return nil, fmt.Errorf("recover an interrupted session open: %w", err)
 	}
-	// The Beekeeper's thread is recovered by the same existing path every
-	// workstream's threads are: a turn a previous session claimed or
-	// prepared without capturing a result ends interrupted, exactly as an
-	// interrupted chief-of-staff turn does, and gets the same kind of
-	// continuation turn, run at once since the shadow project has no
-	// background reconciliation loop to pick it up later.
-	beekeeperRecovery := s.StartActivity("recovery-beekeeper", ActivityRecovery, config.ShadowProjectID, "", "recovering the beekeeper's interrupted turns")
-	err = s.recoverSessions(ctx, cfg, shadow)
-	beekeeperRecovery.Finish(err)
-	if err != nil {
-		s.cleanupSocket()
-		st.Close()
-		return nil, fmt.Errorf("recover the beekeeper's interrupted turns: %w", err)
-	}
 	s.lifetime, s.cancel = context.WithCancel(ctx)
 	hostname := cfg.Listen.Tailnet
 	s.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -590,9 +481,6 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.mu.Unlock()
 		// A project failure that stopped the service is reported once.
 		if e := s.stop(projects...); e != nil && (s.err == nil || !errors.Is(e, s.err)) {
-			s.err = errors.Join(s.err, e)
-		}
-		if e := s.shadow.Close(); e != nil {
 			s.err = errors.Join(s.err, e)
 		}
 		s.cleanupSocket()

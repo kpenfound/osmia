@@ -415,69 +415,6 @@
         }
       }
     },
-    "/v1/beekeeper": {
-      "get": {
-        "summary": "List the Beekeeper chat's recent messages, oldest first, limited by limit (default 50, capped at 200)",
-        "operationId": "getBeekeeper",
-        "responses": {
-          "default": {
-            "description": "The request failed; the error names its code and reason.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BeekeeperMessagesResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "summary": "Send an owner message to the Beekeeper; refused with conflict while a previous turn is in flight",
-        "operationId": "postBeekeeper",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BeekeeperSendRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "default": {
-            "description": "The request failed; the error names its code and reason.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BeekeeperMessagesResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/charter": {
       "get": {
         "summary": "List charter proposals",
@@ -3293,60 +3230,6 @@
         },
         "type": "object"
       },
-      "BeekeeperAuthor": {
-        "properties": {
-          "kind": {
-            "type": "string"
-          },
-          "workstream": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "BeekeeperMessage": {
-        "properties": {
-          "at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "author": {
-            "$ref": "#/components/schemas/BeekeeperAuthor"
-          },
-          "text": {
-            "type": "string"
-          },
-          "turn": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "BeekeeperMessagesResponse": {
-        "properties": {
-          "has_older": {
-            "type": "boolean"
-          },
-          "messages": {
-            "items": {
-              "$ref": "#/components/schemas/BeekeeperMessage"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          }
-        },
-        "type": "object"
-      },
-      "BeekeeperSendRequest": {
-        "properties": {
-          "text": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "CapacityStatus": {
         "properties": {
           "per_workstream": {
@@ -3651,9 +3534,6 @@
               "null"
             ]
           },
-          "beekeeper": {
-            "$ref": "#/components/schemas/ConfigBeekeeper"
-          },
           "budget": {
             "$ref": "#/components/schemas/ConfigBudget"
           },
@@ -3721,23 +3601,6 @@
             "type": "integer"
           },
           "workspaces": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "ConfigBeekeeper": {
-        "properties": {
-          "image": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "profile": {
-            "type": "string"
-          },
-          "sandbox": {
             "type": "string"
           }
         },

@@ -150,3 +150,22 @@ func TestBrowserSelectedWorkstreamIsMarkedCurrent(t *testing.T) {
 	// Selecting did not reorder the sidebar.
 	p.awaitSidebarOrder(first, second)
 }
+
+// The page no longer has a Beekeeper sidebar item or chat panel: the
+// removed feature leaves nothing behind in the sidebar or the settings
+// menu's views.
+func TestBrowserPageHasNoBeekeeperSidebarItemOrPanel(t *testing.T) {
+	t.Parallel()
+	opts, repo := sidebarFixture(t)
+	must(t, repo.Close())
+	s, _ := start(t, opts)
+	p := openBrowser(t)
+	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))
+	p.await("the live connection", `document.body.dataset.connection === 'live'`)
+	var hasButton, hasPanel bool
+	p.eval(`document.getElementById('beekeeper-button') !== null`, &hasButton)
+	p.eval(`document.querySelector('[data-view="beekeeper"]') !== null`, &hasPanel)
+	if hasButton || hasPanel {
+		t.Fatalf("the page still has a beekeeper sidebar item (%v) or panel (%v)", hasButton, hasPanel)
+	}
+}

@@ -215,6 +215,10 @@ var keyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
 func key(s string) bool     { return keyPattern.MatchString(s) }
 func present(s string) bool { return strings.TrimSpace(s) != "" }
+
+// validActor accepts "beekeeper" only to keep reading records an earlier
+// version of the service attributed to its now-removed service-wide
+// assistant; nothing in the service writes that kind any more.
 func validActor(a Actor) bool {
 	return (a.Kind == "owner" || a.Kind == "service" || a.Kind == "agent" || a.Kind == "beekeeper") && key(a.ID)
 }

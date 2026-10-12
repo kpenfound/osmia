@@ -94,7 +94,7 @@ func roleRestrictedTool(role, name string) bool {
 func roleGrant(role string, grant coreadapter.Capabilities) (coreadapter.Capabilities, error) {
 	switch role {
 	case "mason", "librarian", "session":
-	case "chief_of_staff", "architect", "committee", "reviewer", "foreman", "classifier", "beekeeper":
+	case "chief_of_staff", "architect", "committee", "reviewer", "foreman", "classifier":
 		grant.WriteFiles, grant.Execute, grant.Network = false, false, false
 	default:
 		return coreadapter.Capabilities{}, errors.New("unknown Osmia role")
