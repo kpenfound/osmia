@@ -173,9 +173,9 @@ its own, actionable again, if the service is still listing it two minutes
 after acknowledging the submission, so it can never disappear for good.
 Submitting one card never hides or changes any other. If a submission fails,
 the card comes back at once with the error shown and what you typed still in
-it. A submission the backend cannot admit right now, because an operation
-such as a Beekeeper turn is still in flight, shows distinctly from one the
-service rejects outright: the former names the blocking operation and is
+it. A submission the backend cannot admit right now, because an operation it
+needs is still in flight, shows distinctly from one the service rejects
+outright: the former names the blocking operation and is
 worth retrying as is, the latter needs the input or the decision changed.
 Every form that submits an action, including new project, archive and the
 feed's own action forms, clears back to its defaults once it succeeds; a
@@ -189,33 +189,6 @@ is lit while a reload has something to apply.
 When the connection drops, the page shows that it is reconnecting and retries
 with a growing delay up to 10 seconds, immediately when the browser comes back
 online or the page becomes visible again.
-
-## The Beekeeper
-
-Beside each workstream's chat with its chief of staff, the page carries a
-"Beekeeper" item above the workstream list. The Beekeeper is the owner's one
-assistant for the whole service, not any single project: open it to ask what
-projects and workstreams exist, or to have it pass a message to the chief of
-staff of any workstream in any registered project. Selecting it opens a chat
-in the main area, with a composer that behaves like a workstream's: Enter
-sends, Shift+Enter starts a new line, and your message and the Beekeeper's
-reply appear without a reload. A reply a chief of staff sends back after the
-Beekeeper relays it a message also appears in the chat, attributed to that
-workstream's chief of staff, without you having to ask again.
-
-The Beekeeper answers one message at a time. Sending another while it is
-still working on the previous one gets a `503 unavailable` response naming
-the turn in flight, rather than being queued or recorded; wait for the reply
-and send it again. The chat shows only the most recent messages and has no
-way to load older history.
-
-The Beekeeper cannot approve or refuse a delivery, rule on a contested unit,
-approve a spec or plan, edit or ratify the charter, answer a question a
-worker escalated, or open a workstream; those decisions are still made from
-the workstream's own inbox entries, on the page or with the command line, as
-described above. `[beekeeper]` in the top-level configuration names its
-profile and sandbox; see the
-[configuration reference](configuration.md#top-level-configtoml).
 
 ## Sessions
 
@@ -483,8 +456,8 @@ cares should retry rather than treat that body as current.
 
 Every owner-action write (hand-in, ratify, a shed action, an amendment
 decision, answering an inbox entry, moving a unit, delivery approval,
-abandon, pause, priority, archive, and the Beekeeper's message) answers with
-one of three outcomes: a success response once the command is durably
+abandon, pause, priority and archive) answers with one of three outcomes: a
+success response once the command is durably
 accepted; an error with a `4xx` code and a reason when it is rejected, which
 includes a command whose request or revision is now stale against current
 state; or `503 unavailable` naming the backend operation in the way when a

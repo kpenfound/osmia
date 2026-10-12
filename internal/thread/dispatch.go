@@ -49,8 +49,8 @@ type Dispatcher struct {
 	// Relay, when set, runs every time Apply observes a turn with a
 	// captured response and a completion, given the thread's identity and
 	// the completed queued turn, so a caller can mirror the reply
-	// elsewhere, such as the Beekeeper's shadow trace, without the
-	// dispatcher knowing why. It never starts a new turn. Apply reports its
+	// elsewhere without the dispatcher knowing why. It never starts a new
+	// turn. Apply reports its
 	// error like any other reconciliation failure, so Relay runs again on
 	// retry; it must not repeat a side effect it already completed.
 	Relay func(context.Context, trace.Thread, trace.QueuedTurn) error

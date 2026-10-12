@@ -57,6 +57,11 @@ configuration list; they belong to persisted workstream manifests.
 <root>/branches/<project-id>/<workstream-id>  the workstream's feature branch, a workspace of the clone
 ```
 
+A root left over from a version that had the Beekeeper, the service's former
+service-wide assistant, may still carry a `<root>/beekeeper/` directory,
+alongside the layout above. The service no longer reads or writes it; it can
+be deleted.
+
 A project whose trace still uses the older layout, with every workstream's
 records inside the project's own repository under `workstreams/<workstream-id>/`,
 is migrated automatically into the layout above the next time the service
@@ -170,20 +175,16 @@ webhook = ""
 # "never", "always" or a duration.
 refresh = "24h"
 
-[beekeeper]
-# The Beekeeper's runtime session settings. It runs in its own shadow
-# project, separate from every registered project's configuration.
-name = "Beekeeper"
-profile = "default"
-sandbox = "none"
-# image = "example/osmia-claude:1" # only with sandbox "container" or "sbx"
-
-
 [roles.mason]
 profile = "default"
 sandbox = "none"
 skills = []
 ```
+
+A top-level file left over from a version that had the Beekeeper may still
+carry a `[beekeeper]` section. The loader accepts and ignores it: it loads
+without error and has no effect, so the section can be deleted at your
+convenience.
 
 The socket must be a direct child of the resolved root with a `.sock` suffix,
 separate from managed state. Its absolute path may contain at most 103 bytes

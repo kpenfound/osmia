@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -774,10 +773,9 @@ func (e *confinementEngine) Enforcer(s coreadapter.ExecutionSettings) (agent.Enf
 }
 
 // newConfinementFixture registers a project the way newSessionChatFixture
-// does, with the Beekeeper section a Beekeeper turn needs and an MCP host so
-// a chief-of-staff or Beekeeper turn's granted tools can be served: unlike a
-// session turn, which is granted none, every other role needs one to run at
-// all.
+// does, with an MCP host so a chief-of-staff turn's granted tools can be
+// served: unlike a session turn, which is granted none, every other role
+// needs one to run at all.
 func newConfinementFixture(t *testing.T) (*Service, *Client, config.ProjectID, *confinementEngine) {
 	t.Helper()
 	opts, clone := projectFixture(t)
@@ -790,14 +788,10 @@ func newConfinementFixture(t *testing.T) (*Service, *Client, config.ProjectID, *
 	must(t, os.MkdirAll(filepath.Dir(bare), 0700))
 	demoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
 	demoGit(t, home, "-C", clone, "remote", "add", "upstream", bare)
-	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
-	must(t, err)
-	_, err = configFile.WriteString("[beekeeper]\nname = \"Hive\"\nprofile = \"default\"\n")
-	must(t, errors.Join(err, configFile.Close()))
 	sessions := &demoSessions{byKey: map[string]*mcp.ClientSession{}}
 	engine := &confinementEngine{}
 	enforced := Enforce(opts, Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}}})
-	opts.Threads, opts.controls, opts.BeekeeperTurns = enforced.Threads, enforced.controls, enforced.BeekeeperTurns
+	opts.Threads, opts.controls = enforced.Threads, enforced.controls
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), request(clone))
 	must(t, err)
@@ -841,12 +835,11 @@ func confinementChiefTurn(t *testing.T, s *Service, c *Client, engine *confineme
 
 // TestResumeConfinedToSessionTurns covers that resume is confined to
 // session turns (spec#8, spec#27 and the constraint that chief-of-staff,
-// mason, reviewer and Beekeeper turns must not start resuming): in a
-// service where a session has taken a turn resumed through
-// resumableEngine's role-blind heuristic fallback, a chief-of-staff
-// conversation and a Beekeeper turn, each run through the exact same shared
-// engine (which has no CheckResume of its own, so neither could resume
-// through any other mechanism either), never resume, and a second,
+// mason and reviewer turns must not start resuming): in a service where a
+// session has taken a turn resumed through resumableEngine's role-blind
+// heuristic fallback, a chief-of-staff conversation run through the exact
+// same shared engine (which has no CheckResume of its own, so it could not
+// resume through any other mechanism either) never resumes, and a second,
 // completely session-free service's identical conversation receives the
 // exact same second-turn prompt.
 func TestResumeConfinedToSessionTurns(t *testing.T) {
@@ -888,26 +881,6 @@ func TestResumeConfinedToSessionTurns(t *testing.T) {
 		t.Fatalf("chief-of-staff turn input: %q", chiefPrompt)
 	}
 
-	// And a Beekeeper turn, through its own separate production runner
-	// (Options.BeekeeperTurns), also through the same engine.
-	_, err = s.PostBeekeeper(context.Background(), "first beekeeper message")
-	must(t, err)
-	var beeResume, beePrompt string
-	engine.mu.Lock()
-	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
-		beeResume, beePrompt = req.ResumeID, req.Prompt
-		return &agent.Result{ClaudeID: "bee-session-1", ResultText: "Second beekeeper reply"}, nil
-	}
-	engine.mu.Unlock()
-	_, err = s.PostBeekeeper(context.Background(), "second beekeeper message")
-	must(t, err)
-	if beeResume != "" {
-		t.Fatalf("a beekeeper turn resumed although only the session role may: %q", beeResume)
-	}
-	if !strings.Contains(beePrompt, "second beekeeper message") {
-		t.Fatalf("beekeeper turn input: %q", beePrompt)
-	}
-
 	// A second, completely session-free service's identical chief-of-staff
 	// conversation receives the exact same second-turn prompt: the session
 	// elsewhere made no difference to it.
@@ -943,9 +916,9 @@ func normalizeReplayPrompt(prompt string) string {
 }
 
 // TestResumeConfinedAcrossMasonAndReviewerTurns extends
-// TestResumeConfinedToSessionTurns's chief-of-staff and Beekeeper coverage
-// (spec#8, spec#27, the constraint that chief-of-staff, mason, reviewer and
-// Beekeeper turns must not start resuming, and acceptance item 11) to a real
+// TestResumeConfinedToSessionTurns's chief-of-staff coverage (spec#8,
+// spec#27, the constraint that chief-of-staff, mason and reviewer turns
+// must not start resuming, and acceptance item 11) to a real
 // mason turn and a real reviewer turn, run through the exact production
 // pipeline every other mason and reviewer test uses (newLandingFixture's
 // shared demoEngine, which every role's turn reaches, session included):
@@ -1050,19 +1023,6 @@ func TestResumeRoleGateCoversEveryRole(t *testing.T) {
 		if got := d.Runner.ResumableRoles(role); got != want {
 			t.Errorf("ResumableRoles(%q) = %v, want %v", role, got, want)
 		}
-	}
-}
-
-// TestBeekeeperTurnsNeverResume shows that the Beekeeper's own turn
-// mechanism (internal/service/beekeeper, a separate thread.Runner from the
-// one sessions and registered-project roles share) never asks to resume:
-// it builds its Runner with no ResumableRoles, so every Beekeeper turn
-// starts a fresh model session, independent of any session's resume use.
-func TestBeekeeperTurnsNeverResume(t *testing.T) {
-	t.Parallel()
-	r := thread.Runner{}
-	if r.ResumableRoles != nil {
-		t.Fatal("a bare Runner, as the Beekeeper's own dispatcher constructs one, already requests resume")
 	}
 }
 

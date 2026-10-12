@@ -234,13 +234,6 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 				respond(w, 200, out)
 			}
 			return
-		case Prefix + "/beekeeper":
-			if out, api := s.beekeeperMessages(r); api != nil {
-				failWith(w, api)
-			} else {
-				respond(w, 200, out)
-			}
-			return
 		}
 		if path, ok := strings.CutPrefix(r.URL.Path, Prefix+"/trace/"); ok {
 			stream, kind, selector, valid := splitTracePath(path)
@@ -483,18 +476,6 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if out, api := s.send(r.Context(), id, v); api != nil {
-			failWith(w, api)
-		} else {
-			respond(w, 200, out)
-		}
-		return
-	}
-	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/beekeeper" {
-		var v BeekeeperSendRequest
-		if !decode(w, r, &v) {
-			return
-		}
-		if out, api := s.postBeekeeperMessage(r.Context(), v); api != nil {
 			failWith(w, api)
 		} else {
 			respond(w, 200, out)

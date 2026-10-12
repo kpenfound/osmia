@@ -8,10 +8,12 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// A turn response attributed to the Beekeeper actor kind is accepted, the
-// same way an owner, service or agent actor is, and an unknown kind is
-// still refused.
-func TestBeekeeperActorKindIsAccepted(t *testing.T) {
+// A turn response attributed to the "beekeeper" actor kind, as an older
+// version of the service once recorded for its retired service-wide
+// assistant, still reads back the same way an owner, service or agent
+// actor does, so a trace holding such a legacy record keeps reading. An
+// unknown kind is still refused.
+func TestLegacyBeekeeperActorKindStillReads(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
 	agent := Agent{Header: header("agent", "beekeeper"), Role: "beekeeper", ThreadID: "beekeeper"}
@@ -40,7 +42,7 @@ func TestBeekeeperActorKindIsAccepted(t *testing.T) {
 		t.Fatal(err)
 	}
 	if th.Turns[0].Response.Actor != (Actor{Kind: "beekeeper", ID: "beekeeper"}) {
-		t.Fatalf("beekeeper actor not retained: %+v", th.Turns[0].Response.Actor)
+		t.Fatalf("legacy beekeeper actor not retained: %+v", th.Turns[0].Response.Actor)
 	}
 
 	if validActor(Actor{Kind: "hive", ID: "beekeeper"}) {

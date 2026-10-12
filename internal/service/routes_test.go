@@ -62,6 +62,25 @@ func TestRoutesAreServed(t *testing.T) {
 	}
 }
 
+// TestFormerBeekeeperChatPathIsUnknown shows that a request to the retired
+// Beekeeper chat path gets the same status and body as any other unknown
+// route: the handler no longer recognizes /v1/beekeeper at all.
+func TestFormerBeekeeperChatPathIsUnknown(t *testing.T) {
+	t.Parallel()
+	s, _ := start(t, fixture(t))
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		unknownRec := httptest.NewRecorder()
+		s.handle(unknownRec, httptest.NewRequest(method, Prefix+"/not-a-route-this-service-ever-served", nil))
+
+		beekeeperRec := httptest.NewRecorder()
+		s.handle(beekeeperRec, httptest.NewRequest(method, Prefix+"/beekeeper", nil))
+
+		if beekeeperRec.Code != unknownRec.Code || beekeeperRec.Body.String() != unknownRec.Body.String() {
+			t.Fatalf("%s %s/beekeeper: status %d body %s; an unknown route gets status %d body %s", method, Prefix, beekeeperRec.Code, beekeeperRec.Body.String(), unknownRec.Code, unknownRec.Body.String())
+		}
+	}
+}
+
 // TestRoutesListEveryPath checks that every API path the service's handlers
 // match is listed in Routes, so the OpenAPI description covers it.
 func TestRoutesListEveryPath(t *testing.T) {

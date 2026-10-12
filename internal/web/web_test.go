@@ -10,8 +10,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/kpenfound/osmia/internal/config"
 )
 
 func serve(method, path string) (*httptest.ResponseRecorder, bool) {
@@ -46,21 +44,6 @@ func TestServeServesThePageAndItsAssets(t *testing.T) {
 	}
 	if !strings.Contains(policy, "default-src 'none'") || !strings.Contains(policy, "connect-src 'self'") || !strings.Contains(policy, "frame-ancestors 'none'") {
 		t.Fatalf("policy %q", policy)
-	}
-}
-
-// The page never names the Beekeeper's shadow project or its reserved
-// workstream: it reaches the Beekeeper only through the service-level
-// Beekeeper endpoints, with no special case naming the shadow identity.
-func TestAssetsNeverReferenceTheShadowProjectIdentifier(t *testing.T) {
-	for _, name := range []string{"index.html", "app.js", "style.css", "favicon.svg"} {
-		content, err := assets.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(content), string(config.ShadowProjectID)) || strings.Contains(string(content), string(config.BeekeeperWorkstreamID)) {
-			t.Fatalf("%s references the beekeeper's shadow project identifier", name)
-		}
 	}
 }
 

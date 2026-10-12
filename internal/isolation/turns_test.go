@@ -394,6 +394,15 @@ func TestReviewerGrantIsReadOnly(t *testing.T) {
 	}
 }
 
+// roleGrant's role switch no longer names a Beekeeper role: that service-wide
+// assistant is removed, and the role is unknown like any other it never
+// named.
+func TestRoleGrantRefusesTheRemovedBeekeeperRole(t *testing.T) {
+	if _, err := roleGrant("beekeeper", a.Capabilities{}); err == nil {
+		t.Fatal("roleGrant still recognizes the removed beekeeper role")
+	}
+}
+
 func TestChiefOfStaffToolsOnlyReachChiefOfStaff(t *testing.T) {
 	for _, name := range []string{"set_status", "prioritise", "decide_amendment", "decide_charter", "move_unit", "hand_back_drift"} {
 		for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason", "librarian"} {

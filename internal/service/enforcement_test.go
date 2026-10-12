@@ -116,3 +116,26 @@ func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 		}
 	}
 }
+
+// With the Beekeeper removed, no grant Enforce builds, and no tool a
+// chief-of-staff turn is actually given, names list_factory or
+// message_chief_of_staff, and no role is named "beekeeper".
+func TestNoGrantOrToolsetNamesTheRemovedBeekeeper(t *testing.T) {
+	t.Parallel()
+	for _, grant := range []coreadapter.Capabilities{chiefGrant, masonGrant, unitMasonGrant, reviewerGrant} {
+		for _, name := range grant.Tools {
+			if name == "list_factory" || name == "message_chief_of_staff" {
+				t.Fatalf("grant %+v still names the removed Beekeeper tool %s", grant, name)
+			}
+		}
+	}
+	f, stream, repository := newReviewFixture(t, "no-beekeeper")
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "turn"}
+	tools, err := chiefTools(f.s.cfg, repository, &runtimeControls{}, scope, time.Now)
+	must(t, err)
+	for _, tool := range tools {
+		if tool.Name == "list_factory" || tool.Name == "message_chief_of_staff" {
+			t.Fatalf("a chief-of-staff turn is given the removed Beekeeper tool %s", tool.Name)
+		}
+	}
+}

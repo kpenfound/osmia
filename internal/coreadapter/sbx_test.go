@@ -103,7 +103,7 @@ if [ "$1" = app-server ]; then
       ;;
     *'"method":"turn/start"'*)
       echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"turn":{"id":"turn-1"}}}'
-      echo '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agent_message","text":"boxed"}}}'
+      echo '{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","text":"boxed"}}}'
       echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"status":"completed"}}}'
       exit 0
       ;;
