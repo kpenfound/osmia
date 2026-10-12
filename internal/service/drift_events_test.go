@@ -119,11 +119,12 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: driftMasonAgent, Turn: turn, Role: masonRole}
 	tools, err := driftMasonTools(repository, scope, f.s.now)
 	must(t, err)
-	if len(tools) != 1 || tools[0].Name != questions.AmendTool {
+	if len(tools) != 2 {
 		t.Fatalf("the drift mason's question tools %+v", tools)
 	}
+	amend := askTool(t, tools, questions.AmendTool)
 	input := `{"citations":["spec#1"],"change":"Name the upstream owner in the spec","reason":"Upstream moved ownership of internal/"}`
-	if got := handle(t, tools[0], input); !strings.Contains(got, `"amendment":"1"`) {
+	if got := handle(t, amend, input); !strings.Contains(got, `"amendment":"1"`) {
 		t.Fatalf("the drift mason's amend returned %s", got)
 	}
 	requests, err := trace.Read[trace.Amendment](repository, stream)
@@ -168,7 +169,8 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	scope.Turn = recovered.Request.TurnID
 	tools, err = driftMasonTools(repository, scope, f.s.now)
 	must(t, err)
-	if got := handle(t, tools[0], input); !strings.Contains(got, `"amendment":"1"`) {
+	amend = askTool(t, tools, questions.AmendTool)
+	if got := handle(t, amend, input); !strings.Contains(got, `"amendment":"1"`) {
 		t.Fatalf("the recovering turn's amend returned %s", got)
 	}
 	if requests, err := trace.Read[trace.Amendment](repository, stream); err != nil || len(requests) != 1 {

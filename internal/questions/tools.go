@@ -55,9 +55,11 @@ func Tools(repository *trace.Repository, agent string, scope coreadapter.Scope, 
 	return tools(repository, agent, scope, now, nil)
 }
 
-// DriftTools returns the amend tool of the mason turn that resolves the
-// feature branch's conflicts with upstream after drift rebase move: an
-// amendment it files cites move's upstream commit and parks nothing.
+// DriftTools returns the ask and amend tools of the mason turn that
+// resolves the feature branch's conflicts with upstream after drift rebase
+// move: ask reaches the workstream's chief of staff about the drift rebase
+// it resolves, and an amendment it files cites move's upstream commit and
+// parks nothing.
 func DriftTools(repository *trace.Repository, agent string, scope coreadapter.Scope, now func() time.Time, move trace.UpstreamMove) ([]coreadapter.Tool, error) {
 	if scope.Role != "mason" || scope.Unit != "" {
 		return nil, errors.New("only the drift mason turn reads a drift rebase")
@@ -93,7 +95,7 @@ func tools(repository *trace.Repository, agent string, scope coreadapter.Scope, 
 		}{true, q.ID, "End your turn now. The answer arrives as your next turn on this thread."})
 	}
 	if move != nil {
-		return []coreadapter.Tool{amendmentTool(repository, agent, scope, now, false, move)}, nil
+		return []coreadapter.Tool{ask, amendmentTool(repository, agent, scope, now, false, move)}, nil
 	}
 	return []coreadapter.Tool{ask}, nil
 }

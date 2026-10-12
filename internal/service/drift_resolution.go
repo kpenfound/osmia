@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -126,15 +127,53 @@ func (r resolutions) Acquire(ctx context.Context, req coreadapter.WorkspaceReque
 
 // selection selects the whole of the resolution workspace, but its VCS
 // metadata, as the drift mason turn's view, run with execution. The turn
-// may read and write files, file an amendment and call done, and nothing
-// else.
+// gets exactly masonGrant's tools over this view: it may read and write
+// files, execute, ask the chief of staff, read factory context, record a
+// discovery, file an amendment and call done.
 func (r resolutions) selection(ctx context.Context, scope coreadapter.Scope, execution coreadapter.ExecutionSettings) (isolation.Selection, error) {
 	w, err := r.find(ctx, config.WorkstreamID(scope.Workstream))
 	if err != nil {
 		return isolation.Selection{}, err
 	}
 	paths, err := viewPaths(w.Path)
-	return isolation.Selection{Paths: paths, Execution: execution, Narrow: &coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AmendTool, doneTool}, WriteFiles: true, Execute: true}}, err
+	return isolation.Selection{Paths: paths, Execution: execution}, err
+}
+
+// driftReviewerSelection stages a read-only export of the resolved
+// candidate that the drift review turn belongs to, resolved through
+// driftReviewOrigin from durable drift/rebase.json records rather than
+// from the live resolution workspace, so it is the same across an answer
+// continuation and after a restart. The turn gets exactly reviewerGrant's
+// tools over this view: it may read files, ask the chief of staff, read
+// factory context, record a discovery, read the diff and record its
+// verdict; reviewerGrant holds neither WriteFiles nor Execute, so it
+// writes nothing and executes nothing.
+func driftReviewerSelection(ctx context.Context, cfg *config.Config, repository *trace.Repository, scope coreadapter.Scope, execution coreadapter.ExecutionSettings) (isolation.Selection, error) {
+	stream := config.WorkstreamID(scope.Workstream)
+	rebase, err := driftReviewOrigin(repository, stream, scope)
+	if err != nil {
+		return isolation.Selection{}, err
+	}
+	g, err := driftWorkspaces(cfg, repository).of(stream)
+	if err != nil {
+		return isolation.Selection{}, err
+	}
+	dir := filepath.Join(cfg.Root.String(), "workspaces", scope.Project, scope.Workstream, "review")
+	if err := os.RemoveAll(dir); err != nil {
+		return isolation.Selection{}, err
+	}
+	if err := g.Export(ctx, rebase.Candidate, dir); err != nil {
+		return isolation.Selection{}, err
+	}
+	paths, err := viewPaths(dir)
+	if err != nil {
+		return isolation.Selection{}, err
+	}
+	return isolation.Selection{
+		Workspace: coreadapter.WorkspaceRequest{SourceDirectory: dir, Directory: dir, BaseRevision: rebase.Candidate},
+		Paths:     paths,
+		Execution: execution,
+	}, nil
 }
 
 // capture copies a drift mason turn's view back into its resolution
@@ -611,7 +650,7 @@ func (d drifter) reviewed(ctx context.Context, stream config.WorkstreamID, rebas
 			return UnitVerdict{}, false, err
 		}
 		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: foremanActor, Cause: driftDocument, Depth: 1},
-			AgentID: driftReviewerAgent, ThreadID: driftReviewerAgent, TurnID: turn, Profile: profile, SystemPrompt: "You are the reviewer of a resolution of the conflicts a rebase onto upstream left in a feature branch. Read only the supplied evidence: call workstream_diff to read the feature branch's change and the resolution. Call verdict with your decision. You cannot edit the candidate.", Prompt: prompt}
+			AgentID: driftReviewerAgent, ThreadID: driftReviewerAgent, TurnID: turn, Profile: profile, SystemPrompt: driftReviewerSystemPrompt(), Prompt: prompt}
 		_, err = d.repository.EnqueueTurn(ctx, req)
 		return UnitVerdict{}, false, err
 	}
@@ -665,8 +704,30 @@ func (d drifter) ensureThread(ctx context.Context, stream config.WorkstreamID, a
 	return d.repository.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: agent, Revision: 1, Project: d.repository.Project(), Workstream: stream, At: d.s.now(), Actor: foremanActor, Cause: driftDocument}, Role: role, ThreadID: agent})
 }
 
+// driftScopeRule says that the conflicted paths of a drift rebase, and any
+// change the rebased branch needs so that both upstream's and the feature
+// branch's behaviour stand, are in scope whatever the workstream's sealed
+// spec, plan or unit footprints name, and that a resolved path outside the
+// workstream's original scope is not, on its own, a reason to reject the
+// resolution. It belongs in the drift mason's and drift reviewer's system
+// prompts and in every resolution, fix and review prompt.
+const driftScopeRule = "Conflicted paths, and any other change the rebased branch needs so that both upstream's and the feature branch's behaviour stand, are in scope of this drift rebase, whatever the workstream's sealed spec, plan or unit footprints name. A resolved path outside the workstream's original scope is not, on its own, a reason to reject it."
+
+// driftReviewChecks names what the drift reviewer checks of a resolution:
+// both sides kept, nothing of the feature branch's change lost or altered,
+// no change beyond what the rebase needs, no conflict marker left, and the
+// sealed criteria still holding.
+const driftReviewChecks = "Check that both sides are kept: nothing upstream now holds, and nothing the feature branch built, was lost or altered. Check that no change goes beyond what the rebase needs, that no conflict marker remains, and that the sealed criteria still hold. " + driftScopeRule
+
 func driftMasonSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are a mason of the %s project (%s). You resolve the conflicts the service's rebase of a feature branch onto upstream left, in a workspace of its own whose files are your view. You hold no version control tool: the service records your work and goes on with the rebase. Resolve against the sealed spec, change nothing the conflicts do not need, and call done when no conflict marker is left. When upstream's change alters what a sealed criterion means, call %s: the owner decides the spec, never your resolution.", p.Name, p.Upstream, questions.AmendTool)
+	return fmt.Sprintf("You are a mason of the %s project (%s). You resolve the conflicts the service's rebase of a feature branch onto upstream left, in a workspace of its own whose files are your view. You hold no version control tool: the service records your work and goes on with the rebase. Resolve against the sealed spec, change nothing the conflicts do not need, and call done when no conflict marker is left. %s When upstream's change alters what a sealed criterion means, call %s: the owner decides the spec, never your resolution. When you need a decision you cannot make from your context, call %s to ask the workstream's chief of staff about the drift rebase you resolve; the answer arrives as your next turn on this thread.", p.Name, p.Upstream, driftScopeRule, questions.AmendTool, questions.AskTool)
+}
+
+// driftReviewerSystemPrompt is the system prompt of the drift reviewer
+// turn that reads a resolution of a drift rebase's conflicts against the
+// sealed spec.
+func driftReviewerSystemPrompt() string {
+	return fmt.Sprintf("You are the reviewer of a resolution of the conflicts a rebase onto upstream left in a feature branch. Your view holds the resolved candidate's files, read-only: you cannot edit it. Read only the supplied evidence: call %s to read the feature branch's change and the resolution. %s Call %s with your decision. When you need a decision you cannot make from your context, call %s to ask the workstream's chief of staff about the drift rebase you review; the answer arrives as your next turn on this thread.", workstreamDiffTool, driftReviewChecks, verdictTool, questions.AskTool)
 }
 
 // driftAmendGuidance tells a drift mason how to raise an upstream change to
@@ -732,11 +793,11 @@ func (d drifter) resolvePrompt(ctx context.Context, stream config.WorkstreamID, 
 The service is rebasing the workstream's feature branch %s from %s onto %s/%s at %s, one commit at a time, in a workspace of its own whose files are your view. Replaying commit %s (%q) conflicted, and these files of your view are conflicted:
 - %s
 
-%s Resolve every conflict against the sealed spec below, so that what upstream now holds and what the feature branch built both stand, and remove every marker. Change nothing the conflicts do not need. Then call done with the outcome of your resolution and end your turn. The service goes on with the rebase once no conflicted file carries a marker, and a reviewer reads the resolved branch against the sealed spec before the feature branch moves.%s
+%s Resolve every conflict against the sealed spec below, so that what upstream now holds and what the feature branch built both stand, and remove every marker. Change nothing the conflicts do not need. Then call done with the outcome of your resolution and end your turn. The service goes on with the rebase once no conflicted file carries a marker, and a reviewer reads the resolved branch against the sealed spec before the feature branch moves. %s%s
 
 %s
 
-%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, rebase.Stop, subject, strings.Join(rebase.Conflicts, "\n- "), markers, handback, driftAmendGuidance(rebase), spec), nil
+%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, rebase.Stop, subject, strings.Join(rebase.Conflicts, "\n- "), markers, driftScopeRule, handback, driftAmendGuidance(rebase), spec), nil
 }
 
 func (d drifter) fixPrompt(stream config.WorkstreamID, rebase DriftRebase) (string, error) {
@@ -757,11 +818,11 @@ func (d drifter) fixPrompt(stream config.WorkstreamID, rebase DriftRebase) (stri
 	return fmt.Sprintf(`The reviewer did not approve your resolution of the conflicts of feature branch %s with upstream. Their findings:
 %s
 
-Your view holds the resolved branch, candidate %s. Address every finding against the sealed spec below, keep what upstream holds and what the feature branch built, and leave no conflict marker. Then call done with the outcome of your changes and end your turn. The reviewer reads the resolution again before the feature branch moves.%s
+Your view holds the resolved branch, candidate %s. Address every finding against the sealed spec below, keep what upstream holds and what the feature branch built, and leave no conflict marker. Then call done with the outcome of your changes and end your turn. The reviewer reads the resolution again before the feature branch moves. %s%s
 
 %s
 
-%s`, rebase.Branch, strings.Join(findings, "\n"), rebase.Candidate, handback, driftAmendGuidance(rebase), spec), nil
+%s`, rebase.Branch, strings.Join(findings, "\n"), rebase.Candidate, driftScopeRule, handback, driftAmendGuidance(rebase), spec), nil
 }
 
 func (d drifter) reviewPrompt(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase) (string, error) {
@@ -794,12 +855,12 @@ func (d drifter) reviewPrompt(ctx context.Context, stream config.WorkstreamID, r
 The service rebased feature branch %s from %s onto %s/%s at %s. The rebase conflicted in:
 - %s
 
-A mason resolved the conflicts, and the resolved branch is candidate %s. The feature branch stays at %s until you approve it: a satisfactory verdict moves the feature branch and the seal to the candidate, and material findings return the resolution to the mason with your findings. Check that each conflicted file keeps both what upstream now holds and what the feature branch built, that nothing else of the feature branch's change was lost or altered, and that the sealed criteria still hold. Summarize what you checked in the verdict, citing criteria as spec#<n> where they matter.%s
+A mason resolved the conflicts, and the resolved branch is candidate %s. The feature branch stays at %s until you approve it: a satisfactory verdict moves the feature branch and the seal to the candidate, and material findings return the resolution to the mason with your findings. %s Summarize what you checked in the verdict, citing criteria as spec#<n> where they matter.%s
 
 Read both changes with %s, whole or by file and line range. Their changed files, with added and removed lines:
 
 %s
-%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, strings.Join(paths, "\n- "), rebase.Candidate, rebase.Before, handback, workstreamDiffTool, strings.Join(changes, "\n"), spec), nil
+%s`, rebase.Branch, rebase.Branch, rebase.Before, rebase.Upstream.Remote, rebase.Upstream.Branch, rebase.Upstream.Commit, strings.Join(paths, "\n- "), rebase.Candidate, rebase.Before, driftReviewChecks, handback, workstreamDiffTool, strings.Join(changes, "\n"), spec), nil
 }
 
 // driftDiffs are the two changes a drift review reads: the feature branch's
@@ -823,26 +884,76 @@ func driftDiffs(ctx context.Context, cfg *config.Config, repository *trace.Repos
 	}, nil
 }
 
-// driftDiffTool serves the changes of the drift review a turn belongs to,
-// named by its drift rebase and review in the turn ID.
-func driftDiffTool(ctx context.Context, cfg *config.Config, repository *trace.Repository, scope coreadapter.Scope) (coreadapter.Tool, error) {
-	var k, review int
-	if _, err := fmt.Sscanf(strings.TrimPrefix(scope.Turn, driftReviewerAgent+"-"), "%d-%d", &k, &review); err != nil {
-		return coreadapter.Tool{}, fmt.Errorf("turn %s is not a drift review", scope.Turn)
+// driftOriginTurnID walks an agent thread's answer turn back, through
+// however many chained asks, to the turn ID that began the attempt it
+// continues: a drift resolve, fix or review turn. A turn that is not an
+// answer turn is its own origin. This resolves an answer continuation to
+// the same origin as the turn it continues, from durable question and
+// thread records alone, so it survives a restart.
+func driftOriginTurnID(repository *trace.Repository, stream config.WorkstreamID, agent, turn string) (string, error) {
+	for strings.HasPrefix(turn, questions.TurnID("")) {
+		th, err := repository.Thread(stream, agent)
+		if err != nil {
+			return "", err
+		}
+		asked, err := repository.Questions(stream)
+		if err != nil {
+			return "", err
+		}
+		question := answerQuestionID(turn)
+		i := slices.IndexFunc(asked, func(q trace.QuestionState) bool {
+			return q.Asked.ID == question && q.Asked.Thread == agent
+		})
+		if i < 0 {
+			return "", fmt.Errorf("turn %s names no recorded question %s on thread %s", turn, question, agent)
+		}
+		j := slices.IndexFunc(th.Turns, func(t trace.QueuedTurn) bool { return t.Request.TurnID == asked[i].Asked.Turn })
+		if j < 0 {
+			return "", fmt.Errorf("turn %s's asking turn %s is not recorded on thread %s", turn, asked[i].Asked.Turn, agent)
+		}
+		turn = th.Turns[j].Request.TurnID
 	}
-	stream := config.WorkstreamID(scope.Workstream)
+	return turn, nil
+}
+
+// driftReviewOrigin resolves a drift reviewer turn, including an answer
+// continuation of a chain of asks, to the drift rebase and review it
+// belongs to: the origin turn's ID names drift rebase k and review n as
+// driftReviewTurnID does, and that review's recorded candidate is read
+// from drift/rebase.json, not from the turn ID itself.
+func driftReviewOrigin(repository *trace.Repository, stream config.WorkstreamID, scope coreadapter.Scope) (DriftRebase, error) {
+	origin, err := driftOriginTurnID(repository, stream, driftReviewerAgent, scope.Turn)
+	if err != nil {
+		return DriftRebase{}, err
+	}
+	var k, review int
+	if _, err := fmt.Sscanf(strings.TrimPrefix(origin, driftReviewerAgent+"-"), "%d-%d", &k, &review); err != nil {
+		return DriftRebase{}, fmt.Errorf("turn %s is not a drift review", origin)
+	}
 	records, err := driftRebases(repository, stream, k)
 	if err != nil {
-		return coreadapter.Tool{}, err
+		return DriftRebase{}, err
 	}
 	for i := len(records) - 1; i >= 0; i-- {
 		if records[i].Review == review && records[i].Candidate != "" {
-			diffs, err := driftDiffs(ctx, cfg, repository, stream, records[i])
-			if err != nil {
-				return coreadapter.Tool{}, err
-			}
-			return diffTool(diffs...), nil
+			return records[i], nil
 		}
 	}
-	return coreadapter.Tool{}, fmt.Errorf("drift rebase %d records no candidate for review %d", k, review)
+	return DriftRebase{}, fmt.Errorf("drift rebase %d records no candidate for review %d", k, review)
+}
+
+// driftDiffTool serves the changes of the drift review a turn belongs to,
+// resolved through driftReviewOrigin so an answer continuation reads the
+// same pinned diffs as the review turn it continues.
+func driftDiffTool(ctx context.Context, cfg *config.Config, repository *trace.Repository, scope coreadapter.Scope) (coreadapter.Tool, error) {
+	stream := config.WorkstreamID(scope.Workstream)
+	rebase, err := driftReviewOrigin(repository, stream, scope)
+	if err != nil {
+		return coreadapter.Tool{}, err
+	}
+	diffs, err := driftDiffs(ctx, cfg, repository, stream, rebase)
+	if err != nil {
+		return coreadapter.Tool{}, err
+	}
+	return diffTool(diffs...), nil
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -793,6 +794,43 @@ func (d drifter) hold(ctx context.Context, stream config.WorkstreamID, rebase Dr
 		return coreadapter.OperationResult{}, err
 	}
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
+}
+
+// driftRebaseNotes describes every drift rebase of the workstream whose
+// conflict resolution the reviewer approved, one line per drift rebase,
+// naming its conflicted paths. A later final or delivery review that reads
+// a branch such a drift rebase moved includes these notes in what the
+// reader is given, attributing the resolved paths to the drift rebase
+// rather than treating them as out of the workstream's own scope.
+func driftRebaseNotes(repository *trace.Repository, stream config.WorkstreamID) ([]string, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	approved := map[int][]string{}
+	for _, doc := range docs {
+		if doc.ID != driftDocument {
+			continue
+		}
+		var r DriftRebase
+		if err := json.Unmarshal([]byte(doc.Content), &r); err != nil {
+			return nil, fmt.Errorf("%s revision %d: %w", doc.Path, doc.Revision, err)
+		}
+		if len(r.Conflicts) == 0 || r.Verdict == nil || r.Verdict.Decision != "satisfactory" {
+			continue
+		}
+		approved[r.Drift] = r.Conflicts
+	}
+	drifts := make([]int, 0, len(approved))
+	for k := range approved {
+		drifts = append(drifts, k)
+	}
+	slices.Sort(drifts)
+	var notes []string
+	for _, k := range drifts {
+		notes = append(notes, fmt.Sprintf("Drift rebase %d resolved a conflict with upstream in %s, approved by the drift reviewer; treat that change as the drift rebase's, not as outside this workstream's scope.", k, strings.Join(approved[k], ", ")))
+	}
+	return notes, nil
 }
 
 // skip records that drift rebase k changed nothing, and why.
