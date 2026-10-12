@@ -155,7 +155,7 @@ From the page you can:
 - Answer an escalation, accept its quick reply, or pick one of its options.
 - Ratify a plan, sustain or overrule an objection, or ask for a redraft.
 - Decide a contested unit, an amendment or a charter proposal.
-- Approve a delivery, editing its pull request description first if you want.
+- Approve a delivery, seeing its pull request title and editing its description first if you want.
 - Send a message in a workstream's conversation. Enter sends where there is a
   keyboard; Shift+Enter starts a new line.
 - Pause or resume the factory, a project or a workstream, softly or hard.

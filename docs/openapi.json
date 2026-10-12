@@ -825,7 +825,7 @@
     },
     "/v1/delivery/{workstream}": {
       "get": {
-        "summary": "Show the final report and pull request draft",
+        "summary": "Show the final report and the drafted pull request title and body",
         "operationId": "getDeliveryByWorkstream",
         "parameters": [
           {
@@ -3924,6 +3924,9 @@
           },
           "style": {
             "type": "string"
+          },
+          "title": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -4013,6 +4016,9 @@
             "type": "integer"
           },
           "style": {
+            "type": "string"
+          },
+          "title": {
             "type": "string"
           },
           "workstream": {

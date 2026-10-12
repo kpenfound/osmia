@@ -450,7 +450,7 @@ func TestPublicationVerifiesHeadAfterAutomaticPRAdvance(t *testing.T) {
 	newDescription := "# A newly approved description\n"
 	p.approve(t, &newDescription)
 	second := p.request(t)
-	p.pulls.prs = []pulls.PullRequest{{Number: 8, URL: "https://github.com/dagger/dagger/pull/8", State: "open", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", HeadCommit: old, Base: "main", Body: newDescription}}
+	p.pulls.prs = []pulls.PullRequest{{Number: 8, URL: "https://github.com/dagger/dagger/pull/8", State: "open", Head: featureBranch(p.stream), HeadRepository: "owner/dagger", HeadCommit: old, Base: "main", Title: "Resumable uploads", Body: newDescription}}
 	p.s.boundary = func(step string) error {
 		if step == "publish-pushed" {
 			p.pulls.prs[0].HeadCommit, _ = p.forkBranch(t)

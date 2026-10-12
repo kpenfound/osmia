@@ -433,11 +433,14 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	ctx := context.Background()
 	// Publication waits while the workstream is paused.
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: ws}, Mode: "soft", Reason: "Hold the publication", Source: runtime.PauseOwner})
-	// recordReport records the next revision of the final report under a new
-	// summary, which changes the draft, and returns its presentation.
-	recordReport := func(revision int, summary string) DeliveryPresentation {
+	// recordReport records the next revision of the final report, keeping
+	// its criteria and commit, and returns its presentation. Neither the
+	// title nor the drafted body is derived from the final report's
+	// summary (spec#1, spec#3), so a later revision of the same report
+	// presents the same title and draft; what the entry pins is the new
+	// review revision.
+	recordReport := func(revision int) DeliveryPresentation {
 		t.Helper()
-		report.Summary = summary
 		content, err := json.Marshal(report)
 		must(t, err)
 		h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalReportDocument, Revision: revision, Project: f.project, Workstream: ws, At: time.Now().UTC(), Actor: finalReviewActor, Cause: "final-review"}
@@ -518,14 +521,18 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	gate.set(false)
 	resync()
 	p.awaitText(card+`[data-criterion="spec#2"]`, "dedupe.go and TestDedupe")
+	// The presentation shows the title to be published alongside the
+	// drafted body (spec#7).
+	p.awaitText(card+"[data-field=title]", "Pull request title: "+first.Title)
 	drafted(first)
 
 	// A new report is recorded while its presentation cannot be read: the
-	// entry pins its draft, and the page still holds the earlier one.
+	// entry pins its new review revision, and the page still holds the
+	// earlier one.
 	gate.set(true)
-	second := recordReport(2, "Resumable uploads with dedupe")
-	if second.DraftHash == first.DraftHash {
-		t.Fatal("the new summary left the draft as it was")
+	second := recordReport(2)
+	if second.ReviewRevision != 2 || second.DraftHash != first.DraftHash {
+		t.Fatalf("report revision 2 presented %+v", second)
 	}
 	p.awaitText(card+"[data-field=pins]", pins(2, second))
 	p.awaitText(card+"[data-field=reading]", "The final report is unavailable.")
@@ -553,7 +560,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	}
 
 	// A newer report asks for approval again; the owner edits its draft.
-	third := recordReport(3, "Resumable uploads, reviewed again")
+	third := recordReport(3)
 	p.awaitText(card+"[data-field=pins]", pins(3, third))
 	drafted(third)
 	edited := third.Draft + "\nReviewed on the phone.\n"

@@ -116,7 +116,9 @@ func TestDeliveryDemonstration(t *testing.T) {
 	masons.check(t)
 	presented, err := f.c.Delivery(ctx, stream)
 	must(t, err)
-	if presented.Report.Review != 2 || presented.Report.Criteria[1].Evidence == "" || !strings.Contains(presented.Draft, unit) {
+	// The draft is a short spec summary, not an account of the work: it no
+	// longer names the follow-up unit that closed the gap (spec#3).
+	if presented.Report.Review != 2 || presented.Report.Criteria[1].Evidence == "" || presented.Title == "" || strings.Contains(presented.Draft, unit) {
 		t.Fatalf("presentation %+v", presented)
 	}
 	f.stop(t)
