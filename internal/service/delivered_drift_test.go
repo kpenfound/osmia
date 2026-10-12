@@ -150,6 +150,92 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 	}
 }
 
+// TestDeliveredDriftConflictOutsideUnitFootprintCompletesEndToEnd shows a
+// conflicted drift rebase of a delivered workstream with an open pull
+// request completing end to end when the conflicted file belongs to
+// neither plan unit. shared.go reaches the feature branch through
+// moveFeature alone, with no unit's own landing transition recorded for
+// it, unlike resume.go and dedupe.go, which deliveryFixtureWith lands as
+// the "resume" and "dedupe" units' own changes (spec#7).
+func TestDeliveredDriftConflictOutsideUnitFootprintCompletesEndToEnd(t *testing.T) {
+	t.Parallel()
+	p := newPublicationFixture(t, "squash")
+	ctx := context.Background()
+	p.approve(t, nil)
+	result := settleOperation(t, p.s, p.repository, p.stream, p.request(t), p.publisher())
+	if result.Outcome != "succeeded" {
+		t.Fatal(result)
+	}
+	p.pulls.syncHead = true
+	before, _ := p.forkBranch(t)
+	fm := cadenceForeman(p.shedFixture, p.repository, "1m")
+	moveFeature(t, p.shedFixture, p.stream, map[string]string{"shared.go": "package demo\n// Feature shared helper.\n"})
+	advanceUpstream(t, p.shedFixture, map[string]string{"DRIFT.md": "new upstream content\n", "shared.go": "package demo\n// Upstream shared helper.\n"})
+	if _, api := p.s.rebaseWorkstream(ctx, string(p.stream)); api != nil {
+		t.Fatal(api)
+	}
+	passDrifts(t, fm)
+	ops := driftOperations(t, p.repository, p.stream)
+	if len(ops) != 1 {
+		t.Fatalf("drifts: %v", ops)
+	}
+	d := drifter{fm}
+	awaitResolution(t, p.s, d, p.stream, ops[0].Operation, "its mason's resolution of shared.go")
+	w := resolutionWorkspace(t, p.shedFixture, p.stream)
+	must(t, os.WriteFile(filepath.Join(w.Path, "shared.go"), []byte("package demo\n// Upstream and feature shared helper.\n"), 0600))
+	completeDriftTurn(t, p.shedFixture, p.repository, p.stream, driftMasonAgent, resolvedDone("Combined shared helper"))
+	awaitResolution(t, p.s, d, p.stream, ops[0].Operation, "review 1 of candidate")
+	if tip, _ := p.forkBranch(t); tip != before {
+		t.Fatal("conflict resolution pushed without approval")
+	}
+	completeDriftTurn(t, p.shedFixture, p.repository, p.stream, driftReviewerAgent, driftVerdict(t, approvedResolution))
+	result = settleOperation(t, p.s, p.repository, p.stream, ops[0].Operation, d)
+	if result.Outcome != "succeeded" {
+		t.Fatal(result)
+	}
+	if tip, _ := p.forkBranch(t); tip != before {
+		t.Fatal("the rebase pushed the pull request on its own")
+	}
+	pending, err := upstreamDeliveryPending(p.repository, p.s.cfg, p.stream)
+	must(t, err)
+	if !pending {
+		t.Fatal("the resolved drift did not request a delivery review")
+	}
+	reviewer := &finalReviewer{s: p.s, repository: p.repository}
+	must(t, reviewer.Pass(ctx))
+	op := actionOperation(t, p.repository, p.stream, deliveryReviewAction)
+	in, err := decodeFinalReview(op)
+	must(t, err)
+	p.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Ready after drift", "criteria": []any{map[string]any{"criterion": "spec#1", "evidence": "resume.go"}, map[string]any{"criterion": "spec#2", "evidence": "dedupe.go"}}})
+		return err
+	})
+	result = settleOperation(t, p.s, p.repository, p.stream, op, reviewer)
+	if result.Outcome != "succeeded" {
+		t.Fatal(result)
+	}
+	must(t, p.publisher().Pass(ctx))
+	if tip, _ := p.forkBranch(t); tip != before {
+		t.Fatal("remote changed before the owner's approval")
+	}
+	presented, api := p.s.deliveryPresentation(ctx, string(p.stream))
+	if api != nil || !presented.Maintenance || presented.Approval != nil {
+		t.Fatalf("presentation %+v %v", presented, api)
+	}
+	description := "Updated drift delivery\n\nApproved after rebase outside unit footprints."
+	p.approve(t, &description)
+	must(t, p.publisher().Pass(ctx))
+	publish := actionOperation(t, p.repository, p.stream, publishUpstreamAction)
+	result = settleOperation(t, p.s, p.repository, p.stream, publish, p.publisher())
+	if result.Outcome != "succeeded" {
+		t.Fatal(result)
+	}
+	tip, _ := p.forkBranch(t)
+	if tip == before || p.pulls.creates != 1 || p.pulls.prs[0].Body != description || p.feature(t) != DeliveredState {
+		t.Fatalf("delivery tip %s creates %d state %s", tip, p.pulls.creates, p.feature(t))
+	}
+}
+
 func TestDeliveredDriftClosedPRStopsBeforeRebase(t *testing.T) {
 	t.Parallel()
 	for _, outcome := range []string{"closed", "merged"} {
