@@ -67,6 +67,42 @@ func requestRefresh(t *testing.T, repository *trace.Repository, librarian, strea
 	must(t, err)
 }
 
+func TestArchiveCleanupIdlePassDoesNotAnnounceActivity(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"no archives", "already cleaned", "another project"} {
+		t.Run(scenario, func(t *testing.T) {
+			opts, cfg := conversationFixture(t, "archive-idle-")
+			store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{project: {stream}}})
+			must(t, err)
+			t.Cleanup(func() { store.Close() })
+			if scenario != "no archives" {
+				a := runtime.Archive{Project: project, Workstream: stream, Title: "Archived work", State: AbandonedState, ArchivedAt: demoStart}
+				if scenario == "already cleaned" {
+					a.CleanedAt = demoStart.Add(time.Second)
+				}
+				must(t, store.SetArchived(a))
+			}
+			s := &Service{cfg: cfg, store: store, options: opts}
+			s.activity = newActivityRegistry(s.now)
+			notifications := 0
+			s.activity.notify = func() { notifications++ }
+			if scenario == "another project" {
+				cfg.Project.ID = "p_other"
+			}
+			cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, now: s.now}}
+			for range 3 {
+				must(t, cleanup.Pass(context.Background()))
+			}
+			if notifications != 0 {
+				t.Fatalf("idle cleanup announced %d activity changes", notifications)
+			}
+			if entries := s.activity.snapshot(); len(entries) != 0 {
+				t.Fatalf("idle cleanup recorded activity: %+v", entries)
+			}
+		})
+	}
+}
+
 func TestArchiveCleanupMigratesOldArchivesAndRetainsTitle(t *testing.T) {
 	ctx := context.Background()
 	logged, logger := captureLog(t)

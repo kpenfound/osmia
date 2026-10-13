@@ -53,11 +53,16 @@ type archiveCleanup struct {
 	finish func(config.Root, config.ProjectID, config.WorkstreamID) error
 }
 
-// Pass reports its own progress through the service's activity record, so
-// its phases are visible through the API, the event stream and the web UI
-// while the trace work they drive is blocked.
+// Pass reports progress when the project has archives awaiting cleanup.
+// Idle passes leave the activity record and event stream quiet.
 func (c *archiveCleanup) Pass(ctx context.Context) error {
 	project := c.workspaces.cfg.Project.ID
+	state, _ := c.s.store.Snapshot()
+	if !slices.ContainsFunc(state.Archived, func(a runtime.Archive) bool {
+		return a.Project == project && a.CleanedAt.IsZero()
+	}) {
+		return nil
+	}
 	h := c.s.StartActivity("archive-cleanup:"+string(project), ActivityArchiveCleanup, project, "", "scanning archived workstreams")
 	err := c.pass(ctx, h)
 	h.Finish(err)
