@@ -44,8 +44,10 @@ type Turns struct {
 	// Scoped supplies trusted handlers bound to one claimed turn, such as private
 	// role notes. They join the same registry and grant checks as Tools.
 	Scoped func(context.Context, coreadapter.Scope) ([]coreadapter.Tool, error)
-	Hosts  coreadapter.MCPHosts
-	Engine coreadapter.Engine
+	// ViewTools supplies handlers that inspect the active turn's isolated files.
+	ViewTools func(context.Context, coreadapter.Scope, *FileView) ([]coreadapter.Tool, error)
+	Hosts     coreadapter.MCPHosts
+	Engine    coreadapter.Engine
 	// Capture may snapshot selected output through the service before cleanup.
 	// It runs even on execution errors, but never grants an agent VCS access.
 	Capture func(context.Context, coreadapter.Scope, *FileView, coreadapter.SessionResult) error
@@ -76,14 +78,15 @@ func narrow(grant coreadapter.Capabilities, request *coreadapter.Capabilities) c
 }
 
 // roleTools names tools only one role may hold, whatever the service grant says.
-var roleTools = map[string]string{"capacity": "chief_of_staff", "notify": "chief_of_staff", "set_status": "chief_of_staff", "prioritise": "chief_of_staff", "decide_amendment": "chief_of_staff", "decide_charter": "chief_of_staff", "resolve_contested": "chief_of_staff", "move_unit": "chief_of_staff", "hand_back_drift": "chief_of_staff", "answer": "chief_of_staff", "escalate": "chief_of_staff", "relay_ruling": "chief_of_staff", "route_amendment": "chief_of_staff", "propose_charter": "chief_of_staff",
+var roleTools = map[string]string{"kb_check": "librarian", "capacity": "chief_of_staff", "notify": "chief_of_staff", "set_status": "chief_of_staff", "prioritise": "chief_of_staff", "decide_amendment": "chief_of_staff", "decide_charter": "chief_of_staff", "resolve_contested": "chief_of_staff", "move_unit": "chief_of_staff", "hand_back_drift": "chief_of_staff", "answer": "chief_of_staff", "escalate": "chief_of_staff", "relay_ruling": "chief_of_staff", "route_amendment": "chief_of_staff", "propose_charter": "chief_of_staff",
 	"object": "committee", "concede": "committee", "final_report": "committee", "reply": "architect", "verdict": "reviewer"}
 
 // deniedTools names tools one role may never hold, whatever the service grant says.
 var deniedTools = map[string]string{"ask": "chief_of_staff"}
 
 func roleRestrictedTool(role, name string) bool {
-	return name == "inspect_code" && role != "chief_of_staff" && role != "architect" ||
+	return name == "project_context" && (role == "classifier" || role == "session") ||
+		name == "inspect_code" && role != "chief_of_staff" && role != "architect" ||
 		name == "read_remote_file" && role != "chief_of_staff" && role != "architect" ||
 		name == "factory_context" && role != "chief_of_staff" && role != "architect" && role != "mason" && role != "reviewer" ||
 		name == "record_discovery" && role != "chief_of_staff" && role != "mason" && role != "reviewer" ||
@@ -193,6 +196,13 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 		}
 	}
 	tools := append(fileTools(view), r.Tools...)
+	if r.ViewTools != nil {
+		viewTools, toolErr := r.ViewTools(ctx, input.Scope, view)
+		if toolErr != nil {
+			return result, toolErr
+		}
+		tools = append(tools, viewTools...)
+	}
 	if r.Scoped != nil {
 		scoped, scopedErr := r.Scoped(ctx, input.Scope)
 		if scopedErr != nil {

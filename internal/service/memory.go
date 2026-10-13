@@ -24,17 +24,18 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 		return repo.BeginTool(ctx, scope, tool, raw, func() time.Time { return time.Now().UTC() })
 	}
 
-	if cfg.Hearsay.URL == "" || cfg.Project.HearsayScope == "" {
-		return turns
-	}
 	client := hearsay.Client{Config: cfg.Hearsay}
+	external := cfg.Hearsay.URL != "" && cfg.Project.HearsayScope != ""
 	for role, grant := range turns.Grants {
 		if role == "classifier" || role == sessionRole {
 			continue
 		}
 		grant.Tools = slices.Clone(grant.Tools)
-		for _, tool := range client.Tools(role, cfg.Project.HearsayScope, nil) {
-			grant.Tools = append(grant.Tools, tool.Name)
+		grant.Tools = append(grant.Tools, projectContextTool)
+		if external {
+			for _, tool := range client.Tools(role, cfg.Project.HearsayScope, nil) {
+				grant.Tools = append(grant.Tools, tool.Name)
+			}
 		}
 		turns.Grants[role] = grant
 	}
@@ -51,7 +52,11 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 		if scope.Role == "classifier" || scope.Role == sessionRole {
 			return tools, nil
 		}
-		return append(tools, client.Tools(scope.Role, cfg.Project.HearsayScope, func() error { return repo.ActiveTurn(scope) })...), nil
+		tools = append(tools, projectContext(repo, scope))
+		if external {
+			tools = append(tools, client.Tools(scope.Role, cfg.Project.HearsayScope, func() error { return repo.ActiveTurn(scope) })...)
+		}
+		return tools, nil
 	}
 	return turns
 }

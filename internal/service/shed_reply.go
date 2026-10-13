@@ -922,7 +922,7 @@ func (d *debate) stageReply(ctx context.Context, stream config.WorkstreamID, in 
 	if err != nil {
 		return nil, err
 	}
-	files := map[string]string{plan.SpecPath: latest[plan.SpecDocument].Content, plan.PlanPath: latest[plan.PlanDocument].Content, "charter.md": charter.Content, "context.md": b.Render()}
+	files := map[string]string{plan.SpecPath: latest[plan.SpecDocument].Content, plan.PlanPath: latest[plan.PlanDocument].Content, "charter.md": charter.Content, "context.md": b.Brief()}
 	paths := []string{plan.SpecPath, plan.PlanPath, "charter.md", "context.md"}
 	for _, doc := range latest {
 		if directory, _, _ := strings.Cut(doc.Path, "/"); directory == "handed" || directory == "shed" {

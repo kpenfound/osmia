@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -391,6 +392,21 @@ func TestReviewerGrantIsReadOnly(t *testing.T) {
 	}
 	if len(h.requests) != 1 || len(h.requests[0].Tools) != 1 || h.requests[0].Tools[0].Name != "file_read" {
 		t.Fatalf("reviewer tools %+v", h.requests)
+	}
+}
+
+func TestKnowledgeToolsFollowTheRole(t *testing.T) {
+	for _, role := range []string{"librarian", "chief_of_staff", "architect", "mason", "reviewer", "committee", "foreman", "classifier", "session"} {
+		grant, err := roleGrant(role, a.Capabilities{Tools: []string{"kb_check", "project_context"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.Contains(grant.Tools, "kb_check") != (role == "librarian") {
+			t.Errorf("kb_check granted to %s: %v", role, grant.Tools)
+		}
+		if slices.Contains(grant.Tools, "project_context") != (role != "classifier" && role != "session") {
+			t.Errorf("project_context grant for %s: %v", role, grant.Tools)
+		}
 	}
 }
 

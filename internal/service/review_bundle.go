@@ -199,7 +199,7 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	if notices := mason.RenderAmendments(); notices != "" {
 		items = append(items, coreadapter.ContextItem{Source: "amendment notices", Content: notices})
 	}
-	items = append(items, coreadapter.ContextItem{Source: "local context", Content: mason.Context.Render()})
+	items = append(items, coreadapter.ContextItem{Source: "local context", Content: mason.Context.Brief()})
 	return coreadapter.ReviewRequest{Subject: identity.Subject, Candidate: identity.Candidate, Diff: diff, Context: items}, identity, nil
 }
 

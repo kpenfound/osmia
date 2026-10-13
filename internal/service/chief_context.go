@@ -34,7 +34,7 @@ func chiefContext(ctx context.Context, provider bundle.Provider, repository *tra
 	}
 
 	var out strings.Builder
-	out.WriteString(b.Render())
+	out.WriteString(b.Brief())
 	out.WriteString("\n## Latest status\n")
 	if status == nil {
 		out.WriteString("No status has been stored.\n")

@@ -1340,7 +1340,7 @@ func (d *debate) stage(ctx context.Context, clone string, stream config.Workstre
 	if err != nil {
 		return nil, err
 	}
-	files := map[string]string{plan.SpecPath: specDoc.Content, plan.PlanPath: planDoc.Content, "charter.md": charter.Content, "context.md": b.Render()}
+	files := map[string]string{plan.SpecPath: specDoc.Content, plan.PlanPath: planDoc.Content, "charter.md": charter.Content, "context.md": b.Brief()}
 	paths := []string{"repo", plan.SpecPath, plan.PlanPath, "charter.md", "context.md"}
 	docs, err := trace.Read[trace.Document](d.repository, stream)
 	if err != nil {

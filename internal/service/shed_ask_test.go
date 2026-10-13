@@ -357,7 +357,7 @@ func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 			p.report("answer turn system prompt %q, profile %+v", req.SystemPrompt, req.Profile)
 		}
 		names, err := toolNames(ctx, tools)
-		if err != nil || !slices.Equal(names, []string{questions.AskTool, shed.ConcedeTool, "file_read", shed.ObjectTool}) {
+		if err != nil || !slices.Equal(names, []string{questions.AskTool, shed.ConcedeTool, "file_read", shed.ObjectTool, "project_context"}) {
 			p.report("answer turn tools %v %v", names, err)
 		}
 		// The owner edited the spec while the round was parked; the round

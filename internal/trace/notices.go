@@ -25,7 +25,7 @@ type ProjectNotice struct {
 // same call in the same turn returns the existing record.
 func (r *Repository) NotifyTool(scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: "notify", Effect: coreadapter.ToolMemory,
-		Description: "Publish an informational notice to subsequent turns throughout this project. Cite the evidence in text. This does not make an owner ruling, edit the charter, or send an external message.",
+		Description: "Record a concise, lasting finding relevant across this project, retrievable with project_context. Cite evidence. Do not publish routine progress, repeated status, a workstream transcript or a finding that belongs only to the current task. Consult existing notices to avoid duplicates. This does not make an owner ruling, edit the charter, or send an external message.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var in struct {

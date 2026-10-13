@@ -812,7 +812,7 @@ func (d *drafter) stage(ctx context.Context, stream config.WorkstreamID, turn, w
 	if err != nil {
 		return nil, err
 	}
-	files := map[string]string{handed.Path: handed.Content, "charter.md": charter.Content, "context.md": b.Render()}
+	files := map[string]string{handed.Path: handed.Content, "charter.md": charter.Content, "context.md": b.Brief()}
 	paths := []string{"handed", "charter.md", "context.md"}
 	if id, ok := amendmentTurnID(continuedTurn(turn)); ok {
 		requests, err := trace.Read[trace.Amendment](d.repository, stream)

@@ -643,6 +643,30 @@ registration needs its own clone. Repeating an active project's exact
 registration returns it without change. Existing project runtimes and overrides
 are retained.
 
+### Knowledge maintenance and retrieval
+
+Factory turns receive governing rules and decisions with references to project
+knowledge. They retrieve KB prose, the entity map and informational project
+notices with `project_context`, rather than carrying that material in every
+prompt. The tool searches current records, lists at most 20 matches per page,
+and reads at most 16 KiB per call. Reads identify the revision; subsequent pages
+can pin it, and older revisions remain available. Private role notes and other
+workstreams' records are not exposed by this tool. Workstream documents remain
+available through `factory_context` and each role's scoped file view.
+
+The librarian maintains concise current explanations on every extraction and
+refresh. It removes superseded claims, duplicate explanations, routine status
+and refresh histories, retaining applicable constraints and non-obvious pitfalls.
+It references detailed evidence rather than copying it into the KB. The service
+keeps provenance and historical revisions in the trace and source ledger.
+
+Each KB prose file has an 8 KiB ceiling, and all prose together has a 64 KiB
+ceiling; the entity map is excluded. The librarian is instructed to aim well
+below these limits and can call `kb_check` on its isolated output to find and
+repair problems before finishing. The service also validates at publication;
+invalid output leaves the recorded KB unchanged. Existing KB files are not
+silently truncated: a successful librarian pass must consolidate them.
+
 `osmia project remove <project-id>` (API: `DELETE /v1/projects`) removes the
 active ID from `active_projects` as a text edit, stops admitting new work,
 and waits for in-flight operations to finish before closing its runtime; other active projects keep running. The project's and every workstream's trace repositories, and the owner's clone, are not deleted. Adding the

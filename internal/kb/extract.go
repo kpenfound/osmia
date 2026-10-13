@@ -20,6 +20,11 @@ var subsystemPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // MaxSubsystemLength bounds a subsystem name so its document ID stays valid.
 const MaxSubsystemLength = 64
 
+// MaxProseBytes and MaxTotalProseBytes bound the maintained KB, excluding its
+// entity map. Detailed evidence belongs in the source records.
+const MaxProseBytes = 8 * 1024
+const MaxTotalProseBytes = 64 * 1024
+
 // CheckSubsystem accepts a subsystem name: lowercase letters, digits and
 // hyphens, starting with a letter or digit, at most MaxSubsystemLength long.
 func CheckSubsystem(name string) error {
@@ -93,6 +98,7 @@ func ReadOutput(dir string) (Output, error) {
 		return out, errors.Join(append(problems, fmt.Errorf("kb/ is missing from the output"))...)
 	}
 	entitiesFound := false
+	totalProseBytes := int64(0)
 	for _, e := range entries {
 		name := e.Name()
 		info, err := root.Lstat("kb/" + name)
@@ -125,6 +131,11 @@ func ReadOutput(dir string) (Output, error) {
 			add("kb/%s: %v", name, err)
 			continue
 		}
+		totalProseBytes += info.Size()
+		if info.Size() > MaxProseBytes {
+			add("kb/%s is %d bytes; maximum is %d: consolidate current knowledge and remove history and duplication", name, info.Size(), MaxProseBytes)
+			continue
+		}
 		data, err := root.ReadFile("kb/" + name)
 		if err != nil {
 			return out, err
@@ -137,6 +148,9 @@ func ReadOutput(dir string) (Output, error) {
 	}
 	if !entitiesFound {
 		add("kb/entities.json is missing from the output")
+	}
+	if totalProseBytes > MaxTotalProseBytes {
+		add("KB prose is %d bytes; maximum is %d: consolidate across subsystems rather than splitting to bypass the budget", totalProseBytes, MaxTotalProseBytes)
 	}
 	if len(out.Prose) == 0 {
 		add("no kb/<subsystem>.md prose was produced")

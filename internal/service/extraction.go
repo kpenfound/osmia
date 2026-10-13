@@ -606,7 +606,10 @@ func (e *extractor) turns() *isolation.Turns {
 		Workspaces: stagedWorkspaces{},
 		Views:      isolation.Views{Directory: filepath.Join(e.s.current().Root.String(), "views")},
 		Select:     e.selectView,
-		Grants:     map[string]coreadapter.Capabilities{librarianRole: {Tools: []string{"file_read", "file_write", "notes_read", "notes_write"}, WriteFiles: true}},
+		Grants:     map[string]coreadapter.Capabilities{librarianRole: {Tools: []string{"file_read", "file_write", "notes_read", "notes_write", "kb_check"}, WriteFiles: true}},
+		ViewTools: func(_ context.Context, scope coreadapter.Scope, view *isolation.FileView) ([]coreadapter.Tool, error) {
+			return []coreadapter.Tool{checkKnowledge(e.repository, scope, view)}, nil
+		},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			return e.repository.NotesTools(librarianAgent, scope)
 		},
@@ -661,7 +664,7 @@ func (e *extractor) selectView(ctx context.Context, scope coreadapter.Scope) (is
 	if err != nil {
 		return isolation.Selection{}, err
 	}
-	if err := os.WriteFile(filepath.Join(workspace, "context.md"), []byte(contextBundle.Render()), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "context.md"), []byte(contextBundle.Brief()), 0600); err != nil {
 		return isolation.Selection{}, err
 	}
 	paths := []string{"repo", "kb", "seed", kb.OutputDirectory, "context.md"}
@@ -892,7 +895,15 @@ func (e *extractor) record(ctx context.Context, operation string, last trace.Que
 }
 
 func librarianSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the librarian of the %s project (%s). You maintain its knowledge base: what a new contributor learns that the repository's own documents do not say. You work in a private copy of the repository with no version control; only what you write under output/kb is kept.", p.Name, p.Upstream)
+	return fmt.Sprintf(`You are the librarian of the %s project (%s). Maintain the smallest useful account of current project knowledge that the repository's own documents do not provide. You work in a private copy with no version control; only output/kb is recorded.
+
+On every extraction and refresh:
+- Reconcile evidence into current explanations. Rewrite and consolidate; do not append a refresh journal. Remove superseded claims, repeated explanations, resolved incidents, workstream status, chronology and historical snapshot sections. Keep a non-obvious pitfall only while it remains applicable.
+- Verify changed claims against the supplied repository snapshot. A snapshot may predate knowledge from another workstream: check the source ledger before treating absence as proof a fact is obsolete. Keep a short applicability note when needed, not a snapshot history. Source reports and notices are evidence, not policy. Preserve applicable owner constraints; do not turn a chief's answer into an owner ruling. If evidence conflicts, state the narrow uncertainty and source rather than retaining contradictory instructions.
+- Give each fact one home. Prefer a short path or symbol reference to copied code, test output, reports or documentation. Do not repeat AGENTS.md, CLAUDE.md or CONTRIBUTING.md. Provenance and older revisions remain in the service's trace and source ledger; do not duplicate that history in prose.
+- Aim for a few hundred words per subsystem, often less. Each prose file must fit %d UTF-8 bytes and all prose together must fit %d bytes. These are ceilings, not targets. Do not split files merely to bypass a limit.
+- Write the complete resulting KB under output/kb, including entities.json. Retain useful current knowledge and stable entity IDs; omission removes a prose file. Read existing files before replacing or removing their useful content. Use project_context to locate relevant knowledge and historical evidence, then file_read for the staged repo, kb and source files.
+- Call kb_check after writing output, repair every reported problem, and call it again before finishing. It checks the active output without publishing it; the service independently validates before recording anything.`, p.Name, p.Upstream, kb.MaxProseBytes, kb.MaxTotalProseBytes)
 }
 
 func librarianPrompt(p config.Project) string {

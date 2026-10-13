@@ -46,7 +46,7 @@ Four choices give the design its shape.
 | unit | One piece of the plan: a task, its acceptance, the criteria it serves, the units it depends on, the code it will touch. Built by one mason, verified against its acceptance by one reviewer, landed as one commit on the feature branch. |
 | footprint | The code entities a unit expects to touch, declared in the plan. Overlap between footprints is entanglement, so footprints decide which units may be built at once. |
 | seal | The pair of the upstream main commit and the spec's hash recorded at ratification. Moves when the feature branch rebases. |
-| bundle | The context a session gets at the start of a turn: the documents it needs, the unit, its questions and answers, local decisions and notices, and an optional Hearsay bundle for its scope. |
+| bundle | The context a session gets at the start of a turn: its task, applicable constraints and decisions, and references for retrieving project knowledge and evidence. |
 | the shed | Bounded engineering debate for initial planning and focused revisions. It challenges material risks and assumptions; it does not require engineering unanimity. |
 | amendment | A durable revision proposal. The chief of staff decides plan-only engineering revisions; spec changes and charter exceptions require the owner. |
 | question | Anything a role cannot answer from its bundle. Goes to the chief of staff, which answers or asks you. |
@@ -102,11 +102,13 @@ Keep factory settings out of it. Budgets, capacity and models are configuration.
 
 What a new contributor learns that the repository's documents do not say. It has three parts.
 
-- **Prose by subsystem.** `kb/<subsystem>.md`: how the subsystem is built, how to run the tests that matter, what breaks when you touch what, and the decisions behind it. These files are read directly into local bundles and become pinned anchors when Hearsay is enabled. Hearsay caps anchors at four per scope, which is a useful pressure to keep them short.
+- **Prose by subsystem.** `kb/<subsystem>.md`: how the subsystem is built, how to run the tests that matter, what breaks when you touch what, and the decisions behind it. Turns receive references to these files and retrieve relevant sections through bounded project-context tools; they become pinned anchors when Hearsay is enabled. Hearsay caps anchors at four per scope, which is a useful pressure to keep them short.
 - **The entity map.** The map from how people talk about the code to where it is: entities with stable local identifiers, aliases, path patterns, owners and part-of edges, seeded from CODEOWNERS and repository structure. Its local record is `kb/entities.json`; when Hearsay is enabled, these seeds are mapped into its code entity namespace. Footprints name these entities and remain resolvable without Hearsay.
 - **Decisions.** Constraints and choices about each subsystem, recorded as rulings and decisions in the trace with provenance. When Hearsay is enabled, it also represents them as stances. Local bundles include the relevant decisions without requiring an external service.
 
-The repository's `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md` are inputs the knowledge base must not repeat. Everyone reads it: the architect plans against the real architecture, the committee cites it, the mason's bundle carries the sections its footprint names.
+The repository's `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md` are inputs the knowledge base must not repeat. Every role can retrieve relevant KB sections: the architect plans against the real architecture, the committee cites it, and the mason uses its footprint to select knowledge.
+
+The librarian reconciles every pass into concise current explanations, removing superseded claims, duplicate material and historical refresh narratives. Detailed evidence and history stay in the trace and source ledger. Each prose file is limited to 8 KiB and total prose to 64 KiB; these are ceilings, not targets. The librarian can validate its staged output with `kb_check`, and the service independently validates it before publication. Invalid output leaves the recorded KB untouched.
 
 It is written by the librarian: an extraction pass over the clone when a project is added, and a pass each time a workstream goes quiet, with none of its units started and unmerged, as at assembly, or once it is delivered or abandoned. That pass folds in what every mason whose unit landed since the last one reported it learned. Refreshes are serial, so several workstreams on one project never race on them. A question the chief of staff had to answer from the code rather than the knowledge base is a gap, and it files the entry.
 
@@ -432,7 +434,7 @@ Durable threads are why a reviewer remembers what it found last round, a committ
 
 ### 9.2 The owned message log
 
-Every turn's request and final response is captured by the service, per agent, in `agents/<id>/log.jsonl`, with provenance: what caused the turn and at what depth. The service does not read the agent binary's own transcript files. Their schema is unofficial and versioned, and owning the log is what makes a thread survive a profile switch: when the next turn cannot resume the backend session, it starts a fresh session with a bounded replay of the owned log. Chief-of-staff event and owner conversation turns also receive the current workstream bundle, latest stored status and open inbox escalations in their system prompt, so durable context remains available when bounded replay omits the tool calls that recorded it. One capture path per backend, since each exposes turn results differently.
+Every turn's request and final response is captured by the service, per agent, in `agents/<id>/log.jsonl`, with provenance: what caused the turn and at what depth. The service does not read the agent binary's own transcript files. Their schema is unofficial and versioned, and owning the log is what makes a thread survive a profile switch: when the next turn cannot resume the backend session, it starts a fresh session with a bounded replay of the owned log. Chief-of-staff event and owner conversation turns also receive a project briefing with governing rules and decisions, references to retrievable knowledge, latest stored status and open inbox escalations, so durable context remains available when bounded replay omits the tool calls that recorded it. One capture path per backend, since each exposes turn results differently.
 
 ### 9.3 Profiles
 
@@ -457,8 +459,10 @@ The Osmia server, role-scoped:
 | `object`, `concede` | committee | A shed contribution, citing the spec, the charter or the knowledge base. |
 | `verdict` | committee | A review verdict: the decision, how the reviewer verified the acceptance, and findings with severities and the action each asks for. |
 | `workstream_diff` | unit, drift and final reviewers | Read the diff a review is pinned to: the whole diff, the changed files with line counts, chosen files or directories, or the hunks touching a line range. A unit review reads its candidate against its base, a drift review the feature branch's change before the rebase and the resolved candidate's change on upstream, and a final review the branch against upstream. Review prompts list the changed files instead of carrying diffs. |
-| `answer`, `escalate`, `route_amendment`, `propose_charter`, `set_status`, `notify` | chief of staff | The five outcomes of a question, the status, and a notice to in-flight bundles. |
+| `answer`, `escalate`, `route_amendment`, `propose_charter`, `set_status`, `notify` | chief of staff | The five outcomes of a question, the status, and a retrievable informational project notice. |
 | `inspect_code` | chief of staff, architect | Read committed project code or a unit candidate, with snapshot identity and an inspection citation. |
+| `project_context` | all factory roles | List, search and read project charter, KB and informational notices in bounded pages, including historical revisions. |
+| `kb_check` | librarian | Validate staged KB output and prose budgets without publishing it. |
 | `factory_context` | chief of staff, architect, mason, unit reviewer, drift mason, drift reviewer | List or read workstream documents at current or historical revisions, independently of conversation replay. |
 | `read_remote_file` | chief of staff, architect | Retrieve a GitHub repository file at a resolved commit and record its provenance and content. |
 | `record_discovery` | chief of staff, mason, unit reviewer, drift mason, drift reviewer | Record necessary discovered work; the chief assigns, declines or retains suggestions with reasons. |
@@ -640,7 +644,7 @@ Osmia is a Hearsay source. A connector plugin in Hearsay's process reads the pro
 
 ### 12.3 Bundles
 
-The service assembles each turn's bundle: its own part, spec, plan, unit, questions and answers, notices, and then Hearsay's bundle for the project scope filtered by the unit's footprint entities, one to two thousand tokens of pointers with one line each. Roles map to agent classes: architect, committee and mason are workers, the chief of staff is an orchestrator over several scopes with a watch, the foreman and librarian are observers, and you are the steward. The effective principal is always the agent's grants intersected with yours.
+The service assembles each turn's task context and a project briefing with applicable charter rules, decisions and owner-policy notices. KB prose, the full entity map and informational notice history remain available through bounded project-context retrieval. Optional scoped Hearsay pointers accompany the briefing, with detailed evidence available through its tools. Roles map to agent classes: architect, committee and mason are workers, the chief of staff is an orchestrator over several scopes with a watch, the foreman and librarian are observers, and you are the steward. The effective principal is always the agent's grants intersected with yours.
 
 ### 12.4 Watching
 

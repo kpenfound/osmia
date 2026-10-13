@@ -69,6 +69,22 @@ func refreshFixture(t *testing.T, output string, fail bool) (*shedFixture, *fake
 				return nil, err
 			}
 		}
+		// Validation reads the active isolated output and permits repair in the
+		// same turn without changing the project's recorded KB.
+		if _, err := callTool(ctx, tools, "file_write", map[string]any{"path": "output/kb/internal.md", "content": strings.Repeat("x", kb.MaxProseBytes+1)}); err != nil {
+			return nil, err
+		}
+		invalid, err := callTool(ctx, tools, "kb_check", map[string]any{})
+		if err != nil || !strings.Contains(invalid, `"valid":false`) || !strings.Contains(invalid, "maximum is 8192") {
+			return nil, fmt.Errorf("oversized KB validation: %s: %v", invalid, err)
+		}
+		if _, err := callTool(ctx, tools, "file_write", map[string]any{"path": "output/kb/internal.md", "content": output}); err != nil {
+			return nil, err
+		}
+		checked, err := callTool(ctx, tools, "kb_check", map[string]any{})
+		if err != nil || !strings.Contains(checked, `"valid":true`) {
+			return nil, fmt.Errorf("KB validation: %s: %v", checked, err)
+		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Refreshed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 	f.engine.mu.Unlock()

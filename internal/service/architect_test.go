@@ -302,7 +302,7 @@ func checkArchitectBoundary(ctx context.Context, req agent.Request, verified *ag
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if want := []string{questions.AskTool, DraftTool, "factory_context", "file_read", "inspect_code", "read_remote_file"}; !slices.Equal(names, want) {
+	if want := []string{questions.AskTool, DraftTool, "factory_context", "file_read", "inspect_code", "project_context", "read_remote_file"}; !slices.Equal(names, want) {
 		fail("role tools %v, want %v", names, want)
 	}
 	for _, name := range []string{"file_write", "shell", "git_push", "set_status", "notes_read", "notes_write"} {
@@ -319,10 +319,14 @@ func checkArchitectBoundary(ctx context.Context, req agent.Request, verified *ag
 	if err != nil {
 		fail("read context.md: %v", err)
 	}
-	for _, want := range []string{"# Project context", "context mode: file", "- charter#1: Keep changes small.", "- charter#2: Every change has a test.", "## Entities", "internal.trace"} {
+	for _, want := range []string{"# Project context", "context mode: file", "- charter#1: Keep changes small.", "- charter#2: Every change has a test.", "project_context", "kb/entities.json"} {
 		if !strings.Contains(context, want) {
 			fail("context.md lacks %q:\n%s", want, context)
 		}
+	}
+	entities, err := callTool(ctx, tools, projectContextTool, map[string]any{"path": "kb/entities.json"})
+	if err != nil || !strings.Contains(entities, "internal.trace") {
+		fail("retrieving entities: %s: %v", entities, err)
 	}
 	for _, path := range []string{"repo/CODEOWNERS", "secret.env", "../config.toml", ".git/HEAD", filepath.Join(clone, "CODEOWNERS"), "kb/entities.json"} {
 		if _, err := readTool(ctx, tools, path); err == nil {

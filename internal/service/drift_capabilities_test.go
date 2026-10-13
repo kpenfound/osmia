@@ -129,7 +129,7 @@ func TestDriftMasonGrantNamesEveryDriftMasonTool(t *testing.T) {
 	// file_read and file_write come from the view, not Scoped.
 	names = append(names, "file_read", "file_write")
 	slices.Sort(names)
-	want := slices.Clone(masonGrant.Tools)
+	want := slices.Clone(turns.Grants[masonRole].Tools)
 	slices.Sort(want)
 	if !slices.Equal(names, want) {
 		t.Fatalf("drift mason toolset %v, want %v", names, want)
@@ -183,7 +183,7 @@ func TestDriftReviewerGrantNamesEveryDriftReviewerToolAndReadOnlyCandidateView(t
 	}
 	names = append(names, "file_read")
 	slices.Sort(names)
-	want := slices.Clone(reviewerGrant.Tools)
+	want := slices.Clone(turns.Grants[reviewerRole].Tools)
 	slices.Sort(want)
 	if !slices.Equal(names, want) {
 		t.Fatalf("drift reviewer toolset %v, want %v", names, want)

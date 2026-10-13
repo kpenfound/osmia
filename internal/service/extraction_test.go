@@ -240,7 +240,7 @@ func checkLibrarianBoundary(ctx context.Context, req agent.Request, verified *ag
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if want := []string{"file_read", "file_write", "notes_read", "notes_write"}; !slices.Equal(names, want) {
+	if want := []string{"file_read", "file_write", "kb_check", "notes_read", "notes_write", "project_context"}; !slices.Equal(names, want) {
 		fail("role tools %v, want %v", names, want)
 	}
 	for _, name := range []string{"shell", "git_push"} {

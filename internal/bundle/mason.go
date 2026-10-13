@@ -251,7 +251,7 @@ func (m Mason) Render() string {
 	}
 	line("## end of %s", m.Spec.Source)
 	line("")
-	w.WriteString(m.Context.Render())
+	w.WriteString(m.Context.Brief())
 	return w.String()
 }
 

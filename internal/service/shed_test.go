@@ -206,7 +206,7 @@ func checkCommitteeBoundary(ctx context.Context, req agent.Request, verified *ag
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if want := []string{questions.AskTool, shed.ConcedeTool, "file_read", shed.ObjectTool}; !slices.Equal(names, want) {
+	if want := []string{questions.AskTool, shed.ConcedeTool, "file_read", shed.ObjectTool, "project_context"}; !slices.Equal(names, want) {
 		fail("role tools %v, want %v", names, want)
 	}
 	for _, name := range []string{"file_write", "shell", "exec", "fetch", "git_push", DraftTool, "set_status", "notes_read", "notes_write", "answer", "escalate", shed.ReplyTool} {
@@ -219,7 +219,7 @@ func checkCommitteeBoundary(ctx context.Context, req agent.Request, verified *ag
 			fail("read %s: %q %v", path, got, err)
 		}
 	}
-	if bundle, err := readTool(ctx, tools, "context.md"); err != nil || !strings.Contains(bundle, "- charter#2: Every change has a test.") || !strings.Contains(bundle, "internal.trace") {
+	if bundle, err := readTool(ctx, tools, "context.md"); err != nil || !strings.Contains(bundle, "- charter#2: Every change has a test.") || !strings.Contains(bundle, "project_context") {
 		fail("context.md: %q %v", bundle, err)
 	}
 	for _, path := range []string{"repo/secret.env", "secret.env", "repo/.git/HEAD", ".git/HEAD", "../config.toml", filepath.Join(clone, "CODEOWNERS"), "kb/entities.json", "shed/round-1/" + committeeAgent(2) + ".json"} {

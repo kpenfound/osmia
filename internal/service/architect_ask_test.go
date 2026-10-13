@@ -71,7 +71,7 @@ func TestArchitectQuestionParksTheDraftUntilTheAnswerArrives(t *testing.T) {
 		if !strings.Contains(req.SystemPrompt, "architect of the dagger project") || req.Profile.Name != architectRole {
 			p.report("answer turn system prompt %q, profile %+v", req.SystemPrompt, req.Profile)
 		}
-		if names, err := toolNames(ctx, tools); err != nil || !slices.Equal(names, []string{questions.AskTool, DraftTool, "factory_context", "file_read", "inspect_code", "read_remote_file"}) {
+		if names, err := toolNames(ctx, tools); err != nil || !slices.Equal(names, []string{questions.AskTool, DraftTool, "factory_context", "file_read", "inspect_code", "project_context", "read_remote_file"}) {
 			p.report("answer turn tools %v %v", names, err)
 		}
 		return delivers(p, plan.PlanPath, validPlan)(ctx, req, verified, tools)
@@ -228,7 +228,7 @@ func TestArchitectQuestionHoldsTheReplyAndTheConclusion(t *testing.T) {
 		return errors.Join(answers(p, "I will split it.", size)(ctx, req, verified, tools), asks(p, "1")(ctx, req, verified, tools))
 	})
 	answering := f.answer("1", func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
-		if names, err := toolNames(ctx, tools); err != nil || !slices.Equal(names, []string{questions.AskTool, DraftTool, "file_read", shed.ReplyTool}) {
+		if names, err := toolNames(ctx, tools); err != nil || !slices.Equal(names, []string{questions.AskTool, DraftTool, "file_read", "project_context", shed.ReplyTool}) {
 			p.report("answer turn tools %v %v", names, err)
 		}
 		return delivers(p, plan.PlanPath, splitPlan)(ctx, req, verified, tools)

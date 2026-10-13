@@ -95,3 +95,26 @@ func TestReadOutput(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 }
+
+func TestKnowledgeProseBudgets(t *testing.T) {
+	entities := `{"version":1,"entities":[{"id":"internal","name":"Internal","paths":["internal/**"]}]}`
+	files := map[string]string{"kb/entities.json": entities, "kb/internal.md": strings.Repeat("x", MaxProseBytes)}
+	if _, err := ReadOutput(writeOutput(t, files)); err != nil {
+		t.Fatal(err)
+	}
+	files["kb/internal.md"] += "é"
+	if _, err := ReadOutput(writeOutput(t, files)); err == nil || !strings.Contains(err.Error(), "maximum is 8192") {
+		t.Fatalf("oversized file accepted: %v", err)
+	}
+	delete(files, "kb/internal.md")
+	for i := range 8 {
+		files["kb/subsystem-"+string(rune('a'+i))+".md"] = strings.Repeat("x", MaxProseBytes)
+	}
+	if _, err := ReadOutput(writeOutput(t, files)); err != nil {
+		t.Fatal(err)
+	}
+	files["kb/extra.md"] = "x"
+	if _, err := ReadOutput(writeOutput(t, files)); err == nil || !strings.Contains(err.Error(), "maximum is 65536") {
+		t.Fatalf("total budget bypassed by splitting: %v", err)
+	}
+}

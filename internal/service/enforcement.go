@@ -71,7 +71,7 @@ var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_wri
 // unitMasonGrant is what a unit mason turn may do: read, write and execute in
 // its view of its unit's workspace, ask the chief of staff and report its
 // unit done.
-var unitMasonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, factoryContextTool, discoveryTool, doneTool}, WriteFiles: true, Execute: true}
+var unitMasonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, factoryContextTool, projectContextTool, discoveryTool, doneTool}, WriteFiles: true, Execute: true}
 
 // reviewerGrant is what a unit reviewer turn may do: read its candidate and
 // diff, ask the chief of staff, read factory context, record a discovery and

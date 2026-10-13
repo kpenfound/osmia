@@ -253,7 +253,7 @@ func checkReplyBoundary(ctx context.Context, p *faults, req agent.Request, verif
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if want := []string{questions.AskTool, DraftTool, "file_read", shed.ReplyTool}; !slices.Equal(names, want) {
+	if want := []string{questions.AskTool, DraftTool, "file_read", "project_context", shed.ReplyTool}; !slices.Equal(names, want) {
 		p.report("role tools %v, want %v", names, want)
 	}
 	for _, name := range []string{shed.ObjectTool, shed.ConcedeTool, "file_write", "shell", "fetch", "git_push", "notes_write", "set_status"} {
@@ -982,7 +982,7 @@ func TestReplyToolsAreBoundToTheReplyTurn(t *testing.T) {
 	for _, tool := range tools {
 		names = append(names, tool.Name)
 	}
-	if want := []string{shed.ReplyTool, DraftTool, questions.AskTool}; !slices.Equal(names, want) {
+	if want := []string{shed.ReplyTool, DraftTool, questions.AskTool, projectContextTool}; !slices.Equal(names, want) {
 		t.Fatalf("tools %v, want %v", names, want)
 	}
 	for name, mutate := range map[string]func(*coreadapter.Scope){
