@@ -356,6 +356,35 @@ A custom template must support every agent in that role's fallback chain. The
 classifier uses the mason's sandbox and template with its own configured profile.
 Reload applies role settings to subsequent turns; an active turn keeps its grants.
 
+**Building the Osmia template**
+
+From the Osmia checkout, run:
+
+```sh
+./scripts/build-sandbox.sh
+```
+
+The script requires a working `sbx` installation. It pulls the default Codex
+template, installs the latest Codex and Claude Code plus Dagger CLI
+`1.0.0-beta.17`, verifies the tools, and saves the local template as `osmia:latest`.
+Tags such as `:latest` are supported for templates. Each run refreshes both agents
+and replaces that local tag. The Dagger version is a constant in the script. The
+temporary build sandbox has no workspace mounts and is removed when the script
+exits.
+
+Under each role that should use this template, set `sandbox = "sbx"` and
+`image = "osmia:latest"` in the existing role configuration, then run
+`osmia reload`. `image` is configured per role, not inherited from a profile.
+The template supports Codex and Claude profiles, including fallback chains
+and the classifier when configuring the mason. Docker may warn about using a
+Codex-based template with Claude; both agent executables are installed. Build
+under the OS account running Osmia so the service can access the local template.
+Existing sandboxes keep their installed versions.
+
+The template installs the Dagger CLI; engine access still requires the role's
+[Dagger configuration](#dagger-for-masons). Keep its configured version aligned
+with the script's pin.
+
 Follow [Docker Sandboxes setup](https://docs.docker.com/ai/sandboxes/get-started/),
 including initial network policy and credential approvals, before unattended
 turns. Put `sbx` on the service's `PATH` and prepare it under the OS account
