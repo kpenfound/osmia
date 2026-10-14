@@ -269,6 +269,38 @@ func TestFactoryContextReadsPriorRevisionsAndEnforcesTurnScope(t *testing.T) {
 	}
 }
 
+func TestFactoryContextListsFolders(t *testing.T) {
+	t.Parallel()
+	c := newContestFixture(t, "factory-folders")
+	var recorded []trace.Document
+	for _, id := range []string{"discovery-a", "discovery-b"} {
+		recorded = append(recorded, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: c.repo.Project(), Workstream: c.stream, At: c.f.clock.Now(), Actor: chiefActor, Cause: "fixture"}, Path: "discoveries/" + id + ".json", Content: "{}"})
+	}
+	must(t, c.repo.RecordDocuments(context.Background(), recorded))
+	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
+	tool := factoryContext(c.repo, scope)
+	for _, path := range []string{"discoveries", "discoveries/"} {
+		input, _ := json.Marshal(map[string]any{"path": path})
+		raw, err := tool.Handle(context.Background(), input)
+		must(t, err)
+		var listed map[string]int
+		must(t, json.Unmarshal(raw, &listed))
+		if len(listed) != 2 || listed["discoveries/discovery-a.json"] != 1 || listed["discoveries/discovery-b.json"] != 1 {
+			t.Fatalf("folder %q listed %s", path, raw)
+		}
+	}
+	for input, want := range map[string]string{
+		`{"path":"missing"}`:                  "without a path to list documents",
+		`{"path":"discoveries","revision":1}`: "is a folder",
+		`{"path":"spec.md","revision":99}`:    "its latest is 1",
+	} {
+		_, err := tool.Handle(context.Background(), json.RawMessage(input))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: got error %v, want it to mention %q", input, err, want)
+		}
+	}
+}
+
 func TestFactoryContextReadsCompleteCheckOutput(t *testing.T) {
 	t.Parallel()
 	c := newContestFixture(t, "check-output")

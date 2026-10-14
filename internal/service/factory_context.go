@@ -20,7 +20,7 @@ const factoryContextTool = "factory_context"
 // factoryContext exposes workstream records independently of conversation replay.
 func factoryContext(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	return coreadapter.Tool{Name: factoryContextTool, Effect: coreadapter.ToolRead,
-		Description: "Read the workstream's durable factory records, including your current task in plan.json, spec.md, unit reports, check output, discoveries, and neighboring assignments. With no path list available documents and revisions. Set revision to read earlier evidence. Use start and lines to select text. Large excerpts return next_offset; pass it as offset with the same line range to continue. This reads factory state, not target-project files.",
+		Description: "Read the workstream's durable factory records, including your current task in plan.json, spec.md, unit reports, check output, discoveries, and neighboring assignments. With no path list available documents and their latest revisions; a folder path such as discoveries lists the documents under it. Set revision to read earlier evidence. Use start and lines to select text. Large excerpts return next_offset; pass it as offset with the same line range to continue. This reads factory state, not target-project files.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"offset":{"type":"integer","minimum":0},"path":{"type":"string"},"revision":{"type":"integer","minimum":1},"start":{"type":"integer","minimum":1},"lines":{"type":"integer","minimum":1,"maximum":1000}},"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			if err := r.ActiveTurn(scope); err != nil {
@@ -63,8 +63,24 @@ func factoryContext(r *trace.Repository, scope coreadapter.Scope) coreadapter.To
 			if in.Path == "" {
 				return json.Marshal(latest)
 			}
+			if _, ok := latest[in.Path]; !ok {
+				folder := map[string]int{}
+				prefix := strings.TrimSuffix(in.Path, "/") + "/"
+				for path, revision := range latest {
+					if strings.HasPrefix(path, prefix) {
+						folder[path] = revision
+					}
+				}
+				if len(folder) == 0 {
+					return nil, fmt.Errorf("no factory document or folder at %q; call factory_context without a path to list documents", in.Path)
+				}
+				if in.Revision != 0 {
+					return nil, fmt.Errorf("%q is a folder; revision selects a document within it", in.Path)
+				}
+				return json.Marshal(folder)
+			}
 			if selected.Revision == 0 {
-				return nil, errors.New("factory document revision not found")
+				return nil, fmt.Errorf("%s has no revision %d; its latest is %d", in.Path, in.Revision, latest[in.Path])
 			}
 			lines := strings.Split(selected.Content, "\n")
 			start := min(len(lines), in.Start-1)
