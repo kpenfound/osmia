@@ -31,3 +31,13 @@ func (s *Service) setSole(p *activeProject) {
 func runtimeFor(repository *trace.Repository) *activeProject {
 	return &activeProject{id: repository.Project(), repository: repository}
 }
+
+// traces returns the open traces of the active projects.
+func (s *Service) traces() []*trace.Repository {
+	_, projects := s.runtimes()
+	out := make([]*trace.Repository, len(projects))
+	for i, p := range projects {
+		out[i] = p.repository
+	}
+	return out
+}

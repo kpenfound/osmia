@@ -237,9 +237,9 @@ func (n *notifier) budgetPause(cfg *config.Config, link string) (pause *occurren
 			// The pause expired at midnight and awaits its clearing.
 			return nil, ""
 		}
-		status, diagnostic := n.s.dailyBudgetStatus()
-		if diagnostic != nil || status == nil {
-			return nil, "cannot read today's spend; the budget pause notification waits until it can be read"
+		status := n.s.dailyBudgetStatus()
+		if status == nil {
+			return nil, "no daily budget is configured; the budget pause notification waits until one is"
 		}
 		key := strings.Join([]string{string(cfg.Project.ID), NotifyBudgetPause, p.SetAt.UTC().Format(time.RFC3339Nano)}, "/")
 		return &occurrence{key: key, kind: NotifyBudgetPause, body: budgetPauseBody(cfg.Project.ID, status, day.end, link)}, ""

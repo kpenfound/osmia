@@ -95,6 +95,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	var added, removed []*activeProject
 	rollback := func() {
 		for _, p := range added {
+			s.pool.Leave(p.id)
 			p.repository.Close()
 		}
 	}

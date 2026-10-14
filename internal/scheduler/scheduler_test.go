@@ -487,14 +487,13 @@ func TestPassNeverDispatchesASessionWorkstream(t *testing.T) {
 	f.thread(t, repo, sessionStream, "session", "session")
 	f.queue(t, repo, "alpha", "one")
 	f.queueOn(t, repo, sessionStream, "session", "one")
-	s, err := New(repo, Options{Now: f.clock.Now})
+	shared := &Shared{}
+	s, err := New(repo, Options{Now: f.clock.Now, Shared: shared})
 	must(t, err)
-	slots, err := s.Slots(func(Candidate) (bool, error) { return false, nil })
-	must(t, err)
-	if n := slots.Used["session"]; n != 0 {
+	must(t, s.Pass(ctx))
+	if n := shared.Slots([]config.ProjectID{project}).Used["session"]; n != 0 {
 		t.Fatalf("session role slots in use: %d", n)
 	}
-	must(t, s.Pass(ctx))
 	if got := dispatched(t, repo); !slices.Equal(got, []string{"alpha/one"}) {
 		t.Fatalf("dispatched %v", got)
 	}

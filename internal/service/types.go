@@ -975,6 +975,9 @@ const (
 	// EventActivity announces a change to the backend activity record: an
 	// operation started, reported progress, finished or failed.
 	EventActivity EventKind = "activity"
+	// EventCapacity announces a change to the role slots in use or the turns
+	// waiting for one, as the projects' schedulers publish them.
+	EventCapacity EventKind = "capacity"
 )
 
 // Event is one notification of the client event stream. It names what

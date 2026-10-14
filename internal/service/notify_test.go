@@ -730,7 +730,8 @@ func TestNotifyDailyBudgetPauseOncePerPause(t *testing.T) {
 }
 
 // A pause already in force when notifications turn on is not posted, and one
-// whose spend cannot be read waits and is reported.
+// that cannot be described, with no daily budget configured, waits and is
+// reported.
 func TestNotifyDailyBudgetPauseBeforeTheWebhookAndUnreadableSpend(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -758,19 +759,23 @@ func TestNotifyDailyBudgetPauseBeforeTheWebhookAndUnreadableSpend(t *testing.T) 
 	if got := hook.received(); len(got) != 1 {
 		t.Fatalf("posts for the entry: %q", got)
 	}
-	must(t, repo.Close())
+	unbudgeted := *s.cfg
+	unbudgeted.Budget.PerDay = ""
+	s.mu.Lock()
+	s.cfg = &unbudgeted
+	s.mu.Unlock()
 	inbox.set()
 	hook.respond(http.StatusOK)
 	time.Sleep(20 * time.Millisecond)
 	n.pass(ctx)
 	if got := hook.received(); len(got) != 1 {
-		t.Fatalf("posts with unreadable spend: %q", got)
+		t.Fatalf("posts with no daily budget configured: %q", got)
 	}
 	if rec := n.ledger.Notifications[notificationKey(project, e)]; rec == nil || rec.State != notificationPending {
-		t.Fatalf("the decided entry while spend is unreadable: %+v", rec)
+		t.Fatalf("the decided entry with no daily budget configured: %+v", rec)
 	}
 	if d := n.diagnostics(); !slices.ContainsFunc(d, func(d Diagnostic) bool {
-		return d.Message == "cannot read today's spend; the budget pause notification waits until it can be read"
+		return d.Message == "no daily budget is configured; the budget pause notification waits until one is"
 	}) {
 		t.Fatalf("diagnostics %+v", d)
 	}

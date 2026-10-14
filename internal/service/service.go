@@ -163,7 +163,9 @@ type Service struct {
 	// active_projects order.
 	projects []*activeProject
 	// pool is the role capacity the schedulers of every project draw on.
-	pool      *scheduler.Shared
+	pool *scheduler.Shared
+	// spends is the daily spend each project's daily budget pass publishes.
+	spends    daySpends
 	pending   error
 	reloadErr *ReloadError
 	projectMu sync.Mutex // serializes project registration, removal and reload
@@ -266,7 +268,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: newHub(), logger: logger}
 	s.activity = newActivityRegistry(s.now)
 	s.activity.notify = func() { s.hub.publish(Event{Kind: EventActivity}) }
-	s.pool = &scheduler.Shared{Traces: s.traces}
+	s.pool = &scheduler.Shared{Changed: func() { s.hub.publish(Event{Kind: EventCapacity}) }}
 	// Getenv reads the Jev boost's API key the same way the default would,
 	// and registers whatever value it reads for redaction: the owner may
 	// point api_key_env at any environment variable name, not only
@@ -630,17 +632,6 @@ func (s *Service) runtimeOf(id config.ProjectID) (*config.Config, *activeProject
 	return cfg, nil
 }
 
-// traces returns the open traces of the active projects, whose turns in
-// flight share the role capacity.
-func (s *Service) traces() []*trace.Repository {
-	_, projects := s.runtimes()
-	out := make([]*trace.Repository, len(projects))
-	for i, p := range projects {
-		out[i] = p.repository
-	}
-	return out
-}
-
 // projectFor resolves the project a project-scoped request names. A request
 // may leave the project out only while exactly one project is active; the
 // errors list the active projects.
@@ -762,9 +753,10 @@ func (s *Service) openAll(cfg *config.Config) ([]*activeProject, error) {
 }
 
 // open opens the existing trace of the project cfg is about and its
-// reconciliation controller. Without a configured project, or without a trace
-// for it, the project runs idle: trace creation belongs to project
-// registration.
+// reconciliation controller, and joins the project to the shared pool of role
+// capacity. Without a configured project, or without a trace for it, the
+// project runs idle: trace creation belongs to project registration. A caller
+// that closes the project without launching it leaves the pool.
 func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	if !cfg.HasProject() {
 		return nil, nil
@@ -781,25 +773,37 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 		repository.Close()
 		return nil, err
 	}
+	if err := s.pool.Join(repository); err != nil {
+		repository.Close()
+		return nil, err
+	}
 	return &activeProject{id: cfg.Project.ID, repository: repository, controller: controller, pipeline: p, done: make(chan error, 1)}, nil
 }
 
-// admit is the scheduler's gate. It declines every turn of the librarian's
-// workstream and of every architect and committee thread, which the service's
-// own reconcilers run in their staged views, and of abandoned workstreams, and
-// holds the project's other queued turns that a runtime pause in force covers.
-// It also holds every mason turn of a unit whose workspace is behind its
-// feature branch, so the workspace has no writer when the foreman rebases it.
-// The store is read on every pass, so a cleared pause lets held turns run on
-// the loop's next periodic pass.
-func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(context.Context, scheduler.Candidate) (bool, error) {
+// dispatcher is the scheduler of the project cfg is about, drawing on the
+// shared pool of role capacity.
+func (s *Service) dispatcher(cfg *config.Config, repository *trace.Repository) (*scheduler.Scheduler, error) {
+	limits := cfg.Capacity
+	limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
+	return scheduler.New(repository, scheduler.Options{Now: s.options.Reconciliation.Now, Holds: s.dispatchHolds(cfg, repository), Admit: s.admit(cfg, repository), Capacity: &limits, Priorities: s.priorities, Shared: s.pool})
+}
+
+// dispatchHolds is the scheduler's gate before capacity for the project cfg
+// is about: holds of its candidates.
+func (s *Service) dispatchHolds(cfg *config.Config, repository *trace.Repository) func(scheduler.Candidate) (bool, error) {
 	project := cfg.Project.ID
 	librarian := librarianWorkstream(project)
+	return func(c scheduler.Candidate) (bool, error) {
+		return s.holds(project, librarian, repository, c)
+	}
+}
+
+// admit is the scheduler's gate after holds and capacity. It holds every
+// mason turn of a unit whose workspace is behind its feature branch, so the
+// workspace has no writer when the foreman rebases it.
+func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(context.Context, scheduler.Candidate) (bool, error) {
 	units := newUnitWorkspaces(cfg, repository)
 	return func(ctx context.Context, c scheduler.Candidate) (bool, error) {
-		if held, err := s.holds(project, librarian, repository, c); err != nil || held {
-			return false, err
-		}
 		if c.Thread.Identity.Role == masonRole && c.Turn.Request.Unit != "" {
 			behind, err := units.behind(ctx, c.Workstream, c.Turn.Request.Unit)
 			return !behind, err
@@ -811,7 +815,9 @@ func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(c
 // holds reports whether the dispatch gate declines the candidate whatever
 // the capacity: a turn of the librarian's workstream, an architect or
 // committee turn, which their own passes run, a turn of an abandoned
-// workstream, and a turn a pause in force holds.
+// workstream, and a turn a pause in force holds. The store is read on every
+// pass, so a cleared pause lets held turns run on the loop's next periodic
+// pass.
 func (s *Service) holds(project config.ProjectID, librarian config.WorkstreamID, repository *trace.Repository, c scheduler.Candidate) (bool, error) {
 	if c.Workstream == librarian || c.Thread.Identity.Role == architectRole || c.Thread.Identity.Role == committeeRole {
 		return true, nil
@@ -1091,9 +1097,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 			return nil, err
 		}
 		runner.turns = abandonable{Reconciler: bound, s: s, repository: repository}
-		limits := cfg.Capacity
-		limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
-		dispatch, err := scheduler.New(repository, scheduler.Options{Now: options.Now, Admit: s.admit(cfg, repository), Capacity: &limits, Priorities: s.priorities, Shared: s.pool})
+		dispatch, err := s.dispatcher(cfg, repository)
 		if err != nil {
 			return nil, err
 		}

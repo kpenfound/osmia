@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -41,10 +42,10 @@ func roleCapacity(t *testing.T, c *CapacityStatus, role string) RoleCapacity {
 	return RoleCapacity{}
 }
 
-// Status counts the slots in use of each shared role kind as the scheduler
-// does, and lists the queued turns and deferred ready units waiting for one;
-// work a pause holds waits for no slot, while its turn in flight keeps its
-// slot.
+// Status reports the slots in use of each shared role kind and the queued
+// turns waiting for one as the project's scheduler pass published them, and
+// the deferred ready units waiting for one; work a pause holds waits for no
+// slot, while its turn in flight keeps its slot.
 func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -63,10 +64,18 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 	_, err := repo.ClaimTurn(ctx, stream, "mason-1", "token", t.TempDir(), clock.Now())
 	must(t, err)
 
-	got := s.statusList()
-	if got.Capacity == nil {
-		t.Fatalf("no capacity: %+v", got.Diagnostics)
+	// Before the project's first pass, nothing is published.
+	s.pool = &scheduler.Shared{}
+	if got := s.statusList(); got.Capacity == nil || roleCapacity(t, got.Capacity, masonRole).Used != 0 || len(roleCapacity(t, got.Capacity, masonRole).Waiting) != 0 {
+		t.Fatalf("capacity before the project's pass: %+v", got.Capacity)
 	}
+	dispatch, err := s.dispatcher(s.cfg, repo)
+	must(t, err)
+	must(t, dispatch.Pass(ctx))
+	ops, err := repo.Operations(stream)
+	must(t, err)
+
+	got := s.statusList()
 	// The reviewer takes the free reviewer slot and the workstream's second
 	// slot, so the workstream's masons wait for the workstream; the sibling's
 	// mason waits for mason-1's mason slot. The committee's turns run in shed
@@ -76,15 +85,16 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 			{Workstream: sibling, Unit: "u-s1", Agent: "s1", Turn: "s1-turn", Reason: DeferCapacity},
 			{Workstream: stream, Unit: "u-mason-2", Agent: "mason-2", Turn: "mason-2-turn", Reason: DeferWorkstreamCap},
 			{Workstream: stream, Unit: "u-mason-3", Agent: "mason-3", Turn: "mason-3-turn", Reason: DeferWorkstreamCap}}},
-		{Role: reviewerRole, Used: 0, Limit: 1, Waiting: []SlotWait{}},
+		{Role: reviewerRole, Used: 1, Limit: 1, Waiting: []SlotWait{}},
 		{Role: committeeRole, Used: 0, Limit: 3, Waiting: []SlotWait{}},
 	}}
 	if !reflect.DeepEqual(got.Capacity, want) {
 		t.Fatalf("capacity\n%+v\nwant\n%+v", got.Capacity, want)
 	}
 
-	// Pausing the workstream holds its queued turns, which no longer wait,
-	// and frees nothing: mason-1 is in flight and keeps its slot.
+	// Pausing the workstream holds its queued turns, which no longer wait
+	// even before the next pass, and frees nothing: mason-1 is in flight and
+	// keeps its slot.
 	must(t, s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Hold", SetAt: clock.Now()}))
 	got = s.statusList()
 	mason := roleCapacity(t, got.Capacity, masonRole)
@@ -109,10 +119,7 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 		// starts them.
 		{Project: project, Workstream: "w_00000000000000000000000000000abc", State: &gone, Units: []UnitStatus{deferred("g", DeferCapacity)}},
 	}
-	capacity, unread := s.capacityStatus(list)
-	if unread != nil {
-		t.Fatalf("capacity diagnostic %+v", unread)
-	}
+	capacity := s.capacityStatus(list)
 	if got, want := roleCapacity(t, capacity, masonRole).Waiting, []SlotWait{
 		{Workstream: sibling, Unit: "u-s1", Agent: "s1", Turn: "s1-turn", Reason: DeferCapacity},
 		{Workstream: sibling, Unit: "a", Reason: DeferCapacity},
@@ -124,7 +131,7 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 
 	// A factory pause holds everything.
 	must(t, s.setPause(runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Travelling", SetAt: clock.Now()}))
-	capacity, _ = s.capacityStatus(list)
+	capacity = s.capacityStatus(list)
 	for _, r := range capacity.Roles {
 		if len(r.Waiting) != 0 {
 			t.Fatalf("%s waits under a factory pause: %+v", r.Role, r.Waiting)
@@ -135,35 +142,20 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 	}
 
 	// Reading the capacity dispatched nothing.
-	ops, err := repo.Operations(stream)
+	after, err := repo.Operations(stream)
 	must(t, err)
-	if len(ops) != 0 {
-		t.Fatalf("reading the capacity published %d operations", len(ops))
+	if len(after) != len(ops) {
+		t.Fatalf("reading the capacity published %d operations", len(after)-len(ops))
 	}
 }
 
 // Without an active project no slot is used and the top-level
-// per-workstream limit is in force; turns that cannot be read leave the
-// capacity null with a diagnostic.
-func TestStatusCapacityWithoutProjectAndUnreadable(t *testing.T) {
+// per-workstream limit is in force.
+func TestStatusCapacityWithoutProject(t *testing.T) {
 	t.Parallel()
 	s, _, _, _ := dailyBudgetService(t, 1, &adaptertest.Turns{})
-	s.boundary = func(name string) error {
-		if name == "status-capacity" {
-			return errors.New("injected")
-		}
-		return nil
-	}
-	got := s.statusList()
-	if got.Capacity != nil || !slices.Contains(got.Diagnostics, Diagnostic{"capacity", Internal, "cannot read the turns of project " + string(project) + "; check the trace repository"}) {
-		t.Fatalf("unreadable capacity: %+v %+v", got.Capacity, got.Diagnostics)
-	}
-	if len(got.Workstreams) == 0 {
-		t.Fatal("an unreadable capacity hid the workstreams")
-	}
-
 	s.cfg = s.cfg.WithoutProject()
-	got = s.statusList()
+	got := s.statusList()
 	want := &CapacityStatus{PerWorkstream: s.cfg.Capacity.PerWorkstream, Roles: []RoleCapacity{
 		{Role: masonRole, Limit: s.cfg.Capacity.Masons, Waiting: []SlotWait{}},
 		{Role: reviewerRole, Limit: s.cfg.Capacity.Reviewers, Waiting: []SlotWait{}},
@@ -217,6 +209,7 @@ func TestStatusReportsProviderUsage(t *testing.T) {
 	must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{stream}}}))
 	limit := runtime.ProviderLimit{Backend: "claude", Status: "rejected", Kind: "five_hour", SetAt: clock.Now(), ResetsAt: clock.Now().Add(time.Hour)}
 	must(t, s.store.SetProviderLimit(limit))
+	must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
 
 	got := s.statusList()
 	u := got.ProviderUsage

@@ -384,6 +384,7 @@ func (s *Service) activate(id config.ProjectID) (config.Project, error) {
 	}
 	if err := s.resolveRuntime(cfg, projects); err != nil {
 		if active != nil {
+			s.pool.Leave(active.id)
 			active.repository.Close()
 		}
 		return config.Project{}, err
@@ -479,11 +480,10 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 
 func (s *Service) finishDraining(active *activeProject) error {
 	err := <-active.done
-	s.pool.Hold(func() {
-		s.mu.Lock()
-		s.projects = slices.DeleteFunc(s.projects, func(p *activeProject) bool { return p == active })
-		s.mu.Unlock()
-	})
+	s.mu.Lock()
+	s.projects = slices.DeleteFunc(s.projects, func(p *activeProject) bool { return p == active })
+	s.mu.Unlock()
+	s.pool.Leave(active.id)
 	return errors.Join(err, active.repository.Close())
 }
 

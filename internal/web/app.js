@@ -14,6 +14,7 @@
     runtime: ['runtime', 'status'],
     config: ['config'],
     spend: ['status'],
+    capacity: ['status'],
     activity: ['activity'],
   };
 

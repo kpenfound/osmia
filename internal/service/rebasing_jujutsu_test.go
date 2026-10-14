@@ -687,10 +687,7 @@ func TestJujutsuConflictedUnitsAreResolvedInParallel(t *testing.T) {
 	f.start(t)
 	var masons RoleCapacity
 	for deadline := time.Now().Add(demoTimeout); ; time.Sleep(10 * time.Millisecond) {
-		capacity, diagnostic := f.s.capacityStatus(nil)
-		if diagnostic != nil {
-			t.Fatal(diagnostic.Message)
-		}
+		capacity := f.s.capacityStatus(nil)
 		masons = capacity.Roles[slices.IndexFunc(capacity.Roles, func(r RoleCapacity) bool { return r.Role == masonRole })]
 		if masons.Used == 2 {
 			break

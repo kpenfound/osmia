@@ -8,7 +8,6 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -18,17 +17,17 @@ import (
 )
 
 // capacityStatus reports the slots of the mason, reviewer and committee role
-// kinds as the scheduler counts them, with the queued turns its gate would
-// admit but that find no free slot, and, for masons, the ready units of list
-// whose latest mason controller decision is to wait for a slot. The role slots
-// are shared by every active project, so their use counts the turns in flight
-// on all of them, and the free slots go to the projects' queued turns in
-// active_projects order. PerWorkstream is the only active project's limit, or the
-// configured default otherwise. Work a pause in force holds, and work of an
-// abandoned workstream, is not waiting. Without an active project no slot is
-// used.
-func (s *Service) capacityStatus(list []WorkstreamStatus) (*CapacityStatus, *Diagnostic) {
-	cfg, projects := s.runtimes()
+// kinds as the projects' schedulers last published them to the shared pool,
+// with the queued turns their last passes found no free slot for, and, for
+// masons, the ready units of list whose latest mason controller decision is
+// to wait for a slot. It reads no trace. The role slots are shared by every
+// project in the pool, so their use counts the turns in flight on all of
+// them, and the waiting turns are listed in active_projects order.
+// PerWorkstream is the only active project's limit, or the configured default
+// otherwise. Work a pause now in force holds, and work of an abandoned
+// workstream, is not waiting.
+func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
+	cfg := s.current()
 	limits := cfg.Capacity
 	if cfg.HasProject() {
 		limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
@@ -38,46 +37,13 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) (*CapacityStatus, *Dia
 		{Role: reviewerRole, Limit: limits.Reviewers, Waiting: []SlotWait{}},
 		{Role: committeeRole, Limit: limits.Committee, Waiting: []SlotWait{}},
 	}}
-	var gated []scheduler.Gated
-	var ids []config.ProjectID
-	for _, p := range projects {
-		if !cfg.Active(p.id) && p.pipeline == nil {
-			continue
-		}
-		view := s.about(p.repository)
-		draining := !cfg.Active(p.id)
-		project, repository := p.id, p.repository
-		librarian := librarianWorkstream(project)
-		projectLimits := cfg.Capacity
-		projectLimits.PerWorkstream = view.Project.Capacity.PerWorkstream
-		dispatch, err := scheduler.New(repository, scheduler.Options{Now: s.now, Capacity: &projectLimits, Priorities: s.priorities, Shared: s.pool})
-		if err != nil {
-			return nil, &Diagnostic{"capacity", Internal, fmt.Sprintf("cannot read the turns of project %s; check the trace repository", project)}
-		}
-		gated = append(gated, scheduler.Gated{Scheduler: dispatch, Holds: func(c scheduler.Candidate) (bool, error) {
-			if draining {
-				return true, nil
-			}
-			return s.holds(project, librarian, repository, c)
-		}})
-		ids = append(ids, project)
-	}
-	// The projects' passes take the shared slots one after another, so a
-	// turn one project's pass would leave without a slot is waiting.
-	slots, err := scheduler.SlotsOf(gated)
-	if err == nil && len(gated) > 0 {
-		err = s.step("status-capacity")
-	}
-	if err != nil {
-		return nil, &Diagnostic{"capacity", Internal, fmt.Sprintf("cannot read the turns of project %s; check the trace repository", projectList(ids))}
-	}
-	used, waiting := slots.Used, slots.Waiting
+	slots := s.pool.Slots(cfg.ProjectIDs())
 	state, _ := s.effective()
 	for i := range out.Roles {
 		role := &out.Roles[i]
-		role.Used = used[role.Role]
-		for _, w := range waiting {
-			if w.Thread.Identity.Role == role.Role {
+		role.Used = slots.Used[role.Role]
+		for _, w := range slots.Waiting {
+			if w.Thread.Identity.Role == role.Role && !scheduler.Held(state.Pauses, w.Project, w.Candidate) {
 				role.Waiting = append(role.Waiting, SlotWait{Workstream: w.Workstream, Unit: w.Turn.Request.Unit, Agent: w.Thread.Identity.ID, Turn: w.Turn.Request.TurnID, Reason: w.Reason})
 			}
 		}
@@ -95,7 +61,7 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) (*CapacityStatus, *Dia
 			}
 		}
 	}
-	return out, nil
+	return out
 }
 
 // providerUsage reports today's known spend by provider, the provider of the
@@ -243,10 +209,7 @@ func (c *runtimeControls) capacity(repo *trace.Repository, scope coreadapter.Sco
 		if api != nil {
 			return nil, api
 		}
-		slots, diagnostic := s.capacityStatus(list)
-		if diagnostic != nil {
-			return nil, errors.New(diagnostic.Message)
-		}
+		slots := s.capacityStatus(list)
 		state, _ := s.effective()
 		return json.Marshal(struct {
 			Capacity *CapacityStatus `json:"capacity"`

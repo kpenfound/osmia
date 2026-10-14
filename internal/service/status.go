@@ -245,11 +245,8 @@ func agentStatuses(repository *trace.Repository, stream config.WorkstreamID, now
 func (s *Service) statusList() StatusResponse {
 	state, _ := s.effective()
 	profiles := s.effectiveProfiles(state)
-	budget, unread := s.dailyBudgetStatus()
+	budget := s.dailyBudgetStatus()
 	diagnostics := []Diagnostic{}
-	if unread != nil {
-		diagnostics = append(diagnostics, *unread)
-	}
 	streaks, err := s.failureStreaks()
 	if err != nil {
 		diagnostics = append(diagnostics, Diagnostic{"failure_streaks", Internal, "cannot read the turn attempts of the active project; check the trace repository"})
@@ -270,10 +267,7 @@ func (s *Service) statusList() StatusResponse {
 	if api != nil {
 		list = []WorkstreamStatus{}
 	}
-	capacity, unread := s.capacityStatus(list)
-	if unread != nil {
-		diagnostics = append(diagnostics, *unread)
-	}
+	capacity := s.capacityStatus(list)
 	if api != nil {
 		return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: append(diagnostics, Diagnostic{"workstreams", api.Code, api.Message}), Workspaces: workspaces}
 	}

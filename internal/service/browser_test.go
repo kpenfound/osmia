@@ -446,6 +446,12 @@ func newPageFixture(t *testing.T) *pageFixture {
 	_, err = live.ClaimTurn(ctx, stream, "agent_mason_upload", "token_upload", t.TempDir(), at)
 	must(t, err)
 	queueRoleTurn(t, live, stream, "agent_mason_audit", masonRole, "audit", at)
+	// The loop does not pass, so the project's scheduler passes once to
+	// publish the slot the upload's mason takes and the audit's turn waiting
+	// for it.
+	dispatch, err := s.dispatcher(s.about(live), live)
+	must(t, err)
+	must(t, dispatch.Pass(ctx))
 	f.status(t, trace.StatusContent{Goal: "Ship resumable uploads.", Note: "A mason is building the upload unit.", Agents: []string{"A mason builds upload."}})
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: quiet}, Mode: "soft", Reason: "The owner is travelling", Source: runtime.PauseOwner})
 	return f

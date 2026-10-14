@@ -821,12 +821,12 @@ func TestSchedulerLeavesLibrarianTurnsToTheExtractor(t *testing.T) {
 		t.Fatalf("first extraction: %+v", x)
 	}
 	must(t, s.sole().repository.CreateWorkstream(ctx, stream, f.clock.Now(), ownerActor))
-	gate := s.admit(s.current(), s.sole().repository)
-	if admitted, err := gate(ctx, scheduler.Candidate{Workstream: librarianWorkstream(id)}); err != nil || admitted {
-		t.Fatalf("librarian workstream admitted: %t %v", admitted, err)
+	holds := s.dispatchHolds(s.current(), s.sole().repository)
+	if held, err := holds(scheduler.Candidate{Workstream: librarianWorkstream(id)}); err != nil || !held {
+		t.Fatalf("librarian workstream not held: %t %v", held, err)
 	}
-	if admitted, err := gate(ctx, scheduler.Candidate{Workstream: stream}); err != nil || !admitted {
-		t.Fatalf("other workstream declined: %t %v", admitted, err)
+	if held, err := holds(scheduler.Candidate{Workstream: stream}); err != nil || held {
+		t.Fatalf("other workstream held: %t %v", held, err)
 	}
 	must(t, s.Close())
 	c.Close()

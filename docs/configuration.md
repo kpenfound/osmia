@@ -115,7 +115,10 @@ the service then starts without a project until `osmia project add` registers
 one. With several IDs the service runs every listed project at once, each with
 its own trace, reconciliation loop, lander and drift cadence. Role capacity
 (`capacity.*`), budgets and the factory-level pause are shared by all of them:
-a turn in flight on any project takes a slot of its role kind. Each project's
+a turn in flight on any project takes a slot of its role kind. Each project
+counts its own slots in use, waiting turns and daily spend from its own trace
+and publishes them, so the shared limits and the status's capacity and daily
+budget follow each project's latest pass. Each project's
 `capacity.per_workstream` still applies to its own workstreams, and a project
 pause holds only that project. Additional project directories may hold archived
 traces and are not scanned or activated. Duplicate IDs are errors. The

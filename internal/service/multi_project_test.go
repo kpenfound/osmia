@@ -183,8 +183,8 @@ func TestSeveralProjectsShareCapacityPauseApartAndResumeFromTheirOwnTraces(t *te
 	// The pause holds only its own project: its turn is neither dispatched nor
 	// waiting for a slot.
 	soon(t, "the other project's turn holds the only mason slot", func() bool {
-		st, d := s.capacityStatus(nil)
-		return d == nil && st.Roles[0].Used == 1 && len(st.Roles[0].Waiting) == 0
+		st := s.capacityStatus(nil)
+		return st.Roles[0].Used == 1 && len(st.Roles[0].Waiting) == 0
 	})
 	if got := f.dispatchedTurns(t, paused, project); len(got) != 0 {
 		t.Fatalf("paused project dispatched %v", got)
@@ -194,8 +194,8 @@ func TestSeveralProjectsShareCapacityPauseApartAndResumeFromTheirOwnTraces(t *te
 	// holds.
 	must(t, s.store.ClearPause(runtime.Target{Scope: "project", Project: project}, runtime.PauseOwner))
 	soon(t, "the first project's turn waits for the shared mason slot", func() bool {
-		st, d := s.capacityStatus(nil)
-		if d != nil || st.Roles[0].Used != 1 || len(st.Roles[0].Waiting) != 1 {
+		st := s.capacityStatus(nil)
+		if st.Roles[0].Used != 1 || len(st.Roles[0].Waiting) != 1 {
 			return false
 		}
 		w := st.Roles[0].Waiting[0]

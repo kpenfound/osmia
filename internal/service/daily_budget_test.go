@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math/big"
 	"reflect"
 	"strings"
 	"testing"
@@ -47,8 +48,24 @@ func jump(c *demoClock, at time.Time) {
 // appendDayCost records an attempt's cost in stream, started at at.
 func appendDayCost(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, id string, at time.Time, amount float64, known bool) {
 	t.Helper()
-	must(t, repo.Append(context.Background(), trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, At: at, Actor: trace.Actor{Kind: "service", ID: "thread-runner"}, Cause: "budget-fixture"},
-		Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(project), Workstream: string(stream), Thread: "thread", Turn: id, Role: masonRole}, AttemptID: id, At: at, Usage: coreadapter.Usage{CostUSD: amount, CostKnown: known, Turns: 1}}}))
+	must(t, repo.Append(context.Background(), trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: at, Actor: trace.Actor{Kind: "service", ID: "thread-runner"}, Cause: "budget-fixture"},
+		Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: "thread", Turn: id, Role: masonRole}, AttemptID: id, At: at, Usage: coreadapter.Usage{CostUSD: amount, CostKnown: known, Turns: 1}}}))
+}
+
+// otherBudgetProject adds a second active project to s, with its own trace
+// holding stream, and returns that trace.
+func otherBudgetProject(t *testing.T, s *Service, repo *trace.Repository, clock *demoClock) *trace.Repository {
+	t.Helper()
+	ctx := context.Background()
+	owner := trace.Actor{Kind: "owner", ID: "local"}
+	other, err := trace.Create(ctx, s.cfg.Root, config.Project{ID: otherProject, Clone: t.TempDir()}, clock.Now(), owner)
+	must(t, err)
+	t.Cleanup(func() { other.Close() })
+	must(t, other.CreateWorkstream(ctx, stream, clock.Now(), owner))
+	s.mu.Lock()
+	s.projects = []*activeProject{runtimeFor(repo), runtimeFor(other)}
+	s.mu.Unlock()
+	return other
 }
 
 // factoryPause returns the factory pause in force, if any.
@@ -65,9 +82,9 @@ func factoryPause(t *testing.T, s *Service) (runtime.Pause, bool) {
 
 func budgetStatus(t *testing.T, s *Service) DailyBudgetStatus {
 	t.Helper()
-	got, diagnostic := s.dailyBudgetStatus()
-	if diagnostic != nil || got == nil {
-		t.Fatalf("daily budget status: %+v %+v", got, diagnostic)
+	got := s.dailyBudgetStatus()
+	if got == nil {
+		t.Fatal("no daily budget status")
 	}
 	return *got
 }
@@ -109,6 +126,99 @@ func TestDailyBudgetPausesTheFactoryAtTheLimit(t *testing.T) {
 	}
 	if !scheduler.Paused(mustEffective(s).Pauses, project, stream) || !scheduler.Paused(mustEffective(s).Pauses, project, sibling) {
 		t.Fatal("the budget pause does not hold the workstreams")
+	}
+}
+
+// Each project's pass sums only its own trace and counts the other
+// project's spend from what that project's own pass published, so the
+// factory pauses on their combined spend even when the other trace can no
+// longer be read.
+func TestDailyBudgetCountsAnotherProjectFromItsPublishedSpend(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, _, repo, clock := dailyBudgetService(t, 0, nil)
+	other := otherBudgetProject(t, s, repo, clock)
+	appendDayCost(t, other, stream, "other", clock.Now(), 0.6, true)
+	must(t, dailyBudget{s: s, repository: other}.Pass(ctx))
+	must(t, other.Close())
+	appendDayCost(t, repo, stream, "first", clock.Now(), 0.3, true)
+	must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
+	if p, ok := factoryPause(t, s); ok {
+		t.Fatalf("paused below the limit: %+v", p)
+	}
+	appendDayCost(t, repo, stream, "second", clock.Now(), 0.1, true)
+	must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
+	if p, ok := factoryPause(t, s); !ok || !strings.Contains(p.Reason, "known spend on 2026-09-16 is USD 1 of the USD 1.00 per-day budget") {
+		t.Fatalf("budget pause on the projects' combined spend: %+v %v", p, ok)
+	}
+}
+
+// A project no longer active stops counting toward the factory's daily
+// spend, and stays forgotten until its own pass publishes its spend again.
+func TestDailyBudgetForgetsARemovedProjectsSpend(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, _, repo, clock := dailyBudgetService(t, 0, nil)
+	other := otherBudgetProject(t, s, repo, clock)
+	appendDayCost(t, other, stream, "other", clock.Now(), 0.6, true)
+	must(t, dailyBudget{s: s, repository: other}.Pass(ctx))
+	s.setSole(runtimeFor(repo))
+	appendDayCost(t, repo, stream, "first", clock.Now(), 0.5, true)
+	must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
+	if p, ok := factoryPause(t, s); ok {
+		t.Fatalf("a removed project's spend counted: %+v", p)
+	}
+	s.mu.Lock()
+	s.projects = append(s.projects, runtimeFor(other))
+	s.mu.Unlock()
+	must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
+	if p, ok := factoryPause(t, s); ok {
+		t.Fatalf("a forgotten project's spend counted before its own pass: %+v", p)
+	}
+}
+
+// Spend another project published for an earlier local day does not count
+// toward today's.
+func TestDailyBudgetIgnoresAnotherProjectsSpendOfAnEarlierDay(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, _, repo, clock := dailyBudgetService(t, 0, nil)
+	other := otherBudgetProject(t, s, repo, clock)
+	appendDayCost(t, other, stream, "other", clock.Now(), 0.6, true)
+	must(t, dailyBudget{s: s, repository: other}.Pass(ctx))
+	jump(clock, time.Date(2026, 9, 17, 8, 0, 0, 0, time.UTC))
+	appendDayCost(t, repo, stream, "next-day", clock.Now(), 0.5, true)
+	must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
+	if p, ok := factoryPause(t, s); ok {
+		t.Fatalf("an earlier day's spend counted: %+v", p)
+	}
+}
+
+// A project's published spend reports a change only when it differs from
+// what it last published, or when another project is forgotten.
+func TestDaySpendsReportOnlyChanges(t *testing.T) {
+	t.Parallel()
+	var d daySpends
+	spend := func(amount string) spendTotal {
+		known, _ := new(big.Rat).SetString(amount)
+		return spendTotal{known: known, precision: 2}
+	}
+	members := []config.ProjectID{project, otherProject}
+	if _, changed := d.total(project, "2026-09-16", spend("0.25"), members); !changed {
+		t.Fatal("a first publication reported no change")
+	}
+	if _, changed := d.total(project, "2026-09-16", spend("0.25"), members); changed {
+		t.Fatal("an unchanged publication reported a change")
+	}
+	if _, changed := d.total(project, "2026-09-17", spend("0.25"), members); !changed {
+		t.Fatal("a new day reported no change")
+	}
+	if _, changed := d.total(otherProject, "2026-09-17", spend("0.5"), members); !changed {
+		t.Fatal("another project's first publication reported no change")
+	}
+	total, changed := d.total(project, "2026-09-17", spend("0.25"), []config.ProjectID{project})
+	if !changed || total.String() != "0.25" {
+		t.Fatalf("forgetting a removed project: changed %t, total %s", changed, total)
 	}
 }
 
@@ -227,10 +337,10 @@ func TestDailyBudgetLetsTheRunningTurnFinish(t *testing.T) {
 	}
 	next, err := repo.Thread(stream, "agent-1")
 	must(t, err)
-	admitted, err := s.admit(s.cfg, repo)(ctx, scheduler.Candidate{Project: project, Workstream: stream, Thread: next, Turn: next.Turns[0]})
+	held, err := s.dispatchHolds(s.cfg, repo)(scheduler.Candidate{Project: project, Workstream: stream, Thread: next, Turn: next.Turns[0]})
 	must(t, err)
-	if admitted {
-		t.Fatal("a queued turn was admitted under the budget pause")
+	if !held {
+		t.Fatal("a queued turn was not held under the budget pause")
 	}
 }
 
@@ -240,6 +350,10 @@ func TestStatusReportsTheDailyBudget(t *testing.T) {
 	t.Parallel()
 	s, _, repo, clock := dailyBudgetService(t, 0, &adaptertest.Turns{})
 	appendDayCost(t, repo, sibling, "spent", clock.Now(), 0.25, true)
+	if got := s.statusList(); got.DailyBudget == nil || got.DailyBudget.SpendUSD != "0" {
+		t.Fatalf("status daily budget before the project's pass published its spend: %+v", got.DailyBudget)
+	}
+	must(t, dailyBudget{s: s, repository: repo}.Pass(context.Background()))
 	got := s.statusList()
 	if want := (&DailyBudgetStatus{Day: "2026-09-16", SpendUSD: "0.25", LimitUSD: "1.00"}); !reflect.DeepEqual(got.DailyBudget, want) {
 		t.Fatalf("status daily budget %+v, want %+v", got.DailyBudget, want)

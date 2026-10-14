@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 
@@ -13,11 +14,11 @@ const second config.ProjectID = "p_00000000000000000000000000000002"
 
 // twoProjects creates the traces of two projects under one root, each with
 // three queued mason turns and one queued reviewer turn, and a scheduler for
-// each drawing on one shared pool.
+// each drawing on one shared pool that both projects have joined.
 func twoProjects(t *testing.T, limits *config.Capacity) (repos [2]*trace.Repository, schedulers [2]*Scheduler) {
 	t.Helper()
 	base := t.TempDir()
-	shared := &Shared{Traces: func() []*trace.Repository { return repos[:] }}
+	shared := &Shared{}
 	for i, id := range []config.ProjectID{project, second} {
 		f, repo := setupIn(t, base, id, "mason1", "mason2", "mason3")
 		t.Cleanup(func() { repo.Close() })
@@ -25,6 +26,7 @@ func twoProjects(t *testing.T, limits *config.Capacity) (repos [2]*trace.Reposit
 		for _, agent := range []string{"mason1", "mason2", "mason3", "reviewer1"} {
 			f.queue(t, repo, agent, "one")
 		}
+		must(t, shared.Join(repo))
 		s, err := New(repo, Options{Now: f.clock.Now, Capacity: limits, Shared: shared})
 		must(t, err)
 		repos[i], schedulers[i] = repo, s
@@ -44,8 +46,7 @@ func TestSharedPoolHoldsRoleCapacityAcrossProjects(t *testing.T) {
 	if got := dispatched(t, repos[1]); len(got) != 0 {
 		t.Fatalf("second project dispatched %v past the shared capacity", got)
 	}
-	slots, err := schedulers[1].Slots(func(Candidate) (bool, error) { return false, nil })
-	must(t, err)
+	slots := schedulers[1].options.Shared.Slots([]config.ProjectID{second})
 	if slots.Used["mason"] != 2 || slots.Used["reviewer"] != 1 || len(slots.Waiting) != 4 {
 		t.Fatalf("second project's slots: %+v", slots)
 	}
@@ -93,30 +94,103 @@ func TestPerWorkstreamCapStaysWithTheProject(t *testing.T) {
 	}
 }
 
-func TestSlotsOfSharedPoolOfferFreeSlotsAcrossProjects(t *testing.T) {
-	// One mason and one reviewer slot, both free: the first project's pass
-	// would take them, so every turn of the second project waits.
+func TestSharedSlotsListTheWaitingTurnsInProjectOrder(t *testing.T) {
+	ctx := context.Background()
+	// One mason and one reviewer slot: the first project's pass takes them,
+	// so every turn of the second project waits.
 	_, schedulers := twoProjects(t, &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 3})
-	none := func(Candidate) (bool, error) { return false, nil }
-	slots, err := SlotsOf([]Gated{{schedulers[0], none}, {schedulers[1], none}})
-	must(t, err)
-	waiting := map[config.ProjectID]int{}
+	must(t, schedulers[0].Pass(ctx))
+	must(t, schedulers[1].Pass(ctx))
+	slots := schedulers[0].options.Shared.Slots([]config.ProjectID{second, project})
+	if slots.Used["mason"] != 1 || slots.Used["reviewer"] != 1 {
+		t.Fatalf("used %v", slots.Used)
+	}
+	var order []config.ProjectID
 	for _, w := range slots.Waiting {
-		waiting[w.Project]++
+		order = append(order, w.Project)
 	}
-	if slots.Used["mason"] != 0 || waiting[project] != 2 || waiting[second] != 4 {
-		t.Fatalf("used %v, waiting by project %v", slots.Used, waiting)
+	if want := []config.ProjectID{second, second, second, second, project, project}; !slices.Equal(order, want) {
+		t.Fatalf("waiting by project %v, want %v", order, want)
 	}
-	// A candidate the gate holds takes no slot, so the next project's turn
-	// finds it free.
-	slots, err = SlotsOf([]Gated{{schedulers[0], func(Candidate) (bool, error) { return true, nil }}, {schedulers[1], none}})
+	// Only the listed projects' waiting turns are reported.
+	if got := schedulers[0].options.Shared.Slots([]config.ProjectID{project}); len(got.Waiting) != 2 || got.Used["mason"] != 1 {
+		t.Fatalf("first project's slots: %+v", got)
+	}
+}
+
+func TestPassCountsAnotherProjectFromItsPublishedTurnsNotItsTrace(t *testing.T) {
+	ctx := context.Background()
+	repos, schedulers := twoProjects(t, &config.Capacity{Masons: 2, Reviewers: 1, Committee: 1, PerWorkstream: 3})
+	must(t, schedulers[1].Pass(ctx))
+	// The second project's trace can no longer be read at all, as when its
+	// storage changes under it; the first project's pass reads only its own.
+	must(t, repos[1].Close())
+	must(t, schedulers[0].Pass(ctx))
+	if got := dispatched(t, repos[0]); len(got) != 0 {
+		t.Fatalf("first project dispatched %v into the slots the second project published as taken", got)
+	}
+	slots := schedulers[0].options.Shared.Slots([]config.ProjectID{project})
+	if slots.Used["mason"] != 2 || slots.Used["reviewer"] != 1 || len(slots.Waiting) != 4 {
+		t.Fatalf("first project's slots: %+v", slots)
+	}
+}
+
+func TestJoinCountsTurnsInFlightBeforeTheProjectsFirstPass(t *testing.T) {
+	ctx := context.Background()
+	limits := &config.Capacity{Masons: 2, Reviewers: 1, Committee: 1, PerWorkstream: 3}
+	repos, schedulers := twoProjects(t, limits)
+	must(t, schedulers[1].Pass(ctx))
+	// A restarted service starts a fresh pool, which every project joins
+	// before any project passes. The second project's turns are still in
+	// flight, to be recovered.
+	restarted := &Shared{}
+	for _, repo := range repos {
+		must(t, restarted.Join(repo))
+	}
+	first, err := New(repos[0], Options{Now: schedulers[0].options.Now, Capacity: limits, Shared: restarted})
 	must(t, err)
-	if len(slots.Waiting) != 2 {
-		t.Fatalf("waiting %+v", slots.Waiting)
+	must(t, first.Pass(ctx))
+	if got := dispatched(t, repos[0]); len(got) != 0 {
+		t.Fatalf("first project dispatched %v past the second project's recovered turns", got)
 	}
-	for _, w := range slots.Waiting {
-		if w.Project != second || w.Thread.Identity.Role != "mason" {
-			t.Fatalf("waiting turn %+v", w)
-		}
+}
+
+func TestLeaveFreesTheProjectsSlots(t *testing.T) {
+	ctx := context.Background()
+	repos, schedulers := twoProjects(t, &config.Capacity{Masons: 2, Reviewers: 1, Committee: 1, PerWorkstream: 3})
+	must(t, schedulers[1].Pass(ctx))
+	schedulers[1].options.Shared.Leave(second)
+	must(t, schedulers[0].Pass(ctx))
+	if got := counts(dispatched(t, repos[0])); got["mason"] != 2 || got["reviewer"] != 1 {
+		t.Fatalf("first project dispatched %v once the second project left the pool", got)
+	}
+}
+
+func TestSharedAnnouncesOnlyChangedSlots(t *testing.T) {
+	ctx := context.Background()
+	_, schedulers := twoProjects(t, &config.Capacity{Masons: 2, Reviewers: 1, Committee: 1, PerWorkstream: 3})
+	shared := schedulers[0].options.Shared
+	changes := 0
+	shared.Changed = func() { changes++ }
+	// The first pass dispatches and leaves a turn waiting.
+	must(t, schedulers[0].Pass(ctx))
+	if changes != 1 {
+		t.Fatalf("%d announcements after the first pass, want 1", changes)
+	}
+	// A pass that finds the same turns in flight and waiting announces
+	// nothing.
+	must(t, schedulers[0].Pass(ctx))
+	if changes != 1 {
+		t.Fatalf("%d announcements after an unchanged pass, want 1", changes)
+	}
+	// The second project's pass finds every slot taken: its turns now wait.
+	must(t, schedulers[1].Pass(ctx))
+	if changes != 2 {
+		t.Fatalf("%d announcements after the second project's pass, want 2", changes)
+	}
+	shared.Leave(second)
+	shared.Leave(second)
+	if changes != 3 {
+		t.Fatalf("%d announcements after the second project left once, want 3", changes)
 	}
 }

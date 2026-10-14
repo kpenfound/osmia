@@ -412,7 +412,7 @@ A freed slot is offered to review before implementation, implementation before d
 
 ### 8.4 Capacity, priority and pause
 
-Capacity is per role kind and global across every workstream on every project. A per-workstream work-in-progress cap keeps one feature from taking everything when it is alone.
+Capacity is per role kind and global across every workstream on every project. A per-workstream work-in-progress cap keeps one feature from taking everything when it is alone. No project reads another project's trace to share a limit: each project's passes count the slots it holds, the turns waiting for one and the day's spend from its own trace and publish them to the service, which enforces the shared limits and reports capacity and the daily budget from what the projects last published. A published total follows each project's next pass, so it can briefly overstate a slot that was just freed, never understate one in use.
 
 Active workstreams have a priority order you set, or ask the chief of staff to set. A paused workstream, project or factory dispatches nothing new. Turns in flight finish, and a hard pause stops them too. Paused units stay where they are, their slots go to what is not paused, and resume picks up with nothing to reconcile. The chief of staff stays reachable while everything is paused, so "pause everything, I'm travelling" and "resume dagger only" are messages. Pause state persists across restart and is shown with who set it and why: you, the daily budget, a provider's usage limit, or the loop guard.
 

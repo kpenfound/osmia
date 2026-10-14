@@ -389,8 +389,8 @@ func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T
 	// The scheduler leaves the committee's queued turns to the round.
 	th, err := f.repository().Thread(stream, committeeAgent(1))
 	must(t, err)
-	if admitted, err := f.s.admit(f.s.current(), f.repository())(ctx, scheduler.Candidate{Workstream: stream, Thread: th}); err != nil || admitted {
-		t.Fatalf("the scheduler admits committee turns: %v %v", admitted, err)
+	if held, err := f.s.dispatchHolds(f.s.current(), f.repository())(scheduler.Candidate{Workstream: stream, Thread: th}); err != nil || !held {
+		t.Fatalf("the scheduler does not hold committee turns: %v %v", held, err)
 	}
 	// One file per member records the revision and what the member
 	// contributed, authored by the member, in one commit.

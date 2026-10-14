@@ -232,12 +232,11 @@ func TestRoleRotationIsKeptIndependentlyPerProject(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	base := t.TempDir()
-	// A single shared mason slot forces the projects to take turns with each
-	// other, so a rotation keyed across projects, rather than per project,
-	// would show up as a dispatch out of each project's own queue order.
+	// A single shared mason slot makes the projects share it, so a rotation
+	// keyed across projects, rather than per project, would show up as a
+	// dispatch out of each project's own queue order.
 	limits := &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 5}
-	var repos []*trace.Repository
-	shared := &Shared{Traces: func() []*trace.Repository { return repos }}
+	shared := &Shared{}
 	var controllers []*reconcile.Controller
 	var runs []*running
 	for _, id := range []config.ProjectID{project, otherProject} {
@@ -246,15 +245,22 @@ func TestRoleRotationIsKeptIndependentlyPerProject(t *testing.T) {
 		defer repo.Close()
 		f.queue(t, repo, "a1", "one")
 		f.queue(t, repo, "a2", "one")
+		must(t, shared.Join(repo))
 		r := &running{}
 		c := f.controllerWith(t, repo, r.turns(), Options{Capacity: limits, Shared: shared})
-		repos, controllers, runs = append(repos, repo), append(controllers, c), append(runs, r)
+		controllers, runs = append(controllers, c), append(runs, r)
 	}
-	// Each project's turn frees the shared slot before the other project's
-	// pass runs, so both get to dispatch on every round.
+	// The first project's turn completes within its pass, but holds the
+	// shared slot for the other project until its own next pass publishes it
+	// free.
 	must(t, controllers[0].Pass(ctx))
 	must(t, controllers[1].Pass(ctx))
+	if got := runs[1].got(); len(got) != 0 {
+		t.Fatalf("second project ran %v in a slot the first project published as taken", got)
+	}
 	must(t, controllers[0].Pass(ctx))
+	must(t, controllers[0].Pass(ctx))
+	must(t, controllers[1].Pass(ctx))
 	must(t, controllers[1].Pass(ctx))
 	for i, r := range runs {
 		if got, want := r.got(), []string{"a1", "a2"}; !slices.Equal(got, want) {

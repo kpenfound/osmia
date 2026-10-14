@@ -108,6 +108,16 @@ func sumCosts(costs []trace.Cost) (spendTotal, error) {
 	return t, nil
 }
 
+// equal reports whether t and other print and count the same.
+func (t spendTotal) equal(other spendTotal) bool {
+	return t.known.Cmp(other.known) == 0 && t.precision == other.precision && t.unknown == other.unknown
+}
+
+// plus returns the sum of t and other.
+func (t spendTotal) plus(other spendTotal) spendTotal {
+	return spendTotal{known: new(big.Rat).Add(t.known, other.known), precision: max(t.precision, other.precision), unknown: t.unknown + other.unknown}
+}
+
 // String prints the known sum as a decimal without trailing zeros.
 func (t spendTotal) String() string {
 	spend := t.known.FloatString(t.precision)

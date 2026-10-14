@@ -33,9 +33,14 @@ type Candidate struct {
 
 type Options struct {
 	Now func() time.Time
-	// Admit is the dispatch gate after Capacity: a candidate it declines, or one
-	// without a free slot, stays queued and is offered again on a later pass.
-	// Nil admits every candidate that fits.
+	// Holds is the part of the dispatch gate that declines a candidate
+	// whatever the capacity, such as a pause. A candidate it holds takes no
+	// slot and does not wait for one. Nil holds none.
+	Holds func(Candidate) (bool, error)
+	// Admit is the rest of the dispatch gate, after Holds and Capacity: a
+	// candidate it declines, one Holds holds, or one without a free slot,
+	// stays queued and is offered again on a later pass. Nil admits every
+	// candidate that fits.
 	Admit func(context.Context, Candidate) (bool, error)
 	// Capacity bounds the turns in flight. Masons, reviewers and committee
 	// members share their role kind's slots across workstreams; every other
@@ -52,23 +57,133 @@ type Options struct {
 }
 
 // Shared is one pool of role slots that the schedulers of several projects,
-// one per trace, draw from. Their passes run one at a time, and each counts
-// the turns in flight on every trace Traces returns against the role slots of
-// Capacity, so the limits hold across projects. PerWorkstream and the one
-// turn per workstream of the other roles stay per workstream.
+// one per trace, draw from. A scheduler reads only its own trace: it counts
+// its own project's turns in flight there, and every other project's from
+// the counts by role kind that project last published to the pool. Their
+// passes run one at a time, and each publishes its project's count once it
+// has dispatched, so the role slots of Capacity hold across projects.
+// PerWorkstream and the one turn per workstream of the other roles stay per
+// workstream.
+//
+// A project's turns enter flight only in its own passes, so its published
+// count is never below its turns in flight. A turn that completes holds its
+// slot for the other projects until its own project's next pass, which its
+// completion wakes.
 type Shared struct {
 	mu sync.Mutex
-	// Traces returns the open traces of every project that draws on the
-	// pool. A scheduler's own trace may be among them.
-	Traces func() []*trace.Repository
+	// usageMu guards usage alone and is never held while taking another
+	// lock, so a project joins or leaves the pool whatever its caller holds.
+	usageMu sync.Mutex
+	// usage is what each project in the pool last published.
+	usage map[config.ProjectID]published
+	// Changed, when set, runs once a project's published turns in flight or
+	// waiting turns change, or the project leaves the pool. It must not call
+	// back into the pool.
+	Changed func()
 }
 
-// Hold runs fn while no pass of a scheduler drawing on the pool is in
-// progress, so a trace fn takes out of Traces is not read once Hold returns.
-func (p *Shared) Hold(fn func()) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	fn()
+// published is one project's turns in flight by role kind, as its own
+// scheduler last counted them, and the queued turns its last pass found no
+// free slot for.
+type published struct {
+	roles   map[string]int
+	waiting []Wait
+}
+
+// Join counts the turns in flight on repository's own trace, such as those
+// a restart left to recover, and publishes them as its project's count. A
+// project joins before its scheduler's first pass, so the other projects'
+// passes count its turns from the start. A nil pool joins nothing.
+func (p *Shared) Join(repository *trace.Repository) error {
+	if p == nil {
+		return nil
+	}
+	l, err := load(repository)
+	if err != nil {
+		return err
+	}
+	used := newUsage()
+	l.count(used)
+	p.publish(l.project, used.roles, nil)
+	return nil
+}
+
+// Leave removes project's count from the pool, freeing its slots for the
+// other projects. A project leaves once its turns are no longer in flight,
+// or when it is never started after joining. A nil pool has nothing to
+// leave.
+func (p *Shared) Leave(project config.ProjectID) {
+	if p == nil {
+		return
+	}
+	p.usageMu.Lock()
+	_, ok := p.usage[project]
+	delete(p.usage, project)
+	p.usageMu.Unlock()
+	if ok && p.Changed != nil {
+		p.Changed()
+	}
+}
+
+func (p *Shared) publish(project config.ProjectID, roles map[string]int, waiting []Wait) {
+	next := published{maps.Clone(roles), slices.Clone(waiting)}
+	p.usageMu.Lock()
+	if p.usage == nil {
+		p.usage = map[config.ProjectID]published{}
+	}
+	previous, ok := p.usage[project]
+	p.usage[project] = next
+	p.usageMu.Unlock()
+	if p.Changed != nil && (!ok || !next.same(previous)) {
+		p.Changed()
+	}
+}
+
+// same reports whether u and other count the same turns in flight and list
+// the same waiting turns, for the same reasons, in the same order.
+func (u published) same(other published) bool {
+	return maps.Equal(u.roles, other.roles) && slices.EqualFunc(u.waiting, other.waiting, func(a, b Wait) bool {
+		return a.Project == b.Project && a.Workstream == b.Workstream && a.Thread.Identity.ID == b.Thread.Identity.ID && a.Turn.Request.TurnID == b.Turn.Request.TurnID && a.Reason == b.Reason
+	})
+}
+
+// others returns the published counts by role kind of every project in the
+// pool but project.
+func (p *Shared) others(project config.ProjectID) map[string]int {
+	p.usageMu.Lock()
+	defer p.usageMu.Unlock()
+	out := map[string]int{}
+	for id, u := range p.usage {
+		if id == project {
+			continue
+		}
+		for role, n := range u.roles {
+			out[role] += n
+		}
+	}
+	return out
+}
+
+// Slots reports the turns in flight of every project in the pool, and the
+// queued turns of projects, in that order, that their last passes found no
+// free slot for. It reads no trace: it is as current as the projects' last
+// passes. A nil pool has no slot in use.
+func (p *Shared) Slots(projects []config.ProjectID) Slots {
+	out := Slots{Used: map[string]int{}}
+	if p == nil {
+		return out
+	}
+	p.usageMu.Lock()
+	defer p.usageMu.Unlock()
+	for _, u := range p.usage {
+		for role, n := range u.roles {
+			out.Used[role] += n
+		}
+	}
+	for _, id := range projects {
+		out.Waiting = append(out.Waiting, p.usage[id].waiting...)
+	}
+	return out
 }
 
 // Scheduler publishes the intent to run each thread's next queued turn. The
@@ -126,13 +241,21 @@ func New(repository *trace.Repository, options Options) (*Scheduler, error) {
 // dispatched least recently, so equal workstreams take the stage's slots in
 // turn. The last dispatch of each stage is read from the trace's turn
 // operations, so the rotation continues across restarts. A candidate that
-// finds no free slot or that Admit declines is not dispatched and leaves its
-// workstream's place in the rotation unchanged.
+// Holds holds, that finds no free slot or that Admit declines is not
+// dispatched and leaves its workstream's place in the rotation unchanged.
+//
+// With a shared pool, the pass publishes its project's turns in flight and
+// the queued turns it found no free slot for once it has dispatched, whether
+// or not it fails part way.
 func (s *Scheduler) Pass(ctx context.Context) error {
 	defer s.lock()()
 	r, err := s.read()
 	if err != nil {
 		return err
+	}
+	var waiting []Wait
+	if s.options.Shared != nil {
+		defer func() { s.options.Shared.publish(s.repository.Project(), r.own.roles, waiting) }()
 	}
 	candidates, used, order := r.candidates, r.used, s.order(r.served)
 	for len(candidates) > 0 {
@@ -140,7 +263,17 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 		c := candidates[0]
 		candidates = candidates[1:]
 		role := c.Thread.Identity.Role
+		if s.options.Holds != nil {
+			held, err := s.options.Holds(c)
+			if err != nil {
+				return err
+			}
+			if held {
+				continue
+			}
+		}
 		if reason := s.refusal(used, c); reason != "" {
+			waiting = append(waiting, Wait{c, reason})
 			continue
 		}
 		if s.options.Admit != nil {
@@ -157,6 +290,7 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 			return fmt.Errorf("workstream %s: %w", c.Workstream, err)
 		}
 		used.add(c.Project, c.Workstream, role)
+		r.own.add(c.Project, c.Workstream, role)
 		r.served[rotationKey(c.Project, c.Workstream, role)] = at
 	}
 	return nil
@@ -171,128 +305,62 @@ const (
 	WaitWorkstreamCap = "workstream-cap"
 )
 
-// Wait is a queued turn that finds no free slot, and why.
+// Wait is a queued turn a pass found no free slot for, and why.
 type Wait struct {
 	Candidate
 	Reason string
 }
 
-// Slots is the scheduler's slot accounting at one read of the trace.
+// Slots is the slot accounting of a shared pool, as its projects' passes
+// last published it.
 type Slots struct {
 	// Used counts the turns in flight by role, chief-of-staff turns aside.
 	Used map[string]int
-	// Waiting lists, in the order a pass offers them, the queued turns that
-	// hold would admit and that a pass would find no free slot for.
+	// Waiting lists, in the order the passes offered them, the queued turns
+	// that Holds did not hold and that found no free slot.
 	Waiting []Wait
 }
 
-// Slots reads the trace as Pass does and reports the slots in use and the
-// queued turns waiting for one, without dispatching anything. It offers the
-// candidates to the free slots in Pass's order and takes a slot for each one
-// that fits and that holds does not hold, as Pass would if Admit let it
-// through. holds is the part of the dispatch gate that declines a candidate
-// whatever the capacity, such as a pause; a candidate it holds is not waiting
-// for a slot.
-func (s *Scheduler) Slots(holds func(Candidate) (bool, error)) (Slots, error) {
-	return SlotsOf([]Gated{{s, holds}})
-}
-
-// Gated is a scheduler and the part of its dispatch gate that declines a
-// candidate whatever the capacity.
-type Gated struct {
-	Scheduler *Scheduler
-	Holds     func(Candidate) (bool, error)
-}
-
-// SlotsOf reports the slots of schedulers that draw on one shared pool as
-// Slots does for one, as if their passes ran one after another in the order
-// given: a slot one scheduler's candidates take is not free to the next, so a
-// turn that would find no slot after the earlier passes is waiting. Used
-// counts the turns in flight before any of them.
-func SlotsOf(gated []Gated) (Slots, error) {
-	out := Slots{}
-	if len(gated) == 0 {
-		return out, nil
-	}
-	defer gated[0].Scheduler.lock()()
-	taken := usage{roles: map[string]int{}, streams: map[streamKey]int{}, local: map[localKey]int{}}
-	for i, g := range gated {
-		s := g.Scheduler
-		r, err := s.read()
-		if err != nil {
-			return Slots{}, err
-		}
-		if i == 0 {
-			out.Used = maps.Clone(r.used.roles)
-		}
-		r.used.merge(taken)
-		candidates, used, order := r.candidates, r.used, s.order(r.served)
-		at := s.options.Now()
-		for len(candidates) > 0 {
-			slices.SortStableFunc(candidates, order)
-			c := candidates[0]
-			candidates = candidates[1:]
-			held, err := g.Holds(c)
-			if err != nil {
-				return Slots{}, err
-			}
-			if held {
-				continue
-			}
-			role := c.Thread.Identity.Role
-			if reason := s.refusal(used, c); reason != "" {
-				out.Waiting = append(out.Waiting, Wait{c, reason})
-				continue
-			}
-			used.add(c.Project, c.Workstream, role)
-			taken.add(c.Project, c.Workstream, role)
-			r.served[rotationKey(c.Project, c.Workstream, role)] = at
-		}
-	}
-	return out, nil
-}
-
-// reading is what a pass reads from the trace before it offers slots: the
-// turns in flight, the queued turns and each stage's last dispatch.
+// reading is what a pass reads before it offers slots: the turns in flight,
+// the queued turns and each stage's last dispatch.
 type reading struct {
-	used       usage
+	// used counts the turns in flight of every project in the pool.
+	used usage
+	// own counts the turns in flight of the scheduler's own project.
+	own        usage
 	candidates []Candidate
 	served     map[rotation]time.Time
 }
 
 // read reads every workstream's threads, then its turn operations. With a
-// shared pool it also counts the turns in flight on the pool's other traces.
+// shared pool it adds the counts the pool's other projects published, and
+// never reads their traces.
 func (s *Scheduler) read() (reading, error) {
 	project := s.repository.Project()
-	own, err := load(s.repository)
+	l, err := load(s.repository)
 	if err != nil {
 		return reading{}, err
 	}
-	used := usage{roles: map[string]int{}, streams: map[streamKey]int{}, local: map[localKey]int{}}
-	own.count(used)
-	if s.options.Shared != nil && s.options.Shared.Traces != nil {
-		for _, other := range s.options.Shared.Traces() {
-			if other == s.repository {
-				continue
-			}
-			l, err := load(other)
-			if err != nil {
-				return reading{}, fmt.Errorf("project %s: %w", other.Project(), err)
-			}
-			l.count(used)
+	own := newUsage()
+	l.count(own)
+	used := newUsage()
+	used.merge(own)
+	if s.options.Shared != nil {
+		for role, n := range s.options.Shared.others(project) {
+			used.roles[role] += n
 		}
 	}
 	var candidates []Candidate
-	for _, stream := range own.streams {
-		for _, t := range own.threads[stream] {
+	for _, stream := range l.streams {
+		for _, t := range l.threads[stream] {
 			q, ok := next(t)
-			if !ok || own.dispatched[turnKey{stream, t.Identity.ID, q.Request.TurnID}] {
+			if !ok || l.dispatched[turnKey{stream, t.Identity.ID, q.Request.TurnID}] {
 				continue
 			}
 			candidates = append(candidates, Candidate{Project: project, Workstream: stream, Thread: t, Turn: q})
 		}
 	}
-	return reading{used: used, candidates: candidates, served: own.served}, nil
+	return reading{used: used, own: own, candidates: candidates, served: l.served}, nil
 }
 
 // loaded is one trace's workstreams, their threads, the turns its turn
@@ -412,6 +480,10 @@ type usage struct {
 	roles   map[string]int
 	streams map[streamKey]int
 	local   map[localKey]int
+}
+
+func newUsage() usage {
+	return usage{roles: map[string]int{}, streams: map[streamKey]int{}, local: map[localKey]int{}}
 }
 
 type streamKey struct {
