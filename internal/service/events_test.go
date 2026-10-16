@@ -91,11 +91,13 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 		}
 	}
 
-	s, err := Start(ctx, opts)
-	must(t, err)
 	// Workstream state changes are routine progress, which waits for
 	// events.progress_window.
 	clock.Advance(14 * time.Minute)
+	s, err := Start(ctx, opts)
+	must(t, err)
+	firstService := s
+	t.Cleanup(func() { _ = firstService.Close() })
 	pass(s)
 	pass(s)
 	bound.Lock()
@@ -121,6 +123,8 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 
 	s, err = Start(ctx, opts)
 	must(t, err)
+	restartedService := s
+	t.Cleanup(func() { _ = restartedService.Close() })
 	clock.Advance(time.Minute)
 	pass(s)
 	pass(s)

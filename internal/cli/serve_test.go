@@ -23,6 +23,7 @@ import (
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/status"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // launches is the process-launch seam every serve in these tests runs its
@@ -102,7 +103,7 @@ func viewFiles(dir string) (map[string]string, error) {
 }
 
 // await waits until the agent has run a turn named name and returns it.
-func (e *launchEngine) await(t *testing.T, name string) *enforcertest.Turn {
+func (e *launchEngine) await(t *testing.T, name string, diagnostics ...func()) *enforcertest.Turn {
 	t.Helper()
 	deadline := time.Now().Add(time.Minute)
 	for {
@@ -113,6 +114,9 @@ func (e *launchEngine) await(t *testing.T, name string) *enforcertest.Turn {
 			return turn
 		}
 		if time.Now().After(deadline) {
+			for _, diagnostic := range diagnostics {
+				diagnostic()
+			}
 			e.mu.Lock()
 			defer e.mu.Unlock()
 			t.Fatalf("turn %s did not run; ran %v", name, e.turns)
@@ -148,6 +152,9 @@ func serve(t *testing.T, root string) {
 		cancel()
 		select {
 		case code := <-result:
+			if t.Failed() {
+				t.Logf("service diagnostics: %s", diag.String())
+			}
 			if code != 0 {
 				t.Errorf("serve exited %d: %s", code, diag.String())
 			}
@@ -204,8 +211,75 @@ func TestServeRunsRoleTurns(t *testing.T) {
 
 			var sent service.ConversationEntry
 			must(t, json.Unmarshal([]byte(successful(t, root, "send", string(handed.Workstream), "Start with uploads.", "--json")), &sent))
-			chief(t, launches.await(t, sent.Turn), root, string(added.Project.ID), string(handed.Workstream))
+			c := service.NewClient(filepath.Join(root, "osmia.sock"))
+			defer c.Close()
+			diagnostics := func() { chiefDispatchDiagnostics(t, c, root, added.Project.ID, handed.Workstream) }
+			chief(t, launches.await(t, sent.Turn, diagnostics), root, string(added.Project.ID), string(handed.Workstream))
+			// The live controller must finish this exact ordinary owner turn,
+			// not just enter the fake engine before a later boundary fails.
+			deadline := time.Now().Add(time.Minute)
+			for {
+				conversation, err := c.Conversation(context.Background(), handed.Workstream)
+				must(t, err)
+				var messages, responses []service.ConversationEntry
+				for _, entry := range conversation.Entries {
+					if entry.Turn != sent.Turn {
+						continue
+					}
+					switch entry.Kind {
+					case "message":
+						messages = append(messages, entry)
+					case "response":
+						responses = append(responses, entry)
+					}
+				}
+				if len(responses) > 0 {
+					if len(messages) != 1 || len(responses) != 1 || messages[0].State != service.TurnDone || responses[0].State != service.TurnDone || responses[0].Text != "Noted" {
+						diagnostics()
+						t.Fatalf("ordinary owner turn did not complete exactly once: %+v", conversation)
+					}
+					break
+				}
+				if time.Now().After(deadline) {
+					diagnostics()
+					t.Fatalf("ordinary owner turn %s did not complete: %+v", sent.Turn, conversation)
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
 		})
+	}
+}
+
+// chiefDispatchDiagnostics reads the live API and the durable queue without
+// taking the service's trace lock or driving an extra scheduling pass.
+func chiefDispatchDiagnostics(t *testing.T, c *service.Client, root string, project config.ProjectID, stream config.WorkstreamID) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	logView := func(name string, value any, err error) {
+		data, encodeErr := json.Marshal(value)
+		t.Logf("chief %s: %s; error: %v", name, data, errors.Join(err, encodeErr))
+	}
+	conversation, err := c.Conversation(ctx, stream)
+	logView("conversation", conversation, err)
+	var feed service.FeedResponse
+	err = c.Do(ctx, "GET", service.Prefix+"/feed/"+string(stream), nil, &feed)
+	logView("feed", feed, err)
+	state, err := c.Status(ctx, stream)
+	logView("status", state, err)
+	r, err := config.ResolveRoot(root, "")
+	if err != nil {
+		t.Logf("diagnostic root: %v", err)
+		return
+	}
+	dir, err := r.WorkstreamTrace(project, stream)
+	if err != nil {
+		t.Logf("diagnostic trace path: %v", err)
+		return
+	}
+	for _, name := range []string{"workflow.json", "agents/" + trace.ChiefOfStaff + "/log.jsonl"} {
+		data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(stream), name))
+		t.Logf("durable %s: %s; error: %v", name, data, err)
 	}
 }
 
@@ -245,7 +319,7 @@ func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream stri
 	if work := turn.Request.Workspace.Directory(); filepath.Dir(work) != turn.Request.SessionDir {
 		t.Fatalf("working directory %s is not the session's own", work)
 	}
-	granted := append([]string{"file_read", "factory_context", "record_discovery", "read_remote_file", status.ToolName, "notify", "capacity", "inspect_code", "prioritise", "pause", "resume", "decide_amendment", "decide_charter", "resolve_contested", "move_unit", "hand_back_drift"}, questions.ChiefTools...)
+	granted := append([]string{"file_read", "factory_context", "record_discovery", "read_remote_file", status.ToolName, "notify", "capacity", "inspect_code", "prioritise", "pause", "resume", "request_change", "decide_change", "decide_amendment", "decide_charter", "resolve_contested", "move_unit", "hand_back_drift"}, questions.ChiefTools...)
 	granted = append(granted, "project_context")
 	var tools []string
 	for _, allowed := range turn.Request.Profile.AllowedTools {

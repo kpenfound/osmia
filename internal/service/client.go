@@ -227,6 +227,14 @@ func (c *Client) RemoveProject(ctx context.Context, id config.ProjectID) (Projec
 	return v, err
 }
 
+// AddRepo adds a repo to an existing project, the same way AddProject adds a
+// project's own default repo.
+func (c *Client) AddRepo(ctx context.Context, req RepoAddRequest) (ProjectResponse, error) {
+	var v ProjectResponse
+	err := c.do(ctx, "POST", Prefix+"/projects/repos", req, &v, c.addProjectTimeout)
+	return v, err
+}
+
 // ExtractProject starts a new knowledge-base extraction of the active project.
 func (c *Client) ExtractProject(ctx context.Context, id config.ProjectID) (ExtractionResponse, error) {
 	var v ExtractionResponse
@@ -254,6 +262,52 @@ func (c *Client) RebaseWorkstream(ctx context.Context, id config.WorkstreamID) (
 func (c *Client) HandIn(ctx context.Context, req HandInRequest) (HandInResponse, error) {
 	var v HandInResponse
 	err := c.Do(ctx, "POST", Prefix+"/handin", req, &v)
+	return v, err
+}
+
+// OpenDesign opens a design session in a project.
+func (c *Client) OpenDesign(ctx context.Context, project config.ProjectID) (DesignResponse, error) {
+	var v DesignResponse
+	err := c.Do(ctx, "POST", Prefix+"/design", DesignOpenRequest{Project: project}, &v)
+	return v, err
+}
+
+// Designs lists design sessions, optionally filtered by project.
+func (c *Client) Designs(ctx context.Context, project config.ProjectID) (DesignsResponse, error) {
+	var v DesignsResponse
+	path := Prefix + "/design"
+	if project != "" {
+		path += "?project=" + url.QueryEscape(string(project))
+	}
+	err := c.Do(ctx, "GET", path, nil, &v)
+	return v, err
+}
+
+// Design reads one design session.
+func (c *Client) Design(ctx context.Context, id config.WorkstreamID) (DesignResponse, error) {
+	var v DesignResponse
+	err := c.Do(ctx, "GET", Prefix+"/design/"+url.PathEscape(string(id)), nil, &v)
+	return v, err
+}
+
+// DesignConversation lists a design session's conversation with its agent.
+func (c *Client) DesignConversation(ctx context.Context, id config.WorkstreamID) (ConversationResponse, error) {
+	var v ConversationResponse
+	err := c.Do(ctx, "GET", Prefix+"/design/"+url.PathEscape(string(id))+"/conversation", nil, &v)
+	return v, err
+}
+
+// DesignMessage sends an owner message to a design session's agent.
+func (c *Client) DesignMessage(ctx context.Context, id config.WorkstreamID, text string) (ConversationEntry, error) {
+	var v ConversationEntry
+	err := c.Do(ctx, "POST", Prefix+"/design/"+url.PathEscape(string(id))+"/message", DesignMessageRequest{Text: text}, &v)
+	return v, err
+}
+
+// DesignStart starts a workgroup from a design session's drafted brief.
+func (c *Client) DesignStart(ctx context.Context, id config.WorkstreamID) (DesignStartResponse, error) {
+	var v DesignStartResponse
+	err := c.Do(ctx, "POST", Prefix+"/design/"+url.PathEscape(string(id))+"/start", nil, &v)
 	return v, err
 }
 

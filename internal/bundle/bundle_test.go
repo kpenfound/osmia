@@ -386,6 +386,70 @@ func TestBundleNotices(t *testing.T) {
 	}
 }
 
+// TestBundleProjectSpecStaysUntilEveryMemberOfTheWorkgroupResolves shows
+// spec#22 at the bundle level: a multi-workstream workgroup's ratified
+// project spec stays in the bundle of every member while any member is
+// unresolved, and leaves every bundle only once the whole workgroup
+// resolves, though its trace history stays directly readable.
+func TestBundleProjectSpecStaysUntilEveryMemberOfTheWorkgroupResolves(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	for _, s := range []config.WorkstreamID{first, second} {
+		if err := f.repo.CreateWorkstream(ctx, s, timestamp, owner); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wg, err := trace.CreateWorkgroup(ctx, f.repo, []config.WorkstreamID{first, second}, timestamp, owner, "test-workgroup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := trace.ProjectSpec{
+		Behavior: "Two repos exchange a fixed interface.",
+		Slices: []trace.Slice{
+			{Workstream: first, Spec: "spec.md", Plan: "plan.json"},
+			{Workstream: second, Spec: "spec.md", Plan: "plan.json"},
+		},
+	}
+	if err := trace.RecordProjectSpec(ctx, f.repo, wg, spec, timestamp, owner, "owner-ratified"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Available in both unresolved members' own bundles.
+	if b := f.assemble(t, bundle.Scope{Workstream: first}); b.ProjectSpec == nil || b.ProjectSpec.Workgroup != wg.ID {
+		t.Fatalf("first member's bundle before resolution: %#v", b.ProjectSpec)
+	}
+	if b := f.assemble(t, bundle.Scope{Workstream: second}); b.ProjectSpec == nil || b.ProjectSpec.Workgroup != wg.ID {
+		t.Fatalf("second member's bundle before resolution: %#v", b.ProjectSpec)
+	}
+
+	// Resolving one member leaves the project spec in the still-unresolved
+	// member's bundle: resolving one does not retire it for the rest.
+	resolvedSet := map[config.WorkstreamID]bool{first: true}
+	resolved := func(s config.WorkstreamID) (bool, error) { return resolvedSet[s], nil }
+	if _, err := trace.MarkWorkgroupsResolved(ctx, f.repo, []trace.Workgroup{wg}, resolved, timestamp.Add(time.Minute), owner, "first-member-resolved"); err != nil {
+		t.Fatal(err)
+	}
+	if b := f.assemble(t, bundle.Scope{Workstream: second}); b.ProjectSpec == nil || b.ProjectSpec.Workgroup != wg.ID {
+		t.Fatalf("unresolved member's bundle after the other member resolves: %#v", b.ProjectSpec)
+	}
+
+	// Resolving every member leaves the project spec out of every bundle,
+	// though its trace history, read directly, stays intact.
+	resolvedSet[second] = true
+	if _, err := trace.MarkWorkgroupsResolved(ctx, f.repo, []trace.Workgroup{wg}, resolved, timestamp.Add(2*time.Minute), owner, "every-member-resolved"); err != nil {
+		t.Fatal(err)
+	}
+	if b := f.assemble(t, bundle.Scope{Workstream: first}); b.ProjectSpec != nil {
+		t.Fatalf("first member's bundle still carries the project spec once every member resolves: %#v", b.ProjectSpec)
+	}
+	if b := f.assemble(t, bundle.Scope{Workstream: second}); b.ProjectSpec != nil {
+		t.Fatalf("second member's bundle still carries the project spec once every member resolves: %#v", b.ProjectSpec)
+	}
+	if _, _, found, err := f.repo.ProjectSpecOf(first); err != nil || !found {
+		t.Fatalf("project spec trace history unreadable after the workgroup resolves: found=%v err=%v", found, err)
+	}
+}
+
 func TestBundleIsDeterministic(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()

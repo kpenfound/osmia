@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/pulls"
@@ -13,6 +14,86 @@ import (
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
+
+func TestWorkgroupOwnPullRequestObservationWithRecordedBaseIntegration(t *testing.T) {
+	cfg, repo, host, refresh := ownPRFixture(t)
+	sealStream(t, repo)
+	_, err := trace.CreateWorkgroup(context.Background(), repo, []config.WorkstreamID{stream}, demoStart, ownerActor, "fixture")
+	must(t, err)
+	publication := deliverWithPullRequest(t, repo, cfg, 42)
+	resolutionDocument(t, repo, stream, baseObservationDocument, "base-observation.json", baseObservation{Base: seal.Base{Remote: "upstream", Branch: "main", Commit: "integrated"}})
+	host.prs = []pulls.PullRequest{{Number: 42, Merged: true, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
+	must(t, refresh.Pass(context.Background()))
+	op := actionOperation(t, repo, stream, baseRefreshAction)
+	_, err = refresh.Apply(context.Background(), op)
+	must(t, err)
+	outcome, revision, err := ownPullRequestOutcomeAt(repo, stream)
+	must(t, err)
+	if host.finds != 1 || revision != 1 || outcome.PullRequest != 42 || outcome.Outcome != ownPullRequestOutcomeMerged {
+		t.Fatalf("integrated base prevented own observation: finds=%d outcome=%+v revision=%d", host.finds, outcome, revision)
+	}
+	_, revision, err = baseObservationAt(repo, stream)
+	must(t, err)
+	if revision != 1 {
+		t.Fatal("own observation changed recorded base integration")
+	}
+}
+
+func TestWorkgroupOwnPullRequestObservationRetriesOnCadenceAndStopsWhenClosed(t *testing.T) {
+	for _, based := range []bool{false, true} {
+		t.Run(fmt.Sprintf("with-base-%v", based), func(t *testing.T) {
+			cfg, repo, host, refresh := ownPRFixture(t)
+			if based {
+				sealStream(t, repo)
+			}
+			clock := &fixedClock{now: demoStart}
+			refresh.s.options.Reconciliation.Now = clock.Now
+			_, err := trace.CreateWorkgroup(context.Background(), repo, []config.WorkstreamID{stream}, demoStart, ownerActor, "fixture")
+			must(t, err)
+			publication := deliverWithPullRequest(t, repo, cfg, 42)
+			host.findErr = errors.New("provider unavailable")
+			ctx := context.Background()
+			must(t, refresh.Pass(ctx))
+			op := actionOperation(t, repo, stream, baseRefreshAction)
+			_, err = refresh.Apply(ctx, op)
+			must(t, err)
+			if _, revision, err := ownPullRequestOutcomeAt(repo, stream); err != nil || revision != 0 {
+				t.Fatalf("failed lookup recorded an outcome: revision=%d err=%v", revision, err)
+			}
+			clock.Advance(time.Minute - time.Nanosecond)
+			must(t, refresh.Pass(ctx))
+			state, err := repo.Workflow(stream, baseRefreshAction)
+			must(t, err)
+			if state.Version != 2 || state.Value != "checked" {
+				t.Fatal("own lookup retried before the minute cadence")
+			}
+			clock.Advance(time.Nanosecond)
+			host.findErr = nil
+			host.prs = []pulls.PullRequest{{Number: 42, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
+			must(t, refresh.Pass(ctx))
+			op = actionOperation(t, repo, stream, baseRefreshAction)
+			_, err = refresh.Apply(ctx, op)
+			must(t, err)
+			outcome, revision, err := ownPullRequestOutcomeAt(repo, stream)
+			must(t, err)
+			if host.finds != 2 || revision != 1 || outcome.Outcome != ownPullRequestOutcomeClosed {
+				t.Fatalf("next cadence did not observe closure: finds=%d outcome=%+v revision=%d", host.finds, outcome, revision)
+			}
+			clock.Advance(time.Minute)
+			must(t, refresh.Pass(ctx))
+			state, err = repo.Workflow(stream, baseRefreshAction)
+			must(t, err)
+			if state.Version != 4 || state.Value != "checked" {
+				t.Fatal("closed PR scheduled another lookup")
+			}
+			done, err := resolved(repo, stream)
+			must(t, err)
+			if done {
+				t.Fatal("closed unmerged PR resolved the member")
+			}
+		})
+	}
+}
 
 // ownPRFixture opens a fresh trace repository holding workstreams stream
 // and quiet, and a fake pull request host counting its own calls.

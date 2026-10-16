@@ -129,6 +129,11 @@ func (f *foreman) Pass(ctx context.Context) error {
 		if stream == librarian {
 			continue
 		}
+		if held, err := changeHeld(f.repository, stream); err != nil {
+			return err
+		} else if held {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -386,11 +391,24 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	approved, err := f.repository.GroupApproved(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if !approved {
+		return coreadapter.OperationResult{Outcome: "failed", Evidence: "workgroup seal preparations are pending"}, nil
+	}
 	if result, err := f.outcome(stream, in); err != nil || result != nil {
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 		return *result, nil
+	}
+	if held, err := changeRepositoryHeld(f.repository, stream, op); err != nil || held {
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		return coreadapter.OperationResult{}, errChangeBoundary
 	}
 	requested, err := f.requestedAt(stream, op.ID)
 	if err != nil {
@@ -483,7 +501,14 @@ func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in la
 	if err != nil {
 		return "", err
 	}
-	if feature.Value != BuildingState && feature.Value != AssembledState {
+	maintenance := false
+	if feature.Value == DeliveredState {
+		maintenance, err = workgroupEdgePending(f.repository, stream)
+		if err != nil {
+			return "", err
+		}
+	}
+	if feature.Value != BuildingState && feature.Value != AssembledState && !maintenance {
 		return fmt.Sprintf("the workstream is %s, not building or assembled", featureState(feature.Value)), nil
 	}
 	state, err := f.repository.Workflow(stream, trace.UnitSubject(in.Unit))
@@ -591,7 +616,7 @@ func landingMessage(stream config.WorkstreamID, unit plan.Unit, spec plan.Spec, 
 // every planned unit whose dependencies have now all merged moving to ready.
 // A landing already recorded returns its result and records nothing more.
 func (f *foreman) record(ctx context.Context, stream config.WorkstreamID, in landInput, operation string, review trace.Document, result UnitReviewResult, commit string) (coreadapter.OperationResult, error) {
-	b, found, err := f.read(stream)
+	b, found, err := f.readActive(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}

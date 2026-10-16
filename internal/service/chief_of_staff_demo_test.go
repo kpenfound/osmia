@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -181,22 +182,28 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	// From here on a pass runs only when the test sends a tick.
 	ticks := make(chan time.Time)
 	opts.Reconciliation.Ticks = ticks
-	settle := func(s *Service) {
-		t.Helper()
-		for range 5 {
-			select {
-			case ticks <- clock.Now():
-			case <-time.After(demoTimeout):
-				s.Close()
-				t.Fatal("service did not finish its pass")
-			}
-		}
-	}
+	var passes atomic.Uint64
+	opts.schedulePassed = func() { passes.Add(1) }
 	lifetime := func() (*Service, *Client, *trace.Repository) {
 		t.Helper()
 		s, err := Start(ctx, opts)
 		must(t, err)
-		return s, NewClient(s.Socket()), <-lives
+		c := NewClient(s.Socket())
+		t.Cleanup(func() {
+			c.Close()
+			if err := s.Close(); err != nil {
+				t.Errorf("service cleanup: %v", err)
+			}
+		})
+		select {
+		case r := <-lives:
+			return s, c, r
+		case <-s.done:
+			t.Fatalf("service stopped before opening the trace: %v", s.Wait())
+		case <-time.After(demoTimeout):
+			t.Fatal("service did not open the trace")
+		}
+		return nil, nil, nil
 	}
 	stop := func(s *Service, c *Client) {
 		t.Helper()
@@ -244,7 +251,19 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	}
 	engine.turns["build"] = worker("Where does state live?")
 	engine.turns["build2"] = worker("")
-	engine.turns["review"] = worker(chiefDemoQuestion)
+	masonAsked := make(chan struct{})
+	var masonAskedOnce sync.Once
+	releaseReviewer := func() { masonAskedOnce.Do(func() { close(masonAsked) }) }
+	t.Cleanup(releaseReviewer)
+	reviewerTurn := worker(chiefDemoQuestion)
+	engine.turns["review"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
+		select {
+		case <-masonAsked:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return reviewerTurn(ctx, req, turn, session)
+	}
 	resumed := func(ctx context.Context, req agent.Request, _ *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -258,7 +277,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		prompts[req.Name] = req
-		tools(ctx, req.Name, session, "answer", "capacity", "decide_amendment", "decide_charter", "escalate", "factory_context", "file_read", "hand_back_drift", "inspect_code", "move_unit", "notify", "pause", "prioritise", "project_context", "propose_charter", "read_remote_file", "record_discovery", "relay_ruling", "resolve_contested", "resume", "route_amendment", "set_status")
+		tools(ctx, req.Name, session, "answer", "capacity", "decide_amendment", "decide_change", "decide_charter", "escalate", "factory_context", "file_read", "hand_back_drift", "inspect_code", "log_assumption", "move_unit", "notify", "pause", "prioritise", "project_context", "propose_charter", "read_remote_file", "record_discovery", "relay_ruling", "request_change", "resolve_contested", "resume", "route_amendment", "set_status")
 		switch {
 		case len(sent) > 0 && req.Name == sent[0].Turn:
 			// The chief of staff reads the workstream's documents in its view.
@@ -330,6 +349,125 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		must(t, err)
 		return th
 	}
+	turnDone := func(r *trace.Repository, agent, turn, status string) bool {
+		th := threadOf(r, agent)
+		for _, q := range th.Turns {
+			if q.Request.TurnID == turn {
+				if q.Response == nil || q.CompletedAt.IsZero() {
+					return false
+				}
+				if q.Response.RequestID != q.Request.ID || q.Response.RequestRevision != q.Request.Revision ||
+					q.Response.ThreadID != q.Request.ThreadID || q.Response.TurnID != q.Request.TurnID {
+					t.Fatalf("turn %s response lost its accepted request link: request=%+v response=%+v", turn, q.Request, q.Response)
+				}
+				return q.Status() == status
+			}
+		}
+		return false
+	}
+	ownerDone := func(r *trace.Repository, entry ConversationEntry) bool {
+		chief, err := r.ChiefOfStaffThread(stream)
+		must(t, err)
+		return turnDone(r, chief.Identity.ID, entry.Turn, "idle")
+	}
+	quiescent := func(r *trace.Repository) bool {
+		threads, err := r.Threads(stream)
+		must(t, err)
+		for _, th := range threads {
+			if th.Active != "" {
+				return false
+			}
+			for _, q := range th.Turns {
+				if q.Response == nil || q.CompletedAt.IsZero() {
+					return false
+				}
+			}
+		}
+		operations, err := r.Operations(stream)
+		must(t, err)
+		for _, op := range operations {
+			if op.Operation.Action == thread.TurnAction && !op.Acknowledged {
+				return false
+			}
+		}
+		return true
+	}
+	await := func(s *Service, r *trace.Repository, phase string, ready func() bool) {
+		t.Helper()
+		sub, ok := s.hub.subscribe()
+		if !ok {
+			t.Fatalf("%s: cannot subscribe to stopped service: %v", phase, s.Wait())
+		}
+		defer s.hub.unsubscribe(sub)
+		deadline := time.NewTimer(demoTimeout)
+		defer deadline.Stop()
+		poll := time.NewTicker(time.Second)
+		defer poll.Stop()
+		diagnose := func(reason string) {
+			t.Helper()
+			threads, err := r.Threads(stream)
+			t.Logf("PHASE %s project=%s workstream=%s reason=%s now=%s passes=%d threads_error=%v", phase, id, stream, reason, clock.Now(), passes.Load(), err)
+			for _, th := range threads {
+				t.Logf("worker=%s thread=%s active=%s status=%s parked=%v", th.Identity.ID, th.Identity.ThreadID, th.Active, th.Status, th.Parked())
+				for _, q := range th.Turns {
+					response, failure := "", ""
+					if q.Response != nil {
+						response, failure = q.Response.ID, q.Response.Failure
+					}
+					t.Logf("worker=%s turn=%s request=%s response=%s claim=%+v completed=%s outcome=%s attempts=%d failure=%q", th.Identity.ID, q.Request.TurnID, q.Request.ID, response, q.Claim, q.CompletedAt, q.Status(), len(q.Attempts), failure)
+					for _, attempt := range q.Attempts {
+						t.Logf("turn=%s attempt=%d captured=%v failure=%q class=%s", q.Request.TurnID, attempt.Number, attempt.Result != nil, attempt.Failure, attempt.FailureClass)
+					}
+				}
+			}
+			operations, err := r.Operations(stream)
+			t.Logf("operations_error=%v", err)
+			for _, op := range operations {
+				if op.Operation.Action != thread.TurnAction {
+					continue
+				}
+				in, decodeErr := thread.DecodeTurn(op.Operation)
+				observed, inspectErr := (thread.Dispatcher{Runner: thread.Runner{Store: r}}).Inspect(ctx, op.Operation)
+				outcome, failure := "", ""
+				if op.Result != nil {
+					outcome = op.Result.Outcome
+				}
+				for _, action := range op.History {
+					if action.Failure != "" {
+						failure = action.Failure
+					}
+				}
+				t.Logf("operation=%s worker=%s turn=%s acknowledged=%v outcome=%s observation=%s evidence=%q retry=%s failure=%q decode_error=%v inspect_error=%v", op.Operation.ID, in.Agent, in.Turn, op.Acknowledged, outcome, observed.State, observed.Evidence, op.RetryAt, failure, decodeErr, inspectErr)
+			}
+			select {
+			case <-s.done:
+				t.Logf("service stopped: %v", s.Wait())
+			default:
+				t.Logf("service active lifetime_error=%v", s.lifetime.Err())
+			}
+			t.Fatalf("chief demonstration did not complete %s: %s", phase, reason)
+		}
+		for {
+			select {
+			case <-s.done:
+				diagnose("service stopped")
+			default:
+			}
+			if ready() {
+				return
+			}
+			select {
+			case ticks <- clock.Now():
+			case <-sub.wake:
+				sub.take()
+			case <-poll.C:
+			case <-s.done:
+				diagnose("service stopped")
+			case <-deadline.C:
+				diagnose("deadline reached")
+			}
+		}
+	}
 
 	// 1. The owner sends a message; the chief of staff replies and writes the
 	// workstream's status.
@@ -343,7 +481,22 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	if message.State != TurnQueued {
 		t.Fatalf("sent: %+v", message)
 	}
-	settle(s)
+	await(s, repo, "owner reply and both questions with the second mason completed", func() bool {
+		// The reviewer asks only after the mason owns the original question.
+		asked, err := repo.Questions(stream)
+		must(t, err)
+		for _, q := range asked {
+			if q.Asked.ID == "1" && q.Asked.Thread == demoThread && q.Asked.Question == "Where does state live?" {
+				releaseReviewer()
+			}
+		}
+		if !ownerDone(repo, message) || !turnDone(repo, demoAgent, "build", "waiting") ||
+			!turnDone(repo, "agent_reviewer", "review", "waiting") || !turnDone(repo, "agent_mason2", "build2", "idle") {
+			return false
+		}
+		return threadOf(repo, demoAgent).Parked() && threadOf(repo, "agent_reviewer").Parked() &&
+			question(repo, "1").State == trace.QuestionOpen && question(repo, "2").State == trace.QuestionOpen && quiescent(repo)
+	})
 	list, err := c.Conversation(ctx, stream)
 	must(t, err)
 	if got := states(list); !slices.Equal(got, []string{"message:done", "response:done"}) || list.Entries[0].Text != "Where do we stand?" || list.Entries[1].Text != chiefDemoReply {
@@ -395,8 +548,10 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	// mason's question with a citation and escalates the reviewer's. The
 	// mason resumes on its own thread.
 	clock.Advance(time.Minute)
-	settle(s)
-	settle(s)
+	await(s, repo, "cited answer and escalation", func() bool {
+		return turnDone(repo, demoAgent, "answer_1", "idle") && question(repo, "1").State == trace.QuestionAnswered &&
+			question(repo, "2").State == trace.QuestionEscalated && threadOf(repo, "agent_reviewer").Parked() && quiescent(repo)
+	})
 	mason := threadOf(repo, demoAgent)
 	if mason.Parked() || len(mason.Turns) != 2 || mason.Turns[1].Request.TurnID != "answer_1" || mason.Turns[1].Status() != "idle" {
 		t.Fatalf("mason after the answer: parked %v, turns %+v", mason.Parked(), mason.Turns)
@@ -418,13 +573,23 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	if len(inbox.Entries) != 1 || !reflect.DeepEqual(inbox.Entries[0], want) {
 		t.Fatalf("inbox:\n%+v\nwant\n%+v", inbox.Entries, want)
 	}
+	wantAction := ConversationEntry{Turn: want.Batch, Kind: "action", State: TurnDone, At: want.OpenedAt,
+		Text: "Question for you: " + want.Question + "\nBlocked: " + want.Blocked +
+			"\nOptions: " + strings.Join(want.Options, "; ") + "\nRecommendation: " + want.Recommendation}
+	escalatedConversation, err := c.Conversation(ctx, stream)
+	must(t, err)
+	if got := states(escalatedConversation); !slices.Equal(got, []string{"message:done", "response:done", "action:done"}) ||
+		!reflect.DeepEqual(escalatedConversation.Entries[2], wantAction) {
+		t.Fatalf("conversation after escalation: %+v", escalatedConversation)
+	}
 	before := runs()
 	stop(s, c)
+	beforePass := passes.Load()
 	s, c, repo = lifetime()
 	mu.Lock()
 	current = repo
 	mu.Unlock()
-	settle(s)
+	await(s, repo, "escalation restart reconciliation", func() bool { return passes.Load() > beforePass && quiescent(repo) })
 	again, err := c.Inbox(ctx)
 	must(t, err)
 	if !reflect.DeepEqual(again, inbox) {
@@ -433,12 +598,18 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	if got := runs(); !reflect.DeepEqual(got, before) {
 		t.Fatalf("the restart ran %v, had run %v", got, before)
 	}
+	afterRestart, err := c.Conversation(ctx, stream)
+	must(t, err)
+	if !reflect.DeepEqual(afterRestart, escalatedConversation) {
+		t.Fatalf("conversation duplicated or changed the escalation after restart: %+v", afterRestart)
+	}
+	clock.Advance(time.Second)
 	mu.Lock()
 	openMessage, err := c.Send(ctx, stream, "What is waiting on me?")
 	sent = append(sent, openMessage)
 	mu.Unlock()
 	must(t, err)
-	settle(s)
+	await(s, repo, "owner reply with the open escalation", func() bool { return ownerDone(repo, openMessage) && quiescent(repo) })
 	mu.Lock()
 	openPrompt := prompts[openMessage.Turn].SystemPrompt
 	mu.Unlock()
@@ -469,9 +640,18 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	if inbox, err := c.Inbox(ctx); err != nil || len(inbox.Entries) != 0 {
 		t.Fatalf("inbox after the ruling: %+v %v", inbox, err)
 	}
+	wantRuling := ConversationEntry{Turn: "ruling_" + want.Batch, Kind: "action", State: TurnDone,
+		Text: "You ruled: " + chiefDemoRuling, At: answered.At}
+	ruledConversation, err := c.Conversation(ctx, stream)
+	must(t, err)
+	if len(ruledConversation.Entries) != len(afterRestart.Entries)+3 ||
+		!reflect.DeepEqual(ruledConversation.Entries[5], wantRuling) {
+		t.Fatalf("conversation immediately after the owner answer: %+v; want ruling %+v", ruledConversation, wantRuling)
+	}
 	clock.Advance(time.Minute)
-	settle(s)
-	settle(s)
+	await(s, repo, "owner ruling relayed to the reviewer", func() bool {
+		return turnDone(repo, "agent_reviewer", "answer_2", "idle") && question(repo, "2").State == trace.QuestionAnswered && quiescent(repo)
+	})
 	reviewer := threadOf(repo, "agent_reviewer")
 	if reviewer.Parked() || len(reviewer.Turns) != 2 || reviewer.Turns[1].Request.TurnID != "answer_2" || reviewer.Turns[1].Status() != "idle" {
 		t.Fatalf("reviewer after the ruling: parked %v, turns %+v", reviewer.Parked(), reviewer.Turns)
@@ -481,11 +661,41 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	sent = append(sent, message)
 	mu.Unlock()
 	must(t, err)
-	settle(s)
+	await(s, repo, "owner reply after the ruling", func() bool { return ownerDone(repo, message) && quiescent(repo) })
 	list, err = c.Conversation(ctx, stream)
 	must(t, err)
-	if got := states(list); len(got) != 6 || got[5] != "response:done" {
-		t.Fatalf("conversation after the ruling: %v", got)
+	if got := states(list); !slices.Equal(got, []string{"message:done", "response:done", "action:done", "message:done", "response:done", "action:done", "message:done", "response:done"}) ||
+		!reflect.DeepEqual(list.Entries[2], wantAction) || !reflect.DeepEqual(list.Entries[5], wantRuling) ||
+		!reflect.DeepEqual(list.Entries[:6], ruledConversation.Entries) {
+		t.Fatalf("conversation after the ruling: %+v", list)
+	}
+	n := 0
+	for _, entry := range list.Entries {
+		if entry.Turn == wantRuling.Turn {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("owner ruling occurs %d times; want one: %+v", n, list)
+	}
+	wantTexts := []string{"Where do we stand?", chiefDemoReply, "What is waiting on me?", "The upload API stays as it is.", "Did the upload API change?", "The upload API stays as it is."}
+	var texts []string
+	for _, entry := range list.Entries {
+		if entry.Kind == "message" || entry.Kind == "response" {
+			texts = append(texts, entry.Text)
+		}
+	}
+	if !slices.Equal(texts, wantTexts) {
+		t.Fatalf("conversation messages and responses: %v; want %v", texts, wantTexts)
+	}
+	stop(s, c)
+	beforePass = passes.Load()
+	s, c, repo = lifetime()
+	await(s, repo, "ruling restart reconciliation", func() bool { return passes.Load() > beforePass && quiescent(repo) })
+	afterRulingRestart, err := c.Conversation(ctx, stream)
+	must(t, err)
+	if !reflect.DeepEqual(afterRulingRestart, list) {
+		t.Fatalf("conversation duplicated or changed the escalation after ruling and restart: %+v", afterRulingRestart)
 	}
 	stop(s, c)
 

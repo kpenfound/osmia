@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -38,7 +39,6 @@ type pipeline struct {
 
 func (p *pipeline) schedule(ctx context.Context) error {
 	if next := p.next.Swap(nil); next != nil {
-		println("DEBUG schedule swap at", time.Now().Format("15:04:05.000"))
 		p.current.Store(next)
 	}
 	current := p.current.Load()
@@ -152,6 +152,18 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		s.launch(p)
 	}
 	s.mu.Unlock()
+	// Member turns may still read their default repo's charter while draining.
+	// Release member handles before the authority they borrow.
+	slices.SortStableFunc(removed, func(a, b *activeProject) int {
+		ad, bd := cfg.For(a.id).Project.IsDefaultRepo(), cfg.For(b.id).Project.IsDefaultRepo()
+		if ad == bd {
+			return 0
+		}
+		if ad {
+			return 1
+		}
+		return -1
+	})
 	for _, p := range removed {
 		if err := s.finishDraining(p); err != nil {
 			s.log().Error("project stopped", "project", string(p.id), "reason", "reload", "error", err.Error())

@@ -60,6 +60,37 @@ type Bundle struct {
 	// CharterEdits identify direct owner edits so in-flight roles notice revised policy.
 	CharterEdits   []trace.Document `json:"charter_edits"`
 	ProjectNotices []ProjectNotice  `json:"project_notices"`
+	// ProjectSpec is the scope's workstream's workgroup's project spec,
+	// marked as a draft until group sealing completes. It stays
+	// available to the chief of staff and every unresolved member,
+	// including a dependent still waiting on or repairing after an
+	// upstream merge, and leaves the bundle only once every member of the
+	// workgroup is resolved.
+	ProjectSpec  *ProjectSpecView      `json:"project_spec,omitempty"`
+	Dependencies []DependencyReference `json:"dependencies,omitempty"`
+}
+
+type DependencyReference struct {
+	Upstream    config.WorkstreamID `json:"upstream"`
+	Type        string              `json:"type"`
+	Merged      bool                `json:"merged"`
+	Reference   string              `json:"reference,omitempty"`
+	Commit      string              `json:"commit,omitempty"`
+	BuildBranch string              `json:"build_branch,omitempty"`
+}
+
+// ProjectSpecView is the project spec of the scope's workstream's
+// workgroup, and the scope's workstream's own slice of it, when one is
+// recorded for it.
+type ProjectSpecView struct {
+	Source    string             `json:"source"`
+	Record    string             `json:"record"`
+	Workgroup config.WorkgroupID `json:"workgroup"`
+	Draft     bool               `json:"draft,omitempty"`
+	Behavior  string             `json:"behavior"`
+	Contracts []trace.Contract   `json:"contracts,omitempty"`
+	Graph     []trace.Edge       `json:"graph,omitempty"`
+	Slice     *trace.Slice       `json:"slice,omitempty"`
 }
 
 type ProjectNotice struct {
@@ -211,6 +242,30 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 	if b.Decisions, err = decisions(repo, scope.Workstream); err != nil {
 		return Bundle{}, fmt.Errorf("decisions: %w", err)
 	}
+	if scope.Workstream != "" {
+		if view, err := projectSpecView(repo, scope.Workstream); err != nil {
+			return Bundle{}, fmt.Errorf("project spec: %w", err)
+		} else if view != nil {
+			b.ProjectSpec = view
+		}
+		documents, err := trace.Read[trace.Document](repo, scope.Workstream)
+		if err != nil {
+			return Bundle{}, err
+		}
+		for _, document := range slices.Backward(documents) {
+			if document.ID != "edge-observation" {
+				continue
+			}
+			var observation struct {
+				Edges []DependencyReference `json:"edges"`
+			}
+			if err := json.Unmarshal([]byte(document.Content), &observation); err != nil {
+				return Bundle{}, fmt.Errorf("dependency references: %w", err)
+			}
+			b.Dependencies = observation.Edges
+			break
+		}
+	}
 	all, err := decisions(repo, "")
 	if err != nil {
 		return Bundle{}, fmt.Errorf("notices: %w", err)
@@ -236,7 +291,7 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 		b.CharterNotices = append(b.CharterNotices, CharterNotice{Source: "workstreams/" + string(p.Workstream) + "/" + p.Latest.Path, Workstream: p.Workstream, Record: p.Latest.ID, Revision: p.Latest.Revision, At: p.Latest.At,
 			Number: p.Proposal.Number, Rule: p.Proposal.Rule, Charter: p.Proposal.Charter, Ruling: p.Proposal.Ruling, RulingRevision: p.Proposal.RulingRevision, OwnerResponse: p.Proposal.OwnerResponse})
 	}
-	documents, err := trace.Read[trace.Document](repo, "")
+	documents, err := repo.ProjectDocuments()
 	if err != nil {
 		return Bundle{}, err
 	}
@@ -361,6 +416,36 @@ func prose(repo *trace.Repository, subsystem string) (Prose, bool, error) {
 
 func entity(e kb.Entity) Entity {
 	return Entity{ID: e.ID, Name: e.Name, Paths: append([]string{}, e.Paths...)}
+}
+
+// projectSpecView returns stream's own workgroup's project spec, with
+// stream's own slice named within it, as long as the spec is still active:
+// recorded, and the workgroup not yet resolved. repo must be the project's
+// own repository, not an instance scoped to one workstream.
+func projectSpecView(repo *trace.Repository, stream config.WorkstreamID) (*ProjectSpecView, error) {
+	spec, workgroup, found, err := repo.ProjectSpecOf(stream)
+	if err != nil || !found {
+		return nil, err
+	}
+	active, err := trace.ProjectSpecActive(repo, workgroup)
+	if err != nil || !active {
+		return nil, err
+	}
+	var slicePtr *trace.Slice
+	if slice, ok := trace.SliceFor(spec, stream); ok {
+		active, err := trace.MemberDocumentsActive(repo, stream)
+		if err != nil {
+			return nil, err
+		}
+		if active {
+			slicePtr = &slice
+		}
+	}
+	approved, err := repo.GroupApproved(stream)
+	if err != nil {
+		return nil, err
+	}
+	return &ProjectSpecView{Source: trace.ProjectSpecsPath, Record: trace.ProjectSpecsDocument, Workgroup: workgroup, Draft: !approved, Behavior: spec.Behavior, Contracts: spec.Contracts, Graph: spec.Graph, Slice: slicePtr}, nil
 }
 
 // decisions returns the latest revision of every ruling in the workstream, or

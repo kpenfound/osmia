@@ -453,6 +453,52 @@ func TestOwnPullRequestOutcomeDocumentPathIsAccepted(t *testing.T) {
 	}
 }
 
+// assumptions.json is a workstream document path the publication journal
+// accepts, next to base.json and own-pull-request-outcome.json; an unlisted
+// name alongside it is still refused.
+func TestAssumptionsDocumentPathIsAccepted(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	dir, err := root.WorkstreamTrace(p.ID, streamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assumptions := streamDocument("workstream-assumptions", AssumptionsPath, "{\"version\":1,\"assumptions\":[]}\n", 1)
+	if err := r.RecordDocuments(ctx, []Document{assumptions}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), AssumptionsPath))
+	if err != nil || string(data) != "{\"version\":1,\"assumptions\":[]}\n" {
+		t.Fatalf("assumptions.json on disk: %q %v", data, err)
+	}
+	unlisted := streamDocument("workstream-assumptions-extra", "assumptions-extra.json", "x\n", 1)
+	if err := r.RecordDocuments(ctx, []Document{unlisted}); err == nil {
+		t.Fatal("unlisted path accepted")
+	}
+}
+
+func TestEdgeObservationDocumentPathIsAccepted(t *testing.T) {
+	r, root, project := create(t)
+	ctx := context.Background()
+	dir, err := root.WorkstreamTrace(project.ID, streamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := "{\"edges\":[]}\n"
+	document := streamDocument("workstream-edge-observation", "edge-observation.json", content, 1)
+	if err := r.RecordDocuments(ctx, []Document{document}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), "edge-observation.json"))
+	if err != nil || string(data) != content {
+		t.Fatalf("edge observation on disk: %q %v", data, err)
+	}
+	unlisted := streamDocument("workstream-edge-observation-extra", "edge-observation-extra.json", "x\n", 1)
+	if err := r.RecordDocuments(ctx, []Document{unlisted}); err == nil {
+		t.Fatal("unlisted path accepted")
+	}
+}
+
 // A session's check run and its captured output are recorded under
 // session-checks/, mirroring a workstream's own final check runs under
 // final/; an unlisted name in the same directory is refused.

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -118,11 +119,31 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		Status        service.StatusResponse
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
+	cfg, err := config.Load(opts.Config)
+	must(t, err)
+	dir, err := cfg.Root.ProjectTrace(cfg.Project.ID)
+	must(t, err)
+	data, err := os.ReadFile(filepath.Join(dir, trace.WorkgroupsPath))
+	must(t, err)
+	var recorded struct {
+		Workgroups []trace.Workgroup `json:"workgroups"`
+	}
+	must(t, json.Unmarshal(data, &recorded))
+	workgroup := func(w config.WorkstreamID) *service.WorkgroupView {
+		group, ok := trace.WorkgroupOf(recorded.Workgroups, w)
+		if !ok {
+			t.Fatalf("workstream %s has no recorded workgroup", w)
+		}
+		must(t, config.CheckWorkgroupIDs(group.ID))
+		return &service.WorkgroupView{ID: group.ID, Members: []config.WorkstreamID{w}, Edges: []trace.Edge{}}
+	}
+	// Handed and not-yet-started workstreams are both planning; the CLI's
+	// text output retains their underlying recorded states.
 	handed := "handed"
-	full := service.WorkstreamStatus{Workstream: stream, Project: project, State: &handed, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file", Workspaces: "git", Status: &service.StatusView{
+	full := service.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(stream), Workstream: stream, Project: project, State: &handed, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file", Workspaces: "git", Status: &service.StatusView{
 		Goal: "Ship resumable uploads.", Note: "The plan is drafted. Review is underway.",
 		Agents: []string{"The architect is preparing the packet.", "A reviewer is idle."}, Revision: 1, UpdatedAt: written}}
-	none := service.WorkstreamStatus{Workstream: quiet, Project: project, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file", Workspaces: "git"}
+	none := service.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(quiet), Workstream: quiet, Project: project, Units: []service.UnitStatus{}, Advisories: []service.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []service.AgentStatus{}, ContextMode: "file", Workspaces: "git"}
 	capacity := &service.CapacityStatus{PerWorkstream: 2, Roles: []service.RoleCapacity{{Role: "mason", Limit: 4, Waiting: []service.SlotWait{}}, {Role: "reviewer", Limit: 2, Waiting: []service.SlotWait{}}, {Role: "committee", Limit: 3, Waiting: []service.SlotWait{}}}}
 	if all.Status.ProviderUsage == nil || all.Status.ProviderUsage.Unattributed != nil {
 		t.Fatalf("status --json provider usage: %+v", all.Status.ProviderUsage)
@@ -156,6 +177,10 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	}
 	raw := map[string]json.RawMessage{}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json", quiet)), &raw))
+	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json", quiet)), &got))
+	if !reflect.DeepEqual(got, none) {
+		t.Fatalf("no status --json: %+v", got)
+	}
 	if string(raw["status"]) != "null" || string(raw["state"]) != "null" || string(raw["units"]) != "[]" || string(raw["gates"]) != "[]" || string(raw["context_mode"]) != `"file"` || string(raw["open_questions"]) != "0" || string(raw["drift"]) != "null" {
 		t.Fatalf("no status JSON: %v", raw)
 	}

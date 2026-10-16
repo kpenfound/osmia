@@ -103,6 +103,13 @@ func TestBrowserOpenSessionThroughFormListsItAsASessionAndOpensItsView(t *testin
 	p.awaitText("#session-title", "Investigate flaky test")
 	p.awaitText("#session-meta", "default")
 	p.awaitText("#session-meta", string(id))
+	p.click("#project-home")
+	p.await("the exploratory session outside any workgroup", `(() => {
+      const row = document.querySelector('[data-sessions="session"] [data-pane-workstream="`+string(id)+`"]');
+      return row && !row.closest('[data-workgroup]');
+    })()`)
+	p.click(`[data-drilldown="` + string(id) + `"]`)
+	p.await("the exploratory session drill-down", `!document.querySelector('[data-view="session"]').hidden`)
 }
 
 // Sending a message to a session posts it and shows the reply, once the

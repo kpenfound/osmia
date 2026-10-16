@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -75,12 +76,40 @@ func TestAbandonHandedWorkstream(t *testing.T) {
 		t.Fatalf("status %+v", st)
 	}
 
+	// Successful abandonment records a project-level workgroup resolution
+	// asynchronously. Settle it before taking the refused request's baseline.
+	groups, _, err := trace.Workgroups(r)
+	must(t, err)
+	group, found := trace.WorkgroupOf(groups, stream)
+	if !found {
+		t.Fatal("handed workstream has no workgroup")
+	}
+	changes, closeChanges := serviceChanges(t, f.s)
+	defer closeChanges()
+	deadline := time.Now().Add(demoTimeout)
+	for {
+		extraction, err := extractionState(r)
+		must(t, err)
+		resolved, _, err := trace.ResolvedWorkgroups(r)
+		must(t, err)
+		if extraction != nil && extraction.Extraction == 1 && extraction.State != "pending" && extraction.State != "running" && slices.Contains(resolved, group.ID) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("registration extraction or successful abandonment did not settle: extraction=%+v resolved=%v", extraction, resolved)
+		}
+		changes()
+	}
 	head := f.head(t)
 	code, body := abandonCall(t, f.s, stream, `{"reason":"again"}`)
 	if code != http.StatusConflict || !strings.Contains(body, "workstream "+string(stream)+" is abandoned and cannot be abandoned") {
 		t.Fatalf("abandoned again: %d %s", code, body)
 	}
 	if !f.unchanged(t, head) {
+		commits, err := exec.Command("git", "-C", f.trace, "log", "--format=%H %s", "--name-only", head+"..HEAD").CombinedOutput()
+		t.Logf("commits since refusal baseline (error=%v):\n%s", err, commits)
+		documents, err := exec.Command("git", "-C", f.trace, "log", "-p", head+"..HEAD", "--", "documents.jsonl").CombinedOutput()
+		t.Logf("project documents since refusal baseline (error=%v):\n%s", err, documents)
 		t.Fatal("a refused abandonment wrote to the trace")
 	}
 }
@@ -116,6 +145,10 @@ func TestAbandonRefusals(t *testing.T) {
 		}
 	}
 	if !f.unchanged(t, head) {
+		commits, err := exec.Command("git", "-C", f.trace, "log", "--format=%H %s", "--name-only", head+"..HEAD").CombinedOutput()
+		t.Logf("commits since refusal baseline (error=%v):\n%s", err, commits)
+		documents, err := exec.Command("git", "-C", f.trace, "log", "-p", head+"..HEAD", "--", "documents.jsonl").CombinedOutput()
+		t.Logf("project documents since refusal baseline (error=%v):\n%s", err, documents)
 		t.Fatal("a refused abandonment wrote to the trace")
 	}
 	if state, err := f.repository().Workflow(handed, trace.FeatureSubject); err != nil || state.Value != HandedState {

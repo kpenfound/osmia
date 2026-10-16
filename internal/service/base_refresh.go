@@ -29,11 +29,15 @@ type baseObservation struct {
 type baseRefreshInput struct {
 	Workstream config.WorkstreamID `json:"workstream"`
 	Check      int                 `json:"check"`
+	OwnOnly    bool                `json:"own_only,omitempty"`
 }
 
 type baseRefresher struct {
 	s          *Service
 	repository *trace.Repository
+	// Archive polling has no member trace to record cadence in. The serial
+	// project pass keeps retry timing locally; merge evidence lives in runtime.
+	archiveChecks map[config.WorkstreamID]time.Time
 }
 
 func baseObservationAt(repo *trace.Repository, stream config.WorkstreamID) (baseObservation, int, error) {
@@ -58,6 +62,9 @@ func integrationRecorded(observed baseObservation, revision int) bool {
 }
 
 func (b *baseRefresher) Pass(ctx context.Context) error {
+	if err := b.observeArchivedPullRequests(ctx); err != nil {
+		return err
+	}
 	streams, err := b.repository.Workstreams()
 	if err != nil {
 		return err
@@ -74,9 +81,6 @@ func (b *baseRefresher) Pass(ctx context.Context) error {
 		dependency, err := b.repository.WorkstreamBase(stream)
 		if err != nil {
 			return err
-		}
-		if dependency.Base == "" {
-			continue
 		}
 		state, err := b.repository.Workflow(stream, trace.FeatureSubject)
 		if err != nil {
@@ -98,25 +102,35 @@ func (b *baseRefresher) Pass(ctx context.Context) error {
 				continue
 			}
 		}
-		if observed, revision, err := baseObservationAt(b.repository, stream); err != nil {
-			return err
-		} else if integrationRecorded(observed, revision) {
-			continue
-		}
-		_, _, sealed, err := seal.Latest(b.repository, stream)
+		observeOwn, err := b.observeDeliveredMember(stream, state.Value)
 		if err != nil {
 			return err
 		}
-		if !sealed {
-			// Ratification freezes the dependency even before sealing can run.
-			// Observe integration here so a removed, merged parent branch does
-			// not leave sealing parked behind the base-availability gate.
-			_, ratified, err := latestRatification(b.repository, stream)
+		ownOnly := dependency.Base == ""
+		observed, revision, err := baseObservationAt(b.repository, stream)
+		if err != nil {
+			return err
+		}
+		ownOnly = ownOnly || integrationRecorded(observed, revision)
+		if ownOnly && !observeOwn {
+			continue
+		}
+		if !ownOnly {
+			_, _, sealed, err := seal.Latest(b.repository, stream)
 			if err != nil {
 				return err
 			}
-			if !ratified {
-				continue
+			if !sealed {
+				_, ratified, err := latestRatification(b.repository, stream)
+				if err != nil {
+					return err
+				}
+				if !ratified && !observeOwn {
+					continue
+				}
+				if !ratified {
+					ownOnly = true
+				}
 			}
 		}
 		transitions, err := trace.Read[trace.Transition](b.repository, stream)
@@ -136,7 +150,7 @@ func (b *baseRefresher) Pass(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		in := baseRefreshInput{stream, int(subject.Version + 1)}
+		in := baseRefreshInput{Workstream: stream, Check: int(subject.Version + 1), OwnOnly: ownOnly}
 		input, err := json.Marshal(in)
 		if err != nil {
 			return err
@@ -195,9 +209,18 @@ func (b *baseRefresher) Apply(ctx context.Context, op coreadapter.Operation) (co
 		return coreadapter.OperationResult{}, err
 	}
 	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(b.repository.Project()), Workstream: string(in.Workstream)})
-	if result, done, err := b.checkOwnPullRequest(ctx, in, op); err != nil {
-		return coreadapter.OperationResult{}, err
-	} else if done {
+	result, done, lookupErr := b.checkOwnPullRequest(ctx, in, op)
+	if lookupErr != nil {
+		return coreadapter.OperationResult{}, lookupErr
+	}
+	if in.OwnOnly && !done {
+		reason := "Own pull request remains open or unavailable; retry on the next cadence"
+		if err := ctx.Err(); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		return b.completeOwnObservation(ctx, in, op, reason)
+	}
+	if done {
 		return result, nil
 	}
 	cfg := b.s.about(b.repository)
@@ -255,7 +278,8 @@ func (b *baseRefresher) Apply(ctx context.Context, op coreadapter.Operation) (co
 // durably records a merged or closed outcome (spec#5). done is true only
 // when it recorded the outcome; the caller then ends the run without
 // calling resolveBase. An open PR, an outcome already recorded for the
-// current PR, a recorded integration, a workstream with no PR of its own,
+// current PR, a recorded integration outside own-only observation,
+// a workstream with no PR of its own,
 // or no PullRequests client all skip the lookup, so the run continues as it
 // did before this check existed.
 func (b *baseRefresher) checkOwnPullRequest(ctx context.Context, in baseRefreshInput, op coreadapter.Operation) (coreadapter.OperationResult, bool, error) {
@@ -274,7 +298,7 @@ func (b *baseRefresher) checkOwnPullRequest(ctx context.Context, in baseRefreshI
 	if err != nil {
 		return coreadapter.OperationResult{}, false, err
 	}
-	if integrationRecorded(observed, revision) {
+	if !in.OwnOnly && integrationRecorded(observed, revision) {
 		return coreadapter.OperationResult{}, false, nil
 	}
 	client := b.s.options.PullRequests
@@ -283,6 +307,17 @@ func (b *baseRefresher) checkOwnPullRequest(ctx context.Context, in baseRefreshI
 	}
 	found, err := client.Find(ctx, publication.Upstream, publication.Fork, publication.Branch)
 	if err != nil {
+		if ctx.Err() != nil {
+			return coreadapter.OperationResult{}, false, ctx.Err()
+		}
+		observe, memberErr := b.observeDeliveredMember(in.Workstream, feature.Value)
+		if memberErr != nil {
+			return coreadapter.OperationResult{}, false, memberErr
+		}
+		if observe {
+			result, err := b.completeOwnObservation(ctx, in, op, "Own pull request lookup failed; retry on the next cadence: "+err.Error())
+			return result, true, err
+		}
 		return coreadapter.OperationResult{}, false, err
 	}
 	for _, pr := range found {
@@ -298,7 +333,7 @@ func (b *baseRefresher) checkOwnPullRequest(ctx context.Context, in baseRefreshI
 		if err := b.s.step("own-pr-outcome-found"); err != nil {
 			return coreadapter.OperationResult{}, false, err
 		}
-		result, err := b.completeOwnPullRequestOutcome(ctx, in, op, publication.PullRequest, outcome)
+		result, err := b.completeOwnPullRequestOutcome(ctx, in, op, publication.PullRequest, outcome, pr.MergeCommit)
 		return result, true, err
 	}
 	return coreadapter.OperationResult{}, false, nil
@@ -308,9 +343,9 @@ func (b *baseRefresher) checkOwnPullRequest(ctx context.Context, in baseRefreshI
 // document and the base-refresh's completing "checked" transition, so a
 // restart between the lookup and this commit re-looks-up the pull request
 // and still yields one recorded outcome (charter#2).
-func (b *baseRefresher) completeOwnPullRequestOutcome(ctx context.Context, in baseRefreshInput, op coreadapter.Operation, pr int, outcome string) (coreadapter.OperationResult, error) {
+func (b *baseRefresher) completeOwnPullRequestOutcome(ctx context.Context, in baseRefreshInput, op coreadapter.Operation, pr int, outcome string, mergeCommit ...string) (coreadapter.OperationResult, error) {
 	at := b.s.now()
-	doc, ok, err := ownPullRequestOutcomeDocumentFor(b.repository, in.Workstream, at, op.ID, pr, outcome)
+	doc, ok, err := ownPullRequestOutcomeDocumentFor(b.repository, in.Workstream, at, op.ID, pr, outcome, mergeCommit...)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -365,7 +400,8 @@ func canonicalPublication(p DeliveryPublication, cfg *config.Config) bool {
 }
 
 // upstreamDeliveryPending reports whether a delivered branch needs reviewed,
-// owner-approved publication after drift or dependency integration.
+// owner-approved publication after drift, dependency integration, or a
+// workgroup merge-order edge merging since the latest final report.
 func upstreamDeliveryPending(repo *trace.Repository, cfg *config.Config, stream config.WorkstreamID) (bool, error) {
 	if finished, err := ownPullRequestFinished(repo, stream); err != nil || finished {
 		return false, err
@@ -398,5 +434,43 @@ func upstreamDeliveryPending(repo *trace.Repository, cfg *config.Config, stream 
 	if pending {
 		return true, nil
 	}
-	return dependentDeliveryPending(repo, cfg, stream)
+	if pending, err := dependentDeliveryPending(repo, cfg, stream); err != nil || pending {
+		return pending, err
+	}
+	return workgroupEdgePending(repo, stream)
+}
+
+// observeDeliveredMember extends own-PR observation to workgroup members whose
+// dependency maintenance has nothing left to observe.
+func (b *baseRefresher) observeDeliveredMember(stream config.WorkstreamID, state string) (bool, error) {
+	if state != DeliveredState {
+		return false, nil
+	}
+	_, found, err := currentOwnPublication(b.repository, stream)
+	if err != nil || !found {
+		return false, err
+	}
+	id, err := b.repository.CrossRepoWorkgroupOf(stream)
+	if err != nil {
+		return false, err
+	}
+	if id != "" {
+		return true, nil
+	}
+	groups, _, err := trace.Workgroups(b.repository)
+	if err != nil {
+		return false, err
+	}
+	_, found = trace.WorkgroupOf(groups, stream)
+	return found, nil
+}
+
+func (b *baseRefresher) completeOwnObservation(ctx context.Context, in baseRefreshInput, op coreadapter.Operation, reason string) (coreadapter.OperationResult, error) {
+	state, err := b.repository.Workflow(in.Workstream, baseRefreshAction)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: fmt.Sprintf("base-refresh-%d-checked", in.Check), Revision: 1, Project: b.repository.Project(), Workstream: in.Workstream, At: b.s.now(), Actor: foremanActor, Cause: op.ID}
+	_, err = b.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: baseRefreshAction, From: state.Value, To: "checked", Reason: reason}})
+	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, err
 }

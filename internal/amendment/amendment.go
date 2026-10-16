@@ -17,7 +17,12 @@ import (
 
 // Path returns the workstream path of an amendment's application record, and
 // DocumentID its trace record ID.
-func Path(id string) string       { return "amendments/" + id + "/application.json" }
+func Path(id string) string {
+	if strings.HasPrefix(id, "group-") {
+		return "tools/amendment-" + id + "-application.json"
+	}
+	return "amendments/" + id + "/application.json"
+}
 func DocumentID(id string) string { return "amendment_" + id + "_application" }
 
 // Pin names one revision of a workstream's sealed documents: the seal number,
@@ -33,8 +38,8 @@ type Pin struct {
 // governs reports whether both pins name the same seal, spec and plan.
 func (p Pin) governs(q Pin) bool { return p.Seal == q.Seal && p.Spec == q.Spec && p.Plan == q.Plan }
 
-// Application is the document amendments/<n>/application.json. Its first
-// revision is recorded with the resealing: the revisions the amendment moved
+// Application records a numeric amendment under amendments/<n>/ or a group
+// delta under tools/. Its first revision is recorded with the resealing: the revisions the amendment moved
 // the workstream From and To, the request and the decision note, the changed
 // criteria, and how the amendment's affected units are
 // treated. Rework units have changed outcomes, constraints, boundaries or
@@ -142,6 +147,13 @@ func FromDocuments(docs []trace.Document) ([]Application, error) {
 
 // idOf returns the amendment an application path names, or "".
 func idOf(path string) string {
+	if rest, ok := strings.CutPrefix(path, "tools/amendment-group-"); ok {
+		id, ok := strings.CutSuffix(rest, "-application.json")
+		if ok && id != "" && !strings.Contains(id, "/") {
+			return "group-" + id
+		}
+		return ""
+	}
 	rest, ok := strings.CutPrefix(path, "amendments/")
 	if !ok {
 		return ""

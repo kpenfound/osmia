@@ -105,6 +105,9 @@ func TestFromDocumentsReadsLatestApplications(t *testing.T) {
 		doc(DocumentID("2"), Path("2"), 1, Application{Amendment: "2", To: pin(2, 3, 2, 2)}),
 		doc(DocumentID("1"), Path("1"), 1, Application{Amendment: "1", To: pin(1, 2, 1, 2)}),
 		doc(DocumentID("1"), Path("1"), 2, Application{Amendment: "1", To: pin(1, 2, 1, 2), Applied: &Applied{Held: []string{"resume"}}}),
+		doc(DocumentID("group-owner-delta"), Path("group-owner-delta"), 1, Application{Amendment: "group-owner-delta", To: pin(3, 4, 3, 3)}),
+		doc(DocumentID("group-owner-delta"), Path("group-owner-delta"), 2, Application{Amendment: "group-owner-delta", To: pin(3, 4, 3, 3), Applied: &Applied{Held: []string{"accept"}}}),
+		doc(DocumentID("unrelated"), "tools/amendment-unrelated-application.json", 1, Application{Amendment: "unrelated"}),
 		doc("amendment_3_affected", "amendments/3/affected.json", 1, Application{Amendment: "3"}),
 		doc(DocumentID("4"), "amendments/4/round-1/application.json", 1, Application{Amendment: "4"}),
 	}
@@ -112,7 +115,7 @@ func TestFromDocumentsReadsLatestApplications(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].Amendment != "1" || got[0].Applied == nil || got[1].Amendment != "2" {
+	if len(got) != 3 || got[0].Amendment != "1" || got[0].Applied == nil || got[1].Amendment != "2" || got[2].Amendment != "group-owner-delta" || got[2].Applied == nil || !slices.Equal(got[2].Applied.Held, []string{"accept"}) {
 		t.Fatalf("applications %+v", got)
 	}
 }

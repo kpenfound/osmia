@@ -201,8 +201,9 @@ func (f *fakeAPI) handleStatus(w http.ResponseWriter, r *http.Request) {
 			workstreams.WriteString(",")
 		}
 		fmt.Fprintf(&workstreams, `{"workstream":"w_%03d","project":"p_fake","workspaces":"git","state":"building",`+
+			`"display_state":"building","workgroup":{"id":"g_%03d","members":["w_%03d"],"edges":[]},`+
 			`"units":[],"advisories":[],"open_questions":0,"gates":[],"context_mode":"file","drift":null,`+
-			`"status":{"goal":"Workstream %d","attention":"","note":"","agents":[],"revision":1,"updated_at":"2026-01-01T00:00:00Z"},"agents":[]}`, i, i)
+			`"status":{"goal":"Workstream %d","attention":"","note":"","agents":[],"revision":1,"updated_at":"2026-01-01T00:00:00Z"},"agents":[]}`, i, i, i, i)
 	}
 	writeJSON(w, `{"workstreams":[`+workstreams.String()+`],"profiles":{},"daily_budget":null,"capacity":null,`+
 		`"provider_usage":null,"diagnostics":[],"workspaces":{"setting":"git","backend":"git"}}`)

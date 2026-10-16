@@ -47,7 +47,37 @@ type Repository struct {
 	// workstream's operations live in its own instance.
 	operationMu *sync.Mutex
 	// attempts holds the operations an open WithOperation attempt claimed, by event.
-	attempts        map[string]bool
+	attempts map[string]bool
+	// members retains fixed member identities and references to project-owned
+	// handles. Lifecycle evidence is checked before resolving a member, so an
+	// open shared handle never pins a deleted workstream handle as live.
+	membersMu              sync.RWMutex
+	members                map[config.WorkstreamID]CrossRepoMember
+	memberLifecycle        atomic.Pointer[WorkgroupMemberLifecycle]
+	questionCommitBoundary atomic.Pointer[func(string) error]
+	questionReadBoundary   atomic.Pointer[func(config.WorkstreamID) error]
+	// processLock is held, on a cross-repo workgroup's own trace instance,
+	// from a successful acquireWorkgroupTrace until Close: it serializes
+	// every goroutine of this one process that opens the same workgroup
+	// trace, so they hand off its OS-level flock in turn through Go's own
+	// scheduler instead of each polling and backing off against the
+	// others, which a shared reconciliation cadence could otherwise
+	// synchronize into a standing collision. nil on every other instance.
+	processLock *sync.Mutex
+	// shared is set only on a cross-repo workgroup's own trace instance
+	// created or opened through the shared registry: it is the one registry entry
+	// every caller that opens the same workgroup id while this instance is
+	// still open shares, so they all call methods on this one instance,
+	// through its own brief locking, instead of each taking a second
+	// exclusive hold on the same directory. Close decrements its reference
+	// count and only actually closes this instance once it reaches zero,
+	// so a long-running caller such as a dispatched chief-of-staff turn
+	// never has to finish before a short-lived caller's own open of the
+	// same workgroup succeeds. nil on every other instance, where Close
+	// behaves exactly as it does today.
+	shared          *sharedWorkgroupTrace
+	charterProject  config.ProjectID
+	charterResolver atomic.Pointer[func(config.ProjectID) (*Repository, error)]
 	root            config.Root
 	project         config.ProjectID
 	stream          config.WorkstreamID
@@ -148,7 +178,11 @@ func openDirectory(root config.Root, project config.Project) (*Repository, error
 	if err != nil {
 		return nil, err
 	}
-	return openStoreDirectory(root, project.ID, "", directory)
+	r, err := openStoreDirectory(root, project.ID, "", directory)
+	if r != nil {
+		r.charterProject = project.Group()
+	}
+	return r, err
 }
 
 // openWorkstreamDirectory opens stream's own dedicated trace directory,
@@ -195,9 +229,35 @@ func openStoreDirectory(root config.Root, project config.ProjectID, stream confi
 // first-time open that fails while this goroutine already holds it, for
 // example inside Serialize's schedule hook or another workstream's
 // WithOperation callback, returns an error instead of deadlocking.
+//
+// On a cross-repo workgroup's own trace instance, id naming one of its
+// real members (a key of r.members) returns that member's own, already
+// open instance directly, never opening or locking a second handle on it;
+// id naming anything else, including the trace's own host workstream, is
+// resolved the ordinary way, inside the workgroup trace itself.
 func (r *Repository) scoped(id config.WorkstreamID) (*Repository, error) {
 	if id == "" || id == r.stream {
 		return r, nil
+	}
+	if m, ok := r.memberBinding(id); ok {
+		retired, err := r.MemberRetired(id)
+		if err != nil {
+			return nil, err
+		}
+		if retired {
+			return nil, &RetiredMemberError{Project: m.Project.Project(), Workstream: id}
+		}
+		member, liveErr := liveMemberRepository(m)
+		if liveErr != nil {
+			retired, err := r.MemberRetired(id)
+			if err != nil {
+				return nil, err
+			}
+			if retired {
+				return nil, &RetiredMemberError{Project: m.Project.Project(), Workstream: id}
+			}
+		}
+		return member, liveErr
 	}
 	if r.stream != "" {
 		return nil, fmt.Errorf("a workstream trace instance has no workstreams of its own")
@@ -252,12 +312,74 @@ func (r *Repository) scoped(id config.WorkstreamID) (*Repository, error) {
 	return s, nil
 }
 
+// ProjectFor resolves the repo handle holding stream's knowledge base and
+// entity map. Charter access on that handle follows CharterRepository to the
+// project's default repo. r must be unscoped. Ordinary repo receivers return
+// themselves; a cross-repo workgroup returns the member's borrowed repo
+// handle, even if its workstream history is retired. The shared chief host
+// uses the first live member's repo context. Project data is never duplicated
+// into the workgroup trace.
+func (r *Repository) ProjectFor(stream config.WorkstreamID) (*Repository, error) {
+	if r.stream != "" {
+		return nil, fmt.Errorf("a workstream trace instance has no project-level data of its own")
+	}
+	m, ok := r.memberBinding(stream)
+	if !ok {
+		if r.memberBindings() == nil {
+			return r, nil
+		}
+		groups, _, err := Workgroups(r)
+		if err != nil {
+			return nil, err
+		}
+		group, found := WorkgroupOf(groups, stream)
+		if !found {
+			return nil, fmt.Errorf("workstream %s has no workgroup project context", stream)
+		}
+		for _, id := range group.Members {
+			member, bound := r.memberBinding(id)
+			if !bound {
+				continue
+			}
+			retired, err := r.MemberRetired(id)
+			if err != nil {
+				return nil, err
+			}
+			if !retired {
+				return member.Project, nil
+			}
+		}
+		return nil, fmt.Errorf("workgroup %s has no live repo context", group.ID)
+	}
+	if _, err := r.MemberRetired(stream); err != nil {
+		return nil, err
+	}
+	return m.Project, nil
+}
+
 // diskStreams lists every workstream that has its own trace directory under
 // the project's workstream traces, the way Workstreams and every aggregate
 // read discover the project's workstreams: from the storage that is
 // authoritative for their existence, not from anything the project trace
-// itself records.
+// itself records. On a cross-repo workgroup's own trace instance it
+// instead lists live real members. Retirement needs durable lifecycle
+// evidence; historical membership stays in Workgroups. The host carrying
+// the shared chief thread is never a real member.
 func (r *Repository) diskStreams() ([]config.WorkstreamID, error) {
+	if members := r.memberBindings(); members != nil {
+		ids := make([]config.WorkstreamID, 0, len(members))
+		for id := range members {
+			retired, err := r.MemberRetired(id)
+			if err != nil {
+				return nil, err
+			}
+			if !retired {
+				ids = append(ids, id)
+			}
+		}
+		slices.Sort(ids)
+		return ids, nil
+	}
 	base, err := r.root.WorkstreamTraces(r.project)
 	if err != nil {
 		return nil, err
@@ -301,9 +423,24 @@ func (r *Repository) scanAll() ([]Record, []config.WorkstreamID, error) {
 	for _, id := range ids {
 		s, err := r.scoped(id)
 		if err != nil {
+			retired, checkedErr := r.retiredRead(id, err)
+			if retired {
+				continue
+			}
+			err = checkedErr
+		}
+		if err != nil {
 			return nil, nil, err
 		}
 		s.mu.Lock()
+		retired, lifecycleErr := r.MemberRetired(id)
+		if retired || lifecycleErr != nil {
+			s.mu.Unlock()
+			if lifecycleErr != nil {
+				return nil, nil, lifecycleErr
+			}
+			continue
+		}
 		recs, _, err := s.scan()
 		s.mu.Unlock()
 		if err != nil {
@@ -364,7 +501,24 @@ func (r *Repository) observed(c Commit) {
 // this point finds no workstream to reuse and opens none of its own, so
 // Close never misses a child and leaks its flock past this process's
 // lifetime.
+//
+// On a cross-repo workgroup's own trace instance created or opened through
+// the shared registry, Close instead decrements the shared reference
+// count it was opened under and returns at once while another caller
+// still holds it: the instance, and every workstream it has opened, stays
+// exactly as open and usable as it was, and only the call that brings the
+// count to zero runs the rest of this method.
 func (r *Repository) Close() error {
+	if r.shared != nil {
+		r.shared.Lock()
+		r.shared.refs--
+		if r.shared.refs > 0 {
+			r.shared.Unlock()
+			return nil
+		}
+		r.shared.repo = nil
+		r.shared.Unlock()
+	}
 	r.workstreamsMu.Lock()
 	children := r.workstreams
 	r.workstreams = nil
@@ -395,6 +549,10 @@ func (r *Repository) closeFiles() error {
 		// so closing alone would leave the lock held until it executes.
 		errs = append(errs, syscall.Flock(int(r.lock.Fd()), syscall.LOCK_UN), r.lock.Close())
 		r.lock = nil
+	}
+	if r.processLock != nil {
+		r.processLock.Unlock()
+		r.processLock = nil
 	}
 	r.recordFiles, r.scanned, r.history, r.verified, r.workflows = nil, nil, nil, nil, nil
 	errs = append(errs, r.dir.Close())
@@ -460,11 +618,16 @@ func charterRevision(project config.ProjectID, at time.Time, actor Actor, cause 
 }
 
 // Charter returns the latest recorded charter revision. Creation records the
-// template as the first. When charter.md differs from the latest revision, or
+// template as the first on the default repo; member repos use that authority.
+// When charter.md differs from the latest revision, or
 // none is recorded, the file is first recorded as a new revision by the owner,
 // so every owner edit is versioned before it is used. A read with no edit
 // records nothing.
 func (r *Repository) Charter(ctx context.Context, at time.Time) (Document, error) {
+	r, err := r.CharterRepository()
+	if err != nil {
+		return Document{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -532,11 +695,14 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 	if err != nil {
 		return nil, err
 	}
-	documents, err := json.Marshal(charterRevision(project.ID, at, actor, "project-create", 1, CharterTemplate))
-	if err != nil {
-		return nil, err
+	var documents []byte
+	if project.IsDefaultRepo() {
+		documents, err = json.Marshal(charterRevision(project.ID, at, actor, "project-create", 1, CharterTemplate))
+		if err != nil {
+			return nil, err
+		}
+		documents = append(documents, '\n')
 	}
-	documents = append(documents, '\n')
 	if entities == nil {
 		entities = []byte("{}\n")
 	} else {
@@ -614,15 +780,24 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 	if err != nil {
 		return nil, err
 	}
-	for _, f := range []struct {
+	files := []struct {
 		name string
 		data []byte
-	}{{"project.json", append(data, '\n')}, {"charter.md", []byte(CharterTemplate)}, {EntitiesPath, entities}, {"documents.jsonl", documents}} {
+	}{{"project.json", append(data, '\n')}, {EntitiesPath, entities}, {"documents.jsonl", documents}}
+	paths := []string{"project.json", EntitiesPath, "documents.jsonl"}
+	if project.IsDefaultRepo() {
+		files = append(files, struct {
+			name string
+			data []byte
+		}{"charter.md", []byte(CharterTemplate)})
+		paths = append(paths, "charter.md")
+	}
+	for _, f := range files {
 		if err := r.writeFile(f.name, f.data); err != nil {
 			return nil, err
 		}
 	}
-	if err := r.commit(ctx, []string{"project.json", "charter.md", EntitiesPath, "documents.jsonl"}, "Create project trace"); err != nil {
+	if err := r.commit(ctx, paths, "Create project trace"); err != nil {
 		return nil, err
 	}
 	ok = true
@@ -1129,7 +1304,7 @@ func (r *Repository) scanTrace(checked *treeFiles) ([]Record, []config.Workstrea
 			v, err := cloneRecord(decoded.record), decoded.err
 			if err == nil {
 				h := v.header()
-				if h.Project != r.project || (h.Workstream != "" && !known[h.Workstream]) || recordPath(v) != name {
+				if (h.Project != r.project && !r.importedConversationRecord(v, checked)) || (h.Workstream != "" && !known[h.Workstream]) || recordPath(v) != name {
 					err = fmt.Errorf("record identity does not match its trace path")
 				}
 			}
@@ -1211,6 +1386,9 @@ func (r *Repository) Append(ctx context.Context, v Record) error {
 func (r *Repository) append(ctx context.Context, v Record, writeDocument bool) error {
 	if err := validate(v); err != nil {
 		return err
+	}
+	if d, ok := v.(Document); ok && d.Path == "charter.md" && r.charterProject != "" && r.charterProject != r.project {
+		return fmt.Errorf("%w: the charter belongs to project %s", ErrConflict, r.charterProject)
 	}
 	if v.header().Project != r.project {
 		return fmt.Errorf("record belongs to a different project")
@@ -1338,13 +1516,12 @@ func Read[T Record](r *Repository, stream config.WorkstreamID) ([]T, error) {
 			return nil, err
 		}
 	}
-	r, err := r.scoped(stream)
+	target, err := r.lockQuestionRead(stream)
 	if err != nil {
 		return nil, err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	records, streams, err := r.scan()
+	defer target.mu.Unlock()
+	records, streams, err := target.scan()
 	if stream != "" {
 		found := false
 		for _, id := range streams {

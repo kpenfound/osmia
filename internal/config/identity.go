@@ -12,7 +12,11 @@ import (
 type ProjectID string
 type WorkstreamID string
 
-var idPattern = regexp.MustCompile(`^[pw]_[0-9a-f]{32}$`)
+// WorkgroupID identifies a workgroup: one or more workstreams of a project
+// sharing a chief of staff.
+type WorkgroupID string
+
+var idPattern = regexp.MustCompile(`^[pwg]_[0-9a-f]{32}$`)
 var ErrCollision = errors.New("identity already exists")
 
 func parseID(s, prefix string) error {
@@ -32,6 +36,12 @@ func ParseWorkstreamID(s string) (WorkstreamID, error) {
 		return "", err
 	}
 	return WorkstreamID(s), nil
+}
+func ParseWorkgroupID(s string) (WorkgroupID, error) {
+	if err := parseID(s, "g_"); err != nil {
+		return "", err
+	}
+	return WorkgroupID(s), nil
 }
 func newID(prefix string) (string, error) {
 	var b [16]byte
@@ -65,6 +75,19 @@ func NewWorkstreamID(existing ...WorkstreamID) (WorkstreamID, error) {
 	}
 	return id, nil
 }
+
+// NewWorkgroupID generates an identity without reserving it.
+func NewWorkgroupID(existing ...WorkgroupID) (WorkgroupID, error) {
+	s, err := newID("g_")
+	if err != nil {
+		return "", err
+	}
+	id := WorkgroupID(s)
+	if err := CheckWorkgroupIDs(append(existing, id)...); err != nil {
+		return "", err
+	}
+	return id, nil
+}
 func checkIDs[T ~string](prefix string, ids []T) error {
 	seen := map[T]bool{}
 	for _, id := range ids {
@@ -80,3 +103,4 @@ func checkIDs[T ~string](prefix string, ids []T) error {
 }
 func CheckProjectIDs(ids ...ProjectID) error       { return checkIDs("p_", ids) }
 func CheckWorkstreamIDs(ids ...WorkstreamID) error { return checkIDs("w_", ids) }
+func CheckWorkgroupIDs(ids ...WorkgroupID) error   { return checkIDs("g_", ids) }

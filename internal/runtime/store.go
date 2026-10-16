@@ -46,19 +46,42 @@ type Priority struct {
 	Workstreams []config.WorkstreamID `json:"workstreams"`
 }
 
+// ArchivePublication preserves the current pull request lookup identity after
+// owner archive. It grants no merge; only an observed merge releases an edge.
+type ArchivePublication struct {
+	Upstream    string `json:"upstream"`
+	Fork        string `json:"fork"`
+	Branch      string `json:"branch"`
+	Commit      string `json:"commit,omitempty"`
+	PullRequest int    `json:"pull_request"`
+}
+
 // Archive records a delivered or abandoned workstream the owner archived.
 // State holds the outcome, delivered or abandoned. DeliveryLink is, where
 // one exists, the pull request URL or the recorded upstream commit of an
 // owner-recorded merge. The title, state and delivery link survive
 // permanent trace cleanup; CleanedAt marks completion.
 type Archive struct {
-	Project      config.ProjectID    `json:"project"`
-	Workstream   config.WorkstreamID `json:"workstream"`
-	ArchivedAt   time.Time           `json:"archived_at"`
-	Title        string              `json:"title,omitempty"`
-	State        string              `json:"state,omitempty"`
-	DeliveryLink string              `json:"delivery_link,omitempty"`
-	CleanedAt    time.Time           `json:"cleaned_at,omitempty"`
+	// Workgroup and Resolved preserve verified identity and resolution before
+	// owner archive. ResolutionEvidence pins merged, cancelled or unresolved
+	// from retained history; an empty value grants no resolution.
+	// CleanupStartedAt records authorized deletion intent.
+	Workgroup          config.WorkgroupID `json:"workgroup,omitempty"`
+	ResolutionEvidence string             `json:"resolution_evidence,omitempty"`
+	// MergeCommit and MergeReference pin verified merge identity for dependents
+	// after trace cleanup. Resolution alone does not supply a dependency commit.
+	Publication      ArchivePublication  `json:"publication,omitzero"`
+	MergeCommit      string              `json:"merge_commit,omitempty"`
+	MergeReference   string              `json:"merge_reference,omitempty"`
+	Resolved         bool                `json:"resolved,omitempty"`
+	CleanupStartedAt time.Time           `json:"cleanup_started_at,omitempty"`
+	Project          config.ProjectID    `json:"project"`
+	Workstream       config.WorkstreamID `json:"workstream"`
+	ArchivedAt       time.Time           `json:"archived_at"`
+	Title            string              `json:"title,omitempty"`
+	State            string              `json:"state,omitempty"`
+	DeliveryLink     string              `json:"delivery_link,omitempty"`
+	CleanedAt        time.Time           `json:"cleaned_at,omitempty"`
 }
 
 // ProviderLimit records a provider's blocked capacity independently of role bindings.
@@ -506,6 +529,49 @@ func validate(st State) error {
 		if archived[a.Workstream] {
 			return fmt.Errorf("duplicate archived workstream")
 		}
+		if a.Workgroup != "" {
+			if err := config.CheckWorkgroupIDs(a.Workgroup); err != nil {
+				return err
+			}
+		}
+		switch a.ResolutionEvidence {
+		case "":
+		case "unresolved":
+			if a.Resolved {
+				return fmt.Errorf("unresolved archive cannot grant resolution")
+			}
+		case "merged":
+			if !a.Resolved || a.State != "delivered" {
+				return fmt.Errorf("invalid archived merge evidence")
+			}
+		case "cancelled":
+			if !a.Resolved || a.State != "abandoned" {
+				return fmt.Errorf("invalid archived cancel evidence")
+			}
+		default:
+			return fmt.Errorf("invalid archive resolution evidence")
+		}
+		if a.Publication != (ArchivePublication{}) && (a.Publication.PullRequest <= 0 || a.Publication.Upstream == "" || a.Publication.Fork == "" || a.Publication.Branch == "") {
+			return fmt.Errorf("invalid archived publication identity")
+		}
+		if a.MergeCommit != "" || a.MergeReference != "" {
+			if a.MergeCommit == "" || a.MergeReference == "" || !a.Resolved || a.ResolutionEvidence != "merged" {
+				return fmt.Errorf("invalid archived merge identity")
+			}
+			p := a.Publication
+			prReference := fmt.Sprintf("%s#%d", p.Upstream, p.PullRequest)
+			ownerSuffix := "@" + a.MergeCommit
+			ownerReference := strings.HasSuffix(a.MergeReference, ownerSuffix) && len(a.MergeReference) > len(ownerSuffix)
+			if !ownerReference && (p == (ArchivePublication{}) || a.MergeReference != prReference) {
+				return fmt.Errorf("archive merge reference does not match its publication")
+			}
+		}
+		if a.Resolved && a.State != "delivered" && a.State != "abandoned" {
+			return fmt.Errorf("resolved archive must be terminal")
+		}
+		if !a.CleanupStartedAt.IsZero() && a.Title == "" {
+			return fmt.Errorf("cleanup intent requires preserved metadata")
+		}
 		archived[a.Workstream] = true
 		if a.ArchivedAt.IsZero() {
 			return fmt.Errorf("archive time must be non-zero")
@@ -774,8 +840,31 @@ func (s *Store) UpdateArchive(a Archive) error {
 	return s.mutate(func(st *State, _ Inputs) error {
 		for i, old := range st.Archived {
 			if old.Project == a.Project && old.Workstream == a.Workstream {
+				// Cleanup may have read history before a dependent durably observed
+				// this exact publication's merge. Preserve that monotonic evidence
+				// while applying cleanup's metadata and progress.
+				if old.ResolutionEvidence == "merged" && old.Publication.PullRequest > 0 && (old.MergeReference == "" || old.MergeReference == fmt.Sprintf("%s#%d", old.Publication.Upstream, old.Publication.PullRequest)) &&
+					a.State == old.State && a.Publication == old.Publication && a.ResolutionEvidence == "unresolved" && !a.Resolved {
+					a.Resolved, a.ResolutionEvidence = old.Resolved, old.ResolutionEvidence
+					a.MergeCommit, a.MergeReference = old.MergeCommit, old.MergeReference
+				}
 				if a.Title == "" {
 					return fmt.Errorf("archive title is required")
+				}
+				if old.Workgroup != "" && a.Workgroup != old.Workgroup {
+					return fmt.Errorf("archive workgroup identity cannot change")
+				}
+				if old.ResolutionEvidence != "" && old.Resolved && (!a.Resolved || a.ResolutionEvidence != old.ResolutionEvidence) {
+					return fmt.Errorf("archive resolution cannot change")
+				}
+				if old.Publication != (ArchivePublication{}) && a.Publication != old.Publication {
+					return fmt.Errorf("archive publication identity cannot change")
+				}
+				if old.MergeCommit != "" && (a.MergeCommit != old.MergeCommit || a.MergeReference != old.MergeReference) {
+					return fmt.Errorf("archive merge identity cannot change")
+				}
+				if !old.CleanupStartedAt.IsZero() {
+					a.CleanupStartedAt = old.CleanupStartedAt
 				}
 				a.ArchivedAt = old.ArchivedAt
 				st.Archived[i] = a
@@ -785,6 +874,32 @@ func (s *Store) UpdateArchive(a Archive) error {
 				}
 				return nil
 			}
+		}
+		return fmt.Errorf("archive does not exist")
+	})
+}
+
+// RecordArchivePullRequestMerge reconciles an observed merge of the exact
+// pinned publication without overwriting concurrent cleanup or archive metadata.
+func (s *Store) RecordArchivePullRequestMerge(project config.ProjectID, stream config.WorkstreamID, publication ArchivePublication, commit string) error {
+	return s.mutate(func(st *State, _ Inputs) error {
+		for i := range st.Archived {
+			a := &st.Archived[i]
+			if a.Project != project || a.Workstream != stream {
+				continue
+			}
+			if a.State != "delivered" || publication.PullRequest <= 0 || a.Publication != publication {
+				return fmt.Errorf("archive merge does not match its delivered publication")
+			}
+			reference := fmt.Sprintf("%s#%d", publication.Upstream, publication.PullRequest)
+			if a.ResolutionEvidence == "cancelled" || a.MergeCommit != "" && commit != "" && (a.MergeCommit != commit || a.MergeReference != reference) {
+				return fmt.Errorf("archive merge identity cannot change")
+			}
+			a.Resolved, a.ResolutionEvidence = true, "merged"
+			if commit != "" {
+				a.MergeCommit, a.MergeReference = commit, reference
+			}
+			return nil
 		}
 		return fmt.Errorf("archive does not exist")
 	})

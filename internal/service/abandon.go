@@ -227,6 +227,12 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 	}
 	logger := ghlog.Logger(ctx)
 	logger.Info("agent turn dispatched", attrs...)
+	var claimToken string
+	ctx = thread.WithClaimObserver(ctx, func(req trace.TurnRequest, claim trace.TurnClaim) {
+		if req.AgentID == in.Agent && req.TurnID == in.Turn {
+			claimToken = claim.Token
+		}
+	})
 	start := a.s.now()
 	result, err := a.Reconciler.Apply(ctx, op)
 	finished := append(append([]any{}, attrs...), "duration", a.s.now().Sub(start).String())
@@ -240,8 +246,15 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 		}
 		logger.Info("agent turn finished", append(finished, "outcome", outcome)...)
 	}
-	// Abandoning while this turn ran left the thread's later turns queued.
+	// The operation's runner has returned. Abandon may have cancelled it
+	// before it could record its first attempt, leaving its claim reserved.
+	// Complete only that uncaptured turn, then cancel the queued successors.
 	if gone, _ := abandoned(a.repository, in.Workstream); gone {
+		if claimToken != "" {
+			if _, cancelErr := a.repository.CancelReturnedTurn(context.WithoutCancel(ctx), in.Workstream, in.Agent, in.Turn, claimToken, a.s.now(), abandonActor, cancelReason); cancelErr != nil {
+				return result, errors.Join(err, cancelErr)
+			}
+		}
 		if _, cancelErr := a.repository.CancelTurns(context.WithoutCancel(ctx), in.Workstream, a.s.now(), abandonActor, cancelReason); cancelErr != nil {
 			return result, errors.Join(err, cancelErr)
 		}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto"
 	"github.com/chromedp/cdproto/network"
 	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
@@ -76,16 +78,16 @@ func sharedBrowser(t *testing.T, binary string) context.Context {
 	return sharedBrowserCtx
 }
 
-// TestMain applies this package's shuffle and timeout defaults
+// TestMain applies this package's shuffle default
 // (applyServiceTestDefaults), runs the tests, and shuts down the browser
 // sharedBrowser started, if any, once every test in the package has run.
-// serial: configures the process-wide flag.CommandLine (test shuffle and
-// timeout) before m.Run; it is the package entrypoint, not a parallel test.
+// serial: configures the process-wide shuffle flag before m.Run and shuts
+// down the shared browser after all tests finish.
 func TestMain(m *testing.M) {
 	if !flag.Parsed() {
 		flag.Parse()
 	}
-	applyServiceTestDefaults(flag.CommandLine, serviceTestTimeoutCap)
+	applyServiceTestDefaults(flag.CommandLine)
 	code := m.Run()
 	if sharedBrowserDone != nil {
 		sharedBrowserDone()
@@ -198,8 +200,29 @@ func (p *page) awaitText(selector, want string) {
 // the middle of the page, clear of the sticky heading and message field.
 func (p *page) click(selector string) {
 	p.t.Helper()
-	p.eval(`document.querySelector(`+quote(selector)+`)?.scrollIntoView({block: 'center'})`, nil)
-	p.run(chromedp.Click(selector, chromedp.ByQuery))
+	p.run(clickCurrent(selector))
+}
+
+// clickCurrent reselects an element replaced during the node lookup and
+// geometry reads. These node errors precede mouse dispatch; other errors
+// return immediately so an owner action is never submitted twice.
+func clickCurrent(selector string, opts ...chromedp.QueryOption) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		for {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := chromedp.Evaluate(`document.querySelector(`+quote(selector)+`)?.scrollIntoView({block: 'center'})`, nil).Do(ctx); err != nil {
+				return err
+			}
+			err := chromedp.Click(selector, append([]chromedp.QueryOption{chromedp.ByQuery}, opts...)...).Do(ctx)
+			var protocol *cdproto.Error
+			if !errors.As(err, &protocol) || protocol.Code != -32000 ||
+				(protocol.Message != "Could not find node with given id" && protocol.Message != "No node with given id found") {
+				return err
+			}
+		}
+	})
 }
 
 // typeInto types text into the first field selector matches.

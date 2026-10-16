@@ -222,6 +222,22 @@ func (r Root) WorkstreamStaging() (string, error) {
 	return r.managed("workstreams-staging")
 }
 
+// WorkgroupTrace is a cross-repo workgroup's own dedicated trace
+// repository: its membership record, its shared chief-of-staff thread, its
+// inbox numbering and its project spec, kept outside every one of its
+// members' own traces and outside every target repository. It is a sibling
+// of "projects" and "workstreams", never nested under either, so nothing
+// that lists registered projects or a project's own workstreams ever
+// observes it. It is used only for a workgroup whose members span more
+// than one repo; a workgroup confined to one repo keeps using that repo's
+// own trace exactly as before.
+func (r Root) WorkgroupTrace(id WorkgroupID) (string, error) {
+	if err := CheckWorkgroupIDs(id); err != nil {
+		return "", err
+	}
+	return r.managed("workgroups", string(id))
+}
+
 // WorkstreamDeleting is where a workstream's own dedicated trace repository
 // is moved, by one atomic rename out of WorkstreamTraces, before archive
 // cleanup removes it. Its presence there is the durable, restart-safe

@@ -209,9 +209,24 @@ func (r *Repository) Statuses() ([]WorkstreamStatus, error) {
 	for _, stream := range ids {
 		s, err := r.scoped(stream)
 		if err != nil {
+			retired, checkedErr := r.retiredRead(stream, err)
+			if retired {
+				continue
+			}
+			err = checkedErr
+		}
+		if err != nil {
 			return nil, err
 		}
 		s.mu.Lock()
+		retired, lifecycleErr := r.MemberRetired(stream)
+		if retired || lifecycleErr != nil {
+			s.mu.Unlock()
+			if lifecycleErr != nil {
+				return nil, lifecycleErr
+			}
+			continue
+		}
 		records, _, verr := s.scan()
 		var view *workflowView
 		var manifest manifestRecord
@@ -252,12 +267,16 @@ func (r *Repository) Statuses() ([]WorkstreamStatus, error) {
 		if workspaces == "" {
 			workspaces = config.WorkspacesGit
 		}
-		state := view.states[FeatureSubject].Value
+		effective, err := r.WorkflowStates(stream)
+		if err != nil {
+			return nil, err
+		}
+		state := effective[FeatureSubject].Value
 		if manifest.Kind == SessionKind {
 			state = SessionState(view.states[SessionSubject].Value)
 		}
 		out = append(out, WorkstreamStatus{Workstream: stream, Workspaces: workspaces, Kind: manifest.Kind, Profile: manifest.Profile, Base: manifest.Base, Branch: manifest.Branch, Title: manifest.Title,
-			State: state, Subjects: view.states, OpenQuestions: open, Gates: ownerGates(records, stream, view), Status: latestStatus(records, stream), CreatedAt: createdAt, LastActivity: lastActivity})
+			State: state, Subjects: effective, OpenQuestions: open, Gates: ownerGates(records, stream, view), Status: latestStatus(records, stream), CreatedAt: createdAt, LastActivity: lastActivity})
 	}
 	return out, nil
 }

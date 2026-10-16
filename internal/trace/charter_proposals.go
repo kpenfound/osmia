@@ -80,9 +80,24 @@ func (r *Repository) CharterProposals() ([]CharterProposalState, error) {
 	for _, stream := range ids {
 		s, err := r.scoped(stream)
 		if err != nil {
+			retired, checkedErr := r.retiredRead(stream, err)
+			if retired {
+				continue
+			}
+			err = checkedErr
+		}
+		if err != nil {
 			return nil, err
 		}
 		s.mu.Lock()
+		retired, lifecycleErr := r.MemberRetired(stream)
+		if retired || lifecycleErr != nil {
+			s.mu.Unlock()
+			if lifecycleErr != nil {
+				return nil, lifecycleErr
+			}
+			continue
+		}
 		records, _, err := s.scan()
 		var v *workflowView
 		if err == nil {
@@ -141,24 +156,29 @@ func charterProposalPath(parts []string) bool {
 // ruling on question id a standing charter rule: revision 1 of the
 // question's charter.json, with the rule text, the number it would take and
 // the ruling it comes from, and the proposal's move to CharterProposed, in
-// one commit. next returns the number from charter.md as it is on disk, which
-// is read, not recorded. A turn of another role fails. A question that does not exist,
+// one commit. next returns the number from the project charter after any owner
+// edit is recorded. A turn of another role fails. A question that does not exist,
 // has no ruling of the owner or already has a proposal, and rule text that
 // is empty, spans lines or holds an HTML comment marker, are refused with
 // *QuestionRefused.
 func (r *Repository) ProposeCharter(ctx context.Context, agent string, scope coreadapter.Scope, id, rule string, next func(charter string) int, at time.Time) (CharterProposal, error) {
 	project := r
-	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	target, localID, turn, err := r.chiefQuestionScope(ctx, agent, scope, id, at)
 	if err != nil {
 		return CharterProposal{}, err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	turn, log, v, records, err := r.chiefTurn(ctx, agent, scope, at)
+	defer target.mu.Unlock()
+	r = target
+	stream := target.stream
+	id = localID
+	log, v, err := target.loadWorkflow(stream)
 	if err != nil {
 		return CharterProposal{}, err
 	}
-	stream := config.WorkstreamID(scope.Workstream)
+	records, _, err := target.scan()
+	if err != nil {
+		return CharterProposal{}, err
+	}
 	existing := questions(records, v, stream)
 	i := slices.IndexFunc(existing, func(q QuestionState) bool { return q.Asked.ID == id })
 	subject := CharterSubject(id)
@@ -177,13 +197,15 @@ func (r *Repository) ProposeCharter(ctx context.Context, agent string, scope cor
 	case strings.Contains(rule, "<!--") || strings.Contains(rule, "-->"):
 		return CharterProposal{}, refused("rule must not contain an HTML comment marker")
 	}
-	project.mu.Lock()
-	current, err := project.readFile("charter.md")
-	project.mu.Unlock()
+	project, err = project.ProjectFor(stream)
 	if err != nil {
 		return CharterProposal{}, err
 	}
-	number := next(string(current))
+	current, err := project.Charter(ctx, at)
+	if err != nil {
+		return CharterProposal{}, err
+	}
+	number := next(current.Content)
 	if number < 1 {
 		return CharterProposal{}, fmt.Errorf("a charter rule number starts at 1")
 	}

@@ -208,16 +208,24 @@ func WriteProjectConfig(path string, p Project) error {
 	if !ValidRepository(p.Upstream) || (p.Fork != "" && !ValidRepository(p.Fork)) || !filepath.IsAbs(p.Clone) || !ValidBranch(p.BaseBranch) {
 		return errors.New("invalid project configuration")
 	}
+	if p.GroupID != "" {
+		if _, err := ParseProjectID(string(p.GroupID)); err != nil || p.GroupID == p.ID {
+			return errors.New("invalid project configuration")
+		}
+	}
 	text := fmt.Sprintf("version = 1\nname = %s\nupstream = %s\nfork = %s\nclone = %s\nbase_branch = %s\nlanding = \"commit-per-unit\"\n",
 		tomlString(p.Name), tomlString(p.Upstream), tomlString(p.Fork), tomlString(p.Clone), tomlString(p.BaseBranch))
 	if p.Fork == "" || strings.EqualFold(p.Upstream, p.Fork) {
 		text = strings.Replace(text, "fork = "+tomlString(p.Fork)+"\n", "", 1)
 	}
+	if p.GroupID != "" {
+		text += "group_id = " + tomlString(string(p.GroupID)) + "\n"
+	}
 	var check Project
 	if _, err := toml.Decode(text, &check); err != nil {
 		return err
 	}
-	if check.Name != p.Name || check.Clone != p.Clone {
+	if check.Name != p.Name || check.Clone != p.Clone || check.GroupID != p.GroupID {
 		return errors.New("project configuration did not round-trip")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {

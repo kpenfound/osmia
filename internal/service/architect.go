@@ -131,6 +131,11 @@ func (d *drafter) Pass(ctx context.Context) error {
 	}
 	librarian := librarianWorkstream(d.repository.Project())
 	for _, stream := range streams {
+		if held, err := changeHeld(d.repository, stream); err != nil {
+			return err
+		} else if held {
+			continue
+		}
 		if stream == librarian {
 			continue
 		}
@@ -162,6 +167,9 @@ func (d *drafter) reconcile(ctx context.Context, stream config.WorkstreamID) err
 	}
 	if feature.Value != HandedState {
 		return nil
+	}
+	if blocked, err := d.s.designStartBlocksDraft(d.repository, stream); err != nil || blocked {
+		return err
 	}
 	state, err := d.repository.Workflow(stream, draftSubject)
 	if err != nil {

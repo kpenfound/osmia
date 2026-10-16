@@ -80,6 +80,7 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	if err != nil {
 		return q, err
 	}
+	observeClaim(ctx, q)
 
 	// The claim serializes continuation selection against competing dispatchers.
 	t, err := r.Store.Thread(stream, agent)
@@ -87,7 +88,7 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 		return q, err
 	}
 	req := q.Request
-	prepared.Scope = coreadapter.Scope{Project: string(req.Project), Workstream: string(stream), Unit: req.Unit, Thread: req.ThreadID, Turn: req.TurnID, Role: t.Identity.Role}
+	prepared.Scope = coreadapter.Scope{Project: string(r.Store.Project()), Workstream: string(stream), Unit: req.Unit, Thread: req.ThreadID, Turn: req.TurnID, Role: t.Identity.Role}
 	prepared.Profile, prepared.SystemPrompt, prepared.Prompt = req.Profile, req.SystemPrompt, req.Prompt
 	var advice string
 	// A stop cancels the advice with the session it would have informed.
@@ -104,6 +105,7 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 		return q, errors.Join(runErr, persistErr)
 	}
 	h := req.Header
+	h.Project = r.Store.Project()
 	h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", trace.EventID(req.ID, "response"), r.Now(), trace.Actor{Kind: "service", ID: "thread-runner"}
 	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: req.ThreadID, TurnID: req.TurnID, RequestID: req.ID, RequestRevision: req.Revision, Result: result, Advice: advice}
 	var stop *Stop

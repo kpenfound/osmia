@@ -485,36 +485,55 @@ func (r *Repository) appendRecords(files map[string][]byte, records []Record) er
 }
 
 func (r *Repository) Workflow(stream config.WorkstreamID, subject string) (WorkflowState, error) {
-	r, err := r.scoped(stream)
-	if err != nil {
-		return WorkflowState{}, err
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	_, v, err := r.loadWorkflow(stream)
+	states, err := r.WorkflowStates(stream)
 	if err != nil {
 		return WorkflowState{}, err
 	}
 	if !key(subject) {
 		return WorkflowState{}, fmt.Errorf("invalid workflow subject")
 	}
-	return v.states[subject], nil
+	return states[subject], nil
 }
 
-// WorkflowStates returns the state of every subject of the workstream's
-// workflow that has one, by subject.
+// WorkflowStates returns effective workflow state. Raw sequential seal
+// preparations remain historical evidence until group completion is durable.
 func (r *Repository) WorkflowStates(stream config.WorkstreamID) (map[string]WorkflowState, error) {
-	r, err := r.scoped(stream)
+	target, err := r.scoped(stream)
 	if err != nil {
 		return nil, err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	_, v, err := r.loadWorkflow(stream)
-	if err != nil {
+	target.mu.Lock()
+	if err := r.memberReadError(stream); err != nil {
+		target.mu.Unlock()
 		return nil, err
 	}
-	return v.states, nil
+	_, v, err := target.loadWorkflow(stream)
+	if err != nil {
+		target.mu.Unlock()
+		return nil, err
+	}
+	states := make(map[string]WorkflowState, len(v.states))
+	for subject, state := range v.states {
+		states[subject] = state
+	}
+	target.mu.Unlock()
+	id := config.WorkgroupID(states[CrossRepoWorkgroupSubject].Value)
+	feature := states[FeatureSubject]
+	if id != "" && (feature.Value == SealPreparedState || feature.Value == "ratified" || feature.Value == "building" || feature.Value == "assembled") {
+		approved, err := r.groupApproved(id)
+		if err != nil {
+			return nil, err
+		}
+		if approved && feature.Value == SealPreparedState {
+			feature.Value = "ratified"
+			states[FeatureSubject] = feature
+		}
+		if !approved {
+			feature.Value = "in-shed"
+			states[FeatureSubject] = feature
+		}
+	}
+	return states, nil
 }
 
 // Outbox returns all entries and their retained delivery history, ordered by ID.

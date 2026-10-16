@@ -75,8 +75,33 @@ func (s *Service) configuration() ConfigResponse {
 	cfg, pending, reloadErr := s.cfg, s.pending, s.reloadErr
 	s.mu.Unlock()
 	out := ConfigResponse{Root: cfg.Root.String(), Digest: digest(cfg), Effective: cfg, Diagnostics: []Diagnostic{}, LastError: reloadErr}
+	// Every repo, default or not, has its own knowledge-base extraction; the
+	// charter is the project's, read only for its default repo.
+	extractions := map[config.ProjectID]*ExtractionState{}
 	for _, p := range cfg.Projects {
+		directory, _ := cfg.Root.ProjectTrace(p.ID)
+		extraction, err := s.projectExtraction(p.ID)
+		if err == nil {
+			extractions[p.ID] = extraction
+		} else if !errors.Is(err, errNoTrace) && !errors.Is(err, errNoActiveProject) {
+			out.Diagnostics = append(out.Diagnostics, Diagnostic{"extraction", Internal, "cannot read the knowledge-base extraction state; check the trace repository at " + directory})
+		}
+	}
+	for _, p := range cfg.Projects {
+		if !p.IsDefaultRepo() {
+			continue
+		}
 		view := projectView(cfg.Root, p)
+		view.Repos = nil
+		for _, member := range groupMembers(cfg.Projects, p.ID) {
+			rv := repoView(cfg.Root, member)
+			rv.Extraction = extractions[member.ID]
+			view.Repos = append(view.Repos, rv)
+		}
+		if len(view.Repos) == 0 {
+			view.Repos = []RepoView{repoView(cfg.Root, p)}
+		}
+		view.Extraction = extractions[p.ID]
 		// A project without a trace, or removed since the snapshot, has no
 		// charter to report.
 		state, err := s.charterState(p.ID)
@@ -84,12 +109,6 @@ func (s *Service) configuration() ConfigResponse {
 			view.CharterState = &state
 		} else if !errors.Is(err, errNoTrace) && !errors.Is(err, errNoActiveProject) {
 			out.Diagnostics = append(out.Diagnostics, Diagnostic{"charter", Internal, "cannot read or record the charter; check " + view.Charter + " and the trace repository"})
-		}
-		extraction, err := s.projectExtraction(p.ID)
-		if err == nil {
-			view.Extraction = extraction
-		} else if !errors.Is(err, errNoTrace) && !errors.Is(err, errNoActiveProject) {
-			out.Diagnostics = append(out.Diagnostics, Diagnostic{"extraction", Internal, "cannot read the knowledge-base extraction state; check the trace repository at " + view.Trace})
 		}
 		out.Projects = append(out.Projects, view)
 	}
@@ -270,6 +289,32 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		if r.URL.Path == Prefix+"/design" {
+			if out, api := s.designList(r.URL.Query().Get("project")); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+		if id, ok := strings.CutSuffix(r.URL.Path, "/conversation"); ok {
+			if id, ok = strings.CutPrefix(id, Prefix+"/design/"); ok {
+				if out, api := s.conversationList(id); api != nil {
+					failWith(w, api)
+				} else {
+					respond(w, 200, out)
+				}
+				return
+			}
+		}
+		if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/design/"); ok {
+			if out, api := s.designRead(id); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, DesignResponse{Design: out})
+			}
+			return
+		}
 		if r.URL.Path == Prefix+"/sessions" {
 			if out, api := s.sessionList(r.URL.Query().Get("project")); api != nil {
 				failWith(w, api)
@@ -392,6 +437,43 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/design" {
+		var v DesignOpenRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		out, api := s.openDesign(r.Context(), v)
+		if api != nil {
+			failWith(w, api)
+		} else {
+			respond(w, 200, DesignResponse{Design: out})
+		}
+		return
+	}
+	if id, ok := strings.CutSuffix(r.URL.Path, "/message"); ok && r.Method == http.MethodPost {
+		if id, ok = strings.CutPrefix(id, Prefix+"/design/"); ok {
+			var v DesignMessageRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			if out, api := s.designMessage(r.Context(), id, v); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+	}
+	if id, ok := strings.CutSuffix(r.URL.Path, "/start"); ok && r.Method == http.MethodPost {
+		if id, ok = strings.CutPrefix(id, Prefix+"/design/"); ok {
+			if out, api := s.startDesignWorkgroup(r.Context(), id); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+	}
 	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/reload" {
 		if out, api := s.reload(); api != nil {
 			failWith(w, api)
@@ -428,6 +510,23 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			result, api = s.removeProject(v)
 		}
+		if api != nil {
+			failWith(w, api)
+			return
+		}
+		respond(w, 200, result)
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/projects/repos" {
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(addProjectTimeout)); err != nil {
+			fail(w, Internal)
+			return
+		}
+		var v RepoAddRequest
+		if !decode(w, r, &v) {
+			return
+		}
+		result, api := s.addRepo(r.Context(), v)
 		if api != nil {
 			failWith(w, api)
 			return

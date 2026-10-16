@@ -108,6 +108,11 @@ func (m *masons) Pass(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if waiting, err := edgeWaiting(m.repository, stream); err != nil {
+			return err
+		} else if waiting {
+			continue
+		}
 		b, found, err := m.read(stream)
 		if err != nil {
 			return fmt.Errorf("workstream %s masons: %w", stream, err)
@@ -345,7 +350,7 @@ func (m *masons) classify(ctx context.Context, stream config.WorkstreamID, unit 
 		prompt += " Call ask if you need a decision, or done with the required report when the unit's acceptance holds."
 	}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: masonActor, Cause: last.Response.ID, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: last.Request.SystemPrompt, Prompt: prompt}
-	_, err = m.repository.EnqueueTurn(ctx, req)
+	err = m.enqueueTurn(ctx, req)
 	return err == nil, false, err
 }
 
@@ -380,7 +385,7 @@ func (m *masons) resumeMasonRuling(ctx context.Context, stream config.Workstream
 		return false, nil
 	}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.now(), Actor: ruling.actor(), Cause: ruling.Contest, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: last.Request.SystemPrompt, Prompt: prompt}
-	_, err = m.repository.EnqueueTurn(ctx, req)
+	err = m.enqueueTurn(ctx, req)
 	return err == nil, err
 }
 
@@ -525,7 +530,7 @@ func (m *masons) recoverTurn(ctx context.Context, stream config.WorkstreamID, un
 		return false, err
 	}
 	req.Prompt = last.Request.Prompt + "\n\n" + interruption(last) + " " + kept("that turn", paths, recorded) + " Continue from those files, check the unit's acceptance, and report done when it holds."
-	_, err = m.repository.EnqueueTurn(ctx, req)
+	err = m.enqueueTurn(ctx, req)
 	return err == nil, err
 }
 
@@ -592,8 +597,24 @@ func (m *masons) follow(ctx context.Context, stream config.WorkstreamID, unit st
 // building or assembled, and when it last started a unit. The effective plan
 // is the latest sealed plan followed by the recorded follow-up units.
 func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
+	if held, err := changeHeld(m.repository, stream); err != nil || held {
+		return building{}, false, err
+	}
+	return m.readActive(stream)
+}
+
+// readActive checks the feature state without admitting a new unit. Started
+// landing effects use it to reconcile their whole unit across a change hold.
+func (m *masons) readActive(stream config.WorkstreamID) (building, bool, error) {
 	feature, err := m.repository.Workflow(stream, trace.FeatureSubject)
-	if err != nil || (feature.Value != BuildingState && feature.Value != AssembledState) {
+	if err != nil {
+		return building{}, false, err
+	}
+	maintenance := false
+	if feature.Value == DeliveredState {
+		maintenance, err = workgroupEdgePending(m.repository, stream)
+	}
+	if err != nil || (feature.Value != BuildingState && feature.Value != AssembledState && !maintenance) {
 		return building{}, false, err
 	}
 	return m.readSealed(stream)
@@ -703,6 +724,9 @@ func (m *masons) bundle(ctx context.Context, stream config.WorkstreamID, unit st
 // blocked and reports it blocked. A unit whose state moved since it was read
 // is left to the next pass.
 func (m *masons) start(ctx context.Context, b building, unit string) (started, blocked bool, err error) {
+	if held, err := changeHeld(m.repository, b.stream); err != nil || held {
+		return false, false, err
+	}
 	subject := trace.UnitSubject(unit)
 	stays := fmt.Sprintf("unit %s stays ready", unit)
 	mason, err := m.bundle(ctx, b.stream, unit)
@@ -750,6 +774,9 @@ func (m *masons) start(ctx context.Context, b building, unit string) (started, b
 	if errors.Is(err, trace.ErrConflict) {
 		return false, false, nil
 	} else if err != nil {
+		return false, false, err
+	}
+	if err := m.s.step("mason-implementing:" + string(b.stream) + ":" + unit); err != nil {
 		return false, false, err
 	}
 	return true, false, m.enqueue(ctx, b.stream, unit, mason, tr)
@@ -865,7 +892,26 @@ func (m *masons) enqueue(ctx context.Context, stream config.WorkstreamID, unit s
 	turn := masonTurnID(unit)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: moved.At, Actor: masonActor, Cause: moved.ID, Depth: 1},
 		AgentID: agent, ThreadID: agent, TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(m.cfg.Project), Prompt: masonPrompt(mason)}
-	_, err = m.repository.EnqueueTurn(ctx, req)
+	err = m.enqueueTurn(ctx, req)
+	return err
+}
+
+// enqueueTurn closes the race with owner abandonment: abandon records the
+// terminal feature state before cancelling requests, and this caller checks
+// that state after durable acceptance. Either writer sees the other's write.
+func (m *masons) enqueueTurn(ctx context.Context, req trace.TurnRequest) error {
+	if _, err := m.repository.EnqueueTurn(ctx, req); err != nil {
+		return err
+	}
+	if err := m.s.step("mason-turn-queued:" + string(req.Workstream) + ":" + req.Unit); err != nil {
+		return err
+	}
+	settle := context.WithoutCancel(ctx)
+	gone, err := abandoned(m.repository, req.Workstream)
+	if err != nil || !gone {
+		return err
+	}
+	_, err = m.repository.CancelQueuedTurn(settle, req.Workstream, req.AgentID, req.TurnID, m.s.now(), abandonActor, cancelReason)
 	return err
 }
 

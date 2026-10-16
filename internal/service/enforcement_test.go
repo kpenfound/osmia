@@ -109,8 +109,44 @@ func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 		if !slices.Contains(chiefGrant.Tools, tool.Name) {
 			t.Errorf("chief-of-staff tool %s is not in the chief's grant", tool.Name)
 		}
+		if tool.Name == projectContextTool && tool.Effect != coreadapter.ToolRead {
+			t.Errorf("project context effect %v, want read", tool.Effect)
+		}
 	}
-	for _, name := range []string{moveUnitTool, handBackDriftTool, resolveContestedTool} {
+	want := slices.DeleteFunc(slices.Clone(chiefOrdinaryTools), func(name string) bool { return name == "file_read" })
+	slices.Sort(want)
+	registered := slices.Clone(names)
+	slices.Sort(registered)
+	if !slices.Equal(registered, want) {
+		t.Errorf("ordinary chief handlers %v, want %v", registered, want)
+	}
+	// Check the registry after the production context wrapper, which adds
+	// retrieval to roles that do not register it themselves.
+	bound, err := Enforce(f.s.options, Enforcement{}).Threads(repository, f.s.cfg)
+	must(t, err)
+	turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
+	wrapped, err := turns.Scoped(context.Background(), scope)
+	must(t, err)
+	var wrappedNames []string
+	for _, tool := range wrapped {
+		wrappedNames = append(wrappedNames, tool.Name)
+	}
+	slices.Sort(wrappedNames)
+	all := slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool { return name == "file_read" })
+	slices.Sort(all)
+	if !slices.Equal(wrappedNames, all) {
+		t.Errorf("production chief registry %v, want %v", wrappedNames, all)
+	}
+	count := 0
+	for _, name := range turns.Grants[trace.ChiefOfStaff].Tools {
+		if name == projectContextTool {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("production chief project context grants: %d, want one", count)
+	}
+	for _, name := range []string{moveUnitTool, handBackDriftTool, resolveContestedTool, projectContextTool} {
 		if !slices.Contains(names, name) {
 			t.Errorf("a chief-of-staff turn is not given %s: %v", name, names)
 		}

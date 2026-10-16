@@ -25,10 +25,15 @@ import (
 
 // inbox lists the open owner decisions of every active project, oldest
 // first, or none when no project or trace is active. Decisions of abandoned
-// workstreams are left out.
+// workstreams are left out. A cross-repo workgroup's own consolidated
+// escalations, recorded only in its own trace, are listed exactly once,
+// never duplicated by each of its real members' own project, and never
+// merged with either member's own unrelated escalations: each project's
+// own inbox counter is independent of the workgroup's.
 func (s *Service) inbox(ctx context.Context) (InboxResponse, *APIError) {
 	cfg, projects := s.runtimes()
 	out := InboxResponse{Entries: []InboxEntry{}}
+	seenWorkgroup := map[config.WorkgroupID]bool{}
 	for _, active := range projects {
 		if !cfg.Active(active.id) {
 			continue
@@ -55,8 +60,122 @@ func (s *Service) inbox(ctx context.Context) (InboxResponse, *APIError) {
 			return InboxResponse{}, &APIError{Internal, err.Error()}
 		}
 		out.Entries = append(out.Entries, entries...)
+
+		ids, err := s.crossRepoWorkgroupIDs(ctx, active.repository)
+		if err != nil {
+			return InboxResponse{}, &APIError{Internal, fmt.Sprintf("cannot resolve the cross-repo workgroups of project %s; check the trace repository", active.id)}
+		}
+		for _, id := range ids {
+			if seenWorkgroup[id] {
+				continue
+			}
+			seenWorkgroup[id] = true
+			entries, api := s.workgroupInbox(ctx, active.repository, id)
+			if api != nil {
+				return InboxResponse{}, api
+			}
+			out.Entries = append(out.Entries, entries...)
+		}
 	}
 	slices.SortStableFunc(out.Entries, func(a, b InboxEntry) int { return a.OpenedAt.Compare(b.OpenedAt) })
+	return out, nil
+}
+
+// crossRepoWorkgroupIDs returns, in encounter order, the distinct
+// fully joined cross-repo workgroup IDs repository's workstreams point to.
+func (s *Service) crossRepoWorkgroupIDs(ctx context.Context, repository *trace.Repository) ([]config.WorkgroupID, error) {
+	streams, err := repository.Workstreams()
+	if err != nil {
+		return nil, err
+	}
+	var ids []config.WorkgroupID
+	seen := map[config.WorkgroupID]bool{}
+	for _, a := range s.memberArchives() {
+		if a.Project != repository.Project() || a.Workgroup == "" || seen[a.Workgroup] {
+			continue
+		}
+		seen[a.Workgroup] = true
+		_, group, _, err := repository.CrossRepoProjectSpec(a.Workgroup)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.crossRepoMemberRepos(ctx, group); errors.Is(err, errWorkgroupJoining) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		ids = append(ids, a.Workgroup)
+	}
+	for _, stream := range streams {
+		id, err := repository.CrossRepoWorkgroupOf(stream)
+		if err != nil {
+			return nil, err
+		}
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		_, group, _, err := repository.CrossRepoProjectSpec(id)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.crossRepoMemberRepos(ctx, group); errors.Is(err, errWorkgroupJoining) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// workgroupInbox lists the open consolidated escalations of the cross-repo
+// workgroup id, recorded only in its own trace, opened and closed for this
+// call alone through known, one of its real members' own already open
+// repository, used only to resolve the service root. Every entry is tagged
+// with the workgroup's own synthetic project identity, which
+// workgroupInboxRepository resolves back to this same trace when the owner
+// answers it, so the entry is never confused with either real member's own,
+// independently numbered inbox.
+func (s *Service) workgroupInbox(ctx context.Context, known *trace.Repository, id config.WorkgroupID) ([]InboxEntry, *APIError) {
+	failed := &APIError{Internal, fmt.Sprintf("cannot read the inbox of workgroup %s; check the trace repository", id)}
+	_, g, _, err := known.CrossRepoProjectSpec(id)
+	if err != nil {
+		return nil, failed
+	}
+	if len(g.Members) < 2 {
+		return nil, nil
+	}
+	members, err := s.crossRepoMemberRepos(ctx, g)
+	if errors.Is(err, errWorkgroupJoining) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, failed
+	}
+	wt, err := trace.OpenWorkgroupTrace(s.current().Root, id, members)
+	if wt != nil && err != nil {
+		wt.Close()
+	}
+	if err != nil {
+		return nil, failed
+	}
+	defer wt.Close()
+	escalations, err := wt.Inbox()
+	if err != nil {
+		return nil, failed
+	}
+	var out []InboxEntry
+	for _, e := range escalations {
+		if e.State != trace.QuestionEscalated && e.Hold == "" {
+			continue
+		}
+		entry := inboxView(e)
+		entry.Workgroup = id
+		entry.Project = wt.Project()
+		entry.Answer.Body["project"] = string(wt.Project())
+		out = append(out, entry)
+	}
 	return out, nil
 }
 
@@ -106,6 +225,9 @@ func (s *Service) projectInbox(ctx context.Context, active *activeProject) ([]In
 }
 
 func inboxView(e trace.InboxEntry) InboxEntry {
+	if e.Hold != "" {
+		e.Blocked += "; " + e.Hold
+	}
 	out := InboxEntry{Kind: InboxEscalation, Number: e.Number, Workstream: e.Workstream, Batch: e.Batch, Question: e.Rephrasing, Blocked: e.Blocked,
 		Options: append([]string{}, e.Options...), Recommendation: e.Recommendation, OpenedAt: e.EscalatedAt, Asked: []InboxQuestion{},
 		Answer: InboxAnswer{Method: http.MethodPost, Path: fmt.Sprintf("%s/inbox/%d", Prefix, e.Number), Body: map[string]any{}}}
@@ -610,38 +732,105 @@ func eligibleQuickReply(recommendation string) bool {
 
 // answer records the owner's ruling on the inbox entry raw numbers. It returns
 // once the ruling and the chief of staff's notice of it are durable; relaying
-// the ruling to the askers is the chief of staff's next turn.
+// the ruling to the askers is the chief of staff's next turn. For an entry
+// workgroupInbox tagged with a cross-repo workgroup's own synthetic project
+// identity, the ruling is recorded in that workgroup's own trace, which
+// resumes all and only the affected askers in their own repos the next time
+// the shared chief of staff relays it; an ordinary project's own entry is
+// unaffected.
 func (s *Service) answer(ctx context.Context, raw string, req AnswerRequest) (AnswerResponse, *APIError) {
 	number, err := strconv.Atoi(raw)
 	if err != nil || number < 1 || strconv.Itoa(number) != raw {
 		return AnswerResponse{}, &APIError{Validation, "inbox entry must be a number from osmia inbox"}
 	}
-	project, api := s.projectFor(req.Project)
-	if api != nil {
-		return AnswerResponse{}, api
-	}
-	_, active := s.runtimeOf(project)
 	unknown := &APIError{Validation, fmt.Sprintf("there is no inbox entry %d; list the entries with osmia inbox", number)}
-	if active == nil {
-		return AnswerResponse{}, unknown
+	var repository *trace.Repository
+	if target, closeTarget, matched, api := s.workgroupInboxRepository(ctx, req.Project); matched {
+		if api != nil {
+			return AnswerResponse{}, api
+		}
+		defer closeTarget()
+		repository = target
+	} else {
+		project, api := s.projectFor(req.Project)
+		if api != nil {
+			return AnswerResponse{}, api
+		}
+		_, active := s.runtimeOf(project)
+		if active == nil {
+			return AnswerResponse{}, unknown
+		}
+		repository = active.repository
 	}
 	if strings.TrimSpace(req.Text) == "" {
 		return AnswerResponse{}, &APIError{Validation, "text must not be empty"}
 	}
+	return s.ruleInbox(ctx, repository, number, req.Text, unknown)
+}
+
+// workgroupInboxRepository resolves req.Project as a cross-repo workgroup's
+// own synthetic project identity, when it is one. matched reports whether
+// req.Project matched that pattern and a workgroup's own trace was found at
+// it; the caller falls back to its own project resolution unchanged when
+// matched is false. The caller must call close once done with target.
+func (s *Service) workgroupInboxRepository(ctx context.Context, project config.ProjectID) (target *trace.Repository, close func(), matched bool, api *APIError) {
+	noop := func() {}
+	id, ok := trace.WorkgroupProjectID(project)
+	if !ok {
+		return nil, noop, false, nil
+	}
+	_, projects := s.runtimes()
+	if len(projects) == 0 {
+		return nil, noop, false, nil
+	}
+	_, g, _, err := projects[0].repository.CrossRepoProjectSpec(id)
+	if err != nil {
+		s.log().Error("cannot resolve inbox workgroup", "workgroup", id, "error", err.Error())
+		return nil, noop, true, &APIError{Internal, fmt.Sprintf("cannot resolve workgroup %s; check the trace repository", id)}
+	}
+	if len(g.Members) < 2 {
+		return nil, noop, false, nil
+	}
+	members, err := s.crossRepoMemberRepos(ctx, g)
+	if err != nil {
+		return nil, noop, true, &APIError{Internal, fmt.Sprintf("cannot resolve the members of workgroup %s: %v", id, err)}
+	}
+	wt, err := trace.OpenWorkgroupTrace(s.current().Root, id, members)
+	if wt != nil && err != nil {
+		wt.Close()
+	}
+	if err != nil {
+		s.log().Error("cannot open inbox workgroup", "workgroup", id, "error", err.Error())
+		return nil, noop, true, &APIError{Internal, fmt.Sprintf("cannot open workgroup %s; check the trace repository", id)}
+	}
+	return wt, func() { wt.Close() }, true, nil
+}
+
+// ruleInbox records the owner's ruling on repository's own inbox entry
+// number.
+func (s *Service) ruleInbox(ctx context.Context, repository *trace.Repository, number int, text string, unknown *APIError) (AnswerResponse, *APIError) {
 	failed := &APIError{Internal, fmt.Sprintf("cannot record the ruling on inbox entry %d; check the trace repository", number)}
 	at := s.now()
-	entry, err := active.repository.Rule(ctx, number, req.Text, ownerActor, at, AbandonedState)
+	entry, err := repository.Rule(ctx, number, text, ownerActor, at, AbandonedState)
 	switch {
+	case errors.Is(err, trace.ErrMemberRetired):
+		return AnswerResponse{}, &APIError{Conflict, err.Error()}
+	case entry.Hold != "" && err != nil:
+		return AnswerResponse{}, &APIError{Conflict, entry.Hold}
 	case errors.Is(err, trace.ErrInboxEntry):
 		return AnswerResponse{}, unknown
 	case errors.Is(err, trace.ErrFeatureState):
 		return AnswerResponse{}, &APIError{Conflict, fmt.Sprintf("inbox entry %d belongs to abandoned workstream %s and takes no ruling", number, entry.Workstream)}
 	case errors.Is(err, trace.ErrRuled):
 		return AnswerResponse{}, &APIError{Conflict, fmt.Sprintf("inbox entry %d is already answered", number)}
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		s.log().Warn("inbox ruling interrupted", "project", repository.Project(), "number", number, "error", err.Error())
+		return AnswerResponse{}, &APIError{Unavailable, fmt.Sprintf("the ruling on inbox entry %d was interrupted; refresh the inbox and retry the same answer if it is still open", number)}
 	case err != nil:
+		s.log().Error("cannot record inbox ruling", "project", repository.Project(), "number", number, "error", err.Error())
 		return AnswerResponse{}, failed
 	}
-	out := AnswerResponse{Number: number, Workstream: entry.Workstream, Batch: entry.Batch, Questions: []string{}, Ruling: req.Text, At: at}
+	out := AnswerResponse{Number: number, Workstream: entry.Workstream, Batch: entry.Batch, Questions: []string{}, Ruling: text, At: at}
 	for _, q := range entry.Questions {
 		out.Questions = append(out.Questions, q.Asked.ID)
 	}

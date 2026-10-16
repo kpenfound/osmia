@@ -8,8 +8,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/trace"
+	"time"
 )
 
 const projectContextTool = "project_context"
@@ -34,7 +36,14 @@ func projectContext(repo *trace.Repository, scope coreadapter.Scope) coreadapter
 			if in.Offset < 0 || in.Revision < 0 || len(in.Query) > 1024 {
 				return nil, errors.New("invalid project context range")
 			}
-			docs, err := trace.Read[trace.Document](repo, "")
+			project, err := repo.ProjectFor(config.WorkstreamID(scope.Workstream))
+			if err != nil {
+				return nil, err
+			}
+			if _, err := project.Charter(ctx, time.Now().UTC()); err != nil {
+				return nil, err
+			}
+			docs, err := project.ProjectDocuments()
 			if err != nil {
 				return nil, err
 			}

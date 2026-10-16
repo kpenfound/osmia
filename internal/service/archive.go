@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -34,12 +36,99 @@ func (s *Service) archive(raw string) (ArchiveResponse, *APIError) {
 	if err != nil {
 		return ArchiveResponse{}, &APIError{Internal, err.Error()}
 	}
+	if err := s.archiveLifecycle(repository, &a); err != nil {
+		return ArchiveResponse{}, &APIError{Internal, err.Error()}
+	}
 	a.ArchivedAt = s.now()
 	a.DeliveryLink, err = deliveryLinkFor(repository, stream)
 	if err != nil {
 		return ArchiveResponse{}, &APIError{Internal, err.Error()}
 	}
-	if api := archiveError(s.store.SetArchived(a)); api != nil {
+	if a.Workgroup != "" {
+		release, api := s.changeArchiveGuard(a.Workgroup)
+		if api != nil {
+			return ArchiveResponse{}, api
+		}
+		defer release()
+	}
+	var authority *trace.Repository
+	var group trace.Workgroup
+	if a.Workgroup != "" {
+		authority, err = trace.OpenWorkgroupAuthority(s.current().Root, a.Workgroup)
+		if err != nil {
+			if authority != nil {
+				authority.Close()
+			}
+			return ArchiveResponse{}, &APIError{Internal, err.Error()}
+		}
+		defer authority.Close()
+		groups, _, readErr := trace.Workgroups(authority)
+		if readErr != nil {
+			return ArchiveResponse{}, &APIError{Internal, readErr.Error()}
+		}
+		for _, g := range groups {
+			if g.ID == a.Workgroup {
+				group = g
+			}
+		}
+	}
+	err = repository.WithMemberQuestionSnapshot(stream, func(snapshot trace.MemberQuestionSnapshot) error {
+		if snapshot.Workgroup != a.Workgroup {
+			return trace.ErrConflict
+		}
+		if snapshot.Feature.Value != DeliveredState && snapshot.Feature.Value != AbandonedState {
+			return trace.ErrFeatureState
+		}
+		if snapshot.Feature.Value != a.State {
+			return trace.ErrConflict
+		}
+		evidence, err := memberEvidenceFrom(snapshot.Documents)
+		if err != nil {
+			return err
+		}
+		a.ResolutionEvidence = evidence.resolution(snapshot.Feature.Value)
+		a.Resolved = a.ResolutionEvidence != "unresolved"
+		evidence.pinArchiveMerge(&a, s.about(repository).Project.Upstream)
+		var mergeLink, publicationLink string
+		for _, doc := range snapshot.Documents {
+			switch doc.ID {
+			case publicationDocument:
+				var p DeliveryPublication
+				if err := json.Unmarshal([]byte(doc.Content), &p); err != nil {
+					return err
+				}
+				if p.Status == publicationOpened && p.PullRequest > 0 {
+					publicationLink = p.URL
+				}
+			case mergeDocument:
+				var merge DeliveryMerge
+				if err := json.Unmarshal([]byte(doc.Content), &merge); err != nil {
+					return err
+				}
+				mergeLink = merge.Upstream.Commit
+			}
+		}
+		a.DeliveryLink = publicationLink
+		if mergeLink != "" {
+			a.DeliveryLink = mergeLink
+		}
+		if authority != nil && len(group.Members) > 1 && slices.Contains(group.Members[1:], stream) {
+			if err := authority.PreserveMemberQuestionSnapshot(context.Background(), group, trace.CrossRepoMember{Workstream: stream, Project: repository}, snapshot, s.now(), serviceActor); err != nil {
+				return err
+			}
+		}
+		if err := s.step("member-retirement-snapshot"); err != nil {
+			return err
+		}
+		if err := s.store.SetArchived(a); err != nil {
+			return err
+		}
+		return s.step("member-archive-recorded")
+	})
+	if errors.Is(err, trace.ErrFeatureState) || errors.Is(err, trace.ErrConflict) {
+		return ArchiveResponse{}, &APIError{Conflict, "workstream changed while archiving; check its state and retry"}
+	}
+	if api := archiveError(err); api != nil {
 		return ArchiveResponse{}, api
 	}
 	return ArchiveResponse{Project: project, Workstream: stream, Archived: true}, nil

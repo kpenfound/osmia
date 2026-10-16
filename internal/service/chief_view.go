@@ -10,22 +10,30 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // chiefDocumentsGuidance tells every chief-of-staff turn what its view holds.
-const chiefDocumentsGuidance = "Your read-only view holds the latest revision of every document this workstream records: spec.md, plan.json, what the owner handed in under handed/, the shed rounds under shed/, and the amendment, unit, final review and delivery records once they exist. units/<unit>/activity.json shows each started unit's state, its contest and the rulings the contest takes, its recent transitions and block reasons, and its roles' latest turns with their outcomes and the tool calls the service refused. Call file_read with a path to read a file or list a directory; \".\" lists the whole view. Read the documents a question or event concerns before you answer, escalate or report on it. Use factory_context for historical document revisions; inspect_code with unit to inspect a mason candidate; read_remote_file to retrieve referenced GitHub files; and record_discovery to track and assign necessary new work. Use route_amendment without a question to commission revised assignments or bounded investigation. Resolve engineering decisions within approved intent; escalate intent changes, constraint exceptions or concrete operational limitations you cannot recover."
+const chiefDocumentsGuidance = "Your read-only view holds current workstream documents: spec.md and plan.json while the member is unresolved, what the owner handed in under handed/, the shed rounds under shed/, and the amendment, unit, final review and delivery records once they exist. units/<unit>/activity.json shows each started unit's state, its contest and the rulings the contest takes, its recent transitions and block reasons, and its roles' latest turns with their outcomes and the tool calls the service refused. Call file_read with a path to read a file or list a directory; \".\" lists the whole view. Read the documents a question or event concerns before you answer, escalate or report on it. Use factory_context for retired documents and historical revisions; inspect_code with unit to inspect a mason candidate; read_remote_file to retrieve referenced GitHub files; and record_discovery to track and assign necessary new work. Use route_amendment without a question to commission revised assignments or bounded investigation. Resolve engineering decisions within approved intent; escalate intent changes, constraint exceptions or concrete operational limitations you cannot recover."
 
-// stageChiefDocuments writes the latest revision of every document stream
-// records, but its tool-call and inspection records, into workspace, replacing
-// what an earlier turn staged there. It returns the top-level paths to select.
+// stageChiefDocuments stages current documents, excluding tool calls,
+// inspections and a resolved member's own spec and plan. Historical revisions
+// remain available through factory_context. Each staging replaces the last.
 func stageChiefDocuments(r *trace.Repository, stream config.WorkstreamID, workspace string) ([]string, error) {
 	docs, err := trace.Read[trace.Document](r, stream)
 	if err != nil {
 		return nil, err
 	}
+	active, err := trace.MemberDocumentsActive(r, stream)
+	if err != nil {
+		return nil, err
+	}
 	latest := map[string]trace.Document{}
 	for _, doc := range docs {
+		if !active && (doc.Path == plan.SpecPath || doc.Path == plan.PlanPath) {
+			continue
+		}
 		if top, _, _ := strings.Cut(doc.Path, "/"); top == "tools" || top == "inspections" {
 			continue
 		}

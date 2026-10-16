@@ -245,6 +245,10 @@ func TestFactoryActionLogRecordsNotificationAttemptWithoutTheWebhookURL(t *testi
 	soon(t, "the ledger enabled", func() bool { return readLedger(t, opts).Enabled })
 	inbox.set(entryOf(InboxEscalation, 1))
 	hook.await(t, 1)
+	soon(t, "the notification recorded as sent", func() bool {
+		rec := readLedger(t, opts).Notifications[notificationKey(project, entryOf(InboxEscalation, 1))]
+		return rec != nil && rec.State == notificationSent
+	})
 	must(t, s.Close())
 
 	text := buf.String()

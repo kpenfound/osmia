@@ -33,6 +33,8 @@ const usage = `Usage: osmia <command> [--root PATH]
   doctor [--json]
   status [workstream-id] [--json]
   project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
+  project add-repo <project-id> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH [--base-branch NAME] [--json]
+  project repos <project-id> [--json]
   project remove <project-id> [--json]
   project extract <project-id> [--json]
   project memory <project-id>
@@ -70,6 +72,11 @@ const usage = `Usage: osmia <command> [--root PATH]
   session check <session-id> [--json]
   session push <session-id> [--json]
   session end <session-id> [--json]
+  design open <project-id> [--json]
+  design list [project-id] [--json]
+  design send <design-id> <message> [--json]
+  design read <design-id> [--json]
+  design start <design-id> [--json]  starts a workgroup from the drafted brief
   config [--json]
   reload [--json]
 Client commands also accept --socket PATH (relative to root).
@@ -256,14 +263,20 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			a[0] == "overrule" && (len(a) == 3 || len(a) == 4) || a[0] == "skip" && len(a) == 2 || a[0] == "more" && len(a) == 3 ||
 			a[0] == "redraft" && len(a) == 3)
 	case "project":
-		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory")
+		valid = len(a) == 2 && (a[0] == "add" && o.upstream != "" && o.clone != "" || a[0] == "add-repo" && o.upstream != "" && o.clone != "" || a[0] == "remove" || a[0] == "extract" || a[0] == "rebase" || a[0] == "memory" || a[0] == "repos")
 	case "session":
 		valid = len(a) == 2 && a[0] == "open" && o.profile != "" ||
 			len(a) == 3 && a[0] == "commit" ||
 			len(a) == 2 && (a[0] == "check" || a[0] == "push" || a[0] == "end")
+	case "design":
+		valid = len(a) >= 1 && (a[0] == "open" && len(a) == 2 ||
+			a[0] == "list" && (len(a) == 1 || len(a) == 2) ||
+			a[0] == "send" && len(a) == 3 ||
+			(a[0] == "read" || a[0] == "start") && len(a) == 2)
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
-	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && (o.accept || o.project != "") || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") {
+	addingRepo := cmd == "project" && len(a) > 0 && a[0] == "add-repo"
+	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && !addingRepo && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && (o.accept || o.project != "") || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -304,7 +317,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "send" || cmd == "conversation" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "stop" {
 		if err := c.Do(ctx, "POST", service.Prefix+"/stop", nil, nil); err != nil {
@@ -376,6 +389,37 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		return 0
 	}
+	if cmd == "project" && a[0] == "repos" {
+		id, err := config.ParseProjectID(a[1])
+		if err != nil {
+			return invalid()
+		}
+		cfg, err := c.Configuration(ctx)
+		if err != nil {
+			return fail(err)
+		}
+		var found *service.ProjectView
+		for i := range cfg.Projects {
+			if cfg.Projects[i].ID == id {
+				found = &cfg.Projects[i]
+			}
+		}
+		if found == nil {
+			fmt.Fprintf(stderr, "%s: project %s is not active\n", service.Validation, id)
+			return 4
+		}
+		if o.json {
+			return output(stdout, stderr, found.Repos)
+		}
+		for _, r := range found.Repos {
+			def := ""
+			if r.Default {
+				def = " (default)"
+			}
+			fmt.Fprintf(stdout, "%s%s %s\nUpstream: %s push repository: %s clone: %s\nTrace: %s\n", r.ID, def, r.Name, r.Upstream, (config.Project{Upstream: r.Upstream, Fork: r.Fork}).PushRepository(), r.Clone, r.Trace)
+		}
+		return 0
+	}
 	if cmd == "project" && a[0] == "memory" {
 		id, err := config.ParseProjectID(a[1])
 		if err != nil {
@@ -408,6 +452,32 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		for _, s := range result.Skipped {
 			fmt.Fprintf(stdout, "Skipped: %s: %s\n", s.Workstream, s.Reason)
+		}
+		return 0
+	}
+	if cmd == "project" && a[0] == "add-repo" {
+		id, err := config.ParseProjectID(a[1])
+		if err != nil {
+			return invalid()
+		}
+		clone, err := filepath.Abs(o.clone)
+		if err != nil {
+			return invalid()
+		}
+		result, err := c.AddRepo(ctx, service.RepoAddRequest{Project: id, Upstream: o.upstream, Fork: o.fork, Clone: clone, BaseBranch: o.baseBranch})
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "%s\n", result.NextStep)
+		for _, r := range result.Project.Repos {
+			def := ""
+			if r.Default {
+				def = " (default)"
+			}
+			fmt.Fprintf(stdout, "Repo %s%s %s upstream: %s clone: %s\n", r.ID, def, r.Name, r.Upstream, r.Clone)
 		}
 		return 0
 	}
@@ -845,7 +915,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.json {
 			return output(stdout, stderr, list)
 		}
-		showConversation(stdout, list)
+		showConversation(stdout, list, "send")
 		return 0
 	}
 	if cmd == "inbox" {
@@ -1048,6 +1118,80 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				return output(stdout, stderr, result)
 			}
 			showSession(stdout, result.Session)
+			return 0
+		}
+	}
+	if cmd == "design" && a[0] == "open" {
+		id, err := config.ParseProjectID(a[1])
+		if err != nil {
+			return invalid()
+		}
+		result, err := c.OpenDesign(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Design session %s opened in project %s\n", result.Design.Workstream, result.Design.Project)
+		return 0
+	}
+	if cmd == "design" && a[0] == "list" {
+		var project config.ProjectID
+		if len(a) == 2 {
+			id, err := config.ParseProjectID(a[1])
+			if err != nil {
+				return invalid()
+			}
+			project = id
+		}
+		list, err := c.Designs(ctx, project)
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, list)
+		}
+		for _, d := range list.Designs {
+			fmt.Fprintf(stdout, "%s  project %s  opened %s\n", d.Workstream, d.Project, d.CreatedAt.Format(time.RFC3339))
+		}
+		return 0
+	}
+	if cmd == "design" {
+		id, err := config.ParseWorkstreamID(a[1])
+		if err != nil {
+			return invalid()
+		}
+		switch a[0] {
+		case "send":
+			entry, err := c.DesignMessage(ctx, id, a[2])
+			if err != nil {
+				return fail(err)
+			}
+			if o.json {
+				return output(stdout, stderr, entry)
+			}
+			fmt.Fprintf(stdout, "Message %s sent to the design agent of %s: %s\n", entry.Turn, id, entry.State)
+			return 0
+		case "read":
+			list, err := c.DesignConversation(ctx, id)
+			if err != nil {
+				return fail(err)
+			}
+			if o.json {
+				return output(stdout, stderr, list)
+			}
+			showConversation(stdout, list, "design send")
+			return 0
+		case "start":
+			result, err := c.DesignStart(ctx, id)
+			if err != nil {
+				return fail(err)
+			}
+			if o.json {
+				return output(stdout, stderr, result)
+			}
+			fmt.Fprintf(stdout, "Started a workgroup from design session %s; workstream %s is now %s\n", id, result.Workstream, result.State)
 			return 0
 		}
 	}
@@ -1581,12 +1725,14 @@ func showAgentStatus(w io.Writer, agents []service.AgentStatus) {
 	}
 }
 
-// showConversation prints each entry's time, author, turn and state, then its
-// text indented.
-func showConversation(w io.Writer, list service.ConversationResponse) {
+// showConversation prints each entry's time, author, turn and state, then
+// its text indented. hint names the command that sends the next message
+// ("send" for an ordinary chief of staff, "design send" for a design
+// session), shown only when there is nothing to show yet.
+func showConversation(w io.Writer, list service.ConversationResponse, hint string) {
 	fmt.Fprintf(w, "Conversation: %s\n", list.Workstream)
 	if len(list.Entries) == 0 {
-		fmt.Fprintf(w, "  no messages yet; send one with osmia send %s \"...\"\n", list.Workstream)
+		fmt.Fprintf(w, "  no messages yet; send one with osmia %s %s \"...\"\n", hint, list.Workstream)
 	}
 	for _, e := range list.Entries {
 		author := "owner"

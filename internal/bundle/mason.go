@@ -87,11 +87,15 @@ type AmendmentNotice struct {
 // hash its seal records.
 var ErrStaleSpec = errors.New("spec does not match its seal")
 
+// ErrResolvedWorkstream refuses active worker context after merge or cancel.
+// Historical specs and plans remain available through the trace readers.
+var ErrResolvedWorkstream = errors.New("workstream is resolved")
+
 // Mason assembles the mason bundle of one unit of the workstream's latest
-// seal. It first reads spec.md, recording any owner edit, and refuses the
-// bundle when the spec's hash differs from the sealed one, so a unit is never
-// built against a spec the owner did not ratify. The unit is read from the
-// sealed plan revision or a final-review follow-up.
+// seal. Resolved members have no active worker bundle. It reads spec.md,
+// recording any owner edit, and refuses a spec whose hash differs from the seal,
+// so a unit is never built against a spec the owner did not ratify. The unit is
+// read from the sealed plan revision or a final-review follow-up.
 func (f Files) Mason(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, unit string) (Mason, error) {
 	if f.Repository == nil {
 		return Mason{}, errors.New("file context provider has no trace")
@@ -99,6 +103,13 @@ func (f Files) Mason(ctx context.Context, project config.ProjectID, stream confi
 	repo, err := f.Repository(project)
 	if err != nil {
 		return Mason{}, err
+	}
+	active, err := trace.MemberDocumentsActive(repo, stream)
+	if err != nil {
+		return Mason{}, err
+	}
+	if !active {
+		return Mason{}, fmt.Errorf("%w: %s", ErrResolvedWorkstream, stream)
 	}
 	s, _, ok, err := seal.Latest(repo, stream)
 	if err != nil {

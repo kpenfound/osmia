@@ -130,6 +130,9 @@ func (c *archiveCleanup) prepare(ctx context.Context, a runtime.Archive) (eligib
 		if a.Title == "" {
 			return false, "", fmt.Errorf("archived workstream %s has no trace from which to preserve its title", a.Workstream)
 		}
+		if a.CleanupStartedAt.IsZero() {
+			return false, "archived trace is missing without recorded cleanup intent", nil
+		}
 		return true, "", nil
 	}
 	if a.Title == "" {
@@ -156,6 +159,12 @@ func (c *archiveCleanup) prepare(ctx context.Context, a runtime.Archive) (eligib
 				return false, "", err
 			}
 		}
+	}
+	if err := c.s.archiveLifecycle(repo, &a); err != nil {
+		return false, "", err
+	}
+	if err := c.s.store.UpdateArchive(a); err != nil {
+		return false, "", err
 	}
 	busy, chief, err := c.workspaces.busy(a.Workstream)
 	if err != nil {
@@ -237,12 +246,37 @@ func (c *archiveCleanup) resolveDependencies(ready map[config.WorkstreamID]bool,
 // hands its actual removal to a background goroutine so this pass, and the
 // lock it runs serialized under, never waits for it.
 func (c *archiveCleanup) beginDeletion(stream config.WorkstreamID) error {
+	if err := c.s.step("archive-cleanup-ready"); err != nil {
+		return err
+	}
+	state, _ := c.s.store.Snapshot()
+	authorized := false
+	for _, a := range state.Archived {
+		if a.Project == c.workspaces.repository.Project() && a.Workstream == stream {
+			authorized = true
+			if a.CleanupStartedAt.IsZero() {
+				a.CleanupStartedAt = c.s.now()
+				if err := c.s.store.UpdateArchive(a); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if !authorized {
+		return fmt.Errorf("workstream %s has no owner archive record", stream)
+	}
+	if err := c.s.step("archive-cleanup-intent"); err != nil {
+		return err
+	}
 	moved, err := c.workspaces.repository.MarkWorkstreamTraceForDeletion(stream)
 	if err != nil {
 		return err
 	}
 	if moved {
 		c.s.log().Info(fmt.Sprintf("archive cleanup is deleting the trace of workstream %s of project %s", stream, c.workspaces.cfg.Project.ID), "component", "archive_cleanup", "project", string(c.workspaces.cfg.Project.ID), "workstream", string(stream))
+	}
+	if err := c.s.step("archive-cleanup-renamed"); err != nil {
+		return err
 	}
 	c.startRemoval(stream)
 	return nil
@@ -301,9 +335,12 @@ func (c *archiveCleanup) reconcile(archived []runtime.Archive) error {
 		if err != nil {
 			return err
 		}
-		if gone {
+		if gone && !a.CleanupStartedAt.IsZero() {
 			a.CleanedAt = c.s.now()
 			if err := c.s.store.UpdateArchive(a); err != nil {
+				return err
+			}
+			if err := c.s.step("archive-cleanup-completed"); err != nil {
 				return err
 			}
 			c.logDeferral(a.Workstream, "")

@@ -12,6 +12,10 @@ import (
 // EditCharter replaces the revision the owner read. An unrecorded file edit
 // is a conflict, so an API write cannot overwrite an owner's local work.
 func (r *Repository) EditCharter(ctx context.Context, revision int, content string, at time.Time) (Document, error) {
+	r, err := r.CharterRepository()
+	if err != nil {
+		return Document{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	checked, err := r.checkHistory(ctx)

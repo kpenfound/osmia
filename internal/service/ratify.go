@@ -94,9 +94,12 @@ func (d *debate) packet(stream config.WorkstreamID, skipped bool) (*shed.Packet,
 	return &packet, nil
 }
 
-// packet serves the workstream's recorded ratification packet.
+// packet serves the workstream's recorded ratification packet. ProjectSpec
+// is set when the workstream belongs to a multi-member workgroup whose
+// project spec is already drafted, so the owner sees it alongside this
+// workstream's own packet before ratifying either.
 func (s *Service) packet(raw string) (PacketResponse, *APIError) {
-	project, stream, repository, api := s.conversationTrace(raw)
+	project, stream, repository, api := s.designMemberTrace(raw)
 	if api != nil {
 		return PacketResponse{}, api
 	}
@@ -107,26 +110,68 @@ func (s *Service) packet(raw string) (PacketResponse, *APIError) {
 	if !found {
 		return PacketResponse{}, &APIError{NotFound, fmt.Sprintf("workstream %s has no ratification packet; the chief of staff presents one once debate concludes or the owner skips it", stream)}
 	}
-	return PacketResponse{Project: project, Workstream: stream, Packet: packet, Revision: doc.Revision, At: doc.At}, nil
+	out := PacketResponse{Project: project, Workstream: stream, Packet: packet, Revision: doc.Revision, At: doc.At}
+	if spec, _, found, err := repository.ProjectSpecOf(stream); err == nil && found {
+		out.ProjectSpec = &spec
+	}
+	return out, nil
 }
 
 // ratify records the owner's approval of the exact revisions of the spec and
 // the plan they read in the packet. It changes no state of its own: the
 // ratification is the record, the record asks for the sealing, and the
-// sealing moves the workstream on.
+// sealing moves the workstream on. For a workstream whose workgroup spans
+// more than one repo, this one call instead seals the workgroup's whole
+// project spec: every real member is ratified at its own current packet
+// pin, all at once, refusing before recording anything if the graph is
+// invalid or a member has no slice. A one-workstream workgroup keeps
+// exactly today's single-workstream behaviour.
 func (s *Service) ratify(ctx context.Context, raw string, req RatifyRequest) (RatifyResponse, *APIError) {
 	if req.Spec < 1 || req.Plan < 1 {
 		return RatifyResponse{}, &APIError{Validation, "ratify the revisions of the spec and the plan the packet named"}
 	}
-	o, api := s.shedAction(raw, InShedState, SketchedState)
+	_, stream, repo, api := s.designMemberTrace(raw)
 	if api != nil {
 		return RatifyResponse{}, api
 	}
+	id, err := repo.CrossRepoWorkgroupOf(stream)
+	if err != nil {
+		return RatifyResponse{}, &APIError{Internal, err.Error()}
+	}
+	if id != "" {
+		out, found, api := s.resumeGroupApproval(ctx, repo, stream, id, shed.Pin{Spec: req.Spec, Plan: req.Plan})
+		if found {
+			return out, api
+		}
+	}
+	o, api := s.shedAction(string(stream), InShedState, SketchedState)
+	if api != nil {
+		return RatifyResponse{}, api
+	}
+	workgroup, err := o.repository.CrossRepoWorkgroupOf(o.stream)
+	if err != nil {
+		return RatifyResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the cross-repo workgroup of workstream %s; check the trace repository", o.stream)}
+	}
+	asked := shed.Pin{Spec: req.Spec, Plan: req.Plan}
+	required, err := o.repository.GroupApprovalRequired(o.stream)
+	if err != nil {
+		return RatifyResponse{}, &APIError{Internal, err.Error()}
+	}
+	if !required {
+		return s.ratifyMember(ctx, o, asked)
+	}
+	return s.ratifyWorkgroup(ctx, o, workgroup, asked)
+}
+
+// ratifyMember is the single-workstream ratification: unchanged from what
+// ratify always did, parameterized by the pin to ratify at instead of
+// reading the request directly, so a multi-member workgroup's other
+// members can be ratified at their own current pin by the same logic.
+func (s *Service) ratifyMember(ctx context.Context, o *shedOwner, asked shed.Pin) (RatifyResponse, *APIError) {
 	latest, ratified, err := latestRatification(o.repository, o.stream)
 	if err != nil {
 		return RatifyResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the ratifications of workstream %s; check the trace repository", o.stream)}
 	}
-	asked := shed.Pin{Spec: req.Spec, Plan: req.Plan}
 	if ratified && latest.Revision == asked {
 		// The revisions are approved already: the gate reports the sealing
 		// their record asked for, and records the ratification again only
@@ -157,6 +202,120 @@ func (s *Service) ratify(ctx context.Context, raw string, req RatifyRequest) (Ra
 		return RatifyResponse{}, api
 	}
 	return RatifyResponse{Project: o.project, Workstream: o.stream, Round: record.Round, Spec: asked.Spec, Plan: asked.Plan, Sealing: "requested", Detail: reason + "; the sealing is asked for"}, nil
+}
+
+// ratifyWorkgroup validates the entire draft before recording one durable
+// owner decision. Member decisions and seals are preparations; only durable
+// group completion grants effective ratification and production admission.
+func (s *Service) ratifyWorkgroup(ctx context.Context, o *shedOwner, id config.WorkgroupID, asked shed.Pin) (RatifyResponse, *APIError) {
+	failed := &APIError{Internal, fmt.Sprintf("cannot read the project spec of workgroup %s; check the trace repository", id)}
+	spec, g, found, err := o.repository.CrossRepoProjectSpec(id)
+	if err != nil {
+		return RatifyResponse{}, failed
+	}
+	if !found || len(g.Members) < 2 {
+		return RatifyResponse{}, &APIError{Conflict, fmt.Sprintf("workgroup %s has no recorded project spec yet; the architect has not finished drafting it", id)}
+	}
+	real := g.Members[1:]
+	if err := trace.ValidateGraph(real, spec.Graph); err != nil {
+		return RatifyResponse{}, &APIError{Validation, fmt.Sprintf("workgroup %s's project spec graph is invalid: %v", id, err)}
+	}
+	for _, m := range real {
+		if _, ok := trace.SliceFor(spec, m); !ok {
+			return RatifyResponse{}, &APIError{Conflict, fmt.Sprintf("workgroup %s's project spec does not cover every member: workstream %s has no slice", id, m)}
+		}
+	}
+	owners := make(map[config.WorkstreamID]*shedOwner, len(real))
+	pins := make(map[config.WorkstreamID]shed.Pin, len(real))
+	var refused []string
+	for _, m := range real {
+		mo, pin := o, asked
+		if m != o.stream {
+			var api *APIError
+			mo, api = s.shedAction(string(m), InShedState, SketchedState)
+			if api != nil {
+				refused = append(refused, fmt.Sprintf("workstream %s: %s", m, api.Message))
+				continue
+			}
+			pin = mo.pin
+		}
+		owners[m], pins[m] = mo, pin
+		entries, err := Dissent(mo.repository, mo.stream)
+		if err != nil {
+			return RatifyResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the dissent record of workstream %s; check the trace repository", mo.stream)}
+		}
+		memberRefusals, err := s.refusals(mo, pin, entries)
+		if err != nil {
+			return RatifyResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the spec and plan of workstream %s; check the trace repository", mo.stream)}
+		}
+		for _, r := range memberRefusals {
+			refused = append(refused, fmt.Sprintf("workstream %s: %s", m, r))
+		}
+		if len(memberRefusals) > 0 {
+			continue
+		}
+		slice, _ := trace.SliceFor(spec, m)
+		specDoc, err := trace.Get[trace.Document](mo.repository, m, plan.SpecDocument, pin.Spec)
+		if err != nil {
+			return RatifyResponse{}, &APIError{Internal, err.Error()}
+		}
+		planDoc, err := trace.Get[trace.Document](mo.repository, m, plan.PlanDocument, pin.Plan)
+		if err != nil {
+			return RatifyResponse{}, &APIError{Internal, err.Error()}
+		}
+		if slice.Spec != specDoc.Content || slice.Plan != planDoc.Content {
+			refused = append(refused, fmt.Sprintf("workstream %s: the project slice differs from the packet revisions", m))
+		}
+	}
+	if len(refused) > 0 {
+		return RatifyResponse{}, &APIError{Conflict, fmt.Sprintf("workgroup %s is not ratified:\n- %s", id, strings.Join(refused, "\n- "))}
+	}
+	lock := s.groupApprovalLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	wt, group, err := s.approvalTrace(ctx, o.repository, id)
+	if err != nil {
+		return RatifyResponse{}, &APIError{Internal, err.Error()}
+	}
+	defer wt.Close()
+	decision, _, exists, err := trace.ReadGroupApproval(wt, group.Members[0])
+	if err != nil {
+		return RatifyResponse{}, &APIError{Internal, err.Error()}
+	}
+	if exists {
+		matched := slices.ContainsFunc(decision.Members, func(m trace.GroupMemberApproval) bool {
+			return m.Workstream == o.stream && m.Spec == asked.Spec && m.Plan == asked.Plan
+		})
+		if !matched {
+			return RatifyResponse{}, &APIError{Conflict, "the request differs from the immutable workgroup approval"}
+		}
+	}
+	if !exists {
+		decision = trace.GroupApproval{Workgroup: id, ProjectSpec: spec}
+		for _, m := range real {
+			mo, pin := owners[m], pins[m]
+			entries, err := Dissent(mo.repository, m)
+			if err != nil {
+				return RatifyResponse{}, &APIError{Internal, err.Error()}
+			}
+			record := shed.Ratify(mo.round, pin, entries)
+			content, err := shed.EncodeRatification(record)
+			if err != nil {
+				return RatifyResponse{}, &APIError{Internal, err.Error()}
+			}
+			decision.Members = append(decision.Members, trace.GroupMemberApproval{Project: mo.project, Workstream: m, Spec: pin.Spec, Plan: pin.Plan, Round: mo.round, Record: content})
+		}
+		if err := trace.RecordGroupApproval(ctx, wt, group.Members[0], decision, s.now(), ownerActor); err != nil {
+			return RatifyResponse{}, &APIError{Internal, err.Error()}
+		}
+	}
+	if err := s.step("group-decision-recorded"); err != nil {
+		return RatifyResponse{}, &APIError{Internal, err.Error()}
+	}
+	if err := s.prepareGroupApproval(ctx, decision); err != nil {
+		return RatifyResponse{}, &APIError{Internal, err.Error()}
+	}
+	return groupApprovalResponse(o.project, o.stream, decision), nil
 }
 
 // sealing reports the state of the sealing a ratification's record asked

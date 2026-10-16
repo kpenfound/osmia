@@ -185,7 +185,7 @@ func validateThreads(threads map[string]Thread, records []Record, project config
 	expected := map[string]Record{}
 	for id, t := range threads {
 		a := t.Identity
-		if id != a.ID || a.Project != project || a.Workstream != stream || a.Revision != 1 {
+		if id != a.ID || (a.Project != project && a.Role != ChiefOfStaff) || a.Workstream != stream || a.Revision != 1 {
 			return fmt.Errorf("invalid thread identity")
 		}
 		if err := validate(a); err != nil {
@@ -203,7 +203,7 @@ func validateThreads(threads map[string]Thread, records []Record, project config
 			if err := validate(req); err != nil {
 				return err
 			}
-			if req.Project != project || req.Workstream != stream || req.AgentID != id || req.ThreadID != a.ThreadID || req.Revision != 1 || q.Sequence != uint64(i+1) || seenTurns[req.TurnID] {
+			if (req.Project != project && (a.Role != ChiefOfStaff || req.Project != a.Project)) || req.Workstream != stream || req.AgentID != id || req.ThreadID != a.ThreadID || req.Revision != 1 || q.Sequence != uint64(i+1) || seenTurns[req.TurnID] {
 				return fmt.Errorf("invalid queued turn")
 			}
 			seenTurns[req.TurnID] = true
@@ -228,7 +228,7 @@ func validateThreads(threads map[string]Thread, records []Record, project config
 				if err := validate(res); err != nil {
 					return err
 				}
-				if res.Project != project || res.Workstream != stream || res.Unit != req.Unit || res.AgentID != id || res.ThreadID != a.ThreadID || res.TurnID != req.TurnID || res.RequestID != req.ID || res.RequestRevision != req.Revision || res.Revision != 1 || res.Cause != req.Cause || res.Depth != req.Depth || res.At.Before(c.At) || res.Result.SessionDirectory != c.SessionDirectory || (res.Result.Session.Backend != "" && res.Result.Session.Backend != responseProfile(q).Backend) {
+				if (res.Project != req.Project && (a.Role != ChiefOfStaff || res.Project != project)) || res.Workstream != stream || res.Unit != req.Unit || res.AgentID != id || res.ThreadID != a.ThreadID || res.TurnID != req.TurnID || res.RequestID != req.ID || res.RequestRevision != req.Revision || res.Revision != 1 || res.Cause != req.Cause || res.Depth != req.Depth || res.At.Before(c.At) || res.Result.SessionDirectory != c.SessionDirectory || (res.Result.Session.Backend != "" && res.Result.Session.Backend != responseProfile(q).Backend) {
 					return fmt.Errorf("invalid captured response provenance")
 				}
 				if _, ok := expected[recordKey(res)]; ok {
@@ -319,17 +319,24 @@ func (r *Repository) CreateThread(ctx context.Context, agent Agent) error {
 // thread.
 const ChiefOfStaff = "chief_of_staff"
 
-// EnsureChiefOfStaff creates the workstream's chief-of-staff thread unless it
-// already exists, and returns the thread. The first creation fixes the identity's
-// timestamp and actor; later calls leave it unchanged.
+// EnsureChiefOfStaff creates the chief-of-staff thread of stream's workgroup
+// unless it already exists, and returns the thread. The thread lives on the
+// workgroup's host (its first member), so a one-workstream workgroup keeps
+// exactly today's behaviour and no other member ever gets a thread of its
+// own. The first creation fixes the identity's timestamp and actor; later
+// calls leave it unchanged.
 func (r *Repository) EnsureChiefOfStaff(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor) (Thread, error) {
-	r, err := r.scoped(stream)
+	host, err := r.ChiefOfStaffHost(stream)
 	if err != nil {
 		return Thread{}, err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.ensureChiefOfStaff(ctx, stream, at, actor)
+	hr, err := r.scoped(host)
+	if err != nil {
+		return Thread{}, err
+	}
+	hr.mu.Lock()
+	defer hr.mu.Unlock()
+	return hr.ensureChiefOfStaff(ctx, host, at, actor)
 }
 
 func (r *Repository) ensureChiefOfStaff(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor) (Thread, error) {
@@ -358,10 +365,48 @@ func (r *Repository) ensureChiefOfStaff(ctx context.Context, stream config.Works
 	return t, nil
 }
 
-// ChiefOfStaffThread returns a snapshot of the workstream's chief-of-staff
-// thread, or os.ErrNotExist before it is created.
+// RetractChiefOfStaff removes stream's own chief-of-staff thread identity,
+// if hand-in already created one before stream joined a cross-repo
+// workgroup. A new workstream gets this identity at once
+// (CreateWorkstreamOn), before anything can know it will later become a
+// cross-repo workgroup's member; once RecordCrossRepoWorkgroup points it at
+// its shared thread in the workgroup's own trace, that earlier, unused
+// identity on stream's own repository would otherwise make the chief of
+// staff authoritative in two places (charter#2). It changes nothing when
+// stream carries no chief-of-staff thread of its own. It refuses, changing
+// nothing, when that thread already has turns: retracting a real
+// conversation is not this function's job, and r must be the project's own
+// repository, not an instance already scoped to one workstream.
+func (r *Repository) RetractChiefOfStaff(ctx context.Context, stream config.WorkstreamID) error {
+	sr, err := r.scoped(stream)
+	if err != nil {
+		return err
+	}
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	log, _, err := sr.loadWorkflow(stream)
+	if err != nil {
+		return err
+	}
+	t, ok := log.Threads[ChiefOfStaff]
+	if !ok {
+		return nil
+	}
+	if len(t.Turns) > 0 {
+		return fmt.Errorf("%w: workstream %s already has chief-of-staff turns of its own", ErrConflict, stream)
+	}
+	delete(log.Threads, ChiefOfStaff)
+	return sr.saveThread(ctx, stream, log)
+}
+
+// ChiefOfStaffThread returns a snapshot of the shared chief-of-staff thread
+// of stream's workgroup, or os.ErrNotExist before it is created.
 func (r *Repository) ChiefOfStaffThread(stream config.WorkstreamID) (Thread, error) {
-	return r.Thread(stream, ChiefOfStaff)
+	host, err := r.ChiefOfStaffHost(stream)
+	if err != nil {
+		return Thread{}, err
+	}
+	return r.Thread(host, ChiefOfStaff)
 }
 
 // Thread returns a detached snapshot. A claim from a previous service session
@@ -415,7 +460,18 @@ func (r *Repository) snapshot(t Thread) Thread {
 
 // EnqueueTurn fixes the request and its profile at acceptance. Sequence numbers
 // reflect serialized durable acceptance, not timestamps or goroutine launch order.
+// A chief-of-staff turn is always enqueued on the workgroup's shared thread,
+// so req.Workstream is rewritten to the workgroup's host when it names
+// another member: callers that address the chief of staff by any member's
+// ID reach the one thread every member shares.
 func (r *Repository) EnqueueTurn(ctx context.Context, req TurnRequest) (QueuedTurn, error) {
+	if req.AgentID == ChiefOfStaff {
+		host, err := r.ChiefOfStaffHost(req.Workstream)
+		if err != nil {
+			return QueuedTurn{}, err
+		}
+		req.Workstream = host
+	}
 	r, err := r.scoped(req.Workstream)
 	if err != nil {
 		return QueuedTurn{}, err
@@ -579,6 +635,7 @@ func (r *Repository) AbandonTurn(ctx context.Context, stream config.WorkstreamID
 		}
 		req := q.Request
 		h := req.Header
+		h.Project = r.project
 		h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", EventID(req.ID, "response"), at, Actor{Kind: "service", ID: "thread-recovery"}
 		response := TurnResponse{Header: h, AgentID: agent, ThreadID: req.ThreadID, TurnID: turn, RequestID: req.ID, RequestRevision: req.Revision,
 			Result:  coreadapter.SessionResult{SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, Cancelled: true, IsError: true, ErrorSubtype: "interrupted"},
@@ -636,6 +693,7 @@ func (r *Repository) RecoverUnclaimedTurn(ctx context.Context, stream config.Wor
 		}
 		q.Claim = &TurnClaim{Token: EventID(q.Request.ID, "recovery-claim"), ServiceSession: r.session, SessionDirectory: directory, At: at}
 		h := q.Request.Header
+		h.Project = r.project
 		h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", EventID(q.Request.ID, "response"), at, Actor{Kind: "service", ID: "thread-recovery"}
 		response := TurnResponse{Header: h, AgentID: agent, ThreadID: q.Request.ThreadID, TurnID: turn, RequestID: q.Request.ID, RequestRevision: q.Request.Revision,
 			Result:  coreadapter.SessionResult{SessionDirectory: directory, StartedAt: at, Cancelled: true, IsError: true, ErrorSubtype: "interrupted"},
@@ -676,6 +734,49 @@ func settleAttempt(q *QueuedTurn, response *TurnResponse) {
 // later turns of its thread wait for another call. It returns the number of
 // turns it completed.
 func (r *Repository) CancelTurns(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor, reason string) (int, error) {
+	return r.cancelTurns(ctx, stream, at, actor, reason, func(Thread, QueuedTurn) bool { return true }, nil)
+}
+
+// CancelUnitTurns supersedes only unfinished turns for changed units. Running
+// turns held by this repository session finish before their replacements run.
+func (r *Repository) CancelUnitTurns(ctx context.Context, stream config.WorkstreamID, units []string, at time.Time, actor Actor, reason string) (int, error) {
+	return r.cancelTurns(ctx, stream, at, actor, reason, func(_ Thread, q QueuedTurn) bool {
+		return slices.Contains(units, q.Request.Unit)
+	}, nil)
+}
+
+// CancelQueuedTurn cancels only the named request if it has never been claimed
+// or attempted and has no captured response. The selection and cancellation
+// share the thread lock, so a runner that acquires it first keeps its claim.
+func (r *Repository) CancelQueuedTurn(ctx context.Context, stream config.WorkstreamID, agent, turn string, at time.Time, actor Actor, reason string) (int, error) {
+	return r.cancelTurns(ctx, stream, at, actor, reason, func(t Thread, q QueuedTurn) bool {
+		return t.Identity.ID == agent && t.Active == "" && q.Request.TurnID == turn && q.Claim == nil && len(q.Attempts) == 0 && q.Response == nil
+	}, nil)
+}
+
+// CancelReturnedTurn cancels only the named active turn when this session
+// still holds the matching claim token without a captured response. The caller
+// must supply the token acquired by its own invocation and have waited for
+// its runner to return. Other turns remain untouched; CancelTurns can cancel
+// queued successors afterwards.
+func (r *Repository) CancelReturnedTurn(ctx context.Context, stream config.WorkstreamID, agent, turn, token string, at time.Time, actor Actor, reason string) (int, error) {
+	selected := func(t Thread, q QueuedTurn) bool {
+		return t.Identity.ID == agent && t.Active == turn && q.Request.TurnID == turn && q.Claim != nil && q.Claim.Token == token
+	}
+	return r.cancelTurns(ctx, stream, at, actor, reason, selected, selected)
+}
+
+// CurrentTurnClaim reports whether this repository session reserved the turn.
+// Claims retained from a stopped service can resume after a change boundary.
+func (r *Repository) CurrentTurnClaim(stream config.WorkstreamID, claim *TurnClaim) (bool, error) {
+	scoped, err := r.scoped(stream)
+	if err != nil {
+		return false, err
+	}
+	return claim != nil && claim.ServiceSession == scoped.session, nil
+}
+
+func (r *Repository) cancelTurns(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor, reason string, selected, returned func(Thread, QueuedTurn) bool) (int, error) {
 	r, err := r.scoped(stream)
 	if err != nil {
 		return 0, err
@@ -698,10 +799,13 @@ func (r *Repository) CancelTurns(ctx context.Context, stream config.WorkstreamID
 		changed := false
 	turns:
 		for i, q := range t.Turns {
+			if !selected(t, q) || returned != nil && (q.Claim == nil || q.Claim.ServiceSession != r.session) {
+				continue
+			}
 			switch {
 			case !q.CompletedAt.IsZero():
 				continue
-			case q.Response != nil, q.Claim != nil && q.Claim.ServiceSession == r.session:
+			case q.Response != nil, q.Claim != nil && q.Claim.ServiceSession == r.session && (returned == nil || !returned(t, q)):
 				break turns
 			}
 			req := q.Request
@@ -715,6 +819,7 @@ func (r *Repository) CancelTurns(ctx context.Context, stream config.WorkstreamID
 				done = q.Claim.At
 			}
 			h := req.Header
+			h.Project = r.project
 			h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", EventID(req.ID, "response"), done, actor
 			response := TurnResponse{Header: h, AgentID: agent, ThreadID: req.ThreadID, TurnID: req.TurnID, RequestID: req.ID, RequestRevision: req.Revision,
 				Result:  coreadapter.SessionResult{SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, Cancelled: true, IsError: true, ErrorSubtype: "cancelled"},

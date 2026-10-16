@@ -167,6 +167,72 @@ func TestProjectCommands(t *testing.T) {
 	}
 }
 
+// TestProjectAddRepoAndListRepos covers spec#1 and spec#2 through the
+// command line: a project is created with exactly one repo by "project
+// add", a second repo resolves its own upstream, fork, clone and trace once
+// added, and both are listed with "project repos".
+func TestProjectAddRepoAndListRepos(t *testing.T) {
+	opts, clone := emptyFixture(t)
+	s, err := service.Start(context.Background(), opts)
+	must(t, err)
+	t.Cleanup(func() { s.Close() })
+	root := opts.Config.Root
+
+	var added service.ProjectResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", clone, "--json")), &added))
+	id := added.Project.ID
+	if len(added.Project.Repos) != 1 || added.Project.Repos[0].ID != id || !added.Project.Repos[0].Default {
+		t.Fatalf("project add did not yield exactly one default repo: %+v", added.Project.Repos)
+	}
+
+	secondClone := filepath.Join(filepath.Dir(clone), "second")
+	cmd := exec.Command("git", "init", "--quiet", secondClone)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	var repoAdded service.ProjectResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add-repo", string(id), "--upstream", "dagger/docs", "--clone", secondClone, "--json")), &repoAdded))
+	if len(repoAdded.Project.Repos) != 2 {
+		t.Fatalf("repo not added: %+v", repoAdded.Project.Repos)
+	}
+	var second service.RepoView
+	for _, r := range repoAdded.Project.Repos {
+		if !r.Default {
+			second = r
+		}
+	}
+	if second.ID == "" || second.Upstream != "dagger/docs" || second.Clone != secondClone || second.Name != "docs" || second.Trace == added.Project.Trace || second.KB == "" || second.EntityMap == "" {
+		t.Fatalf("second repo's own settings: %+v", second)
+	}
+	if err := config.CheckProjectIDs(second.ID); err != nil || second.ID == id {
+		t.Fatalf("second repo identity: %v %s", err, second.ID)
+	}
+
+	text := successful(t, root, "project", "repos", string(id))
+	if !strings.Contains(text, string(id)+" (default)") || !strings.Contains(text, string(second.ID)) || !strings.Contains(text, "dagger/docs") {
+		t.Fatalf("project repos text output:\n%s", text)
+	}
+	var repos []service.RepoView
+	must(t, json.Unmarshal([]byte(successful(t, root, "project", "repos", string(id), "--json")), &repos))
+	if len(repos) != 2 {
+		t.Fatalf("project repos --json: %+v", repos)
+	}
+
+	// Removing the default repo while its second repo is still active is
+	// refused, so a project never loses the repo its charter and ID belong
+	// to while it still has other repos.
+	code, out, diag := invoke(t, root, "project", "remove", string(id))
+	if code != 4 || out != "" || !strings.Contains(diag, "still has other repos") {
+		t.Fatalf("removing a default repo with others active: %d %s %s", code, out, diag)
+	}
+	must(t, json.Unmarshal([]byte(successful(t, root, "project", "remove", string(second.ID), "--json")), &repoAdded))
+	removedAgain := successful(t, root, "project", "remove", string(id))
+	if !strings.Contains(removedAgain, "removed") {
+		t.Fatalf("removing the default repo once alone: %s", removedAgain)
+	}
+}
+
 // awaitExtraction polls status until the latest extraction is terminal.
 func awaitExtraction(t *testing.T, root string) service.ExtractionState {
 	t.Helper()
@@ -192,6 +258,9 @@ func TestProjectUsage(t *testing.T) {
 		{"project"}, {"project", "add"}, {"project", "add", "name"}, {"project", "add", "name", "--upstream", "a/b", "--fork", "c/d"},
 		{"project", "add", "name", "--upstream", "a/b", "--fork", "c/d", "--clone", ""}, {"project", "remove"}, {"project", "remove", "not-an-id"},
 		{"project", "remove", project, "--clone", "x"}, {"status", "--upstream", "a/b"}, {"project", "list"},
+		{"project", "add-repo"}, {"project", "add-repo", project}, {"project", "add-repo", project, "--upstream", "a/b"},
+		{"project", "add-repo", project, "--upstream", "a/b", "--clone", ""}, {"project", "add-repo", "not-an-id", "--upstream", "a/b", "--clone", "x"},
+		{"project", "repos"}, {"project", "repos", "not-an-id"}, {"project", "repos", project, "--upstream", "a/b"},
 		{"handin"}, {"handin", "not-an-id"}, {"handin", project}, {"handin", project, "a.md", "b.md"}, {"handin", "not-an-id", "a.md"},
 		{"handin", project, ""}, {"handin", project, "a.md", "--clone", "x"}, {"handin", project, "a.md", "--hard"},
 		{"project", "extract"}, {"project", "extract", "not-an-id"}, {"project", "extract", project, "--hard"},

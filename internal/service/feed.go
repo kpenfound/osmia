@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"slices"
 
@@ -16,7 +17,12 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 	if api != nil {
 		return FeedResponse{}, api
 	}
-	entries, err := consistentRead(func() ([]FeedEntry, error) { return feedEntries(repository, stream) }, repository.Generation)
+	chief, _, _, closeChief, err := s.chiefRepository(context.Background(), repository, stream)
+	if err != nil {
+		return FeedResponse{}, &APIError{Internal, fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
+	}
+	defer closeChief()
+	entries, err := consistentRead(func() ([]FeedEntry, error) { return feedEntries(repository, chief, stream) }, repository.Generation, chief.Generation)
 	if err != nil {
 		return FeedResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the feed of workstream %s; check the trace repository", stream)}
 	}
@@ -25,9 +31,12 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 
 // feedEntries merges the workstream's records into one feed ordered by time.
 // Entries recorded at the same time keep the conversation first, then
-// statuses, transitions and sessions.
-func feedEntries(repository *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
-	conversation, err := conversationEntries(repository, stream)
+// statuses, transitions and sessions. chief is the repository the
+// workstream's chief-of-staff conversation is read from: repository itself,
+// unless stream belongs to a cross-repo workgroup, whose shared thread
+// lives only in that workgroup's own trace.
+func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
+	conversation, err := conversationEntries(chief, stream)
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +44,11 @@ func feedEntries(repository *trace.Repository, stream config.WorkstreamID) ([]Fe
 	for _, e := range conversation {
 		out = append(out, FeedEntry{Kind: e.Kind, At: e.At, Turn: e.Turn, Text: e.Text, State: e.State})
 	}
-	statuses, err := trace.Read[trace.Status](repository, stream)
+	host, err := chief.ChiefOfStaffHost(stream)
+	if err != nil {
+		return nil, err
+	}
+	statuses, err := trace.Read[trace.Status](chief, host)
 	if err != nil {
 		return nil, err
 	}

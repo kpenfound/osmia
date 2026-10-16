@@ -99,7 +99,42 @@ announced as the matching command's is. It fits phone and laptop widths and
 updates live from the service's event stream. The browser tab shows the bee
 emoji (🐝) as the page's favicon.
 
-The page is laid out like a chat client:
+The project pane is the main entry point. It lists each project's repos and
+workgroups, their member workstreams and any named wait. **New project**
+creates a one-repo project; **Add repo** extends it using a separate clone and
+the shared charter. **New design session** opens the read-only project chat;
+**Start workgroup from brief** hands the latest brief to the architect in one
+owner action. **Hand in a feature** takes the document fast path instead.
+With several active repos, both entry points let the architect select the
+affected repos; the service validates the selection and creates their members.
+A single selected repo gets ordinary ratification. For several selected repos,
+one ratification covers the project spec, graph and slices. The original
+conversation continues as the one shared chief-of-staff thread.
+
+Member labels are planning, ready, building, paused, blocked (naming the edge
+or merge), PR open, delivered (merged) and cancelled. Expected merge waits
+create no inbox entry or notification. The workstream graph appears only for
+several members or recorded edges. Exploratory sessions appear under their
+project outside workgroups and retain their direct writable-worktree chat.
+The **Osmia** heading returns to the project pane.
+
+**Delivered (merged)** requires an owner merge record or a recorded merged
+outcome matching the current publication's PR, live or archived. An open,
+unmerged PR shows **PR open**; ready, draft and closed-without-merge PRs remain
+unresolved. An archived member without pinned merge or cancel evidence shows
+**blocked**, with a wait explaining that the workgroup remains unresolved.
+The project spec stays active until every member is merged or cancelled,
+including in one-member workgroups. Trace history remains until owner archive.
+
+Selecting a member opens its existing view, with a direct workstream link
+that survives reload; an original design link follows the adopted conversation
+after start. Shared questions appear once in the project overview and can be
+answered from either member, preserving the original entry and project pin.
+Owner-approved archive and eligible cleanup of a terminal member do not remove
+the survivor's shared conversation or active project spec. Unexplained missing
+live history yields a truthful diagnostic. Archive does not count as merge.
+
+The member view is laid out like a chat client:
 
 - The header shows whether the page is live, the slots in use per role, the
   number of pauses in force, a button for a new workstream and a settings
@@ -155,13 +190,20 @@ From the page you can:
 - Answer an escalation, accept its quick reply, or pick one of its options.
 - Ratify a plan, sustain or overrule an objection, or ask for a redraft.
 - Decide a contested unit, an amendment or a charter proposal.
-- Approve a delivery, seeing its pull request title and editing its description first if you want.
+- Accept the final review and approve each workstream's delivery, seeing its
+  PR title and editing its description and commit message. Draft publication,
+  updates and marking ready each require that member's own fresh approval and
+  service-owned signing; there is no group-wide publication approval.
 - Send a message in a workstream's conversation. Enter sends where there is a
   keyboard; Shift+Enter starts a new line.
 - Pause or resume the factory, a project or a workstream, softly or hard.
 - Set or clear a project's priority order and each role's profile.
-- Register a project, read and edit its charter, remove it from active work,
-  and hand in new work.
+- Create a project, add a repo, read and edit its shared charter, remove repo
+  registrations from active work and hand in new work.
+- Open a project design chat, review readiness questions and collapsed
+  assumptions, then start a workgroup from its brief.
+- Request amend or cancel in the shared conversation and approve its single
+  impact summary, choosing whether cancellation closes open PRs or leaves drafts.
 - Abandon a workstream or permanently archive a finished one.
 - Reload the configuration.
 
@@ -429,6 +471,16 @@ under `/v1`, with its path parameters, request body, response and error shape.
 Open it in any OpenAPI viewer, such as Swagger UI, Redoc or Scalar, or generate
 a client from it. The command line's `--json` output is built from these
 responses; see the [command line](cli.md) for each command's shape.
+
+Project views include repo lists; member status includes workgroup membership.
+Workstream status separates the stored workflow `state` from `display_state`
+and its named `wait`;
+publication state `delivered` alone does not establish merge. Runtime archive
+records expose `resolution_evidence` (`merged`, `cancelled` or `unresolved`)
+and `resolved`, pinned from history before cleanup. Only merge or cancel
+evidence resolves an archived member; a missing pin keeps the workgroup and
+project spec active with a visible diagnostic. See
+[resolution and retention](configuration.md#resolution-retention-and-shared-lifecycle).
 
 Every failure returns `{"error": {"code": ..., "message": ...}}`. `GET
 /v1/events` is a `text/event-stream`: each frame names the event's kind and

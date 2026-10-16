@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -15,6 +18,12 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
+type statusesRead struct {
+	list       []WorkstreamStatus
+	unreadable map[config.WorkstreamID]Diagnostic
+	api        *APIError
+}
+
 // statuses reports every workstream of every active project, ordered by last
 // activity time, newest first, or none when no project or trace is active.
 // Last activity is derived only from durable trace records, so a read-only
@@ -26,7 +35,59 @@ import (
 // workstream whose agent turns, unit states, overlap advisories or drift
 // rebases cannot be read is reported without them and its first such failure
 // in unreadable, by workstream.
+
 func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagnostic, *APIError) {
+	snapshot, err := consistentRead(func() (statusesRead, error) {
+		list, unreadable, api := s.statusesSnapshot()
+		return statusesRead{list, unreadable, api}, nil
+	}, s.groupApprovalGeneration)
+	if err != nil {
+		return nil, nil, &APIError{Internal, err.Error()}
+	}
+	return snapshot.list, snapshot.unreadable, snapshot.api
+}
+
+// groupApprovalGeneration covers group authority independently of member
+// generations. A completion racing a multi-repo status read retries the whole
+// view, so one response cannot combine pending and approved group members.
+func (s *Service) groupApprovalGeneration() uint64 {
+	_, projects := s.runtimes()
+	decisions := map[config.WorkgroupID]string{}
+	for _, p := range projects {
+		streams, err := p.repository.Workstreams()
+		if err != nil {
+			return 0
+		}
+		for _, stream := range streams {
+			id, err := p.repository.CrossRepoWorkgroupOf(stream)
+			if err != nil {
+				return 0
+			}
+			if id == "" {
+				continue
+			}
+			if _, seen := decisions[id]; seen {
+				continue
+			}
+			approval, found, err := p.repository.GroupApprovalOf(stream)
+			if err != nil {
+				return 0
+			}
+			decisions[id] = "pending"
+			if found {
+				data, _ := json.Marshal(approval)
+				decisions[id] = string(data)
+			}
+		}
+	}
+	digest := sha256.New()
+	for _, id := range slices.Sorted(maps.Keys(decisions)) {
+		digest.Write([]byte(string(id) + ":" + decisions[id] + "\n"))
+	}
+	return binary.LittleEndian.Uint64(digest.Sum(nil))
+}
+
+func (s *Service) statusesSnapshot() ([]WorkstreamStatus, map[config.WorkstreamID]Diagnostic, *APIError) {
 	cfg, projects := s.runtimes()
 	var out []workstreamActivity
 	unreadable := map[config.WorkstreamID]Diagnostic{}
@@ -75,7 +136,11 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 				if title == "" {
 					title = string(a.Workstream)
 				}
-				rows = append(rows, workstreamActivity{status: WorkstreamStatus{Project: a.Project, Workstream: a.Workstream, Archived: true, TraceDeleted: !a.CleanedAt.IsZero(), DeliveryLink: a.DeliveryLink, State: &terminal, Status: &StatusView{Goal: title}, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}}, lastActivity: a.ArchivedAt, createdAt: a.ArchivedAt})
+				archivedView := WorkstreamStatus{Project: a.Project, Workstream: a.Workstream, Archived: true, TraceDeleted: !a.CleanedAt.IsZero(), DeliveryLink: a.DeliveryLink, State: &terminal, Status: &StatusView{Goal: title}, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}}
+				if err := presentArchivedWorkstream(active.repository, &archivedView, a); err != nil {
+					projectUnreadable[a.Workstream] = Diagnostic{"presentation", Internal, err.Error()}
+				}
+				rows = append(rows, workstreamActivity{status: archivedView, lastActivity: a.ArchivedAt, createdAt: a.ArchivedAt})
 			}
 			return projectStatusResult{rows, projectUnreadable}, nil
 		}, active.repository.Generation, s.storeGeneration)
@@ -142,7 +207,46 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 		if w.Workstream == librarian {
 			continue
 		}
-		view := statusView(active.id, mode, w)
+		design, err := isDesignWorkstream(active.repository, w.Workstream)
+		if err != nil {
+			return nil, nil, &APIError{Internal, fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", w.Workstream)}
+		}
+		targetStream, err := s.designStatusAddress(active.repository, w.Workstream)
+		if err != nil {
+			return nil, nil, &APIError{Internal, err.Error()}
+		}
+		if targetStream != w.Workstream {
+			continue
+		}
+		view := statusView(active.id, mode, w, design)
+		approval, accepted, err := active.repository.GroupApprovalOf(w.Workstream)
+		if err != nil {
+			return nil, nil, &APIError{Internal, err.Error()}
+		}
+		if accepted {
+			view.Gates = slices.DeleteFunc(view.Gates, func(g trace.OwnerGate) bool { return g.Kind == "ratification" })
+		}
+		group, err := active.repository.CrossRepoWorkgroupOf(w.Workstream)
+		if err != nil {
+			return nil, nil, &APIError{Internal, err.Error()}
+		}
+		if group != "" {
+			chief, host, _, close, err := s.chiefRepository(context.Background(), active.repository, w.Workstream)
+			if err == nil {
+				statuses, readErr := trace.Read[trace.Status](chief, host)
+				close()
+				if readErr != nil {
+					return nil, nil, &APIError{Internal, readErr.Error()}
+				}
+				if len(statuses) > 0 {
+					st := statuses[len(statuses)-1]
+					view.Status = &StatusView{Goal: st.Goal, Attention: st.Attention, Note: st.Note, Agents: st.Agents, Revision: st.Revision, UpdatedAt: st.At}
+				}
+			} else if !errors.Is(err, errWorkgroupJoining) {
+				return nil, nil, &APIError{Internal, err.Error()}
+			}
+		}
+
 		agents, err := agentStatuses(active.repository, w.Workstream, time.Now())
 		if err == nil {
 			err = s.step("status-agents")
@@ -179,12 +283,29 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 		} else {
 			view.Drift = drift
 		}
+		if wait, err := edgeWaitDisplay(active.repository, w.Workstream); err != nil {
+			if _, ok := unreadable[w.Workstream]; !ok {
+				unreadable[w.Workstream] = Diagnostic{"edges", Internal, fmt.Sprintf("cannot read the workgroup edges of workstream %s; check the trace repository", w.Workstream)}
+			}
+		} else {
+			view.Wait = wait
+		}
 		for i := range view.Units {
 			for _, gate := range view.Gates {
 				if gate.Kind == UnitContested && gate.Reference == view.Units[i].Unit && gate.Reason != "" {
 					view.Units[i].Reason = gate.Reason
 				}
 			}
+		}
+		if accepted && !approval.Complete {
+			_, detail, err := s.groupApprovalDetail(approval)
+			if err != nil {
+				return nil, nil, &APIError{Internal, err.Error()}
+			}
+			view.Wait = detail
+		}
+		if err := s.presentWorkstream(active.repository, &view); err != nil {
+			unreadable[w.Workstream] = Diagnostic{"presentation", Internal, err.Error()}
 		}
 		out = append(out, workstreamActivity{status: view, lastActivity: w.LastActivity, createdAt: w.CreatedAt})
 	}
@@ -346,6 +467,27 @@ func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 	if api != nil {
 		return WorkstreamStatus{}, api
 	}
+	// Archive records and ordinary rows need no live conversation history.
+	// Only an address omitted from the list can be a continued design alias.
+	if !slices.ContainsFunc(list, func(w WorkstreamStatus) bool { return w.Workstream == id }) {
+		cfg, projects := s.runtimes()
+		for _, active := range projects {
+			if !cfg.Active(active.id) || id == librarianWorkstream(active.id) {
+				continue
+			}
+			streams, err := active.repository.Workstreams()
+			if err != nil {
+				return WorkstreamStatus{}, &APIError{Internal, fmt.Sprintf("cannot read the workstreams of project %s; check the trace repository", active.id)}
+			}
+			if slices.Contains(streams, id) {
+				id, err = s.designStatusAddress(active.repository, id)
+				if err != nil {
+					return WorkstreamStatus{}, &APIError{Internal, err.Error()}
+				}
+				break
+			}
+		}
+	}
 	if d, ok := unreadable[id]; ok {
 		return WorkstreamStatus{}, &APIError{d.Code, d.Message}
 	}
@@ -357,8 +499,43 @@ func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 	return WorkstreamStatus{}, &APIError{NotFound, fmt.Sprintf("workstream %s is not in an active project; list workstreams with osmia status", id)}
 }
 
-func statusView(project config.ProjectID, mode bundle.Mode, w trace.WorkstreamStatus) WorkstreamStatus {
-	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, Workspaces: w.Workspaces, Kind: w.Kind, Profile: w.Profile, Base: w.Base, Branch: w.Branch, Title: w.Title,
+// designStatusAddress maps an adopted design host to its first live member,
+// or its historical first member once none remain live.
+// Status resolution reads membership without requiring live conversation history.
+func (s *Service) designStatusAddress(repo *trace.Repository, stream config.WorkstreamID) (config.WorkstreamID, error) {
+	id, err := repo.CrossRepoWorkgroupOf(stream)
+	if err != nil || id == "" {
+		return stream, err
+	}
+	_, g, _, err := repo.CrossRepoProjectSpec(id)
+	if err != nil {
+		return stream, err
+	}
+	if g.Conversation != nil && g.Conversation.Workstream == stream && len(g.Members) > 1 {
+		leader, err := s.firstLiveWorkgroupMember(g)
+		if err != nil {
+			return "", err
+		}
+		if leader != "" {
+			return leader, nil
+		}
+		return g.Members[1], nil
+	}
+	return stream, nil
+}
+
+func statusView(project config.ProjectID, mode bundle.Mode, w trace.WorkstreamStatus, design bool) WorkstreamStatus {
+	kind := w.Kind
+	if kind == "" && design {
+		// design is isDesignWorkstream's own answer, read directly from the
+		// design-session marker openDesign records, never inferred here from
+		// an empty kind and an empty feature state: an ordinary workstream
+		// can legitimately have both and still not be a design session. The
+		// web page and CLI use this marker to show the design chat instead
+		// of the ordinary workstream view.
+		kind = "design"
+	}
+	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, Workspaces: w.Workspaces, Kind: kind, Profile: w.Profile, Base: w.Base, Branch: w.Branch, Title: w.Title,
 		Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, OpenQuestions: w.OpenQuestions, Gates: append([]trace.OwnerGate{}, w.Gates...), ContextMode: mode}
 	if w.State != "" {
 		state := w.State

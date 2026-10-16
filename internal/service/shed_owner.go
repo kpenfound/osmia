@@ -24,6 +24,18 @@ import (
 // the ones under debate, and the problems are reported once to the
 // workstream's chief of staff.
 func (d *debate) ownerEdits(ctx context.Context, stream config.WorkstreamID) (shed.Pin, error) {
+	decision, found, err := d.repository.GroupApprovalOf(stream)
+	if err != nil {
+		return shed.Pin{}, err
+	}
+	if found {
+		for _, member := range decision.Members {
+			if member.Workstream == stream {
+				return shed.Pin{Spec: member.Spec, Plan: member.Plan}, nil
+			}
+		}
+	}
+
 	// The check runs while the trace is held, so the entity map it validates
 	// against is loaded before the read.
 	entities, err := kb.Load(d.repository)
