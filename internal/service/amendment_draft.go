@@ -437,14 +437,27 @@ func affectedRevision(oldSpec, newSpec string, oldPlan, newPlan plan.Plan) amend
 	return a
 }
 
-func (a *amendmentDrafter) record(ctx context.Context, operation string, stream config.WorkstreamID, request trace.Amendment, turn string) (coreadapter.OperationResult, error) {
+// amendmentRevision is what an amendment attempt delivered: a decline with
+// its reason, or the revised spec and plan, the delivered documents in place
+// of the sealed ones, with every problem that makes the revision invalid.
+type amendmentRevision struct {
+	declined      bool
+	reason        string
+	oldSpec, spec string
+	graph         string
+	before, after plan.Plan
+	problems      []string
+}
+
+// revision reads and validates what the amendment attempt turn delivered.
+func (a *amendmentDrafter) revision(stream config.WorkstreamID, turn string) (amendmentRevision, error) {
 	latest, err := a.latest(stream)
 	if err != nil {
-		return coreadapter.OperationResult{}, err
+		return amendmentRevision{}, err
 	}
 	oldSpec, oldPlan := latest[plan.SpecDocument].Content, latest[plan.PlanDocument].Content
 	if oldSpec == "" || oldPlan == "" {
-		return coreadapter.OperationResult{}, errors.New("sealed spec or plan is missing")
+		return amendmentRevision{}, errors.New("sealed spec or plan is missing")
 	}
 	directory := filepath.Join(a.turnDirectory(stream, turn), "output")
 	read := func(name string) (string, bool, error) {
@@ -457,11 +470,11 @@ func (a *amendmentDrafter) record(ctx context.Context, operation string, stream 
 		}
 		return string(data), err == nil, err
 	}
-	readFailure := func(err error) (coreadapter.OperationResult, error) {
+	readFailure := func(err error) (amendmentRevision, error) {
 		if errors.Is(err, errAmendmentText) {
-			return a.finish(ctx, operation, stream, request.ID, "invalid", err.Error(), nil)
+			return amendmentRevision{problems: []string{err.Error()}}, nil
 		}
-		return coreadapter.OperationResult{}, err
+		return amendmentRevision{}, err
 	}
 	if reason, ok, err := read("decline.txt"); err != nil {
 		return readFailure(err)
@@ -469,7 +482,7 @@ func (a *amendmentDrafter) record(ctx context.Context, operation string, stream 
 		if strings.TrimSpace(reason) == "" {
 			reason = "the architect gave no reason"
 		}
-		return a.finish(ctx, operation, stream, request.ID, "declined", reason, nil)
+		return amendmentRevision{declined: true, reason: reason}, nil
 	}
 	spec, hasSpec, err := read(plan.SpecPath)
 	if err != nil {
@@ -486,22 +499,22 @@ func (a *amendmentDrafter) record(ctx context.Context, operation string, stream 
 		graph = oldPlan
 	}
 	if !hasSpec && !hasPlan {
-		return a.finish(ctx, operation, stream, request.ID, "invalid", "no revised document was delivered", nil)
+		return amendmentRevision{problems: []string{"no revised document was delivered"}}, nil
 	}
 	problems, err := a.validate(trace.Document{Content: spec}, trace.Document{Content: graph})
 	if err != nil {
-		return coreadapter.OperationResult{}, err
+		return amendmentRevision{}, err
 	}
 	before, oldErr := plan.Parse([]byte(oldPlan))
 	after, newErr := plan.Parse([]byte(graph))
 	if oldErr != nil {
-		return coreadapter.OperationResult{}, oldErr
+		return amendmentRevision{}, oldErr
 	}
 	if newErr == nil {
 		for _, old := range before.Units {
 			state, err := a.repository.Workflow(stream, trace.UnitSubject(old.ID))
 			if err != nil {
-				return coreadapter.OperationResult{}, err
+				return amendmentRevision{}, err
 			}
 			if state.Value == "merged" {
 				now, ok := after.Unit(old.ID)
@@ -511,13 +524,39 @@ func (a *amendmentDrafter) record(ctx context.Context, operation string, stream 
 			}
 		}
 	}
-	if len(problems) > 0 {
-		return a.finish(ctx, operation, stream, request.ID, "invalid", strings.Join(problems, "; "), nil)
+	if len(problems) == 0 && spec == oldSpec && graph == oldPlan {
+		problems = []string{"revision makes no change"}
 	}
-	if spec == oldSpec && graph == oldPlan {
-		return a.finish(ctx, operation, stream, request.ID, "invalid", "revision makes no change", nil)
+	return amendmentRevision{oldSpec: oldSpec, spec: spec, graph: graph, before: before, after: after, problems: problems}, nil
+}
+
+// judge is the draftJudge of an amendment draft.
+func (a *amendmentDrafter) judge(stream config.WorkstreamID, attempt string) (string, []string, error) {
+	r, err := a.revision(stream, attempt)
+	switch {
+	case err != nil:
+		return "", nil, err
+	case r.declined:
+		return draftDeclined, nil, nil
+	case len(r.problems) > 0:
+		return draftInvalid, r.problems, nil
 	}
-	affected := affectedRevision(oldSpec, spec, before, after)
+	return draftValid, nil, nil
+}
+
+func (a *amendmentDrafter) record(ctx context.Context, operation string, stream config.WorkstreamID, request trace.Amendment, turn string) (coreadapter.OperationResult, error) {
+	r, err := a.revision(stream, turn)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if r.declined {
+		return a.finish(ctx, operation, stream, request.ID, "declined", r.reason, nil)
+	}
+	if len(r.problems) > 0 {
+		return a.finish(ctx, operation, stream, request.ID, "invalid", strings.Join(r.problems, "; "), nil)
+	}
+	spec, graph := r.spec, r.graph
+	affected := affectedRevision(r.oldSpec, spec, r.before, r.after)
 	data, err := json.MarshalIndent(affected, "", "  ")
 	if err != nil {
 		return coreadapter.OperationResult{}, err

@@ -95,9 +95,23 @@ func (f *crossRepoRatifyFixture) handInSkipping(t *testing.T, project config.Pro
 // workgroup's project-spec draft turn.
 func (f *crossRepoRatifyFixture) scriptDrafts(t *testing.T) {
 	t.Helper()
-	deliver := func(ctx context.Context, tools *mcp.ClientSession, path, content string) error {
-		_, err := callTool(ctx, tools, DraftTool, map[string]any{"path": path, "content": content})
-		return err
+	// verdict calls the tool and requires the verdict it returns.
+	verdict := func(ctx context.Context, tools *mcp.ClientSession, name string, args map[string]any, want string) error {
+		got, err := callTool(ctx, tools, name, args)
+		if err != nil {
+			return err
+		}
+		var status draftStatus
+		if err := json.Unmarshal([]byte(got), &status); err != nil {
+			return err
+		}
+		if status.Verdict != want {
+			return fmt.Errorf("%s returned %s, want verdict %s", name, got, want)
+		}
+		return nil
+	}
+	deliver := func(ctx context.Context, tools *mcp.ClientSession, path, content, want string) error {
+		return verdict(ctx, tools, DraftTool, map[string]any{"path": path, "content": content}, want)
 	}
 	f.engine.mu.Lock()
 	f.engine.turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -111,10 +125,10 @@ func (f *crossRepoRatifyFixture) scriptDrafts(t *testing.T) {
 		default:
 			return nil, fmt.Errorf("unexpected draft workspace %s", dir)
 		}
-		if err := deliver(ctx, tools, "spec.md", spec); err != nil {
+		if err := deliver(ctx, tools, "spec.md", spec, draftInvalid); err != nil {
 			return nil, err
 		}
-		if err := deliver(ctx, tools, "plan.json", plan); err != nil {
+		if err := deliver(ctx, tools, "plan.json", plan, draftValid); err != nil {
 			return nil, err
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Draft delivered", SessionDir: req.SessionDir, NumTurns: 2}, nil
@@ -133,7 +147,15 @@ func (f *crossRepoRatifyFixture) scriptDrafts(t *testing.T) {
 				{"workstream": string(f.stream2), "contract_criteria": []int{1}},
 			},
 		}
-		if _, err := callTool(ctx, tools, ProjectSpecDraftTool, args); err != nil {
+		// A delivery without its intended behaviour is reported invalid and
+		// replaced by the next one.
+		behavior := args["behavior"]
+		args["behavior"] = " "
+		if err := verdict(ctx, tools, ProjectSpecDraftTool, args, draftInvalid); err != nil {
+			return nil, err
+		}
+		args["behavior"] = behavior
+		if err := verdict(ctx, tools, ProjectSpecDraftTool, args, draftValid); err != nil {
 			return nil, err
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Project spec delivered", SessionDir: req.SessionDir, NumTurns: 1}, nil

@@ -53,6 +53,25 @@ type projectSpecDraftSlice struct {
 	ContractCriteria []int               `json:"contract_criteria,omitempty"`
 }
 
+// projectSpec builds the full project spec from the draft: one slice per
+// member, holding the contract criteria the draft gives it and the spec and
+// plan content returns for it.
+func (d projectSpecDraft) projectSpec(members []config.WorkstreamID, content func(config.WorkstreamID) (spec, plan string, err error)) (trace.ProjectSpec, error) {
+	criteria := map[config.WorkstreamID][]int{}
+	for _, sl := range d.Slices {
+		criteria[sl.Workstream] = sl.ContractCriteria
+	}
+	slices := make([]trace.Slice, 0, len(members))
+	for _, m := range members {
+		specContent, planContent, err := content(m)
+		if err != nil {
+			return trace.ProjectSpec{}, err
+		}
+		slices = append(slices, trace.Slice{Workstream: m, Spec: specContent, Plan: planContent, ContractCriteria: criteria[m]})
+	}
+	return trace.ProjectSpec{Behavior: d.Behavior, Contracts: d.Contracts, Graph: d.Graph, Slices: slices}, nil
+}
+
 // DraftWorkgroup creates a new cross-repo workgroup for the given member
 // workstreams, one per repo, each already handed into its own active
 // project. It records, on each member's own trace, a locator pointing to
@@ -365,7 +384,7 @@ func (s *Service) dispatchProjectSpecDraft(ctx context.Context, wt *trace.Reposi
 	}
 	ctx, release := s.stoppable(ctx, wt.Project(), host)
 	defer release()
-	dispatcher := thread.Dispatcher{Runner: s.threadRunner(s.current(), wt, s.projectSpecDraftTurns(wt, host, members), s.now), Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
+	dispatcher := thread.Dispatcher{Runner: s.threadRunner(s.current(), wt, s.projectSpecDraftTurns(wt, g, host, members), s.now), Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 		directory := filepath.Join(s.projectSpecTurnDirectoryFor(in.Workstream), "session")
 		return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 	}}
@@ -420,7 +439,7 @@ func (s *Service) enqueueProjectSpecDraft(ctx context.Context, wt *trace.Reposit
 // write, execute, network, VCS or ask capability. Unlike a per-member
 // draft, this step cannot ask a question: it only combines what members'
 // own drafting already resolved.
-func (s *Service) projectSpecDraftTurns(wt *trace.Repository, host config.WorkstreamID, members []trace.CrossRepoMember) *isolation.Turns {
+func (s *Service) projectSpecDraftTurns(wt *trace.Repository, g trace.Workgroup, host config.WorkstreamID, members []trace.CrossRepoMember) *isolation.Turns {
 	var engine coreadapter.Engine
 	var hosts coreadapter.MCPHosts
 	if a := s.options.Architect; a != nil {
@@ -448,7 +467,7 @@ func (s *Service) projectSpecDraftTurns(wt *trace.Repository, host config.Workst
 			if scope.Workstream != string(host) {
 				return nil, errors.New("turn scope denied")
 			}
-			return []coreadapter.Tool{s.projectSpecDraftTool(host)}, nil
+			return []coreadapter.Tool{s.projectSpecDraftTool(g, host)}, nil
 		},
 		Hosts:  hosts,
 		Engine: engine,
@@ -500,8 +519,12 @@ func stageProjectSpecView(members []trace.CrossRepoMember, workspace string) err
 	return nil
 }
 
-func (s *Service) projectSpecDraftTool(host config.WorkstreamID) coreadapter.Tool {
-	return coreadapter.Tool{Name: ProjectSpecDraftTool, Description: "Deliver the project spec: behavior, contracts, graph and each member's own contract-criteria numbers.", Effect: coreadapter.ToolMemory,
+// projectSpecDraftTool delivers the workgroup's project spec draft into the
+// turn's output directory, which the service records once the turn
+// completes. It returns the verdict the service would give the delivered
+// draft if the turn ended now.
+func (s *Service) projectSpecDraftTool(g trace.Workgroup, host config.WorkstreamID) coreadapter.Tool {
+	return coreadapter.Tool{Name: ProjectSpecDraftTool, Description: "Deliver the project spec: behavior, contracts, graph and each member's own contract-criteria numbers. Returns the verdict the service would give the delivered project spec if your turn ended now: valid, or invalid with its problem.", Effect: coreadapter.ToolMemory,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"behavior":{"type":"string"},"contracts":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"text":{"type":"string"}},"required":["name","text"],"additionalProperties":false}},"graph":{"type":"array","items":{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"type":{"type":"string"}},"required":["from","to","type"],"additionalProperties":false}},"slices":{"type":"array","items":{"type":"object","properties":{"workstream":{"type":"string"},"contract_criteria":{"type":"array","items":{"type":"integer"}}},"required":["workstream"],"additionalProperties":false}}},"required":["behavior","slices"],"additionalProperties":false}`),
 		Handle: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			var draft projectSpecDraft
@@ -520,7 +543,18 @@ func (s *Service) projectSpecDraftTool(host config.WorkstreamID) coreadapter.Too
 			if err := os.WriteFile(filepath.Join(s.projectSpecTurnDirectoryFor(host), "output", "project-spec.json"), data, 0600); err != nil {
 				return nil, err
 			}
-			return json.RawMessage(`{}`), nil
+			// Validation reads no member content, so the slices are built
+			// without it.
+			full, err := draft.projectSpec(g.Members[1:], func(config.WorkstreamID) (string, string, error) { return "", "", nil })
+			if err != nil {
+				return nil, err
+			}
+			status := draftStatus{Delivered: "project-spec.json", Verdict: draftValid}
+			if err := trace.ValidateProjectSpec(full, g.Members); err != nil {
+				status.Verdict, status.Problems = draftInvalid, []string{err.Error()}
+			}
+			status.Next = draftNext[status.Verdict]
+			return json.Marshal(status)
 		}}
 }
 
@@ -566,23 +600,16 @@ func (s *Service) recordProjectSpecDraft(ctx context.Context, wt *trace.Reposito
 	if err := dec.Decode(&draft); err != nil {
 		return s.failProjectSpecDraft(ctx, wt, host, "the delivered project spec does not parse: "+err.Error())
 	}
-	slices := make([]trace.Slice, 0, len(g.Members)-1)
-	criteria := map[config.WorkstreamID][]int{}
-	for _, sl := range draft.Slices {
-		criteria[sl.Workstream] = sl.ContractCriteria
-	}
-	for _, m := range g.Members[1:] {
+	full, err := draft.projectSpec(g.Members[1:], func(m config.WorkstreamID) (string, string, error) {
 		_, _, repo, api := s.conversationTrace(string(m))
 		if api != nil {
-			return fmt.Errorf("workstream %s: %s", m, api.Message)
+			return "", "", fmt.Errorf("workstream %s: %s", m, api.Message)
 		}
-		specContent, planContent, err := memberSpecAndPlan(repo, m)
-		if err != nil {
-			return err
-		}
-		slices = append(slices, trace.Slice{Workstream: m, Spec: specContent, Plan: planContent, ContractCriteria: criteria[m]})
+		return memberSpecAndPlan(repo, m)
+	})
+	if err != nil {
+		return err
 	}
-	full := trace.ProjectSpec{Behavior: draft.Behavior, Contracts: draft.Contracts, Graph: draft.Graph, Slices: slices}
 	if err := trace.RecordProjectSpec(ctx, wt, g, full, s.now(), projectSpecDraftActor, turn); err != nil {
 		return s.failProjectSpecDraft(ctx, wt, host, "the delivered project spec is invalid: "+err.Error())
 	}

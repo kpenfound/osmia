@@ -708,7 +708,11 @@ func (d *drafter) turns(stream config.WorkstreamID) *isolation.Turns {
 			if err != nil {
 				return nil, err
 			}
-			return append([]coreadapter.Tool{factoryContext(d.repository, scope), remoteFileTool(d.repository, scope, d.s.now), inspectCode(d.s.about(d.repository), d.repository, scope, d.s.now), d.draftTool(scope, origin)}, ask...), nil
+			judge := d.judge
+			if _, amending := amendmentTurnID(origin); amending {
+				judge = (&amendmentDrafter{d}).judge
+			}
+			return append([]coreadapter.Tool{factoryContext(d.repository, scope), remoteFileTool(d.repository, scope, d.s.now), inspectCode(d.s.about(d.repository), d.repository, scope, d.s.now), d.draftTool(scope, origin, judge)}, ask...), nil
 		},
 		Hosts:  hosts,
 		Engine: engine,
@@ -737,12 +741,55 @@ func (d *drafter) continued(stream config.WorkstreamID, turn string) (string, er
 	}
 }
 
+// The verdicts draftTool returns on what the attempt has delivered so far.
+const (
+	draftValid     = "valid"
+	draftInvalid   = "invalid"
+	draftDeclined  = "declined"
+	draftUnchanged = "unchanged"
+)
+
+// draftJudge returns the verdict the service would give what the attempt
+// delivered if its turn ended now, with every problem of an invalid draft.
+// It is the same judgment the service records once the attempt completes.
+type draftJudge func(stream config.WorkstreamID, attempt string) (string, []string, error)
+
+// draftStatus is draft_write's result: the file it delivered and the
+// attempt's draft as it now stands.
+type draftStatus struct {
+	Delivered string   `json:"delivered"`
+	Verdict   string   `json:"verdict"`
+	Problems  []string `json:"problems,omitempty"`
+	Next      string   `json:"next"`
+}
+
+var draftNext = map[string]string{
+	draftValid:     "The draft as delivered passes validation. The service records it when your turn ends.",
+	draftInvalid:   "The draft as delivered would not be accepted if your turn ended now. Deliver the missing or corrected files.",
+	draftDeclined:  "Ending your turn declines the amendment with the reason in decline.txt.",
+	draftUnchanged: "The delivered files match the current revision, so ending your turn leaves the revision as it is.",
+}
+
+// judge is the draftJudge of a workstream's own draft: both files must be
+// delivered within the attempt and pass validation.
+func (d *drafter) judge(stream config.WorkstreamID, attempt string) (string, []string, error) {
+	files, problems, err := d.delivered(stream, attempt)
+	if err != nil || len(problems) > 0 {
+		return draftInvalid, problems, err
+	}
+	if problems, err = d.validate(trace.Document{Content: files[plan.SpecPath]}, trace.Document{Content: files[plan.PlanPath]}); err != nil || len(problems) > 0 {
+		return draftInvalid, problems, err
+	}
+	return draftValid, nil, nil
+}
+
 // draftTool delivers one of the two draft files into the output directory of
 // the attempt the claimed turn continues, which the service records once the
 // attempt completes: the turn that delivers the answer to the architect's
-// question adds to what the turn that asked it delivered.
-func (d *drafter) draftTool(scope coreadapter.Scope, attempt string) coreadapter.Tool {
-	return coreadapter.Tool{Name: DraftTool, Description: "Deliver spec.md, plan.json, or an amendment decline.txt. The service records and validates delivered files.", Effect: coreadapter.ToolMemory,
+// question adds to what the turn that asked it delivered. It returns judge's
+// verdict on the attempt's draft as it stands after the delivery.
+func (d *drafter) draftTool(scope coreadapter.Scope, attempt string, judge draftJudge) coreadapter.Tool {
+	return coreadapter.Tool{Name: DraftTool, Description: "Deliver spec.md, plan.json, or an amendment decline.txt. Returns the verdict the service would give everything delivered so far if your turn ended now: valid, invalid with its problems, declined, or unchanged. The service records and validates the delivered files when your turn ends.", Effect: coreadapter.ToolMemory,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","enum":["spec.md","plan.json","decline.txt"]},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`),
 		Handle: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			var input struct{ Path, Content string }
@@ -767,7 +814,11 @@ func (d *drafter) draftTool(scope coreadapter.Scope, attempt string) coreadapter
 			if err := os.WriteFile(filepath.Join(directory, input.Path), []byte(input.Content), 0600); err != nil {
 				return nil, err
 			}
-			return json.RawMessage(`{}`), nil
+			verdict, problems, err := judge(config.WorkstreamID(scope.Workstream), attempt)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(draftStatus{Delivered: input.Path, Verdict: verdict, Problems: problems, Next: draftNext[verdict]})
 		}}
 }
 

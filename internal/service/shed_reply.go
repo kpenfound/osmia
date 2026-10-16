@@ -544,6 +544,20 @@ func (d *debate) redraft(stream config.WorkstreamID, attempt string) (map[string
 	return files, problems, nil
 }
 
+// judge is the draftJudge of a redraft delivered with a reply.
+func (d *debate) judge(stream config.WorkstreamID, attempt string) (string, []string, error) {
+	files, problems, err := d.redraft(stream, attempt)
+	switch {
+	case err != nil:
+		return "", nil, err
+	case len(problems) > 0:
+		return draftInvalid, problems, nil
+	case len(files) == 0:
+		return draftUnchanged, nil, nil
+	}
+	return draftValid, nil, nil
+}
+
 // answers merges what the reply's turns answered, a later answer replacing an
 // earlier one to the same objection, and names the last turn that ended. An
 // interrupted turn contributes nothing.
@@ -867,7 +881,7 @@ func (d *debate) replyPath(stream config.WorkstreamID, in roundInput) *isolation
 			if err != nil {
 				return nil, err
 			}
-			return append(append(tools, d.drafter().draftTool(scope, attempt)), ask...), nil
+			return append(append(tools, d.drafter().draftTool(scope, attempt, d.judge)), ask...), nil
 		},
 		Hosts:  hosts,
 		Engine: engine,

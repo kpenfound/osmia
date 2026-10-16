@@ -129,6 +129,11 @@ func TestArchitectAmendmentDrafts(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("state %s, want %s", got, tc.want)
 			}
+			// The last delivery's verdict foretold what the service recorded.
+			verdict := map[string]string{"proposed": draftValid, "invalid": draftInvalid, "declined": draftDeclined}[tc.want]
+			if delivered := f.delivered("amend-1-1"); len(delivered) != len(tc.files) || delivered[len(delivered)-1].Verdict != verdict {
+				t.Fatalf("deliveries %+v, want verdict %s", delivered, verdict)
+			}
 			feature, err := repo.Workflow(stream, trace.FeatureSubject)
 			must(t, err)
 			wantFeature := BuildingState

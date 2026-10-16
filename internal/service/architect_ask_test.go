@@ -20,11 +20,17 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// delivers makes the architect's turn deliver one draft file.
-func delivers(p *faults, path, content string) fakeTurn {
+// delivers makes the architect's turn deliver one draft file, which the tool
+// must report with verdict for everything the attempt delivered so far.
+func delivers(p *faults, path, content, verdict string) fakeTurn {
 	return func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		if got, err := callTool(ctx, tools, DraftTool, map[string]any{"path": path, "content": content}); err != nil || got != `{}` {
-			p.report("deliver %s: %q %v", path, got, err)
+		got, err := callTool(ctx, tools, DraftTool, map[string]any{"path": path, "content": content})
+		var status draftStatus
+		if err == nil {
+			err = json.Unmarshal([]byte(got), &status)
+		}
+		if err != nil || status.Delivered != path || status.Verdict != verdict || status.Next == "" {
+			p.report("deliver %s: %q %v, want verdict %s", path, got, err, verdict)
 		}
 		return nil
 	}
@@ -60,7 +66,7 @@ func TestArchitectQuestionParksTheDraftUntilTheAnswerArrives(t *testing.T) {
 		if !strings.Contains(req.Prompt, "Call ask when something you must know to draft is not in your view") || !strings.Contains(req.SystemPrompt, "call ask: your work waits for the answer") {
 			p.report("draft prompts do not offer ask:\n%s\n%s", req.SystemPrompt, req.Prompt)
 		}
-		return errors.Join(delivers(p, plan.SpecPath, validSpec)(ctx, req, verified, tools), asks(p, "1")(ctx, req, verified, tools))
+		return errors.Join(delivers(p, plan.SpecPath, validSpec, draftInvalid)(ctx, req, verified, tools), asks(p, "1")(ctx, req, verified, tools))
 	})
 	answering := f.answer("1", func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
 		for _, want := range []string{"The owner ruled on your question 1. The chief of staff relays the ruling.", "| " + askedQuestion, "<<< osmia:owner_response", "| " + relayedRuling} {
@@ -74,7 +80,7 @@ func TestArchitectQuestionParksTheDraftUntilTheAnswerArrives(t *testing.T) {
 		if names, err := toolNames(ctx, tools); err != nil || !slices.Equal(names, []string{questions.AskTool, DraftTool, "factory_context", "file_read", "inspect_code", "project_context", "read_remote_file"}) {
 			p.report("answer turn tools %v %v", names, err)
 		}
-		return delivers(p, plan.PlanPath, validPlan)(ctx, req, verified, tools)
+		return delivers(p, plan.PlanPath, validPlan, draftValid)(ctx, req, verified, tools)
 	})
 	stream := f.handIn(t, "design", handedDesign)
 	f.await(t, stream, draftAt("waiting-1"))
@@ -231,7 +237,7 @@ func TestArchitectQuestionHoldsTheReplyAndTheConclusion(t *testing.T) {
 		if names, err := toolNames(ctx, tools); err != nil || !slices.Equal(names, []string{questions.AskTool, DraftTool, "file_read", "project_context", shed.ReplyTool}) {
 			p.report("answer turn tools %v %v", names, err)
 		}
-		return delivers(p, plan.PlanPath, splitPlan)(ctx, req, verified, tools)
+		return delivers(p, plan.PlanPath, splitPlan, draftValid)(ctx, req, verified, tools)
 	})
 	stream := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, stream, "asked-1", "replied-1", "failed-1")
@@ -330,7 +336,7 @@ func TestArchitectQuestionParksTheRedraftUntilTheAnswerArrives(t *testing.T) {
 	redraft := roundInput{Round: 1, Redraft: true}
 	asking := redraft.turnID(1)
 	f.script(asking, nil, asks(p, "1"))
-	answering := f.answer("1", delivers(p, plan.PlanPath, splitPlan))
+	answering := f.answer("1", delivers(p, plan.PlanPath, splitPlan, draftValid))
 	stream := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, stream, "concluded-1")
 	if _, err := f.c.ShedRedraft(ctx, stream, "Split the resume unit."); err != nil {

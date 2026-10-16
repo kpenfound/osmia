@@ -56,6 +56,11 @@ type architectFixture struct {
 	engine      *demoEngine
 	sessions    *demoSessions
 	clock       *demoClock
+
+	statusMu sync.Mutex
+	// statuses holds, by turn, what each draft_write a scripted turn made
+	// returned.
+	statuses map[string][]draftStatus
 }
 
 // architectContainer runs the architect in a container, the only sandbox
@@ -157,15 +162,34 @@ func (f *architectFixture) script(turn string, files map[string]string, check fu
 			if !ok {
 				continue
 			}
-			if _, e := callTool(ctx, tools, DraftTool, map[string]any{"path": path, "content": content}); e != nil {
-				err = errors.Join(err, fmt.Errorf("deliver %s: %w", path, e))
+			got, e := callTool(ctx, tools, DraftTool, map[string]any{"path": path, "content": content})
+			var status draftStatus
+			if e == nil {
+				e = json.Unmarshal([]byte(got), &status)
 			}
+			if e != nil {
+				err = errors.Join(err, fmt.Errorf("deliver %s: %w", path, e))
+				continue
+			}
+			f.statusMu.Lock()
+			if f.statuses == nil {
+				f.statuses = map[string][]draftStatus{}
+			}
+			f.statuses[turn] = append(f.statuses[turn], status)
+			f.statusMu.Unlock()
 		}
 		if err != nil {
 			return nil, err
 		}
 		return &agent.Result{ClaudeID: "session-" + turn, ResultText: "Draft delivered", SessionDir: req.SessionDir, NumTurns: 2}, nil
 	}
+}
+
+// delivered returns what each draft_write the scripted turn made returned.
+func (f *architectFixture) delivered(turn string) []draftStatus {
+	f.statusMu.Lock()
+	defer f.statusMu.Unlock()
+	return slices.Clone(f.statuses[turn])
 }
 
 func (f *architectFixture) runs() []string {
@@ -632,6 +656,31 @@ func TestArchitectResubmitsAnInvalidDraft(t *testing.T) {
 	}
 	if _, ok := byID["draft-3-invalid"]; ok {
 		t.Fatal("draft 3 was refused")
+	}
+	// Each delivery returned the verdict the service then recorded for
+	// everything its attempt had delivered so far.
+	for turn, want := range map[string][]draftStatus{
+		"draft-1-1": {{Delivered: plan.SpecPath, Verdict: draftInvalid, Problems: []string{"plan.json is not UTF-8 text"}}},
+		"draft-2-1": {
+			{Delivered: plan.SpecPath, Verdict: draftInvalid, Problems: []string{"plan.json was not delivered"}},
+			{Delivered: plan.PlanPath, Verdict: draftInvalid, Problems: []string{"spec#2: no unit serves this criterion", `unit "dedupe": dependency cycle dedupe -> resume -> dedupe`}},
+		},
+		"draft-3-1": {
+			{Delivered: plan.SpecPath, Verdict: draftInvalid, Problems: []string{"plan.json was not delivered"}},
+			{Delivered: plan.PlanPath, Verdict: draftValid},
+		},
+	} {
+		got := f.delivered(turn)
+		for i := range got {
+			if got[i].Next != draftNext[got[i].Verdict] {
+				t.Fatalf("%s delivery %d next %q", turn, i, got[i].Next)
+			}
+		}
+		if !slices.EqualFunc(got, want, func(a, b draftStatus) bool {
+			return a.Delivered == b.Delivered && a.Verdict == b.Verdict && slices.Equal(a.Problems, b.Problems)
+		}) {
+			t.Fatalf("%s deliveries %+v, want %+v", turn, got, want)
+		}
 	}
 	if tr := byID["sketched"]; tr.From != HandedState || tr.Cause != ops[2].Operation.ID || !strings.Contains(tr.Reason, "draft 3 passed validation: spec.md revision 3 with 2 acceptance criteria and plan.json revision 2 with 2 units") {
 		t.Fatalf("sketched: %+v", tr)

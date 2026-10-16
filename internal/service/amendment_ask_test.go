@@ -146,7 +146,7 @@ func (a *amendmentAskFixture) thread(t *testing.T) trace.Thread {
 // question 1.
 func parks(p *faults) fakeTurn {
 	return func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
-		return errors.Join(delivers(p, plan.SpecPath, checkpointSpec)(ctx, req, verified, tools), asks(p, "1")(ctx, req, verified, tools))
+		return errors.Join(delivers(p, plan.SpecPath, checkpointSpec, draftValid)(ctx, req, verified, tools), asks(p, "1")(ctx, req, verified, tools))
 	}
 }
 
@@ -186,7 +186,7 @@ func TestArchitectQuestionParksTheAmendmentUntilItsAnswer(t *testing.T) {
 			if !strings.Contains(req.Prompt, "Answer to your question 1.") || !strings.Contains(req.Prompt, askedAnswer) {
 				p.report("answer prompt:\n%s", req.Prompt)
 			}
-			return delivers(p, plan.PlanPath, restartPlan)(ctx, req, verified, tools)
+			return delivers(p, plan.PlanPath, restartPlan, draftValid)(ctx, req, verified, tools)
 		})
 	})
 	first := f.parkFirst(t, p)
@@ -318,7 +318,7 @@ func TestParkedAmendmentLeavesNoAnswerBlockingTheNext(t *testing.T) {
 	var answering string
 	f := newAmendmentAskFixture(t, func(f *shedFixture) {
 		f.script("amend-1-1", nil, parks(p))
-		answering = f.answer("1", delivers(p, plan.PlanPath, restartPlan))
+		answering = f.answer("1", delivers(p, plan.PlanPath, restartPlan, draftValid))
 		f.script("amend-2-1", map[string]string{plan.PlanPath: restartPlan}, nil)
 		f.script("amend-3-1", map[string]string{plan.SpecPath: checkpointSpec}, nil)
 	})

@@ -117,8 +117,12 @@ func TestServiceTurnsApplyRoleCeilingAndFreshViews(t *testing.T) {
 					for _, tool := range tools {
 						names = append(names, tool.Name)
 						if tool.Name == "file_write" {
-							if _, err := tool.Handle(context.Background(), json.RawMessage(`{"path":"src/file","content":"changed"}`)); err != nil {
+							result, err := tool.Handle(context.Background(), json.RawMessage(`{"path":"src/file","content":"changed"}`))
+							if err != nil {
 								return err
+							}
+							if string(result) != `{"written":true,"path":"src/file","bytes":7}` {
+								return fmt.Errorf("file_write returned %s", result)
 							}
 							for _, path := range []string{"../host", ".git/config"} {
 								raw, _ := json.Marshal(map[string]string{"path": path, "content": "bad"})

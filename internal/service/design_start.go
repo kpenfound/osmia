@@ -395,7 +395,7 @@ func (s *Service) selectDesignRepos(ctx context.Context, r *trace.Repository, st
 }
 
 func (s *Service) affectedReposDelivery(r *trace.Repository, stream config.WorkstreamID, scope coreadapter.Scope) coreadapter.Tool {
-	return coreadapter.Tool{Name: affectedReposTool, Effect: coreadapter.ToolMemory, Description: "Deliver the affected repo IDs. The service validates scope and records stable member identities.",
+	return coreadapter.Tool{Name: affectedReposTool, Effect: coreadapter.ToolMemory, Description: "Deliver the affected repo IDs. The service validates scope, records stable member identities and returns the recorded members.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"repos":{"type":"array","items":{"type":"string"},"minItems":1,"uniqueItems":true}},"required":["repos"],"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			if scope.Role != architectRole || scope.Project != string(r.Project()) || scope.Workstream != string(stream) {
@@ -444,20 +444,28 @@ func (s *Service) affectedReposDelivery(r *trace.Repository, stream config.Works
 			if err != nil {
 				return nil, err
 			}
+			recorded := func() (json.RawMessage, error) {
+				return json.Marshal(struct {
+					Recorded bool           `json:"recorded"`
+					Members  []designMember `json:"members"`
+				}{true, selected.Members})
+			}
 			if found {
 				previous, _ := json.Marshal(old)
 				if string(previous) != string(data) {
 					return nil, trace.ErrConflict
 				}
-				return json.RawMessage(`{}`), nil
+				return recorded()
 			}
 			h := ownerHeader(designSelectionDocument, r.Project(), stream, designStartTransition, s.now())
 			h.Schema = "osmia.trace.document"
-			err = r.RecordDocuments(ctx, []trace.Document{{Header: h, Path: designSelectionPath, Content: string(data)}})
-			if err == nil {
-				err = s.step("design-selection-recorded")
+			if err := r.RecordDocuments(ctx, []trace.Document{{Header: h, Path: designSelectionPath, Content: string(data)}}); err != nil {
+				return nil, err
 			}
-			return json.RawMessage(`{}`), err
+			if err := s.step("design-selection-recorded"); err != nil {
+				return nil, err
+			}
+			return recorded()
 		}}
 }
 

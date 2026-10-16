@@ -257,8 +257,27 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 		if verified.VCS || req.Grants.VCS || req.Profile.VCSAccess || req.Workspace.VCS() != nil || len(req.VCSEnv) != 0 {
 			return nil, errors.New("architect has mutation or VCS authority")
 		}
-		_, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": []string{string(f.project), string(f.project2)}})
-		return questionResult(req, "session-selection", "Both repos are affected."), err
+		// The recorded selection is returned, again when it is delivered
+		// again.
+		var results []string
+		for range 2 {
+			got, err := callTool(ctx, tools, affectedReposTool, map[string]any{"repos": []string{string(f.project), string(f.project2)}})
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, got)
+		}
+		var selected struct {
+			Recorded bool           `json:"recorded"`
+			Members  []designMember `json:"members"`
+		}
+		if err := json.Unmarshal([]byte(results[0]), &selected); err != nil {
+			return nil, err
+		}
+		if !selected.Recorded || len(selected.Members) != 2 || selected.Members[0].Repo != f.project || selected.Members[1].Repo != f.project2 || selected.Members[0].Workstream == "" || results[1] != results[0] {
+			return nil, fmt.Errorf("%s returned %v", affectedReposTool, results)
+		}
+		return questionResult(req, "session-selection", "Both repos are affected."), nil
 	}
 	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := toolNames(ctx, tools)

@@ -551,6 +551,9 @@ func TestCapReachedWithAnOpenVetoApprovesNothing(t *testing.T) {
 	if reply := f.reply(t, stream, 1); reply.Redraft != nil || len(f.documents(t, stream, plan.PlanDocument)) != 1 {
 		t.Fatalf("an unchanged plan was recorded as a redraft: %+v", reply)
 	}
+	if delivered := f.delivered(replyTurnID(1, 1)); len(delivered) != 1 || delivered[0].Verdict != draftUnchanged || len(delivered[0].Problems) != 0 {
+		t.Fatalf("an unchanged plan was delivered as %+v", delivered)
+	}
 	open, err := Dissent(f.repository(), stream)
 	must(t, err)
 	if len(open) != 2 || open[0].ID != veto || open[0].Kind != shed.Charter || open[0].Member != committeeAgent(1) || open[0].Part != "spec#2" || !open[0].Blocking ||

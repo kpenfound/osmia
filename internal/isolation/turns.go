@@ -318,7 +318,11 @@ func fileTools(view *FileView) []coreadapter.Tool {
 				if err := view.Write(input.Path, []byte(input.Content)); err != nil {
 					return nil, err
 				}
-				return json.RawMessage(`{}`), nil
+				return json.Marshal(struct {
+					Written bool   `json:"written"`
+					Path    string `json:"path"`
+					Bytes   int    `json:"bytes"`
+				}{true, input.Path, len(input.Content)})
 			}},
 	}
 }
