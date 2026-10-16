@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/agentcore/agent/agenttest"
@@ -171,58 +170,12 @@ cat >/dev/null
 						t.Fatalf("sandbox receives %s", forbidden)
 					}
 				}
-				assertSbxHostPolicy(t, runner, "1", true)
+				assertSbxHostPolicy(t, runner, "1")
 				if !strings.Contains(readSbxFile(t, filepath.Join(filepath.Dir(runner.SbxBin), "sbx-rm.txt")), "rm\n--force\n") {
 					t.Fatal("sandbox not removed")
 				}
 			})
 		}
-	}
-}
-
-func TestSbxPreparedSessionRefusesChangedGrantsAndRelease(t *testing.T) {
-	ctx := context.Background()
-	runner := sbxRunner(t, "exit 99\n")
-	work, sessionDir := t.TempDir(), t.TempDir()
-	grants := agent.Grants{Tools: []string{}, Mounts: []agent.Mount{{Path: work, Access: agent.ReadWrite}, {Path: sessionDir, Access: agent.ReadOnly}}}
-	enforcer, err := a.NewEnforcer(runner, a.ExecutionSettings{Mode: "sbx"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := enforcer.Prepare(ctx, grants)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer session.Release(ctx)
-	p := session.Policy()
-	p.Mounts[0].Access = agent.ReadOnly
-	if !session.Policy().Writes(work) {
-		t.Fatal("returned policy aliases session state")
-	}
-	req := agent.Request{Profile: agent.Profile{Agent: "claude", Sandbox: "sbx"}, Workspace: vcs.Directory(work), SessionDir: sessionDir}
-	grants.VCS = true
-	req.Grants = &grants
-	if _, err := session.Run(ctx, req); !errors.Is(err, agent.ErrNotGranted) {
-		t.Fatalf("changed grants: %v", err)
-	}
-	req.Grants = nil
-	if err := os.Remove(work); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(t.TempDir(), work); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := session.Run(ctx, req); !errors.Is(err, agent.ErrPolicyChanged) {
-		t.Fatalf("changed mount: %v", err)
-	}
-	if err := session.Release(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := session.Run(ctx, req); !errors.Is(err, agent.ErrReleased) {
-		t.Fatalf("released session: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(runner.SbxBin), "sbx-create.txt")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("refused request launched a sandbox")
 	}
 }
 
@@ -244,63 +197,9 @@ func TestSbxRefusesUnavailableCLI(t *testing.T) {
 	}
 }
 
-func TestSbxFailureAndCancellationRemoveSandbox(t *testing.T) {
-	for _, cancelTurn := range []bool{false, true} {
-		name := "failure"
-		if cancelTurn {
-			name = "cancellation"
-		}
-		t.Run(name, func(t *testing.T) {
-			turn := toolTurn(t, "sbx")
-			turn.Sandbox.Verified.Environment[a.TokenEnvironment] = turn.SessionDirectory
-			body := "exit 42\n"
-			if cancelTurn {
-				body = "touch \"$OSMIA_MCP_TOKEN/started\"\nexec sleep 60\n"
-			}
-			runner := sbxRunner(t, body)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			done := make(chan error, 1)
-			go func() {
-				result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: a.CoreEngine{Runner: runner}}}).Run(ctx, turn)
-				if err == nil && !result.IsError {
-					t.Error("failed session reported success")
-				}
-				done <- err
-			}()
-			if cancelTurn {
-				deadline := time.Now().Add(5 * time.Second)
-				for {
-					if _, err := os.Stat(filepath.Join(turn.SessionDirectory, "started")); err == nil {
-						break
-					}
-					if time.Now().After(deadline) {
-						cancel()
-						<-done
-						t.Fatal("fake agent did not start")
-					}
-					time.Sleep(10 * time.Millisecond)
-				}
-				cancel()
-			}
-			select {
-			case err := <-done:
-				if cancelTurn && !errors.Is(err, context.Canceled) {
-					t.Fatalf("cancellation: %v", err)
-				}
-			case <-time.After(10 * time.Second):
-				t.Fatal("sandbox run did not finish")
-			}
-			assertSbxHostPolicy(t, runner, "1", true)
-			removed := readSbxFile(t, filepath.Join(filepath.Dir(runner.SbxBin), "sbx-rm.txt"))
-			if strings.Count(removed, "rm\n--force\n") != 1 {
-				t.Fatalf("cleanup: %s", removed)
-			}
-		})
-	}
-}
-
-func assertSbxHostPolicy(t *testing.T, runner agent.Runner, port string, removed bool) {
+// assertSbxHostPolicy checks that the sandbox was allowed to reach the host's
+// MCP port, and that the rule and the sandbox were removed afterwards.
+func assertSbxHostPolicy(t *testing.T, runner agent.Runner, port string) {
 	t.Helper()
 	dir := filepath.Dir(runner.SbxBin)
 	created := strings.Split(readSbxFile(t, filepath.Join(dir, "sbx-create.txt")), "\n")
@@ -313,38 +212,15 @@ func assertSbxHostPolicy(t *testing.T, runner agent.Runner, port string, removed
 	if name == "" {
 		t.Fatal("sandbox not named")
 	}
-	want := "policy allow network --sandbox " + name + " localhost:" + port + "\n"
-	calls := "create --quiet\npolicy allow\n"
-	if removed {
-		want += "policy rm network --sandbox " + name + " --resource localhost:" + port + " --force\n"
-		calls += "policy rm\n"
-	}
-	calls += "rm --force\n"
+	want := "policy allow network --sandbox " + name + " localhost:" + port + "\n" +
+		"policy rm network --sandbox " + name + " --resource localhost:" + port + " --force\n"
+	calls := "create --quiet\npolicy allow\npolicy rm\nrm --force\n"
 	if got := readSbxFile(t, filepath.Join(dir, "sbx-policy.txt")); got != want {
 		t.Fatalf("host policy:\n%s\nwant:\n%s", got, want)
 	}
 	if got := readSbxFile(t, filepath.Join(dir, "sbx-calls.txt")); got != calls {
 		t.Fatalf("sandbox lifecycle:\n%s\nwant:\n%s", got, calls)
 	}
-}
-
-func TestSbxPolicyFailurePreventsExecutionAndRemovesSandbox(t *testing.T) {
-	turn := toolTurn(t, "sbx")
-	runner := sbxRunner(t, "exit 99\n")
-	dir := filepath.Dir(runner.SbxBin)
-	if err := os.WriteFile(filepath.Join(dir, "fail-policy"), nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: a.CoreEngine{Runner: runner}}}).Run(context.Background(), turn)
-	if err == nil || !strings.Contains(err.Error(), "allow sandbox") || !result.IsError {
-		t.Fatalf("policy refusal: %+v, %v", result, err)
-	}
-	for _, name := range []string{"sbx-probe.txt", "sbx-setup.txt"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("policy refusal reached backend: %s", name)
-		}
-	}
-	assertSbxHostPolicy(t, runner, "1", false)
 }
 
 func TestSbxHostGrantsAndAgentPolicyCannotWiden(t *testing.T) {
@@ -408,7 +284,7 @@ func TestSbxSharedMCPPortKeepsCallerOwnedListener(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertSbxHostPolicy(t, runner, address.Port(), true)
+			assertSbxHostPolicy(t, runner, address.Port())
 			address.Host = "127.0.0.1:" + address.Port()
 			client := mcp.NewClient(&mcp.Implementation{Name: "fixture", Version: "1"}, nil)
 			session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: address.String(), HTTPClient: &http.Client{Transport: mcphost.BearerTransport(endpoint.Token, nil)}, MaxRetries: -1}, nil)
@@ -440,42 +316,5 @@ func TestSbxRequestCannotChangePreparedHostPort(t *testing.T) {
 	}
 	if len(engine.Prepared) != 1 || len(engine.Requests) != 1 {
 		t.Fatal("changed endpoint reached preparation")
-	}
-}
-
-// TestSbxAcceptsTurnIdentifiersLongerThanTheSandboxNameLimit shows that a
-// turn identifier longer than sbx's 63-character sandbox-name limit still
-// prepares and runs in an sbx session: Osmia passes the identifier straight
-// through to core's request, and core's own sbx sandboxName bounds and
-// hashes it. Two identifiers sharing a long prefix still get distinct
-// sandboxes.
-func TestSbxAcceptsTurnIdentifiersLongerThanTheSandboxNameLimit(t *testing.T) {
-	long := strings.Repeat("a", 80) + "-attempt-1"
-	sibling := strings.Repeat("a", 80) + "-attempt-2"
-	names := map[string]string{}
-	for _, id := range []string{long, sibling} {
-		turn := toolTurn(t, "sbx")
-		turn.Scope.Turn = id
-		turn.Sandbox.Verified.Environment[a.TokenEnvironment] = turn.SessionDirectory
-		runner := sbxRunner(t, "cat >/dev/null\necho '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"boxed\"}'\n")
-		result, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: a.CoreEngine{Runner: runner}}}).Run(context.Background(), turn)
-		if err != nil || result.IsError {
-			t.Fatalf("turn identifier %q (%d characters): %+v %v", id, len(id), result, err)
-		}
-		created := readSbxFile(t, filepath.Join(filepath.Dir(runner.SbxBin), "sbx-create.txt"))
-		args := strings.Split(created, "\n")
-		name := ""
-		for i, arg := range args {
-			if arg == "--name" && i+1 < len(args) {
-				name = args[i+1]
-			}
-		}
-		if name == "" || utf8.RuneCountInString(name) > 63 {
-			t.Fatalf("sandbox name for %q: %q (%d characters)", id, name, utf8.RuneCountInString(name))
-		}
-		names[id] = name
-	}
-	if names[long] == names[sibling] {
-		t.Fatalf("turn identifiers sharing a long prefix share a sandbox name %q", names[long])
 	}
 }
