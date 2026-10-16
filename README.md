@@ -37,7 +37,8 @@ behavior and feature dependencies; the guides describe implemented behavior.
 3. Masons do each unit's task in scoped workspaces. Reviewers check each
    candidate against its unit's acceptance, and the service lands approved
    units in dependency order.
-4. A final review shows the evidence for each criterion. You approve delivery;
+4. A high-level final review reads the assembled branch against the spec's
+   intent and reports blocking and advisory findings. You approve delivery;
    the service pushes the branch and opens the pull request.
 
 The chief of staff answers what it can, resolves contested units it is

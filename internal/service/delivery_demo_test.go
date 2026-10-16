@@ -18,7 +18,8 @@ import (
 )
 
 // TestDeliveryDemonstration follows one feature from ordinary unit turns
-// through final review, a follow-up, the owner's decision and publication.
+// through a final review with an advisory finding, which builds nothing, to
+// the owner's decision and publication.
 func TestDeliveryDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -40,17 +41,6 @@ func TestDeliveryDemonstration(t *testing.T) {
 	chief := f.engine.turns["*"]
 	f.engine.turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
-		case strings.HasPrefix(req.Name, "mason-final-") && strings.HasSuffix(req.Name, "-implement"):
-			if !strings.Contains(req.Prompt, "acknowledged chunks") {
-				return nil, fmt.Errorf("follow-up lost its gap: %s", req.Prompt)
-			}
-			if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/proof_test.go"), []byte("package trace\n// Acknowledged chunks are skipped.\n"), 0600); err != nil {
-				return nil, err
-			}
-			ok, why, err := done(ctx, tools, map[string]any{"outcome": "Prove skipped chunks"})
-			if err != nil || !ok {
-				return nil, fmt.Errorf("follow-up report: %s: %v", why, err)
-			}
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
 			if _, err := reviewIdentityInPrompt(req.Prompt); err != nil {
 				return nil, err
@@ -59,22 +49,13 @@ func TestDeliveryDemonstration(t *testing.T) {
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("review: %s: %v", body, err)
 			}
-		case strings.HasPrefix(req.Name, "final-1-") || strings.HasPrefix(req.Name, "final-2-"):
+		case strings.HasPrefix(req.Name, "final-1-"):
 			upstream, err := readTool(ctx, tools, "branch/UPSTREAM.md")
 			if err != nil || upstream != "upstream moved\n" {
 				return nil, fmt.Errorf("final review did not read rebased upstream: %q: %v", upstream, err)
 			}
-			criteria := []any{map[string]any{"criterion": "spec#1", "evidence": "resume landing and TestResume"}}
-			if strings.HasPrefix(req.Name, "final-1-") {
-				criteria = append(criteria, map[string]any{"criterion": "spec#2", "gap": "No proof that acknowledged chunks are skipped"})
-			} else {
-				proof, err := readTool(ctx, tools, "branch/internal/trace/proof_test.go")
-				if err != nil || !strings.Contains(proof, "Acknowledged chunks") {
-					return nil, fmt.Errorf("second review missed follow-up: %q: %v", proof, err)
-				}
-				criteria = append(criteria, map[string]any{"criterion": "spec#2", "evidence": "follow-up proof_test.go shows acknowledged chunks are skipped"})
-			}
-			body, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Resumable uploads", "criteria": criteria})
+			body, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Resumable uploads", "findings": []any{
+				map[string]any{"severity": "advisory", "criteria": []any{"spec#2"}, "finding": "No test shows acknowledged chunks are skipped after a restart."}}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("final report: %s: %v", body, err)
 			}
@@ -100,25 +81,15 @@ func TestDeliveryDemonstration(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	added, err := followup.Read(f.repository(), stream)
-	must(t, err)
-	if len(added) != 1 || added[0].Criterion != "spec#2" || added[0].Gap == "" {
-		t.Fatalf("follow-up %+v", added)
-	}
-	unit := added[0].Unit.ID
-	f.awaitMerged(t, stream, unit)
-	for len(streamDocuments(t, f.repository(), stream, finalReportDocument)) < 2 {
-		if time.Now().After(deadline) {
-			t.Fatal("second final review did not report")
-		}
-		time.Sleep(50 * time.Millisecond)
+	if added, err := followup.Read(f.repository(), stream); err != nil || len(added) != 0 {
+		t.Fatalf("an advisory finding built follow-ups %+v: %v", added, err)
 	}
 	masons.check(t)
 	presented, err := f.c.Delivery(ctx, stream)
 	must(t, err)
-	// The draft is a short spec summary, not an account of the work: it no
-	// longer names the follow-up unit that closed the gap (spec#3).
-	if presented.Report.Review != 2 || presented.Report.Criteria[1].Evidence == "" || presented.Title == "" || strings.Contains(presented.Draft, unit) {
+	// The draft is a short spec summary, not an account of the work: it does
+	// not carry the review's findings (spec#3).
+	if presented.Report.Review != 1 || presented.Report.Criteria[1].Evidence == "" || len(presented.Report.Findings) != 1 || presented.Title == "" || strings.Contains(presented.Draft, "after a restart") {
 		t.Fatalf("presentation %+v", presented)
 	}
 	f.stop(t)
@@ -167,7 +138,7 @@ func TestDeliveryDemonstration(t *testing.T) {
 	if len(records) != 2 || records[1].Approval != 1 || records[1].Reviewed != approval.Commit || records[1].Commit != tip || records[1].DescriptionHash != approval.DescriptionHash || records[1].PullRequest != p.pulls.prs[0].Number {
 		t.Fatalf("publication provenance %+v", records)
 	}
-	if len(streamDocuments(t, p.repository, stream, finalReportDocument)) != 2 || len(streamDocuments(t, p.repository, stream, deliveryDocument)) != 1 {
+	if len(streamDocuments(t, p.repository, stream, finalReportDocument)) != 1 || len(streamDocuments(t, p.repository, stream, deliveryDocument)) != 1 {
 		t.Fatal("review or owner ruling missing from trace")
 	}
 }

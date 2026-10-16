@@ -312,7 +312,10 @@ a crash and repeated starts neither lose nor duplicate records. See
   publication is listed once three attempts in a row have failed: its question carries the last failure, such as GitHub's
   refusal with the token permissions it asks for, and it says when the next
   attempt runs. It takes no answer; fix the cause and it leaves the inbox once
-  an attempt publishes. A held drift rebase, whose conflict resolution review
+  an attempt publishes. A final review whose project checks did not complete
+  three times in a row is listed with the last failure and when the checks run
+  next; it takes no answer, and it leaves the inbox once a run completes. A
+  held drift rebase, whose conflict resolution review
   sent back `shed.max_bounces` times, is answered with `rebase`, which
   asks for another, or by asking the chief of staff with `send` to hand it
   back with a note its drift mason and reviewer receive; it leaves the inbox
@@ -539,20 +542,26 @@ a crash and repeated starts neither lose nor duplicate records. See
   unknown amendment fails with `not_found` (exit 4). You can also tell the
   workstream's chief of staff your decision with `send`.
 - `delivery <workstream-id>` shows an assembled workstream's final report,
-  unshown criteria first, and the drafted pull request description, then any
+  its summary, blocking then advisory findings, and every criterion with the
+  merged units that serve it, unserved first, and the drafted pull request
+  description, then any
   approved description and the state of its publication. For a delivered
   workstream it shows the report, the approved description and the pull
   request it was delivered as, or the merge you recorded with `merged`.
-- `approve <workstream-id> [description-file] [--message-file FILE | --messages-file FILE]` approves the drafted
+- `approve <workstream-id> [description-file] [--message-file FILE | --messages-file FILE] [--accept]` approves the drafted
   description, or the file's text instead, for the presented final report.
+  A report with blocking findings or an unserved criterion is approved only
+  with `--accept`, which accepts them as they are; the approval records what
+  it accepted.
   `--message-file` supplies the commit message when delivery has one commit.
   For multiple commits, `--messages-file` reads a JSON array of
   `{"commit":"<presented revision>","message":"<edited text>"}` objects, in the
   order returned by `delivery --json` in `messages`. Include every commit.
   The service attributes the outgoing commits to your Git identity, removes
   agent co-author trailers, adds your sign-off and signs before pushing the
-  branch to your repository or fork and opening the pull request; `delivery` shows its progress. A report with gaps, a presentation
-  that changed and a delivered workstream fail with `conflict` (exit 5). After
+  branch to your repository or fork and opening the pull request; `delivery` shows its progress. A report with blocking findings approved
+  without `--accept`, a presentation that changed and a delivered workstream
+  fail with `conflict` (exit 5). After
   a publication was refused, approving again asks for another one.
 - `merged <workstream-id>` records an assembled workstream delivered because
   you merged its feature branch into upstream yourself, outside the factory.

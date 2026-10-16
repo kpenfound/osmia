@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -113,7 +112,7 @@ func TestDependentDeliveryMaintenanceReviewsApprovesAndReconcilesUpstream(t *tes
 	in, err := decodeFinalReview(op)
 	must(t, err)
 	p.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Ready upstream", "criteria": []any{map[string]any{"criterion": "spec#1", "evidence": "resume.go"}, map[string]any{"criterion": "spec#2", "evidence": "dedupe.go"}}})
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Ready upstream", "findings": []any{}})
 		return err
 	})
 	result, err := reviewer.Apply(ctx, op)
@@ -223,14 +222,14 @@ func TestDependentDeliveryMaintenanceGapKeepsImplementationTerminal(t *testing.T
 	in, err := decodeFinalReview(op)
 	must(t, err)
 	p.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Integration exposes a gap", "criteria": []any{map[string]any{"criterion": "spec#1", "gap": "resume behavior is missing"}, map[string]any{"criterion": "spec#2", "evidence": "dedupe.go"}}})
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Integration exposes a gap", "findings": []any{map[string]any{"severity": "blocking", "criteria": []any{"spec#1"}, "finding": "resume behavior is missing"}}})
 		return err
 	})
 	_, err = reviewer.Apply(ctx, op)
 	must(t, err)
 	report, reason, err := reviewer.finalGate(ctx, p.stream)
 	must(t, err)
-	if !report.Maintenance || !strings.Contains(reason, "repairs require a new workstream") || p.feature(t) != DeliveredState {
+	if !report.Maintenance || reason != "" || len(report.blocking()) != 1 || p.feature(t) != DeliveredState {
 		t.Fatalf("maintenance gap: %+v reason %q state %s", report, reason, p.feature(t))
 	}
 	units, err := followup.Read(p.repository, p.stream)

@@ -160,7 +160,7 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 			return CheckResult{}, fmt.Errorf("checks missed merged dependency reference: %q, %v", dependency, err)
 		}
 		if repair && checkCalls == 1 {
-			return CheckResult{ExitCode: 1, Output: "TestDedupe fails after the dependency update"}, nil
+			return CheckResult{ExitCode: 1, Output: failedReport("dag://?check=go/packages/tests/test&go-test=TestDedupe") + "TestDedupe fails after the dependency update\n"}, nil
 		}
 		return CheckResult{Output: "dependency checks pass"}, nil
 	})
@@ -310,11 +310,11 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 		in, err := decodeFinalReview(op)
 		must(t, err)
 		f.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-			criterion := map[string]any{"criterion": "spec#2", "evidence": "dedupe.go"}
+			findings := []any{}
 			if gap {
-				criterion = map[string]any{"criterion": "spec#2", "gap": "TestDedupe fails with the merged dependency; repair dedupe.go within the slice"}
+				findings = append(findings, map[string]any{"severity": "blocking", "criteria": []any{"spec#2"}, "finding": "TestDedupe fails with the merged dependency; repair dedupe.go within the slice"})
 			}
-			_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Dependency updated", "criteria": []any{map[string]any{"criterion": "spec#1", "evidence": "resume.go and dependency.txt"}, criterion}})
+			_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Dependency updated", "findings": findings})
 			return err
 		})
 		result := settleOperation(t, f.s, repository, stream, op, a)
@@ -326,9 +326,9 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 		if !found || fresh.EdgeResolved == "" || fresh.Commit == report.Commit {
 			t.Fatalf("fresh review did not read the dependency update: %+v", fresh)
 		}
-		checks, found, err := a.recordedChecks(stream, in.Review)
+		_, checks, err := a.incompleteChecks(stream, in.Review, fresh.Commit)
 		must(t, err)
-		if !found || checks.Commit != fresh.Commit {
+		if checks.Commit != fresh.Commit {
 			t.Fatalf("checks did not read the update: %+v", checks)
 		}
 		assertContext(true)
@@ -490,7 +490,7 @@ func exerciseReadyDependentBaseGap(t *testing.T, p *publicationFixture, parent c
 	in, err := decodeFinalReview(op)
 	must(t, err)
 	p.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Base integration exposes a gap", "criteria": []any{map[string]any{"criterion": "spec#1", "gap": "resume behavior is missing after base integration"}, map[string]any{"criterion": "spec#2", "evidence": "dedupe.go"}}})
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Base integration exposes a gap", "findings": []any{map[string]any{"severity": "blocking", "criteria": []any{"spec#1"}, "finding": "resume behavior is missing after base integration"}}})
 		return err
 	})
 	if result := settleOperation(t, p.s, repo, stream, op, reviewer); result.Outcome != "succeeded" {
@@ -498,8 +498,11 @@ func exerciseReadyDependentBaseGap(t *testing.T, p *publicationFixture, parent c
 	}
 	report, reason, err := reviewer.finalGate(ctx, stream)
 	must(t, err)
-	if !report.Maintenance || report.EdgeResolved == "" || !strings.Contains(reason, "repairs require a new workstream") || p.feature(t) != DeliveredState {
+	if !report.Maintenance || report.EdgeResolved == "" || reason != "" || len(report.blocking()) != 1 || p.feature(t) != DeliveredState {
 		t.Fatalf("later maintenance gap: %+v reason %q state %s", report, reason, p.feature(t))
+	}
+	if body := noticeOf(t, repo, stream, fmt.Sprintf("final-review-%d-reviewed", in.Review)); !strings.Contains(body, "repairs need a new workstream") {
+		t.Fatalf("the chief heard %q", body)
 	}
 	after, err := followup.Read(repo, stream)
 	must(t, err)
@@ -519,7 +522,7 @@ func exerciseReadyDependentBaseGap(t *testing.T, p *publicationFixture, parent c
 		t.Fatal(api)
 	}
 	decision := DeliveryDecision{Review: report.Review, ReviewRevision: presented.ReviewRevision, Commit: report.Commit, DraftHash: presented.DraftHash}
-	if _, api := p.s.approveDelivery(ctx, string(stream), decision); api == nil || api.Code != Conflict || !strings.Contains(api.Message, "repairs require a new workstream") {
+	if _, api := p.s.approveDelivery(ctx, string(stream), decision); api == nil || api.Code != Conflict || !strings.Contains(api.Message, "approve with accept_blocking") {
 		t.Fatalf("later maintenance gap accepted delivery approval: %v", api)
 	}
 	must(t, p.publisher().Pass(ctx))
@@ -570,25 +573,15 @@ func TestWorkgroupDependentPostMergeGapRepairsInScopeNeverBlocksLikeSameRepoMain
 	must(t, err)
 	must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalReportDocument, Revision: 2, Project: repository.Project(), Workstream: stream, At: f.s.now(), Actor: finalReviewActor, Cause: "final-review"}, Path: finalReportPath, Content: string(data)}}))
 
-	// Unlike same-repo base-dependency delivery maintenance, a gap here
-	// does not block delivery outright: finalGate's only reported reason,
-	// if any, must not be the "repairs require a new workstream" refusal
-	// that path gives (plan#edges boundaries).
-	_, reason, err := a.finalGate(ctx, stream)
-	must(t, err)
-	if strings.Contains(reason, "repairs require a new workstream") {
-		t.Fatalf("a workgroup dependent's post-merge gap was blocked like same-repo delivery maintenance: %q", reason)
-	}
-
 	// The gap becomes an ordinary follow-up unit of the same workstream,
 	// never a new workstream, and recording it raises nothing to the
 	// owner: no new inbox entry.
 	before, err := repository.Inbox()
 	must(t, err)
-	added, err := a.followups(stream, gapped, 2)
+	added, found, err := a.followup(stream, gapped, 2)
 	must(t, err)
-	if len(added) != 1 || added[0].Criterion != "spec#2" || added[0].Gap != gapped.Criteria[1].Gap || added[0].Unit.ID == "" {
-		t.Fatalf("follow-up units for the post-merge gap: %+v", added)
+	if !found || added.Criterion != "spec#2" || added.Gap != "spec#2: "+gapped.Criteria[1].Gap || added.Unit.ID == "" {
+		t.Fatalf("follow-up unit for the post-merge gap: %+v", added)
 	}
 	after, err := repository.Inbox()
 	must(t, err)

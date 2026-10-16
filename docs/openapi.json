@@ -4438,6 +4438,12 @@
       },
       "DeliveryApproval": {
         "properties": {
+          "accepted_blocking": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "at": {
             "format": "date-time",
             "type": "string"
@@ -4495,6 +4501,9 @@
       },
       "DeliveryDecision": {
         "properties": {
+          "accept_blocking": {
+            "type": "boolean"
+          },
           "commit": {
             "type": "string"
           },
@@ -5014,6 +5023,26 @@
         },
         "type": "object"
       },
+      "FinalFinding": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "criteria": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "finding": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "FinalReport": {
         "properties": {
           "base_check": {
@@ -5051,6 +5080,12 @@
           },
           "failure": {
             "type": "string"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/FinalFinding"
+            },
+            "type": "array"
           },
           "maintenance": {
             "type": "boolean"

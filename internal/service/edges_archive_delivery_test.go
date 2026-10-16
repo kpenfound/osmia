@@ -64,7 +64,7 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 				}
 				if _, err := os.Stat(filepath.Join(directory, "internal/trace/repaired.go")); os.IsNotExist(err) {
 					failedChecks.Add(1)
-					return CheckResult{ExitCode: 1, Output: "TestResume fails with the merged dependency"}, nil
+					return CheckResult{ExitCode: 1, Output: failedReport("dag://?check=go/packages/tests/test&go-test=TestResume") + "TestResume fails with the merged dependency\n"}, nil
 				}
 				repairedChecks.Add(1)
 				return CheckResult{Output: "TestResume passes with the merged dependency"}, nil
@@ -106,24 +106,19 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 			case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
 				_, err = callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
 			case strings.HasPrefix(req.Name, "final-"):
-				criteria := []any{map[string]any{"criterion": "spec#1", "evidence": "internal/trace/built.go"}}
-				if strings.Contains(req.Workspace.Directory(), string(f.stream1)) {
-					criteria = append(criteria, map[string]any{"criterion": "spec#2", "evidence": "internal/trace/built.go"})
-				} else if !strings.HasPrefix(req.Name, "final-1-") {
+				findings := []any{}
+				if !strings.Contains(req.Workspace.Directory(), string(f.stream1)) && !strings.HasPrefix(req.Name, "final-1-") {
 					dependency, e := readTool(ctx, tools, "branch/internal/trace/dependency.txt")
 					if e != nil || strings.TrimSpace(dependency) != merged {
 						return nil, fmt.Errorf("final reader missed dependency update: %q, %v", dependency, e)
 					}
 					if strings.HasPrefix(req.Name, "final-2-") {
-						criteria = []any{map[string]any{"criterion": "spec#1", "gap": "TestResume fails with the merged dependency; repair the client within its slice"}}
-					} else {
-						if _, e := readTool(ctx, tools, "branch/internal/trace/repaired.go"); e != nil {
-							return nil, e
-						}
-						criteria = []any{map[string]any{"criterion": "spec#1", "evidence": "internal/trace/dependency.txt and internal/trace/repaired.go"}}
+						findings = append(findings, map[string]any{"severity": "blocking", "criteria": []any{"spec#1"}, "finding": "TestResume fails with the merged dependency; repair the client within its slice"})
+					} else if _, e := readTool(ctx, tools, "branch/internal/trace/repaired.go"); e != nil {
+						return nil, e
 					}
 				}
-				_, err = callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "The client resumes uploads", "criteria": criteria})
+				_, err = callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "The client resumes uploads", "findings": findings})
 			default:
 				return chief(ctx, req, turn, tools)
 			}

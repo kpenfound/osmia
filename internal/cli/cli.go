@@ -55,7 +55,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   merged <workstream-id> [--json]
   rebase <workstream-id> [--json]
   trace <workstream-id> [unit <id>|criterion <spec#n>|commit <sha>] [--json]
-  approve <workstream-id> [description-file] [--message-file FILE | --messages-file FILE] [--json]
+  approve <workstream-id> [description-file] [--message-file FILE | --messages-file FILE] [--accept] [--json]
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
   inbox [--json]
@@ -276,7 +276,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	addingRepo := cmd == "project" && len(a) > 0 && a[0] == "add-repo"
-	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && !addingRepo && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && (o.accept || o.project != "") || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") {
+	if !valid || cmd != "approve" && (o.messageFile != "" || o.messagesFile != "") || o.messageFile != "" && o.messagesFile != "" || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && !addingRepo && o.target || cmd != "handin" && (o.skipDebate || o.base != "") || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") {
 		return invalid()
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -782,6 +782,19 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				return output(stdout, stderr, presentation)
 			}
 			fmt.Fprintf(stdout, "Final review %d of %s at %s:\n", presentation.Report.Review, id, presentation.Report.Commit)
+			if summary := strings.TrimSpace(presentation.Report.Summary); summary != "" {
+				fmt.Fprintf(stdout, "%s\n", summary)
+			}
+			for _, finding := range presentation.Report.Findings {
+				if finding.Severity == service.FindingBlocking {
+					fmt.Fprintf(stdout, "Blocking: %s\n", finding.Describe())
+				}
+			}
+			for _, finding := range presentation.Report.Findings {
+				if finding.Severity != service.FindingBlocking {
+					fmt.Fprintf(stdout, "Advisory: %s\n", finding.Describe())
+				}
+			}
 			for _, criterion := range presentation.Report.Criteria {
 				if criterion.Gap != "" {
 					fmt.Fprintf(stdout, "Unshown %s: %s — %s\n", criterion.Criterion, criterion.Text, criterion.Gap)
@@ -813,7 +826,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			}
 			return 0
 		}
-		decision := service.DeliveryDecision{Review: presentation.Report.Review, ReviewRevision: presentation.ReviewRevision, Commit: presentation.Report.Commit, DraftHash: presentation.DraftHash}
+		decision := service.DeliveryDecision{Review: presentation.Report.Review, ReviewRevision: presentation.ReviewRevision, Commit: presentation.Report.Commit, DraftHash: presentation.DraftHash, AcceptBlocking: o.accept}
 		description := presentation.Draft
 		decision.Messages = slices.Clone(presentation.Messages)
 		if presentation.Approval != nil {

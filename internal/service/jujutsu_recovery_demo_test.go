@@ -259,10 +259,7 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 			}
 		}
 		if strings.HasPrefix(req.Name, "final-") {
-			body, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Resumable uploads", "criteria": []any{
-				map[string]any{"criterion": "spec#1", "evidence": "resume landing and TestResume"},
-				map[string]any{"criterion": "spec#2", "evidence": "dedupe and audit landings"},
-			}})
+			body, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Resumable uploads", "findings": []any{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				demo.problem("final report %s: %s: %v", req.Name, body, err)
 			}

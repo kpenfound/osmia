@@ -254,8 +254,11 @@ move a stuck unit yourself with
 `osmia move <workstream-id> <unit> <state> "note"`.
 
 When every unit has landed and the final review is done, the workstream's
-delivery entry opens. Read the final report and the drafted pull request
-description; on the page you can edit the description before approving. Approve
+delivery entry opens. Read the final report's findings and the drafted pull
+request description; on the page you can edit the description before
+approving. Approving a report with blocking findings accepts them as they are;
+otherwise the chief of staff plans the work that resolves them and a new final
+review follows. Approve
 it on the page, or with `osmia approve <workstream-id> [description-file]`. The
 service then pushes the branch to your repository or fork and opens the pull request against
 the upstream itself, with your description; no agent pushes. `osmia delivery

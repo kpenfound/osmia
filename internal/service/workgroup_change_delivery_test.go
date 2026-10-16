@@ -92,10 +92,7 @@ func testAmendOpenPullRequest(t *testing.T, changeDescription bool) {
 	in, err := decodeFinalReview(ops[0].Operation)
 	must(t, err)
 	p.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Checkpoint delta holds", "criteria": []any{
-			map[string]any{"criterion": "spec#1", "evidence": "Checkpoint test"},
-			map[string]any{"criterion": "spec#2", "evidence": "Dedupe test"},
-		}})
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Checkpoint delta holds", "findings": []any{}})
 		return err
 	})
 	result, err = a.Apply(ctx, ops[0].Operation)

@@ -249,7 +249,7 @@ func decision(kind string, stream config.WorkstreamID, opened time.Time, path st
 // openDecisions lists a workstream's open decisions other than its
 // escalations: its ratification packet, contested units, presented
 // amendments, held drift rebase, delivery approval, failing publication,
-// parked base, notices held from the chief of staff and a loop guard pause.
+// final checks that do not complete, parked base, notices held from the chief of staff and a loop guard pause.
 func (s *Service) openDecisions(ctx context.Context, repository *trace.Repository, w trace.WorkstreamStatus) ([]InboxEntry, error) {
 	var out []InboxEntry
 	add := func(e InboxEntry, open bool, err error) error {
@@ -294,6 +294,11 @@ func (s *Service) openDecisions(ctx context.Context, repository *trace.Repositor
 			return nil, err
 		}
 		if err := add(s.publicationEntry(repository, w)); err != nil {
+			return nil, err
+		}
+	}
+	if w.State == AssembledState {
+		if err := add(finalChecksEntry(repository, w)); err != nil {
 			return nil, err
 		}
 	}
@@ -436,6 +441,32 @@ func (s *Service) publicationEntry(repository *trace.Repository, w trace.Workstr
 		return e, true, nil
 	}
 	return InboxEntry{}, false, nil
+}
+
+// finalChecksEntry reports the requested final review whose checks have not
+// completed maxIncompleteChecks times in a row, opened when the first of
+// those runs finished. It takes no decision: the owner fixes the cause, and
+// it closes once a run completes.
+func finalChecksEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error) {
+	k, err := strconv.Atoi(strings.TrimPrefix(w.Subjects[finalReviewSubject].Value, "requested-"))
+	if err != nil || !strings.HasPrefix(w.Subjects[finalReviewSubject].Value, "requested-") {
+		return InboxEntry{}, false, nil
+	}
+	stream := w.Workstream
+	rebase, rebased, err := (&finalReviewer{repository: repository}).rebase(stream, k)
+	if err != nil || !rebased {
+		return InboxEntry{}, false, err
+	}
+	n, latest, err := incompleteFinalChecks(repository, stream, k, rebase.Commit)
+	if err != nil || n < maxIncompleteChecks {
+		return InboxEntry{}, false, err
+	}
+	e := decision(InboxFinalChecks, stream, latest.StartedAt, "/status/"+string(stream), map[string]any{})
+	e.Answer.Method = http.MethodGet
+	e.Revision = k
+	e.Question = fmt.Sprintf("The project's checks on the assembled branch did not complete %d times in a row, so final review %d cannot read it. Last failure: %s", n, k, latest.Error)
+	e.Blocked = fmt.Sprintf("The final review. The service runs the checks again at %s, waiting longer after each run, and this entry closes once a run completes.", latest.FinishedAt.Add(finalCheckDelay(n)).UTC().Format(time.RFC3339))
+	return e, true, nil
 }
 
 // driftEntry is the workstream's latest drift rebase while it is held for
@@ -675,11 +706,7 @@ func (s *Service) deliveryEntry(ctx context.Context, repository *trace.Repositor
 	case p.Delivered && !p.Maintenance:
 		return InboxEntry{}, false, nil
 	}
-	for _, c := range p.Report.Criteria {
-		if c.Gap != "" {
-			return InboxEntry{}, false, nil
-		}
-	}
+	blocking := p.Report.blocking()
 	review, prior, _, err := deliveryDocuments(repository, stream)
 	if err != nil {
 		return InboxEntry{}, false, err
@@ -689,13 +716,20 @@ func (s *Service) deliveryEntry(ctx context.Context, repository *trace.Repositor
 			return InboxEntry{}, false, err
 		}
 	}
-	e := decision(InboxDelivery, stream, review.At, "/delivery/"+string(stream), map[string]any{"review": p.Report.Review, "review_revision": p.ReviewRevision, "commit": p.Report.Commit, "draft_hash": p.DraftHash})
+	body := map[string]any{"review": p.Report.Review, "review_revision": p.ReviewRevision, "commit": p.Report.Commit, "draft_hash": p.DraftHash}
+	if len(blocking) > 0 {
+		body["accept_blocking"] = true
+	}
+	e := decision(InboxDelivery, stream, review.At, "/delivery/"+string(stream), body)
 	e.Revision = p.ReviewRevision
 	title := strings.TrimSpace(p.Report.Summary)
 	if title == "" {
 		title = "workstream " + string(stream)
 	}
-	e.Question = fmt.Sprintf("Deliver %s? Final review %d of commit %s shows evidence for every criterion.", title, p.Report.Review, p.Report.Commit)
+	e.Question = fmt.Sprintf("Deliver %s? Final review %d of commit %s found nothing blocking.", title, p.Report.Review, p.Report.Commit)
+	if len(blocking) > 0 {
+		e.Question = fmt.Sprintf("Deliver %s as it is? Final review %d of commit %s has blocking findings: %s. Approving accepts them as they are; otherwise the work that resolves them goes through a plan revision, and a new final review follows.", title, p.Report.Review, p.Report.Commit, strings.Join(blocking, "; "))
+	}
 	e.Blocked = "Publishing the pull request."
 	e.Options = []string{"approve"}
 	return e, true, nil

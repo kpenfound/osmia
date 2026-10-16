@@ -1861,6 +1861,7 @@
     amendment: 'Amendment',
     delivery: 'Delivery',
     publication: 'Publication failing',
+    checks: 'Checks not completing',
     drift: 'Drift held',
     notices: 'Notices held',
     loop: 'Loop guard',
@@ -1878,6 +1879,7 @@
     commit: 'commit',
     draft_hash: 'draft',
     base: 'base workstream',
+    accept_blocking: 'accepts blocking findings',
   };
 
   const decisionNames = {
@@ -2143,7 +2145,7 @@
     });
     // A failing publication, a held drift rebase, held notices or a loop
     // guard pause take no decision here, so their cards have no form.
-    d.node = el('article', { class: 'decision', 'data-decision': key, 'data-kind': entry.kind, 'data-workstream': entry.workstream }, d.head, d.detail, ['publication', 'drift', 'notices', 'loop'].includes(entry.kind) ? null : form);
+    d.node = el('article', { class: 'decision', 'data-decision': key, 'data-kind': entry.kind, 'data-workstream': entry.workstream }, d.head, d.detail, ['publication', 'checks', 'drift', 'notices', 'loop'].includes(entry.kind) ? null : form);
     decisions.set(key, d);
     return d;
   }
@@ -2189,11 +2191,17 @@
     // the owner can edit, and keeps the title an already-approved delivery
     // records even if the workstream's title changes later.
     const title = view.approval ? (view.approval.title || view.title) : view.title;
-    d.detail.replaceChildren(
+    const findings = view.report.findings || [];
+    d.detail.replaceChildren(...[
       el('p', { class: 'meta', 'data-field': 'title' }, 'Pull request title: ' + title),
+      view.report.summary ? el('p', { 'data-field': 'summary' }, view.report.summary) : null,
+      findings.length === 0 ? null : el('ul', { class: 'findings', 'data-field': 'findings' }, ...findings.map((f) => el('li', { 'data-severity': f.severity },
+        el('span', { class: 'tag' }, f.severity), ' ', (f.criteria || []).length ? f.criteria.join(', ') + ': ' : '', f.finding,
+        f.action ? el('div', { class: 'meta' }, 'Action: ' + f.action) : null))),
       el('ul', { class: 'criteria', 'data-field': 'criteria' }, ...view.report.criteria.map((c) => el('li', { 'data-criterion': c.criterion },
         el('strong', {}, c.criterion), ' ', c.text,
-        el('div', { class: 'meta' }, c.evidence ? c.evidence : 'Gap: ' + c.gap)))));
+        el('div', { class: 'meta' }, c.evidence ? c.evidence : 'Gap: ' + c.gap)))),
+    ].filter((node) => node !== null));
     const previous = new Map(d.messages.map((m) => [m.commit, m]));
     d.messages = (view.approval ? view.approval.messages : (view.messages || [])).map((m) => {
       const old = previous.get(m.commit);
@@ -2231,7 +2239,7 @@
         return button;
       }));
     } else {
-      const none = ['ratification', 'publication', 'drift', 'notices', 'loop', 'base'].includes(entry.kind) ? 'none until what blocks it is resolved' : 'none';
+      const none = ['ratification', 'publication', 'checks', 'drift', 'notices', 'loop', 'base'].includes(entry.kind) ? 'none until what blocks it is resolved' : 'none';
       options = el('p', { 'data-field': 'options' }, 'Options: ' + (entry.options.length === 0 ? none : entry.options.join(', ')));
     }
     d.head.replaceChildren(...[
@@ -2244,7 +2252,7 @@
       entry.blocked ? el('p', { class: 'meta', 'data-field': 'blocked' }, 'Waiting on it: ' + entry.blocked) : null,
       options,
       entry.recommendation ? el('p', { class: 'attention', 'data-field': 'recommendation' }, 'Recommendation: ' + entry.recommendation) : null,
-      entry.kind === 'publication' ? null : el('p', { class: 'meta', 'data-field': 'pins' }, 'Answers ' + pins(entry)),
+      ['publication', 'checks'].includes(entry.kind) ? null : el('p', { class: 'meta', 'data-field': 'pins' }, 'Answers ' + pins(entry)),
     ].filter((node) => node !== null));
     switch (entry.kind) {
       case 'escalation':
@@ -2256,6 +2264,7 @@
         place(d.actions, [d.submit]);
         break;
       case 'publication':
+      case 'checks':
         break;
       case 'ratification': {
         const dissent = renderDissent(d, name);
