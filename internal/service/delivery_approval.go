@@ -67,6 +67,9 @@ type DeliveryApproval struct {
 	At              time.Time                   `json:"at"`
 	Messages        []workspace.DeliveryMessage `json:"messages"`
 	Style           string                      `json:"style"`
+	// AcceptedBlocking is what the final report found blocking that the
+	// owner accepted as it is by approving.
+	AcceptedBlocking []string `json:"accepted_blocking,omitempty"`
 }
 
 // publishedTitle is the title to publish for an approval: the title it
@@ -89,6 +92,9 @@ type DeliveryDecision struct {
 	DraftHash      string                      `json:"draft_hash"`
 	Description    *string                     `json:"description,omitempty"`
 	Messages       []workspace.DeliveryMessage `json:"messages,omitempty"`
+	// AcceptBlocking accepts what the final report found blocking as it is;
+	// a report with blocking findings is approved only with it.
+	AcceptBlocking bool `json:"accept_blocking,omitempty"`
 }
 
 func descriptionHash(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) }
@@ -343,9 +349,7 @@ func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID,
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Internal, "cannot read final review"}
 	}
-	// An unshown criterion is part of the report the owner must see, even
-	// though that report cannot authorize delivery yet.
-	if reason != "" && !strings.Contains(reason, "unresolved gap") {
+	if reason != "" {
 		return DeliveryPresentation{}, &APIError{Conflict, reason}
 	}
 	review, _, approval, err := deliveryDocuments(repository, stream)
@@ -405,6 +409,10 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 	} else if reason != "" {
 		return DeliveryApproval{}, &APIError{Conflict, reason}
 	}
+	blocking := presented.Report.blocking()
+	if len(blocking) > 0 && !req.AcceptBlocking {
+		return DeliveryApproval{}, &APIError{Conflict, fmt.Sprintf("final review %d has blocking findings: %s; approve with accept_blocking to accept them as they are, or wait for the work that resolves them", presented.Report.Review, strings.Join(blocking, "; "))}
+	}
 	description := presented.Draft
 	if presented.Approval != nil {
 		description = presented.Approval.Description
@@ -461,7 +469,7 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 		return *existing, nil
 	}
 	r := presented.Report
-	approval := DeliveryApproval{Review: r.Review, ReviewRevision: review.Revision, Commit: r.Commit, Seal: r.Seal, SpecHash: r.SpecHash, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter, DraftHash: req.DraftHash, Title: presented.Title, Description: description, DescriptionHash: descriptionHash(description), Messages: messages, Style: presented.Style, At: s.now()}
+	approval := DeliveryApproval{Review: r.Review, ReviewRevision: review.Revision, Commit: r.Commit, Seal: r.Seal, SpecHash: r.SpecHash, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter, DraftHash: req.DraftHash, Title: presented.Title, Description: description, DescriptionHash: descriptionHash(description), Messages: messages, Style: presented.Style, At: s.now(), AcceptedBlocking: blocking}
 	content, err := json.Marshal(approval)
 	if err != nil {
 		return DeliveryApproval{}, &APIError{Internal, "cannot encode delivery approval"}
@@ -522,6 +530,9 @@ func (s *Service) deliveryGate(ctx context.Context, repository *trace.Repository
 	}
 	if approval.DescriptionHash != descriptionHash(approval.Description) || approval.Description != description {
 		return *approval, "the description differs from what the owner approved", nil
+	}
+	if blocking := report.blocking(); !slices.Equal(blocking, approval.AcceptedBlocking) {
+		return *approval, fmt.Sprintf("final review %d found blocking problems the owner approval does not accept", report.Review), nil
 	}
 	return *approval, "", nil
 }

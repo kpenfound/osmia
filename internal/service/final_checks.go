@@ -41,14 +41,37 @@ func finalChecksDocument(k int) string { return fmt.Sprintf("final-checks-%d", k
 
 func finalChecksPath(k int) string { return fmt.Sprintf("final/checks-%d.json", k) }
 
-// finalChecks returns the check run of the commit report reads, running
-// every project check on a fresh export of it, bounded by the project's
-// checks_timeout, when none is recorded. A run that cannot export or run the
-// checks, or outlasts the timeout, is recorded as incomplete; the service
+// finalCheckDelay is how long final review checks wait to run again after n
+// runs in a row did not complete: checkRetryDelay, doubling with each further
+// run, up to an hour.
+func finalCheckDelay(n int) time.Duration {
+	delay := checkRetryDelay
+	for i := 1; i < n && delay < time.Hour; i++ {
+		delay *= 2
+	}
+	return min(delay, time.Hour)
+}
+
+// finalChecks returns the completed check run of the commit report reads,
+// running every project check on a fresh export of it, bounded by the
+// project's checks_timeout, when none is recorded. A run that cannot export
+// or run the checks, or outlasts the timeout, is recorded as incomplete and
+// returned with an error, so the review never reads a commit whose checks
+// show nothing: the review's operation retries, and the checks run again
+// once finalCheckDelay has passed since the last incomplete run. The service
 // stopping records nothing, so a retry runs them again.
 func (a *finalReviewer) finalChecks(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, report FinalReport) (FinalCheckRun, error) {
-	if run, found, err := a.recordedChecks(stream, report.Review); err != nil || found && run.Commit == report.Commit {
-		return run, err
+	incomplete, latest, err := a.incompleteChecks(stream, report.Review, report.Commit)
+	if err != nil {
+		return FinalCheckRun{}, err
+	}
+	if incomplete == 0 && latest.Commit == report.Commit {
+		return latest, nil
+	}
+	if incomplete > 0 {
+		if next := latest.FinishedAt.Add(finalCheckDelay(incomplete)); a.s.now().Before(next) {
+			return latest, incompleteChecksError(latest, incomplete, next)
+		}
 	}
 	run := FinalCheckRun{Review: report.Review, Operation: report.Operation, Commit: report.Commit, ExitCode: -1, StartedAt: a.s.now()}
 	result, err := a.runChecks(ctx, cfg, stream, report.Commit, &run)
@@ -85,7 +108,19 @@ func (a *finalReviewer) finalChecks(ctx context.Context, cfg *config.Config, str
 	if err := a.repository.RecordDocuments(context.WithoutCancel(ctx), []trace.Document{doc, output}); err != nil {
 		return FinalCheckRun{}, err
 	}
-	return run, a.s.step("final-checks-recorded")
+	if err := a.s.step("final-checks-recorded"); err != nil {
+		return FinalCheckRun{}, err
+	}
+	if run.Status == ChecksIncomplete {
+		return run, incompleteChecksError(run, incomplete+1, run.FinishedAt.Add(finalCheckDelay(incomplete+1)))
+	}
+	return run, nil
+}
+
+// incompleteChecksError is the error a final review's operation retries on
+// while its checks have not completed.
+func incompleteChecksError(latest FinalCheckRun, n int, next time.Time) error {
+	return fmt.Errorf("final review %d waits for its checks: %d runs in a row on %s did not complete, the latest because %s; they run again at %s", latest.Review, n, latest.Commit, latest.Error, next.UTC().Format(time.RFC3339))
 }
 
 // runChecks runs every project check on a fresh export of commit, setting
@@ -122,33 +157,43 @@ func (a *finalReviewer) runChecks(ctx context.Context, cfg *config.Config, strea
 	return result, err
 }
 
-// recordedChecks returns the latest recorded check run of final review k,
-// and whether one is.
-func (a *finalReviewer) recordedChecks(stream config.WorkstreamID, k int) (FinalCheckRun, bool, error) {
-	docs, err := trace.Read[trace.Document](a.repository, stream)
+// incompleteChecks returns how many of final review k's latest recorded
+// check runs on commit did not complete, in a row, and its latest recorded
+// run, which is zero when none is recorded.
+func (a *finalReviewer) incompleteChecks(stream config.WorkstreamID, k int, commit string) (int, FinalCheckRun, error) {
+	return incompleteFinalChecks(a.repository, stream, k, commit)
+}
+
+func incompleteFinalChecks(repository *trace.Repository, stream config.WorkstreamID, k int, commit string) (int, FinalCheckRun, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
-		return FinalCheckRun{}, false, err
+		return 0, FinalCheckRun{}, err
 	}
+	n := 0
+	var latest FinalCheckRun
 	for _, d := range slices.Backward(docs) {
 		if d.ID != finalChecksDocument(k) {
 			continue
 		}
 		var run FinalCheckRun
 		if err := json.Unmarshal([]byte(d.Content), &run); err != nil {
-			return FinalCheckRun{}, false, fmt.Errorf("%s revision %d: %w", d.Path, d.Revision, err)
+			return 0, FinalCheckRun{}, fmt.Errorf("%s revision %d: %w", d.Path, d.Revision, err)
 		}
-		return run, true, nil
+		if latest.Review == 0 {
+			latest = run
+		}
+		if run.Commit != commit || run.Status != ChecksIncomplete {
+			break
+		}
+		n++
 	}
-	return FinalCheckRun{}, false, nil
+	return n, latest, nil
 }
 
 // finalCheckEvidence is how the final reader's prompt carries the check run
 // of the commit it reads.
 func finalCheckEvidence(run FinalCheckRun) string {
 	out := fmt.Sprintf("The service ran every project check on this exact commit before your read, recorded in %s; you do not run them. The run %s.", finalChecksPath(run.Review), run.Status)
-	if run.Status == ChecksIncomplete {
-		out = fmt.Sprintf("The service ran the project's checks on this exact commit before your read, recorded in %s, and they did not complete: %s. The checks show nothing about this commit; a criterion that rests on them is a gap.", finalChecksPath(run.Review), run.Error)
-	}
 	if len(run.Command) > 0 {
 		out += "\nCommand: " + checkExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048)
 	}

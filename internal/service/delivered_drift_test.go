@@ -84,7 +84,7 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 			in, err := decodeFinalReview(op)
 			must(t, err)
 			p.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-				_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Ready after drift", "criteria": []any{map[string]any{"criterion": "spec#1", "evidence": "resume.go"}, map[string]any{"criterion": "spec#2", "evidence": "dedupe.go"}}})
+				_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Ready after drift", "findings": []any{}})
 				return err
 			})
 			result = settleOperation(t, p.s, p.repository, p.stream, op, reviewer)
@@ -207,7 +207,7 @@ func TestDeliveredDriftConflictOutsideUnitFootprintCompletesEndToEnd(t *testing.
 	in, err := decodeFinalReview(op)
 	must(t, err)
 	p.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Ready after drift", "criteria": []any{map[string]any{"criterion": "spec#1", "evidence": "resume.go"}, map[string]any{"criterion": "spec#2", "evidence": "dedupe.go"}}})
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Ready after drift", "findings": []any{}})
 		return err
 	})
 	result = settleOperation(t, p.s, p.repository, p.stream, op, reviewer)

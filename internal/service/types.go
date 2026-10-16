@@ -896,6 +896,7 @@ const (
 	InboxAmendment    = "amendment"
 	InboxDelivery     = "delivery"
 	InboxPublication  = "publication"
+	InboxFinalChecks  = "checks"
 	InboxDrift        = "drift"
 	InboxNotices      = "notices"
 	InboxLoop         = "loop"
@@ -911,7 +912,10 @@ const (
 // staff's rephrasing of an escalation, and the service's statement of the
 // decision for the other kinds. A publication entry reports a publication
 // whose last attempts failed: it takes no decision, its Revision is the owner
-// approval being published and its Options are empty. Project names the project whose workstream
+// approval being published and its Options are empty. A checks entry reports
+// a final review whose checks did not complete maxIncompleteChecks times in a
+// row: it takes no decision, its Revision is the final review and its Options
+// are empty. Project names the project whose workstream
 // the decision belongs to; escalation numbers are unique only within it.
 type InboxEntry struct {
 	// Workgroup identifies a shared decision kept in the workgroup trace.

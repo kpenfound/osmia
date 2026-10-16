@@ -166,7 +166,8 @@ The member view is laid out like a chat client:
   its report or failure. Its inbox entries sit below the feed, above the
   message field: what each asks, what waits on it, its options and the chief
   of staff's recommendation. A ratification also shows the dissent record; a
-  delivery shows the final report's criteria with their evidence or gaps.
+  delivery shows the final report's findings and the units serving each
+  criterion.
   The Documents tab reads and edits the draft spec and plan, the dependency,
   and the debate actions; the Trace tab walks the workstream's record. The
   `…` menu pauses the workstream or jumps to its dependency, debate actions

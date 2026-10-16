@@ -451,8 +451,7 @@ func TestPauseHoldsAndStopsAFinalReview(t *testing.T) {
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
 	turn := finalTurnID(1, committeeAgent(1), 1)
 	entered := blockTurn(f.architectFixture, turn, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Both hold.", "criteria": []any{
-			map[string]any{"criterion": "spec#1", "evidence": "resume.go"}, map[string]any{"criterion": "spec#2", "evidence": "dedupe.go"}}})
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Both hold.", "findings": []any{}})
 		return err
 	})
 	hard := ownerPause("workstream", f.project, stream, "hard", "Stop the review")

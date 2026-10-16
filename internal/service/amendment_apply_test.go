@@ -362,10 +362,7 @@ func TestApprovedAmendmentInvalidatesTheFinalReportAndAddsAFollowup(t *testing.T
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
 	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"criteria": []any{
-			map[string]any{"criterion": "spec#1", "evidence": "resume.go"},
-			map[string]any{"criterion": "spec#2", "evidence": "dedupe.go"},
-		}})
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Both hold.", "findings": []any{}})
 		return err
 	})
 	if result, err := finals.Apply(ctx, op); err != nil || result.Outcome != "succeeded" {

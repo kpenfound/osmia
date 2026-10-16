@@ -138,10 +138,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 				problems.report("review %s: %s: %v", req.Name, body, err)
 			}
 		case strings.HasPrefix(req.Name, "final-"):
-			body, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Resumable uploads", "criteria": []any{
-				map[string]any{"criterion": "spec#1", "evidence": "resume landing and TestResume"},
-				map[string]any{"criterion": "spec#2", "evidence": "dedupe landing skips acknowledged chunks"},
-			}})
+			body, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Resumable uploads", "findings": []any{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				problems.report("final report %s: %s: %v", req.Name, body, err)
 			}

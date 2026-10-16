@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/kpenfound/busybees/core/vcs"
@@ -95,9 +96,10 @@ type FinalRebase struct {
 // FinalReport is the document final/report.json: one final review of an
 // assembled workstream. A reviewed report names the exact branch commit the
 // committee member read, the governing seal, spec hash, spec, plan and
-// charter revisions, and evidence or an explicit gap for every criterion of
-// the sealed spec. A failed report says why no such report exists; it never
-// authorises approval or delivery.
+// charter revisions, the coverage of every criterion of the sealed spec by
+// merged units, and the reader's findings on the branch as a whole. A failed
+// report says why no such report exists; it never authorises approval or
+// delivery.
 type FinalReport struct {
 	Maintenance  bool             `json:"maintenance,omitempty"`
 	BaseCheck    int              `json:"base_check,omitempty"`
@@ -120,10 +122,11 @@ type FinalReport struct {
 	Turn         string           `json:"turn,omitempty"`
 	Summary      string           `json:"summary,omitempty"`
 	Criteria     []FinalCriterion `json:"criteria"`
+	Findings     []FinalFinding   `json:"findings,omitempty"`
 }
 
-// FinalCriterion is the final reader's account of one sealed criterion:
-// Evidence says what in the branch shows it holds, or Gap what does not.
+// FinalCriterion is one sealed criterion's coverage: Evidence names the
+// merged units that serve it, or Gap says that none does.
 type FinalCriterion struct {
 	Criterion string `json:"criterion"`
 	Text      string `json:"text"`
@@ -131,14 +134,61 @@ type FinalCriterion struct {
 	Gap       string `json:"gap,omitempty"`
 }
 
+// The severities of a final finding. A blocking finding stops delivery until
+// work resolves it or the owner accepts it; an advisory one is shown to the
+// owner and stops nothing.
+const (
+	FindingBlocking = "blocking"
+	FindingAdvisory = "advisory"
+)
+
+// FinalFinding is one problem the final reader found with the branch as a
+// whole, the criteria it concerns, and the action it asks for.
+type FinalFinding struct {
+	Severity string   `json:"severity"`
+	Criteria []string `json:"criteria,omitempty"`
+	Finding  string   `json:"finding"`
+	Action   string   `json:"action,omitempty"`
+}
+
+// maxFinalRounds is how many final reviews of one workstream may find
+// blocking problems before further revisions of its assembled plan are the
+// owner's decision rather than the chief of staff's.
+const maxFinalRounds = 3
+
+// blocking returns what stops the reviewed report from authorising delivery
+// on its own: each criterion no merged unit serves and each blocking finding.
+func (r FinalReport) blocking() []string {
+	var out []string
+	for _, c := range r.Criteria {
+		if c.Gap != "" {
+			out = append(out, c.Criterion+": "+c.Gap)
+		}
+	}
+	for _, f := range r.Findings {
+		if f.Severity == FindingBlocking {
+			out = append(out, f.Describe())
+		}
+	}
+	return out
+}
+
+// Describe is the finding on one line with the criteria it concerns.
+func (f FinalFinding) Describe() string {
+	out := f.Finding
+	if len(f.Criteria) > 0 {
+		out = strings.Join(f.Criteria, ", ") + ": " + out
+	}
+	if f.Action != "" {
+		out += " Action: " + f.Action
+	}
+	return out
+}
+
 // finalReportInput is what the final reader's tool call records.
 type finalReportInput struct {
-	Summary  string `json:"summary,omitempty"`
-	Criteria []struct {
-		Criterion string `json:"criterion"`
-		Evidence  string `json:"evidence,omitempty"`
-		Gap       string `json:"gap,omitempty"`
-	} `json:"criteria"`
+	Summary  string         `json:"summary,omitempty"`
+	Findings []FinalFinding `json:"findings"`
 }
 
 func finalReviewIDs(k int) (transition, event string) {
@@ -845,7 +895,11 @@ func (a *finalReviewer) read(ctx context.Context, cfg *config.Config, stream con
 				report.Failure = "the committee member ended its turn without recording a report"
 				return a.record(ctx, stream, report)
 			}
-			report.Outcome, report.Summary, report.Criteria = finalReviewed, recorded.Summary, recorded.Criteria
+			criteria, err := a.coverage(stream, report)
+			if err != nil {
+				return coreadapter.OperationResult{}, err
+			}
+			report.Outcome, report.Summary, report.Criteria, report.Findings = finalReviewed, recorded.Summary, criteria, recorded.Findings
 			return a.record(ctx, stream, report)
 		}
 	}
@@ -892,10 +946,18 @@ func (a *finalReviewer) enqueue(ctx context.Context, cfg *config.Config, stream 
 	if err != nil {
 		return err
 	}
+	coverage, err := a.coverage(stream, report)
+	if err != nil {
+		return err
+	}
+	previous, _, err := previousFinalReport(a.repository, stream, in.Review)
+	if err != nil {
+		return err
+	}
 	turn := finalTurnID(in.Review, member, attempt)
 	transition, _ := finalReviewIDs(in.Review)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.repository.Project(), Workstream: stream, At: a.s.now(), Actor: finalReviewActor, Cause: transition, Depth: 1},
-		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: finalSystemPrompt(cfg.Project), Prompt: finalPrompt(report, checks, notes)}
+		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: finalSystemPrompt(cfg.Project), Prompt: finalPrompt(report, checks, notes, coverage, previous)}
 	_, err = a.repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -940,16 +1002,27 @@ func (a *finalReviewer) turns(stream config.WorkstreamID, in finalReviewInput, r
 			// The turn that continues one a hard pause stopped replaces the
 			// report that turn recorded.
 			tool, err := a.tool(stream, continuedTurn(scope.Turn), report)
+			if err != nil {
+				return nil, err
+			}
 			cfg := a.s.about(a.repository)
-			branch := pinnedDiff{About: "the whole change the reviewed branch makes to the upstream commit it was rebased onto", From: report.Upstream.Commit, To: report.Commit,
-				Read: func(ctx context.Context) (string, error) {
+			read := func(from, to string) func(ctx context.Context) (string, error) {
+				return func(ctx context.Context) (string, error) {
 					g, err := featureWorkspaces(cfg, a.repository).of(stream)
 					if err != nil {
 						return "", err
 					}
-					return g.Diff(ctx, report.Upstream.Commit, report.Commit)
-				}}
-			return []coreadapter.Tool{tool, diffTool(branch)}, err
+					return g.Diff(ctx, from, to)
+				}
+			}
+			branch := pinnedDiff{About: "the whole change the reviewed branch makes to the upstream commit it was rebased onto", From: report.Upstream.Commit, To: report.Commit, Read: read(report.Upstream.Commit, report.Commit)}
+			previous, found, err := previousFinalReport(a.repository, stream, in.Review)
+			if err != nil || !found {
+				return []coreadapter.Tool{tool, diffTool(branch)}, err
+			}
+			branch.Name = "branch"
+			since := pinnedDiff{Name: "since", About: fmt.Sprintf("what changed since final review %d read %s, including any upstream change a rebase brought in", previous.Review, previous.Commit), From: previous.Commit, To: report.Commit, Read: read(previous.Commit, report.Commit)}
+			return []coreadapter.Tool{tool, diffTool(branch, since)}, nil
 		},
 		Hosts:  hosts,
 		Engine: engine,
@@ -974,10 +1047,39 @@ func (a *finalReviewer) sealedCriteria(stream config.WorkstreamID, report FinalR
 	return criteria, nil
 }
 
-// tool binds the report tool to the turn: a call that accounts for every
-// sealed criterion once, each with evidence or a gap and not both, is kept in
-// the turn's output, replacing an earlier call's; any other is refused with
-// the reason.
+// coverage returns every criterion of the review's sealed spec with the
+// merged units that serve it, or a gap when none does.
+func (a *finalReviewer) coverage(stream config.WorkstreamID, report FinalReport) ([]FinalCriterion, error) {
+	criteria, err := a.sealedCriteria(stream, report)
+	if err != nil {
+		return nil, err
+	}
+	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).readSealed(stream)
+	if err != nil {
+		return nil, err
+	}
+	for i, c := range criteria {
+		var units []string
+		if found {
+			for _, u := range b.plan.Units {
+				if slices.Contains(u.Criteria, c.Criterion) && b.states[trace.UnitSubject(u.ID)].Value == UnitMerged {
+					units = append(units, u.ID)
+				}
+			}
+		}
+		if len(units) == 0 {
+			criteria[i].Gap = "no merged unit serves it"
+			continue
+		}
+		criteria[i].Evidence = "served by merged units " + strings.Join(units, ", ") + ", each reviewed against its acceptance"
+	}
+	return criteria, nil
+}
+
+// tool binds the report tool to the turn: a call whose findings each name a
+// severity, say what is wrong and cite only criteria of the sealed spec is
+// kept in the turn's output, replacing an earlier call's; any other is
+// refused with the reason.
 func (a *finalReviewer) tool(stream config.WorkstreamID, turn string, report FinalReport) (coreadapter.Tool, error) {
 	sealed, err := a.sealedCriteria(stream, report)
 	if err != nil {
@@ -985,18 +1087,18 @@ func (a *finalReviewer) tool(stream config.WorkstreamID, turn string, report Fin
 	}
 	file := a.output(stream, turn)
 	tool := coreadapter.Tool{Name: FinalReportTool, Effect: coreadapter.ToolMemory,
-		Description: "Record the final report on the whole branch: for every criterion of the sealed spec, cited as spec#<n>, either evidence (what in the branch shows the criterion holds: files, tests, behaviour) or a gap (what does not show it). A later call replaces an earlier one. End your turn once the report is recorded.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"summary":{"type":"string"},"criteria":{"type":"array","items":{"type":"object","properties":{"criterion":{"type":"string"},"evidence":{"type":"string"},"gap":{"type":"string"}},"required":["criterion"],"additionalProperties":false}}},"required":["criteria"],"additionalProperties":false}`)}
+		Description: "Record the final report on the whole branch: a summary and your findings. Each finding has a severity: blocking when the feature as a whole does not deliver the spec's intent, its units do not work together, or it breaks a charter rule; advisory for anything else worth the owner's attention. Give the criteria it concerns, cited as spec#<n>, what is wrong and the action it asks for. Record an empty list when there are no findings. A later call replaces an earlier one. End your turn once the report is recorded.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["blocking","advisory"]},"criteria":{"type":"array","items":{"type":"string"}},"finding":{"type":"string"},"action":{"type":"string"}},"required":["severity","finding"],"additionalProperties":false}}},"required":["summary","findings"],"additionalProperties":false}`)}
 	tool.Handle = func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input finalReportInput
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return nil, err
 		}
-		criteria, reason := accountFor(sealed, input)
+		findings, reason := checkFindings(sealed, input.Findings)
 		if reason != "" {
 			return refuseReport("%s", reason)
 		}
-		data, err := json.Marshal(FinalReport{Summary: strings.TrimSpace(input.Summary), Criteria: criteria})
+		data, err := json.Marshal(FinalReport{Summary: strings.TrimSpace(input.Summary), Findings: findings})
 		if err != nil {
 			return nil, err
 		}
@@ -1012,38 +1114,24 @@ func (a *finalReviewer) tool(stream config.WorkstreamID, turn string, report Fin
 	return tool, nil
 }
 
-// accountFor returns the sealed criteria in spec order with the evidence or
-// gap the input gives each, or why the input does not account for every
-// sealed criterion exactly once.
-func accountFor(sealed []FinalCriterion, input finalReportInput) ([]FinalCriterion, string) {
-	given := map[string]FinalCriterion{}
-	for _, c := range input.Criteria {
-		i := slices.IndexFunc(sealed, func(s FinalCriterion) bool { return s.Criterion == c.Criterion })
-		if i < 0 {
-			return nil, fmt.Sprintf("%q is not a criterion of the sealed spec; cite criteria as spec#<n>", c.Criterion)
+// checkFindings returns the findings trimmed, or why one has no known
+// severity, says nothing or cites what is not a criterion of the sealed spec.
+func checkFindings(sealed []FinalCriterion, input []FinalFinding) ([]FinalFinding, string) {
+	out := []FinalFinding{}
+	for i, f := range input {
+		f.Severity, f.Finding, f.Action = strings.TrimSpace(f.Severity), strings.TrimSpace(f.Finding), strings.TrimSpace(f.Action)
+		if f.Severity != FindingBlocking && f.Severity != FindingAdvisory {
+			return nil, fmt.Sprintf("finding %d has severity %q; use blocking or advisory", i+1, f.Severity)
 		}
-		if _, repeated := given[c.Criterion]; repeated {
-			return nil, fmt.Sprintf("%s is accounted for more than once", c.Criterion)
+		if f.Finding == "" {
+			return nil, fmt.Sprintf("finding %d says nothing; state what is wrong", i+1)
 		}
-		evidence, gap := strings.TrimSpace(c.Evidence), strings.TrimSpace(c.Gap)
-		if (evidence == "") == (gap == "") {
-			return nil, fmt.Sprintf("%s needs either evidence or a gap, not both and not neither", c.Criterion)
+		for _, c := range f.Criteria {
+			if !slices.ContainsFunc(sealed, func(s FinalCriterion) bool { return s.Criterion == c }) {
+				return nil, fmt.Sprintf("%q is not a criterion of the sealed spec; cite criteria as spec#<n>", c)
+			}
 		}
-		criterion := sealed[i]
-		criterion.Evidence, criterion.Gap = evidence, gap
-		given[c.Criterion] = criterion
-	}
-	var out []FinalCriterion
-	var missing []string
-	for _, s := range sealed {
-		c, ok := given[s.Criterion]
-		if !ok {
-			missing = append(missing, s.Criterion)
-		}
-		out = append(out, c)
-	}
-	if len(missing) > 0 {
-		return nil, "every sealed criterion needs evidence or a gap; missing " + strings.Join(missing, ", ")
+		out = append(out, f)
 	}
 	return out, ""
 }
@@ -1169,18 +1257,30 @@ func (a *finalReviewer) record(ctx context.Context, stream config.WorkstreamID, 
 	transition, _ := finalReviewIDs(report.Review)
 	id := transition + "-" + report.Outcome
 	outcome := coreadapter.OperationResult{Outcome: "failed"}
+	// Only a pending workgroup post-merge update permits maintenance
+	// repairs on this branch. Historical edge resolutions do not grant
+	// that permission to later same-repo base maintenance.
+	edgePending := false
+	if report.Maintenance {
+		edgePending, err = workgroupEdgePending(a.repository, stream)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+	}
 	var reason, body string
 	if report.Outcome == finalReviewed {
 		outcome.Outcome = "succeeded"
-		var gaps []string
-		for _, c := range report.Criteria {
-			if c.Gap != "" {
-				gaps = append(gaps, c.Criterion)
-			}
+		blocking := report.blocking()
+		reason = fmt.Sprintf("final review %d read %s at %s against seal %d (spec revision %d, plan revision %d, charter revision %d): %d blocking and %d advisory; report %s revision %d",
+			report.Review, report.Branch, report.Commit, report.Seal, report.Spec, report.Plan, report.Charter, len(blocking), len(report.Findings)-countSeverity(report.Findings, FindingBlocking), finalReportPath, revision)
+		rounds, err := finalRoundsWithBlocking(a.repository, stream)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
 		}
-		reason = fmt.Sprintf("final review %d read %s at %s against seal %d (spec revision %d, plan revision %d, charter revision %d): %d of %d criteria shown; gaps: %s; report %s revision %d",
-			report.Review, report.Branch, report.Commit, report.Seal, report.Spec, report.Plan, report.Charter, len(report.Criteria)-len(gaps), len(report.Criteria), list(gaps), finalReportPath, revision)
-		body = fmt.Sprintf("The final review of the assembled branch is recorded: %d of %d criteria are shown; not shown: %s.", len(report.Criteria)-len(gaps), len(report.Criteria), list(gaps))
+		if len(blocking) > 0 && !report.Maintenance {
+			rounds++
+		}
+		body = finalReviewNotice(report, blocking, rounds, edgePending)
 	} else {
 		reason = fmt.Sprintf("final review %d failed: %s; report %s revision %d", report.Review, report.Failure, finalReportPath, revision)
 		body = fmt.Sprintf("The final review of the assembled branch failed: %s. The failed review authorises nothing; a new review runs once the branch or its governing documents change.", report.Failure)
@@ -1196,23 +1296,13 @@ func (a *finalReviewer) record(ctx context.Context, stream config.WorkstreamID, 
 		Events:     []trace.Event{trace.Notice(id, "chief", body)}}
 	documents := []trace.Document{doc}
 	txs := []trace.Transaction{tx}
-	// Only a pending workgroup post-merge update permits maintenance
-	// repairs on this branch. Historical edge resolutions do not grant
-	// that permission to later same-repo base maintenance.
-	edgePending := false
-	if report.Maintenance {
-		edgePending, err = workgroupEdgePending(a.repository, stream)
+	if report.Outcome == finalReviewed && report.Maintenance && edgePending {
+		added, found, err := a.followup(stream, report, revision)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-	}
-	if report.Outcome == finalReviewed && (!report.Maintenance || edgePending) {
-		added, err := a.followups(stream, report, revision)
-		if err != nil {
-			return coreadapter.OperationResult{}, err
-		}
-		if len(added) != 0 {
-			content, err := json.MarshalIndent(added, "", "  ")
+		if found {
+			content, err := json.MarshalIndent([]followup.Unit{added}, "", "  ")
 			if err != nil {
 				return coreadapter.OperationResult{}, err
 			}
@@ -1221,16 +1311,14 @@ func (a *finalReviewer) record(ctx context.Context, stream config.WorkstreamID, 
 				return coreadapter.OperationResult{}, err
 			}
 			documents = append(documents, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: followup.DocumentID, Revision: rev, Project: a.repository.Project(), Workstream: stream, At: at, Actor: finalReviewActor, Cause: id}, Path: followup.Path, Content: string(content) + "\n"})
-			for _, u := range added {
-				subject := trace.UnitSubject(u.Unit.ID)
-				planned := subject + "-" + UnitPlanned
-				ready := subject + "-" + UnitReady
-				makeHeader := func(key, cause string) trace.Header {
-					return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: key, Revision: 1, Project: a.repository.Project(), Workstream: stream, Unit: u.Unit.ID, At: at, Actor: finalReviewActor, Cause: cause}
-				}
-				txs = append(txs, trace.Transaction{Transition: trace.Transition{Header: makeHeader(planned, id), Subject: subject, To: UnitPlanned, Reason: fmt.Sprintf("final review %d found %s missing: %s; report %s revision %d", report.Review, u.Criterion, u.Gap, finalReportPath, revision)}})
-				txs = append(txs, trace.Transaction{ExpectedVersion: 1, Transition: trace.Transition{Header: makeHeader(ready, planned), Subject: subject, From: UnitPlanned, To: UnitReady, Reason: fmt.Sprintf("follow-up %s is ready to address %s from final review %d", u.Unit.ID, u.Criterion, report.Review)}})
+			subject := trace.UnitSubject(added.Unit.ID)
+			planned := subject + "-" + UnitPlanned
+			ready := subject + "-" + UnitReady
+			makeHeader := func(key, cause string) trace.Header {
+				return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: key, Revision: 1, Project: a.repository.Project(), Workstream: stream, Unit: added.Unit.ID, At: at, Actor: finalReviewActor, Cause: cause}
 			}
+			txs = append(txs, trace.Transaction{Transition: trace.Transition{Header: makeHeader(planned, id), Subject: subject, To: UnitPlanned, Reason: fmt.Sprintf("final review %d of the post-merge dependency update found blocking problems: %s; report %s revision %d", report.Review, added.Gap, finalReportPath, revision)}})
+			txs = append(txs, trace.Transaction{ExpectedVersion: 1, Transition: trace.Transition{Header: makeHeader(ready, planned), Subject: subject, From: UnitPlanned, To: UnitReady, Reason: fmt.Sprintf("follow-up %s is ready to repair the post-merge dependency update from final review %d", added.Unit.ID, report.Review)}})
 		}
 	}
 	if _, err := a.repository.RecordDocumentsWith(ctx, documents, txs...); err != nil {
@@ -1244,17 +1332,93 @@ func (a *finalReviewer) record(ctx context.Context, stream config.WorkstreamID, 
 	return outcome, nil
 }
 
-// followups turns each unshown criterion into a unit scoped to the sealed
-// footprint already assigned to that criterion. New intent or footprint must
-// go through the owner amendment flow before unit work can use it.
-func (a *finalReviewer) followups(stream config.WorkstreamID, report FinalReport, revision int) ([]followup.Unit, error) {
+func countSeverity(findings []FinalFinding, severity string) int {
+	n := 0
+	for _, f := range findings {
+		if f.Severity == severity {
+			n++
+		}
+	}
+	return n
+}
+
+// finalReviewNotice is what the chief of staff hears of a reviewed final
+// report: what blocks delivery, what is advisory, and what to do about it.
+// rounds counts the workstream's final reviews with blocking problems,
+// this one included, and edgePending says a delivered workstream's
+// post-merge dependency update is pending.
+func finalReviewNotice(report FinalReport, blocking []string, rounds int, edgePending bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "The final review of the assembled branch is recorded: %d blocking, %d advisory.", len(blocking), countSeverity(report.Findings, FindingAdvisory))
+	for _, item := range blocking {
+		b.WriteString("\nBlocking: " + item)
+	}
+	for _, f := range report.Findings {
+		if f.Severity == FindingAdvisory {
+			b.WriteString("\nAdvisory: " + f.Describe())
+		}
+	}
+	switch {
+	case len(blocking) == 0:
+		b.WriteString("\nNothing blocks delivery; the owner decides it with the advisory findings in view.")
+	case report.Maintenance && edgePending:
+		b.WriteString("\nOne follow-up unit repairs the post-merge dependency update; the final review runs again once it lands.")
+	case report.Maintenance:
+		b.WriteString("\nThe workstream is delivered, so repairs need a new workstream; the owner can instead accept these findings at delivery.")
+	case rounds >= maxFinalRounds:
+		fmt.Fprintf(&b, "\nFinal reviews have found blocking problems %d times. Further revisions of the assembled plan are the owner's decision: present these findings to the owner, who can accept them at delivery or approve the work that resolves them.", rounds)
+	default:
+		b.WriteString("\nTriage them: a finding that needs code is resolved by one plan revision, through route_amendment, that groups related findings into as few units as fit; a finding that is mistaken or not worth building is the owner's to accept at delivery, so tell the owner why.")
+	}
+	return b.String()
+}
+
+// followup returns the one unit that repairs the blocking problems of a
+// reviewed post-merge dependency update, scoped to the sealed footprints of
+// the units serving the criteria they concern, or of every unit when they
+// name none, and whether there are any.
+func (a *finalReviewer) followup(stream config.WorkstreamID, report FinalReport, revision int) (followup.Unit, bool, error) {
+	blocking := report.blocking()
+	if len(blocking) == 0 {
+		return followup.Unit{}, false, nil
+	}
 	_, graph, err := a.documents(stream, report)
 	if err != nil {
-		return nil, err
+		return followup.Unit{}, false, err
 	}
 	p, err := plan.Parse([]byte(graph.Content))
 	if err != nil {
-		return nil, err
+		return followup.Unit{}, false, err
+	}
+	var criteria []string
+	for _, c := range report.Criteria {
+		if c.Gap != "" {
+			criteria = append(criteria, c.Criterion)
+		}
+	}
+	for _, f := range report.Findings {
+		if f.Severity != FindingBlocking {
+			continue
+		}
+		for _, c := range f.Criteria {
+			if !slices.Contains(criteria, c) {
+				criteria = append(criteria, c)
+			}
+		}
+	}
+	var footprint []string
+	for _, u := range p.Units {
+		if len(criteria) > 0 && !slices.ContainsFunc(u.Criteria, func(c string) bool { return slices.Contains(criteria, c) }) {
+			continue
+		}
+		for _, name := range u.Footprint {
+			if !slices.Contains(footprint, name) {
+				footprint = append(footprint, name)
+			}
+		}
+	}
+	if len(footprint) == 0 {
+		return followup.Unit{}, false, fmt.Errorf("final review %d names no sealed footprint to repair; an owner-approved plan amendment is required", report.Review)
 	}
 	known := map[string]bool{}
 	for _, u := range p.Units {
@@ -1262,37 +1426,76 @@ func (a *finalReviewer) followups(stream config.WorkstreamID, report FinalReport
 	}
 	previous, err := followup.Read(a.repository, stream)
 	if err != nil {
-		return nil, err
+		return followup.Unit{}, false, err
 	}
 	for _, u := range previous {
 		known[u.Unit.ID] = true
 	}
-	var out []followup.Unit
-	for _, c := range report.Criteria {
-		if c.Gap == "" {
+	base := fmt.Sprintf("final-%d", report.Review)
+	id := base
+	for n := 2; known[id]; n++ {
+		id = fmt.Sprintf("%s-%d", base, n)
+	}
+	var acceptance []string
+	for _, item := range blocking {
+		acceptance = append(acceptance, "Resolved: "+item)
+	}
+	gap := strings.Join(blocking, "; ")
+	first := ""
+	if len(criteria) > 0 {
+		first = criteria[0]
+	}
+	return followup.Unit{Review: report.Review, Report: revision, Criterion: first, Gap: gap, Unit: plan.Unit{ID: id, Title: "Repair the post-merge dependency update", Task: "Resolve what final review " + strconv.Itoa(report.Review) + " found blocking after the dependency update: " + gap, Acceptance: acceptance, Criteria: criteria, DependsOn: []string{}, Footprint: footprint}}, true, nil
+}
+
+// previousFinalReport returns the latest reviewed report of a final review
+// before review k, and whether one is recorded.
+func previousFinalReport(repository *trace.Repository, stream config.WorkstreamID, k int) (FinalReport, bool, error) {
+	reports, err := finalReports(repository, stream)
+	if err != nil {
+		return FinalReport{}, false, err
+	}
+	for _, r := range slices.Backward(reports) {
+		if r.Review < k && r.Outcome == finalReviewed && r.Commit != "" {
+			return r, true, nil
+		}
+	}
+	return FinalReport{}, false, nil
+}
+
+// finalRoundsWithBlocking counts the workstream's recorded final reviews of
+// its assembled feature, outside delivery maintenance, that found something
+// blocking.
+func finalRoundsWithBlocking(repository *trace.Repository, stream config.WorkstreamID) (int, error) {
+	reports, err := finalReports(repository, stream)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range reports {
+		if r.Outcome == finalReviewed && !r.Maintenance && len(r.blocking()) > 0 {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// finalReports returns every recorded final report in the order recorded.
+func finalReports(repository *trace.Repository, stream config.WorkstreamID) ([]FinalReport, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	var out []FinalReport
+	for _, d := range docs {
+		if d.ID != finalReportDocument {
 			continue
 		}
-		var footprint []string
-		for _, original := range p.Units {
-			if !slices.Contains(original.Criteria, c.Criterion) {
-				continue
-			}
-			for _, name := range original.Footprint {
-				if !slices.Contains(footprint, name) {
-					footprint = append(footprint, name)
-				}
-			}
+		var report FinalReport
+		if err := json.Unmarshal([]byte(d.Content), &report); err != nil {
+			return nil, fmt.Errorf("%s revision %d: %w", d.Path, d.Revision, err)
 		}
-		if len(footprint) == 0 {
-			return nil, fmt.Errorf("%s has no sealed footprint for %s; an owner-approved plan amendment is required", c.Criterion, c.Gap)
-		}
-		base := fmt.Sprintf("final-%d-%s", report.Review, strings.ReplaceAll(c.Criterion, "#", "-"))
-		id := base
-		for n := 2; known[id]; n++ {
-			id = fmt.Sprintf("%s-%d", base, n)
-		}
-		known[id] = true
-		out = append(out, followup.Unit{Review: report.Review, Report: revision, Criterion: c.Criterion, Gap: c.Gap, Unit: plan.Unit{ID: id, Title: "Address final review gap", Task: c.Gap, Acceptance: []string{"The final review's gap in " + c.Criterion + " is closed"}, Criteria: []string{c.Criterion}, DependsOn: []string{}, Footprint: footprint}})
+		out = append(out, report)
 	}
 	return out, nil
 }
@@ -1352,11 +1555,12 @@ func finalReportBaseStale(repository *trace.Repository, stream config.Workstream
 }
 
 // finalGate returns the workstream's latest final report and why it cannot
-// authorise approval or delivery: none is recorded, the latest failed, or it
-// no longer reads the workstream's feature branch tip, latest seal and its
-// spec hash, latest spec and plan revisions and latest charter revision. The
-// A report with gaps or unfinished follow-ups also cannot authorise delivery.
-// The reason is empty when the report can.
+// be presented for approval or delivery: none is recorded, the latest
+// failed, it no longer reads the workstream's feature branch tip, latest seal
+// and its spec hash, latest spec and plan revisions and latest charter
+// revision, or follow-up units have not landed. The reason is empty when it
+// can. What the report itself finds blocking is the owner's to accept at
+// approval; see FinalReport.blocking.
 func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamID) (FinalReport, string, error) {
 	report, found, err := latestFinalReport(a.repository, stream)
 	if err != nil || !found {
@@ -1431,20 +1635,6 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 	} else if stale {
 		return report, fmt.Sprintf("final review %d is stale: its upstream base changed; a new final review is required", report.Review), nil
 	}
-	for _, c := range report.Criteria {
-		if c.Gap != "" {
-			if report.Maintenance {
-				edgePending, err := workgroupEdgePending(a.repository, stream)
-				if err != nil {
-					return report, "", err
-				}
-				if !edgePending {
-					return report, fmt.Sprintf("final review %d has an unresolved gap for %s; upstream delivery is blocked and repairs require a new workstream", report.Review, c.Criterion), nil
-				}
-			}
-			return report, fmt.Sprintf("final review %d has an unresolved gap for %s; follow-up units must land and a new final review is required", report.Review, c.Criterion), nil
-		}
-	}
 	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).readSealed(stream)
 	if err != nil {
 		return report, "", err
@@ -1456,13 +1646,42 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 }
 
 func finalSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s): every planned unit has landed on the feature branch, and you read the whole branch against the feature's sealed spec and the project's charter before the owner decides whether it is delivered. You judge one thing: whether the branch meets each criterion of the sealed spec without breaking a charter rule. Your view is read-only. The service ran every project check on the exact commit you read, and your prompt carries the result; cite it as evidence rather than re-deriving what the checks prove. Code style, formatting and lint belong to the checks, not to your read. You record your report with %s: for every criterion, what in the branch shows it holds, or the gap. A criterion you cannot see shown is a gap, never a guess.", p.Name, p.Upstream, FinalReportTool)
+	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s). Every planned unit has landed on the feature branch after its own reviewer verified it in detail against its task and acceptance, and the service ran every project check on the exact commit you read. You read the branch as a whole, at a high level, before the owner decides whether it is delivered. You judge whether the feature delivers the sealed spec's intent: its units work together in the running product rather than only in their own tests, no unit undoes or contradicts another, every criterion is served, and no charter rule is broken. You do not review units again: their tests, edge cases, naming and internal structure were judged in their own reviews, and style, formatting and lint belong to the checks. Your view is read-only. You record your report with %s: a summary and your findings. A finding is blocking only when the feature as a whole fails the spec's intent or breaks a charter rule; anything else worth the owner's attention is advisory. Report nothing you cannot point at in the branch.", p.Name, p.Upstream, FinalReportTool)
 }
 
-func finalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string) string {
+func finalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string, coverage []FinalCriterion, previous FinalReport) string {
 	notes := ""
 	if len(driftNotes) > 0 {
 		notes = "\n" + strings.Join(driftNotes, "\n") + "\n"
+	}
+	var served strings.Builder
+	for _, c := range coverage {
+		if c.Gap != "" {
+			fmt.Fprintf(&served, "- %s: %s\n", c.Criterion, c.Gap)
+		} else {
+			fmt.Fprintf(&served, "- %s: %s\n", c.Criterion, c.Evidence)
+		}
+	}
+	diff := fmt.Sprintf("Call %s to read the whole change the branch makes to upstream: files_only lists the changed files, and paths and lines narrow the diff.", workstreamDiffTool)
+	earlier := ""
+	if previous.Review > 0 {
+		diff = fmt.Sprintf("Call %s with change branch for the whole change the branch makes to upstream, or change since for what changed after final review %d: files_only lists the changed files, and paths and lines narrow the diff.", workstreamDiffTool, previous.Review)
+		var b strings.Builder
+		fmt.Fprintf(&b, "\nFinal review %d read %s and found:\n", previous.Review, previous.Commit)
+		blocking := previous.blocking()
+		for _, item := range blocking {
+			b.WriteString("- blocking: " + item + "\n")
+		}
+		for _, f := range previous.Findings {
+			if f.Severity == FindingAdvisory {
+				b.WriteString("- advisory: " + f.Describe() + "\n")
+			}
+		}
+		if len(blocking) == 0 && len(previous.Findings) == 0 {
+			b.WriteString("- nothing\n")
+		}
+		fmt.Fprintf(&b, "Start from what changed since then. Say in your summary whether each of its blocking findings is resolved. Raise a new blocking finding only where a change since review %d breaks the feature, or where the feature plainly fails a criterion; do not reopen what review %d accepted, and do not repeat its advisory findings.\n", previous.Review, previous.Review)
+		earlier = b.String()
 	}
 	return fmt.Sprintf(`Final review %d of the assembled feature branch at commit %s, rebased onto %s/%s at %s. The spec is revision %d, the plan revision %d, sealed as seal %d; the charter is revision %d.
 
@@ -1473,10 +1692,12 @@ Your view holds:
 - context.md: local decisions, knowledge and notices, plus optional scoped external memory.
 - units/<unit>/report.json and landing.json: each unit's last report and how it landed.
 %s
-Call %s to read the whole change the branch makes to upstream: files_only lists the changed files, and paths and lines narrow the diff.
+%s
 
-Read the whole branch, not unit by unit. For every criterion of spec.md, call %s once with all of them: evidence names what in the branch shows the criterion holds, such as files, tests, behaviour and the checks below; a gap says what is missing, wrong or not shown, including anything that breaks a charter rule or a failed check the criterion rests on. Then end your turn.
+Every criterion and the merged units that serve it:
+%s%s
+Read the branch as a whole, not unit by unit: follow how the units' work connects, from where the feature is entered to what it changes, and check it against the spec's intent and the charter. Then call %s once with your summary and findings, an empty list when there are none, and end your turn.
 
 %s
-`, report.Review, report.Commit, report.Upstream.Remote, report.Upstream.Branch, report.Upstream.Commit, report.Spec, report.Plan, report.Seal, report.Charter, notes, workstreamDiffTool, FinalReportTool, finalCheckEvidence(checks))
+`, report.Review, report.Commit, report.Upstream.Remote, report.Upstream.Branch, report.Upstream.Commit, report.Spec, report.Plan, report.Seal, report.Charter, notes, diff, served.String(), earlier, FinalReportTool, finalCheckEvidence(checks))
 }

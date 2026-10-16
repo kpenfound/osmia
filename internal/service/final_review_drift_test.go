@@ -35,9 +35,7 @@ func TestFinalReviewNamesAnApprovedDriftRebasesConflictedPathsAndApproval(t *tes
 	in, err := decodeFinalReview(op)
 	must(t, err)
 	f.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Both criteria are shown.", "criteria": []any{
-			map[string]any{"criterion": "spec#1", "evidence": "internal/trace/resume.go resumes from the last chunk."},
-			map[string]any{"criterion": "spec#2", "evidence": "internal/trace/dedupe.go skips acknowledged chunks."}}})
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Both criteria are shown.", "findings": []any{}})
 		return err
 	})
 	result, err := a.Apply(ctx, op)

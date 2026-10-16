@@ -24,6 +24,19 @@ func engineeringRevision(r *trace.Repository, stream config.WorkstreamID, c amen
 	if strings.TrimSpace(note) == "" {
 		return refuse("an engineering decision requires its reasoning against approved intent")
 	}
+	feature, err := r.Workflow(stream, trace.FeatureSubject)
+	if err != nil {
+		return &APIError{Internal, err.Error()}
+	}
+	if feature.Value == AssembledState {
+		rounds, err := finalRoundsWithBlocking(r, stream)
+		if err != nil {
+			return &APIError{Internal, err.Error()}
+		}
+		if rounds >= maxFinalRounds {
+			return refuse(fmt.Sprintf("final reviews have found blocking problems %d times; further revisions of the assembled plan require an owner decision", rounds))
+		}
+	}
 	docs, err := trace.Read[trace.Document](r, stream)
 	if err != nil {
 		return &APIError{Internal, err.Error()}

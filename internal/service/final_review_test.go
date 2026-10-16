@@ -16,7 +16,6 @@ import (
 	"github.com/kpenfound/busybees/core/agent"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/followup"
@@ -177,12 +176,14 @@ func (f *shedFixture) finalTurn(k, attempt int, run func(ctx context.Context, to
 // Its first final review rebases the feature branch onto upstream's moved
 // main, replaying each landed commit, and one committee member reads the
 // exact rebased commit, its diff, the sealed spec and plan and the charter
-// in a read-only view. The report it records accounts for every sealed
-// criterion with evidence or a gap; one naming only some is refused. The
-// report records the reviewed commit and every governing revision, survives
-// a restart, and authorises later steps until the branch, the spec or the
-// charter changes, when a new review is asked for.
-func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.T) {
+// in a read-only view, with every criterion and the merged units serving it.
+// The report it records holds that coverage and the reader's findings on the
+// branch as a whole; a finding without a known severity or citing what is not
+// a sealed criterion is refused. The report records the reviewed commit and
+// every governing revision, survives a restart, and authorises later steps
+// until the branch, the spec or the charter changes, when a new review is
+// asked for.
+func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, a := newFinalFixture(t, "final")
 	ctx := context.Background()
@@ -240,15 +241,14 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 		if report, err := readTool(ctx, tools, "units/resume/report.json"); err == nil {
 			problems = append(problems, fmt.Errorf("a unit that never reported shows a report %q", report))
 		}
-		if got, err := callTool(ctx, tools, FinalReportTool, map[string]any{"criteria": []any{map[string]any{"criterion": "spec#1", "evidence": "TestResume"}}}); err != nil || !strings.Contains(got, "missing spec#2") {
-			problems = append(problems, fmt.Errorf("a partial report was not refused: %s %v", got, err))
+		if got, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "x", "findings": []any{map[string]any{"severity": "minor", "finding": "x"}}}); err == nil || strings.Contains(got, `"recorded":true`) {
+			problems = append(problems, fmt.Errorf("a finding of unknown severity was not refused: %s %v", got, err))
 		}
-		if got, err := callTool(ctx, tools, FinalReportTool, map[string]any{"criteria": []any{map[string]any{"criterion": "spec#1", "evidence": "x", "gap": "y"}, map[string]any{"criterion": "spec#2", "gap": "y"}}}); err != nil || !strings.Contains(got, "not both") {
-			problems = append(problems, fmt.Errorf("a criterion with evidence and a gap was not refused: %s %v", got, err))
+		if got, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "x", "findings": []any{map[string]any{"severity": "advisory", "criteria": []any{"spec#9"}, "finding": "x"}}}); err != nil || !strings.Contains(got, `\"spec#9\" is not a criterion of the sealed spec`) {
+			problems = append(problems, fmt.Errorf("a finding citing an unknown criterion was not refused: %s %v", got, err))
 		}
-		got, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Both criteria are shown.", "criteria": []any{
-			map[string]any{"criterion": "spec#2", "evidence": "internal/trace/dedupe.go skips acknowledged chunks."},
-			map[string]any{"criterion": "spec#1", "evidence": "internal/trace/resume.go resumes from the last chunk."}}})
+		got, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{
+			map[string]any{"severity": "advisory", "criteria": []any{"spec#2"}, "finding": "Dedupe keeps acknowledged chunk IDs in memory only.", "action": "Persist them if restarts matter."}}})
 		if err != nil || !strings.Contains(got, `"recorded":true`) {
 			problems = append(problems, fmt.Errorf("the report was not recorded: %s %v", got, err))
 		}
@@ -274,7 +274,8 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 	}
 	reader, err := repository.Thread(stream, committeeAgent(1))
 	must(t, err)
-	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "recorded in final/checks-1.json; you do not run them. The run passed.") || !strings.Contains(prompt, "all proofs passed") {
+	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "recorded in final/checks-1.json; you do not run them. The run passed.") || !strings.Contains(prompt, "all proofs passed") ||
+		!strings.Contains(prompt, "- spec#1: served by merged units resume, each reviewed against its acceptance\n- spec#2: served by merged units dedupe") || strings.Contains(prompt, "change since") {
 		t.Fatalf("the reader's prompt lacks the check run:\n%s", prompt)
 	}
 	if on, err := g.Ancestor(ctx, upstream, tip); err != nil || !on || tip == head {
@@ -301,9 +302,10 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 
 	want := FinalReport{Review: 1, Operation: op.ID, Outcome: finalReviewed, Branch: featureBranch(stream), Before: head, Commit: tip,
 		Upstream: &seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}, Seal: 1, SpecHash: seal.SpecHash(validSpec), Spec: 1, Plan: 1, Charter: charter.Revision,
-		Reader: committeeAgent(1), Turn: turn, Summary: "Both criteria are shown.", Criteria: []FinalCriterion{
-			{Criterion: "spec#1", Text: "An interrupted upload resumes from the last acknowledged chunk.", Evidence: "internal/trace/resume.go resumes from the last chunk."},
-			{Criterion: "spec#2", Text: "Acknowledged chunks are never sent again.", Evidence: "internal/trace/dedupe.go skips acknowledged chunks."}}}
+		Reader: committeeAgent(1), Turn: turn, Summary: "Uploads resume and skip acknowledged chunks.", Criteria: []FinalCriterion{
+			{Criterion: "spec#1", Text: "An interrupted upload resumes from the last acknowledged chunk.", Evidence: "served by merged units resume, each reviewed against its acceptance"},
+			{Criterion: "spec#2", Text: "Acknowledged chunks are never sent again.", Evidence: "served by merged units dedupe, each reviewed against its acceptance"}},
+		Findings: []FinalFinding{{Severity: FindingAdvisory, Criteria: []string{"spec#2"}, Finding: "Dedupe keeps acknowledged chunk IDs in memory only.", Action: "Persist them if restarts matter."}}}
 	report, found, err := latestFinalReport(repository, stream)
 	if err != nil || !found || !reflect.DeepEqual(report, want) {
 		t.Fatalf("final report %+v, %v, %v; want %+v", report, found, err, want)
@@ -319,11 +321,11 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 		t.Fatalf("final rebase documents %+v", rebases)
 	}
 	reviewed := transitionByID(t, repository, stream, "final-review-1-reviewed")
-	wantReason := fmt.Sprintf("final review 1 read %s at %s against seal 1 (spec revision 1, plan revision 1, charter revision %d): 2 of 2 criteria shown; gaps: none; report final/report.json revision 1", featureBranch(stream), tip, charter.Revision)
+	wantReason := fmt.Sprintf("final review 1 read %s at %s against seal 1 (spec revision 1, plan revision 1, charter revision %d): 0 blocking and 1 advisory; report final/report.json revision 1", featureBranch(stream), tip, charter.Revision)
 	if reviewed.Subject != finalReviewSubject || reviewed.From != "requested-1" || reviewed.To != "reviewed-1" || reviewed.Cause != op.ID || reviewed.Reason != wantReason || result.Evidence != wantReason {
 		t.Fatalf("the reviewed transition %+v, result %+v", reviewed, result)
 	}
-	if body := noticeOf(t, repository, stream, reviewed.ID); body != "The final review of the assembled branch is recorded: 2 of 2 criteria are shown; not shown: none." {
+	if body := noticeOf(t, repository, stream, reviewed.ID); body != "The final review of the assembled branch is recorded: 0 blocking, 1 advisory.\nAdvisory: spec#2: Dedupe keeps acknowledged chunk IDs in memory only. Action: Persist them if restarts matter.\nNothing blocks delivery; the owner decides it with the advisory findings in view." {
 		t.Fatalf("the notice %q", body)
 	}
 	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != "" {
@@ -399,119 +401,147 @@ func TestFinalReviewReadsTheRebasedBranchAgainstEverySealedCriterion(t *testing.
 	}
 }
 
-func TestFinalReviewGapBecomesAnAssembledFollowupAndRequiresRereview(t *testing.T) {
+// A final review's blocking finding builds nothing on its own: the plan and
+// its units stay as they are, the chief of staff hears the finding with how
+// to triage it, and the report is presented for delivery. Approving it
+// without accepting the finding is refused; approving with acceptance records
+// what was accepted, and delivery holds the approval to it. A new review of
+// a changed branch starts from what the previous one found and reads what
+// changed since.
+func TestBlockingFinalFindingsWaitForTriageOrOwnerAcceptance(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "gaps")
+	f, stream, repository, a := newFinalFixture(t, "blocking")
 	ctx := context.Background()
 	_, op := assembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
 	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"criteria": []any{
-			map[string]any{"criterion": "spec#1", "evidence": "resume.go"},
-			map[string]any{"criterion": "spec#2", "gap": "The branch has no proof that acknowledged chunks are skipped."},
-		}})
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Dedupe is not wired in.", "findings": []any{
+			map[string]any{"severity": "blocking", "criteria": []any{"spec#2"}, "finding": "The upload path never calls Dedupe.", "action": "Call Dedupe before sending a chunk."}}})
 		return err
 	})
-	_, err := a.Apply(ctx, op)
-	must(t, err)
-	added, err := followup.Read(repository, stream)
-	must(t, err)
-	if len(added) != 1 || added[0].Review != 1 || added[0].Report != 1 || added[0].Criterion != "spec#2" || added[0].Gap == "" {
-		t.Fatalf("follow-up trace %+v", added)
+	if result := settleOperation(t, f.s, repository, stream, op, a); result.Outcome != "succeeded" {
+		t.Fatalf("the first review %+v", result)
 	}
-	id := added[0].Unit.ID
-	if !slices.Equal(added[0].Unit.Criteria, []string{"spec#2"}) || added[0].Unit.Task != added[0].Gap || len(added[0].Unit.Acceptance) != 1 || len(added[0].Unit.Footprint) == 0 {
-		t.Fatalf("follow-up is not actionable: %+v", added[0])
+	blocking := []string{"spec#2: The upload path never calls Dedupe. Action: Call Dedupe before sending a chunk."}
+	if added, err := followup.Read(repository, stream); err != nil || len(added) != 0 {
+		t.Fatalf("a blocking finding built follow-up units %+v: %v", added, err)
 	}
 	if plans := streamDocuments(t, repository, stream, plan.PlanDocument); len(plans) != 1 || plans[0].Content != validPlan {
-		t.Fatalf("follow-up changed the ratified plan: %+v", plans)
-	}
-	if docs := streamDocuments(t, repository, stream, followup.DocumentID); len(docs) != 1 || docs[0].Path != followup.Path || docs[0].Cause != "final-review-1-reviewed" {
-		t.Fatalf("follow-up documents %+v", docs)
+		t.Fatalf("a blocking finding changed the ratified plan: %+v", plans)
 	}
 	if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AssembledState {
-		t.Fatalf("feature after gap %+v: %v", feature, err)
+		t.Fatalf("feature after a blocking finding %+v: %v", feature, err)
 	}
-	b, found, err := (&masons{s: f.s, cfg: f.s.cfg, repository: repository}).read(stream)
-	must(t, err)
-	if !found || b.states[trace.UnitSubject(id)].Value != UnitReady || !slices.ContainsFunc(b.plan.Units, func(u plan.Unit) bool { return u.ID == id }) {
-		t.Fatalf("follow-up is not scheduled: %+v", b)
-	}
-	m := &masons{s: f.s, cfg: f.s.cfg, repository: repository}
-	masonBundle, err := m.bundle(ctx, stream, id)
-	must(t, err)
-	if masonBundle.Followup == nil || masonBundle.Followup.Gap != added[0].Gap || !strings.Contains(masonBundle.Render(), added[0].Gap) {
-		t.Fatalf("mason cannot see the gap: %+v", masonBundle.Followup)
-	}
-	started, _, err := m.start(ctx, b, id)
-	must(t, err)
-	if !started {
-		t.Fatal("the normal mason controller did not start the follow-up")
-	}
-	if state, err := repository.Workflow(stream, trace.UnitSubject(id)); err != nil || state.Value != UnitImplementing {
-		t.Fatalf("follow-up did not enter implementing: %+v %v", state, err)
-	}
-	if _, reason, err := a.finalGate(ctx, stream); err != nil || !strings.Contains(reason, "unresolved gap for spec#2") {
-		t.Fatalf("gap passed delivery gate: %q %v", reason, err)
+	if body := noticeOf(t, repository, stream, "final-review-1-reviewed"); !strings.Contains(body, "1 blocking, 0 advisory.\nBlocking: "+blocking[0]) || !strings.Contains(body, "through route_amendment") {
+		t.Fatalf("the notice %q", body)
 	}
 	must(t, a.Pass(ctx))
 	if ops := finalOperations(t, repository, stream); len(ops) != 1 {
-		t.Fatalf("review asked before landing: %+v", ops)
+		t.Fatalf("the review was asked for again with nothing changed: %+v", ops)
 	}
-	mergeDirectly(t, f, repository, stream, id, map[string]string{"internal/trace/proof_test.go": "package trace\n"})
-	if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AssembledState {
-		t.Fatalf("landing moved the feature: %+v %v", feature, err)
-	}
-	if _, reason, err := a.finalGate(ctx, stream); err != nil || !strings.Contains(reason, "stale") {
-		t.Fatalf("old review after landing: %q %v", reason, err)
-	}
-	repository.Close()
-	f.start(t)
-	awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return finalOperations(t, f.repository(), stream) })
-	f.stop(t)
-	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	defer repository.Close()
-	a = &finalReviewer{s: f.s, repository: repository}
+
+	moveFeature(t, f, stream, map[string]string{"internal/trace/upload.go": "package trace\n"})
 	must(t, a.Pass(ctx))
 	ops := finalOperations(t, repository, stream)
 	if len(ops) != 2 {
-		t.Fatalf("new review not asked: %+v", ops)
+		t.Fatalf("no review of the changed branch: %+v", ops)
 	}
+	var problems []error
 	f.finalTurn(2, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"criteria": []any{
-			map[string]any{"criterion": "spec#1", "evidence": "resume.go"},
-			map[string]any{"criterion": "spec#2", "evidence": "proof_test.go shows acknowledged chunks are skipped"},
-		}})
+		if since, err := callTool(ctx, tools, workstreamDiffTool, map[string]any{"change": "since", "files_only": true}); err != nil || !strings.Contains(since, "internal/trace/upload.go") || strings.Contains(since, "dedupe.go") {
+			problems = append(problems, fmt.Errorf("the change since review 1 %q: %v", since, err))
+		}
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Dedupe is still not wired in.", "findings": []any{
+			map[string]any{"severity": "blocking", "criteria": []any{"spec#2"}, "finding": "The upload path never calls Dedupe.", "action": "Call Dedupe before sending a chunk."}}})
 		return err
 	})
-	result, err := a.Apply(ctx, ops[1].Operation)
+	result := settleOperation(t, f.s, repository, stream, ops[1].Operation, a)
+	if err := errors.Join(problems...); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := repository.Thread(stream, committeeAgent(1))
 	must(t, err)
-	if result.Outcome != "succeeded" {
-		t.Fatalf("rerun failed: %+v", result)
+	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "Final review 1 read ") || !strings.Contains(prompt, "- blocking: "+blocking[0]) || !strings.Contains(prompt, "change since for what changed after final review 1") {
+		t.Fatalf("the second reader's prompt lacks the first review:\n%s", prompt)
 	}
-	if report, reason, err := a.finalGate(ctx, stream); err != nil || reason != "" || report.Review != 2 {
-		t.Fatalf("rerun did not clear gap: review %+v, reason %q: %v", report, reason, err)
+	if report, reason, err := a.finalGate(ctx, stream); err != nil || reason != "" || result.Outcome != "succeeded" || report.Review != 2 || !slices.Equal(report.blocking(), blocking) {
+		t.Fatalf("the second review %+v, reason %q: %v", report, reason, err)
 	}
-	must(t, os.WriteFile(workstreamTraceFile(t, f.s.cfg.Root, f.project, stream, plan.SpecPath), []byte(strings.Replace(validSpec, "never sent again", "sometimes resent", 1)), 0600))
-	if _, err := (&masons{s: f.s, cfg: f.s.cfg, repository: repository}).bundle(ctx, stream, id); !errors.Is(err, bundle.ErrStaleSpec) {
-		t.Fatalf("follow-up accepted unratified spec change: %v", err)
+
+	f.s.setSole(&activeProject{repository: repository})
+	p, api := f.s.deliveryPresentation(ctx, string(stream))
+	if api != nil || !slices.Equal(p.Report.blocking(), blocking) {
+		t.Fatalf("presentation %+v: %v", p.Report, api)
+	}
+	decision := DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash}
+	if _, api := f.s.approveDelivery(ctx, string(stream), decision); api == nil || api.Code != Conflict || !strings.Contains(api.Message, "approve with accept_blocking") {
+		t.Fatalf("approved without accepting the blocking finding: %v", api)
+	}
+	decision.AcceptBlocking = true
+	approval, api := f.s.approveDelivery(ctx, string(stream), decision)
+	if api != nil || !slices.Equal(approval.AcceptedBlocking, blocking) {
+		t.Fatalf("the accepting approval %+v: %v", approval, api)
+	}
+	if _, reason, err := f.s.deliveryGate(ctx, repository, stream, approval.Description); err != nil || reason != "" {
+		t.Fatalf("the accepting approval does not authorise delivery: %q %v", reason, err)
 	}
 }
 
-func TestFinalReviewBehaviorAndEvidenceGapsStayExplicit(t *testing.T) {
+// Once maxFinalRounds final reviews of an assembled feature have found
+// something blocking, the chief of staff no longer decides plan revisions of
+// it: they wait for the owner, and the chief hears so with the findings.
+func TestRepeatedBlockingFinalReviewsLeaveRevisionsToTheOwner(t *testing.T) {
 	t.Parallel()
-	_, stream, _, a := newFinalFixture(t, "both-gaps")
-	added, err := a.followups(stream, FinalReport{Review: 1, Spec: 1, Plan: 1, Criteria: []FinalCriterion{
-		{Criterion: "spec#1", Gap: "Resume ignores the checkpoint."},
-		{Criterion: "spec#2", Gap: "No test shows acknowledged chunks are skipped."},
-	}}, 1)
+	f, stream, repository, a := newFinalFixture(t, "rounds")
+	ctx := context.Background()
+	assembleBoth(t, f, repository, a, stream,
+		map[string]string{"internal/trace/resume.go": "package trace\n"},
+		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
+	record := func(review int, severity string) {
+		content, err := json.Marshal(FinalReport{Review: review, Outcome: finalReviewed, Findings: []FinalFinding{{Severity: severity, Finding: "The upload path never calls Dedupe."}}})
+		must(t, err)
+		must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalReportDocument, Revision: review, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: finalReviewActor, Cause: "final-review"}, Path: finalReportPath, Content: string(content)}}))
+	}
+	chief := func() *APIError {
+		return engineeringRevision(repository, stream, amendmentCase{}, seal.Seal{}, nil, "Groups the findings into one unit.")
+	}
+	const owners = "final reviews have found blocking problems 3 times; further revisions of the assembled plan require an owner decision"
+	record(1, FindingBlocking)
+	record(2, FindingAdvisory)
+	record(3, FindingBlocking)
+	if api := chief(); api != nil && api.Message == owners {
+		t.Fatalf("two blocking reviews left the revision to the owner: %v", api)
+	}
+	record(4, FindingBlocking)
+	if api := chief(); api == nil || api.Message != owners {
+		t.Fatalf("three blocking reviews left the revision to the chief of staff: %v", api)
+	}
+	if body := finalReviewNotice(FinalReport{}, []string{"x"}, maxFinalRounds, false); !strings.Contains(body, "Further revisions of the assembled plan are the owner's decision") {
+		t.Fatalf("the notice %q", body)
+	}
+}
+
+// A post-merge dependency update's final review with blocking problems
+// becomes one follow-up unit that resolves all of them, scoped to the sealed
+// footprints of the units serving the criteria they concern. Advisory
+// findings build nothing.
+func TestPostMergeRepairCollectsBlockingProblemsInOneUnit(t *testing.T) {
+	t.Parallel()
+	_, stream, _, a := newFinalFixture(t, "repair")
+	report := FinalReport{Review: 1, Spec: 1, Plan: 1,
+		Criteria: []FinalCriterion{{Criterion: "spec#1", Gap: "no merged unit serves it"}, {Criterion: "spec#2", Evidence: "served by merged units dedupe"}},
+		Findings: []FinalFinding{{Severity: FindingBlocking, Criteria: []string{"spec#2"}, Finding: "Dedupe breaks with the merged dependency."}, {Severity: FindingAdvisory, Finding: "Rename the helper."}}}
+	added, found, err := a.followup(stream, report, 1)
 	must(t, err)
-	if len(added) != 2 || added[0].Criterion != "spec#1" || added[0].Gap != "Resume ignores the checkpoint." ||
-		added[1].Criterion != "spec#2" || added[1].Gap != "No test shows acknowledged chunks are skipped." ||
-		added[0].Unit.ID == added[1].Unit.ID || len(added[0].Unit.Footprint) == 0 || len(added[1].Unit.Footprint) == 0 {
-		t.Fatalf("gaps were collapsed or lost: %+v", added)
+	if !found || added.Unit.ID != "final-1" || !slices.Equal(added.Unit.Criteria, []string{"spec#1", "spec#2"}) || !slices.Equal(added.Unit.Footprint, []string{"internal.trace"}) ||
+		!slices.Equal(added.Unit.Acceptance, []string{"Resolved: spec#1: no merged unit serves it", "Resolved: spec#2: Dedupe breaks with the merged dependency."}) || strings.Contains(added.Gap, "Rename") {
+		t.Fatalf("the repair %+v", added)
+	}
+	report.Criteria[0] = FinalCriterion{Criterion: "spec#1", Evidence: "served by merged units resume"}
+	report.Findings = report.Findings[1:]
+	if added, found, err := a.followup(stream, report, 1); err != nil || found {
+		t.Fatalf("advisory findings built a repair %+v: %v", added, err)
 	}
 }
 
@@ -640,11 +670,13 @@ func TestInterruptedFinalReviewKeepsItsRecordedRebase(t *testing.T) {
 	}
 }
 
-// The service runs the final review's checks once, before the read, and
-// records the run whatever its result. A review interrupted after the run is
-// recorded reads it back on retry instead of running the checks again, and a
-// run that did not complete reaches the reader as a run that shows nothing.
-func TestFinalChecksRunOnceBeforeTheRead(t *testing.T) {
+// The service runs the final review's checks before the read and records
+// every run whatever its result. A review interrupted after a run is recorded
+// reads it back on retry instead of running the checks again. A run that did
+// not complete is never read: the review waits and runs the checks again,
+// waiting longer after each run, and after maxIncompleteChecks such runs in a
+// row the owner's inbox reports them until a run completes.
+func TestFinalReviewWaitsForChecksThatComplete(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, a := newFinalFixture(t, "final-checks")
 	ctx := context.Background()
@@ -656,9 +688,12 @@ func TestFinalChecksRunOnceBeforeTheRead(t *testing.T) {
 	must(t, err)
 	must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalChecksDocument(1), Revision: 1, Project: repository.Project(), Workstream: stream, At: f.clock.Now(), Actor: checksActor, Cause: "fixture"}, Path: finalChecksPath(1), Content: string(prior)}}))
 	rawOutput := "engine diagnostic start\n" + strings.Repeat("transport detail\n", 6000) + "engine diagnostic end\n"
-	runs := 0
+	runs, complete := 0, false
 	f.s.options.reviewChecks = checkFunc(func(context.Context, string) (CheckResult, error) {
 		runs++
+		if complete {
+			return CheckResult{Output: "all proofs passed"}, nil
+		}
 		return CheckResult{ExitCode: -1, Output: rawOutput}, errors.New("engine unreachable")
 	})
 	f.s.boundary = func(name string) error {
@@ -671,12 +706,17 @@ func TestFinalChecksRunOnceBeforeTheRead(t *testing.T) {
 		t.Fatalf("the interrupted review: %v", err)
 	}
 	f.s.boundary = nil
-	f.finalTurn(1, 1, func(context.Context, *mcp.ClientSession) error { return nil })
-	if _, err := a.Apply(ctx, op); err != nil {
-		t.Fatal(err)
+	read := 0
+	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+		read++
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume.", "findings": []any{}})
+		return err
+	})
+	if _, err := a.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "final review 1 waits for its checks: 1 runs in a row on") || !strings.Contains(err.Error(), "engine unreachable") {
+		t.Fatalf("the review read a commit whose checks did not complete: %v", err)
 	}
-	if runs != 1 {
-		t.Fatalf("the checks ran %d times", runs)
+	if runs != 1 || read != 0 {
+		t.Fatalf("the checks ran %d times and the reader %d times before the wait passed", runs, read)
 	}
 	var run FinalCheckRun
 	docs := streamDocuments(t, repository, stream, finalChecksDocument(1))
@@ -687,10 +727,47 @@ func TestFinalChecksRunOnceBeforeTheRead(t *testing.T) {
 	if len(outputDocs) != 1 || outputDocs[0].Content != rawOutput || outputDocs[0].Path != run.OutputPath || !run.Truncated || !strings.Contains(run.Output, "engine diagnostic start") || !strings.Contains(run.Output, "engine diagnostic end") {
 		t.Fatal("final check recovery lost captured output or diagnostics")
 	}
+	entry := func() (InboxEntry, bool) {
+		t.Helper()
+		state, err := repository.Workflow(stream, finalReviewSubject)
+		must(t, err)
+		e, open, err := finalChecksEntry(repository, trace.WorkstreamStatus{Workstream: stream, Subjects: map[string]trace.WorkflowState{finalReviewSubject: state}})
+		must(t, err)
+		return e, open
+	}
+	for n, wait := range []time.Duration{checkRetryDelay, 2 * checkRetryDelay} {
+		if _, open := entry(); open {
+			t.Fatalf("the inbox reports %d incomplete runs", n+1)
+		}
+		f.clock.now = f.clock.now.Add(wait + time.Minute)
+		if _, err := a.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%d runs in a row", n+2)) {
+			t.Fatalf("run %d: %v", n+2, err)
+		}
+	}
+	if runs != 3 || read != 0 {
+		t.Fatalf("the checks ran %d times and the reader %d times", runs, read)
+	}
+	e, open := entry()
+	if !open || e.Kind != InboxFinalChecks || e.Revision != 1 || !strings.Contains(e.Question, "did not complete 3 times in a row") || !strings.Contains(e.Question, "Last failure: engine unreachable") || !strings.Contains(e.Blocked, "waiting longer after each run") {
+		t.Fatalf("the inbox entry %+v, open %v", e, open)
+	}
+	complete = true
+	if _, err := a.Apply(ctx, op); err == nil {
+		t.Fatal("the checks ran again before the longer wait passed")
+	}
+	f.clock.now = f.clock.now.Add(finalCheckDelay(3) + time.Minute)
+	result, err := a.Apply(ctx, op)
+	must(t, err)
+	if result.Outcome != "succeeded" || runs != 4 || read != 1 {
+		t.Fatalf("result %+v after %d check runs and %d reads", result, runs, read)
+	}
 	reader, err := repository.Thread(stream, committeeAgent(1))
 	must(t, err)
-	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "recorded in final/checks-1.json, and they did not complete: engine unreachable. The checks show nothing about this commit") || !strings.Contains(prompt, run.OutputPath) || !strings.Contains(prompt, "engine diagnostic start") || !strings.Contains(prompt, "engine diagnostic end") {
-		t.Fatalf("the reader's prompt lacks the incomplete run:\n%s", prompt)
+	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "The run passed.") || strings.Contains(prompt, "engine unreachable") {
+		t.Fatalf("the reader's prompt:\n%s", prompt)
+	}
+	if _, open := entry(); open {
+		t.Fatal("the inbox still reports the checks once a run completed")
 	}
 }
 
@@ -735,9 +812,7 @@ func TestInterruptedFinalRebaseIsReconciled(t *testing.T) {
 			}
 			var problems []error
 			f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-				got, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Both criteria are shown.", "criteria": []any{
-					map[string]any{"criterion": "spec#1", "evidence": "internal/trace/resume.go"},
-					map[string]any{"criterion": "spec#2", "evidence": "internal/trace/dedupe.go"}}})
+				got, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
 				if err != nil || !strings.Contains(got, `"recorded":true`) {
 					problems = append(problems, fmt.Errorf("the report was not recorded: %s %v", got, err))
 				}

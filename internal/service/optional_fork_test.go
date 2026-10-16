@@ -76,7 +76,7 @@ func approveMaintenance(t *testing.T, p *publicationFixture) {
 	in, err := decodeFinalReview(op)
 	must(t, err)
 	p.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Ready upstream", "criteria": []any{map[string]any{"criterion": "spec#1", "evidence": "resume.go"}, map[string]any{"criterion": "spec#2", "evidence": "dedupe.go"}}})
+		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Ready upstream", "findings": []any{}})
 		return err
 	})
 	result, err := reviewer.Apply(ctx, op)
