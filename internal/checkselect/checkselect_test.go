@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kpenfound/osmia/internal/systemone"
+	"github.com/kpenfound/agentcore/jev/systemone"
 )
 
 func TestCandidatesCollapseTheLargestCollections(t *testing.T) {

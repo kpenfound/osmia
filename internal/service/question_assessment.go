@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/events"
@@ -15,7 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/systemone"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 

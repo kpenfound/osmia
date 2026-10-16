@@ -4,19 +4,21 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/kpenfound/agentcore/jev"
 )
 
 // The Jev defaults reach Jev through OpenRouter's TypeSafe-compatible API.
 const (
-	DefaultJevURL       = "https://openrouter.ai/api"
-	DefaultJevModel     = "~typesafe/jev-latest"
-	DefaultJevAPIKeyEnv = "OPENROUTER_API_KEY"
+	DefaultJevURL       = jev.DefaultURL
+	DefaultJevModel     = jev.DefaultModel
+	DefaultJevAPIKeyEnv = jev.DefaultAPIKeyEnv
 	DefaultJevTimeout   = "10s"
 )
 
 // MaxJevTimeout bounds one Jev request, so a judgment never holds a turn for
 // long.
-const MaxJevTimeout = time.Minute
+const MaxJevTimeout = jev.MaxTimeout
 
 // Jev configures the optional Jev boost. Enabled is the one switch for every
 // judgment Osmia asks Jev for; the other settings say how to reach it. The API
@@ -36,10 +38,10 @@ func defaultJev() Jev {
 	return Jev{URL: DefaultJevURL, Model: DefaultJevModel, APIKeyEnv: DefaultJevAPIKeyEnv, Timeout: DefaultJevTimeout}
 }
 
-// RequestTimeout is how long one Jev request may take.
-func (j Jev) RequestTimeout() time.Duration {
-	d, _ := time.ParseDuration(j.Timeout)
-	return d
+// Settings are j as a Jev judge reads them, with the timeout parsed.
+func (j Jev) Settings() jev.Settings {
+	timeout, _ := time.ParseDuration(j.Timeout)
+	return jev.Settings{Enabled: j.Enabled, URL: j.URL, Model: j.Model, APIKeyEnv: j.APIKeyEnv, Timeout: timeout}
 }
 
 // The settings are validated whether or not Jev is enabled, so turning the

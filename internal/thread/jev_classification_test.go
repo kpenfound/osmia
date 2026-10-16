@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/agentcore/jev/jevtest"
+	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/jev"
-	"github.com/kpenfound/osmia/internal/jev/jevtest"
-	"github.com/kpenfound/osmia/internal/systemone"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 

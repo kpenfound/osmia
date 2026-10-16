@@ -165,7 +165,7 @@ func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 	must(t, a.Pass(ctx))
 	ops := finalOperations(t, repository, stream)
 	if len(ops) != 2 {
-			t.Fatalf("final review operations %+v", ops)
+		t.Fatalf("final review operations %+v", ops)
 	}
 	if in, err := decodeFinalReview(ops[1].Operation); err != nil || in.Move != 2 {
 		t.Fatalf("the review asked for after the moves %+v %v", in, err)

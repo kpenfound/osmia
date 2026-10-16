@@ -6,9 +6,9 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/jev"
-	"github.com/kpenfound/osmia/internal/systemone"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 

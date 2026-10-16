@@ -144,8 +144,8 @@ collections runs more than it would with each link judged.
 | --- | --- |
 | Questions, state, narrowing, threshold and version | [checkselect](../internal/checkselect) |
 | The check run, its record and the selection's fallbacks | [service](../internal/service): `unit_checks.go`, `smart_checks.go`, `review_checks.go` |
-| Recording, reuse, retries and cool-down shared by every judgment | [jev](../internal/jev) |
-| The System One API client | [systemone](../internal/systemone) |
+| Recording and reuse shared by every judgment | [jev](../internal/jev) |
+| The System One API client, retries and cool-down | agentcore `jev` and `jev/systemone` |
 | Changed files from a diff | [gitdiff](../internal/gitdiff) |
 | The local command | [smartcheck](../cmd/smartcheck) |
 

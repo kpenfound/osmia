@@ -74,7 +74,7 @@ func TestDefaults(t *testing.T) {
 	if c.EventWindow() != 5*time.Second {
 		t.Fatalf("event window default: %v", c.EventWindow())
 	}
-	if c.Jev != (Jev{URL: "https://openrouter.ai/api", Model: "~typesafe/jev-latest", APIKeyEnv: "OPENROUTER_API_KEY", Timeout: "10s"}) || c.Jev.RequestTimeout() != 10*time.Second {
+	if c.Jev != (Jev{URL: "https://openrouter.ai/api", Model: "~typesafe/jev-latest", APIKeyEnv: "OPENROUTER_API_KEY", Timeout: "10s"}) || c.Jev.Settings().Timeout != 10*time.Second || c.Jev.Settings().Validate() != nil {
 		t.Fatalf("jev defaults: %+v", c.Jev)
 	}
 	if c.Project.UpstreamRebase != "6h" || c.Project.RebaseInterval() != 6*time.Hour {
@@ -100,7 +100,7 @@ func TestDefaults(t *testing.T) {
 
 func TestJevBoostIsOneSwitch(t *testing.T) {
 	c, err := Load(fixture(t, topConfig+"[jev]\nenabled = true\nmodel = 'jev-1.13.0'\ntimeout = '3s'\n", projectConfig))
-	if err != nil || !c.Jev.Enabled || c.Jev.Model != "jev-1.13.0" || c.Jev.URL != DefaultJevURL || c.Jev.APIKeyEnv != DefaultJevAPIKeyEnv || c.Jev.RequestTimeout() != 3*time.Second {
+	if err != nil || !c.Jev.Enabled || c.Jev.Model != "jev-1.13.0" || c.Jev.URL != DefaultJevURL || c.Jev.APIKeyEnv != DefaultJevAPIKeyEnv || c.Jev.Settings().Timeout != 3*time.Second {
 		t.Fatalf("jev: %+v %v", c.Jev, err)
 	}
 }

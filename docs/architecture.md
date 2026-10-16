@@ -87,7 +87,7 @@ learnings; it does not rewrite or prune Git history. See
 | Execution boundary | Scoped file views, tool grants, environment, sandbox verification | [isolation](../internal/isolation), [coreadapter](../internal/coreadapter) |
 | Target workspaces | Service-owned Git and Jujutsu operations | [workspace](../internal/workspace) |
 | Interfaces | Local client and browser page | [cli](../internal/cli), [web](../internal/web) |
-| Jev judgments | The optional boost's switch, fallbacks, cool-down, judgment records and costs, over a standalone System One API client | [jev](../internal/jev), [systemone](../internal/systemone) |
+| Jev judgments | Judgment identity, records, reuse, acceptance and costs, over agentcore's Jev client with its switch, retries and cool-down | [jev](../internal/jev) |
 
 The service uses a pinned `agentcore` dependency for reusable execution,
 MCP, sandbox and VCS primitives. Osmia keeps its state machine, owner decisions
@@ -158,7 +158,7 @@ it.
 
 A judgment supplies the turn's scope, the trace record that caused it, a task
 name and version, the records its state was built from, the
-[`systemone`](../internal/systemone) request, and an acceptance function
+agentcore `jev/systemone` request, and an acceptance function
 holding the task's thresholds. Two rules keep recorded decisions meaningful:
 
 - Bump the version whenever the questions, the meaning given to their answers
@@ -171,13 +171,17 @@ holding the task's thresholds. Two rules keep recorded decisions meaningful:
   fallback still carries the answers for evaluation; they must not drive the
   workflow.
 
-The Judge records the judgment and its cost itself. A consumer records what it
+The Judge records the judgment and its cost itself. It asks through
+agentcore's `jev.Judge`, which owns the API client, the retry of a timeout or
+unavailable provider, the cool-down after rate limits and outages, and the
+status the runtime reports. A consumer records what it
 did with the decision as it records any other result, and can cite the
 decision's ID. Keep task questions, thresholds and interpretation in the
 consumer's package, or in a package of their own when more than one program
 asks the judgment, as [checkselect](../internal/checkselect) does for the
 service and `cmd/smartcheck` ([smart checks](smart-checks.md)); `jev` holds
-only what every judgment shares, and `systemone` knows nothing of Osmia.
+only what every judgment shares, and agentcore's `jev` knows nothing of
+Osmia.
 
 ## Storage and deployment
 

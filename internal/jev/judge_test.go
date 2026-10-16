@@ -2,8 +2,9 @@ package jev_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,11 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/agentcore/jev/jevtest"
+	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/jev"
-	"github.com/kpenfound/osmia/internal/jev/jevtest"
-	"github.com/kpenfound/osmia/internal/systemone"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -176,9 +177,6 @@ func TestDisabledBoostSendsAndRecordsNothing(t *testing.T) {
 	if len(f.costs(t)) != 0 {
 		t.Fatal("disabled boost recorded a cost")
 	}
-	if s := j.Status(); s.Mode != jev.ModeDisabled {
-		t.Fatalf("status = %+v", s)
-	}
 }
 
 func TestAcceptedJudgmentIsRecordedWithItsCostAndReusedAfterRestart(t *testing.T) {
@@ -250,51 +248,27 @@ func TestLowConfidenceFallsBackKeepingTheAnswers(t *testing.T) {
 	}
 }
 
-func TestFailuresFallBackWithBoundedRetries(t *testing.T) {
-	for _, c := range []struct {
-		name     string
-		err      error
-		want     jev.Reason
-		requests int
-	}{
-		{"timeout retried once", &systemone.Error{Kind: systemone.KindTimeout}, jev.ReasonTimeout, 2},
-		{"unavailable retried once", &systemone.Error{Kind: systemone.KindUnavailable}, jev.ReasonUnavailable, 2},
-		{"other errors are unavailable", errors.New("connection reset"), jev.ReasonUnavailable, 2},
-		{"unprocessable not retried", &systemone.Error{Kind: systemone.KindRejected, Message: "HTTP 422"}, jev.ReasonRejected, 1},
-		{"unauthorized not retried", &systemone.Error{Kind: systemone.KindUnauthorized}, jev.ReasonRejected, 1},
-		{"malformed not retried", &systemone.Error{Kind: systemone.KindMalformed}, jev.ReasonUnusable, 1},
-		{"rate limit not retried", &systemone.Error{Kind: systemone.KindRateLimited}, jev.ReasonRateLimited, 1},
-	} {
-		f := newFixture(t)
-		settings := enabled()
-		p := &jevtest.Provider{Results: []jevtest.Result{{Err: c.err}}}
-		d := judge(&settings, p, "key").Evaluate(context.Background(), f.repo, judgment("Done."))
-		want := c.want
-		if d.Outcome != jev.Fallback || d.Reason != want || len(p.Requests()) != c.requests {
-			t.Errorf("%s: decision = %+v, requests = %d", c.name, d, len(p.Requests()))
-			continue
-		}
-		records := f.records(t, d.ID)
-		if last := records[len(records)-1]; last.State != "fallback" || last.Reason != want || last.Requests != c.requests {
-			t.Errorf("%s: record = %+v", c.name, last)
-		}
-		if len(f.costs(t)) != 0 {
-			t.Errorf("%s: a failed request recorded a cost", c.name)
-		}
-	}
-}
-
-func TestATransientFailureThenSuccessIsAccepted(t *testing.T) {
+func TestAFailedRequestIsRecordedWithoutACost(t *testing.T) {
 	f := newFixture(t)
 	settings := enabled()
-	p := &jevtest.Provider{Results: []jevtest.Result{{Err: &systemone.Error{Kind: systemone.KindTimeout}}, answer(0.9)}}
+	p := &jevtest.Provider{Results: []jevtest.Result{{Err: &systemone.Error{Kind: systemone.KindTimeout, Message: "deadline"}}}}
 	d := judge(&settings, p, "key").Evaluate(context.Background(), f.repo, judgment("Done."))
-	if d.Outcome != jev.Accepted || len(p.Requests()) != 2 {
+	if d.Outcome != jev.Fallback || d.Reason != jev.ReasonTimeout || d.Response != nil {
 		t.Fatalf("decision = %+v", d)
+	}
+	records := f.records(t, d.ID)
+	if len(records) != 2 || records[0].State != "started" {
+		t.Fatalf("records = %+v", records)
+	}
+	if last := records[1]; last.State != "fallback" || last.Reason != jev.ReasonTimeout || last.Detail != "deadline" || last.Requests != len(p.Requests()) || last.Attempt != 1 {
+		t.Fatalf("record = %+v, requests = %d", last, len(p.Requests()))
+	}
+	if len(f.costs(t)) != 0 {
+		t.Fatal("a failed request recorded a cost")
 	}
 }
 
-func TestARateLimitCoolsEveryJudgmentDown(t *testing.T) {
+func TestACoolingProviderRecordsAFallbackWithoutStarting(t *testing.T) {
 	f := newFixture(t)
 	settings := enabled()
 	p := &jevtest.Provider{Results: []jevtest.Result{{Err: &systemone.Error{Kind: systemone.KindRateLimited, RetryAfter: time.Minute}}}}
@@ -304,27 +278,21 @@ func TestARateLimitCoolsEveryJudgmentDown(t *testing.T) {
 	if d.Reason != jev.ReasonCoolingDown || len(p.Requests()) != 1 {
 		t.Fatalf("decision = %+v, requests = %d", d, len(p.Requests()))
 	}
-	s := j.Status()
-	if s.Mode != jev.ModeDegraded || s.Reason != jev.ReasonRateLimited || s.CoolingUntil == nil || !s.CoolingUntil.Equal(at.Add(time.Minute)) {
-		t.Fatalf("status = %+v", s)
-	}
-	settings.URL = "https://typesafe.example"
-	if s := j.Status(); s.Mode != jev.ModeReady {
-		t.Fatalf("changed settings kept the cool-down: %+v", s)
+	if records := f.records(t, d.ID); len(records) != 1 || records[0].State != "fallback" || records[0].Reason != jev.ReasonCoolingDown || records[0].Attempt != 1 || records[0].Requests != 0 {
+		t.Fatalf("records = %+v", records)
 	}
 }
 
-func TestMissingKeyFallsBackVisibly(t *testing.T) {
+func TestMissingKeyRecordsAFallbackWithoutStarting(t *testing.T) {
 	f := newFixture(t)
 	settings := enabled()
 	p := &jevtest.Provider{Results: []jevtest.Result{answer(0.9)}}
-	j := judge(&settings, p, "")
-	d := j.Evaluate(context.Background(), f.repo, judgment("Done."))
-	if d.Reason != jev.ReasonUnconfigured || !strings.Contains(d.Detail, "TEST_JEV_KEY") || len(p.Requests()) != 0 {
+	d := judge(&settings, p, "").Evaluate(context.Background(), f.repo, judgment("Done."))
+	if d.Reason != jev.ReasonUnconfigured || len(p.Requests()) != 0 {
 		t.Fatalf("decision = %+v", d)
 	}
-	if s := j.Status(); s.Mode != jev.ModeUnconfigured {
-		t.Fatalf("status = %+v", s)
+	if records := f.records(t, d.ID); len(records) != 1 || records[0].State != "fallback" || records[0].Reason != jev.ReasonUnconfigured || records[0].Attempt != 1 {
+		t.Fatalf("records = %+v", records)
 	}
 }
 
@@ -407,5 +375,43 @@ func TestInvalidJudgmentsFallBackWithoutARequest(t *testing.T) {
 	}
 	if len(p.Requests()) != 0 {
 		t.Fatal("an invalid judgment was sent")
+	}
+}
+
+// storedRecord is an accepted judgment record as the trace keeps it, with
+// its digest and request size to fill in.
+const storedRecord = `{"scope":{"Project":"p_00000000000000000000000000000001","Workstream":"w_00000000000000000000000000000001","Unit":"unit1","Thread":"mason1","Turn":"turn1","Role":"mason"},"task":"mason-classification","version":1,"model":"~typesafe/jev-latest","sources":[{"kind":"turn-response","id":"response_1","revision":1}],"digest":"%s","request_bytes":%d,"state":"accepted","attempt":1,"resolved_model":"jev-1.13.0","answers":{"class":{"type":"choice","choice":"claims_done","probabilities":{"claims_done":0.9,"gave_up":0.1},"confidence":0.85}},"usage":{"input_tokens":120,"output_tokens":10,"cost_usd":0.00004,"cost_known":true},"requests":1,"duration_ms":40}`
+
+func TestAStoredDecisionIsReusedAsRecorded(t *testing.T) {
+	f := newFixture(t)
+	settings := enabled()
+	asked := judgment("Done.")
+	body, err := asked.Request.Body(settings.Model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(body))
+	identity, _ := json.Marshal([]any{asked.Cause, asked.Task, asked.Version, digest})
+	id := fmt.Sprintf("judgment_%x", sha256.Sum256(identity))
+	content := fmt.Sprintf(storedRecord, digest, len(body))
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: projectID, Workstream: streamID, Unit: "unit1", At: at, Actor: trace.Actor{Kind: "service", ID: jev.Role}, Cause: "request_1", Depth: 1}, Path: jev.Path(id), Content: content}
+	if err := f.repo.RecordDocuments(context.Background(), []trace.Document{doc}); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &jevtest.Provider{Results: []jevtest.Result{answer(0.99)}}
+	d := judge(&settings, p, "key").Evaluate(context.Background(), f.repo, asked)
+	want := &systemone.Response{Model: "jev-1.13.0", Answers: map[string]systemone.Answer{
+		"class": {Kind: systemone.KindChoice, Choice: "claims_done", Probabilities: map[string]float64{"claims_done": 0.9, "gave_up": 0.1}, Confidence: 0.85},
+	}, Usage: systemone.Usage{InputTokens: 120, OutputTokens: 10, CostUSD: 0.00004, CostKnown: true}}
+	if d.ID != id || !d.Recovered || d.Outcome != jev.Accepted || d.Reason != "" || !reflect.DeepEqual(d.Response, want) || len(p.Requests()) != 0 {
+		t.Fatalf("decision = %+v, requests = %d", d, len(p.Requests()))
+	}
+	records := f.records(t, id)
+	if len(records) != 1 {
+		t.Fatalf("records = %+v", records)
+	}
+	if again, err := json.Marshal(records[0]); err != nil || string(again) != content {
+		t.Fatalf("record reads back as %s, %v", again, err)
 	}
 }

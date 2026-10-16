@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	corejev "github.com/kpenfound/agentcore/jev"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/events"
@@ -101,7 +102,7 @@ type Options struct {
 	PullRequests pulls.Client
 	// JevProvider returns the Jev provider for the current settings and API
 	// key. It defaults to the TypeSafe-compatible HTTP API the settings name.
-	JevProvider func(config.Jev, string) jev.Provider
+	JevProvider func(corejev.Settings, string) corejev.Provider
 	// JoinTailnet joins the owner's tailnet when listen.tailnet is set. It
 	// defaults to embedded Tailscale.
 	JoinTailnet JoinTailnet

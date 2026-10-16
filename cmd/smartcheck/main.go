@@ -19,10 +19,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/gitdiff"
-	"github.com/kpenfound/osmia/internal/systemone"
 )
 
 const usage = `usage: smartcheck [flags] [-- dagger check flags]

@@ -12,10 +12,10 @@ import (
 
 	"github.com/kpenfound/agentcore/agent"
 
+	"github.com/kpenfound/agentcore/jev/jevtest"
+	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/jev/jevtest"
 	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/systemone"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 

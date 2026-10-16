@@ -1,8 +1,8 @@
 // Package jev asks Jev, TypeSafe's System One model, the bounded judgments of
-// Osmia's turns through a Provider, and owns what Osmia does with them: the
-// global switch, fallbacks, cool-down, trace records and ledger costs. The
-// API client itself is internal/systemone. Nothing here runs on the
-// scheduling path.
+// Osmia's turns, and owns what Osmia does with them: judgment identity, trace
+// records, reuse after a restart, acceptance thresholds and ledger costs.
+// agentcore's jev sends the requests, with the global switch, retries,
+// cool-down and status. Nothing here runs on the scheduling path.
 package jev
 
 import (
@@ -11,14 +11,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"regexp"
 	"sync"
 	"time"
 
+	corejev "github.com/kpenfound/agentcore/jev"
+	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/systemone"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -29,10 +29,6 @@ const Role = "jev"
 // interrupted before its result was recorded leaves only its start; the
 // judgment then starts again, until this many have been interrupted.
 const maxAttempts = 2
-
-// maxRequests bounds the requests of one attempt; only a timeout or an
-// unavailable provider is retried.
-const maxRequests = 2
 
 // maxRecordedRequest bounds the request body kept in a judgment record; a
 // larger one is kept as its digest and size.
@@ -79,11 +75,11 @@ type Judgment struct {
 }
 
 // Outcome is whether a judgment's answers are used.
-type Outcome string
+type Outcome = corejev.Outcome
 
 const (
-	Accepted Outcome = "accepted"
-	Fallback Outcome = "fallback"
+	Accepted = corejev.Accepted
+	Fallback = corejev.Fallback
 )
 
 // Decision is a judgment's result. Use the answers only when Outcome is
@@ -154,14 +150,22 @@ type Judge struct {
 	Config func() config.Jev
 	// Provider returns the provider for settings and a key. Nil uses a
 	// systemone.Client for the settings' URL and model.
-	Provider func(settings config.Jev, key string) Provider
+	Provider func(settings corejev.Settings, key string) Provider
 	// Getenv reads the API key. Nil uses os.Getenv.
 	Getenv func(string) string
 	Now    func() time.Time
 
-	mu       sync.Mutex
-	settings config.Jev
-	cool     *coolDown
+	once  sync.Once
+	asker *corejev.Judge
+}
+
+// core returns the agentcore Judge that sends j's requests, built from j's
+// fields on first use.
+func (j *Judge) core() *corejev.Judge {
+	j.once.Do(func() {
+		j.asker = &corejev.Judge{Config: func() corejev.Settings { return j.Config().Settings() }, Provider: j.Provider, Getenv: j.Getenv, Now: j.Now}
+	})
+	return j.asker
 }
 
 func (j *Judge) now() time.Time {
@@ -169,31 +173,6 @@ func (j *Judge) now() time.Time {
 		return j.Now()
 	}
 	return time.Now()
-}
-
-func (j *Judge) key(settings config.Jev) string {
-	if j.Getenv != nil {
-		return j.Getenv(settings.APIKeyEnv)
-	}
-	return os.Getenv(settings.APIKeyEnv)
-}
-
-// coolDown returns the cool-down of the current settings. Changed settings
-// reach a provider afresh.
-func (j *Judge) coolDown(settings config.Jev) *coolDown {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	if j.cool == nil || j.settings != settings {
-		j.settings, j.cool = settings, &coolDown{}
-	}
-	return j.cool
-}
-
-func (j *Judge) provider(settings config.Jev, key string) Provider {
-	if j.Provider != nil {
-		return j.Provider(settings, key)
-	}
-	return systemone.Client{BaseURL: settings.URL, Model: settings.Model, APIKey: key}
 }
 
 func (j Judgment) validate() error {
@@ -276,16 +255,19 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 		r.State, r.Reason, r.Detail = StateFallback, ReasonInterrupted, fmt.Sprintf("%d attempts were interrupted", latest.Attempt)
 		return finish(r)
 	}
-	cool := j.coolDown(settings)
-	key := j.key(settings)
-	if key == "" {
+	// A judgment the provider cannot be asked now falls back without a
+	// started revision. A cool-down that begins after this check is
+	// recorded as the attempt's result instead.
+	switch status := j.core().Status(); {
+	case status.Mode == ModeDisabled:
+		return Decision{Outcome: Fallback, Reason: ReasonDisabled}
+	case status.Mode == ModeUnconfigured:
 		r := base
-		r.State, r.Reason, r.Detail = StateFallback, ReasonUnconfigured, settings.APIKeyEnv+" is not set"
+		r.State, r.Reason, r.Detail = StateFallback, ReasonUnconfigured, status.Detail
 		return finish(r)
-	}
-	if cooling, until := cool.cooling(j.now()); cooling {
+	case status.CoolingUntil != nil:
 		r := base
-		r.State, r.Reason, r.Detail = StateFallback, ReasonCoolingDown, "provider is cooling down until "+until.UTC().Format(time.RFC3339)
+		r.State, r.Reason, r.Detail = StateFallback, ReasonCoolingDown, "provider is cooling down until "+status.CoolingUntil.UTC().Format(time.RFC3339)
 		return finish(r)
 	}
 	started := base
@@ -294,37 +276,18 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 		return Decision{ID: id, Outcome: Fallback, Reason: ReasonUnrecorded, Detail: "judgment start cannot be recorded"}
 	}
 
-	provider := j.provider(settings, key)
-	begin := j.now()
-	var resp systemone.Response
-	var last *failure
-	requests := 0
-	for requests < maxRequests {
-		requests++
-		call, cancel := context.WithTimeout(ctx, settings.RequestTimeout())
-		resp, err = provider.Evaluate(call, judgment.Request)
-		cancel()
-		if err == nil {
-			last = nil
-			cool.observe(j.now(), nil)
-			break
-		}
-		last = failed(err)
-		if ctx.Err() != nil {
-			// The turn ended; the start stays as an interrupted attempt.
-			return Decision{ID: id, Outcome: Fallback, Reason: ReasonCancelled, Detail: "turn ended during the judgment"}
-		}
-		cool.observe(j.now(), last)
-		if paused, _ := cool.cooling(j.now()); paused || !last.reason.transient() {
-			break
-		}
+	asked := j.core().Evaluate(ctx, judgment.Request)
+	if asked.Reason == ReasonCancelled {
+		// The turn ended; the start stays as an interrupted attempt.
+		return Decision{ID: id, Outcome: Fallback, Reason: ReasonCancelled, Detail: "turn ended during the judgment"}
 	}
 	r := base
-	r.Requests, r.DurationMS = requests, j.now().Sub(begin).Milliseconds()
-	if last != nil {
-		r.State, r.Reason, r.Detail = StateFallback, last.reason, last.detail
+	r.Requests, r.DurationMS = asked.Requests, asked.Duration.Milliseconds()
+	if asked.Outcome != Accepted {
+		r.State, r.Reason, r.Detail = StateFallback, asked.Reason, asked.Detail
 		return finish(r)
 	}
+	resp := *asked.Response
 	r.ResolvedModel, r.Answers, r.Usage = resp.Model, resp.Answers, &resp.Usage
 	r.State = StateAccepted
 	if judgment.Accept != nil {
@@ -418,50 +381,26 @@ func (w *writer) cost(ctx context.Context, attempt int, u systemone.Usage) error
 	return nil
 }
 
-// Mode is the boost's state as status reports it.
-type Mode string
+// Mode is the boost's state as status reports it: disabled, unconfigured
+// while its API key is not set, ready, or degraded while its latest request
+// failed or it cools down.
+type Mode = corejev.Mode
 
 const (
-	ModeDisabled Mode = "disabled"
-	// ModeUnconfigured is an enabled boost without its API key; every
-	// judgment falls back.
-	ModeUnconfigured Mode = "unconfigured"
-	ModeReady        Mode = "ready"
-	// ModeDegraded is an enabled boost whose latest request failed or that
-	// is cooling down; judgments fall back while it cools.
-	ModeDegraded Mode = "degraded"
+	ModeDisabled     = corejev.ModeDisabled
+	ModeUnconfigured = corejev.ModeUnconfigured
+	ModeReady        = corejev.ModeReady
+	ModeDegraded     = corejev.ModeDegraded
 )
 
 // Status reports the boost's mode, the configured model and the latest
 // failure since the last success.
-type Status struct {
-	Mode         Mode       `json:"mode"`
-	Model        string     `json:"model,omitempty"`
-	Reason       Reason     `json:"reason,omitempty"`
-	Detail       string     `json:"detail,omitempty"`
-	CoolingUntil *time.Time `json:"cooling_until,omitempty"`
-}
+type Status = corejev.Status
 
 // Status reports the boost under the current settings.
 func (j *Judge) Status() Status {
 	if j == nil {
 		return Status{Mode: ModeDisabled}
 	}
-	settings := j.Config()
-	if !settings.Enabled {
-		return Status{Mode: ModeDisabled}
-	}
-	out := Status{Mode: ModeReady, Model: settings.Model}
-	if j.key(settings) == "" {
-		out.Mode, out.Reason, out.Detail = ModeUnconfigured, ReasonUnconfigured, settings.APIKeyEnv+" is not set"
-		return out
-	}
-	cool := j.coolDown(settings)
-	if f := cool.lastFailure(); f != nil {
-		out.Mode, out.Reason, out.Detail = ModeDegraded, f.reason, f.detail
-	}
-	if cooling, until := cool.cooling(j.now()); cooling {
-		out.Mode, out.CoolingUntil = ModeDegraded, &until
-	}
-	return out
+	return j.core().Status()
 }

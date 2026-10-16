@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/gitdiff"
-	"github.com/kpenfound/osmia/internal/systemone"
 )
 
 // Task names the judgment. Bump Version whenever its questions, their

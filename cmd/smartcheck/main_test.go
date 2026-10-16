@@ -12,8 +12,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/systemone"
 )
 
 const (
