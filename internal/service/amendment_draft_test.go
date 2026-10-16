@@ -21,11 +21,23 @@ func seedAmendment(t *testing.T, f *architectFixture, repo *trace.Repository, st
 	if err != nil {
 		t.Fatalf("move feature to building: %v", err)
 	}
-	request := trace.Amendment{Header: trace.Header{Schema: "osmia.trace.amendment", Version: trace.Version, ID: "1", Revision: 1, Project: f.project, Workstream: stream, Unit: "resume", At: f.clock.Now(), Actor: trace.Actor{Kind: "agent", ID: "agent_mason_resume"}, Cause: "fixture"}, Requester: trace.Actor{Kind: "agent", ID: "agent_mason_resume"}, Role: "mason", Thread: "thread_mason_resume", Turn: "turn_resume", Citations: []string{"spec#1"}, Change: "Revise the criterion", Reason: "New constraint", Seal: 1, SealRevision: 1, SpecHash: "hash"}
+	fileAmendment(t, f, repo, stream, "1")
+}
+
+// fileAmendment files amendment id of the workstream: a mason's request to
+// revise spec#1.
+func fileAmendment(t *testing.T, f *architectFixture, repo *trace.Repository, stream config.WorkstreamID, id string) {
+	t.Helper()
+	ctx := context.Background()
+	turn := "turn_resume"
+	if id != "1" {
+		turn += "_" + id
+	}
+	request := trace.Amendment{Header: trace.Header{Schema: "osmia.trace.amendment", Version: trace.Version, ID: id, Revision: 1, Project: f.project, Workstream: stream, Unit: "resume", At: f.clock.Now(), Actor: trace.Actor{Kind: "agent", ID: "agent_mason_resume"}, Cause: "fixture"}, Requester: trace.Actor{Kind: "agent", ID: "agent_mason_resume"}, Role: "mason", Thread: "thread_mason_resume", Turn: turn, Citations: []string{"spec#1"}, Change: "Revise the criterion", Reason: "New constraint", Seal: 1, SealRevision: 1, SpecHash: "hash"}
 	if err := repo.Append(ctx, request); err != nil {
 		t.Fatalf("append request: %v", err)
 	}
-	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "amendment_1_filed", Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: request.Actor, Cause: request.Cause}, Subject: "amendment_1", To: "filed", Reason: "filed"}})
+	_, err := repo.Transact(ctx, trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "amendment_" + id + "_filed", Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: request.Actor, Cause: request.Cause}, Subject: amendmentSubject(id), To: "filed", Reason: "filed"}})
 	if err != nil {
 		t.Fatalf("file request: %v", err)
 	}

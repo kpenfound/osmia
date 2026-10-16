@@ -751,7 +751,7 @@ func (d *drafter) draftTool(scope coreadapter.Scope, attempt string) coreadapter
 			if err := dec.Decode(&input); err != nil {
 				return nil, err
 			}
-			if input.Path != plan.SpecPath && input.Path != plan.PlanPath && !(input.Path == "decline.txt" && strings.HasPrefix(scope.Turn, "amend-")) {
+			if _, amending := amendmentTurnID(attempt); input.Path != plan.SpecPath && input.Path != plan.PlanPath && !(input.Path == "decline.txt" && amending) {
 				return nil, fmt.Errorf("path must be %s or %s", plan.SpecPath, plan.PlanPath)
 			}
 			if len(input.Content) > MaxHandedBytes {
@@ -822,7 +822,13 @@ func (d *drafter) stage(ctx context.Context, stream config.WorkstreamID, turn, w
 	}
 	files := map[string]string{handed.Path: handed.Content, "charter.md": charter.Content, "context.md": b.Brief()}
 	paths := []string{"handed", "charter.md", "context.md"}
-	if id, ok := amendmentTurnID(continuedTurn(turn)); ok {
+	// The turn that delivers the answer to the architect's question sees the
+	// view of the attempt that asked it.
+	origin, err := d.continued(stream, turn)
+	if err != nil {
+		return nil, err
+	}
+	if id, ok := amendmentTurnID(origin); ok {
 		requests, err := trace.Read[trace.Amendment](d.repository, stream)
 		if err != nil {
 			return nil, err
