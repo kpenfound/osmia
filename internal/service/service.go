@@ -37,8 +37,11 @@ import (
 
 type Options struct {
 	reviewChecks ReviewChecks
-	Config       config.Options
-	Build        Identity
+	// boundary injects interruptions using the current service lifetime. It is
+	// bound before controllers launch so startup reconciliation is covered.
+	boundary func(context.Context, string) error
+	Config   config.Options
+	Build    Identity
 	// Workstreams supplies known identities when no trace exists. An existing
 	// trace supplies its validated workstream manifests.
 	Workstreams       []config.WorkstreamID
@@ -313,6 +316,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			st.Close()
 		}
 	}()
+	state, _ := st.Snapshot()
+	if err = s.ensureWorkgroups(ctx, cfg, projects, state.Archived); err != nil {
+		return nil, err
+	}
 	if err = removeStaleSocket(cfg.Listen.Socket); err != nil {
 		return nil, err
 	}
@@ -331,6 +338,9 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, err
 	}
 	s.cfg, s.projects, s.store, s.listener, s.socketInfo = cfg, projects, st, listener, info
+	for _, p := range projects {
+		s.installMemberLifecycle(p.repository)
+	}
 	if err = os.Chmod(cfg.Listen.Socket, 0600); err != nil {
 		s.cleanupSocket()
 		return nil, err
@@ -363,6 +373,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		opts.WriteTimeout = 10 * time.Second
 	}
 	s.options = opts
+	s.recoverArchiveLifecycle(ctx)
 	if s.tailnet != nil {
 		// A first join that fails leaves the tailnet down for the supervisor
 		// to retry; it never fails startup.
@@ -394,12 +405,20 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		}
 		reapSandboxes(ctx, view, s.options.sbxBin)
 	}
+	if err = s.recoverWorkgroupChiefSessions(ctx, projects); err != nil {
+		s.cleanupSocket()
+		st.Close()
+		return nil, fmt.Errorf("recover cross-repo workgroup chief-of-staff threads: %w", err)
+	}
 	if err = s.recoverSessionOpen(ctx); err != nil {
 		s.cleanupSocket()
 		st.Close()
 		return nil, fmt.Errorf("recover an interrupted session open: %w", err)
 	}
 	s.lifetime, s.cancel = context.WithCancel(ctx)
+	if opts.boundary != nil {
+		s.boundary = func(step string) error { return opts.boundary(s.lifetime, step) }
+	}
 	hostname := cfg.Listen.Tailnet
 	s.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.requests.Add(1)
@@ -479,12 +498,14 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.requests.Wait()
 		s.mu.Lock()
 		projects := s.projects
-		s.projects = nil
 		s.mu.Unlock()
 		// A project failure that stopped the service is reported once.
 		if e := s.stop(projects...); e != nil && (s.err == nil || !errors.Is(e, s.err)) {
 			s.err = errors.Join(s.err, e)
 		}
+		s.mu.Lock()
+		s.projects = nil
+		s.mu.Unlock()
 		s.cleanupSocket()
 		s.store.Close()
 		unlock(s.lock)
@@ -819,6 +840,11 @@ func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(c
 // pass, so a cleared pause lets held turns run on the loop's next periodic
 // pass.
 func (s *Service) holds(project config.ProjectID, librarian config.WorkstreamID, repository *trace.Repository, c scheduler.Candidate) (bool, error) {
+	if c.Thread.Identity.Role != trace.ChiefOfStaff {
+		if held, err := changeHeld(repository, c.Workstream); err != nil || held {
+			return true, err
+		}
+	}
 	if c.Workstream == librarian || c.Thread.Identity.Role == architectRole || c.Thread.Identity.Role == committeeRole {
 		return true, nil
 	}
@@ -826,6 +852,10 @@ func (s *Service) holds(project config.ProjectID, librarian config.WorkstreamID,
 		return gone, err
 	}
 	if (c.Thread.Identity.Role == masonRole || c.Thread.Identity.Role == reviewerRole) && c.Turn.Request.Unit != "" {
+		approved, err := repository.GroupApproved(c.Workstream)
+		if err != nil || !approved {
+			return true, err
+		}
 		if held, err := assignmentHeld(repository, c.Workstream, c.Turn.Request.Unit, c.Thread.Identity.Role); err != nil || held {
 			return held, err
 		}
@@ -833,6 +863,17 @@ func (s *Service) holds(project config.ProjectID, librarian config.WorkstreamID,
 	if c.Thread.Identity.Role != trace.ChiefOfStaff {
 		if waiting, err := baseWaiting(repository, c.Workstream); err != nil || waiting {
 			return waiting, err
+		}
+		approved, err := repository.GroupApproved(c.Workstream)
+		if err != nil {
+			return true, err
+		}
+		// Information-only role turns may ask during drafting; unit work remains
+		// held by the group approval and edge admission checks.
+		if approved || c.Turn.Request.Unit != "" {
+			if waiting, err := edgeWaiting(repository, c.Workstream); err != nil || waiting {
+				return waiting, err
+			}
 		}
 	}
 	st, _ := s.effective()
@@ -884,6 +925,22 @@ func ensureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at t
 		if session, err := isSession(repository, stream); err != nil {
 			return fmt.Errorf("workstream %s: %w", stream, err)
 		} else if session {
+			continue
+		}
+		if id, err := repository.CrossRepoWorkgroupOf(stream); err != nil {
+			return fmt.Errorf("workstream %s: %w", stream, err)
+		} else if id != "" {
+			// A cross-repo member's shared chief-of-staff thread lives
+			// only in its workgroup's own trace (chiefRepository), lazily
+			// created there the first time it is needed; this
+			// project-scoped backfill must never create a second one on
+			// the member's own repo, which would make the workgroup's
+			// chief of staff authoritative in two places (charter#2).
+			continue
+		}
+		if pending, err := repository.PendingCrossRepoWorkgroup(stream); err != nil {
+			return fmt.Errorf("workstream %s: %w", stream, err)
+		} else if pending != "" {
 			continue
 		}
 		if _, err := repository.EnsureChiefOfStaff(ctx, stream, at, serviceActor); err != nil {
@@ -1019,6 +1076,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		}
 		return nil, nil, nil, err
 	}
+	repository.SetCharterResolver(s.charterRepository)
 	repository.Observe(s.hub.traceEvents(cfg.Project.ID))
 	if options.Worker == "" {
 		options.Worker = "local-operations"
@@ -1084,9 +1142,9 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	budget := budgetSignals{s: s, repository: repository}
 	daily := dailyBudget{s: s, repository: repository}
 	checks := &checkers{masons: &masons{s: s, cfg: cfg, repository: repository}}
-	runner := runnerAdapter{turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
+	runner := runnerAdapter{deltas: deltaRunner{s}, turns: options.Adapters[coreadapter.RunnerBoundary], extract: refresh.extractor, refresh: refresh, draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
 	cleanup := &workspaceCleanup{cfg: cfg, repository: repository, now: s.now}
-	hooks := []scheduleHook{{"base-refresh", (&baseRefresher{s: s, repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", cleanup.Pass}, {"archive-cleanup", (&archiveCleanup{s: s, workspaces: cleanup}).Pass}}
+	hooks := []scheduleHook{{"workgroup-change", func(ctx context.Context) error { return s.changePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{s: s, repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.edgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.edgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"design-start", func(ctx context.Context) error { return s.designStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"refresh", refresh.Pass}, {"drift", land.drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"cleanup", cleanup.Pass}, {"archive-cleanup", (&archiveCleanup{s: s, workspaces: cleanup}).Pass}, {"workgroup-resolution", (&workgroupResolver{s: s, repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.projectSpecDraftPass(ctx, repository) }}}
 	hooks = append([]scheduleHook{{"factory-policy", func(ctx context.Context) error { return s.reconcileFactoryPolicy(ctx, repository) }}}, hooks...)
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})
@@ -1102,13 +1160,19 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 			return nil, err
 		}
 		deliver, err := events.New(repository, events.Options{Now: options.Now, Window: cfg.EventWindow(), ProgressWindow: cfg.EventProgressWindow(), Profile: s.chiefEventsProfile(cfg), System: s.chiefEventsPrompt(cfg.Project.ID, repository),
-			Skip: chiefOfStaffSkip(repository)})
+			Skip: s.chiefEventsSkip(repository), ChiefTarget: func(ctx context.Context, stream config.WorkstreamID) (*trace.Repository, func(), error) {
+				target, _, _, close, err := s.chiefRepository(ctx, repository, stream)
+				if errors.Is(err, errWorkgroupJoining) {
+					return nil, close, fmt.Errorf("%w: %v", events.ErrChiefUnavailable, err)
+				}
+				return target, close, err
+			}})
 		if err != nil {
 			return nil, err
 		}
 		units := &masons{s: s, cfg: cfg, repository: repository}
 		reviews := &reviewers{masons: units}
-		hooks = append(hooks, scheduleHook{"events", deliver.Pass}, scheduleHook{"answers", s.answers(cfg, repository).Pass}, scheduleHook{"checks", checks.Pass}, scheduleHook{"reviews", reviews.Pass}, scheduleHook{"masons", units.Pass}, scheduleHook{"dispatch", dispatch.Pass})
+		hooks = append(hooks, scheduleHook{"events", deliver.Pass}, scheduleHook{"answers", s.answers(cfg, repository).Pass}, scheduleHook{"checks", checks.Pass}, scheduleHook{"reviews", reviews.Pass}, scheduleHook{"masons", units.Pass}, scheduleHook{"dispatch", dispatch.Pass}, scheduleHook{"workgroup-chief-dispatch", func(ctx context.Context) error { return s.workgroupChiefDispatchPass(ctx, repository) }})
 	}
 	return &stages{cfg: cfg, hooks: hooks, runner: runner,
 		repository: repositoryAdapter{other: options.Adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish}}, nil
@@ -1124,7 +1188,7 @@ func concurrentOperation(op coreadapter.Operation) bool {
 		return false
 	}
 	switch op.Action {
-	case thread.TurnAction, RoundAction, AmendmentRoundAction, CheckAction:
+	case thread.TurnAction, RoundAction, AmendmentRoundAction, CheckAction, deltaTurnAction:
 		return true
 	}
 	return false

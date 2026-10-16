@@ -224,8 +224,9 @@ func closingReference(handed trace.Document, targetRepo string) string {
 // (see workstreamTitle) and a short prose summary of the sealed spec,
 // closing the issue the workstream was handed in from when one is recorded
 // and its repository can be compared with the one the pull request would
-// target. Both come from documents already in the trace, so presenting the
-// same recorded trace twice produces the same draft, and no agent is called.
+// target, and the workstream's logged assumptions, when it has any. All of
+// it comes from documents already in the trace, so presenting the same
+// recorded trace twice produces the same draft, and no agent is called.
 func draftDelivery(cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, report FinalReport) (title, body string, err error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -255,6 +256,25 @@ func draftDelivery(cfg *config.Config, repository *trace.Repository, stream conf
 	body = summary + "\n"
 	if ref := closingReference(handed, targetRepo); ref != "" {
 		body += "\n" + ref + "\n"
+	}
+	// A workgroup merge-order edge whose upstream has not yet merged keeps
+	// the pull request a draft; the owner sees the dependency stated here,
+	// as part of the one delivery approval, so marking it ready later needs
+	// no separate owner prompt (spec#12).
+	if references, err := pendingMergeOrderReferences(repository, stream); err != nil {
+		return "", "", err
+	} else if len(references) > 0 {
+		body += fmt.Sprintf("\nThis depends on %s, which must merge first. This pull request opens as a draft. After updating to the merged dependencies, checks, final review and a fresh owner delivery approval are required before marking it ready.\n", strings.Join(references, ", "))
+	}
+	assumptions, err := trace.Assumptions(repository, stream)
+	if err != nil {
+		return "", "", err
+	}
+	if len(assumptions) > 0 {
+		body += "\nAssumptions:\n"
+		for _, a := range assumptions {
+			body += "- " + strings.TrimSpace(a.Text) + "\n"
+		}
 	}
 	return title, body, nil
 }
@@ -313,6 +333,11 @@ func (s *Service) presentDelivery(ctx context.Context, project config.ProjectID,
 	}
 	if feature.Value != AssembledState && !maintenance {
 		return DeliveryPresentation{}, &APIError{Conflict, "the workstream is not assembled"}
+	}
+	if wait, err := edgePublicationWait(repository, stream); err != nil {
+		return DeliveryPresentation{}, &APIError{Internal, "cannot read dependency references"}
+	} else if wait != "" {
+		return DeliveryPresentation{}, &APIError{Conflict, wait}
 	}
 	report, reason, err := (&finalReviewer{s: s, repository: repository}).finalGate(ctx, stream)
 	if err != nil {
@@ -390,6 +415,15 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 	if strings.TrimSpace(description) == "" {
 		return DeliveryApproval{}, &APIError{Validation, "description must not be empty"}
 	}
+	references, err := pendingMergeOrderReferences(repository, stream)
+	if err != nil {
+		return DeliveryApproval{}, &APIError{Internal, "cannot read dependency references"}
+	}
+	for _, reference := range references {
+		if !strings.Contains(description, reference) {
+			return DeliveryApproval{}, &APIError{Validation, "description must state the dependency on " + reference}
+		}
+	}
 	messages := slices.Clone(presented.Messages)
 	if presented.Approval != nil {
 		messages = slices.Clone(presented.Approval.Messages)
@@ -451,6 +485,18 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 // deliveryGate checks the approval against the current review and the exact
 // description publication proposes to send.
 func (s *Service) deliveryGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, description string) (DeliveryApproval, string, error) {
+	if wait, err := edgePublicationWait(repository, stream); err != nil || wait != "" {
+		return DeliveryApproval{}, wait, err
+	}
+	references, err := pendingMergeOrderReferences(repository, stream)
+	if err != nil {
+		return DeliveryApproval{}, "", err
+	}
+	for _, reference := range references {
+		if !strings.Contains(description, reference) {
+			return DeliveryApproval{}, "the approved description must state the dependency on " + reference, nil
+		}
+	}
 	if pending, err := unresolvedWork(repository, stream); err != nil {
 		return DeliveryApproval{}, "", err
 	} else if pending {

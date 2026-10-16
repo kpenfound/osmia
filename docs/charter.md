@@ -3,7 +3,9 @@
 Each project has one charter, `<root>/projects/<project-id>/charter.md`: your
 rules as a contributor to that project. You edit the file directly. Plans,
 reviews and the committee cite its rules, so Osmia refuses to hand in work
-while it has none.
+while it has none. This is the default repo's trace directory; every additional
+repo in the project uses this same authoritative charter. KB, entities and
+repository settings remain per repo.
 
 ## Template
 

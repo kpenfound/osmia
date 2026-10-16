@@ -274,7 +274,7 @@ func (z *sealer) outcome(stream config.WorkstreamID, k int, operation string) (*
 	transition, _ := sealIDs(k)
 	for _, t := range transitions {
 		switch {
-		case t.Subject == trace.FeatureSubject && t.To == RatifiedState && t.Cause == operation:
+		case t.Subject == trace.FeatureSubject && (t.To == RatifiedState || t.To == trace.SealPreparedState) && t.Cause == operation:
 			return &coreadapter.OperationResult{Outcome: "succeeded", Evidence: t.Reason}, nil
 		case t.Subject == sealSubject && t.ID == transition+"-failed":
 			return &coreadapter.OperationResult{Outcome: "failed", Evidence: t.Reason}, nil
@@ -428,8 +428,17 @@ func (z *sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	}
 	reason := fmt.Sprintf("sealed %s at %s of %s/%s (%s); feature branch %s is checked out in %s; the footprints of %s are recorded",
 		in.pin(), base, remote, selected.Branch, record.SpecHash, branch, ws.Directory(), units(len(footprints)))
-	h := z.header(RatifiedState, stream, op.ID, z.s.now())
-	_, err = z.repository.MoveFeatureState(ctx, h, feature.Value, RatifiedState, reason)
+	to := RatifiedState
+	group, err := z.repository.GroupApprovalRequired(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if group {
+		to = trace.SealPreparedState
+		reason += "; preparation awaits the durable completion of every group member"
+	}
+	h := z.header(to, stream, op.ID, z.s.now())
+	_, err = z.repository.MoveFeatureState(ctx, h, feature.Value, to, reason)
 	if err == nil {
 		return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
 	}
@@ -469,7 +478,7 @@ func (z *sealer) documents(stream config.WorkstreamID, pin shed.Pin) (spec, grap
 // record records the seal as the next revision of seal.json, unless this
 // sealing recorded it already.
 func (z *sealer) record(ctx context.Context, stream config.WorkstreamID, record seal.Seal, cause string) error {
-	latest, doc, found, err := seal.Latest(z.repository, stream)
+	latest, doc, found, err := seal.PreparedLatest(z.repository, stream)
 	if err != nil {
 		return err
 	}

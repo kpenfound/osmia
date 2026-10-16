@@ -887,6 +887,238 @@
         }
       }
     },
+    "/v1/design": {
+      "get": {
+        "summary": "List design sessions, optionally filtered by project",
+        "operationId": "getDesign",
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Open a design session in a project",
+        "operationId": "postDesign",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesignOpenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/design/{workstream}": {
+      "get": {
+        "summary": "Show one design session",
+        "operationId": "getDesignByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/design/{workstream}/conversation": {
+      "get": {
+        "summary": "List a design session's conversation with its agent",
+        "operationId": "getDesignByWorkstreamConversation",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/design/{workstream}/message": {
+      "post": {
+        "summary": "Send a message to a design session's agent; refused as busy while a turn is running",
+        "operationId": "postDesignByWorkstreamMessage",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesignMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationEntry"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/design/{workstream}/start": {
+      "post": {
+        "summary": "Start a workgroup from a design session's drafted brief; the same thread continues as the workgroup's chief of staff",
+        "operationId": "postDesignByWorkstreamStart",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignStartResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/documents/{workstream}": {
       "get": {
         "summary": "Read a workstream's handed document, spec and plan",
@@ -1556,6 +1788,43 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProjectRebaseResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/repos": {
+      "post": {
+        "summary": "Add a repo to an existing project",
+        "operationId": "postProjectsRepos",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepoAddRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
                 }
               }
             }
@@ -3848,6 +4117,9 @@
           "fork": {
             "type": "string"
           },
+          "group_id": {
+            "type": "string"
+          },
           "hearsay_entities": {
             "additionalProperties": {
               "type": "string"
@@ -4340,6 +4612,9 @@
           "description_hash": {
             "type": "string"
           },
+          "draft": {
+            "type": "boolean"
+          },
           "fork": {
             "type": "string"
           },
@@ -4372,6 +4647,79 @@
           },
           "url": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DesignMessageRequest": {
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DesignOpenRequest": {
+        "properties": {
+          "project": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DesignResponse": {
+        "properties": {
+          "design": {
+            "$ref": "#/components/schemas/DesignView"
+          }
+        },
+        "type": "object"
+      },
+      "DesignStartResponse": {
+        "properties": {
+          "handed": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DesignView": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DesignsResponse": {
+        "properties": {
+          "designs": {
+            "items": {
+              "$ref": "#/components/schemas/DesignView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -4698,6 +5046,9 @@
               "null"
             ]
           },
+          "edge_resolved": {
+            "type": "string"
+          },
           "failure": {
             "type": "string"
           },
@@ -4910,6 +5261,9 @@
           "unit": {
             "type": "string"
           },
+          "workgroup": {
+            "type": "string"
+          },
           "workstream": {
             "type": "string"
           }
@@ -5102,6 +5456,9 @@
           "project": {
             "type": "string"
           },
+          "project_spec": {
+            "$ref": "#/components/schemas/TraceProjectSpec"
+          },
           "revision": {
             "type": "integer"
           },
@@ -5251,6 +5608,15 @@
           "name": {
             "type": "string"
           },
+          "repos": {
+            "items": {
+              "$ref": "#/components/schemas/RepoView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "trace": {
             "type": "string"
           },
@@ -5348,6 +5714,12 @@
           "detail": {
             "type": "string"
           },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "plan": {
             "type": "integer"
           },
@@ -5400,6 +5772,70 @@
               "array",
               "null"
             ]
+          }
+        },
+        "type": "object"
+      },
+      "RepoAddRequest": {
+        "properties": {
+          "base_branch": {
+            "type": "string"
+          },
+          "clone": {
+            "type": "string"
+          },
+          "fork": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "upstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RepoView": {
+        "properties": {
+          "base_branch": {
+            "type": "string"
+          },
+          "clone": {
+            "type": "string"
+          },
+          "default": {
+            "type": "boolean"
+          },
+          "entity_map": {
+            "type": "string"
+          },
+          "extraction": {
+            "$ref": "#/components/schemas/ExtractionState"
+          },
+          "fork": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kb": {
+            "type": "string"
+          },
+          "landing": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "trace": {
+            "type": "string"
+          },
+          "upstream": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -5465,11 +5901,30 @@
             "format": "date-time",
             "type": "string"
           },
+          "cleanup_started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "delivery_link": {
+            "type": "string"
+          },
+          "merge_commit": {
+            "type": "string"
+          },
+          "merge_reference": {
             "type": "string"
           },
           "project": {
             "type": "string"
+          },
+          "publication": {
+            "$ref": "#/components/schemas/RuntimeArchivePublication"
+          },
+          "resolution_evidence": {
+            "type": "string"
+          },
+          "resolved": {
+            "type": "boolean"
           },
           "state": {
             "type": "string"
@@ -5477,7 +5932,30 @@
           "title": {
             "type": "string"
           },
+          "workgroup": {
+            "type": "string"
+          },
           "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RuntimeArchivePublication": {
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "fork": {
+            "type": "string"
+          },
+          "pull_request": {
+            "type": "integer"
+          },
+          "upstream": {
             "type": "string"
           }
         },
@@ -6170,6 +6648,28 @@
         },
         "type": "object"
       },
+      "TraceContract": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceConversationOrigin": {
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "TraceCriterion": {
         "properties": {
           "criterion": {
@@ -6273,6 +6773,20 @@
         },
         "type": "object"
       },
+      "TraceEdge": {
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "TraceEvent": {
         "properties": {
           "at": {
@@ -6368,6 +6882,35 @@
           },
           "reference": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TraceProjectSpec": {
+        "properties": {
+          "behavior": {
+            "type": "string"
+          },
+          "contracts": {
+            "items": {
+              "$ref": "#/components/schemas/TraceContract"
+            },
+            "type": "array"
+          },
+          "graph": {
+            "items": {
+              "$ref": "#/components/schemas/TraceEdge"
+            },
+            "type": "array"
+          },
+          "slices": {
+            "items": {
+              "$ref": "#/components/schemas/TraceSlice"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -6561,6 +7104,26 @@
           },
           "seal": {
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "TraceSlice": {
+        "properties": {
+          "contract_criteria": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "plan": {
+            "type": "string"
+          },
+          "spec": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -6996,6 +7559,35 @@
         },
         "type": "object"
       },
+      "WorkgroupView": {
+        "properties": {
+          "conversation": {
+            "$ref": "#/components/schemas/TraceConversationOrigin"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/TraceEdge"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "WorkspaceDeliveryMessage": {
         "properties": {
           "commit": {
@@ -7073,6 +7665,9 @@
           "delivery_link": {
             "type": "string"
           },
+          "display_state": {
+            "type": "string"
+          },
           "drift": {
             "$ref": "#/components/schemas/DriftStatus"
           },
@@ -7120,6 +7715,12 @@
               "array",
               "null"
             ]
+          },
+          "wait": {
+            "type": "string"
+          },
+          "workgroup": {
+            "$ref": "#/components/schemas/WorkgroupView"
           },
           "workspaces": {
             "type": "string"

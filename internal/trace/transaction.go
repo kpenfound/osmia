@@ -314,8 +314,8 @@ func (r *Repository) finishPublication(ctx context.Context, own *published) erro
 // materialize or remove: workflow, transition, question, shed, unit, final
 // review, drift rebase and owned agent files of a workstream, private role
 // notes, project notices, project documents, a session's thread entries and
-// check runs, and the base and own pull-request-outcome observations of a
-// workstream.
+// check runs, and the base, own pull-request-outcome and
+// logged-assumptions observations of a workstream.
 func publicationPath(name string) error {
 	parts := strings.Split(name, "/")
 	switch {
@@ -323,7 +323,7 @@ func publicationPath(name string) error {
 		if _, err := config.ParseWorkstreamID(parts[1]); err != nil {
 			return err
 		}
-		if len(parts) == 3 && (parts[2] == "workflow.json" || parts[2] == "events.jsonl" || parts[2] == "documents.jsonl" || parts[2] == "spec.md" || parts[2] == "plan.json" || parts[2] == "seal.json" || (parts[2] == "base.json" || parts[2] == "base-observation.json" || parts[2] == "own-pull-request-outcome.json")) {
+		if len(parts) == 3 && (parts[2] == "workflow.json" || parts[2] == "events.jsonl" || parts[2] == "documents.jsonl" || parts[2] == "spec.md" || parts[2] == "plan.json" || parts[2] == "seal.json" || (parts[2] == "base.json" || parts[2] == "base-observation.json" || parts[2] == "own-pull-request-outcome.json" || parts[2] == "edge-observation.json" || parts[2] == AssumptionsPath)) {
 			return nil
 		}
 		if len(parts) == 5 && parts[2] == "agents" && key(parts[3]) && (parts[4] == "identity.jsonl" || parts[4] == "log.jsonl") {
@@ -349,7 +349,7 @@ func publicationPath(name string) error {
 		return nil
 	case len(parts) == 2 && parts[0] == "notices" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json")):
 		return nil
-	case name == "documents.jsonl" || name == EntitiesPath || name == "kb/sources.json":
+	case name == "documents.jsonl" || name == EntitiesPath || name == "kb/sources.json" || name == WorkgroupsPath:
 		return nil
 	case len(parts) == 2 && parts[0] == "kb" && strings.HasSuffix(parts[1], ".md") && key(strings.TrimSuffix(parts[1], ".md")):
 		return nil

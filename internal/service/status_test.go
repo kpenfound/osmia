@@ -83,6 +83,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	engine.resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
+	startTurn := make(chan struct{})
 	views := filepath.Join(cfg.Root.String(), "views")
 	must(t, os.Mkdir(views, 0700))
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
@@ -102,7 +103,12 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{sessions: sessions}},
 		}
 		return thread.Dispatcher{Runner: thread.Runner{Store: r, Turns: turns, Now: clock.Now},
-			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
+			Prepare: func(ctx context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
+				select {
+				case <-startTurn:
+				case <-ctx.Done():
+					return coreadapter.PreparedTurn{}, ctx.Err()
+				}
 				directory := filepath.Join(cfg.Root.String(), "sessions", in.Agent, in.Turn)
 				return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 			}}, nil
@@ -147,12 +153,19 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	s, c := start(t, opts)
 	list, err := c.Statuses(ctx)
 	must(t, err)
+	groups, _, err := trace.Workgroups(s.sole().repository)
+	must(t, err)
 	empty := func(w config.WorkstreamID) WorkstreamStatus {
-		return WorkstreamStatus{Workstream: w, Project: project, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []AgentStatus{}, ContextMode: "file", Workspaces: config.WorkspacesGit}
+		group, ok := trace.WorkgroupOf(groups, w)
+		if !ok {
+			t.Fatalf("workstream %s has no recorded workgroup", w)
+		}
+		return WorkstreamStatus{DisplayState: "planning", Workgroup: &WorkgroupView{ID: group.ID, Members: []config.WorkstreamID{w}, Edges: []trace.Edge{}}, Workstream: w, Project: project, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []AgentStatus{}, ContextMode: "file", Workspaces: config.WorkspacesGit}
 	}
 	if want := []WorkstreamStatus{empty(stream), empty(quiet)}; !sameStatuses(list.Workstreams, want) || len(list.Diagnostics) != 0 {
 		t.Fatalf("before the chief of staff wrote: %+v", list)
 	}
+	close(startTurn)
 	close(release)
 	select {
 	case <-finished:
@@ -301,7 +314,7 @@ func TestStatusViewCarriesTraceFacts(t *testing.T) {
 	at := demoStart
 	stored := &trace.Status{Header: trace.Header{Revision: 4, At: at}, StatusContent: trace.StatusContent{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}}}
 	state := "building"
-	got := statusView(project, bundle.ModeFile, trace.WorkstreamStatus{Workstream: stream, Workspaces: config.WorkspacesJujutsu, State: state, OpenQuestions: 2, Status: stored})
+	got := statusView(project, bundle.ModeFile, trace.WorkstreamStatus{Workstream: stream, Workspaces: config.WorkspacesJujutsu, State: state, OpenQuestions: 2, Status: stored}, false)
 	want := WorkstreamStatus{Workstream: stream, Project: project, State: &state, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, OpenQuestions: 2, Gates: []trace.OwnerGate{}, ContextMode: "file", Workspaces: config.WorkspacesJujutsu,
 		Status: &StatusView{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}, Revision: 4, UpdatedAt: at}}
 	if !reflect.DeepEqual(got, want) {

@@ -102,8 +102,8 @@
   // first status read listed, whose current activity counts as seen the
   // first time the page shows them.
   const ui = {
-    selected: stored('selected', null),
-    view: 'workstream',
+    selected: location.hash.startsWith('#workstream=') ? decodeURIComponent(location.hash.slice(12)) : stored('selected', null),
+    view: location.hash.startsWith('#workstream=') ? 'workstream' : 'project-pane',
     tab: 'feed',
     seen: stored('seen', {}),
     initial: null,
@@ -224,6 +224,32 @@
           }
         }));
         if (views.status) {
+          if (!streams().some(w => w.workstream === ui.selected)) {
+            const member = streams().find(w => w.workgroup?.conversation?.workstream === ui.selected);
+            if (member) {
+              ui.selected = member.workstream;
+              store('selected', ui.selected);
+              if (ui.view === 'design' || ui.view === 'workstream') {
+                ui.view = 'workstream';
+                ui.tab = 'feed';
+                history.replaceState(null, '', '#workstream=' + encodeURIComponent(ui.selected));
+              }
+            }
+          }
+          if (ui.initial === null && location.hash.startsWith('#workstream=')) {
+            const w = streams().find(w => w.workstream === ui.selected);
+            if (w) ui.view = w.kind === 'session' ? 'session' : w.kind === 'design' ? 'design' : 'workstream';
+          }
+          for (const w of streams()) {
+            if (w.kind !== 'design' && w.state && designIds.has(w.workstream)) {
+              designIds.delete(w.workstream);
+              startedDesignIds.add(w.workstream);
+              if (ui.selected === w.workstream && ui.view === 'design') {
+                ui.view = 'workstream';
+                ui.tab = 'feed';
+              }
+            }
+          }
           const listed = new Set(listedFeeds());
           for (const name of [...Object.keys(views), ...Object.keys(failures)]) {
             if (name.startsWith('feed/') && !listed.has(name)) {
@@ -270,7 +296,8 @@
   // expand turns an event's view names into view paths.
   function expand(name, event) {
     if (name === 'feeds') {
-      return listedFeeds();
+      return [...listedFeeds(), ...streams().filter((w) => isDesignId(w.workstream) && !w.archived)
+        .map((w) => 'design/' + w.workstream + '/conversation')];
     }
     if (name === 'feed') {
       let data = {};
@@ -279,7 +306,12 @@
       } catch {
         return [];
       }
-      return data.workstream ? ['feed/' + data.workstream] : [];
+      if (!data.workstream) {
+        return [];
+      }
+      return isDesignId(data.workstream)
+        ? ['feed/' + data.workstream, 'design/' + data.workstream + '/conversation']
+        : ['feed/' + data.workstream];
     }
     return [name];
   }
@@ -416,9 +448,13 @@
     return views.config ? views.config.projects || [] : [];
   }
 
+  function configuredRepos() {
+    return projects().flatMap(p => p.repos?.length ? p.repos.map(r => ({ ...r, label: p.repos.length > 1 ? p.name + ' / ' + r.name : p.name })) : [{ ...p, label: p.name }]);
+  }
+
   function projectName(id) {
     const p = projects().find((p) => p.id === id);
-    return p && p.name ? p.name : id;
+    return p?.name || configuredRepos().find(r => r.id === id)?.label || id;
   }
 
   function goal(w) {
@@ -478,7 +514,7 @@
   // active projects and each project's workstreams.
   function pauseTargets() {
     const targets = [['factory', 'The factory', { scope: 'factory' }]];
-    for (const p of projects()) {
+    for (const p of configuredRepos()) {
       targets.push(['project:' + p.id, 'Project ' + projectName(p.id), { scope: 'project', project: p.id }]);
       for (const w of views.status ? views.status.workstreams.filter((w) => w.project === p.id && !w.archived) : []) {
         targets.push(['workstream:' + w.workstream, projectName(p.id) + ': ' + goal(w),
@@ -587,7 +623,7 @@
   // the first such workstream in the list of work, which the status already
   // orders by last activity. Sessions have their own view and shownSession.
   function shown() {
-    const list = streams().filter((w) => w.kind !== 'session');
+    const list = streams().filter((w) => w.kind !== 'session' && w.kind !== 'design');
     return list.find((w) => !w.archived && w.workstream === ui.selected) || list.find((w) => !w.archived) || null;
   }
 
@@ -619,7 +655,8 @@
   // inboxOf lists the workstream's open entries, less any a submission has
   // dismissed from the feed; see dismissed above.
   function inboxOf(id) {
-    return views.inbox ? views.inbox.entries.filter((e) => e.workstream === id && !dismissed.has(decisionKey(e))) : [];
+    const group = streams().find(w => w.workstream === id)?.workgroup?.id;
+    return views.inbox ? views.inbox.entries.filter((e) => (e.workstream === id || (group && e.workgroup === group)) && !dismissed.has(decisionKey(e))) : [];
   }
 
   function proposalsOf(id) {
@@ -738,7 +775,7 @@
         rows.delete(id);
       }
     }
-    const current = shown();
+    const current = streams().find((w) => !w.archived && w.workstream === ui.selected) || shown();
     const archived = streams().filter((w) => w.archived);
     const group = byId('archived');
     group.hidden = archived.length === 0;
@@ -747,11 +784,15 @@
       const r = row(w.workstream);
       const needs = inboxOf(w.workstream).length + proposalsOf(w.workstream).length;
       const paused = pausedIn(w).length > 0;
-      r.kind.hidden = w.kind !== 'session';
+      r.kind.hidden = w.kind !== 'session' && w.kind !== 'design';
+      r.kind.textContent = w.kind === 'design' ? 'Design' : 'Session';
       if (w.kind === 'session') {
         sessionIds.add(w.workstream);
       }
-      const label = w.kind === 'session' ? (w.title || w.workstream) : goal(w);
+      if (w.kind === 'design' && !startedDesignIds.has(w.workstream)) {
+        designIds.set(w.workstream, w);
+      }
+      const label = w.kind === 'session' ? (w.title || w.workstream) : w.kind === 'design' ? w.workstream : goal(w);
       r.title.textContent = label;
       r.title.title = label;
       r.project.textContent = projectName(w.project);
@@ -776,6 +817,134 @@
     place(list, work.map(entry));
   }
 
+  let paneRendered = '';
+  // Keep focused controls connected while status and inbox events update labels.
+  const paneProjects = new Map();
+  const paneGroups = new Map();
+  const paneEntries = new Map();
+
+  function renderProjectPane() {
+    const key = JSON.stringify([projects(), streams(), views.inbox, [...dismissed.keys()]]);
+    if (key === paneRendered) return;
+    paneRendered = key;
+    const action = (label, view, project) => {
+      const button = el('button', { type: 'button', 'data-project-action': view }, label);
+      button.addEventListener('click', () => {
+        openView(view);
+        const form = document.querySelector('[data-view="' + view + '"] form');
+        if (form?.elements.project) {
+          form.elements.project.value = project;
+          form.elements.project.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      });
+      return button;
+    };
+    const entry = (w, p) => {
+      let row = paneEntries.get(w.workstream);
+      if (!row) {
+        row = {
+          title: el('strong'), repo: el('span', { class: 'meta', 'data-field': 'repo' }),
+          state: el('span', { class: 'tag', 'data-field': 'state' }),
+          wait: el('p', { class: 'pane-wait', 'data-field': 'wait' }),
+          needs: el('span', { class: 'needs' }), archive: el('p', { class: 'meta' }),
+        };
+        row.button = el('button', { type: 'button', class: 'pane-workstream', 'data-drilldown': w.workstream }, row.title, row.repo, row.state);
+        row.button.addEventListener('click', () => select(w.workstream));
+        row.node = el('li', { 'data-pane-workstream': w.workstream }, row.button, row.wait, row.needs, row.archive);
+        paneEntries.set(w.workstream, row);
+      }
+      const repo = (p.repos || []).find(r => r.id === w.project);
+      row.title.textContent = w.kind === 'session' ? (w.title || w.workstream) : goal(w);
+      row.repo.textContent = repo?.name || w.project;
+      row.state.textContent = w.display_state || w.state || w.kind || 'planning';
+      row.button.disabled = !!w.archived;
+      const needs = inboxOf(w.workstream).filter(e => !e.workgroup).length;
+      row.wait.textContent = w.wait || '';
+      row.wait.hidden = !w.wait;
+      row.needs.textContent = needs + ' waiting for you';
+      row.needs.hidden = !needs;
+      row.archive.textContent = w.trace_deleted ? 'Archived · trace deleted' : 'Archived · cleanup pending';
+      row.archive.hidden = !w.archived;
+      return row.node;
+    };
+    const projectNodes = projects().map(p => {
+      const ids = new Set([p.id, ...(p.repos || []).map(r => r.id)]);
+      const work = streams().filter(w => ids.has(w.project)).sort((a, b) => a.workstream.localeCompare(b.workstream));
+      const groups = new Map();
+      for (const w of work) {
+        if (w.workgroup) groups.set(w.workgroup.id, w.workgroup);
+      }
+      const groupsView = [...groups.values()].map(g => {
+        const members = work.filter(w => w.workgroup?.id === g.id);
+        const graph = g.members.length > 1 || g.edges.length > 0;
+        let row = paneGroups.get(g.id);
+        if (!row) {
+          row = { inbox: el('button', { type: 'button' }), members: el('ul', { class: 'pane-streams' }), graph: el('div'), graphKey: '' };
+          row.inbox.addEventListener('click', () => {
+            const live = streams().find(w => w.workgroup?.id === g.id && !w.archived);
+            if (live) select(live.workstream);
+          });
+          row.node = el('section', { class: 'pane-workgroup', 'data-workgroup': g.id },
+            el('h4', {}, 'Workgroup'), el('p', { class: 'id' }, g.id), row.inbox, row.members, row.graph);
+          paneGroups.set(g.id, row);
+        }
+        const waiting = (views.inbox?.entries || []).filter(e => e.workgroup === g.id && !dismissed.has(decisionKey(e)));
+        row.inbox.textContent = waiting.length + ' waiting for you · Open inbox';
+        row.inbox.hidden = !waiting.length;
+        if (waiting.length) row.inbox.dataset.groupInbox = g.id;
+        else delete row.inbox.dataset.groupInbox;
+        place(row.members, members.map(w => entry(w, p)));
+        const graphKey = JSON.stringify([g.members, g.edges, p.repos]);
+        if (row.graphKey !== graphKey) {
+          row.graphKey = graphKey;
+          row.graph.replaceChildren(...(graph ? [el('figure', { class: 'workgroup-graph', 'aria-label': 'Workstream graph' },
+            el('figcaption', {}, 'Workstream graph'),
+            el('ul', {}, ...g.members.map(id => el('li', {},
+              (p.repos || []).find(r => r.id === work.find(w => w.workstream === id)?.project)?.name || id, ' · ', id))),
+            ...g.edges.map(e => el('p', { 'data-edge': e.type }, e.from + ' → ' + e.to + ' · ' + e.type.replaceAll('_', ' '))))] : []));
+        }
+        return row.node;
+      });
+      let row = paneProjects.get(p.id);
+      if (!row) {
+        row = { name: el('h3'), repos: el('ul', { class: 'pane-repos' }), groups: el('div'),
+          none: el('p', { class: 'meta' }, 'No workgroups yet.'), ungrouped: el('ul', { class: 'pane-streams' }), sessions: [] };
+        const sections = [['design', 'Design sessions'], ['session', 'Exploratory sessions']].map(([kind, title]) => {
+          const list = el('ul', { class: 'pane-streams' });
+          const node = el('section', { 'data-sessions': kind }, el('h3', {}, title), list);
+          row.sessions.push({ kind, list, node });
+          return node;
+        });
+        row.node = el('article', { class: 'project-card', 'data-project': p.id }, row.name,
+          el('div', { class: 'actions' }, action('Design a workgroup', 'design-add', p.id),
+            action('Hand in a feature', 'handin', p.id), action('Add repo', 'repo-add', p.id),
+            action('Charter', 'projects', p.id), action('New exploratory session', 'session-add', p.id)),
+          el('h4', {}, 'Repos'), row.repos, el('h3', {}, 'Workgroups'), row.groups, row.none, row.ungrouped, ...sections);
+        paneProjects.set(p.id, row);
+      }
+      row.name.textContent = p.name;
+      const repoKey = JSON.stringify(p.repos);
+      if (row.repoKey !== repoKey) {
+        row.repoKey = repoKey;
+        row.repos.replaceChildren(...(p.repos || []).map(r => el('li', { 'data-repo': r.id }, el('strong', {}, r.name), ' · ', r.upstream)));
+      }
+      place(row.groups, groupsView);
+      row.none.hidden = !!groupsView.length;
+      place(row.ungrouped, work.filter(w => !w.workgroup && !w.kind).map(w => entry(w, p)));
+      row.ungrouped.hidden = !row.ungrouped.children.length;
+      for (const section of row.sessions) {
+        place(section.list, work.filter(w => w.kind === section.kind && !w.workgroup).map(w => entry(w, p)));
+        section.node.hidden = !section.list.children.length;
+      }
+      return row.node;
+    });
+    place(byId('project-pane'), projectNodes);
+    if (!projects().length) byId('project-pane').append(el('p', { class: 'meta' }, views.config ? 'Create a project to start.' : 'Loading projects…'));
+    for (const id of paneProjects.keys()) if (!projects().some(p => p.id === id)) paneProjects.delete(id);
+    for (const id of paneGroups.keys()) if (!streams().some(w => w.workgroup?.id === id)) paneGroups.delete(id);
+    for (const id of paneEntries.keys()) if (!streams().some(w => w.workstream === id)) paneEntries.delete(id);
+  }
+
   // setPicker opens or closes the workstream list at phone widths, where it
   // covers the page until the owner picks a workstream or closes it.
   function setPicker(open) {
@@ -789,9 +958,11 @@
     const changed = ui.selected !== id;
     ui.selected = id;
     store('selected', id);
+    history.replaceState(null, '', '#workstream=' + encodeURIComponent(id));
     setPicker(false);
     const session = isSessionId(id);
-    openView(session ? 'session' : 'workstream');
+    const design = !session && isDesignId(id);
+    openView(session ? 'session' : design ? 'design' : 'workstream');
     if (changed) {
       clearWorkstreamForms();
       ui.toEnd = true;
@@ -800,7 +971,7 @@
       byId('archived').open = true;
     }
     render();
-    if (changed && !views['feed/' + id]) {
+    if (changed && !views['feed/' + id] && !design) {
       mark(['feed/' + id]);
     }
     if (changed && ui.tab === 'documents') {
@@ -808,6 +979,9 @@
     }
     if (session) {
       mark(['status', 'sessions/' + id + '/changes']);
+    }
+    if (design) {
+      mark(['status', 'design/' + id + '/conversation']);
     }
   }
 
@@ -834,7 +1008,9 @@
       }
     }
     const changed = ui.view !== view;
+    if (changed && ['project-pane', 'workstream', 'session', 'design'].includes(ui.view)) ui.returnView = ui.view;
     ui.view = view;
+    if (view === 'project-pane') history.replaceState(null, '', location.pathname + location.search);
     setPicker(false);
     render();
     if (changed) {
@@ -1384,6 +1560,126 @@
     setOptions(form.elements.profile, [['', 'Choose a profile'], ...sessionProfiles().map((p) => [p, p])]);
   }
 
+  // shownDesign is the design session the design view shows: the selected
+  // workstream, when the status lists it as one. Like shownSession, it never
+  // falls back to another design session.
+  function shownDesign() {
+    if (!isDesignId(ui.selected)) {
+      return null;
+    }
+    return streams().find((w) => !w.archived && w.workstream === ui.selected) || designIds.get(ui.selected) || null;
+  }
+
+  // designIds names every design session this page has opened or seen
+  // listed, so select can route to the design view the moment one opens,
+  // before the next status read lists it.
+  const designIds = new Map();
+  const startedDesignIds = new Set();
+
+  function isDesignId(id) {
+    if (startedDesignIds.has(id)) {
+      return false;
+    }
+    // Opening a design session produces several trace commits. A status
+    // read already in flight may list its workstream before the design
+    // marker exists. The successful open response takes precedence over
+    // that snapshot until the owner explicitly starts the workgroup.
+    if (designIds.has(id)) {
+      return true;
+    }
+    const w = views.status ? views.status.workstreams.find((x) => x.workstream === id) : undefined;
+    return !!(w && w.kind === 'design');
+  }
+
+  // designConversationEntries reads the design session's conversation from
+  // its own endpoint, the same entry shape the chief-of-staff conversation
+  // uses. Unlike a session, a design session carries no feed event of its
+  // own, so a sent message waits for this view to read again, the same way
+  // the ordinary chief-of-staff composer's send does.
+  function designConversationEntries(id) {
+    const view = views['design/' + id + '/conversation'];
+    return view ? view.entries : [];
+  }
+
+  let designFeedShown = null;
+
+  function renderDesignFeed(id) {
+    const entries = designConversationEntries(id);
+    const key = id + ':' + JSON.stringify(entries);
+    if (designFeedShown === key) {
+      return;
+    }
+    designFeedShown = key;
+    const box = byId('design-feed');
+    if (entries.length === 0) {
+      box.replaceChildren(el('p', { class: 'meta' }, 'Nothing has happened yet.'));
+    } else {
+      box.replaceChildren(el('ol', {}, ...entries.map((e) => {
+        const entry = renderConversationEntry(e, 'Design agent');
+        if (e.kind === 'response') {
+          const text = entry.querySelector('[data-field="text"]');
+          const pattern = /<details>\s*<summary>Assumptions<\/summary>([\s\S]*?)<\/details>/gi;
+          let start = 0;
+          let match;
+          text.replaceChildren();
+          while ((match = pattern.exec(e.text)) !== null) {
+            text.append(document.createTextNode(e.text.slice(start, match.index)),
+              el('details', {}, el('summary', {}, 'Assumptions (reply to override)'),
+                el('div', { class: 'text' }, match[1].trim())));
+            start = pattern.lastIndex;
+          }
+          text.append(document.createTextNode(e.text.slice(start)));
+        }
+        return entry;
+      })));
+    }
+  }
+
+  // sendDesign posts the owner's message to the design session's agent. The
+  // sent message and the agent's reply both appear once this view's next
+  // read of the conversation shows them.
+  function sendDesign(id) {
+    const form = byId('design-form');
+    const result = byId('design-result');
+    const text = form.elements.text.value.trim();
+    if (text === '') {
+      show(result, 'error', 'Write a message first.');
+      return;
+    }
+    act(result, form.querySelector('button'), () => request('POST', '/design/' + id + '/message', { text }), (entry) => {
+      form.elements.text.value = '';
+      mark(['design/' + id + '/conversation']);
+      return 'Sent; the design agent answers in its next turn (' + entry.state + ').';
+    });
+  }
+
+  // startDesign is the one owner action that starts a workgroup from a
+  // design session's drafted brief; the same conversation continues as the
+  // workgroup's chief-of-staff thread.
+  function startDesign(id) {
+    act(byId('design-start-result'), byId('design-start'), () => request('POST', '/design/' + id + '/start'), (out) => {
+      designIds.delete(id);
+      startedDesignIds.add(id);
+      ui.tab = 'feed';
+      select(out.workstream);
+      mark(['status', 'feed/' + out.workstream]);
+      return 'Started a workgroup from this brief; workstream ' + out.workstream + ' is now ' + out.state + '.';
+    });
+  }
+
+  function renderDesignView() {
+    const w = shownDesign();
+    if (!w) {
+      byId('design-title').textContent = 'Design session';
+      byId('design-meta').replaceChildren();
+      byId('design-feed').replaceChildren(el('p', { class: 'meta' }, 'No design session selected.'));
+      return;
+    }
+    byId('design-title').textContent = w.workstream;
+    byId('design-meta').replaceChildren(el('span', { 'data-field': 'project' }, projectName(w.project)), ' · ', w.workstream);
+    renderDesignFeed(w.workstream);
+  }
+
   // renderHeader shows the slots in use per role, the pauses in force and
   // whether a reload has something to apply.
   function renderHeader() {
@@ -1528,7 +1824,7 @@
       button.addEventListener('click', () => openView(button.dataset.open));
     }
     for (const button of document.querySelectorAll('[data-close]')) {
-      button.addEventListener('click', () => openView('workstream'));
+      button.addEventListener('click', () => openView(ui.returnView || 'project-pane'));
     }
     for (const button of document.querySelectorAll('[data-tab]')) {
       button.addEventListener('click', () => setTab(button.dataset.tab));
@@ -2051,7 +2347,7 @@
 
   function priorityProject() {
     const id = byId('priority-project').value;
-    return projects().some((p) => p.id === id) ? id : null;
+    return configuredRepos().some((p) => p.id === id) ? id : null;
   }
 
   function renderPriority() {
@@ -2060,7 +2356,7 @@
     if (!views.status || !views.runtime || !views.config) {
       return;
     }
-    setOptions(byId('priority-project'), projects().map((p) => [p.id, projectName(p.id)]));
+    setOptions(byId('priority-project'), configuredRepos().map((p) => [p.id, p.label]));
     const id = priorityProject();
     block(byId('priority-form').querySelector('button[type=submit]'), !id);
     block(byId('priority-clear'), !id);
@@ -2397,6 +2693,12 @@
   }
 
   function setupOwnerForms() {
+    const repo = byId('repo-add');
+    repo.addEventListener('submit', event => {
+      event.preventDefault();
+      formAction(repo, event.submitter, () => request('POST', '/projects/repos', Object.fromEntries(new FormData(repo))),
+        out => 'Added repo to ' + out.project.name + '.', { reset: true });
+    });
     const add = byId('project-add');
     add.addEventListener('submit', event => {
       event.preventDefault();
@@ -2588,6 +2890,40 @@
     });
   }
 
+  // setupDesignForms wires the "New design session" form, the design view's
+  // chat and the one owner action that starts a workgroup from its brief.
+  function setupDesignForms() {
+    const add = byId('design-add-form');
+    add.addEventListener('submit', (event) => {
+      event.preventDefault();
+      formAction(add, event.submitter, () => request('POST', '/design', { project: add.elements.project.value }), (out) => {
+        designIds.set(out.design.workstream, out.design);
+        select(out.design.workstream);
+        return 'Opened design session ' + out.design.workstream + '.';
+      }, { reset: true });
+    });
+    const form = byId('design-form');
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const w = shownDesign();
+      if (w) {
+        sendDesign(w.workstream);
+      }
+    });
+    form.elements.text.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && window.matchMedia('(pointer: fine)').matches) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    byId('design-start').addEventListener('click', () => {
+      const w = shownDesign();
+      if (w) {
+        startDesign(w.workstream);
+      }
+    });
+  }
+
   function traceTree(value) {
     if (value === null || typeof value !== 'object') {
       return el('span', {class: 'text'}, value === null ? 'None' : String(value));
@@ -2608,9 +2944,11 @@
     renderProblems();
     renderHeader();
     renderSidebar();
+    renderProjectPane();
     renderWorkstreamView();
     renderSessionView();
     renderSessionAddForm();
+    renderDesignView();
     renderPauses();
     renderPauseForm();
     renderActivity();
@@ -2624,6 +2962,7 @@
   setupLayout();
   setupOwnerForms();
   setupSessionForms();
+  setupDesignForms();
   render();
   byId('pause-form').addEventListener('submit', pause);
   byId('priority-form').addEventListener('submit', setPriority);

@@ -41,53 +41,146 @@ func projectView(root config.Root, p config.Project) ProjectView {
 	// ProjectTrace resolves the shadow project to its own directory outside
 	// "projects", so this must not hand-join the shared-layout path.
 	directory, _ := root.ProjectTrace(p.ID)
-	return ProjectView{ID: p.ID, Name: p.Name, Upstream: p.Upstream, Fork: p.Fork, Clone: p.Clone, BaseBranch: p.BaseBranch, Trace: directory, Charter: filepath.Join(directory, "charter.md")}
+	charterDirectory, _ := root.ProjectTrace(p.Group())
+	return ProjectView{ID: p.ID, Name: p.Name, Upstream: p.Upstream, Fork: p.Fork, Clone: p.Clone, BaseBranch: p.BaseBranch, Trace: directory, Charter: filepath.Join(charterDirectory, "charter.md"), Repos: []RepoView{repoView(root, p)}}
+}
+
+// repoView names one repo's own settings and trace.
+func repoView(root config.Root, p config.Project) RepoView {
+	directory, _ := root.ProjectTrace(p.ID)
+	return RepoView{ID: p.ID, Name: p.Name, Upstream: p.Upstream, Fork: p.Fork, Clone: p.Clone, BaseBranch: p.BaseBranch, Landing: p.Landing, Trace: directory, KB: filepath.Join(directory, "kb"), EntityMap: filepath.Join(directory, trace.EntitiesPath), Default: p.IsDefaultRepo()}
+}
+
+// groupMembers returns every repo of the project default belongs to, default
+// itself included, in the order they appear in all.
+func groupMembers(all []config.Project, group config.ProjectID) []config.Project {
+	var members []config.Project
+	for _, p := range all {
+		if p.Group() == group {
+			members = append(members, p)
+		}
+	}
+	return members
+}
+
+// projectGroupView builds the view of the project any repo of belongs to:
+// the project's own default repo's fields at the top level, for
+// compatibility with a one-repo project, and every repo of the project, the
+// default repo included, in Repos. any need not itself be the default repo.
+func (s *Service) projectGroupView(any config.Project) ProjectView {
+	cfg := s.current()
+	members := groupMembers(cfg.Projects, any.Group())
+	primary := any
+	for _, member := range members {
+		if member.IsDefaultRepo() {
+			primary = member
+		}
+	}
+	view := projectView(cfg.Root, primary)
+	view.Repos = nil
+	for _, member := range members {
+		view.Repos = append(view.Repos, repoView(cfg.Root, member))
+	}
+	if len(view.Repos) == 0 {
+		view.Repos = []RepoView{repoView(cfg.Root, primary)}
+	}
+	return view
 }
 
 // validateAdd checks a request before anything is written. Every failure names
 // the field at fault; the clone is read, never written.
 func (s *Service) validateAdd(req ProjectAddRequest) (config.Project, *APIError) {
+	return s.validateRepo(req.Name, req.Upstream, req.Fork, req.Clone, req.BaseBranch)
+}
+
+// validateRepo checks one repo's own fields before anything is written. Every
+// failure names the field at fault; the clone is read, never written. It is
+// shared by project creation and by adding a repo to an existing project.
+func (s *Service) validateRepo(name, upstream, fork, clone, baseBranch string) (config.Project, *APIError) {
 	invalid := func(message string) (config.Project, *APIError) {
 		return config.Project{}, &APIError{Validation, message}
 	}
-	name := strings.TrimSpace(req.Name)
+	name = strings.TrimSpace(name)
 	if name == "" || strings.ContainsAny(name, "\x00\r\n") {
 		return invalid("name is required and must be one line")
 	}
-	if !config.ValidRepository(req.Upstream) {
+	if !config.ValidRepository(upstream) {
 		return invalid("upstream must be owner/repository without a URL or .git suffix")
 	}
-	if req.Fork != "" && !config.ValidRepository(req.Fork) {
+	if fork != "" && !config.ValidRepository(fork) {
 		return invalid("fork must be owner/repository without a URL or .git suffix")
 	}
-	if strings.EqualFold(req.Upstream, req.Fork) {
-		req.Fork = ""
+	if strings.EqualFold(upstream, fork) {
+		fork = ""
 	}
-	branch := req.BaseBranch
+	branch := baseBranch
 	if branch == "" {
 		branch = "main"
 	}
 	if !config.ValidBranch(branch) {
 		return invalid("base_branch is not a valid Git branch name")
 	}
-	if !filepath.IsAbs(req.Clone) {
+	if !filepath.IsAbs(clone) {
 		return invalid("clone must be an absolute path to the local clone")
 	}
-	clone, err := config.ResolveClone(req.Clone, s.options.Config.Home)
+	resolved, err := config.ResolveClone(clone, s.options.Config.Home)
 	if err != nil {
 		return invalid("clone must be an accessible absolute path")
 	}
 	root := s.current().Root
-	if root.Overlaps(clone) {
+	if root.Overlaps(resolved) {
 		return invalid("clone and Osmia root must be separate, non-nested directories")
 	}
-	if info, err := os.Stat(clone); err != nil || !info.IsDir() {
+	if info, err := os.Stat(resolved); err != nil || !info.IsDir() {
 		return invalid("clone does not exist or is not a directory")
 	}
-	if _, err := os.Stat(filepath.Join(clone, ".git")); err != nil {
+	if _, err := os.Stat(filepath.Join(resolved, ".git")); err != nil {
 		return invalid("clone is not a Git repository: no .git entry")
 	}
-	return config.Project{Version: 1, Name: name, Upstream: req.Upstream, Fork: req.Fork, Clone: clone, BaseBranch: branch, Landing: "commit-per-unit"}, nil
+	return config.Project{Version: 1, Name: name, Upstream: upstream, Fork: fork, Clone: resolved, BaseBranch: branch, Landing: "commit-per-unit"}, nil
+}
+
+// repoNameFromUpstream derives a repo's default name from its upstream
+// owner/repository reference: the part after the slash.
+func repoNameFromUpstream(upstream string) string {
+	if i := strings.LastIndex(upstream, "/"); i >= 0 {
+		return upstream[i+1:]
+	}
+	return upstream
+}
+
+// validateAddRepo checks a RepoAddRequest before anything is written: Project
+// must name an active project's own default repo, and the new repo's own
+// fields must be valid. It returns the project's default repo and the new
+// repo, with GroupID already set to the project.
+func (s *Service) validateAddRepo(req RepoAddRequest) (config.Project, config.Project, *APIError) {
+	if err := config.CheckProjectIDs(req.Project); err != nil {
+		return config.Project{}, config.Project{}, &APIError{Validation, "project must be a project ID: p_ followed by 32 lowercase hexadecimal digits"}
+	}
+	cfg := s.current()
+	var primary config.Project
+	found := false
+	for _, p := range cfg.Projects {
+		if p.ID == req.Project {
+			primary, found = p, true
+		}
+	}
+	if !found {
+		return config.Project{}, config.Project{}, &APIError{Validation, fmt.Sprintf("project %s is not active", req.Project)}
+	}
+	if !primary.IsDefaultRepo() {
+		return config.Project{}, config.Project{}, &APIError{Validation, fmt.Sprintf("project %s is a repo of project %s; add repos there instead", req.Project, primary.Group())}
+	}
+	name := req.Name
+	if name == "" {
+		name = repoNameFromUpstream(req.Upstream)
+	}
+	repo, api := s.validateRepo(name, req.Upstream, req.Fork, req.Clone, req.BaseBranch)
+	if api != nil {
+		return config.Project{}, config.Project{}, api
+	}
+	repo.GroupID = primary.ID
+	return primary, repo, nil
 }
 
 func sameRegistration(a, b config.Project) bool {
@@ -143,6 +236,55 @@ func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (Projec
 	return s.added(p), nil
 }
 
+// addRepo registers a repo as part of an existing project's default repo: the
+// same journal, the same crash recovery and the same deduplication addProject
+// uses for a whole project, scoped to one additional repo.
+func (s *Service) addRepo(ctx context.Context, req RepoAddRequest) (ProjectResponse, *APIError) {
+	s.projectMu.Lock()
+	defer s.projectMu.Unlock()
+	pending, err := s.readPending()
+	if err != nil {
+		return ProjectResponse{}, &APIError{Internal, "the project registration journal is unreadable; inspect project-add.json under the root"}
+	}
+	if pending != nil {
+		if conflict := pendingCloneConflict(s.current(), pending.Project); conflict != nil {
+			return ProjectResponse{}, conflict
+		}
+		p, err := s.complete(ctx, *pending, true)
+		if err != nil {
+			return ProjectResponse{}, incomplete(pending.Project.ID, err)
+		}
+		if _, requested, api := s.validateAddRepo(req); api != nil || !sameRegistration(requested, p) || requested.Group() != p.Group() {
+			return ProjectResponse{}, activeError(p.ID)
+		}
+		return s.addedRepo(p), nil
+	}
+	cfg := s.current()
+	_, p, api := s.validateAddRepo(req)
+	if api != nil {
+		return ProjectResponse{}, api
+	}
+	for _, active := range cfg.Projects {
+		if p.Group() == active.Group() && sameRegistration(p, active) {
+			return s.addedRepo(active), nil
+		}
+		if p.Clone == active.Clone {
+			return ProjectResponse{}, activeError(active.ID)
+		}
+	}
+	if err := s.reserve(&p); err != nil {
+		return ProjectResponse{}, &APIError{Internal, "cannot reserve a project identity under the root; check its permissions"}
+	}
+	if err := s.step("journal-written"); err != nil {
+		return ProjectResponse{}, incomplete(p.ID, err)
+	}
+	p, err = s.complete(ctx, pendingProject{Version: 1, Project: p}, true)
+	if err != nil {
+		return ProjectResponse{}, incomplete(p.ID, err)
+	}
+	return s.addedRepo(p), nil
+}
+
 func activeError(id config.ProjectID) *APIError {
 	return &APIError{ProjectActive, fmt.Sprintf("project %s already owns this registration or clone; use a separate clone for another project", id)}
 }
@@ -157,8 +299,13 @@ func incomplete(id config.ProjectID, err error) *APIError {
 	return &APIError{Internal, fmt.Sprintf("registration of project %s is incomplete (%s); fix the root and run osmia project add again to finish it", id, reason)}
 }
 func (s *Service) added(p config.Project) ProjectResponse {
-	view := projectView(s.current().Root, p)
+	view := s.projectGroupView(p)
 	return ProjectResponse{Project: view, NextStep: "Write the charter in " + view.Charter + " before handing in work."}
+}
+
+func (s *Service) addedRepo(p config.Project) ProjectResponse {
+	view := s.projectGroupView(p)
+	return ProjectResponse{Project: view, NextStep: fmt.Sprintf("Repo %s added to project %s.", p.ID, p.Group())}
 }
 
 // reserve generates an identity with no directory under projects and journals it.
@@ -443,6 +590,17 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 		return ProjectResponse{}, &APIError{Validation, fmt.Sprintf("project %s is not active; the active projects are %s", req.Project, projectList(cfg.ProjectIDs()))}
 	}
 	removed := cfg.For(req.Project).Project
+	if removed.IsDefaultRepo() {
+		if others := groupMembers(cfg.Projects, removed.ID); len(others) > 1 {
+			var ids []string
+			for _, o := range others {
+				if o.ID != removed.ID {
+					ids = append(ids, string(o.ID))
+				}
+			}
+			return ProjectResponse{}, &APIError{Validation, fmt.Sprintf("project %s still has other repos (%s); remove them first", removed.ID, strings.Join(ids, ", "))}
+		}
+	}
 	configPath, err := cfg.Root.Config()
 	if err == nil {
 		err = config.RemoveActiveProject(configPath, req.Project)

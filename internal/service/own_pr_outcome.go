@@ -34,6 +34,7 @@ const (
 type ownPullRequestOutcome struct {
 	PullRequest int    `json:"pull_request"`
 	Outcome     string `json:"outcome"`
+	MergeCommit string `json:"merge_commit,omitempty"`
 }
 
 // ownPullRequestOutcomeAt reads the latest recorded own-PR outcome of
@@ -85,7 +86,7 @@ func ownPullRequestFinished(repo *trace.Repository, stream config.WorkstreamID) 
 	if err != nil || revision == 0 {
 		return false, err
 	}
-	return outcome.PullRequest == current.PullRequest, nil
+	return outcome.PullRequest == current.PullRequest && (outcome.Outcome == ownPullRequestOutcomeMerged || outcome.Outcome == ownPullRequestOutcomeClosed), nil
 }
 
 // ownPullRequestOutcomeDocumentFor builds the next revision of the own-PR
@@ -93,12 +94,17 @@ func ownPullRequestFinished(repo *trace.Repository, stream config.WorkstreamID) 
 // revision, read backward by record ID. It returns ok=false when the
 // recorded outcome already matches pr and outcome, so recording stays
 // idempotent across a restart between the lookup and the record (charter#2).
-func ownPullRequestOutcomeDocumentFor(repo *trace.Repository, stream config.WorkstreamID, at time.Time, cause string, pr int, outcome string) (trace.Document, bool, error) {
+func ownPullRequestOutcomeDocumentFor(repo *trace.Repository, stream config.WorkstreamID, at time.Time, cause string, pr int, outcome string, mergeCommit ...string) (trace.Document, bool, error) {
 	prior, revision, err := ownPullRequestOutcomeAt(repo, stream)
 	if err != nil {
 		return trace.Document{}, false, err
 	}
 	next := ownPullRequestOutcome{PullRequest: pr, Outcome: outcome}
+	if len(mergeCommit) > 0 {
+		next.MergeCommit = mergeCommit[0]
+	} else if prior.PullRequest == pr && prior.Outcome == outcome {
+		next.MergeCommit = prior.MergeCommit
+	}
 	if revision > 0 && prior == next {
 		return trace.Document{}, false, nil
 	}

@@ -854,3 +854,167 @@ func TestProgressWaitsForItsWindowOrTheNextNotice(t *testing.T) {
 		t.Fatalf("the notice did not carry the waiting progress: %d turns", len(turns))
 	}
 }
+
+// TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelivery
+// covers Options.ChiefTarget: a member's outbox event is delivered as a
+// turn on the shared chief-of-staff thread of its cross-repo workgroup,
+// which lives in neither member's own repository, and is acknowledged
+// exactly once even when the service restarts partway through delivering
+// it (here, right after the event is claimed but before its chief-of-staff
+// turn is enqueued, the same crash point TestCrashAndRestartNeitherLoseNorRepeatEvents
+// already covers for a single-repo workstream).
+func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelivery(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f, repo := setup(t)
+	defer func() { repo.Close() }()
+
+	// A second member, in its own separate project and repository, makes
+	// this workgroup genuinely cross-repo.
+	home2 := t.TempDir()
+	root2, err := config.ResolveRoot(filepath.Join(home2, "osmia"), "")
+	must(t, err)
+	project2 := config.Project{ID: "p_00000000000000000000000000000002", Clone: filepath.Join(home2, "target")}
+	must(t, os.Mkdir(project2.Clone, 0700))
+	repo2, err := trace.Create(ctx, root2, project2, start, owner)
+	must(t, err)
+	defer func() { repo2.Close() }()
+	stream2 := config.WorkstreamID("w_00000000000000000000000000000002")
+	must(t, repo2.CreateWorkstream(ctx, stream2, start, owner))
+
+	wt, g, err := trace.CreateWorkgroupTrace(ctx, f.root, []trace.CrossRepoMember{{Workstream: stream, Project: repo}, {Workstream: stream2, Project: repo2}}, start, owner, "test-workgroup")
+	must(t, err)
+	must(t, wt.Close())
+
+	// setup and CreateWorkstream already commit each member's own
+	// chief-of-staff thread (that is what eventTurns elsewhere relies on
+	// reading), so "the member has no chief thread" cannot be the signal
+	// that delivery went to the shared thread instead. Snapshot each
+	// member's own thread now, before any Pass, so we can later assert it
+	// never grew an event turn.
+	snapshotThread := func(repo *trace.Repository, stream config.WorkstreamID) []trace.QueuedTurn {
+		th, err := repo.ChiefOfStaffThread(stream)
+		must(t, err)
+		return slices.Clone(th.Turns)
+	}
+	snapshot1 := snapshotThread(repo, stream)
+	snapshot2 := snapshotThread(repo2, stream2)
+
+	members := func() []trace.CrossRepoMember {
+		return []trace.CrossRepoMember{{Workstream: stream, Project: repo}, {Workstream: stream2, Project: repo2}}
+	}
+	chiefTarget := func(context.Context, config.WorkstreamID) (*trace.Repository, func(), error) {
+		wt, err := trace.OpenWorkgroupTrace(f.root, g.ID, members())
+		if err != nil {
+			return nil, nil, err
+		}
+		return wt, func() { wt.Close() }, nil
+	}
+
+	f.notify(t, repo, "cross-repo-event")
+	f.clock.Advance(time.Minute)
+
+	d, err := New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil }, ChiefTarget: chiefTarget})
+	must(t, err)
+	var fired bool
+	d.boundary = crashAt("before-enqueue", 1, &fired)
+	_ = d.Pass(ctx)
+	if !fired {
+		t.Fatal("crash point never fired")
+	}
+
+	// The simulated crash hit after the event was claimed but before its
+	// chief-of-staff turn was enqueued: nothing was delivered yet.
+	if n := unacknowledged(t, repo); n != 1 {
+		t.Fatalf("event state after the simulated crash: %d unacknowledged, want 1", n)
+	}
+
+	// Restart: a fresh repository session and a fresh deliverer, as a real
+	// service restart would build.
+	repo = f.reopen(t, repo)
+	d, err = New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil }, ChiefTarget: chiefTarget})
+	must(t, err)
+	must(t, d.Pass(ctx))
+
+	// Neither member's own chief-of-staff thread grew an event turn: the
+	// notice went only to the shared thread in the workgroup's own trace.
+	assertNoEventTurnAdded := func(repo *trace.Repository, stream config.WorkstreamID, snapshot []trace.QueuedTurn) {
+		t.Helper()
+		th, err := repo.ChiefOfStaffThread(stream)
+		must(t, err)
+		bad := len(th.Turns) != len(snapshot)
+		for _, q := range th.Turns {
+			if q.Request.Actor == Actor || strings.Contains(q.Request.Prompt, "Notice cross-repo-event") {
+				bad = true
+			}
+		}
+		if bad {
+			t.Fatalf("member's own thread grew an event turn: before=%+v after=%+v", snapshot, th.Turns)
+		}
+	}
+	assertNoEventTurnAdded(repo, stream, snapshot1)
+	assertNoEventTurnAdded(repo2, stream2, snapshot2)
+
+	wt2, err := trace.OpenWorkgroupTrace(f.root, g.ID, members())
+	must(t, err)
+	defer func() { wt2.Close() }()
+	th, err := wt2.ChiefOfStaffThread(stream)
+	must(t, err)
+	var queued []trace.QueuedTurn
+	for _, q := range th.Turns {
+		if q.Request.Actor == Actor {
+			queued = append(queued, q)
+		}
+	}
+	if len(queued) != 1 {
+		t.Fatalf("shared chief thread has %d event turns queued, want 1: %+v", len(queued), queued)
+	}
+	if !strings.Contains(queued[0].Request.Prompt, "Notice cross-repo-event") {
+		t.Fatalf("queued turn is missing the notice: %+v", queued[0])
+	}
+
+	// Complete the queued turn by hand, the way claimNext/finish do for
+	// the single-repo case, but against the workgroup's own trace and its
+	// synthetic host workstream, which is where EnqueueTurn actually
+	// stores a chief-of-staff request.
+	host := g.Members[0]
+	q, err := wt2.ClaimTurn(ctx, host, trace.ChiefOfStaff, "run_1", "/sessions/run_1", f.clock.Now())
+	must(t, err)
+	h := q.Request.Header
+	h.Schema, h.ID, h.At = "osmia.trace.turn-response", "response_"+q.Request.TurnID, f.clock.Now()
+	response := trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: 1,
+		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, FinalResponse: "Noted"}}
+	must(t, wt2.CaptureTurn(ctx, q.Claim.Token, response))
+	must(t, wt2.CompleteTurn(ctx, host, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, f.clock.Now()))
+
+	// Settle: the chief's turn is now done, so the event is acknowledged.
+	must(t, d.Pass(ctx))
+
+	if n := unacknowledged(t, repo); n != 0 {
+		t.Fatalf("%d events left unacknowledged after the chief's turn completed", n)
+	}
+	entries, err := repo.Outbox(stream)
+	must(t, err)
+	acked := 0
+	for _, e := range entries {
+		if e.Acknowledged {
+			acked++
+		}
+	}
+	if acked != 1 {
+		t.Fatalf("event acknowledged %d times, want 1: %+v", acked, entries)
+	}
+
+	// Delivered exactly once: one chief-of-staff turn carries the notice.
+	th, err = wt2.ChiefOfStaffThread(stream)
+	must(t, err)
+	n := 0
+	for _, q := range th.Turns {
+		if q.Request.Actor == Actor {
+			n += strings.Count(q.Request.Prompt, "Notice cross-repo-event\n")
+		}
+	}
+	if n != 1 {
+		t.Fatalf("event delivered %d times, want 1", n)
+	}
+}

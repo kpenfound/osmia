@@ -162,6 +162,7 @@ func newDismissPage(t *testing.T, entries ...string) (*page, *fakeAPI) {
 	p := openBrowser(t)
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate(server.URL+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.click(`[data-select="w_000"]`)
 	return p, api
 }
 

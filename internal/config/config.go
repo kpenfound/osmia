@@ -193,7 +193,13 @@ func (d *Dagger) Settings() *agent.Dagger {
 }
 
 type Project struct {
-	ID              ProjectID         `toml:"-" json:"id"`
+	ID ProjectID `toml:"-" json:"id"`
+	// GroupID names the project this repo belongs to, when it is not the
+	// project's own default repo: empty means this repo is itself the
+	// project's default repo and the project's own ID. A project is the set
+	// of every repo whose own ID or GroupID equals one default repo's ID; its
+	// charter is that default repo's.
+	GroupID         ProjectID         `toml:"group_id,omitempty" json:"group_id,omitempty"`
 	Version         int               `toml:"version" json:"version"`
 	Name            string            `toml:"name" json:"name"`
 	Upstream        string            `toml:"upstream" json:"upstream"`
@@ -233,6 +239,19 @@ func (p Project) RebaseInterval() time.Duration {
 	d, _ := time.ParseDuration(p.UpstreamRebase)
 	return d
 }
+
+// Group is the ID of the project p belongs to: p's own GroupID when set, or
+// p's own ID when p is itself a project's default repo.
+func (p Project) Group() ProjectID {
+	if p.GroupID != "" {
+		return p.GroupID
+	}
+	return p.ID
+}
+
+// IsDefaultRepo reports whether p is the default repo of its project: the
+// repo whose own ID is the project's ID and whose charter is the project's.
+func (p Project) IsDefaultRepo() bool { return p.GroupID == "" }
 
 type ProjectCapacity struct {
 	PerWorkstream int `toml:"per_workstream" json:"per_workstream"`
@@ -284,10 +303,36 @@ func Load(options Options) (*Config, error) {
 		}
 		c.Projects = append(c.Projects, p)
 	}
+	if err := c.validateGroups(); err != nil {
+		return nil, err
+	}
 	if len(c.Projects) == 1 {
 		c.Project = c.Projects[0]
 	}
 	return c, nil
+}
+
+// validateGroups checks that every repo naming a project through GroupID
+// names one that is active and is itself a project's default repo (its own
+// GroupID is empty). Repos load independently, so this is checked once every
+// active repo is loaded, not while each is loading.
+func (c *Config) validateGroups() error {
+	defaults := map[ProjectID]bool{}
+	for _, p := range c.Projects {
+		if p.IsDefaultRepo() {
+			defaults[p.ID] = true
+		}
+	}
+	for _, p := range c.Projects {
+		if p.GroupID != "" && !defaults[p.GroupID] {
+			path, err := c.Root.ProjectConfig(p.ID)
+			if err != nil {
+				path = string(p.ID)
+			}
+			return fieldError(path, "group_id", fmt.Sprintf("names project %s, which is not active or is not a default repo", p.GroupID))
+		}
+	}
+	return nil
 }
 
 // LoadTopLevel loads and validates the top-level file alone, as Load does,
@@ -586,6 +631,14 @@ func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Proje
 	if p.Version != 1 {
 		return Project{}, fieldError(projectPath, "version", "must be 1 (no migrations supported)")
 	}
+	if p.GroupID != "" {
+		if _, err := ParseProjectID(string(p.GroupID)); err != nil {
+			return Project{}, fieldError(projectPath, "group_id", "must be a project ID: p_ followed by 32 lowercase hexadecimal digits")
+		}
+		if p.GroupID == p.ID {
+			return Project{}, fieldError(projectPath, "group_id", "must not name this repo's own identity")
+		}
+	}
 	for _, value := range []struct{ field, s string }{{"upstream", p.Upstream}, {"fork", p.Fork}} {
 		if value.field == "fork" && value.s == "" {
 			continue
@@ -696,7 +749,7 @@ func knownKey(key toml.Key, project bool) bool {
 		if len(key) == 2 && key[0] == "hearsay_entities" {
 			return true
 		}
-		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "version", "name", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "checks_timeout", "capacity", "capacity.per_workstream"}, path)
+		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "version", "name", "group_id", "upstream", "fork", "clone", "base_branch", "landing", "classifier", "upstream_rebase", "checks_timeout", "capacity", "capacity.per_workstream"}, path)
 	}
 	// A leftover [beekeeper] section from the removed Beekeeper feature is
 	// accepted and ignored, never decoded into any field, so a top-level

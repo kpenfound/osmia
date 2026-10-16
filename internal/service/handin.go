@@ -61,7 +61,7 @@ func (s *Service) handIn(ctx context.Context, req HandInRequest) (HandInResponse
 	if errors.Is(err, errNoActiveProject) {
 		return HandInResponse{}, &APIError{NotFound, fmt.Sprintf("project %s is not an active project; check the project ID with osmia status", req.Project)}
 	}
-	view := projectView(cfg.Root, config.Project{ID: req.Project})
+	view := projectView(cfg.Root, cfg.For(req.Project).Project)
 	if errors.Is(err, errNoTrace) {
 		return HandInResponse{}, &APIError{Internal, fmt.Sprintf("project %s is configured but has no trace repository; register it with osmia project add", req.Project)}
 	}
@@ -210,6 +210,14 @@ func (h handIn) record(ctx context.Context, content *string) (HandInResponse, bo
 		}
 		if err != nil {
 			return h.failed("creating")
+		}
+		// The hand-in creates the workstream's one-workstream workgroup at
+		// once, rather than waiting for the next start's migration pass, so
+		// the fast path never runs briefly without one: a workstream never
+		// has a chief of staff of its own, and ensureWorkgroups backfilling
+		// this on a later start changes nothing further.
+		if _, err := trace.EnsureWorkgroups(ctx, repository, []config.WorkstreamID{stream}, now, ownerActor, handInTransition); err != nil {
+			return h.failed("recording the workgroup of")
 		}
 		if req.Base != "" {
 			recorded, err := repository.WorkstreamBase(stream)

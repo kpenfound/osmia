@@ -1,13 +1,73 @@
 # Configuration
 
 `internal/config.Load` reads and validates the entire declarative configuration.
-It returns a configuration only when the top-level file and the active project's
-file pass. It creates no directories, repositories, sockets or state and does
+It returns a configuration only when the top-level file and every active
+repo configuration pass. It creates no directories, repositories, sockets or state and does
 not launch agents. The local service owns startup and the Unix
-socket. Project registration through `osmia project add` writes the project
-file and edits `active_projects`; see [project registration](#project-registration).
+socket. Registration through `osmia project add` or `project add-repo` writes
+the repo file and edits `active_projects`; see [project registration](#project-registration).
 A running service applies edited files through [reload](running.md#reload).
-Migrations are separate work.
+Startup performs the recoverable migrations described below.
+
+## Projects, repos and workgroups
+
+A project owns one charter and one or more repos. Each repo owns its upstream,
+optional fork, clone, base branch, landing style, caps, KB and entity map.
+Workgroups represent feature requests; their workstreams each target exactly
+one repo and share one chief of staff. Footprints name entities from that repo.
+Briefs, project specs, slices and all other factory state stay outside target
+repositories. File-based context supports the complete flow without Hearsay.
+
+The default repo's `p_…` ID is also the project ID. Additional repos have their
+own `p_…` IDs and set `group_id` to that default ID in their configuration.
+`active_projects` lists repo registrations, including the default. The shared
+charter lives at `projects/<default-repo-id>/charter.md`; each repo keeps its
+KB and entities in its own trace. API project views expose the repo list;
+compatibility fields such as `upstream` at the top level describe the default
+repo. Use `osmia project repos <project-id>` to see the members.
+
+Charter reads and edits through any repo use that same default-repo authority,
+including worker bundles and owner-ratified rules. Added repos have no separate
+charter file. Any charter revisions retained in a member repo are historical
+records and do not supply its active policy.
+
+The design agent uses the `chief_of_staff` role's profile, overrides and sandbox
+configuration. There is no separate `design` role binding. Its grants restrict
+it to the project charter, each repo's KB and read-only source access; it has
+no VCS, delivery credentials, source writes or gate tools. The service records
+its draft brief outside the repos. One owner start hands that brief to the
+architect, which selects affected repos; Go validates and allocates one member
+per selected repo. The same conversation becomes the shared chief thread.
+One ratification seals the project spec, graph and slices together. See
+[design sessions](cli.md#design-sessions) for commands.
+
+Ordinary file, issue and stdin hand-ins use the same affected-repo selection
+path when the project has two or more active repos. A single selected repo
+keeps ordinary single-member ratification; several selected repos share one
+all-member packet. A project with one active repo goes directly to ordinary
+drafting. Selection adds no configuration or owner approval. See
+[handing in work](design.md#142-handing-in-a-workstream) for input, base and
+skipped-debate behavior.
+
+Edges are recorded in the ratified workgroup graph, not configured in TOML.
+A contract edge resolves on its ratified contract; hard-block and merge-order
+edges resolve only on the upstream PR's detected or owner-recorded merge.
+Merge is the only release signal: no tag, package-version or ecosystem settings
+exist. Expected waits are status only, without inbox entries or notifications.
+Every draft publication, PR update and ready action still requires its own
+workstream's owner delivery approval and owner signing. Integration-gate edges
+remain an open question pending an owner ruling on the combined-test mechanism;
+they are unsupported and the architect must not propose them.
+
+Amend and cancel are requested in the workgroup conversation and decided by
+one owner-approved impact summary. Contract changes cascade to dependents;
+unchanged units stay untouched, changed completed units get revisions, removed
+sections get removal units and new sections get new units. Active work stops
+at a unit boundary; open PRs keep their branch and PR and need fresh individual
+delivery approval, while merged changes need a follow-up workstream. Cancel
+asks whether open PRs are closed or left as drafts, includes dependent impact
+and never reverts merged work. These are recorded operations, not configuration
+switches. See [amend and cancel](cli.md#amend-and-cancel).
 
 ## Root and identity
 
@@ -29,7 +89,7 @@ home for embedding and tests. Other users' tilde syntax is rejected. Paths are
 absolute and cleaned, and existing symlink ancestors are resolved without requiring
 the final directory to exist.
 
-Project IDs are `p_` followed by 32 lowercase hex digits; workstream IDs use `w_`.
+Project and repo IDs are `p_` followed by 32 lowercase hex digits; workstream IDs use `w_`, and workgroup IDs use `g_`.
 `NewProjectID` and `NewWorkstreamID` generate random 128-bit keys. Persist the key
 once; changing a display name, upstream or clone does not change it. Parsing accepts
 only the canonical format, so traversal, absolute names and case aliases cannot
@@ -49,12 +109,13 @@ configuration list; they belong to persisted workstream manifests.
 <root>/tailnet/                                embedded Tailscale node state, when listen.tailnet is set
 <root>/project-add.json                       journal of one interrupted project registration
 <root>/notifications.json                     ledger of owner notifications, once notify.webhook has been set
-<root>/projects/<project-id>/config.toml
-<root>/projects/<project-id>/                  dedicated project trace repository: durable project knowledge only
-<root>/workstreams/<project-id>/<workstream-id>/  the workstream's own dedicated trace repository, a sibling of projects/<project-id>/
+<root>/projects/<repo-id>/config.toml
+<root>/projects/<repo-id>/                     dedicated repo knowledge trace; default repo holds project charter
+<root>/workstreams/<repo-id>/<workstream-id>/  the workstream's own dedicated trace repository, separate from projects/<repo-id>/
+<root>/workgroups/<workgroup-id>/              cross-repo record, project spec, shared chief and group decisions
 <root>/workstreams-staging/                    a new or migrating workstream's trace is built here before an atomic rename publishes it
-<root>/workstreams-deleting/<project-id>/      a workstream's trace archive cleanup has moved aside, durably marked for removal
-<root>/branches/<project-id>/<workstream-id>  the workstream's feature branch, a workspace of the clone
+<root>/workstreams-deleting/<repo-id>/      a workstream's trace archive cleanup has moved aside, durably marked for removal
+<root>/branches/<repo-id>/<workstream-id>  the workstream's feature branch, a workspace of the clone
 ```
 
 A root left over from a version that had the Beekeeper, the service's former
@@ -75,6 +136,21 @@ symlinks. Relative clone paths resolve from the project configuration
 directory; missing clones are accepted for configuration purposes. Loading
 configuration writes nothing in the clone. Helpers check existing paths, not future filesystem changes;
 state writers must protect against concurrent symlink replacement.
+
+### Project and workgroup migration
+
+At startup, each existing one-repo project becomes a default project holding
+that one repo, retaining its ID and paths. Its charter is the project charter.
+Every existing non-session workstream appears under it as a one-workstream
+workgroup whose chief is its existing thread. This includes building,
+delivered, abandoned and archived records. Existing exploratory sessions
+stay outside workgroups, retain their session kind and thread identity and
+remain excluded from factory passes. They are never converted to features.
+Traces, rulings, decisions and archive records are preserved without owner
+action. Migration is resumable and idempotent: an interrupted start finishes
+on the next start, and repeated starts create no duplicates. This is separate
+from the trace-layout migration below; neither requires moving existing member
+traces to a workgroup trace.
 
 ### Trace migration
 
@@ -112,18 +188,20 @@ model = "your-model-name"
 
 Only IDs in `active_projects` are loaded; the list may be empty or absent, and
 the service then starts without a project until `osmia project add` registers
-one. With several IDs the service runs every listed project at once, each with
-its own trace, reconciliation loop, lander and drift cadence. Role capacity
+one. With several IDs the service runs every listed repo at once, each with
+its own trace, reconciliation loop, lander and drift cadence. Additional repos
+share the project of their `group_id`; that default repo must also be active. Role capacity
 (`capacity.*`), budgets and the factory-level pause are shared by all of them:
-a turn in flight on any project takes a slot of its role kind. Each project
+a turn in flight on any project takes a slot of its role kind. Each repo
 counts its own slots in use, waiting turns and daily spend from its own trace
 and publishes them, so the shared limits and the status's capacity and daily
-budget follow each project's latest pass. Each project's
-`capacity.per_workstream` still applies to its own workstreams, and a project
-pause holds only that project. Additional project directories may hold archived
+budget follow each repo's latest pass. Each repo's
+`capacity.per_workstream` applies to its own workstreams. Runtime project-scoped
+controls retain the selected repo registration's scope. Additional directories
+may hold archived
 traces and are not scanned or activated. Duplicate IDs are errors. The
-top-level file, and every active project's file, must exist and specify
-`version = 1`; one project file that fails to load fails the whole load. Unknown versions, keys (including empty unknown
+top-level file, and every active repo's file, must exist and specify
+`version = 1`; one repo file that fails to load fails the whole load. Unknown versions, keys (including empty unknown
 tables and case variants), duplicate TOML keys, malformed TOML and incorrect
 types are errors.
 
@@ -646,6 +724,15 @@ registration needs its own clone. Repeating an active project's exact
 registration returns it without change. Existing project runtimes and overrides
 are retained.
 
+`osmia project add` creates a project with exactly one default repo.
+`osmia project add-repo <project-id> --upstream OWNER/REPO --clone PATH`
+(API: `POST /v1/projects/repos`) uses the same registration journal to add a
+repo to that project, with its own config, clone, KB and entity map, and the
+project's existing charter. `--fork` and `--base-branch` are optional on both
+commands. `osmia project repos <project-id>` lists the repo views returned by
+`GET /v1/config`. There is no separate repo-list endpoint. The project pane
+offers project creation and adding a repo with these same service operations.
+
 ### Knowledge maintenance and retrieval
 
 Factory turns receive governing rules and decisions with references to project
@@ -671,28 +758,30 @@ invalid output leaves the recorded KB unchanged. Existing KB files are not
 silently truncated: a successful librarian pass must consolidate them.
 
 `osmia project remove <project-id>` (API: `DELETE /v1/projects`) removes the
-active ID from `active_projects` as a text edit, stops admitting new work,
-and waits for in-flight operations to finish before closing its runtime; other active projects keep running. The project's and every workstream's trace repositories, and the owner's clone, are not deleted. Adding the
+active repo ID from `active_projects` as a text edit, stops admitting new work,
+and waits for in-flight operations to finish before closing its runtime; other active projects keep running. The project's and every workstream's trace repositories, and the owner's clone, are not deleted. Remove additional repos before removing the default repo; a default with other
+active repos cannot be removed. Adding the
 same upstream again afterwards generates a new project ID and new trace
 repositories; the old ones stay untouched under `projects/<old-id>/` and
 `workstreams/<old-id>/` and are
 never reused, so archived history is immutable and every add is a fresh start.
 
-The service's loaded configuration changes only in its project after add and
-remove: `/config` reports no `restart_required` or `reload_required` diagnostic
+The service's loaded configuration changes only for the registration added or
+removed: `/config` reports no `restart_required` or `reload_required` diagnostic
 for these edits.
 Without a project, `/config` and `/runtime` carry a `no_project` diagnostic and
 project-scoped overrides are rejected as referencing an inactive project.
 
-## Project config.toml
+## Repo config.toml
 
-Store this file at `projects/<project-id>/config.toml`; `osmia project add`
-writes it. The directory ID is the identity; there is no second configurable ID
+Store this file at `projects/<repo-id>/config.toml`; `osmia project add` or
+`osmia project add-repo` writes it. The directory ID is the identity; there is no second configurable ID
 to disagree with it.
 
 ```toml
 version = 1
-name = "My project"                 # optional display metadata, default empty
+name = "My repo"                    # optional display metadata, default empty
+# group_id = "p_0123456789abcdef0123456789abcdef" # additional repo: its project ID
 upstream = "upstream/repository"    # required owner/repository, not a URL
 fork = "my-account/repository"      # optional; omit to push feature branches to upstream
 clone = "~/src/repository"          # required; may not yet exist
@@ -711,7 +800,7 @@ ASCII letters, digits, `.`, `_` and `-`, beginning with a letter or digit, witho
 a `.git` suffix. Fork and upstream must differ ignoring case. `base_branch` follows
 Git branch-name constraints. `landing` accepts `commit-per-unit` (default) or
 `squash`: it chooses whether an approved workstream is
-published with each unit's commit or as one commit. Project `capacity.per_workstream` is a positive integer overriding the
+published with each unit's commit or as one commit. Repo `capacity.per_workstream` is a positive integer overriding the
 global default.
 
 Publication requires the service host's Git `user.name`, `user.email` and
@@ -737,7 +826,7 @@ duration shorter than `1m` is rejected.
 
 `checks_timeout` is a Go duration string from `1m` to `24h`: how long one run
 of a unit candidate's checks, or of a final review's checks, may
-take. It defaults to `"15m"`; raise it for a project whose `dagger check` runs
+take. It defaults to `"15m"`; raise it for a repo whose `dagger check` runs
 longer. A run that outlasts it did not complete: the unit stays checking and its
 checks run again later, and a final review's reader is told its checks did not
 complete. Listing the check links for a Jev selection has its
@@ -814,7 +903,7 @@ id = "osmia-observer"
 token_env = "HEARSAY_OBSERVER_TOKEN"
 ```
 
-Each enabled project names its Hearsay scope in project `config.toml`:
+Each enabled repo names its Hearsay scope in its repo `config.toml`:
 
 ```toml
 hearsay_scope = "example"
@@ -824,8 +913,8 @@ hearsay_scope = "example"
 ```
 
 The optional entity mapping selects scope bundles for unit footprints; without
-mapped footprint entities, the project scope is used. An empty project scope
-keeps that project in file mode. Settings apply through reload. Hearsay must
+mapped footprint entities, the project scope is used. An empty repo scope
+keeps that repo in file mode. Settings apply through reload. Hearsay must
 configure the named principals with the worker, orchestrator, and observer
 classes and grants intersected with the owner's access.
 
@@ -941,6 +1030,50 @@ with the same inputs, after a restart included, returns the recorded decision.
 as the `jev` provider in today's usage. `osmia doctor` warns when the boost is
 on without its key.
 
+### Resolution, retention and shared lifecycle
+
+A workstream's own slice, spec, plan and workspaces leave active state and new
+bundles when it resolves (merged or cancelled). Its trace remains until owner
+archive. The workgroup's project spec stays active for the shared chief and
+every unresolved member until every member resolves, including a dependent
+waiting for or repairing after an upstream merge. Only then does it leave
+active views and bundles; project-spec history and owner decisions remain in
+the trace until archive. A stored `delivered` publication state alone does not
+mean merged: an open, unmerged PR shows **PR open** in the project pane.
+A ready but unmerged PR keeps its member unresolved and the project spec active.
+Merge is detected by GitHub polling or recorded by the owner with `osmia merged`.
+Resolution requires cancellation/abandonment or delivery with an owner merge
+record or a recorded merged outcome matching the current publication's PR.
+Closed but unmerged PRs, outcomes for earlier PRs and delivery without evidence
+remain unresolved. One-member workgroups use the same rule; their existing
+delivery cleanup remains separate from group resolution.
+
+Every delivered member's current PR is observed at most once per minute,
+with or without a same-repo base or downstream edges. Observation stops on a
+matching merged or closed outcome. Failed lookups record nothing and retry
+on the next cadence; a closed-without-merge outcome remains unresolved.
+These are service rules, with no additional polling configuration.
+
+Owner archive and eligible cleanup of a terminal member preserve the original
+shared conversation, active project spec and status for unresolved survivors,
+including across restart and when the retired member was the conversation's
+source or the controller's driver. Durable archive identity and verified
+resolution evidence, followed by cleanup intent and confirmed removal, locate
+the original authority without recreating a deleted member trace. Archive is
+never a merge event and cannot release edges or grant seal, admission or
+publication permission. Missing or corrupt live history, inactive or
+misconfigured repos and incomplete joins yield errors or recoverable holds;
+absence or an arbitrary API failure does not prove retirement or resolution.
+
+Approved amend/cancel journals keep their exact original approval and document
+pins. Survivor effects reconcile once through the original group authority.
+If a remaining effect requires unavailable retired history, the journal and
+pending effect stay recorded with an explicit recoverable diagnostic; they
+are never discarded, declared applied or retargeted to newer revisions.
+Shared inbox questions retain their original ordered origins and ruling links;
+sufficient recorded evidence resumes eligible survivors once, while genuinely
+unavailable ruling or relay effects remain pending.
+
 ### Permanent workstream archives
 
 `osmia archive <workstream>` permanently archives delivered or abandoned work.
@@ -948,13 +1081,23 @@ on without its key.
 project, the workstream ID, the title, the outcome (delivered or abandoned),
 the archive time and, where one exists, the delivery link (the pull request
 URL, or the recorded upstream commit for an owner-recorded merge). The
-service then deletes the workstream's own independent storage, its dedicated
+record also pins `resolution_evidence` from the member's history as `merged`,
+`cancelled` or `unresolved`; `resolved` is true only with merged or cancelled
+evidence. Both fields are exposed in the API's runtime archive records. An
+archived member without that evidence keeps the workgroup unresolved and its
+project spec active. The pane shows **blocked** with the wait
+`archived member <id> has no pinned merge or cancel evidence; workgroup remains unresolved`.
+An older `resolved` flag without evidence is re-derived from retained history
+where possible; otherwise the hold remains visible. Archive and cleanup alone
+never supply resolution evidence.
+
+The service then deletes the workstream's own independent storage, its dedicated
 trace repository and its temporary workspaces, including all check
 stdout/stderr, documents, decisions and agent turns, from disk, as files; it
 does not rewrite or prune any Git history. An archive
-cannot be restored or unarchived. Delivery and abandonment alone remove
-temporary workspaces while retaining the trace and target-repository
-branches.
+cannot be restored or unarchived. Resolution removes active documents and temporary workspaces while retaining
+the trace and target-repository branches. Publication may require further
+dependent repair or approved rework; it never authorizes trace deletion.
 
 The cleanup pass first fills in the title, outcome and delivery link in
 `runtime.json`, for an archive recorded before this behaviour existed too,
@@ -964,8 +1107,8 @@ also waits while another retained workstream depends on it as a base
 (archived bases may leave together with their archived dependents), and until
 the librarian refresh covering its landed units has incorporated the
 workstream's learnings into project knowledge. Once every wait clears, the
-trace repository is moved aside by one atomic rename, a durable, restart-safe
-intent to delete it that a directory listing never again shows as live, and
+service records durable cleanup intent before moving the trace repository
+aside by one atomic rename. Directory listings no longer show it as live, and
 its removal then runs without holding any repository lock, so deleting even a
 large trace never delays a read, a write or reconciliation of any other
 workstream. The archive record is marked clean, `trace_deleted` in the API,

@@ -431,6 +431,43 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	t.Cleanup(func() { f.stop(t) })
 	p := openBrowser(t)
 	ctx := context.Background()
+	// Keep the stream's last events for a failed delivery wait. The service
+	// currently sends no SSE id, so retain the transport request and kind too.
+	var eventMu sync.Mutex
+	var deliveryEvents []string
+	chromedp.ListenTarget(p.ctx, func(event any) {
+		if e, ok := event.(*network.EventEventSourceMessageReceived); ok {
+			eventMu.Lock()
+			deliveryEvents = append(deliveryEvents, fmt.Sprintf("request=%s id=%q kind=%s data=%.300s", e.RequestID, e.EventID, e.EventName, e.Data))
+			if len(deliveryEvents) > 64 {
+				deliveryEvents = deliveryEvents[len(deliveryEvents)-64:]
+			}
+			eventMu.Unlock()
+		}
+	})
+	defer func() {
+		if !t.Failed() {
+			return
+		}
+		read, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		presented, err := f.c.Delivery(read, ws)
+		t.Logf("delivery at failure: review=%d revision=%d draft=%s approval=%+v error=%v", presented.Report.Review, presented.ReviewRevision, presented.DraftHash, presented.Approval, err)
+		inbox, err := f.c.Inbox(read)
+		t.Logf("inbox read at failure: %v", err)
+		for _, entry := range inbox.Entries {
+			if entry.Workstream == ws {
+				t.Logf("inbox entry at failure: kind=%s revision=%d answer=%+v", entry.Kind, entry.Revision, entry.Answer)
+			}
+		}
+		eventMu.Lock()
+		events := append([]string(nil), deliveryEvents...)
+		eventMu.Unlock()
+		t.Logf("delivery stream events since approval: %v", events)
+		var inboxReads any
+		p.eval(`window.deliveryInboxReads`, &inboxReads)
+		t.Logf("page inbox reads: %+v", inboxReads)
+	}()
 	// Publication waits while the workstream is paused.
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: ws}, Mode: "soft", Reason: "Hold the publication", Source: runtime.PauseOwner})
 	// recordReport records the next revision of the final report, keeping
@@ -507,7 +544,16 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 			if (init && init.method === 'POST' && String(url).includes('/delivery/')) {
 				window.approvals.push(JSON.parse(init.body));
 			}
-			return send(url, init);
+			return send(url, init).then(async (response) => {
+				if (String(url).endsWith('/inbox')) {
+					const body = await response.clone().json();
+					window.deliveryInboxReads = [...(window.deliveryInboxReads || []),
+						{status: response.status, entries: body.entries?.map(e => ({
+							kind: e.kind, workstream: e.workstream, revision: e.revision, pins: e.answer?.body
+						}))}].slice(-16);
+				}
+				return response;
+			});
 		};
 	})()`, nil)
 	p.selectWorkstream(ws)
@@ -559,6 +605,15 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 		t.Fatalf("the approval of the draft %+v", after.Approval)
 	}
 
+	// A submitted card disappears optimistically. Observe the accepted
+	// approval in the page's inbox before the fixture records another report
+	// with the same decision identity.
+	resync()
+	p.await("the processed approval in the live inbox", `window.deliveryInboxReads?.at(-1)?.entries &&
+		!window.deliveryInboxReads.at(-1).entries.some(e => e.kind === 'delivery' && e.workstream === `+quote(string(ws))+`)`)
+	eventMu.Lock()
+	deliveryEvents = nil
+	eventMu.Unlock()
 	// A newer report asks for approval again; the owner edits its draft.
 	third := recordReport(3)
 	p.awaitText(card+"[data-field=pins]", pins(3, third))

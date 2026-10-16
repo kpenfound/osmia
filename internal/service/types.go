@@ -165,6 +165,9 @@ type ReloadError struct {
 }
 
 // ProjectView names a registered project, its trace and its charter file.
+// Upstream, Fork, Clone, BaseBranch, Trace and Extraction describe the
+// project's default repo, the one its own ID names; Repos lists every repo
+// of the project, the default repo included, each with its own settings.
 type ProjectView struct {
 	ID         config.ProjectID `json:"id"`
 	Name       string           `json:"name"`
@@ -174,9 +177,27 @@ type ProjectView struct {
 	BaseBranch string           `json:"base_branch"`
 	Trace      string           `json:"trace"`
 	Charter    string           `json:"charter"`
+	Repos      []RepoView       `json:"repos"`
 	// CharterState and Extraction are reported by status only.
 	CharterState *CharterState    `json:"charter_state,omitempty"`
 	Extraction   *ExtractionState `json:"extraction,omitempty"`
+}
+
+// RepoView names one repo of a project: its own upstream, optional fork,
+// local clone, landing style, trace and knowledge base.
+type RepoView struct {
+	ID         config.ProjectID `json:"id"`
+	Name       string           `json:"name"`
+	Upstream   string           `json:"upstream"`
+	Fork       string           `json:"fork,omitempty"`
+	Clone      string           `json:"clone"`
+	BaseBranch string           `json:"base_branch"`
+	Landing    string           `json:"landing"`
+	Trace      string           `json:"trace"`
+	KB         string           `json:"kb"`
+	EntityMap  string           `json:"entity_map"`
+	Default    bool             `json:"default"`
+	Extraction *ExtractionState `json:"extraction,omitempty"`
 }
 
 // ExtractionState is the latest knowledge-base extraction of a project: its
@@ -270,6 +291,48 @@ type HandInResponse struct {
 	SkipDebate bool                `json:"skip_debate,omitempty"`
 }
 
+// DesignOpenRequest opens a design session in a project. The project may be
+// left out while exactly one project is active.
+type DesignOpenRequest struct {
+	Project config.ProjectID `json:"project"`
+}
+
+// DesignView is one design session: the workstream it lives on, its project
+// and when it opened. It carries no spec, plan or feature state: it stays
+// outside every factory pass until the owner starts a workgroup from it.
+type DesignView struct {
+	Workstream config.WorkstreamID `json:"workstream"`
+	Project    config.ProjectID    `json:"project"`
+	CreatedAt  time.Time           `json:"created_at"`
+}
+
+// DesignResponse answers opening or reading one design session.
+type DesignResponse struct {
+	Design DesignView `json:"design"`
+}
+
+// DesignsResponse lists design sessions, newest first.
+type DesignsResponse struct {
+	Designs []DesignView `json:"designs"`
+}
+
+// DesignMessageRequest is an owner message to a design session's agent.
+type DesignMessageRequest struct {
+	Text string `json:"text"`
+}
+
+// DesignStartResponse names the workstream a design session's brief started
+// a workgroup on. Handed is the path of the recorded brief; Source names the
+// design session it came from. The same thread that held the design
+// conversation continues as the workgroup's chief-of-staff thread.
+type DesignStartResponse struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	State      string              `json:"state"`
+	Handed     string              `json:"handed"`
+	Source     string              `json:"source"`
+}
+
 // AbandonRequest abandons a workstream for the owner's reason.
 type AbandonRequest struct {
 	Reason string `json:"reason"`
@@ -359,13 +422,17 @@ type ShedRedraftRequest struct {
 
 // PacketResponse is the ratification packet of a workstream: the revisions the
 // owner decides on, why debate ended, the dissent record with what blocks
-// ratification first, and the chief of staff's recommendation.
+// ratification first, and the chief of staff's recommendation. ProjectSpec
+// is present only when the workstream belongs to a multi-member workgroup
+// whose project spec is already drafted: ratifying this packet then seals
+// that project spec and every member, not only this workstream.
 type PacketResponse struct {
-	Project    config.ProjectID    `json:"project"`
-	Workstream config.WorkstreamID `json:"workstream"`
-	Packet     shed.Packet         `json:"packet"`
-	Revision   int                 `json:"revision"`
-	At         time.Time           `json:"at"`
+	Project     config.ProjectID    `json:"project"`
+	Workstream  config.WorkstreamID `json:"workstream"`
+	Packet      shed.Packet         `json:"packet"`
+	Revision    int                 `json:"revision"`
+	At          time.Time           `json:"at"`
+	ProjectSpec *trace.ProjectSpec  `json:"project_spec,omitempty"`
 }
 
 // RatifyRequest ratifies the exact revisions of the spec and the plan the
@@ -377,15 +444,18 @@ type RatifyRequest struct {
 
 // RatifyResponse reports a recorded ratification: the revisions it approves,
 // the round it was given in, and the state of its sealing: requested by this
-// call, or pending or running from an earlier one.
+// call, or pending or running from an earlier one. Members lists every
+// workstream this one ratification sealed; it names only the named
+// workstream for a one-workstream workgroup, exactly as today.
 type RatifyResponse struct {
-	Project    config.ProjectID    `json:"project"`
-	Workstream config.WorkstreamID `json:"workstream"`
-	Round      int                 `json:"round"`
-	Spec       int                 `json:"spec"`
-	Plan       int                 `json:"plan"`
-	Sealing    string              `json:"sealing"`
-	Detail     string              `json:"detail"`
+	Project    config.ProjectID      `json:"project"`
+	Workstream config.WorkstreamID   `json:"workstream"`
+	Round      int                   `json:"round"`
+	Spec       int                   `json:"spec"`
+	Plan       int                   `json:"plan"`
+	Sealing    string                `json:"sealing"`
+	Detail     string                `json:"detail"`
+	Members    []config.WorkstreamID `json:"members,omitempty"`
 }
 
 // ShedResponse reports one owner action in the shed: what was recorded, the
@@ -418,6 +488,20 @@ type ProjectRemoveRequest struct {
 type ProjectResponse struct {
 	Project  ProjectView `json:"project"`
 	NextStep string      `json:"next_step"`
+}
+
+// RepoAddRequest adds a repo to an existing project: Project must name an
+// active project's default repo. Name defaults to the last path segment of
+// Upstream. Clone, Upstream, Fork and BaseBranch behave as they do for
+// ProjectAddRequest, but describe this one additional repo, not the project
+// as a whole.
+type RepoAddRequest struct {
+	Project    config.ProjectID `json:"project"`
+	Name       string           `json:"name,omitempty"`
+	Upstream   string           `json:"upstream"`
+	Fork       string           `json:"fork,omitempty"`
+	Clone      string           `json:"clone"`
+	BaseBranch string           `json:"base_branch,omitempty"`
 }
 type RuntimeResponse struct {
 	Effective runtime.State               `json:"effective"`
@@ -612,10 +696,14 @@ type RoleFallback struct {
 // service-owned facts about claimed and parked turns. Workspaces is the
 // workspace backend the workstream was created on, git or jujutsu.
 type WorkstreamStatus struct {
-	Workstream config.WorkstreamID `json:"workstream"`
-	Project    config.ProjectID    `json:"project"`
-	Workspaces string              `json:"workspaces"`
-	// Kind is "session" for a session workstream, omitted for an ordinary
+	// DisplayState is the project pane label derived from recorded service facts.
+	DisplayState string              `json:"display_state"`
+	Workgroup    *WorkgroupView      `json:"workgroup,omitempty"`
+	Workstream   config.WorkstreamID `json:"workstream"`
+	Project      config.ProjectID    `json:"project"`
+	Workspaces   string              `json:"workspaces"`
+	// Kind is "session" for a session workstream, "design" for a design
+	// session that has not yet started a workgroup, omitted for an ordinary
 	// one. Profile, Base and Branch are set only for a session: its fixed
 	// profile, base commit and branch. Title is a session's optional title.
 	Kind          string            `json:"kind,omitempty"`
@@ -641,6 +729,22 @@ type WorkstreamStatus struct {
 	// pull request URL or the recorded upstream commit of an owner-recorded
 	// merge.
 	DeliveryLink string `json:"delivery_link,omitempty"`
+	// Wait names, in plain words, an edge or merge the workstream waits on,
+	// for example "waiting on owner: repo-a#123 merge". It is "" while
+	// nothing is waited on. A wait is status only: it never creates an
+	// inbox entry or a notification (spec#15).
+	Wait string `json:"wait,omitempty"`
+}
+
+// WorkgroupView presents recorded membership and the workstream graph. It
+// carries no workflow authority; the service's existing gates govern members.
+type WorkgroupView struct {
+	ID      config.WorkgroupID    `json:"id"`
+	Members []config.WorkstreamID `json:"members"`
+	Edges   []trace.Edge          `json:"edges"`
+	// Conversation names the original design address when that conversation
+	// was adopted by this workgroup. Member feed endpoints use that authority.
+	Conversation *trace.ConversationOrigin `json:"conversation,omitempty"`
 }
 
 // SessionOpenRequest opens a session: a registered project and a profile
@@ -810,6 +914,8 @@ const (
 // approval being published and its Options are empty. Project names the project whose workstream
 // the decision belongs to; escalation numbers are unique only within it.
 type InboxEntry struct {
+	// Workgroup identifies a shared decision kept in the workgroup trace.
+	Workgroup      config.WorkgroupID  `json:"workgroup,omitempty"`
 	Kind           string              `json:"kind"`
 	Project        config.ProjectID    `json:"project"`
 	Workstream     config.WorkstreamID `json:"workstream"`

@@ -80,7 +80,7 @@ func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "message_owner", Profile: chiefProfile, Prompt: "How is it going?"})
 	must(t, err)
 
-	got, err := feedEntries(repo, stream)
+	got, err := feedEntries(repo, repo, stream)
 	must(t, err)
 	chiefEnded, masonEnded := at(7), at(12)
 	want := []FeedEntry{

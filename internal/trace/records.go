@@ -103,14 +103,36 @@ func (Amendment) traceRecord() {}
 // Escalation is the chief of staff's choice to send questions to the owner.
 // Batch identifies the escalation and Questions lists every question it
 // covers, so the revisions of one batch carry the same value. Inbox numbers
-// the escalation among all of the project's, from 1.
+// the escalation among all of the project's, from 1. Workstreams, when
+// present, names the workstream each entry of Questions belongs to, letting
+// one consolidated escalation span every member of a shared workgroup a
+// genuine gap affects; when absent, every question belongs to the
+// workstream the escalation is recorded on, as it always did before a
+// workgroup could hold more than one member. Section cites the spec or plan
+// passage in tension, and Conflict states the tension itself: together with
+// Options and Recommendation, a worker's escalated question is structured as
+// spec#17 asks.
 type Escalation struct {
-	Batch          string   `json:"batch"`
-	Inbox          int      `json:"inbox"`
-	Questions      []string `json:"questions"`
-	Blocked        string   `json:"blocked"`
-	Options        []string `json:"options,omitempty"`
-	Recommendation string   `json:"recommendation"`
+	Batch          string                `json:"batch"`
+	Inbox          int                   `json:"inbox"`
+	Questions      []string              `json:"questions"`
+	Workstreams    []config.WorkstreamID `json:"workstreams,omitempty"`
+	Section        string                `json:"section"`
+	Conflict       string                `json:"conflict"`
+	Blocked        string                `json:"blocked,omitempty"`
+	Options        []string              `json:"options,omitempty"`
+	Recommendation string                `json:"recommendation"`
+}
+
+// workstreamOf returns the workstream Escalation.Questions[i] belongs to:
+// Workstreams[i] when recorded, or home, the workstream the escalation was
+// read from, for an escalation recorded before cross-workstream batches
+// existed.
+func (e Escalation) workstreamOf(i int, home config.WorkstreamID) config.WorkstreamID {
+	if i < len(e.Workstreams) && e.Workstreams[i] != "" {
+		return e.Workstreams[i]
+	}
+	return home
 }
 
 func (Question) traceRecord() {}
@@ -331,10 +353,10 @@ func documentPath(p string, stream bool) error {
 		return err
 	}
 	parts := strings.Split(p, "/")
-	if !stream && (memoryPath(parts) || p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || (len(parts) == 2 && parts[0] == "notices" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))) || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
+	if !stream && (memoryPath(parts) || p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || p == WorkgroupsPath || p == WorkgroupResolutionsPath || p == ProjectSpecsPath || p == ProjectAmendmentsPath || (len(parts) == 2 && parts[0] == "notices" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))) || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && ((p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json") || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts) || sessionCheckPath(parts)) {
+	if stream && ((p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json" || p == "edge-observation.json" || p == AssumptionsPath) || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts) || sessionCheckPath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)

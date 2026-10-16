@@ -5,6 +5,13 @@ adds scoped context, role tools and durable watches. The companion `osmia`
 connector runs in Hearsay, reads committed trace snapshots, and writes L0 only.
 Osmia has no build dependency on a Hearsay checkout.
 
+Hearsay scopes and entity mappings are per repo. The `project` identifiers in
+this interface name repo registrations, including the default repo whose ID
+also names the project and whose charter is shared. Workgroup conversations,
+project specs, questions and owner decisions remain authoritative in Osmia's
+local trace. No project design, merge dependency, amend or cancel depends on
+Hearsay being configured or available.
+
 ## Prepare configuration
 
 `osmia project memory <project-id>` returns JSON containing five Hearsay

@@ -55,8 +55,16 @@ func validRulingScope(r Ruling) bool {
 func QuestionSubject(id string) string { return "question_" + id }
 
 func (e Escalation) valid(id string) bool {
-	if !key(e.Batch) || e.Inbox < 1 || !slices.Contains(e.Questions, id) || !present(e.Blocked) || !present(e.Recommendation) {
+	if !key(e.Batch) || e.Inbox < 1 || !slices.Contains(e.Questions, id) || !present(e.Recommendation) {
 		return false
+	}
+	if len(e.Workstreams) != 0 && len(e.Workstreams) != len(e.Questions) {
+		return false
+	}
+	for _, w := range e.Workstreams {
+		if w != "" && config.CheckWorkstreamIDs(w) != nil {
+			return false
+		}
 	}
 	for _, q := range e.Questions {
 		if !key(q) {
@@ -102,17 +110,16 @@ func (r *Repository) Questions(stream config.WorkstreamID) ([]QuestionState, err
 // QuestionActions reads questions and filed amendment requests from one trace
 // snapshot, so a turn can determine its durable waiting outcome in one scan.
 func (r *Repository) QuestionActions(stream config.WorkstreamID) ([]QuestionState, []Amendment, error) {
-	r, err := r.scoped(stream)
+	target, err := r.lockQuestionRead(stream)
 	if err != nil {
 		return nil, nil, err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	_, v, err := r.loadWorkflow(stream)
+	defer target.mu.Unlock()
+	_, v, err := target.loadWorkflow(stream)
 	if err != nil {
 		return nil, nil, err
 	}
-	records, _, err := r.scan()
+	records, _, err := target.scan()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -175,6 +182,16 @@ func (r *Repository) questionTurn(ctx context.Context, agent string, scope corea
 	if err != nil {
 		return QueuedTurn{}, workflowLog{}, nil, nil, err
 	}
+	if r.parent != nil {
+		group := config.WorkgroupID(v.states[CrossRepoWorkgroupSubject].Value)
+		retired, err := r.parent.workgroupMemberRetired(group, r.stream)
+		if err != nil {
+			return QueuedTurn{}, workflowLog{}, nil, nil, err
+		}
+		if retired {
+			return QueuedTurn{}, workflowLog{}, nil, nil, &RetiredMemberError{Project: r.project, Workstream: r.stream}
+		}
+	}
 	records, _, err := r.scan()
 	return q, log, v, records, err
 }
@@ -189,11 +206,10 @@ func questionTransition(v *workflowView, h Header, id, from, to, reason string) 
 // the same commit. A chief-of-staff turn fails. An empty question and a second
 // question from the same turn are refused with *QuestionRefused.
 func (r *Repository) Ask(ctx context.Context, agent string, scope coreadapter.Scope, text string, at time.Time) (Question, error) {
-	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	r, err := r.lockQuestionRead(config.WorkstreamID(scope.Workstream))
 	if err != nil {
 		return Question{}, err
 	}
-	r.mu.Lock()
 	defer r.mu.Unlock()
 	if scope.Role == ChiefOfStaff {
 		return Question{}, fmt.Errorf("the chief of staff answers questions and cannot ask one")
@@ -276,26 +292,77 @@ func (r *Repository) chiefTurn(ctx context.Context, agent string, scope coreadap
 	return r.questionTurn(ctx, agent, scope, at)
 }
 
+// chiefTurnOn requires that scope is the active chief-of-staff turn of its
+// own workstream, then returns a repository instance scoped and locked for
+// member, ready for the caller to read or write its questions. The caller
+// must unlock the returned repository's mu once done, whether or not this
+// returns an error. r must be the project's own repository.
+func (r *Repository) chiefTurnOn(ctx context.Context, agent string, scope coreadapter.Scope, member config.WorkstreamID, at time.Time) (*Repository, QueuedTurn, error) {
+	host := config.WorkstreamID(scope.Workstream)
+	hr, err := r.lockQuestionRead(host)
+	if err != nil {
+		return nil, QueuedTurn{}, err
+	}
+	turn, _, _, _, err := hr.chiefTurn(ctx, agent, scope, at)
+	if member == host {
+		if err != nil {
+			hr.mu.Unlock()
+			return nil, QueuedTurn{}, err
+		}
+		return hr, turn, nil
+	}
+	hr.mu.Unlock()
+	if err != nil {
+		return nil, QueuedTurn{}, err
+	}
+	tr, err := r.lockQuestionRead(member)
+	if err != nil {
+		return nil, QueuedTurn{}, err
+	}
+	return tr, turn, nil
+}
+
+// chiefQuestionScope resolves id to the member workstream a chief-of-staff
+// tool names, with id's own local form, validates that scope is its active
+// turn, and returns a repository instance scoped and locked for that
+// member, ready for the caller to read or write its questions. The caller
+// must unlock target.mu once done, whether or not it returns an error.
+// r must be the project's own repository.
+func (r *Repository) chiefQuestionScope(ctx context.Context, agent string, scope coreadapter.Scope, id string, at time.Time) (target *Repository, localID string, turn QueuedTurn, err error) {
+	member, localID, err := r.ChiefQuestionTarget(config.WorkstreamID(scope.Workstream), id)
+	if err != nil {
+		return nil, "", QueuedTurn{}, err
+	}
+	target, turn, err = r.chiefTurnOn(ctx, agent, scope, member, at)
+	return target, localID, turn, err
+}
+
 // AnswerQuestion records the chief of staff's answer to an open question as
 // the question's ruling, with the citations it rests on, and moves the
-// question to answered in the same commit. The caller has checked that every
-// citation resolves. A turn of another role fails, and so does, with
-// ErrConflict, an open question that already has a ruling record. A question
-// that is not open, an empty answer and an answer without a citation are
-// refused with *QuestionRefused.
+// question to answered in the same commit. id names a question of the
+// turn's own workstream when unqualified, or "<workstream>:<id>" one of any
+// other member of the shared workgroup; the ruling is recorded in that
+// question's own workstream. The caller has checked that every citation
+// resolves. A turn of another role fails, and so does, with ErrConflict, an
+// open question that already has a ruling record. A question that is not
+// open, an empty answer and an answer without a citation are refused with
+// *QuestionRefused.
 func (r *Repository) AnswerQuestion(ctx context.Context, agent string, scope coreadapter.Scope, id, text string, citations []string, at time.Time) (Ruling, error) {
-	r, err := r.scoped(config.WorkstreamID(scope.Workstream))
+	target, localID, turn, err := r.chiefQuestionScope(ctx, agent, scope, id, at)
 	if err != nil {
 		return Ruling{}, err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	turn, log, v, records, err := r.chiefTurn(ctx, agent, scope, at)
+	defer target.mu.Unlock()
+	stream := target.stream
+	log, v, err := target.loadWorkflow(stream)
 	if err != nil {
 		return Ruling{}, err
 	}
-	stream := config.WorkstreamID(scope.Workstream)
-	q, err := openQuestion(questions(records, v, stream), id)
+	records, _, err := target.scan()
+	if err != nil {
+		return Ruling{}, err
+	}
+	q, err := openQuestion(questions(records, v, stream), localID)
 	if err != nil {
 		return Ruling{}, err
 	}
@@ -305,59 +372,82 @@ func (r *Repository) AnswerQuestion(ctx context.Context, agent string, scope cor
 	if len(citations) == 0 {
 		return Ruling{}, refused("an answer needs at least one citation; escalate a question the record does not settle")
 	}
-	h := Header{Schema: "osmia.trace.ruling", Version: Version, ID: id, Revision: 1, Project: r.project, Workstream: stream, Unit: q.Asked.Unit,
+	h := Header{Schema: "osmia.trace.ruling", Version: Version, ID: localID, Revision: 1, Project: target.project, Workstream: stream, Unit: q.Asked.Unit,
 		At: at, Actor: Actor{Kind: "agent", ID: agent}, Cause: turn.Request.ID, Depth: turn.Request.Depth + 1}
-	ruling := Ruling{Header: h, QuestionID: id, QuestionRevision: q.Latest.Revision, Decision: DecisionAnswer, ReturnedAnswer: text, Citations: slices.Clone(citations)}
+	ruling := Ruling{Header: h, QuestionID: localID, QuestionRevision: q.Latest.Revision, Decision: DecisionAnswer, ReturnedAnswer: text, Citations: slices.Clone(citations)}
 	if err := validate(ruling); err != nil {
 		return Ruling{}, err
 	}
 	for _, rec := range records {
 		if recordKey(rec) == recordKey(ruling) {
-			return Ruling{}, fmt.Errorf("%w: ruling %s already exists", ErrConflict, id)
+			return Ruling{}, fmt.Errorf("%w: ruling %s already exists", ErrConflict, localID)
 		}
 	}
-	tx := questionTransition(v, h, id, QuestionOpen, QuestionAnswered, fmt.Sprintf("The chief of staff answered question %s citing %s", id, strings.Join(citations, ", ")))
-	files, _, err := r.stage(stream, log, v, []Record{ruling}, tx)
+	tx := questionTransition(v, h, localID, QuestionOpen, QuestionAnswered, fmt.Sprintf("The chief of staff answered question %s citing %s", localID, strings.Join(citations, ", ")))
+	files, _, err := target.stage(stream, log, v, []Record{ruling}, tx)
 	if err != nil {
 		return Ruling{}, err
 	}
-	if err := r.publish(ctx, files); err != nil {
+	if err := target.publish(ctx, files); err != nil {
 		return Ruling{}, err
 	}
-	_ = r.wake.Notify(context.Background())
+	_ = target.wake.Notify(context.Background())
 	return ruling, nil
 }
 
 // EscalationRequest is what the chief of staff sends the owner for one or
-// several open questions.
+// several open questions. Section cites the spec or plan passage in
+// tension and Conflict states the tension itself: a worker's escalated
+// question is structured with both, plus Options and a Recommendation
+// (spec#17).
 type EscalationRequest struct {
 	Questions      []string
 	Rephrasing     string
+	Section        string
+	Conflict       string
 	Blocked        string
 	Options        []string
 	Recommendation string
 }
 
-// EscalateQuestions marks every listed open question escalated in one commit:
-// each gets a revision carrying the rephrasing and the escalation, whose
-// batch ID it returns. The escalation takes the project's next inbox number. A turn of another role fails. Unless every question is
-// open, none is escalated and the request is refused with *QuestionRefused.
+// EscalateQuestions marks every listed open question escalated in one
+// consolidated batch: each gets a revision carrying the rephrasing and the
+// escalation, whose batch ID it returns, and the batch takes the project's
+// next inbox number, once, however many workstreams it spans. Every id
+// names a question of the turn's own workstream when unqualified, or
+// "<workstream>:<id>" one of any other member of the shared workgroup;
+// ChiefQuestionTarget already refuses a workstream outside it, so a batch
+// can span only members of one workgroup. Recording spans one commit per
+// distinct workstream the batch touches: every question is checked eligible,
+// and the inbox number reserved, before any of them is written, so a
+// refused batch wastes no number and writes nothing; a crash after some of
+// those commits is not retried by this call, but its own questions keep
+// their escalation, and run() with the same idempotent action, as every
+// caller of this tool already does, must not call it a second time for
+// questions it already escalated. A turn of another role fails. Unless
+// every question is open, none is escalated and the request is refused
+// with *QuestionRefused.
 func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope coreadapter.Scope, req EscalationRequest, at time.Time) (string, error) {
 	project := r
-	stream := config.WorkstreamID(scope.Workstream)
-	r, err := r.scoped(stream)
-	if err != nil {
-		return "", err
+	if len(req.Questions) == 0 {
+		return "", refused("questions is required: list at least one open question")
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	turn, log, v, records, err := r.chiefTurn(ctx, agent, scope, at)
-	if err != nil {
-		return "", err
+	host := config.WorkstreamID(scope.Workstream)
+	members := make([]config.WorkstreamID, len(req.Questions))
+	locals := make([]string, len(req.Questions))
+	for i, raw := range req.Questions {
+		member, local, err := project.ChiefQuestionTarget(host, raw)
+		if err != nil {
+			return "", err
+		}
+		for j := 0; j < i; j++ {
+			if members[j] == member && locals[j] == local {
+				return "", refused("question %s is listed twice", raw)
+			}
+		}
+		members[i], locals[i] = member, local
 	}
 	switch {
-	case len(req.Questions) == 0:
-		return "", refused("questions is required: list at least one open question")
 	case !present(req.Rephrasing):
 		return "", refused("rephrasing is required: the question as the owner should read it")
 	case !present(req.Blocked):
@@ -370,49 +460,110 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 			return "", refused("options must not contain an empty entry")
 		}
 	}
-	existing := questions(records, v, stream)
-	// Every question is checked eligible before the inbox number is reserved,
-	// so a refused batch never wastes one.
-	opened := make([]QuestionState, len(req.Questions))
-	for i, id := range req.Questions {
-		if slices.Contains(req.Questions[:i], id) {
-			return "", refused("question %s is listed twice", id)
+	var distinct []config.WorkstreamID
+	for _, m := range members {
+		if !slices.Contains(distinct, m) {
+			distinct = append(distinct, m)
 		}
-		q, err := openQuestion(existing, id)
-		if err != nil {
+	}
+	// Every question of every workstream the batch touches is checked
+	// eligible before the inbox number is reserved, so a refused batch
+	// never wastes one.
+	for _, member := range distinct {
+		if err := func() error {
+			mr, _, err := project.chiefTurnOn(ctx, agent, scope, member, at)
+			if err != nil {
+				return err
+			}
+			defer mr.mu.Unlock()
+			_, v, err := mr.loadWorkflow(member)
+			if err != nil {
+				return err
+			}
+			records, _, err := mr.scan()
+			if err != nil {
+				return err
+			}
+			existing := questions(records, v, member)
+			for i, m := range members {
+				if m != member {
+					continue
+				}
+				if _, err := openQuestion(existing, locals[i]); err != nil {
+					return err
+				}
+			}
+			return nil
+		}(); err != nil {
 			return "", err
 		}
-		opened[i] = q
 	}
-	// The project's inbox number is reserved before the workstream's own
-	// commit, in the project's own trace repository: a crash between the two
-	// leaves the number unused, never reused, and the escalation is retried
-	// with a freshly reserved one.
+	// The project's inbox number is reserved before any workstream's own
+	// commit, in the project's own trace repository: a crash between the
+	// two leaves the number unused, never reused, and the escalation is
+	// retried with a freshly reserved one.
 	inbox, err := project.reserveInboxNumber(ctx)
 	if err != nil {
 		return "", err
 	}
-	escalation := &Escalation{Batch: "escalation_" + req.Questions[0], Inbox: inbox, Questions: slices.Clone(req.Questions), Blocked: req.Blocked, Options: slices.Clone(req.Options), Recommendation: req.Recommendation}
-	var revisions []Record
-	var txs []Transaction
-	for i, id := range req.Questions {
-		next := opened[i].Latest
-		next.Revision++
-		next.At, next.Actor, next.Cause, next.Depth = at, Actor{Kind: "agent", ID: agent}, turn.Request.ID, turn.Request.Depth+1
-		next.SentToOwner, next.Escalation = req.Rephrasing, escalation
-		if err := validate(next); err != nil {
+	batch := "escalation_" + locals[0]
+	escalation := &Escalation{Batch: batch, Inbox: inbox, Questions: slices.Clone(locals), Section: req.Section, Conflict: req.Conflict, Blocked: req.Blocked, Options: slices.Clone(req.Options), Recommendation: req.Recommendation}
+	if len(distinct) > 1 {
+		// Workstreams is recorded only for a batch that genuinely spans more
+		// than one of the workgroup's members, so a single-workstream
+		// escalation's record is byte-identical to one from before
+		// cross-workstream batches existed.
+		escalation.Workstreams = slices.Clone(members)
+	}
+	for _, member := range distinct {
+		if err := func() error {
+			mr, turn, err := project.chiefTurnOn(ctx, agent, scope, member, at)
+			if err != nil {
+				return err
+			}
+			defer mr.mu.Unlock()
+			log, v, err := mr.loadWorkflow(member)
+			if err != nil {
+				return err
+			}
+			records, _, err := mr.scan()
+			if err != nil {
+				return err
+			}
+			existing := questions(records, v, member)
+			var revisions []Record
+			var txs []Transaction
+			for i, m := range members {
+				if m != member {
+					continue
+				}
+				id := locals[i]
+				q, err := openQuestion(existing, id)
+				if err != nil {
+					return err
+				}
+				next := q.Latest
+				next.Revision++
+				next.At, next.Actor, next.Cause, next.Depth = at, Actor{Kind: "agent", ID: agent}, turn.Request.ID, turn.Request.Depth+1
+				next.SentToOwner, next.Escalation = req.Rephrasing, escalation
+				if err := validate(next); err != nil {
+					return err
+				}
+				revisions = append(revisions, next)
+				txs = append(txs, questionTransition(v, next.Header, id, QuestionOpen, QuestionEscalated, fmt.Sprintf("The chief of staff escalated question %s to the owner in %s", id, batch)))
+			}
+			files, _, err := mr.stage(member, log, v, revisions, txs...)
+			if err != nil {
+				return err
+			}
+			if err := mr.publish(ctx, files); err != nil {
+				return err
+			}
+			_ = mr.wake.Notify(context.Background())
+			return nil
+		}(); err != nil {
 			return "", err
 		}
-		revisions = append(revisions, next)
-		txs = append(txs, questionTransition(v, next.Header, id, QuestionOpen, QuestionEscalated, fmt.Sprintf("The chief of staff escalated question %s to the owner in %s", id, escalation.Batch)))
 	}
-	files, _, err := r.stage(stream, log, v, revisions, txs...)
-	if err != nil {
-		return "", err
-	}
-	if err := r.publish(ctx, files); err != nil {
-		return "", err
-	}
-	_ = r.wake.Notify(context.Background())
-	return escalation.Batch, nil
+	return batch, nil
 }

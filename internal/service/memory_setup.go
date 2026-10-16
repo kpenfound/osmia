@@ -158,6 +158,9 @@ func buildMemorySetup(cfg *config.Config, repo *trace.Repository, local kb.Map) 
 	}
 	for _, stream := range append([]config.WorkstreamID{""}, streams...) {
 		docs, err := trace.Read[trace.Document](repo, stream)
+		if stream == "" {
+			docs, err = repo.ProjectDocuments()
+		}
 		if err != nil {
 			return out, err
 		}

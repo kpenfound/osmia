@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// newTestFlags builds a fresh FlagSet with the same two flags TestMain
-// applies defaults to, so each case starts from a clean, unparsed set.
+// newTestFlags builds a fresh FlagSet with shuffle and timeout flags,
+// so each case starts from a clean, unparsed set.
 func newTestFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("testmain-defaults", flag.ContinueOnError)
 	fs.String("test.shuffle", "off", "")
@@ -17,43 +17,55 @@ func newTestFlags() *flag.FlagSet {
 
 func TestApplyServiceTestDefaults(t *testing.T) {
 	t.Parallel()
-	const limit = 10 * time.Minute
 
 	t.Run("unset shuffle becomes on", func(t *testing.T) {
 		fs := newTestFlags()
-		applyServiceTestDefaults(fs, limit)
+		applyServiceTestDefaults(fs)
 		if got := fs.Lookup("test.shuffle").Value.String(); got != "on" {
 			t.Fatalf("test.shuffle = %q, want %q", got, "on")
 		}
 	})
 
-	t.Run("explicit seed is kept", func(t *testing.T) {
-		fs := newTestFlags()
-		if err := fs.Parse([]string{"-test.shuffle=1700000000000000000"}); err != nil {
-			t.Fatalf("parsing flags: %v", err)
-		}
-		applyServiceTestDefaults(fs, limit)
-		if got := fs.Lookup("test.shuffle").Value.String(); got != "1700000000000000000" {
-			t.Fatalf("test.shuffle = %q, want the explicit seed kept", got)
-		}
-	})
+	for _, shuffle := range []string{"on", "off", "1700000000000000000"} {
+		t.Run("explicit shuffle "+shuffle+" is kept", func(t *testing.T) {
+			fs := newTestFlags()
+			if err := fs.Parse([]string{"-test.shuffle=" + shuffle}); err != nil {
+				t.Fatalf("parsing flags: %v", err)
+			}
+			applyServiceTestDefaults(fs)
+			if got := fs.Lookup("test.shuffle").Value.String(); got != shuffle {
+				t.Fatalf("test.shuffle = %q, want %q", got, shuffle)
+			}
+		})
+	}
 
-	t.Run("30m is lowered to the cap", func(t *testing.T) {
+	t.Run("30m is kept", func(t *testing.T) {
 		fs := newTestFlags()
 		if err := fs.Parse([]string{"-test.timeout=30m"}); err != nil {
 			t.Fatalf("parsing flags: %v", err)
 		}
-		applyServiceTestDefaults(fs, limit)
-		if got := fs.Lookup("test.timeout").Value.String(); got != limit.String() {
-			t.Fatalf("test.timeout = %q, want %q", got, limit.String())
+		applyServiceTestDefaults(fs)
+		if got := fs.Lookup("test.timeout").Value.String(); got != (30 * time.Minute).String() {
+			t.Fatalf("test.timeout = %q, want %q", got, (30 * time.Minute).String())
 		}
 	})
 
-	t.Run("0 is lowered to the cap", func(t *testing.T) {
+	t.Run("default zero timeout is kept", func(t *testing.T) {
 		fs := newTestFlags()
-		applyServiceTestDefaults(fs, limit)
-		if got := fs.Lookup("test.timeout").Value.String(); got != limit.String() {
-			t.Fatalf("test.timeout = %q, want %q", got, limit.String())
+		applyServiceTestDefaults(fs)
+		if got := fs.Lookup("test.timeout").Value.String(); got != "0s" {
+			t.Fatalf("test.timeout = %q, want %q", got, "0s")
+		}
+	})
+
+	t.Run("explicit zero timeout is kept", func(t *testing.T) {
+		fs := newTestFlags()
+		if err := fs.Parse([]string{"-test.timeout=0"}); err != nil {
+			t.Fatalf("parsing flags: %v", err)
+		}
+		applyServiceTestDefaults(fs)
+		if got := fs.Lookup("test.timeout").Value.String(); got != "0s" {
+			t.Fatalf("test.timeout = %q, want %q", got, "0s")
 		}
 	})
 
@@ -62,7 +74,7 @@ func TestApplyServiceTestDefaults(t *testing.T) {
 		if err := fs.Parse([]string{"-test.timeout=5m"}); err != nil {
 			t.Fatalf("parsing flags: %v", err)
 		}
-		applyServiceTestDefaults(fs, limit)
+		applyServiceTestDefaults(fs)
 		if got := fs.Lookup("test.timeout").Value.String(); got != (5 * time.Minute).String() {
 			t.Fatalf("test.timeout = %q, want %q", got, (5 * time.Minute).String())
 		}

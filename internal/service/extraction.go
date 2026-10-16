@@ -274,6 +274,7 @@ func (s *Service) extractProject(ctx context.Context, req ProjectExtractRequest)
 // the architect's replies to its debate, unit check runs to the checks
 // controller, everything else to the bound thread reconciler.
 type runnerAdapter struct {
+	deltas      deltaRunner
 	turns       coreadapter.Reconciler
 	extract     *extractor
 	refresh     *refresher
@@ -286,6 +287,9 @@ type runnerAdapter struct {
 }
 
 func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
+	if op.Action == deltaTurnAction {
+		return a.deltas.Inspect(ctx, op)
+	}
 	if op.Action == RefreshAction {
 		return a.refresh.Inspect(ctx, op)
 	}
@@ -319,6 +323,9 @@ func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (c
 	return a.turns.Inspect(ctx, op)
 }
 func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
+	if op.Action == deltaTurnAction {
+		return a.deltas.Apply(ctx, op)
+	}
 	if op.Action == RefreshAction {
 		return a.refresh.Apply(ctx, op)
 	}

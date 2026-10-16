@@ -5,7 +5,10 @@ approved. Follow the steps in order.
 
 ## Supported features
 
-- Multiple projects, each with its own clone, configuration and trace.
+- Projects with one charter and one or more repos, each with its own clone,
+  settings, knowledge base and entity map.
+- Feature workgroups with one shared chief of staff, optional project design
+  chat, cross-repo contracts and merge dependencies.
 - Git worktrees, or Jujutsu workspaces on your clone's Git store: the service
   builds each workstream's feature branch in them and pushes it to your repository or fork
   itself.
@@ -158,7 +161,19 @@ charter revision the next time it reads the file, and `osmia status` then shows
 staff are decided with `osmia charter`. See [charter](charter.md) for the
 format.
 
-## 5. Hand in a workstream and decide
+To add another repo and list the project's repos:
+
+```sh
+osmia project add-repo p_… --upstream owner/other --clone ~/src/other
+osmia project repos p_…
+```
+
+Its repo configuration and KB are separate; the charter is shared. The project
+pane offers the same creation and repo-add actions. Existing one-repo projects
+are wrapped automatically on startup, retaining IDs, charter and history;
+existing exploratory sessions stay outside workgroups.
+
+## 5. Start a workgroup and decide
 
 Write the feature down in a Markdown file, or point at a GitHub issue URL, and
 hand it in with the project ID:
@@ -167,9 +182,36 @@ hand it in with the project ID:
 osmia handin p_… design.md
 ```
 
-The command prints the workstream ID (`w_…`). Add `--skip-debate` for small
+The command creates an initial workstream with the document as its brief
+and prints its ID (`w_…`). With one active repo, it stays a one-workstream
+workgroup. With several active repos, the architect selects the affected repos;
+the service validates that selection and creates one member per selected repo.
+A single selected repo gets the ordinary packet; several get one ratification
+covering the project spec, graph and slices. The original conversation continues
+as the group's shared chief-of-staff thread. No design session or extra graph
+approval is required. Add `--skip-debate` for small
 work: the committee does not debate it and the draft waits for your ratification.
 Follow progress with `osmia status <workstream-id>`, or on the page.
+
+If you want to discuss the design first, open a project design session:
+
+```sh
+osmia design open p_…
+osmia design send w_… "Design resumable uploads across both repos."
+osmia design read w_…
+osmia design start w_…
+```
+
+The design agent reads every repo but cannot change code, use version control,
+access delivery credentials or start work. It asks only material readiness
+questions with recommendations and lists other inferences as collapsed,
+overridable assumptions. Once it records a brief, one owner start hands it to
+the architect; the brief wins over its reference transcript. The architect
+chooses affected repos, and Go allocates members without another owner step.
+For several repos the packet includes the project spec, contracts, graph and
+per-repo slices and plans, all covered by one ratification. The actual design
+conversation continues as the shared chief's thread for status, escalations,
+amend and cancel. See [design sessions](cli.md#design-sessions).
 
 The architect drafts a spec and a plan of units, the committee debates them in
 the shed, and the chief of staff presents them to you. From then on Osmia stops
@@ -204,7 +246,7 @@ minutes apart.
 
 Ratifying seals the spec and plan: the service fetches upstream, creates the
 feature branch in a worktree or Jujutsu workspace of your clone, and masons
-build the units, each reviewed and landed in order. You can talk to the workstream's chief of staff
+build the units, each reviewed and landed in order. You can talk to the workgroup's shared chief of staff
 meanwhile with `osmia send <workstream-id> "…"` or on the page, and hold work
 with `osmia pause`. The conversation also shows what the chief of staff did on
 your behalf, such as resolving a contested unit or moving a stuck one. You can
@@ -218,7 +260,26 @@ it on the page, or with `osmia approve <workstream-id> [description-file]`. The
 service then pushes the branch to your repository or fork and opens the pull request against
 the upstream itself, with your description; no agent pushes. `osmia delivery
 <workstream-id>` shows the pull request it was delivered as, and the workstream
-ends `delivered`.
+records workflow state `delivered`. The project pane shows **PR open** until
+a detected or owner-recorded merge, then **delivered (merged)**. The owner
+merges the PR; Osmia never merges or pushes a base branch.
+
+Each PR needs its own owner approval of its description and commit message and
+is signed as the owner. This covers drafts, updates and marking ready; there
+is no workgroup-wide publication approval. A merge-order dependent publishes
+a draft linking the upstream PR, then updates to the merged upstream commit,
+repairs within its slice, re-runs checks and final review and asks for fresh
+delivery approval before becoming ready. Merge is the only release signal.
+Expected waits appear in status without an inbox entry or notification.
+
+Resolution retires each member's own documents and workspaces from active
+context. The shared project spec stays active for the chief and unresolved
+members until all members resolve (merged or cancelled). Trace history at both
+levels is retained until owner archive. The same lifetime applies to one-member
+workgroups. A ready or closed-without-merge PR remains unresolved; archive and
+cleanup supply no merge evidence. You can request amend or cancel in the
+shared chat; approve one impact summary, and at cancellation choose whether
+open PRs are closed or left as drafts. Merged work is never reverted.
 
 ## Where to go next
 

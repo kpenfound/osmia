@@ -385,50 +385,45 @@ func load(repository *trace.Repository) (loaded, error) {
 	if err != nil {
 		return loaded{}, err
 	}
-	streams := make([]config.WorkstreamID, 0, len(all))
+	out := loaded{project: project, threads: map[config.WorkstreamID][]trace.Thread{}, dispatched: map[turnKey]bool{}, served: map[rotation]time.Time{}}
 	for _, stream := range all {
 		kind, err := repository.Kind(stream)
 		if err != nil {
 			return loaded{}, fmt.Errorf("workstream %s: %w", stream, err)
 		}
-		if kind != trace.SessionKind {
-			streams = append(streams, stream)
+		if kind == trace.SessionKind {
+			continue
 		}
-	}
-	threads := map[config.WorkstreamID][]trace.Thread{}
-	roles := map[localKey]string{}
-	for _, stream := range streams {
-		if threads[stream], err = repository.Threads(stream); err != nil {
+		threads, err := repository.Threads(stream)
+		if err != nil {
 			return loaded{}, fmt.Errorf("workstream %s: %w", stream, err)
 		}
-		for _, t := range threads[stream] {
-			roles[localKey{project, stream, t.Identity.ID}] = t.Identity.Role
-		}
-	}
-	dispatched := map[turnKey]bool{}
-	served := map[rotation]time.Time{}
-	for _, stream := range streams {
 		records, err := repository.Operations(stream)
 		if err != nil {
 			return loaded{}, fmt.Errorf("workstream %s: %w", stream, err)
 		}
+		out.streams = append(out.streams, stream)
+		out.threads[stream] = threads
+		roles := map[string]string{}
+		for _, t := range threads {
+			roles[t.Identity.ID] = t.Identity.Role
+		}
 		for _, record := range records {
-			// The dispatcher refuses input it cannot decode, and the controller
-			// records that refusal as a retry, so such an operation runs no turn.
+			// Undecodable input is refused by the dispatcher and runs no turn.
 			in, err := thread.DecodeTurn(record.Operation)
 			if err != nil {
 				continue
 			}
-			dispatched[turnKey{in.Workstream, in.Agent, in.Turn}] = true
-			if role, ok := roles[localKey{project, in.Workstream, in.Agent}]; ok {
+			out.dispatched[turnKey{in.Workstream, in.Agent, in.Turn}] = true
+			if role, ok := roles[in.Agent]; ok {
 				key := rotationKey(project, in.Workstream, role)
-				if at := record.Transition.At; at.After(served[key]) {
-					served[key] = at
+				if at := record.Transition.At; at.After(out.served[key]) {
+					out.served[key] = at
 				}
 			}
 		}
 	}
-	return loaded{project, streams, threads, dispatched, served}, nil
+	return out, nil
 }
 
 // count adds the trace's turns in flight to used.

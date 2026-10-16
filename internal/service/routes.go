@@ -44,6 +44,7 @@ var Routes = []Route{
 
 	{Method: http.MethodPost, Path: Prefix + "/projects", Summary: "Register a project", Request: ProjectAddRequest{}, Response: ProjectResponse{}},
 	{Method: http.MethodDelete, Path: Prefix + "/projects", Summary: "Remove a project from active work", Request: ProjectRemoveRequest{}, Response: ProjectResponse{}},
+	{Method: http.MethodPost, Path: Prefix + "/projects/repos", Summary: "Add a repo to an existing project", Request: RepoAddRequest{}, Response: ProjectResponse{}},
 	{Method: http.MethodPost, Path: Prefix + "/projects/extract", Summary: "Start a knowledge-base extraction", Request: ProjectExtractRequest{}, Response: ExtractionResponse{}},
 	{Method: http.MethodPost, Path: Prefix + "/projects/rebase", Summary: "Ask for a drift rebase of a project's workstreams", Request: ProjectRebaseRequest{}, Response: ProjectRebaseResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/projects/memory/{project}", Summary: "Export a project's Hearsay setup", Response: MemorySetup{}},
@@ -60,6 +61,13 @@ var Routes = []Route{
 	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/check", Summary: "Check the session head commit: smart under JEV, full otherwise; refused while a check is already running", Response: SessionCheckRun{}},
 	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/push", Summary: "Push the session branch to the project's remote; refused when the remote branch has commits not on it", Response: SessionPushResponse{}},
 	{Method: http.MethodPost, Path: Prefix + "/sessions/{workstream}/end", Summary: "End a session, releasing its worktree and stored model-session state", Response: SessionResponse{}},
+
+	{Method: http.MethodPost, Path: Prefix + "/design", Summary: "Open a design session in a project", Request: DesignOpenRequest{}, Response: DesignResponse{}},
+	{Method: http.MethodGet, Path: Prefix + "/design", Summary: "List design sessions, optionally filtered by project", Response: DesignsResponse{}},
+	{Method: http.MethodGet, Path: Prefix + "/design/{workstream}", Summary: "Show one design session", Response: DesignResponse{}},
+	{Method: http.MethodGet, Path: Prefix + "/design/{workstream}/conversation", Summary: "List a design session's conversation with its agent", Response: ConversationResponse{}},
+	{Method: http.MethodPost, Path: Prefix + "/design/{workstream}/message", Summary: "Send a message to a design session's agent; refused as busy while a turn is running", Request: DesignMessageRequest{}, Response: ConversationEntry{}},
+	{Method: http.MethodPost, Path: Prefix + "/design/{workstream}/start", Summary: "Start a workgroup from a design session's drafted brief; the same thread continues as the workgroup's chief of staff", Response: DesignStartResponse{}},
 
 	{Method: http.MethodPost, Path: Prefix + "/handin", Summary: "Hand in a workstream", Request: HandInRequest{}, Response: HandInResponse{}},
 	{Method: http.MethodGet, Path: Prefix + "/status", Summary: "List workstreams with capacity, usage and diagnostics", Response: StatusResponse{}},

@@ -162,12 +162,12 @@ func TestSendAndConversation(t *testing.T) {
 
 func TestConversationTextWithoutMessages(t *testing.T) {
 	var w strings.Builder
-	showConversation(&w, service.ConversationResponse{Workstream: stream, Entries: []service.ConversationEntry{}})
+	showConversation(&w, service.ConversationResponse{Workstream: stream, Entries: []service.ConversationEntry{}}, "send")
 	if want := "Conversation: " + stream + "\n  no messages yet; send one with osmia send " + stream + " \"...\"\n"; w.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", w.String(), want)
 	}
 	w.Reset()
-	showConversation(&w, service.ConversationResponse{Workstream: stream, Entries: []service.ConversationEntry{{Turn: "message_1", Kind: "message", Text: "Why?\n", At: written, State: service.TurnFailed}}})
+	showConversation(&w, service.ConversationResponse{Workstream: stream, Entries: []service.ConversationEntry{{Turn: "message_1", Kind: "message", Text: "Why?\n", At: written, State: service.TurnFailed}}}, "send")
 	if want := "Conversation: " + stream + "\n2026-09-16T10:00:00Z owner [message_1 failed]\n  Why?\n"; w.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", w.String(), want)
 	}

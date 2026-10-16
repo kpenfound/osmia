@@ -31,7 +31,9 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 			continue
 		}
 		grant.Tools = slices.Clone(grant.Tools)
-		grant.Tools = append(grant.Tools, projectContextTool)
+		if !slices.Contains(grant.Tools, projectContextTool) {
+			grant.Tools = append(grant.Tools, projectContextTool)
+		}
 		if external {
 			for _, tool := range client.Tools(role, cfg.Project.HearsayScope, nil) {
 				grant.Tools = append(grant.Tools, tool.Name)
@@ -52,7 +54,9 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 		if scope.Role == "classifier" || scope.Role == sessionRole {
 			return tools, nil
 		}
-		tools = append(tools, projectContext(repo, scope))
+		if !slices.ContainsFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == projectContextTool }) {
+			tools = append(tools, projectContext(repo, scope))
+		}
 		if external {
 			tools = append(tools, client.Tools(scope.Role, cfg.Project.HearsayScope, func() error { return repo.ActiveTurn(scope) })...)
 		}

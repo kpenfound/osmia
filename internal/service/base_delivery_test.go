@@ -27,6 +27,10 @@ func (r repositoryPulls) Create(ctx context.Context, repository string, n pulls.
 	return r[repository].Create(ctx, repository, n)
 }
 
+func (r repositoryPulls) Ready(ctx context.Context, repository string, number int) (pulls.PullRequest, error) {
+	return r[repository].Ready(ctx, repository, number)
+}
+
 func maintenanceFixture(t *testing.T) *publicationFixture {
 	t.Helper()
 	p := newPublicationFixture(t, "commit-per-unit")

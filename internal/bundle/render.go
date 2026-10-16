@@ -25,6 +25,39 @@ func (b Bundle) Render() string {
 	if b.Scope.Workstream != "" {
 		line("workstream: %s", b.Scope.Workstream)
 	}
+	if spec := b.ProjectSpec; spec != nil {
+		if spec.Draft {
+			line("\n## Draft project spec")
+		} else {
+			line("\n## Ratified project spec")
+		}
+		line("source: %s (record %s, workgroup %s)", spec.Source, spec.Record, spec.Workgroup)
+		line("%s", spec.Behavior)
+		for _, contract := range spec.Contracts {
+			line("\n### Contract: %s", contract.Name)
+			line("%s", contract.Text)
+		}
+		if len(spec.Graph) > 0 {
+			line("\n### Workstream graph")
+			for _, edge := range spec.Graph {
+				line("- %s -> %s (%s)", edge.From, edge.To, edge.Type)
+			}
+		}
+		if slice := spec.Slice; slice != nil {
+			line("\n### Slice: %s", slice.Workstream)
+			line("spec: %s", slice.Spec)
+			line("plan: %s", slice.Plan)
+			line("read-only contract criteria: %v", slice.ContractCriteria)
+		}
+	}
+	if len(b.Dependencies) > 0 {
+		line("\n## Dependency references")
+		line("source: edge-observation.json (record edge-observation)")
+		line("Build against the upstream branch or commit while waiting. After a merge, update the dependency reference to its merged commit within the ratified slice, then run checks and final review. Publication and readiness require fresh owner delivery approval.")
+		for _, dependency := range b.Dependencies {
+			line("- %s (%s): %s; build reference: %s; merged: %t; merged commit: %s", dependency.Upstream, dependency.Type, dependency.Reference, dependency.BuildBranch, dependency.Merged, dependency.Commit)
+		}
+	}
 
 	line("")
 	line("## Charter")

@@ -336,8 +336,21 @@ func loadTraceWalk(repository *trace.Repository, stream config.WorkstreamID) (*t
 			w.roles[v.ID] = v.Role
 		}
 	}
-	w.feature = w.states[trace.FeatureSubject]
-	w.loadSeal()
+	feature, err := repository.Workflow(stream, trace.FeatureSubject)
+	if err != nil {
+		return nil, err
+	}
+	w.feature = feature.Value
+	w.states[trace.FeatureSubject] = feature.Value
+	approved, err := repository.GroupApproved(stream)
+	if err != nil {
+		return nil, err
+	}
+	if approved {
+		w.loadSeal()
+	} else {
+		w.gaps = append(w.gaps, TraceGap{Link: seal.Path, State: LinkUnfinished, Reason: "workgroup seal preparations are pending"})
+	}
 	return w, nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,7 +18,7 @@ import (
 
 func TestGitHubFindsAndCreatesPullRequestsWithTheToken(t *testing.T) {
 	t.Parallel()
-	var created map[string]string
+	var created map[string]any
 	// server stands in for the real GitHub REST API: a remote system whose
 	// real responses and rate limits this fake does not reproduce.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +60,7 @@ func TestGitHubFindsAndCreatesPullRequestsWithTheToken(t *testing.T) {
 	if err != nil || pr.Number != 10 || pr.HeadCommit != "abc" || pr.URL != "https://github.com/acme/widgets/pull/10" {
 		t.Fatalf("created %+v: %v", pr, err)
 	}
-	if created["head"] != "owner:osmia/w" || created["base"] != "main" || created["title"] != "Title" || created["body"] != "Body" {
+	if created["head"] != "owner:osmia/w" || created["base"] != "main" || created["title"] != "Title" || created["body"] != "Body" || created["draft"] != false {
 		t.Fatalf("sent %v", created)
 	}
 	if _, err := g.Find(ctx, "acme/gadgets", "owner/widgets", "osmia/w"); err == nil || !strings.Contains(err.Error(), "GitHub answered 404") || strings.Contains(err.Error(), "secret") {
@@ -74,28 +75,29 @@ func TestGitHubSameRepositoryCreateAndRetarget(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer secret" {
 			t.Error("missing service credentials")
 		}
-		var body map[string]string
+		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
 		}
+		base, _ := body["base"].(string)
 		switch r.Method {
 		case http.MethodPost:
-			if r.URL.Path != "/repos/owner/repo/pulls" || body["head"] != "osmia/child" || body["base"] != "osmia/parent" {
+			if r.URL.Path != "/repos/owner/repo/pulls" || body["head"] != "osmia/child" || base != "osmia/parent" || body["draft"] != true {
 				t.Errorf("create %s %v", r.URL.Path, body)
 			}
 			w.WriteHeader(http.StatusCreated)
 		case http.MethodPatch:
-			if r.URL.Path != "/repos/owner/repo/pulls/7" || body["base"] != "main" || body["body"] != "Approved" || body["title"] != "Ready" {
+			if r.URL.Path != "/repos/owner/repo/pulls/7" || base != "main" || body["body"] != "Approved" || body["title"] != "Ready" {
 				t.Errorf("update %s %v", r.URL.Path, body)
 			}
 		default:
 			t.Errorf("unexpected method %s", r.Method)
 		}
-		io.WriteString(w, `{"number":7,"state":"open","base":{"ref":"`+body["base"]+`"}}`)
+		io.WriteString(w, `{"number":7,"state":"open","base":{"ref":"`+base+`"}}`)
 	}))
 	defer server.Close()
 	g := GitHub{BaseURL: server.URL, HTTP: server.Client(), Token: "secret"}
-	pr, err := g.Create(context.Background(), "owner/repo", New{HeadRepository: "owner/repo", Head: "osmia/child", Base: "osmia/parent"})
+	pr, err := g.Create(context.Background(), "owner/repo", New{HeadRepository: "owner/repo", Head: "osmia/child", Base: "osmia/parent", Draft: true})
 	if err != nil || pr.Number != 7 || pr.Base != "osmia/parent" {
 		t.Fatalf("create %+v %v", pr, err)
 	}
@@ -330,5 +332,59 @@ func TestGitHubLogNeverCarriesSecretsOrPullRequestBodies(t *testing.T) {
 		if strings.Contains(out, sentinel) {
 			t.Fatalf("log leaked %q: %s", sentinel, out)
 		}
+	}
+}
+
+// TestGitHubReadyReadsTheNodeIDThenRunsTheReadyMutation shows Ready reading
+// the draft pull request's GraphQL node ID over REST, running the
+// markPullRequestReadyForReview mutation against that ID (the only way to
+// clear draft status, since the REST pull update endpoint has no field for
+// it), and then reading the pull request again for the returned result. A
+// pull request that is not a draft is returned unchanged with no mutation
+// call at all.
+func TestGitHubReadyReadsTheNodeIDThenRunsTheReadyMutation(t *testing.T) {
+	t.Parallel()
+	var gets, mutations int
+	draft := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/pulls/11":
+			gets++
+			io.WriteString(w, fmt.Sprintf(`{"number":11,"node_id":"PR_kwAn","html_url":"https://github.com/acme/widgets/pull/11","state":"open","draft":%t,"head":{"ref":"osmia/w","sha":"abc"},"base":{"ref":"main"}}`, draft))
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			mutations++
+			var in struct {
+				Query     string            `json:"query"`
+				Variables map[string]string `json:"variables"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				t.Fatal(err)
+			}
+			if in.Variables["id"] != "PR_kwAn" || !strings.Contains(in.Query, "markPullRequestReadyForReview") {
+				t.Fatalf("mutation variables %v, query %s", in.Variables, in.Query)
+			}
+			draft = false
+			io.WriteString(w, `{"data":{"markPullRequestReadyForReview":{"clientMutationId":null}}}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	g := GitHub{BaseURL: server.URL, Token: "secret", HTTP: server.Client()}
+	pr, err := g.Ready(context.Background(), "acme/widgets", 11)
+	if err != nil || pr.Number != 11 || pr.Draft || pr.URL != "https://github.com/acme/widgets/pull/11" {
+		t.Fatalf("ready %+v: %v", pr, err)
+	}
+	if gets != 2 || mutations != 1 {
+		t.Fatalf("gets %d mutations %d, want 2 and 1", gets, mutations)
+	}
+	// A pull request already ready for review is returned as read, with no
+	// mutation call: Ready never reopens or otherwise changes it.
+	pr, err = g.Ready(context.Background(), "acme/widgets", 11)
+	if err != nil || pr.Draft {
+		t.Fatalf("ready again %+v: %v", pr, err)
+	}
+	if gets != 3 || mutations != 1 {
+		t.Fatalf("gets %d mutations %d, want 3 and 1", gets, mutations)
 	}
 }

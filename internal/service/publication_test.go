@@ -32,6 +32,7 @@ type fakePulls struct {
 	syncHead bool
 	updates  int
 	creates  int
+	readies  int
 	lose     bool
 	fork     func() string
 	// findErr, when set, fails every Find as a refusing host does.
@@ -71,13 +72,33 @@ func (c *fakePulls) Create(_ context.Context, repository string, n pulls.New) (p
 	defer c.mu.Unlock()
 	c.creates++
 	number := 100 + len(c.prs)
-	pr := pulls.PullRequest{Number: number, URL: fmt.Sprintf("https://github.com/%s/pull/%d", repository, number), State: "open", Head: n.Head, HeadRepository: n.HeadRepository, HeadCommit: c.fork(), Base: n.Base, Title: n.Title, Body: n.Body}
+	pr := pulls.PullRequest{Number: number, URL: fmt.Sprintf("https://github.com/%s/pull/%d", repository, number), State: "open", Draft: n.Draft, Head: n.Head, HeadRepository: n.HeadRepository, HeadCommit: c.fork(), Base: n.Base, Title: n.Title, Body: n.Body}
 	c.prs = append(c.prs, pr)
 	if c.lose {
 		c.lose = false
 		return pulls.PullRequest{}, errors.New("connection reset")
 	}
 	return pr, nil
+}
+
+// Ready converts a draft pull request to one ready for review, standing in
+// for GitHub's markPullRequestReadyForReview mutation.
+func (c *fakePulls) Ready(_ context.Context, repository string, number int) (pulls.PullRequest, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.readies++
+	for i := range c.prs {
+		if c.prs[i].Number != number {
+			continue
+		}
+		c.prs[i].Draft = false
+		if c.lose {
+			c.lose = false
+			return pulls.PullRequest{}, errors.New("connection reset")
+		}
+		return c.prs[i], nil
+	}
+	return pulls.PullRequest{}, errors.New("pull request not found")
 }
 
 type publicationFixture struct {

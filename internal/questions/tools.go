@@ -25,22 +25,29 @@ const (
 	RouteAmendmentTool = "route_amendment"
 	AmendTool          = "amend"
 	ProposeCharterTool = "propose_charter"
+	LogAssumptionTool  = "log_assumption"
 )
 
 // Guidance tells the chief of staff what to do with a question. It belongs
 // in the system prompt of every turn that may carry one.
 const Guidance = "When a service event says a question is open, choose exactly once for it. " +
 	"Call answer for engineering decisions within the approved intent, including equivalent evidence and necessary supporting changes within an assignment. Cite the requirements and evidence supporting your decision: " + CitationForms + ". " +
-	"Call escalate only when the answer changes owner intent, relaxes a constraint, contradicts an owner ruling, or needs an owner-reserved tradeoff. Missing context calls for investigation, not an intent decision. " +
+	"Call escalate only when the answer would contradict or extend the agreed design: it changes owner intent, relaxes a constraint, contradicts an owner ruling, or needs an owner-reserved tradeoff. Missing context calls for investigation, not an intent decision. " +
+	"Structure every escalation: section cites the spec or plan passage in tension, conflict states the tension itself, options are the choices and recommendation is what you would decide. " +
+	"When a genuine gap affects more than one workstream or unit of your workgroup, escalate every affected question together as one consolidated batch, naming each with its own workstream when it is not your own: " +
+	"the owner's one answer resumes every one of them, and work unaffected by the gap is never held up for it. " +
 	"Call route_amendment for revised assignments, dependencies or newly discovered work. Plan-only revisions preserving approved intent are factory decisions; spec changes remain owner decisions. " +
-	"Escalate several open questions that need the same decision as one batch. Never answer for the owner because time is passing; a question waits as long as it needs. " +
+	"A question that would change a contract section of a member's slice is filed as a project-level amendment instead of a plan amendment, and is never applied inside that workstream; route_amendment does this for you. " +
+	"Log a judgment call you make within stated intent, rather than escalate or stay silent about it, with log_assumption: it appears in the affected workstreams' drafted pull request descriptions. Name affected members with workstreams; omit it for a workgroup-wide judgment. " +
+	"Never answer for the owner because time is passing; a question waits as long as it needs. " +
+	"Your workgroup may hold more than one workstream; a question number alone names one of your own workstream, and \"<workstream>:<number>\" names one of another member sharing you as its chief of staff. " +
 	"When a service event says the owner ruled on an inbox entry, call relay_ruling exactly once for it, naming one of its questions: rephrase the ruling for the askers without changing what it decides, " +
 	"and choose scope local when it matters only to them, or notify when it applies across the project. " +
 	"When the owner's ruling is a standing rule for the project rather than a decision about this feature, also call propose_charter once for it with the rule as the charter should state it; " +
 	"the owner ratifies or declines the proposal, so make it the attention of your status until they do."
 
 // ChiefTools names the chief of staff's question tools.
-var ChiefTools = []string{AnswerTool, EscalateTool, RelayRulingTool, RouteAmendmentTool, ProposeCharterTool}
+var ChiefTools = []string{AnswerTool, EscalateTool, RelayRulingTool, RouteAmendmentTool, ProposeCharterTool, LogAssumptionTool}
 
 type refusal struct {
 	Recorded bool   `json:"recorded"`
@@ -130,6 +137,20 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 			return nil, err
 		}
 		stream := config.WorkstreamID(scope.Workstream)
+		// A route_amendment naming a question resolves it the same way
+		// every other chief-of-staff question tool does: against the
+		// asking member's own workstream, which is where its citations,
+		// its seal and the amendment itself (unless it becomes a
+		// project-level amendment instead) belong, never against the
+		// chief's host workstream by default.
+		target := stream
+		if routed && input.Question != "" {
+			member, _, err := repository.ChiefQuestionTarget(stream, input.Question)
+			if err != nil {
+				return refuse(err)
+			}
+			target = member
+		}
 		if len(input.Citations) == 0 {
 			return encode(refusal{Reason: "at least one spec#<n> or plan#<unit> citation is required"})
 		}
@@ -137,7 +158,7 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 			if _, ok := plan.ParseCitation(c); !ok && !strings.HasPrefix(c, "plan#") {
 				return encode(refusal{Reason: "amendments cite only spec#<n> or plan#<unit>"})
 			}
-			if err := Resolve(ctx, repository, stream, c, now()); err != nil {
+			if err := Resolve(ctx, repository, target, c, now()); err != nil {
 				var unresolved *Unresolved
 				if errors.As(err, &unresolved) {
 					return encode(refusal{Reason: unresolved.Error()})
@@ -145,7 +166,7 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 				return nil, err
 			}
 		}
-		documents, err := trace.Read[trace.Document](repository, stream)
+		documents, err := trace.Read[trace.Document](repository, target)
 		if err != nil {
 			return nil, err
 		}
@@ -165,15 +186,24 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 		if err := json.Unmarshal([]byte(document.Content), &sealed); err != nil {
 			return nil, err
 		}
-		a, err := repository.FileAmendment(ctx, agent, scope, trace.AmendmentRequest{QuestionID: input.Question, Citations: input.Citations, Change: input.Change, Reason: input.Reason, Seal: sealed.Seal, SealRevision: document.Revision, SpecHash: sealed.SpecHash, Upstream: move}, now())
+		outcome, err := repository.FileAmendment(ctx, agent, scope, trace.AmendmentRequest{QuestionID: input.Question, Citations: input.Citations, Change: input.Change, Reason: input.Reason, Seal: sealed.Seal, SealRevision: document.Revision, SpecHash: sealed.SpecHash, Upstream: move}, now())
 		if err != nil {
 			return refuse(err)
+		}
+		if outcome.ProjectLevel {
+			return encode(struct {
+				Recorded         bool   `json:"recorded"`
+				ProjectAmendment string `json:"project_amendment"`
+				Workgroup        string `json:"workgroup"`
+				Next             string `json:"next"`
+			}{true, outcome.ProjectAmendment.ID, string(outcome.ProjectAmendment.Workgroup),
+				"A contract section is read-only inside a workstream; this was filed as a project-level amendment. " + next})
 		}
 		return encode(struct {
 			Recorded  bool   `json:"recorded"`
 			Amendment string `json:"amendment"`
 			Next      string `json:"next"`
-		}{true, a.ID, next})
+		}{true, outcome.Amendment.ID, next})
 	}
 	return tool
 }
@@ -192,8 +222,12 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 		if err := decodeInput(raw, &input); err != nil {
 			return nil, err
 		}
+		member, _, err := repository.ChiefQuestionTarget(stream, input.Question)
+		if err != nil {
+			return refuse(err)
+		}
 		for _, c := range input.Citations {
-			if err := Resolve(ctx, repository, stream, c, now()); err != nil {
+			if err := Resolve(ctx, repository, member, c, now()); err != nil {
 				var unresolved *Unresolved
 				if errors.As(err, &unresolved) {
 					return encode(refusal{Reason: unresolved.Error()})
@@ -212,12 +246,17 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 		}{true, ruling.QuestionID, "The answer is delivered to the asker as its next turn."})
 	}
 	escalate := coreadapter.Tool{Name: EscalateTool, Effect: coreadapter.ToolMemory,
-		Description: "Send one or several open questions to the owner as one batch. questions: their numbers. rephrasing: the question as the owner should read it, naming the unit and criterion. blocked: what waits on the answer. options: the choices. recommendation: what you would decide. An escalated question can no longer be answered by you.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"questions":{"type":"array","items":{"type":"string"}},"rephrasing":{"type":"string"},"blocked":{"type":"string"},"options":{"type":"array","items":{"type":"string"}},"recommendation":{"type":"string"}},"required":["questions","rephrasing","blocked","options","recommendation"],"additionalProperties":false}`)}
+		Description: "Send one or several open questions to the owner as one consolidated batch: a genuine gap affecting several workstreams or units of your workgroup is escalated once, naming every affected question, " +
+			"not once per workstream, and the owner's one answer resumes every one of them while unaffected work keeps running. questions: their numbers, qualified \"<workstream>:<number>\" for any question not of your own workstream. " +
+			"section: the spec#<n> or plan#<unit> passage in tension. conflict: the tension itself. rephrasing: the question as the owner should read it, naming the unit and criterion. options: the choices. recommendation: what you would decide. " +
+			"An escalated question can no longer be answered by you.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"questions":{"type":"array","items":{"type":"string"}},"rephrasing":{"type":"string"},"section":{"type":"string"},"conflict":{"type":"string"},"blocked":{"type":"string"},"options":{"type":"array","items":{"type":"string"}},"recommendation":{"type":"string"}},"required":["questions","rephrasing","blocked","options","recommendation"],"additionalProperties":false}`)}
 	escalate.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
 			Questions      []string `json:"questions"`
 			Rephrasing     string   `json:"rephrasing"`
+			Section        string   `json:"section"`
+			Conflict       string   `json:"conflict"`
 			Blocked        string   `json:"blocked"`
 			Options        []string `json:"options"`
 			Recommendation string   `json:"recommendation"`
@@ -225,7 +264,7 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 		if err := decodeInput(raw, &input); err != nil {
 			return nil, err
 		}
-		batch, err := repository.EscalateQuestions(ctx, agent, scope, trace.EscalationRequest{Questions: input.Questions, Rephrasing: input.Rephrasing, Blocked: input.Blocked, Options: input.Options, Recommendation: input.Recommendation}, now())
+		batch, err := repository.EscalateQuestions(ctx, agent, scope, trace.EscalationRequest{Questions: input.Questions, Rephrasing: input.Rephrasing, Section: input.Section, Conflict: input.Conflict, Blocked: input.Blocked, Options: input.Options, Recommendation: input.Recommendation}, now())
 		if err != nil {
 			return refuse(err)
 		}
@@ -282,7 +321,30 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 			Next     string `json:"next"`
 		}{true, proposal.Question, proposal.Number, "The owner ratifies or declines the proposal; make it the attention of your status until they do."})
 	}
-	return []coreadapter.Tool{answer, escalate, relay, amendmentTool(repository, agent, scope, now, true, nil), propose}
+	logAssumption := coreadapter.Tool{Name: LogAssumptionTool, Effect: coreadapter.ToolMemory,
+		Description: "Log a judgment call made within stated intent, rather than ask or escalate it. text: the assumption as it should read in the drafted pull request description. workstreams: optional affected member workstream IDs; omit for a judgment applying to the whole workgroup.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"},"workstreams":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string"}}},"required":["text"],"additionalProperties":false}`)}
+	logAssumption.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		var input struct {
+			Text        string                `json:"text"`
+			Workstreams []config.WorkstreamID `json:"workstreams"`
+		}
+		if err := decodeInput(raw, &input); err != nil {
+			return nil, err
+		}
+		if input.Workstreams != nil && len(input.Workstreams) == 0 {
+			return encode(refusal{Reason: "workstreams must name at least one affected member, or be omitted for the whole workgroup"})
+		}
+		a, err := repository.LogAssumption(ctx, agent, scope, input.Text, now(), input.Workstreams...)
+		if err != nil {
+			return refuse(err)
+		}
+		return encode(struct {
+			Recorded bool   `json:"recorded"`
+			Logged   string `json:"logged"`
+		}{true, a.ID})
+	}
+	return []coreadapter.Tool{answer, escalate, relay, amendmentTool(repository, agent, scope, now, true, nil), propose, logAssumption}
 }
 
 // refuse turns a refusal into the tool's result and passes other errors on.

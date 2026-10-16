@@ -24,8 +24,8 @@ Paths are under the root, `~/.local/share/osmia` by default.
 
 | Path | What it answers |
 |---|---|
-| `runtime.json` | Pauses with their sources, archived workstreams (title, outcome, archive time, delivery link), profile overrides |
-| `projects/<p>/config.toml` | The project's clone path, base branch and landing style |
+| `runtime.json` | Pauses with their sources, archived workstreams (title, outcome, archive time, delivery link, `resolution_evidence`), profile overrides |
+| `projects/<p>/config.toml` | The repo's clone path, base branch, landing style and optional group_id |
 | `workstreams/<p>/<w>/workstream.json` | When the workstream was created and its workspace backend |
 | `.../events.jsonl` | Every transition: `subject`, `from`, `to`, `reason`, `actor`, `cause`, `at`, `unit` |
 | `.../ledger.jsonl` | One cost record per session: `.entry.Scope` (`Role`, `Unit`, `Thread`, `Turn`), `.entry.At`, `.entry.Usage` (`CostUSD`, `Turns`) |
@@ -37,9 +37,23 @@ Paths are under the root, `~/.local/share/osmia` by default.
 | `.../drift/rebase.json` | The latest drift rebase record: outcome, conflicts, candidate, review count, verdict |
 | `units/<p>/<w>/<u>`, `drifts/<p>/<w>` | Unit and drift resolution workspaces |
 
-The project's librarian has a workstream of its own, `w_` followed by the
+Each repo's librarian has a workstream of its own, `w_` followed by the
 first 32 hex digits of `sha256("librarian:<project id>")`. Its
 `workflow.json` holds the knowledge base extraction and refresh operations.
+
+Here `<p>` is the repo registration ID. Its default project's charter is shared,
+but its KB and settings are local. For a cross-repo workgroup also inspect
+`workgroups/<group-id>/`: the authoritative project spec, membership, original
+shared chief conversation, consolidated questions and approved change journals
+are there, outside member traces. Member roles' asking-turn links lead back to
+their own traces. A published `delivered` workflow state is not itself a merge;
+use a merged outcome matching the current publication's PR or an owner merge
+record. Closed without merge and outcomes for earlier PRs remain unresolved.
+Archive pins `resolution_evidence` as `merged`, `cancelled` or `unresolved`;
+only merged or cancelled evidence can resolve an archived member. An older
+`resolved` flag without evidence is re-derived from retained history or held
+unresolved. Archived-member identity and cleanup evidence distinguish
+retirement from unexplained live absence; retirement alone proves no merge.
 
 Timestamps mix UTC and local offsets. Convert them before you sort or bucket
 them.

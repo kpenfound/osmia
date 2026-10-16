@@ -103,6 +103,9 @@ func (b *builder) Pass(ctx context.Context) error {
 // reconcile asks to start building a ratified workstream on its latest seal
 // when no build on that seal was asked for.
 func (b *builder) reconcile(ctx context.Context, stream config.WorkstreamID) error {
+	if held, err := changeHeld(b.repository, stream); err != nil || held {
+		return err
+	}
 	feature, err := b.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil || feature.Value != RatifiedState {
 		return err
@@ -242,6 +245,12 @@ func (b *builder) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 		}
 		return *result, nil
 	}
+	if held, err := changeRepositoryHeld(b.repository, stream, op); err != nil || held {
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		return coreadapter.OperationResult{}, errChangeBoundary
+	}
 	feature, err := b.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -286,7 +295,32 @@ func (b *builder) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	}
 	reason := fmt.Sprintf("seal %d is recorded; the states of the %s of its plan are recorded: ready %s; planned %s", in.Seal, units(len(p.Units)), list(ready), list(planned))
 	h := b.header(BuildingState, stream, op.ID, at)
-	_, err = b.repository.MoveFeatureStateWith(ctx, h, RatifiedState, BuildingState, reason, txs...)
+	from := RatifiedState
+	group, err := b.repository.CrossRepoWorkgroupOf(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if group != "" {
+		if err := b.s.step("build-workflow-checked:" + string(stream)); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		// Historical cross-repo seals may already have the individual
+		// ratified transition. Use the actual preparation state for the
+		// transaction; effective approval was checked above.
+		transitions, err := trace.Read[trace.Transition](b.repository, stream)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		for _, t := range transitions {
+			if t.Subject == trace.FeatureSubject {
+				from = t.To
+			}
+		}
+		if from != trace.SealPreparedState && from != RatifiedState {
+			return fail(fmt.Sprintf("the workflow changed while the build ran; the workstream is %s", featureState(from)))
+		}
+	}
+	_, err = b.repository.MoveFeatureStateWith(ctx, h, from, BuildingState, reason, txs...)
 	if err == nil {
 		if err := b.s.step("build-recorded"); err != nil {
 			return coreadapter.OperationResult{}, err

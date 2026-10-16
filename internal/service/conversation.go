@@ -69,6 +69,19 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 	if api != nil {
 		return ConversationEntry{}, api
 	}
+	if design, err := isDesignWorkstream(repository, stream); err != nil {
+		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", stream)}
+	} else if design {
+		return ConversationEntry{}, &APIError{Validation, fmt.Sprintf("workstream %s is a design session; send messages with POST %s/design/%s/message", stream, Prefix, stream)}
+	}
+	if blocked, err := s.designStartBlocksDraft(repository, stream); err != nil {
+		return ConversationEntry{}, &APIError{Internal, err.Error()}
+	} else if blocked {
+		state, err := repository.Workflow(stream, designStartSubject)
+		if err != nil || (state.Value != "active" && state.Value != "complete" && state.Value != "invalid") {
+			return ConversationEntry{}, &APIError{Conflict, "the design workgroup is starting; retry once conversation adoption completes"}
+		}
+	}
 	if strings.TrimSpace(req.Text) == "" {
 		return ConversationEntry{}, &APIError{Validation, "text must not be empty"}
 	}
@@ -77,9 +90,25 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 	if err != nil {
 		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("role %s has no usable profile %q; check osmia profiles", trace.ChiefOfStaff, name)}
 	}
-	context, err := chiefContext(ctx, s.Context(), repository, project, stream)
+	target, host, bundleStream, closeTarget, err := s.chiefRepository(ctx, repository, stream)
+	if err != nil {
+		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
+	}
+	bundleProject, err := target.ProjectFor(bundleStream)
+	if err != nil {
+		closeTarget()
+		return ConversationEntry{}, &APIError{Internal, err.Error()}
+	}
+	if bundleProject.Project() != target.Project() {
+		project = bundleProject.Project()
+	}
+	context, err := chiefContext(ctx, s.Context(), target, closeTarget, project, bundleStream)
 	if err != nil {
 		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot assemble the context of workstream %s; check the charter, the knowledge base and the trace repository", stream)}
+	}
+	note := ""
+	if host != stream {
+		note = fmt.Sprintf(" The owner addressed workstream %s, a member of your workgroup; answer or escalate one of its questions as \"%s:<number>\".", stream, stream)
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -88,16 +117,25 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 	id := hex.EncodeToString(nonce[:])
 	at := s.now()
 	failed := &APIError{Internal, fmt.Sprintf("cannot record the message for workstream %s; check the trace repository", stream)}
-	if _, err := repository.EnsureChiefOfStaff(ctx, stream, at, serviceActor); err != nil {
+	// chiefContext already closed the first resolution once it finished
+	// reading from it, so the durable write below reopens the target fresh,
+	// exactly as chiefRepository documents: transient, never held open past
+	// one call.
+	target, _, _, closeTarget, err = s.chiefRepository(ctx, repository, stream)
+	if err != nil {
+		return ConversationEntry{}, &APIError{Internal, fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
+	}
+	defer closeTarget()
+	if _, err := target.EnsureChiefOfStaff(ctx, stream, at, serviceActor); err != nil {
 		return ConversationEntry{}, failed
 	}
-	q, err := repository.EnqueueTurn(ctx, trace.TurnRequest{
-		Header:       trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + id, Revision: 1, Project: project, Workstream: stream, At: at, Actor: ownerActor, Cause: "owner-message"},
+	q, err := target.EnqueueTurn(ctx, trace.TurnRequest{
+		Header:       trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + id, Revision: 1, Project: target.Project(), Workstream: stream, At: at, Actor: ownerActor, Cause: "owner-message"},
 		AgentID:      trace.ChiefOfStaff,
 		ThreadID:     trace.ChiefOfStaff,
 		TurnID:       "message_" + id,
 		Profile:      profile,
-		SystemPrompt: fmt.Sprintf(chiefPrompt, stream) + "\n\n" + chiefDocumentsGuidance + "\n\n" + priorityGuidance + "\n\n" + pauseGuidance + "\n\n" + amendmentGuidance + "\n\n" + charterGuidance + "\n\n" + contestGuidance + "\n\n" + driftHandbackGuidance + "\n\n" + context,
+		SystemPrompt: fmt.Sprintf(chiefPrompt, host) + note + "\n\n" + chiefDocumentsGuidance + "\n\n" + priorityGuidance + "\n\n" + pauseGuidance + "\n\n" + changeGuidance + "\n\n" + amendmentGuidance + "\n\n" + charterGuidance + "\n\n" + contestGuidance + "\n\n" + driftHandbackGuidance + "\n\n" + context,
 		Prompt:       req.Text,
 	})
 	if err != nil {
@@ -113,7 +151,12 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 	if api != nil {
 		return ConversationResponse{}, api
 	}
-	entries, err := consistentRead(func() ([]ConversationEntry, error) { return conversationEntries(repository, stream) }, repository.Generation)
+	target, _, _, closeTarget, err := s.chiefRepository(context.Background(), repository, stream)
+	if err != nil {
+		return ConversationResponse{}, &APIError{Internal, fmt.Sprintf("cannot resolve the workgroup of workstream %s; check the trace repository", stream)}
+	}
+	defer closeTarget()
+	entries, err := consistentRead(func() ([]ConversationEntry, error) { return conversationEntries(target, stream) }, target.Generation)
 	if err != nil {
 		return ConversationResponse{}, &APIError{Internal, fmt.Sprintf("cannot read the conversation of workstream %s; check the trace repository", stream)}
 	}
@@ -170,13 +213,56 @@ func withActions(entries, actions []ConversationEntry) []ConversationEntry {
 
 // chiefActions returns what the chief of staff did on the owner's behalf in
 // the workstream, as action entries: its rulings on contested units, the
-// contests it raised to the owner and the units it moved.
+// contests and questions it raised to the owner, the owner's rulings on
+// those questions and the units it moved.
 func chiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
 		return nil, err
 	}
 	var out []ConversationEntry
+	members, err := repository.WorkgroupMembers(stream)
+	if err != nil {
+		return nil, err
+	}
+	escalations, err := repository.Inbox()
+	if err != nil {
+		return nil, err
+	}
+	for _, escalation := range escalations {
+		if !slices.ContainsFunc(escalation.Questions, func(question trace.QuestionState) bool {
+			return slices.Contains(members, question.Asked.Workstream)
+		}) {
+			continue
+		}
+		text := "Question for you: " + escalation.Rephrasing
+		if escalation.Hold != "" {
+			text += "\nRecoverable hold: " + escalation.Hold
+		}
+		if escalation.Blocked != "" {
+			text += "\nBlocked: " + escalation.Blocked
+		}
+		if len(escalation.Options) > 0 {
+			text += "\nOptions: " + strings.Join(escalation.Options, "; ")
+		}
+		if escalation.Recommendation != "" {
+			text += "\nRecommendation: " + escalation.Recommendation
+		}
+		out = append(out, ConversationEntry{Turn: escalation.Batch, Kind: "action", Text: text, At: escalation.EscalatedAt, State: TurnDone})
+		// One consolidated escalation has one owner answer. Read its original
+		// ruling revision so relaying it cannot change its text or timestamp.
+		// Background chief turns stay out of the owner's conversation.
+		if escalation.State != trace.QuestionEscalated && len(escalation.Questions) > 0 {
+			q := escalation.Questions[0]
+			if q.Ruling != nil && q.Ruling.Decision == trace.DecisionRuling {
+				ruling, err := repository.QuestionRuling(q.Asked.Workstream, q.Ruling.ID, 1)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, ConversationEntry{Turn: "ruling_" + escalation.Batch, Kind: "action", Text: "You ruled: " + ruling.OwnerResponse, At: ruling.At, State: TurnDone})
+			}
+		}
+	}
 	for _, d := range docs {
 		if d.Unit == "" || !strings.HasPrefix(d.Path, "units/"+trace.UnitSubject(d.Unit)+"/chief-") {
 			continue
@@ -210,6 +296,55 @@ func chiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]C
 			text = fmt.Sprintf("Held unit %s for you, from %s: %s", d.Unit, move.From, move.Note)
 		}
 		out = append(out, ConversationEntry{Turn: move.Turn, Kind: "action", Text: text, At: d.At, State: TurnDone})
+	}
+
+	host, err := repository.ChiefOfStaffHost(stream)
+	if err != nil {
+		return nil, err
+	}
+	changes, err := readChanges(repository, host)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range changes {
+		if c.State == "failed" {
+			out = append(out, ConversationEntry{Turn: "change-" + c.ID + "-failed", Kind: "action", Text: c.Failure, State: TurnDone})
+			continue
+		}
+		if c.State == "drafting" || c.State == "debating" || c.State == "answering" || c.State == "presenting" {
+			continue
+		}
+		text := c.Summary()
+		if c.Decision == nil {
+			text += fmt.Sprintf("\nApprove or reject this impact summary (revision %d).", c.Revision)
+		}
+		if c.Request.Kind == "cancel" && c.Decision == nil {
+			text += "\nChoose whether open PRs are closed or left as drafts. Merged work is untouched."
+		}
+		for _, d := range c.Debate {
+			text += "\nCommittee: " + d.Note
+			for _, objection := range d.Objections {
+				text += "\nObjection: " + objection
+			}
+		}
+		if c.Reply != "" {
+			text += "\nArchitect: " + c.Reply
+		}
+		if c.Decision != nil {
+			text += "\nOwner decision: " + c.Decision.Decision
+		}
+		docs, err := trace.Read[trace.Document](repository, host)
+		if err != nil {
+			return nil, err
+		}
+		var at time.Time
+		for _, d := range docs {
+			if d.ID == workgroupChangeDocument(c.ID) {
+				at = d.At
+				break
+			}
+		}
+		out = append(out, ConversationEntry{Turn: "change-" + c.ID + "-impact", Kind: "action", Text: text, At: at, State: TurnDone})
 	}
 	return out, nil
 }

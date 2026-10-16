@@ -44,6 +44,18 @@ func (s *Service) repository(id config.ProjectID) (*trace.Repository, error) {
 	return active.repository, nil
 }
 
+// charterRepository also serves draining repos, whose turns still borrow the
+// project's charter after the configuration stops admitting new work.
+func (s *Service) charterRepository(id config.ProjectID) (*trace.Repository, error) {
+	_, projects := s.runtimes()
+	for _, p := range projects {
+		if p.id == id && p.repository != nil {
+			return p.repository, nil
+		}
+	}
+	return nil, errNoTrace
+}
+
 // Context returns the provider that assembles turn bundles for the active
 // project. Its charter reads record owner edits as loadCharter does.
 func (s *Service) Context() bundle.Provider {

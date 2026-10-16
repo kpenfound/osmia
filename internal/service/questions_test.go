@@ -227,7 +227,9 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			mu.Unlock()
 			return nil, err
 		}
-		if !slices.Equal(names, []string{"answer", "escalate", "file_read", "propose_charter", "relay_ruling", "route_amendment"}) {
+		// log_assumption joined the chief of staff's tools alongside the
+		// structured escalation and project-level amendment work (spec#17).
+		if !slices.Equal(names, []string{"answer", "escalate", "file_read", "log_assumption", "propose_charter", "relay_ruling", "route_amendment"}) {
 			problem("chief of staff tools %v", names)
 		}
 		for _, part := range []string{"You are the chief of staff for workstream " + string(stream), questions.Guidance, "- charter#1 [Charter]: Keep state in files under the root.", "## Latest status", "## Open inbox escalations"} {

@@ -92,9 +92,12 @@ func newArchitectOptions(t *testing.T) (Options, string, *demoEngine, *demoSessi
 	return opts, clone, engine, sessions, clock
 }
 
-func newArchitectFixture(t *testing.T) *architectFixture {
+func newArchitectFixture(t *testing.T, configure ...func(*Options)) *architectFixture {
 	t.Helper()
 	opts, clone, engine, sessions, clock := newArchitectOptions(t)
+	for _, apply := range configure {
+		apply(&opts)
+	}
 	f := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
 	f.start(t)
 	added, err := f.c.AddProject(context.Background(), request(clone))

@@ -73,7 +73,11 @@ func Resolve(ctx context.Context, repository *trace.Repository, stream config.Wo
 		return nil
 	}
 	if m := charterCitation.FindStringSubmatch(citation); m != nil {
-		doc, err := repository.Charter(ctx, now)
+		project, err := repository.ProjectFor(stream)
+		if err != nil {
+			return err
+		}
+		doc, err := project.Charter(ctx, now)
 		if err != nil {
 			return err
 		}
@@ -84,12 +88,16 @@ func Resolve(ctx context.Context, repository *trace.Repository, stream config.Wo
 		return nil
 	}
 	if m := proseCitation.FindStringSubmatch(citation); m != nil {
-		subsystems, err := repository.Subsystems()
+		project, err := repository.ProjectFor(stream)
+		if err != nil {
+			return err
+		}
+		subsystems, err := project.Subsystems()
 		if err != nil {
 			return err
 		}
 		if slices.Contains(subsystems, m[1]) {
-			if _, err := repository.Prose(m[1]); err == nil {
+			if _, err := project.Prose(m[1]); err == nil {
 				return nil
 			} else if !errors.Is(err, fs.ErrNotExist) {
 				return unresolved("%s cannot be read: %v", citation, err)

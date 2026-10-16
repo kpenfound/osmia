@@ -83,6 +83,15 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 		if err != nil || !strings.Contains(out, "only an owner message") {
 			problems = append(problems, fmt.Sprintf("event pause: %s %v", out, err))
 		}
+		for name, input := range map[string]map[string]any{
+			requestChangeTool: {"key": "event-change", "kind": "cancel", "scope": "workgroup", "change": "Cancel without an owner request"},
+			decideChangeTool:  {"id": "event-change", "revision": 1, "decision": "approve", "pull_requests": "close"},
+		} {
+			out, err := callTool(ctx, session, name, input)
+			if err != nil || !strings.Contains(out, "only an owner message") {
+				problems = append(problems, fmt.Sprintf("event %s: %s %v", name, out, err))
+			}
+		}
 		return questionResult(req, "session-chief", "Nothing to do"), nil
 	}
 	engine.turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
@@ -201,7 +210,7 @@ func TestChiefOfStaffSetsPriorityForTheOwner(t *testing.T) {
 		}
 	}
 	slices.Sort(names)
-	if wantNames := []string{"answer", "capacity", "decide_amendment", "decide_charter", "escalate", "factory_context", "file_read", "hand_back_drift", "inspect_code", "move_unit", "notify", "pause", "prioritise", "project_context", "propose_charter", "read_remote_file", "record_discovery", "relay_ruling", "resolve_contested", "resume", "route_amendment", "set_status"}; !slices.Equal(names, wantNames) {
+	if wantNames := []string{"answer", "capacity", "decide_amendment", "decide_change", "decide_charter", "escalate", "factory_context", "file_read", "hand_back_drift", "inspect_code", "log_assumption", "move_unit", "notify", "pause", "prioritise", "project_context", "propose_charter", "read_remote_file", "record_discovery", "relay_ruling", "request_change", "resolve_contested", "resume", "route_amendment", "set_status"}; !slices.Equal(names, wantNames) {
 		t.Fatalf("chief-of-staff tools %v, want %v", names, wantNames)
 	}
 	for prompt, system := range prompts {

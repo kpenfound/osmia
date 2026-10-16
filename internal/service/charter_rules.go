@@ -308,6 +308,10 @@ func (c charterer) Pass(ctx context.Context) error {
 // one pass, and later passes try again.
 func (c charterer) write(ctx context.Context, p trace.CharterProposalState) error {
 	source := charterSource(p)
+	authority, err := c.repository.CharterRepository()
+	if err != nil {
+		return err
+	}
 	written, err := c.written(source)
 	if err != nil {
 		return err
@@ -318,12 +322,12 @@ func (c charterer) write(ctx context.Context, p trace.CharterProposalState) erro
 			return err
 		}
 		content := charter.AppendRule(current.Content, charter.Parse(current.Content).Next(), p.Proposal.Rule, fmt.Sprintf("ratified from %s revision %d", p.Proposal.Ruling, p.Proposal.RulingRevision))
-		next := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: current.ID, Revision: current.Revision + 1, Project: c.repository.Project(), At: c.s.now(), Actor: charterActor, Cause: source},
+		next := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: current.ID, Revision: current.Revision + 1, Project: authority.Project(), At: c.s.now(), Actor: charterActor, Cause: source},
 			Path: current.Path, Content: content}
 		if err := c.s.step("charter-write"); err != nil {
 			return err
 		}
-		err = c.repository.Append(ctx, next)
+		err = authority.Append(ctx, next)
 		if errors.Is(err, trace.ErrConflict) {
 			continue
 		}
@@ -366,7 +370,7 @@ func (c charterer) write(ctx context.Context, p trace.CharterProposalState) erro
 // written returns the charter revision that appended the rule of the
 // proposal at source, or nil when none did.
 func (c charterer) written(source string) (*trace.Document, error) {
-	docs, err := trace.Read[trace.Document](c.repository, "")
+	docs, err := c.repository.ProjectDocuments()
 	if err != nil {
 		return nil, err
 	}

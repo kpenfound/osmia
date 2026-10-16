@@ -9,7 +9,7 @@ operators and contributors. The [design](design.md) defines product behavior.
 ```mermaid
 flowchart LR
     Owner[Owner: CLI or web page] --> API[Service API]
-    API --> Trace[Project and workstream traces]
+    API --> Trace[Repo, workgroup and workstream traces]
     Trace --> Controllers[Go controllers and scheduler]
     Controllers --> Turns[Scoped agent turns]
     Turns --> Trace
@@ -19,15 +19,53 @@ flowchart LR
     Trace --> API
 ```
 
-The trace is split along a durable boundary. Each project has one dedicated
-Git repository holding only durable project knowledge: the charter, the
-knowledge base and role notes. Each workstream has its own dedicated Git
-repository, a sibling of the project's under the Osmia root, holding that
-workstream's complete record: its documents, transitions, turn logs, costs
-and durable operation intents. The target clone and its workspaces are
-separate from every trace repository. The service reads current trace state
-on each reconciliation pass; an event wakes a pass early but does not carry
-the state transition.
+A project owns one charter and a repo list. Each repo has its own settings,
+KB, entities and dedicated knowledge trace; the default repo's trace holds
+the authoritative project charter. Each workstream targets one repo and has
+its own complete trace, branch and PR. A cross-repo workgroup's separate trace
+under `workgroups/<group-id>/` owns its project spec, fixed membership, shared
+chief thread and group decisions. Direct one-repo groups keep their existing
+chief thread in the workstream trace; selection of a different repo adopts the
+original conversation into the workgroup trace even for one selected member.
+Nothing is authoritative in two places, and every trace stays
+outside target clones. Go reads current state on each reconciliation pass;
+an event wakes a pass early but does not carry the state transition.
+
+One owner start hands the design brief to production drafting and allocation;
+the actual design conversation becomes the shared chief thread. For several
+selected repos, one ratification pins the project spec and all member revisions. Until every pinned member seal
+completes, no member has effective group approval or can build or release a
+contract edge. Restart reconciles the same durable decision, without another
+gate. Every PR still needs its own delivery approval and owner signing.
+
+Ordinary file, issue and stdin hand-ins in projects with several active repos
+use that same validated selection, allocation and conversation-adoption path.
+A single selected repo uses ordinary single-member ratification; several use
+the all-member packet. One-repo hand-ins go directly to ordinary drafting.
+
+Repo/member bindings preserve shared authority when a terminal member is
+owner-archived and legitimately cleanup-deleted. Archive identity, verified
+resolution and cleanup intent keep survivor reads, conversation, dispatch,
+events, questions and group journals usable without reviving a retired trace.
+Unknown or corrupt live history yields errors or recoverable holds. Pending
+approved effects retain their original pins; unavailable history never grants
+completion. Archive does not establish merge or release dependencies.
+
+Resolution retires a member's own documents and workspaces from active state.
+The project spec remains active for the shared chief and unresolved members
+until all members resolve (merged or cancelled). A ready but unmerged PR keeps
+its member unresolved. Traces and decisions remain until owner archive.
+The same snapshot-based predicate governs live resolution, archive pins and
+pane labels: cancellation/abandonment, or delivery with an owner merge record
+or merged outcome matching the current publication's PR. Archive records pin
+`resolution_evidence`; missing merge or cancel evidence holds the group
+unresolved even after cleanup. One-member groups use the same predicate,
+separately from their existing delivery cleanup. Every delivered member's
+current PR is observed at most once per minute until a matching merged or
+closed outcome is recorded, including members without same-repo bases.
+Merge-only dependency handling is a Go controller: contract edges resolve on
+the ratified contract, and hard-block and merge-order edges on the recorded
+upstream PR merge. Expected waits have no inbox or notification side effect.
 
 A project whose trace still uses the older shared layout, with every
 workstream's records inside the project's own repository, is migrated
@@ -68,7 +106,10 @@ method publishes dispatch intent without running a model. Reconciliation hands
 that intent to the thread runner, which executes a scoped turn and records its
 response. Landing checks the reviewed candidate, base and governing document
 revisions before merging it. A changed candidate returns to review. Delivery
-requires the owner's approval of the final report and description.
+requires final-review acceptance and each workstream's owner approval of the
+PR description and commit message, followed by owner signing. Amend and cancel
+use one impact-summary decision in the shared conversation; later publication
+approvals remain separate.
 
 ## Staying responsive under backend work
 
@@ -143,7 +184,7 @@ only what every judgment shares, and `systemone` knows nothing of Osmia.
 The root defaults to `~/.local/share/osmia` and the top-level configuration to
 `~/.config/osmia/config.toml`, following the XDG base directories; an explicit
 root holds its own `config.toml`. Runtime overrides, project configuration,
-project trace repositories, workstream trace repositories and workspaces live
+repo knowledge traces, workgroup traces and workstream trace repositories and workspaces live
 in the root; the target clone remains separate. The
 service binds a Unix socket for local clients and can serve the same API on a
 loopback listener or an embedded tailnet node. Tailnet membership controls access

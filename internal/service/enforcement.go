@@ -47,9 +47,26 @@ func CoreEnforcement(root config.Root) Enforcement {
 
 // chiefGrant is what a chief-of-staff thread turn may call: file_read over
 // its read-only view of the workstream's documents, status, runtime controls,
-// owner decisions, unit moves, drift handbacks and question tools. It names
-// every tool chiefTools makes.
-var chiefGrant = coreadapter.Capabilities{Tools: append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, status.ToolName, "notify", "capacity", "inspect_code", prioritiseTool, pauseTool, resumeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, moveUnitTool, handBackDriftTool}, questions.ChiefTools...)}
+// owner decisions, unit moves, drift handbacks, question tools and shared
+// project context. It names every tool chiefTools makes, plus the two tools
+// a design session's agent may reach (draft_brief, read_repo): Select narrows
+// an ordinary
+// chief-of-staff turn's grant down to chiefOrdinaryTools, which excludes
+// them, and a design session's turn down to designOnlyTools, which excludes
+// everything else, so the ceiling here is never itself the enforced set.
+var chiefGrant = coreadapter.Capabilities{Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, status.ToolName, "notify", "capacity", "inspect_code", prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, moveUnitTool, handBackDriftTool, draftBriefToolName, designReadRepoToolName}, questions.ChiefTools...), projectContextTool)}
+
+// chiefOrdinaryTools is chiefGrant's tool list without the two design-only
+// tools, so an ordinary chief-of-staff turn never reaches them.
+var chiefOrdinaryTools = slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool {
+	return name == draftBriefToolName || name == designReadRepoToolName
+})
+
+// designOnlyTools is the entire toolset a design session's turn may reach:
+// read-only file access to its staged view, read-only cross-repo code
+// access, and recording its drafted brief. No write, version-control,
+// credential or owner-gate tool of chiefGrant is reachable through it.
+var designOnlyTools = []string{"file_read", draftBriefToolName, designReadRepoToolName}
 
 // chiefTools are the service tools of one chief-of-staff turn.
 func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeControls, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
@@ -58,7 +75,7 @@ func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeContro
 		return nil, err
 	}
 	chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
-	return append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.moveUnit(r, scope), controls.handBackDrift(r, scope, now)}, chief...), err
+	return append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.changeControl(r, scope, false), controls.changeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.moveUnit(r, scope), controls.handBackDrift(r, scope, now)}, chief...), projectContext(r, scope)), err
 }
 
 // masonGrant is what a mason thread turn may do: read, write and execute in
@@ -181,12 +198,26 @@ func Enforce(opts Options, e Enforcement) Options {
 					if err != nil {
 						return isolation.Selection{}, err
 					}
+					design, err := isDesignWorkstream(r, stream)
+					if err != nil {
+						return isolation.Selection{}, err
+					}
+					if design {
+						workspace := filepath.Join(root, "design", project, scope.Workstream)
+						paths, err := stageDesignWorkspace(workspace)
+						if err != nil {
+							return isolation.Selection{}, err
+						}
+						return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: execution,
+							Narrow: &coreadapter.Capabilities{Tools: designOnlyTools}}, nil
+					}
 					workspace := filepath.Join(root, "chief_of_staff", project, scope.Workstream)
 					paths, err := stageChiefDocuments(r, stream, workspace)
 					if err != nil {
 						return isolation.Selection{}, err
 					}
-					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: execution}, nil
+					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: execution,
+						Narrow: &coreadapter.Capabilities{Tools: chiefOrdinaryTools}}, nil
 				}
 				return isolation.Selection{}, errors.New("view selection denied")
 			},
@@ -221,7 +252,13 @@ func Enforce(opts Options, e Enforcement) Options {
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil
 				}
-				return chiefTools(cfg, r, controls, scope, now)
+				tools, err := chiefTools(cfg, r, controls, scope, now)
+				if err != nil {
+					return nil, err
+				}
+				// Both tools are registered unconditionally; Select's Narrow
+				// decides, per turn, whether either is actually reachable.
+				return append(tools, draftBriefTool(r, scope, now), designReadRepoTool(cfg, r, controls, scope)), nil
 			},
 			Hosts: e.Hosts,
 			// resumableEngine's heuristic fallback (used only when e.Engine has

@@ -166,6 +166,16 @@ func Parse(data []byte) (Seal, error) {
 // Latest returns the latest recorded seal of the workstream and its document,
 // and whether one is recorded.
 func Latest(repository *trace.Repository, stream config.WorkstreamID) (Seal, trace.Document, bool, error) {
+	approved, err := repository.GroupApproved(stream)
+	if err != nil || !approved {
+		return Seal{}, trace.Document{}, false, err
+	}
+	return PreparedLatest(repository, stream)
+}
+
+// PreparedLatest reads historical seal preparation, for the service sealer
+// and group reconciliation. It does not authorize admission or contract release.
+func PreparedLatest(repository *trace.Repository, stream config.WorkstreamID) (Seal, trace.Document, bool, error) {
 	documents, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
 		return Seal{}, trace.Document{}, false, err

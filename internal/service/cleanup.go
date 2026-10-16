@@ -114,6 +114,17 @@ func (c *workspaceCleanup) clean(ctx context.Context, stream config.WorkstreamID
 	}
 	state := states[trace.FeatureSubject].Value
 	finished := state == DeliveredState || state == AbandonedState
+	if state == DeliveredState {
+		waiting, err := edgeWaitDisplay(c.repository, stream)
+		if err != nil {
+			return err
+		}
+		pending, err := workgroupEdgePending(c.repository, stream)
+		if err != nil {
+			return err
+		}
+		finished = waiting == "" && !pending
+	}
 	var done []string
 	for _, unit := range units {
 		if finished || states[trace.UnitSubject(unit)].Value == UnitMerged {

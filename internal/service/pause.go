@@ -159,6 +159,25 @@ func (s *Service) held(repository *trace.Repository, stream config.WorkstreamID)
 // request, so nothing is pushed or asked of GitHub.
 func (s *Service) holding(repository *trace.Repository) func(config.WorkstreamID, coreadapter.Operation) bool {
 	return func(stream config.WorkstreamID, op coreadapter.Operation) bool {
+		if op.Action == deltaTurnAction {
+			return errors.Is(s.held(repository, stream), errPaused)
+		}
+		if op.Boundary == coreadapter.RepositoryBoundary {
+			if held, err := changeRepositoryHeld(repository, stream, op); err != nil || held {
+				return true
+			}
+		}
+		if held, err := changeHeld(repository, stream); err != nil {
+			return true
+		} else if held && op.Boundary == coreadapter.RunnerBoundary {
+			if input, err := thread.DecodeTurn(op); err == nil {
+				t, err := repository.Thread(stream, input.Agent)
+				if err == nil && t.Identity.Role == trace.ChiefOfStaff {
+					return false
+				}
+			}
+			return true
+		}
 		if publicationAction(op) && !pulls.Credentialed(s.options.PullRequests) {
 			return true
 		}
