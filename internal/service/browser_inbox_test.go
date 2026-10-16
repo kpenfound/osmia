@@ -205,6 +205,13 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	} {
 		p.awaitText(selector, want)
 	}
+	// The card leads with the rephrasing; what the role asked in its own
+	// words starts collapsed.
+	var collapsed bool
+	p.eval(`document.querySelector(`+quote(accepted+"details.asked")+`)?.open === false`, &collapsed)
+	if !collapsed {
+		t.Fatal("the asked questions are not collapsed under the rephrasing")
+	}
 	// The API offers no quick reply on the second question, so the page
 	// offers no acceptance.
 	var acceptable bool

@@ -1799,7 +1799,9 @@ func showInbox(w io.Writer, list service.InboxResponse) {
 		} else {
 			block("Options", "none until what blocks it is resolved")
 		}
-		if e.Recommendation != "" {
+		if e.Recommendation != "" && e.Kind == service.InboxContested {
+			block("Note", e.Recommendation)
+		} else if e.Recommendation != "" {
 			block("Recommendation", e.Recommendation)
 		}
 		for _, q := range e.Asked {

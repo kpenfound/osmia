@@ -190,7 +190,7 @@ func TestInboxPrintsEveryDecisionKind(t *testing.T) {
 	list := service.InboxResponse{Entries: []service.InboxEntry{
 		{Kind: service.InboxRatification, Workstream: stream, Revision: 2, Question: "Ratify spec.md revision 1 and plan.json revision 3? Debate ended after round 1: settled", Blocked: "Sealing.",
 			Options: []string{}, Recommendation: "do not ratify yet: ratification is blocked by 1 objection", OpenedAt: opened, Answer: service.InboxAnswer{Method: "POST", Path: "/v1/ratify/" + stream, Body: map[string]any{"spec": 1.0, "plan": 3.0}}},
-		{Kind: service.InboxContested, Workstream: stream, Unit: "resume", Question: "Unit resume is contested: two bounces", Blocked: "Unit resume.", Options: []string{"review", "revise"}, OpenedAt: opened},
+		{Kind: service.InboxContested, Workstream: stream, Unit: "resume", Question: "Unit resume is contested: two bounces", Blocked: "Unit resume.", Options: []string{"review", "revise"}, Recommendation: "Both reviews flag the same retry gap; rule revise.", OpenedAt: opened},
 		{Kind: service.InboxAmendment, Workstream: stream, Amendment: "2", Unit: "resume", Revision: 4, Question: "Amend it?", Blocked: "Unit resume waits for the decision.",
 			Options: []string{"approve", "reject"}, Recommendation: "approve: no objection stands", OpenedAt: opened},
 		{Kind: service.InboxDelivery, Workstream: stream, Revision: 5, Question: "Deliver it?", Blocked: "Publishing the pull request.", Options: []string{"approve"}, OpenedAt: opened,
@@ -204,7 +204,7 @@ func TestInboxPrintsEveryDecisionKind(t *testing.T) {
 	want := "Inbox: 6 waiting; each entry names the command that answers it\n" +
 		"\n[ratification] " + stamp + " " + stream + "\n  Question: Ratify spec.md revision 1 and plan.json revision 3? Debate ended after round 1: settled\n  Blocked: Sealing.\n  Options: none until what blocks it is resolved\n  Recommendation: do not ratify yet: ratification is blocked by 1 objection\n" +
 		"  Decided on: spec.md revision 1 and plan.json revision 3 in packet revision 2\n  Answer: osmia ratify " + stream + "\n" +
-		"\n[contested] " + stamp + " " + stream + " unit resume\n  Question: Unit resume is contested: two bounces\n  Blocked: Unit resume.\n  Options: review, revise\n" +
+		"\n[contested] " + stamp + " " + stream + " unit resume\n  Question: Unit resume is contested: two bounces\n  Blocked: Unit resume.\n  Options: review, revise\n  Note: Both reviews flag the same retry gap; rule revise.\n" +
 		"  Answer: osmia contested " + stream + " resume <review|revise> \"...\"\n" +
 		"\n[amendment] " + stamp + " " + stream + " amendment 2\n  Question: Amend it?\n  Blocked: Unit resume waits for the decision.\n  Options: approve, reject\n  Recommendation: approve: no objection stands\n" +
 		"  Decided on: packet revision 4\n  Answer: osmia amendment " + stream + " 2 <approve|reject> [note]\n" +

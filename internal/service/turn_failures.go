@@ -22,16 +22,34 @@ func exhausted(q trace.QueuedTurn) bool {
 	return !q.CompletedAt.IsZero() && q.Status() == "failed" && q.Response.FailureClass == coreadapter.Infrastructure
 }
 
-// failureHistory describes each attempt of a turn: its profile, and the class
-// and text of its failure.
+// failureHistory describes the attempts of a turn: their profile, and the
+// class and text of their failure. Consecutive attempts that failed the same
+// way on the same profile are described once, as a range.
 func failureHistory(q trace.QueuedTurn) string {
-	var attempts []string
+	type run struct {
+		first, last         int
+		profile, class, why string
+	}
+	var runs []run
 	for _, a := range q.Attempts {
 		failure := []rune(a.Failure)
 		if len(failure) > 300 {
 			failure = append(failure[:300], '…')
 		}
-		attempts = append(attempts, fmt.Sprintf("attempt %d on profile %s: %s failure: %s", a.Number, a.Profile.Name, a.FailureClass, string(failure)))
+		r := run{a.Number, a.Number, a.Profile.Name, string(a.FailureClass), string(failure)}
+		if n := len(runs); n > 0 && runs[n-1].profile == r.profile && runs[n-1].class == r.class && runs[n-1].why == r.why {
+			runs[n-1].last = a.Number
+			continue
+		}
+		runs = append(runs, r)
+	}
+	attempts := make([]string, 0, len(runs))
+	for _, r := range runs {
+		numbers := fmt.Sprintf("attempt %d", r.first)
+		if r.last != r.first {
+			numbers = fmt.Sprintf("attempts %d to %d", r.first, r.last)
+		}
+		attempts = append(attempts, fmt.Sprintf("%s on profile %s: %s failure: %s", numbers, r.profile, r.class, r.why))
 	}
 	return strings.Join(attempts, "; ")
 }
@@ -42,9 +60,10 @@ func failureContestID(response string) string { return trace.EventID(response, "
 
 // contestFailure contests a unit whose thread's latest turn exhausted its
 // infrastructure retries and fallbacks, moving it from `from` with a notice
-// for the chief of staff. The reason lists every attempt; the attempts stay in
-// the thread's log. A turn that contested the unit once never does again, so
-// an owner ruling moves the unit on. It reports whether the unit moved.
+// for the chief of staff. The reason describes every attempt; the attempts
+// stay in the thread's log. A turn that contested the unit once never does
+// again, so an owner ruling moves the unit on. It reports whether the unit
+// moved.
 func contestFailure(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, from string, actor trace.Actor, role string, last trace.QueuedTurn, at time.Time) (bool, error) {
 	if !exhausted(last) {
 		return false, nil
@@ -54,7 +73,7 @@ func contestFailure(ctx context.Context, repo *trace.Repository, stream config.W
 	if err != nil || slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
 		return false, err
 	}
-	reason := fmt.Sprintf("the %s turn %s of unit %s failed on every retry and fallback profile, so the unit is contested: %s", role, last.Request.TurnID, unit, failureHistory(last))
+	reason := fmt.Sprintf("the %s turn %s of unit %s failed on every retry and fallback profile: %s", role, last.Request.TurnID, unit, failureHistory(last))
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: at, Actor: actor, Cause: last.Response.ID}
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: from, To: UnitContested, Reason: reason}, Events: []trace.Event{trace.Notice(id, "unit", reason)}}
 	if _, err := repo.Transact(ctx, tx); errors.Is(err, trace.ErrConflict) {

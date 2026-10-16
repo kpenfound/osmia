@@ -2231,7 +2231,7 @@
     d.shown = key;
     let options = null;
     if (entry.kind === 'escalation') {
-      options = entry.options.length === 0 ? null : el('div', { class: 'actions', 'data-field': 'options' }, 'Options:', ...entry.options.map((o) => {
+      options = entry.options.length === 0 ? null : el('div', { class: 'choices', 'data-field': 'options' }, 'Options:', ...entry.options.map((o) => {
         const button = el('button', { type: 'button', 'data-field': 'option' }, o);
         button.addEventListener('click', () => {
           d.text.value = o;
@@ -2247,11 +2247,15 @@
         el('span', { class: 'tag', 'data-field': 'kind' }, kinds[entry.kind] || entry.kind),
         el('span', { class: 'meta' }, when(entry.opened_at))),
       el('p', { class: 'question', 'data-field': 'question' }, entry.question),
-      entry.asked.length === 0 ? null : el('ul', { class: 'asked', 'data-field': 'asked' }, ...entry.asked.map((q) => el('li', {},
-        el('span', { class: 'meta' }, q.asked_by + (q.unit ? ' on ' + q.unit : '') + ': '), q.question))),
       entry.blocked ? el('p', { class: 'meta', 'data-field': 'blocked' }, 'Waiting on it: ' + entry.blocked) : null,
       options,
-      entry.recommendation ? el('p', { class: 'attention', 'data-field': 'recommendation' }, 'Recommendation: ' + entry.recommendation) : null,
+      entry.recommendation ? el('p', { class: 'attention', 'data-field': 'recommendation' }, (entry.kind === 'contested' ? 'Note: ' : 'Recommendation: ') + entry.recommendation) : null,
+      // The question above is the chief of staff's rephrasing; what each
+      // role asked in its own words stays one tap away.
+      entry.asked.length === 0 ? null : el('details', { class: 'asked' },
+        el('summary', { class: 'meta' }, entry.asked.length === 1 ? 'What was asked' : 'What was asked (' + entry.asked.length + ' questions)'),
+        el('ul', { 'data-field': 'asked' }, ...entry.asked.map((q) => el('li', {},
+          el('span', { class: 'meta' }, q.asked_by + (q.unit ? ' on ' + q.unit : '') + ': '), q.question)))),
       ['publication', 'checks'].includes(entry.kind) ? null : el('p', { class: 'meta', 'data-field': 'pins' }, 'Answers ' + pins(entry)),
     ].filter((node) => node !== null));
     switch (entry.kind) {

@@ -24,6 +24,14 @@ var ownerActor = trace.Actor{Kind: "owner", ID: "local"}
 // priority guidance and the workstream's rendered bundle follow it.
 const chiefPrompt = "You are the chief of staff for workstream %s. The prompt is a message from the owner. The project context below was assembled when the message was accepted."
 
+// ownerWritingGuidance tells the chief of staff how to write the text the
+// owner's inbox shows. It belongs in the system prompt of every
+// chief-of-staff turn.
+const ownerWritingGuidance = "The owner reads your escalations, escalated contests and units held for them in an inbox, often on a phone, and must be able to decide from it in under a minute. Write that text for them: " +
+	"lead with the decision you need, in one or two plain sentences; say what is stuck in a sentence; give each option as one sentence saying what happens if they choose it; keep the recommendation to the option you would choose and its main reason. " +
+	"Leave out how you got there, evidence that does not change the choice, turn names, file paths, record revisions and commit hashes; the owner can read those in the feed and the trace. " +
+	"Prefer short sentences and plain words to jargon, and a short list to a long paragraph. Never repeat the same point in two fields."
+
 // now is the service clock: the reconciliation clock when one is supplied.
 func (s *Service) now() time.Time {
 	if s.options.Reconciliation.Now != nil {
@@ -135,7 +143,7 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 		ThreadID:     trace.ChiefOfStaff,
 		TurnID:       "message_" + id,
 		Profile:      profile,
-		SystemPrompt: fmt.Sprintf(chiefPrompt, host) + note + "\n\n" + chiefDocumentsGuidance + "\n\n" + priorityGuidance + "\n\n" + pauseGuidance + "\n\n" + changeGuidance + "\n\n" + amendmentGuidance + "\n\n" + charterGuidance + "\n\n" + contestGuidance + "\n\n" + driftHandbackGuidance + "\n\n" + context,
+		SystemPrompt: fmt.Sprintf(chiefPrompt, host) + note + "\n\n" + chiefDocumentsGuidance + "\n\n" + priorityGuidance + "\n\n" + pauseGuidance + "\n\n" + changeGuidance + "\n\n" + amendmentGuidance + "\n\n" + charterGuidance + "\n\n" + contestGuidance + "\n\n" + driftHandbackGuidance + "\n\n" + ownerWritingGuidance + "\n\n" + context,
 		Prompt:       req.Text,
 	})
 	if err != nil {

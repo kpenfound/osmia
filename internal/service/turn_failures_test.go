@@ -80,7 +80,7 @@ func checkFailureContest(t *testing.T, f *shedFixture, stream config.WorkstreamI
 			t.Fatal("engineering failure automatically required owner attention")
 		}
 	}
-	for _, want := range []string{"failed on every retry and fallback profile", q.Request.TurnID, fmt.Sprintf("attempt %d on profile default: infrastructure failure", turnRetries+1)} {
+	for _, want := range []string{"failed on every retry and fallback profile", q.Request.TurnID, fmt.Sprintf("%d on profile default: infrastructure failure", turnRetries+1)} {
 		if !strings.Contains(reason, want) {
 			t.Fatalf("contested status %+v lacks %q", status.Units, want)
 		}
@@ -266,4 +266,28 @@ func approvedReviewResult(f *shedFixture, stream config.WorkstreamID, unit strin
 		return result, fmt.Errorf("no satisfactory review")
 	}
 	return result, nil
+}
+
+// TestFailureHistoryCollapsesRepeatedAttempts checks that consecutive
+// attempts failing the same way on the same profile are described once, and
+// that an attempt failing differently or on another profile is described on
+// its own.
+func TestFailureHistoryCollapsesRepeatedAttempts(t *testing.T) {
+	attempt := func(n int, profile, failure string) trace.TurnAttempt {
+		return trace.TurnAttempt{Number: n, Profile: coreadapter.Profile{Name: profile}, FailureClass: coreadapter.Infrastructure, Failure: failure}
+	}
+	for _, c := range []struct {
+		attempts []trace.TurnAttempt
+		want     string
+	}{
+		{[]trace.TurnAttempt{attempt(1, "fast", "timed out")}, "attempt 1 on profile fast: infrastructure failure: timed out"},
+		{[]trace.TurnAttempt{attempt(1, "fast", "timed out"), attempt(2, "fast", "timed out"), attempt(3, "fast", "timed out")},
+			"attempts 1 to 3 on profile fast: infrastructure failure: timed out"},
+		{[]trace.TurnAttempt{attempt(1, "fast", "timed out"), attempt(2, "fast", "timed out"), attempt(3, "fast", "usage limit"), attempt(4, "slow", "usage limit")},
+			"attempts 1 to 2 on profile fast: infrastructure failure: timed out; attempt 3 on profile fast: infrastructure failure: usage limit; attempt 4 on profile slow: infrastructure failure: usage limit"},
+	} {
+		if got := failureHistory(trace.QueuedTurn{Attempts: c.attempts}); got != c.want {
+			t.Errorf("failureHistory\n%s\nwant\n%s", got, c.want)
+		}
+	}
 }

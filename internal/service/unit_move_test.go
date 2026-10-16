@@ -258,6 +258,11 @@ func TestChiefOfStaffRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 	if !ok || entry.Recommendation != hold || strings.Join(entry.Options, ",") != "review,revise" {
 		t.Fatalf("inbox entry %+v", entry)
 	}
+	// The entry shows the note once, as its own field, not again in the
+	// question.
+	if entry.Question != "Unit resume is contested: the chief of staff moved it here from implementing for you to rule on." {
+		t.Fatalf("inbox question %q", entry.Question)
+	}
 	out, api := m.f.s.recordContestedRuling(ctx, m.repo, m.stream, "resume", ContestedRulingRequest{Decision: "revise", Note: "Close the gap the reviews keep finding."}, ownerActor)
 	if api != nil {
 		t.Fatal(api.Message)

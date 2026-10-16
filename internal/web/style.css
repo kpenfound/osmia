@@ -1079,8 +1079,32 @@ button:disabled {
   padding: 0.15rem 0;
 }
 
-.question {
+.question,
+.decision [data-field="blocked"],
+.decision [data-field="recommendation"] {
   white-space: pre-wrap;
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.choices button {
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.asked summary {
+  cursor: pointer;
+}
+
+.asked ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1rem;
+  border-left: 2px solid var(--line);
+  list-style: none;
 }
 
 .asked li,

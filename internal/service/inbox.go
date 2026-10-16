@@ -633,6 +633,13 @@ func (s *Service) contestedEntry(repository *trace.Repository, stream config.Wor
 	e := decision(InboxContested, stream, contest.At, "/contested/"+string(stream)+"/"+unit, map[string]any{})
 	e.Unit = unit
 	e.Question = fmt.Sprintf("Unit %s is contested: %s", unit, contest.Reason)
+	// A move's reason ends with its note, which the entry already carries.
+	if moveContest(contest, unit) {
+		e.Question = fmt.Sprintf("Unit %s is contested: you moved it here from %s.", unit, contest.From)
+		if rulerName(contest.Actor) != "owner" {
+			e.Question = fmt.Sprintf("Unit %s is contested: the chief of staff moved it here from %s for you to rule on.", unit, contest.From)
+		}
+	}
 	e.Blocked = fmt.Sprintf("Unit %s.", unit)
 	e.Options = options
 	e.Recommendation = note
