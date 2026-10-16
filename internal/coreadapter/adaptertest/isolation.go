@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/kpenfound/busybees/core/agent"
-	"github.com/kpenfound/busybees/core/agent/agenttest/enforcertest"
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/agentcore/agent/agenttest/enforcertest"
 	a "github.com/kpenfound/osmia/internal/coreadapter"
 )
 

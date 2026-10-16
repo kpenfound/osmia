@@ -14,12 +14,12 @@
 - Osmia's service owns version control and delivery credentials. Its runtime agents receive scoped files and tools; they do not commit, rebase or push. This is a product requirement, not a restriction on the normal branch and pull-request workflow used to develop Osmia.
 - Keep target-project factory state under the Osmia root, outside the target repository. Osmia's own design and development configuration belong here.
 - Preserve the trace, durable threads and explicit owner decisions through restarts and retries. Reconcile side effects before retrying them.
-- Reuse `github.com/kpenfound/busybees/core` through a pinned dependency. Do not require a sibling checkout or copy its internals into this repository.
+- Reuse `github.com/kpenfound/agentcore` through a pinned dependency. Do not require a sibling checkout or copy its internals into this repository.
 
-## Missing busybees/core functionality
+## Missing agentcore functionality
 
-- When an Osmia feature needs functionality missing from busybees/core, open an upstream feature request in `kpenfound/busybees`.
-- If the needed logic can be implemented in Osmia while awaiting upstream support, a temporary local implementation is allowed. Leave a `TODO` comment beside that code describing the capability needed and stating that the extra code must be removed when busybees/core provides it.
+- When an Osmia feature needs functionality missing from agentcore, open an upstream feature request in `kpenfound/agentcore`.
+- If the needed logic can be implemented in Osmia while awaiting upstream support, a temporary local implementation is allowed. Leave a `TODO` comment beside that code describing the capability needed and stating that the extra code must be removed when agentcore provides it.
 - If the Osmia feature is blocked until upstream implements the capability, comment on the blocked Osmia issue explaining the dependency and linking the upstream feature request, so the upstream request can be prioritized.
 
 ## Validation

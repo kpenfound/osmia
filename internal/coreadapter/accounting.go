@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kpenfound/busybees/core/ops"
-	"github.com/kpenfound/busybees/core/work"
+	"github.com/kpenfound/agentcore/ops"
+	"github.com/kpenfound/agentcore/work"
 )
 
 // LedgerAdapter must be shared by all users of its file. External writers are
@@ -59,7 +59,7 @@ func (a *LedgerAdapter) read(ctx context.Context, since time.Time) ([]LedgerEntr
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// TODO: Remove this strict scan when busybees/core supplies fail-closed ledger
+	// TODO: Remove this strict scan when agentcore supplies fail-closed ledger
 	// reads for every record. Its reader ignores a malformed final record.
 	f, err := os.Open(a.core.LedgerPath())
 	if errors.Is(err, os.ErrNotExist) {

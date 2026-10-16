@@ -2,7 +2,7 @@
 
 A personal software factory for long-running feature work on repositories you own or contribute to. It is configured at the user level, keeps its factory state outside the repository it works on, is driven by a person through one aide, and shares one pool of agent capacity across several workstreams on several projects.
 
-Status: design v0.3, 2026-10-15. This document is the source of truth for feature proposals and implementation; an issue does not override the design. Osmia uses `github.com/kpenfound/busybees/core` as a Go dependency and defines an optional Hearsay memory integration. Section 17 defines those boundaries and section 18 summarizes the feature guarantees.
+Status: design v0.3, 2026-10-15. This document is the source of truth for feature proposals and implementation; an issue does not override the design. Osmia uses `github.com/kpenfound/agentcore` as a Go dependency and defines an optional Hearsay memory integration. Section 17 defines those boundaries and section 18 summarizes the feature guarantees.
 
 ---
 
@@ -932,7 +932,7 @@ Git worktrees and Jujutsu share the workspace interface. The service supports mu
 
 ## 17. Component boundaries
 
-**`github.com/kpenfound/busybees/core`** is the reusable Go dependency for agent execution and backends, session sandbox primitives, review, retry classification, ledger and budget primitives, capacity, event wakeups, the MCP host and the workspace interface. Osmia consumes a pinned module version. Reusable extensions belong in that dependency; Osmia-specific workflow policy remains here. A sibling checkout must not be required to build or test Osmia.
+**`github.com/kpenfound/agentcore`** is the reusable Go dependency for agent execution and backends, session sandbox primitives, review, retry classification, ledger and budget primitives, capacity, event wakeups, the MCP host and the workspace interface. Osmia consumes a pinned module version. Reusable extensions belong in that dependency; Osmia-specific workflow policy remains here. A sibling checkout must not be required to build or test Osmia.
 
 **Osmia owns the workflow.** Its Go controllers own feature and unit state, the plan, seals, footprints, scheduling policy, questions and fixed message routes, role notes, prompts, ratification and delivery gates. Durable threads wrap the core runner with an owned log and turn queue. The core's wakeup bus does not replace the durable outbox, and its workspace or VCS-access flags do not by themselves enforce the isolation required in sections 7 and 15. Adapters must verify those contracts explicitly.
 

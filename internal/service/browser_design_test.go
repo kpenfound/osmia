@@ -10,7 +10,7 @@ import (
 
 	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
-	"github.com/kpenfound/busybees/core/agent"
+	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )

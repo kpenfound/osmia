@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kpenfound/busybees/core/vcs"
+	"github.com/kpenfound/agentcore/vcs"
 )
 
 // requireJJ skips a test that needs jj where jj is not installed, and fails it

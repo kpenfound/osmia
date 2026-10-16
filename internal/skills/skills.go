@@ -1,7 +1,7 @@
 // Package skills parses and validates the skills a role's configuration
 // references by git URL, and prepares them as Claude Code plugin
 // directories. Cloning, refreshing and wrapping references as plugins is
-// busybees/core's own skills package (github.com/kpenfound/busybees/core/skills);
+// agentcore's own skills package (github.com/kpenfound/agentcore/skills);
 // Manager configures a core skills.Manager from Osmia's refresh policy, git
 // runner and clock on every call. Reference parsing and validation (Parse,
 // ParseRefresh) stay Osmia's own: they are used by role configuration and by
@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	coreskills "github.com/kpenfound/busybees/core/skills"
+	coreskills "github.com/kpenfound/agentcore/skills"
 )
 
 // DefaultRefresh is the refresh policy of a configuration that sets none.
@@ -96,7 +96,7 @@ func ParseRefresh(policy string) (always bool, after time.Duration, err error) {
 
 // Manager clones skill references into Dir and returns plugin directories
 // that expose only their skills. It implements core's agent.SkillPreparer by
-// configuring busybees/core's own skills.Manager on every call: the clone,
+// configuring agentcore's own skills.Manager on every call: the clone,
 // refresh and plugin-wrapping mechanics are core's, run with the git runner,
 // clock and refresh policy a caller configures on Manager.
 type Manager struct {

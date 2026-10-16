@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/kpenfound/busybees/core/vcs"
+	"github.com/kpenfound/agentcore/vcs"
 )
 
 // Provider is the version control backend of one set of workspaces on a

@@ -13,7 +13,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/kpenfound/busybees/core/review"
+	"github.com/kpenfound/agentcore/review"
 )
 
 // ReviewReference binds core artifacts to caller-owned identity and exact bytes.

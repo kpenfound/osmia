@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kpenfound/busybees/core/vcs"
+	"github.com/kpenfound/agentcore/vcs"
 )
 
 // Jujutsu is the Jujutsu provider of one clone. Its repository lives under
@@ -596,7 +596,7 @@ func (j *Jujutsu) Advance(ctx context.Context, w Worktree, from, to string) erro
 }
 
 // TODO: Move Jujutsu's persistent replay (ReplayIn, ReplayInFrom,
-// ContinueReplay, Replaying) to busybees/core's revision replay once core's
+// ContinueReplay, Replaying) to agentcore's revision replay once core's
 // jj.Replayer commits a replayed revision deterministically. Today it
 // duplicates with `jj duplicate`, which gives the duplicate a new random
 // change id on every call, and it commits at the wall-clock time of the

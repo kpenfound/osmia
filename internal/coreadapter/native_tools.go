@@ -1,6 +1,6 @@
 package coreadapter
 
-import "github.com/kpenfound/busybees/core/agent"
+import "github.com/kpenfound/agentcore/agent"
 
 // skillTool is Claude's tool that loads a skill from the turn's plugins.
 const skillTool = "Skill"

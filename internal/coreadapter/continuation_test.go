@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kpenfound/busybees/core/agent"
+	"github.com/kpenfound/agentcore/agent"
 )
 
 // resumeExecutor stands in for a real Executor's resume check, which would

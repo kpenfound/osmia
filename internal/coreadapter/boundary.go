@@ -15,8 +15,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kpenfound/busybees/core/agent"
-	"github.com/kpenfound/busybees/core/vcs"
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/agentcore/vcs"
 	"github.com/kpenfound/osmia/internal/skills"
 )
 

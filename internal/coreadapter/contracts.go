@@ -1,5 +1,5 @@
 // Package coreadapter defines Osmia's execution ports. Implementations may use
-// busybees/core; callers own workflow policy and durable records.
+// agentcore; callers own workflow policy and durable records.
 package coreadapter
 
 import (

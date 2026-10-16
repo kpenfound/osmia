@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kpenfound/busybees/core/vcs"
+	"github.com/kpenfound/agentcore/vcs"
 )
 
 // visibleHeads returns the commits the repository shows as heads.

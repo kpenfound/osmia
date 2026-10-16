@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kpenfound/busybees/core/agent"
-	"github.com/kpenfound/busybees/core/agent/procs"
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/agentcore/agent/procs"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/ghlog"
@@ -207,7 +207,7 @@ func (s *Service) recoverWorkspaces(ctx context.Context, cfg *config.Config) err
 }
 
 // reapSandboxes removes the Docker Sandboxes that sessions of an earlier
-// service left behind, through busybees/core's own cleanup of interrupted
+// service left behind, through agentcore's own cleanup of interrupted
 // sandbox records (procs.CleanSandboxDirs). A session's directory records
 // its sandbox's name until the sandbox is removed, so a record found before
 // any turn runs names one whose session was interrupted. A sandbox that

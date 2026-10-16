@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kpenfound/busybees/core/vcs"
+	"github.com/kpenfound/agentcore/vcs"
 )
 
 // newSessionWorktree gives a fixture clone a worktree on a session-style

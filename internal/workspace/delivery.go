@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kpenfound/busybees/core/vcs"
-	coregit "github.com/kpenfound/busybees/core/vcs/git"
+	"github.com/kpenfound/agentcore/vcs"
+	coregit "github.com/kpenfound/agentcore/vcs/git"
 )
 
 // DeliveryMessage pairs an original revision with its owner-approved message.

@@ -33,7 +33,7 @@ const sessionRolePrompt = "You are in a direct session with the owner, working i
 // unresumable saved session, exactly as any other role's CheckResume call
 // would (this wrapper changes nothing for them). Only when the engine has no
 // CheckResume of its own does it reach for a heuristic: a same-backend,
-// same-model, same-effort match, trusted because busybees/core v0.5.6 offers
+// same-model, same-effort match, trusted because agentcore offers
 // no documented way to verify a saved session's availability and
 // compatibility before starting it (TODO(upstream): a documented
 // resumability check would let this verify more and trust less). That

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kpenfound/busybees/core/agent"
-	"github.com/kpenfound/busybees/core/vcs"
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/agentcore/vcs"
 )
 
 // fakeExecutor stands in for a real Executor, which would launch a costly,

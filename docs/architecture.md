@@ -89,7 +89,7 @@ learnings; it does not rewrite or prune Git history. See
 | Interfaces | Local client and browser page | [cli](../internal/cli), [web](../internal/web) |
 | Jev judgments | The optional boost's switch, fallbacks, cool-down, judgment records and costs, over a standalone System One API client | [jev](../internal/jev), [systemone](../internal/systemone) |
 
-The service uses a pinned `busybees/core` dependency for reusable execution,
+The service uses a pinned `agentcore` dependency for reusable execution,
 MCP, sandbox and VCS primitives. Osmia keeps its state machine, owner decisions
 and recovery policy in this repository.
 

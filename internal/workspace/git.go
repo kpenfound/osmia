@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kpenfound/busybees/core/vcs"
-	gitvcs "github.com/kpenfound/busybees/core/vcs/git"
+	"github.com/kpenfound/agentcore/vcs"
+	gitvcs "github.com/kpenfound/agentcore/vcs/git"
 	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
@@ -546,7 +546,7 @@ func (g *Git) replayer() gitvcs.Replayer { return gitvcs.Replayer{} }
 // and removed its state but before Osmia reattached the branch to it,
 // neither of which core's own state covers.
 //
-// TODO: Remove this record when busybees/core's vcs.Replayer itself records
+// TODO: Remove this record when agentcore's vcs.Replayer itself records
 // a replay's pre-replay branch and tip, for a worktree that starts
 // attached, so a caller needs no separate bookkeeping to recover across a
 // restart or to abort back to it.

@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/kpenfound/busybees/core/agent"
+	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/skills"
 )
@@ -838,7 +838,7 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 		}
 		c.Profiles[name] = p
 	}
-	// TODO: Remove this named-profile fallback-cycle validation when busybees/core
+	// TODO: Remove this named-profile fallback-cycle validation when agentcore
 	// resolves a caller's named profiles into its own agent.Profile.Fallback chain
 	// and validates that chain for cycles. Core's Profile.Fallback only links
 	// already-resolved profiles by pointer; core has no profile registry keyed by

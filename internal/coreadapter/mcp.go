@@ -11,8 +11,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kpenfound/busybees/core/agent"
-	"github.com/kpenfound/busybees/core/mcphost"
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/agentcore/mcphost"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -176,7 +176,7 @@ func ContainerTransport(engine string) CoreTransport {
 
 // bridgeGateway asks engine for the gateway address of its bridge network.
 // TODO: core decides the same address for its own MCP server; remove this
-// once busybees/core exports it.
+// once agentcore exports it.
 func bridgeGateway(ctx context.Context, engine string) (string, error) {
 	out, err := exec.CommandContext(ctx, engine, "network", "inspect", "bridge", "--format", "{{(index .IPAM.Config 0).Gateway}}").Output()
 	if err != nil {

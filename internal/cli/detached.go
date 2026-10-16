@@ -141,7 +141,7 @@ var globalLogMu sync.Mutex
 // package's output, and slog's default logger, through logger:
 // slog.SetDefault makes the log package's default Logger write through
 // logger's handler, which catches a dependency linked into serve (e.g.
-// busybees/core or tailscale code other than tsnet's UserLogf) that still
+// agentcore or tailscale code other than tsnet's UserLogf) that still
 // calls log.Printf. If another service already running in this process
 // holds the lock, installGlobalLog installs nothing — that service's own
 // structured handler already receives every standard-log call, since both

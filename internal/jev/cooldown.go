@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kpenfound/busybees/core/ops"
+	"github.com/kpenfound/agentcore/ops"
 )
 
 // The cool-down policy. A rate limit, or outageThreshold consecutive

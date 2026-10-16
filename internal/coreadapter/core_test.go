@@ -3,7 +3,7 @@ package coreadapter_test
 import (
 	"testing"
 
-	"github.com/kpenfound/busybees/core/vcs"
+	"github.com/kpenfound/agentcore/vcs"
 )
 
 // Compile against a public core contract without acquiring a repository.

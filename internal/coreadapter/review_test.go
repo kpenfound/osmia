@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kpenfound/busybees/core/agent"
-	"github.com/kpenfound/busybees/core/review"
-	"github.com/kpenfound/busybees/core/vcs"
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/agentcore/review"
+	"github.com/kpenfound/agentcore/vcs"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

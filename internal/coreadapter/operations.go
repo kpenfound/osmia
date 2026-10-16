@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kpenfound/busybees/core/agent"
-	"github.com/kpenfound/busybees/core/ops"
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/agentcore/ops"
 )
 
 // FailureReason preserves the backend diagnostic for a failed execution,

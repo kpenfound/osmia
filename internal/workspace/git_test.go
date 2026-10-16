@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kpenfound/busybees/core/vcs"
-	gitvcs "github.com/kpenfound/busybees/core/vcs/git"
+	"github.com/kpenfound/agentcore/vcs"
+	gitvcs "github.com/kpenfound/agentcore/vcs/git"
 )
 
 func git(t *testing.T, args ...string) string {

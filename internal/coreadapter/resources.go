@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/kpenfound/busybees/core/vcs"
+	"github.com/kpenfound/agentcore/vcs"
 )
 
 // releaseLease serializes release and permits retry after a failed cleanup.

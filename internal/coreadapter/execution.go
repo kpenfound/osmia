@@ -8,8 +8,8 @@ import (
 	"math"
 	"slices"
 
-	"github.com/kpenfound/busybees/core/agent"
-	"github.com/kpenfound/busybees/core/vcs"
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/agentcore/vcs"
 )
 
 // ErrSessionCostCap is the error a turn's run carries when core stopped it,
