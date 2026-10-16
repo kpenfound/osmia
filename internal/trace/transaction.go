@@ -314,7 +314,7 @@ func (r *Repository) finishPublication(ctx context.Context, own *published) erro
 // materialize or remove: workflow, transition, question, shed, unit, final
 // review, drift rebase and owned agent files of a workstream, private role
 // notes, project notices, project documents, a session's thread entries and
-// check runs, and the base, own pull-request-outcome and
+// check runs, a workstream's moves, and the base, own pull-request-outcome and
 // logged-assumptions observations of a workstream.
 func publicationPath(name string) error {
 	parts := strings.Split(name, "/")
@@ -338,7 +338,7 @@ func publicationPath(name string) error {
 		if len(parts) >= 5 && (amendmentDraftPath(parts[2:]) || amendmentRoundPath(parts[2:])) {
 			return nil
 		}
-		if shedPath(parts[2:]) || unitPath(parts[2:]) || finalPath(parts[2:]) || driftPath(parts[2:]) || toolPath(parts[2:]) || judgmentPath(parts[2:]) || sealingPath(parts[2:]) || charterProposalPath(parts[2:]) || adaptiveDocumentPath(parts[2:]) || sessionEntryPath(parts[2:]) || sessionCheckPath(parts[2:]) {
+		if shedPath(parts[2:]) || unitPath(parts[2:]) || finalPath(parts[2:]) || driftPath(parts[2:]) || toolPath(parts[2:]) || judgmentPath(parts[2:]) || sealingPath(parts[2:]) || charterProposalPath(parts[2:]) || adaptiveDocumentPath(parts[2:]) || sessionEntryPath(parts[2:]) || sessionCheckPath(parts[2:]) || workstreamMovePath(parts[2:]) {
 			return nil
 		}
 	case len(parts) == 2 && parts[0] == "notes" && strings.HasSuffix(parts[1], ".md") && key(strings.TrimSuffix(parts[1], ".md")):

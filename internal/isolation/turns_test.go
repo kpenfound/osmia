@@ -420,7 +420,7 @@ func TestRoleGrantRefusesTheRemovedBeekeeperRole(t *testing.T) {
 }
 
 func TestChiefOfStaffToolsOnlyReachChiefOfStaff(t *testing.T) {
-	for _, name := range []string{"set_status", "prioritise", "decide_amendment", "decide_charter", "move_unit", "hand_back_drift"} {
+	for _, name := range []string{"set_status", "prioritise", "decide_amendment", "decide_charter", "move_unit", "move_workstream", "hand_back_drift"} {
 		for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason", "librarian"} {
 			t.Run(name+"/"+role, func(t *testing.T) {
 				r, _, h, engine, input := fixture(t, role, "container")

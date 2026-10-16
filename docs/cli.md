@@ -316,7 +316,8 @@ a crash and repeated starts neither lose nor duplicate records. See
   three times in a row is listed with the last failure and when the checks run
   next; it takes no answer, and it leaves the inbox once a run completes. A
   held drift rebase, whose conflict resolution review
-  sent back `shed.max_bounces` times, is answered with `rebase`, which
+  sent back `shed.max_bounces` times, or whose drift mason or reviewer turn
+  failed or ended without a verdict, is answered with `rebase`, which
   asks for another, or by asking the chief of staff with `send` to hand it
   back with a note its drift mason and reviewer receive; it leaves the inbox
   once either is recorded.
@@ -381,6 +382,32 @@ a crash and repeated starts neither lose nor duplicate records. See
   `status` shows whether the mason gave up or exhausted the clean-turn bound;
   only `revise` is accepted, resuming its thread in the existing workspace
   with a fresh clean-turn allowance. Neither decision approves a unit.
+- `move <workstream-id> <sketched|in-shed|ratified|building|assembled|delivered|abandoned> <note>`
+  moves a workstream the state machine left stuck or wrong. Quote the
+  required note. Before ratification, `sketched` asks the architect for a
+  redraft with your note once debate has concluded, `in-shed` asks for one
+  more round of debate, and `ratified` ratifies the latest ratification
+  packet; `abandoned` abandons the workstream with your note as the reason.
+  Those are the same actions as `shed redraft`, `shed more`, `ratify` and
+  `abandon`, with the same refusals. `assembled` asks for a fresh final review
+  of the branch as it is, which the reader receives with your note: use it
+  after a final review failed or the branch changed under it. It moves a
+  `building` workstream whose units have all merged, reruns the review of an
+  `assembled` one, and returns a `delivered` workstream whose pull request is
+  open to final review. `building` reopens an `assembled` workstream, or a
+  `delivered` one whose pull request is open, on its existing feature branch.
+  It stays building until a revision filed after the move is decided and its
+  units land, or until you move it to `assembled`, and its final review then
+  runs again. The open pull request is updated only after that final review
+  and your delivery approval. `delivered` returns a reopened workstream to
+  delivered while its feature branch is still what its open pull request
+  carries. A workstream whose pull request is merged or closed, or whose merge
+  you recorded with `merged`, does not reopen. A move the workstream's state
+  refuses, or one made while its publication is in flight, fails with
+  `conflict` (exit 5). The chief of staff moves a workstream to `building` or
+  `assembled` on its own judgment. It moves it to any other state only when
+  you ask it to with `send`. After three final reviews with blocking findings,
+  reopening is yours to decide.
 - `move <workstream-id> <unit> <implementing|checking|reviewing|approved|contested> <note>`
   moves a unit the state machine left stuck or wrong. The unit must have
   started and not merged: it is implementing, checking, reviewing, approved,

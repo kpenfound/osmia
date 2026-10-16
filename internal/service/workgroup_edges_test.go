@@ -501,7 +501,7 @@ func exerciseReadyDependentBaseGap(t *testing.T, p *publicationFixture, parent c
 	if !report.Maintenance || report.EdgeResolved == "" || reason != "" || len(report.blocking()) != 1 || p.feature(t) != DeliveredState {
 		t.Fatalf("later maintenance gap: %+v reason %q state %s", report, reason, p.feature(t))
 	}
-	if body := noticeOf(t, repo, stream, fmt.Sprintf("final-review-%d-reviewed", in.Review)); !strings.Contains(body, "repairs need a new workstream") {
+	if body := noticeOf(t, repo, stream, fmt.Sprintf("final-review-%d-reviewed", in.Review)); !strings.Contains(body, "move the workstream to building with move_workstream") {
 		t.Fatalf("the chief heard %q", body)
 	}
 	after, err := followup.Read(repo, stream)

@@ -62,6 +62,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   answer <inbox-number> <ruling>|--accept [--project ID] [--json]
   charter [<workstream-id> <question> [ratify|decline [note]]] [--json]
   contested <workstream> <unit> <review|revise> <note> [--json]
+  move <workstream> <sketched|in-shed|ratified|building|assembled|delivered|abandoned> <note> [--json]
   move <workstream> <unit> <implementing|checking|reviewing|approved|contested> <note> [--json]
   pause <all|project-id|workstream-id> [--hard] [--reason TEXT] [--json]
   resume <all|project-id|workstream-id> [--json]
@@ -248,8 +249,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = o.accept && len(a) == 1 || !o.accept && len(a) == 2
 	case "charter":
 		valid = len(a) == 0 || len(a) == 2 || (len(a) == 3 || len(a) == 4) && (a[2] == trace.CharterRatify || a[2] == trace.CharterDecline)
-	case "contested", "move":
+	case "contested":
 		valid = len(a) == 4
+	case "move":
+		valid = len(a) == 3 || len(a) == 4
 	case "pause", "resume":
 		valid = len(a) == 1
 	case "handin":
@@ -1046,6 +1049,21 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, result)
 		}
 		fmt.Fprintf(stdout, "Ruling recorded for contested unit %s of %s: %s\n", result.Unit, result.Workstream, result.Ruling.Decision)
+		return 0
+	}
+	if cmd == "move" && len(a) == 3 {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		result, err := c.MoveWorkstream(ctx, id, a[1], a[2])
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, result)
+		}
+		fmt.Fprintf(stdout, "Moved %s to %s: %s\n", result.Workstream, result.State, result.Detail)
 		return 0
 	}
 	if cmd == "move" {

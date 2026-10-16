@@ -818,7 +818,8 @@ foreman schedules its next drift rebase onto
 upstream. It defaults to `"6h"`. `"0"` (or `"0s"`) disables scheduled drift
 rebases; `osmia rebase` and `osmia project rebase` still ask for them. A
 drift rebase whose conflict resolution review sent back `shed.max_bounces`
-times is held: the workstream takes no scheduled drift rebase until
+times, or whose drift mason or reviewer turn failed or ended without a
+verdict, is held: the workstream takes no scheduled drift rebase until
 `osmia rebase` or `osmia project rebase` asks for one or the chief of staff hands it back, and the inbox lists it until
 then. A value that does not
 parse as a Go duration, a TOML number, a negative duration, or a nonzero

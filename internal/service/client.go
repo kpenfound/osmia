@@ -602,6 +602,13 @@ func (c *Client) MoveUnit(ctx context.Context, stream config.WorkstreamID, unit,
 	return v, err
 }
 
+// MoveWorkstream moves a workstream to another feature state with a note.
+func (c *Client) MoveWorkstream(ctx context.Context, stream config.WorkstreamID, to, note string) (WorkstreamMoveResponse, error) {
+	var v WorkstreamMoveResponse
+	err := c.Do(ctx, "POST", Prefix+"/move/"+string(stream), WorkstreamMoveRequest{To: to, Note: note}, &v)
+	return v, err
+}
+
 // RuleContested records the owner's direction for a contested unit.
 func (c *Client) RuleContested(ctx context.Context, stream config.WorkstreamID, unit, decision, note string) (ContestedRulingResponse, error) {
 	var v ContestedRulingResponse

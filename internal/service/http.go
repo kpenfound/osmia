@@ -612,7 +612,19 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if target, ok := strings.CutPrefix(r.URL.Path, Prefix+"/move/"); ok && r.Method == http.MethodPost {
 		stream, unit, found := strings.Cut(target, "/")
-		if !found || unit == "" {
+		if !found {
+			var v WorkstreamMoveRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			if out, api := s.ownerMoveWorkstream(r.Context(), stream, v); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+		if unit == "" {
 			failWith(w, &APIError{Validation, "a move requires a workstream and unit"})
 			return
 		}

@@ -524,6 +524,31 @@ func TestSessionCheckDocumentPathIsAccepted(t *testing.T) {
 	}
 }
 
+// A workstream move is a workstream document at moves/move-<n>.json,
+// recorded together with the transitions it makes; other names under moves/
+// are refused.
+func TestWorkstreamMoveDocumentPathIsAccepted(t *testing.T) {
+	r, root, p := create(t)
+	ctx := context.Background()
+	dir, err := root.WorkstreamTrace(p.ID, streamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	move := streamDocument("workstream-move-1", "moves/move-1.json", "{\"move\":1}\n", 1)
+	if _, err := r.RecordDocumentsWith(ctx, []Document{move}, transaction("assembled", 0, "", "assembled", 1)); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "workstreams", string(streamID), "moves", "move-1.json"))
+	if err != nil || string(data) != "{\"move\":1}\n" {
+		t.Fatalf("moves/move-1.json on disk: %q %v", data, err)
+	}
+	for _, path := range []string{"moves/move-0.json", "moves/other.json", "moves/move-1.txt"} {
+		if err := r.RecordDocuments(ctx, []Document{streamDocument("workstream-move-other", path, "x\n", 1)}); err == nil {
+			t.Fatalf("%s accepted", path)
+		}
+	}
+}
+
 // A shed record is a workstream document under shed/round-<n>/: a batch is one
 // commit through RecordDocuments, Append records one too, a project-scoped
 // shed path is refused, and the trace reopens with the files on disk.

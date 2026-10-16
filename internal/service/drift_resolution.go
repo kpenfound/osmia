@@ -263,6 +263,34 @@ func carryDrift(repository *trace.Repository, stream config.WorkstreamID, onto s
 	return r, true, nil
 }
 
+// unitRebaseConflicts returns the paths the unit's latest rebase left
+// conflicted when that rebase was onto base, the feature branch commit the
+// candidate under review descends from, or nil when it rebased cleanly or
+// onto another commit.
+func unitRebaseConflicts(repository *trace.Repository, stream config.WorkstreamID, unit, base string) ([]string, error) {
+	docs, err := trace.Read[trace.Document](repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	var rebase trace.Document
+	for _, d := range docs {
+		if d.ID == rebaseDocument(unit) {
+			rebase = d
+		}
+	}
+	if rebase.Revision == 0 {
+		return nil, nil
+	}
+	var rebased UnitRebase
+	if err := json.Unmarshal([]byte(rebase.Content), &rebased); err != nil {
+		return nil, err
+	}
+	if rebased.Onto != base {
+		return nil, nil
+	}
+	return rebased.Conflicts, nil
+}
+
 // unitDrift returns the drift rebase whose carry produced the candidate the
 // unit's latest report names, and whether one did: the unit's latest
 // rebase, clean and onto the feature branch a drift rebase moved, made that
@@ -574,6 +602,8 @@ func (d drifter) masonDone(ctx context.Context, stream config.WorkstreamID, w wo
 			return false, driftHeldError{fmt.Sprintf("its mason's latest %d turns were interrupted in a row", n)}
 		}
 		return false, d.follow(ctx, stream, last, "recover", last.Request.Prompt+"\n\n"+interruption(last)+" Your view holds the files that turn left. Go on from them, and call done once the resolution is complete.")
+	case "failed":
+		return false, driftHeldError{turnFailure("mason", last)}
 	case "idle":
 	default:
 		return false, nil
@@ -680,19 +710,33 @@ func (d drifter) reviewed(ctx context.Context, stream config.WorkstreamID, rebas
 		}
 		_, err := d.repository.EnqueueTurn(ctx, req)
 		return UnitVerdict{}, false, err
+	case "failed":
+		return UnitVerdict{}, false, driftHeldError{turnFailure("reviewer", last)}
 	case "idle":
 	default:
 		return UnitVerdict{}, false, nil
 	}
 	outcome := last.Response.Result.Outcome
 	if outcome == nil || outcome.Status != verdictOutcome {
-		return UnitVerdict{}, false, nil
+		return UnitVerdict{}, false, driftHeldError{fmt.Sprintf("its reviewer's turn %s ended without recording a verdict", last.Request.TurnID)}
 	}
 	var verdict UnitVerdict
 	if err := json.Unmarshal([]byte(outcome.Report), &verdict); err != nil {
 		return UnitVerdict{}, false, fmt.Errorf("the verdict of turn %s: %w", last.Request.TurnID, err)
 	}
 	return verdict, true, nil
+}
+
+// turnFailure says why a drift role's failed turn holds its drift rebase.
+func turnFailure(role string, last trace.QueuedTurn) string {
+	why := fmt.Sprintf("its %s's turn %s failed", role, last.Request.TurnID)
+	if exhausted(last) {
+		return why + " on every retry and fallback profile: " + failureHistory(last)
+	}
+	if last.Response.Failure != "" {
+		why += ": " + last.Response.Failure
+	}
+	return why
 }
 
 // ensureThread creates the workstream's drift agent thread when it is

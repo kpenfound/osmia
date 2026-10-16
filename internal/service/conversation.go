@@ -305,6 +305,23 @@ func chiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]C
 		}
 		out = append(out, ConversationEntry{Turn: move.Turn, Kind: "action", Text: text, At: d.At, State: TurnDone})
 	}
+	for _, d := range docs {
+		if !strings.HasPrefix(d.ID, workstreamMovePrefix) {
+			continue
+		}
+		var move WorkstreamMove
+		if err := json.Unmarshal([]byte(d.Content), &move); err != nil {
+			return nil, fmt.Errorf("%s: %w", d.Path, err)
+		}
+		if move.By != rulerName(chiefActor) {
+			continue
+		}
+		text := fmt.Sprintf("Moved the workstream from %s to %s. %s", move.From, move.To, move.Note)
+		if move.From == move.To {
+			text = fmt.Sprintf("Asked for a fresh final review of the %s workstream. %s", move.To, move.Note)
+		}
+		out = append(out, ConversationEntry{Turn: move.Turn, Kind: "action", Text: text, At: d.At, State: TurnDone})
+	}
 
 	host, err := repository.ChiefOfStaffHost(stream)
 	if err != nil {

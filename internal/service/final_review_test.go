@@ -582,7 +582,7 @@ func TestFinalReviewThatCannotRebaseFailsAndAuthorisesNothing(t *testing.T) {
 	if failed.To != "failed-1" || failed.Reason != result.Evidence {
 		t.Fatalf("the failed transition %+v", failed)
 	}
-	if body := noticeOf(t, repository, stream, failed.ID); !strings.HasPrefix(body, "The final review of the assembled branch failed: feature branch ") || !strings.HasSuffix(body, "The failed review authorises nothing; a new review runs once the branch or its governing documents change.") {
+	if body := noticeOf(t, repository, stream, failed.ID); !strings.HasPrefix(body, "The final review of the assembled branch failed: feature branch ") || !strings.HasSuffix(body, "The failed review authorises nothing; a new review runs once the branch or its governing documents change, or once the workstream is moved to assembled with move_workstream.") {
 		t.Fatalf("the notice %q", body)
 	}
 	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != "final review 1 failed: "+report.Failure {

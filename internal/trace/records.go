@@ -356,10 +356,19 @@ func documentPath(p string, stream bool) error {
 	if !stream && (memoryPath(parts) || p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || p == WorkgroupsPath || p == WorkgroupResolutionsPath || p == ProjectSpecsPath || p == ProjectAmendmentsPath || (len(parts) == 2 && parts[0] == "notices" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))) || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && ((p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json" || p == "edge-observation.json" || p == AssumptionsPath) || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts) || sessionCheckPath(parts)) {
+	if stream && ((p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json" || p == "edge-observation.json" || p == AssumptionsPath) || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || judgmentPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts) || sessionCheckPath(parts) || workstreamMovePath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)
+}
+
+// workstreamMovePath reports whether parts name one move of a workstream to
+// another feature state: moves/move-<n>.json.
+func workstreamMovePath(parts []string) bool {
+	if len(parts) != 2 || parts[0] != "moves" || !strings.HasPrefix(parts[1], "move-") || !strings.HasSuffix(parts[1], ".json") {
+		return false
+	}
+	return shedRound.MatchString("round-" + strings.TrimSuffix(strings.TrimPrefix(parts[1], "move-"), ".json"))
 }
 
 // sessionEntryPath reports whether parts name a service entry recorded on a

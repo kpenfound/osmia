@@ -277,7 +277,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		prompts[req.Name] = req
-		tools(ctx, req.Name, session, "answer", "capacity", "decide_amendment", "decide_change", "decide_charter", "escalate", "factory_context", "file_read", "hand_back_drift", "inspect_code", "log_assumption", "move_unit", "notify", "pause", "prioritise", "project_context", "propose_charter", "read_remote_file", "record_discovery", "relay_ruling", "request_change", "resolve_contested", "resume", "route_amendment", "set_status")
+		tools(ctx, req.Name, session, "answer", "capacity", "decide_amendment", "decide_change", "decide_charter", "escalate", "factory_context", "file_read", "hand_back_drift", "inspect_code", "log_assumption", "move_unit", "move_workstream", "notify", "pause", "prioritise", "project_context", "propose_charter", "read_remote_file", "record_discovery", "relay_ruling", "request_change", "resolve_contested", "resume", "route_amendment", "set_status")
 		switch {
 		case len(sent) > 0 && req.Name == sent[0].Turn:
 			// The chief of staff reads the workstream's documents in its view.

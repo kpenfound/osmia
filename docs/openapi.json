@@ -1423,6 +1423,55 @@
         }
       }
     },
+    "/v1/move/{workstream}": {
+      "post": {
+        "summary": "Move a workstream to another feature state",
+        "operationId": "postMoveByWorkstream",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkstreamMoveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkstreamMoveResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/move/{workstream}/{unit}": {
       "post": {
         "summary": "Move a unit to another state",
@@ -5090,6 +5139,9 @@
           "maintenance": {
             "type": "boolean"
           },
+          "move": {
+            "type": "integer"
+          },
           "operation": {
             "type": "string"
           },
@@ -7646,6 +7698,57 @@
             "type": "string"
           },
           "setting": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkstreamMove": {
+        "properties": {
+          "by": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "move": {
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkstreamMoveRequest": {
+        "properties": {
+          "note": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkstreamMoveResponse": {
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "move": {
+            "$ref": "#/components/schemas/WorkstreamMove"
+          },
+          "state": {
+            "type": "string"
+          },
+          "workstream": {
             "type": "string"
           }
         },

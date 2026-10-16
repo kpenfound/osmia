@@ -72,12 +72,16 @@ type finalReviewInput struct {
 	// from the current summary is stale: a workgroup dependency merged
 	// since, and a fresh review and owner approval are required (spec#13).
 	EdgeResolved string `json:"edge_resolved,omitempty"`
-	Review       int    `json:"review"`
-	Commit       string `json:"commit"`
-	Seal         int    `json:"seal"`
-	Spec         int    `json:"spec"`
-	Plan         int    `json:"plan"`
-	Charter      int    `json:"charter"`
+	// Move counts the workstream's moves to building or assembled when the
+	// review was asked for. Each such move asks for a fresh review of the
+	// branch, even when nothing else it reads changed.
+	Move    int    `json:"move,omitempty"`
+	Review  int    `json:"review"`
+	Commit  string `json:"commit"`
+	Seal    int    `json:"seal"`
+	Spec    int    `json:"spec"`
+	Plan    int    `json:"plan"`
+	Charter int    `json:"charter"`
 }
 
 // FinalRebase is the document final/rebase.json: the rebase of the feature
@@ -104,6 +108,7 @@ type FinalReport struct {
 	Maintenance  bool             `json:"maintenance,omitempty"`
 	BaseCheck    int              `json:"base_check,omitempty"`
 	EdgeResolved string           `json:"edge_resolved,omitempty"`
+	Move         int              `json:"move,omitempty"`
 	Review       int              `json:"review"`
 	Operation    string           `json:"operation"`
 	Outcome      string           `json:"outcome"`
@@ -263,7 +268,8 @@ func (a *finalReviewer) Pass(ctx context.Context) error {
 }
 
 // assemble moves a building workstream to assembled once every unit of its
-// sealed plan has merged, and does nothing while any has not.
+// sealed plan has merged, and does nothing while any has not, while work
+// remains unresolved, or while a move to building holds it for a revision.
 func (a *finalReviewer) assemble(ctx context.Context, stream config.WorkstreamID) error {
 	b, found, err := (&masons{s: a.s, cfg: a.s.about(a.repository), repository: a.repository}).readSealed(stream)
 	if err != nil || !found {
@@ -273,6 +279,9 @@ func (a *finalReviewer) assemble(ctx context.Context, stream config.WorkstreamID
 		return nil
 	}
 	if pending, err := unresolvedWork(a.repository, stream); err != nil || pending {
+		return err
+	}
+	if held, err := reopenHeld(a.repository, stream); err != nil || held {
 		return err
 	}
 	transitions, err := trace.Read[trace.Transition](a.repository, stream)
@@ -364,7 +373,11 @@ func (a *finalReviewer) governing(ctx context.Context, stream config.WorkstreamI
 	if err != nil {
 		return finalReviewInput{}, seal.Seal{}, err
 	}
-	return finalReviewInput{BaseCheck: baseCheck, Maintenance: feature.Value == DeliveredState, EdgeResolved: edgeResolved, Commit: tip, Seal: latest.Seal, Spec: latest.Revision.Spec, Plan: latest.Revision.Plan, Charter: charter.Revision}, latest, nil
+	moves, err := reviewMoves(a.repository, stream)
+	if err != nil {
+		return finalReviewInput{}, seal.Seal{}, err
+	}
+	return finalReviewInput{BaseCheck: baseCheck, Maintenance: feature.Value == DeliveredState, EdgeResolved: edgeResolved, Move: len(moves), Commit: tip, Seal: latest.Seal, Spec: latest.Revision.Spec, Plan: latest.Revision.Plan, Charter: charter.Revision}, latest, nil
 }
 
 // reads reports whether a review asked for with in, or recorded as report,
@@ -375,7 +388,7 @@ func (in finalReviewInput) reads(now finalReviewInput) bool {
 }
 
 func (r FinalReport) input() finalReviewInput {
-	return finalReviewInput{Maintenance: r.Maintenance, BaseCheck: r.BaseCheck, EdgeResolved: r.EdgeResolved, Commit: r.Commit, Seal: r.Seal, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter}
+	return finalReviewInput{Maintenance: r.Maintenance, BaseCheck: r.BaseCheck, EdgeResolved: r.EdgeResolved, Move: r.Move, Commit: r.Commit, Seal: r.Seal, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter}
 }
 
 // request asks for the next final review of an assembled workstream unless
@@ -630,7 +643,7 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if !found {
 		return coreadapter.OperationResult{}, fmt.Errorf("workstream %s has no seal", stream)
 	}
-	report := FinalReport{Maintenance: in.Maintenance, BaseCheck: in.BaseCheck, EdgeResolved: in.EdgeResolved, Review: in.Review, Operation: op.ID, Outcome: finalFailed, Branch: featureBranch(stream), Before: in.Commit, Seal: in.Seal, SpecHash: latest.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Criteria: []FinalCriterion{}}
+	report := FinalReport{Maintenance: in.Maintenance, BaseCheck: in.BaseCheck, EdgeResolved: in.EdgeResolved, Move: in.Move, Review: in.Review, Operation: op.ID, Outcome: finalFailed, Branch: featureBranch(stream), Before: in.Commit, Seal: in.Seal, SpecHash: latest.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Criteria: []FinalCriterion{}}
 	fail := func(reason string) (coreadapter.OperationResult, error) {
 		report.Failure = reason
 		return a.record(ctx, stream, report)
@@ -661,6 +674,9 @@ func (a *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	rebase, rebased, err := a.rebase(stream, in.Review)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
+	}
+	if now.Move != in.Move {
+		return fail(fmt.Sprintf("the workstream was moved since the review was asked for; move %d asks for a fresh review", now.Move))
 	}
 	if now.BaseCheck != in.BaseCheck || now.EdgeResolved != in.EdgeResolved || now.Seal != in.Seal || now.Spec != in.Spec || now.Plan != in.Plan || now.Charter != in.Charter {
 		return fail(fmt.Sprintf("the governing documents changed since the review was asked for: seal %d, spec revision %d, plan revision %d and charter revision %d are current", now.Seal, now.Spec, now.Plan, now.Charter))
@@ -945,6 +961,11 @@ func (a *finalReviewer) enqueue(ctx context.Context, cfg *config.Config, stream 
 	notes, err := driftRebaseNotes(a.repository, stream)
 	if err != nil {
 		return err
+	}
+	if note, err := finalMoveNote(a.repository, stream, in.Move); err != nil {
+		return err
+	} else if note != "" {
+		notes = append(notes, note)
 	}
 	coverage, err := a.coverage(stream, report)
 	if err != nil {
@@ -1283,7 +1304,7 @@ func (a *finalReviewer) record(ctx context.Context, stream config.WorkstreamID, 
 		body = finalReviewNotice(report, blocking, rounds, edgePending)
 	} else {
 		reason = fmt.Sprintf("final review %d failed: %s; report %s revision %d", report.Review, report.Failure, finalReportPath, revision)
-		body = fmt.Sprintf("The final review of the assembled branch failed: %s. The failed review authorises nothing; a new review runs once the branch or its governing documents change.", report.Failure)
+		body = fmt.Sprintf("The final review of the assembled branch failed: %s. The failed review authorises nothing; a new review runs once the branch or its governing documents change, or once the workstream is moved to assembled with %s.", report.Failure, moveWorkstreamTool)
 	}
 	outcome.Evidence = reason
 	state, err := a.repository.Workflow(stream, finalReviewSubject)
@@ -1364,7 +1385,7 @@ func finalReviewNotice(report FinalReport, blocking []string, rounds int, edgePe
 	case report.Maintenance && edgePending:
 		b.WriteString("\nOne follow-up unit repairs the post-merge dependency update; the final review runs again once it lands.")
 	case report.Maintenance:
-		b.WriteString("\nThe workstream is delivered, so repairs need a new workstream; the owner can instead accept these findings at delivery.")
+		fmt.Fprintf(&b, "\nThe workstream is delivered with its pull request open. Triage them: to repair a finding that needs code, move the workstream to building with %s and then file one plan revision, through route_amendment, that groups related findings into as few units as fit; the open pull request is updated only after a fresh final review and the owner's delivery approval. A finding that is mistaken or not worth building is the owner's to accept at delivery, so tell the owner why.", moveWorkstreamTool)
 	case rounds >= maxFinalRounds:
 		fmt.Fprintf(&b, "\nFinal reviews have found blocking problems %d times. Further revisions of the assembled plan are the owner's decision: present these findings to the owner, who can accept them at delivery or approve the work that resolves them.", rounds)
 	default:
@@ -1446,6 +1467,24 @@ func (a *finalReviewer) followup(stream config.WorkstreamID, report FinalReport,
 		first = criteria[0]
 	}
 	return followup.Unit{Review: report.Review, Report: revision, Criterion: first, Gap: gap, Unit: plan.Unit{ID: id, Title: "Repair the post-merge dependency update", Task: "Resolve what final review " + strconv.Itoa(report.Review) + " found blocking after the dependency update: " + gap, Acceptance: acceptance, Criteria: criteria, DependsOn: []string{}, Footprint: footprint}}, true, nil
+}
+
+// finalMoveNote is what the reader of a final review asked for by the
+// workstream's move n to building or assembled is told of it, or "" when the
+// review answers no move.
+func finalMoveNote(repository *trace.Repository, stream config.WorkstreamID, n int) (string, error) {
+	if n == 0 {
+		return "", nil
+	}
+	moves, err := reviewMoves(repository, stream)
+	if err != nil || len(moves) < n {
+		return "", err
+	}
+	m := moves[n-1]
+	if m.From == m.To {
+		return fmt.Sprintf("The %s asked for this review with this note: %s", m.By, m.Note), nil
+	}
+	return fmt.Sprintf("The %s moved the workstream from %s to %s, which asked for this review, with this note: %s", m.By, m.From, m.To, m.Note), nil
 }
 
 // previousFinalReport returns the latest reviewed report of a final review
@@ -1620,6 +1659,7 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 		{"dependency observation", report.BaseCheck, now.BaseCheck},
 		{"delivery maintenance", report.Maintenance, now.Maintenance},
 		{"workgroup edge resolution", report.EdgeResolved, now.EdgeResolved},
+		{"workstream move", report.Move, now.Move},
 		{"seal", report.Seal, now.Seal},
 		{"spec hash", report.SpecHash, latest.SpecHash},
 		{"spec revision", report.Spec, revisions[plan.SpecDocument]},
@@ -1646,7 +1686,7 @@ func (a *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamI
 }
 
 func finalSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s). Every planned unit has landed on the feature branch after its own reviewer verified it in detail against its task and acceptance, and the service ran every project check on the exact commit you read. You read the branch as a whole, at a high level, before the owner decides whether it is delivered. You judge whether the feature delivers the sealed spec's intent: its units work together in the running product rather than only in their own tests, no unit undoes or contradicts another, every criterion is served, and no charter rule is broken. You do not review units again: their tests, edge cases, naming and internal structure were judged in their own reviews, and style, formatting and lint belong to the checks. Your view is read-only. You record your report with %s: a summary and your findings. A finding is blocking only when the feature as a whole fails the spec's intent or breaks a charter rule; anything else worth the owner's attention is advisory. Report nothing you cannot point at in the branch.", p.Name, p.Upstream, FinalReportTool)
+	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s). Every planned unit has landed on the feature branch after its own reviewer verified it in detail against its task and acceptance, and the service ran every project check on the exact commit you read. You read the branch as a whole, at a high level, before the owner decides whether it is delivered. You judge whether the feature delivers the sealed spec's intent: its units work together in the running product rather than only in their own tests, no unit undoes or contradicts another, every criterion is served, and no charter rule is broken. You do not review units again: their tests, edge cases, naming and internal structure were judged in their own reviews, and style, formatting and lint belong to the checks. Your view is read-only. You record your report with %s: a summary and your findings. A finding is blocking only when the feature as a whole fails the spec's intent or breaks a charter rule; anything else worth the owner's attention is advisory. The branch was rebased onto upstream: changes a rebase or a drift resolution needed so that both upstream's behaviour and the feature's stand are part of the feature branch whatever the sealed spec, plan or unit footprints name, and upstream's own changes are not the feature's. Neither is a finding on its own; judge them only where they break the feature or fail a criterion. Report nothing you cannot point at in the branch.", p.Name, p.Upstream, FinalReportTool)
 }
 
 func finalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string, coverage []FinalCriterion, previous FinalReport) string {
@@ -1665,7 +1705,7 @@ func finalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string, 
 	diff := fmt.Sprintf("Call %s to read the whole change the branch makes to upstream: files_only lists the changed files, and paths and lines narrow the diff.", workstreamDiffTool)
 	earlier := ""
 	if previous.Review > 0 {
-		diff = fmt.Sprintf("Call %s with change branch for the whole change the branch makes to upstream, or change since for what changed after final review %d: files_only lists the changed files, and paths and lines narrow the diff.", workstreamDiffTool, previous.Review)
+		diff = fmt.Sprintf("Call %s with change branch for the whole change the branch makes to upstream, or change since for what changed after final review %d: files_only lists the changed files, and paths and lines narrow the diff. The change since includes whatever upstream changed in between, which a rebase brought in: that is upstream's change, not the feature's, so judge it only where it breaks the feature.", workstreamDiffTool, previous.Review)
 		var b strings.Builder
 		fmt.Fprintf(&b, "\nFinal review %d read %s and found:\n", previous.Review, previous.Commit)
 		blocking := previous.blocking()
