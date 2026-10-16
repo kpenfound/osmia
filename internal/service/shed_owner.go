@@ -390,7 +390,7 @@ func (s *Service) shedSkip(ctx context.Context, raw string) (ShedResponse, *APIE
 	reason := "the owner skipped debate; the workstream still needs the owner's ratification of the spec and the plan"
 	tx := trace.Transaction{ExpectedVersion: o.owner.Version,
 		Transition: trace.Transition{Header: ownerHeader(skipTransition, o.project, o.stream, "owner-shed", o.now()), Subject: ownerSubject, From: o.owner.Value, To: skippedValue, Reason: reason},
-		Events:     []trace.Event{trace.Notice(skipTransition, "owner", reason+".\n"+presentation(shed.Recommend(entries)))}}
+		Events:     []trace.Event{trace.Notice(skipTransition, "owner", reason+".\n"+presentation(shed.Recommend(entries))+decideFirst(entries))}}
 	if _, err := o.repository.Transact(ctx, tx); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			return ShedResponse{}, &APIError{Conflict, fmt.Sprintf("workstream %s changed while skipping debate; check osmia status and retry", o.stream)}

@@ -114,16 +114,23 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 	if len(docs) != 1 || docs[0].Path != shed.PacketPath(1) || docs[0].Actor != shedActor || docs[0].Cause != "ratification-packet" {
 		t.Fatalf("packet documents %+v", docs)
 	}
+	// The chief of staff is told to decide the committee's objections, then
+	// present it and raise the attention item in its status. Until it has
+	// decided them, the owner's inbox does not list the packet.
+	if notice := f.concluded(t, stream, 1).Event.Body; !strings.Contains(notice, presentation(blocked)+decideFirst(packet.Dissent)) {
+		t.Fatalf("notice %q, want %q", notice, presentation(blocked)+decideFirst(packet.Dissent))
+	}
+	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 0 {
+		t.Fatalf("inbox entries before the chief of staff decided %+v", entries)
+	}
+	f.chiefDecides(t, stream, veto, shed.Escalate, "The veto cites a rule the plan may break.")
+	f.chiefDecides(t, stream, advice, shed.Escalate, "The plan order is a judgement call.")
+	_, presented := f.awaitDecided(t, stream)
 	// The inbox lists the packet with the revisions ratifying it pins, and
 	// offers no ratification while the veto blocks it.
-	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 1 || entries[0].Revision != 1 || entries[0].Recommendation != blocked || entries[0].Options == nil || len(entries[0].Options) != 0 ||
+	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 1 || entries[0].Revision != presented || entries[0].Recommendation != blocked || entries[0].Options == nil || len(entries[0].Options) != 0 ||
 		!reflect.DeepEqual(entries[0].Answer, InboxAnswer{Method: "POST", Path: "/v1/ratify/" + string(stream), Body: map[string]any{"spec": 1.0, "plan": 1.0}}) {
 		t.Fatalf("inbox entries of the packet %+v", entries)
-	}
-	// The chief of staff is told to present it and to raise the attention
-	// item in its status.
-	if notice := f.concluded(t, stream, 1).Event.Body; !strings.Contains(notice, presentation(blocked)) {
-		t.Fatalf("notice %q, want %q", notice, presentation(blocked))
 	}
 	// A charter veto with no disposition refuses ratification, naming it.
 	_, err := f.c.Ratify(ctx, stream, 1, 1)
@@ -148,11 +155,11 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 	if packet := f.awaitPacket(t, stream, ratifiable); len(packet.Dissent) != 2 || packet.Dissent[0].Disposition != shed.Overruled {
 		t.Fatalf("the packet after the overrule %+v", packet)
 	}
-	if docs := f.documents(t, stream, shed.PacketDocumentID(1)); len(docs) != 2 || docs[1].Revision != 2 {
+	if docs := f.documents(t, stream, shed.PacketDocumentID(1)); len(docs) != presented+1 || docs[presented].Revision != presented+1 {
 		t.Fatalf("packet documents after the overrule %+v", docs)
 	}
 	// The inbox lists the latest revision alone, which may be ratified.
-	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 1 || entries[0].Revision != 2 || entries[0].Recommendation != ratifiable || !slices.Equal(entries[0].Options, []string{"ratify"}) {
+	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 1 || entries[0].Revision != presented+1 || entries[0].Recommendation != ratifiable || !slices.Equal(entries[0].Options, []string{"ratify"}) {
 		t.Fatalf("inbox entries after the overrule %+v", entries)
 	}
 	// A disposition the owner takes back, and then takes again, leaves the
@@ -167,7 +174,7 @@ func TestPacketPresentsTheDecisionAndTheOverruleUnblocksIt(t *testing.T) {
 	}
 	f.awaitPacket(t, stream, ratifiable)
 	docs = f.documents(t, stream, shed.PacketDocumentID(1))
-	if len(docs) != 4 || docs[3].Revision != 4 || docs[3].Content != docs[1].Content {
+	if len(docs) != presented+3 || docs[presented+2].Revision != presented+3 || docs[presented+2].Content != docs[presented].Content {
 		t.Fatalf("packet documents after the owner changed their mind twice %+v", docs)
 	}
 

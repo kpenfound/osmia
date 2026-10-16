@@ -242,30 +242,52 @@ type Dissent struct {
 func (d Dissent) Blocking() bool { return d.Kind == Charter || d.Kind == Owner }
 
 // Entry is one line of the dissent record: an objection that stands, whether
-// it blocks, and how the owner disposed of it.
+// it blocks, and how it was disposed of. By is ChiefOfStaff when the chief of
+// staff dismissed it on the owner's behalf, and empty for the owner's own
+// disposition. Escalated says the chief of staff put it to the owner, with
+// Escalation as its note.
 type Entry struct {
 	Dissent
 	Blocking    bool        `json:"blocking"`
 	Disposition Disposition `json:"disposition,omitempty"`
 	Note        string      `json:"note,omitempty"`
+	By          string      `json:"by,omitempty"`
+	Escalated   bool        `json:"escalated,omitempty"`
+	Escalation  string      `json:"escalation,omitempty"`
 }
 
 // DissentRecord is the dissent that stands after the given records, each
-// objection with its kind, member, part, the owner's disposition of it and whether
-// it blocks. A sustained objection blocks whatever its kind; a dismissed or
-// overruled one blocks no longer and is kept as the owner's recorded
-// disposition.
-func DissentRecord(records []Record, rulings []Rulings) []Entry {
+// objection with its kind, member, part, its disposition and whether it
+// blocks. A sustained objection blocks whatever its kind; a dismissed or
+// overruled one blocks no longer and is kept as the recorded disposition. The
+// chief of staff's dismissal of a committee objection is a dismissal on the
+// owner's behalf, and the owner's own ruling takes precedence over it.
+func DissentRecord(records []Record, rulings []Rulings, chief []ChiefDecisions) []Entry {
 	ruled := map[string]Ruling{}
 	for _, one := range flatten(rulings) {
 		ruled[one.Objection] = one
+	}
+	decided := map[string]ChiefDecision{}
+	for _, round := range chief {
+		for _, one := range round.Decisions {
+			decided[one.Objection] = one
+		}
 	}
 	open := OpenDissent(records)
 	entries := make([]Entry, len(open))
 	for i, d := range open {
 		entries[i] = Entry{Dissent: d, Blocking: d.Blocking()}
+		if c, ok := decided[d.ID]; ok && d.Member != OwnerMember {
+			switch c.Decision {
+			case Escalate:
+				entries[i].Escalated, entries[i].Escalation = true, c.Note
+			case Dismiss:
+				entries[i].Disposition, entries[i].Note, entries[i].By = Dismissed, c.Note, ChiefOfStaff
+				entries[i].Blocking = false
+			}
+		}
 		if r, ok := ruled[d.ID]; ok {
-			entries[i].Disposition, entries[i].Note = r.Disposition, r.Note
+			entries[i].Disposition, entries[i].Note, entries[i].By = r.Disposition, r.Note, ""
 			entries[i].Blocking = r.Disposition == Sustained
 		}
 	}

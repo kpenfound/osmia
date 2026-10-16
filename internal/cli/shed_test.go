@@ -54,7 +54,7 @@ func withShed(t *testing.T) service.Options {
 	must(t, err)
 	// The chief of staff presented the packet of the conclusion, which is
 	// what osmia ratify reads the revisions from.
-	packet, err := shed.EncodePacket(shed.Present(1, shed.Pin{Spec: 1, Plan: 1}, false, "planted", shed.DissentRecord([]shed.Record{record}, nil)))
+	packet, err := shed.EncodePacket(shed.Present(1, shed.Pin{Spec: 1, Plan: 1}, false, "planted", shed.DissentRecord([]shed.Record{record}, nil, nil)))
 	must(t, err)
 	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.PacketDocumentID(1), Revision: 1, Project: project, Workstream: stream, At: written, Actor: trace.Actor{Kind: "service", ID: "shed"}, Cause: "ratification-packet"}, Path: shed.PacketPath(1), Content: string(packet)}}))
 	must(t, repo.Close())

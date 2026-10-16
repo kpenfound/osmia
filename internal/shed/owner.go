@@ -40,10 +40,11 @@ const (
 const Owner Kind = "owner"
 
 // reserved reports whether a shed file name, without its extension, belongs
-// to the architect or to the owner rather than to a committee member.
+// to the architect, the chief of staff or the owner rather than to a
+// committee member.
 func reserved(name string) bool {
 	switch name {
-	case replyName, redraftedName, rulingsName, moreName, redraftName, packetName, ratificationName:
+	case replyName, redraftedName, rulingsName, chiefName, moreName, redraftName, packetName, ratificationName:
 		return true
 	}
 	return false

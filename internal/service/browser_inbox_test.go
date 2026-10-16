@@ -338,6 +338,8 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	ws := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, ws, "concluded-1")
 	faults.check(t)
+	f.chiefDecides(t, ws, veto, shed.Escalate, "The veto cites the small-changes rule.")
+	f.chiefDecides(t, ws, size, shed.Escalate, "Splitting the unit is a judgement call.")
 	var entries []InboxEntry
 	soon(t, "the ratification entry", func() bool {
 		entries = f.inboxEntries(t, ws, InboxRatification)
@@ -365,6 +367,7 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	p.awaitText(card+`[data-objection="`+veto+`"] [data-field=standing]`, "blocking")
 	p.awaitText(card+`[data-objection="`+veto+`"]`, "charter by "+committeeAgent(1)+" in round 1 on spec#2")
 	p.awaitText(card+`[data-objection="`+size+`"] [data-field=argument]`, "It does not hold.")
+	p.awaitText(card+`[data-objection="`+veto+`"] [data-field=escalation]`, "Chief of staff: The veto cites the small-changes rule.")
 	// Nothing blocked may be ratified.
 	if got := choices(); slices.Contains(got, "ratify") || !slices.Contains(got, "overrule "+veto) || !slices.Contains(got, "sustain "+size) || !slices.Contains(got, "redraft") {
 		t.Fatalf("the decisions offered while objections block: %v", got)
@@ -421,6 +424,46 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	}
 	p.await("the same document", `window.notReloaded === true`)
 	faults.check(t)
+}
+
+// The ratification card shows the owner the objections the chief of staff
+// escalated, with its note, and folds those it dismissed below them with its
+// reasons: a dismissed charter veto blocks nothing and takes no ruling there.
+func TestBrowserPageFoldsObjectionsTheChiefOfStaffDismissed(t *testing.T) {
+	t.Parallel()
+	f := newDebateFixtureWith(t, 2, 1, listenWeb, nil)
+	t.Cleanup(func() { f.stop(t) })
+	p := openBrowser(t)
+	faults := &faults{}
+	veto := shed.ObjectionID(1, committeeAgent(1), 1)
+	size := shed.ObjectionID(1, committeeAgent(2), 1)
+	f.member(1, 1, 1, objects(faults, shed.Charter, "spec#2", "charter#1"))
+	f.member(1, 2, 1, objects(faults, shed.Size, "plan#resume", "spec#1"))
+	f.script(replyTurnID(1, 1), nil, answers(faults, "Kept as it is.", veto, size))
+	ws := f.handIn(t, "design", handedDesign)
+	f.awaitShed(t, ws, "concluded-1")
+	faults.check(t)
+	f.chiefDecides(t, ws, veto, shed.Dismiss, "Each unit is one small change with its own test.")
+	f.chiefDecides(t, ws, size, shed.Escalate, "Splitting the unit is a judgement call.")
+	var entries []InboxEntry
+	soon(t, "the ratification entry", func() bool {
+		entries = f.inboxEntries(t, ws, InboxRatification)
+		return len(entries) > 0
+	})
+	card := decisionCard(entries[0])
+
+	p.run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.await("the live connection", `document.body.dataset.connection === 'live'`)
+	p.selectWorkstream(ws)
+	p.awaitText(card+"[data-field=kind]", "Ratification")
+	p.awaitText(card+`[data-objection="`+size+`"] [data-field=escalation]`, "Chief of staff: Splitting the unit is a judgement call.")
+	p.awaitText(card+"[data-field=dismissed] summary", "Dismissed by the chief of staff (1)")
+	p.awaitText(card+`[data-field=dismissed] [data-objection="`+veto+`"] [data-field=note]`, "Chief of staff: Each unit is one small change with its own test.")
+	var choices []string
+	p.eval(`[...document.querySelector(`+quote(card+"select")+`).options].map((o) => o.value)`, &choices)
+	if !slices.Contains(choices, "ratify") || !slices.Contains(choices, "overrule "+size) || slices.ContainsFunc(choices, func(c string) bool { return strings.HasSuffix(c, " "+veto) }) {
+		t.Fatalf("the decisions offered with the veto dismissed: %v", choices)
+	}
 }
 
 // The page shows a delivery with its final report's criteria and the drafted

@@ -545,8 +545,10 @@ func baseEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEnt
 }
 
 // ratificationEntry is the workstream's ratification packet while debate
-// rests at the decision it presents and the owner has not ratified it. It
-// offers ratify only while no objection blocks it.
+// rests at the decision it presents and the owner has not ratified it. The
+// chief of staff decides every committee objection that stands first, so the
+// entry is listed only once none waits for its decision. It offers ratify only
+// while no objection blocks it.
 func ratificationEntry(repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
 	packet, doc, found, err := shed.LatestPacket(repository, stream)
 	if err != nil || !found {
@@ -569,6 +571,9 @@ func ratificationEntry(repository *trace.Repository, stream config.WorkstreamID)
 	entries, err := Dissent(repository, stream)
 	if err != nil {
 		return InboxEntry{}, false, err
+	}
+	if len(shed.Undecided(entries)) > 0 {
+		return InboxEntry{}, false, nil
 	}
 	e := decision(InboxRatification, stream, doc.At, "/ratify/"+string(stream), map[string]any{"spec": packet.Revision.Spec, "plan": packet.Revision.Plan})
 	e.Revision = doc.Revision

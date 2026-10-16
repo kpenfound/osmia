@@ -109,7 +109,9 @@ func roundRecords(records []shed.Record, round int) []shed.Record {
 	}
 	return out
 }
-func amendmentDissent(records []shed.Record) []shed.Entry { return shed.DissentRecord(records, nil) }
+func amendmentDissent(records []shed.Record) []shed.Entry {
+	return shed.DissentRecord(records, nil, nil)
+}
 func amendmentCommitteeSystemPrompt(project config.Project, in roundInput) string {
 	if in.Amendment == "" {
 		return committeeSystemPrompt(project)

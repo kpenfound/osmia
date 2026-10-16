@@ -79,14 +79,14 @@ func TestOwnerRecordRoundTripsAndRefusesInvalidContent(t *testing.T) {
 // The owner's objection blocks and no member's turn settles it.
 func TestOwnerObjectionBlocksAndOnlyTheOwnerSettlesIt(t *testing.T) {
 	t.Parallel()
-	entries := shed.DissentRecord([]shed.Record{ownerRecord(1, one, 1), record(2, alice, two, 0)}, nil)
+	entries := shed.DissentRecord([]shed.Record{ownerRecord(1, one, 1), record(2, alice, two, 0)}, nil, nil)
 	if len(entries) != 1 || !entries[0].Blocking || entries[0].Member != shed.OwnerMember || entries[0].Kind != shed.Owner {
 		t.Fatalf("dissent record %+v", entries)
 	}
 	if len(shed.Standing(entries)) != 1 {
 		t.Fatalf("the owner's objection was settled: %+v", entries)
 	}
-	dismissed := shed.DissentRecord([]shed.Record{ownerRecord(1, one, 1)}, []shed.Rulings{rulings(2, two, shed.Ruling{Objection: "owner-r1-1", Disposition: shed.Dismissed, Note: "I was wrong."})})
+	dismissed := shed.DissentRecord([]shed.Record{ownerRecord(1, one, 1)}, []shed.Rulings{rulings(2, two, shed.Ruling{Objection: "owner-r1-1", Disposition: shed.Dismissed, Note: "I was wrong."})}, nil)
 	if len(dismissed) != 1 || dismissed[0].Blocking || dismissed[0].Disposition != shed.Dismissed || dismissed[0].Note != "I was wrong." {
 		t.Fatalf("dismissed %+v", dismissed)
 	}
@@ -109,7 +109,7 @@ func TestRulingOverridesWhatTheKindMeans(t *testing.T) {
 	entries := shed.DissentRecord(records, []shed.Rulings{
 		rulings(1, one, shed.Ruling{Objection: sustained, Disposition: shed.Dismissed}),
 		rulings(2, two, shed.Ruling{Objection: sustained, Disposition: shed.Sustained}, shed.Ruling{Objection: dismissed, Disposition: shed.Dismissed}),
-	})
+	}, nil)
 	want := map[string]struct {
 		blocking    bool
 		disposition shed.Disposition
@@ -127,7 +127,7 @@ func TestRulingOverridesWhatTheKindMeans(t *testing.T) {
 	}
 	// An unruled objection keeps what its kind means, and a ruling on an
 	// objection that no longer stands changes nothing.
-	plain := shed.DissentRecord(records, []shed.Rulings{rulings(1, one, shed.Ruling{Objection: "agent_committee_9-r1-1", Disposition: shed.Sustained})})
+	plain := shed.DissentRecord(records, []shed.Rulings{rulings(1, one, shed.Ruling{Objection: "agent_committee_9-r1-1", Disposition: shed.Sustained})}, nil)
 	if len(plain) != 2 || plain[0].Blocking || plain[0].Disposition != "" || !plain[1].Blocking {
 		t.Fatalf("unruled dissent %+v", plain)
 	}

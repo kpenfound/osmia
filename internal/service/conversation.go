@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -143,7 +144,7 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 		ThreadID:     trace.ChiefOfStaff,
 		TurnID:       "message_" + id,
 		Profile:      profile,
-		SystemPrompt: fmt.Sprintf(chiefPrompt, host) + note + "\n\n" + chiefDocumentsGuidance + "\n\n" + priorityGuidance + "\n\n" + pauseGuidance + "\n\n" + changeGuidance + "\n\n" + amendmentGuidance + "\n\n" + charterGuidance + "\n\n" + contestGuidance + "\n\n" + driftHandbackGuidance + "\n\n" + ownerWritingGuidance + "\n\n" + context,
+		SystemPrompt: fmt.Sprintf(chiefPrompt, host) + note + "\n\n" + chiefDocumentsGuidance + "\n\n" + priorityGuidance + "\n\n" + pauseGuidance + "\n\n" + changeGuidance + "\n\n" + amendmentGuidance + "\n\n" + charterGuidance + "\n\n" + contestGuidance + "\n\n" + objectionGuidance + "\n\n" + driftHandbackGuidance + "\n\n" + ownerWritingGuidance + "\n\n" + context,
 		Prompt:       req.Text,
 	})
 	if err != nil {
@@ -221,8 +222,9 @@ func withActions(entries, actions []ConversationEntry) []ConversationEntry {
 
 // chiefActions returns what the chief of staff did on the owner's behalf in
 // the workstream, as action entries: its rulings on contested units, the
-// contests and questions it raised to the owner, the owner's rulings on
-// those questions and the units it moved.
+// contests, questions and committee objections it raised to the owner, the
+// owner's rulings on those questions, the objections it dismissed and the
+// units it moved.
 func chiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -321,6 +323,29 @@ func chiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]C
 			text = fmt.Sprintf("Asked for a fresh final review of the %s workstream. %s", move.To, move.Note)
 		}
 		out = append(out, ConversationEntry{Turn: move.Turn, Kind: "action", Text: text, At: d.At, State: TurnDone})
+	}
+	// Each revision of a round's decisions adds one decision, shown at the
+	// time that revision was recorded.
+	decided := map[string]bool{}
+	for _, d := range docs {
+		if !strings.HasPrefix(d.Path, "shed/") || !strings.HasSuffix(d.Path, "/chief.json") {
+			continue
+		}
+		decisions, err := shed.ParseChiefDecisions([]byte(d.Content))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", d.Path, err)
+		}
+		for _, c := range decisions.Decisions {
+			if decided[c.Objection] {
+				continue
+			}
+			decided[c.Objection] = true
+			text := fmt.Sprintf("Dismissed objection %s on your behalf: %s", c.Objection, c.Note)
+			if c.Decision == shed.Escalate {
+				text = fmt.Sprintf("Raised objection %s to you: %s", c.Objection, c.Note)
+			}
+			out = append(out, ConversationEntry{Turn: c.Turn, Kind: "action", Text: text, At: d.At, State: TurnDone})
+		}
 	}
 
 	host, err := repository.ChiefOfStaffHost(stream)

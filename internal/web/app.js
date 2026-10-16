@@ -2156,14 +2156,27 @@
       d.detail.replaceChildren(el('p', { class: 'meta' }, failures[name] ? 'The packet is unavailable.' : 'Reading the packet…'));
       return [];
     }
-    const dissent = view.packet.dissent || [];
-    d.detail.replaceChildren(dissent.length === 0 ? el('p', { class: 'meta' }, 'No objection stands.') : el('ul', { class: 'dissent' }, ...dissent.map((o) => el('li', { 'data-objection': o.id },
-      el('div', { class: 'line' },
-        el('strong', {}, o.id),
-        el('span', { class: 'tag', 'data-field': 'standing' }, [o.blocking ? 'blocking' : 'advice', o.disposition].filter(Boolean).join(', '))),
-      el('div', { class: 'meta' }, o.kind + ' by ' + o.member + ' in round ' + o.round + ' on ' + o.part),
-      el('div', { 'data-field': 'argument' }, o.argument),
-      o.note ? el('div', { class: 'meta', 'data-field': 'note' }, 'Your note: ' + o.note) : null))));
+    // The chief of staff decides the committee's objections first; the
+    // owner rules on what it escalated and on their own, and what it
+    // dismissed is folded away with its reasons.
+    const all = view.packet.dissent || [];
+    const dissent = all.filter((o) => o.by !== 'chief_of_staff');
+    const dismissed = all.filter((o) => o.by === 'chief_of_staff');
+    d.detail.replaceChildren(...[
+      dissent.length === 0 ? el('p', { class: 'meta' }, 'No objection stands.') : el('ul', { class: 'dissent' }, ...dissent.map((o) => el('li', { 'data-objection': o.id },
+        el('div', { class: 'line' },
+          el('strong', {}, o.id),
+          el('span', { class: 'tag', 'data-field': 'standing' }, [o.blocking ? 'blocking' : 'advice', o.disposition].filter(Boolean).join(', '))),
+        el('div', { class: 'meta' }, o.kind + ' by ' + o.member + ' in round ' + o.round + (o.part ? ' on ' + o.part : '')),
+        el('div', { 'data-field': 'argument' }, o.argument),
+        o.escalation ? el('div', { class: 'meta', 'data-field': 'escalation' }, 'Chief of staff: ' + o.escalation) : null,
+        o.note ? el('div', { class: 'meta', 'data-field': 'note' }, 'Your note: ' + o.note) : null))),
+      dismissed.length === 0 ? null : el('details', { 'data-field': 'dismissed' },
+        el('summary', { class: 'meta' }, 'Dismissed by the chief of staff (' + dismissed.length + ')'),
+        el('ul', { class: 'dissent' }, ...dismissed.map((o) => el('li', { 'data-objection': o.id },
+          el('div', { class: 'meta' }, o.id + ': ' + o.kind + ' by ' + o.member + (o.part ? ' on ' + o.part : '')),
+          el('div', { 'data-field': 'argument' }, o.argument),
+          el('div', { class: 'meta', 'data-field': 'note' }, 'Chief of staff: ' + o.note)))))].filter(Boolean));
     return dissent;
   }
 

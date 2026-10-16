@@ -288,7 +288,7 @@ func (d *debate) enterSkipped(ctx context.Context, stream config.WorkstreamID, f
 	}
 	h := d.header(InShedState, stream, skipTransition, d.s.now())
 	reason := fmt.Sprintf("%s enter the shed without a committee: the owner skipped debate", pin)
-	body := fmt.Sprintf("Workstream state changed from %s to %s: %s.\n%s", SketchedState, InShedState, reason, presentation(shed.Recommend(entries)))
+	body := fmt.Sprintf("Workstream state changed from %s to %s: %s.\n%s", SketchedState, InShedState, reason, presentation(shed.Recommend(entries))+decideFirst(entries))
 	_, err = d.repository.Transact(ctx, trace.Transaction{ExpectedVersion: feature.Version,
 		Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, From: SketchedState, To: InShedState, Reason: reason},
 		Events:     []trace.Event{trace.Notice(h.ID, "state", body)}})
@@ -387,11 +387,10 @@ func (d *debate) step(ctx context.Context, stream config.WorkstreamID, latest sh
 	if err != nil {
 		return err
 	}
-	rulings, err := shed.AllRulings(d.repository, stream)
+	open, err := dissentRecord(d.repository, stream, records)
 	if err != nil {
 		return err
 	}
-	open := shed.DissentRecord(records, rulings)
 	redrafted := slices.ContainsFunc(records, func(r shed.Record) bool { return r.Round == n && r.Revision != latest })
 	round, _ := roundIDs(n)
 	switch {
@@ -441,12 +440,26 @@ func presentation(recommendation string) string {
 		".\nPresent it, and make the attention of your status the decision the owner has to take now: ratify the revisions, overrule or sustain what blocks, ask for a redraft or for further rounds, or abandon the workstream."
 }
 
+// decideFirst asks the chief of staff to decide the committee objections that
+// stand before it presents the packet, or is empty when none waits for it.
+func decideFirst(entries []shed.Entry) string {
+	undecided := shed.Undecided(entries)
+	if len(undecided) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\nBefore you present it, decide %s with resolve_objection: %s. The owner's inbox lists the ratification once each one is decided, with only the objections you escalate.",
+		shed.Objections(len(undecided)), entryIDs(undecided))
+}
+
 // unopposed is why a debate with nothing standing concludes after round n. It
 // is consensus only among the members whose turns ended normally: a round in
 // which every turn failed reviewed nothing, and the reason says so. Dissent
 // the owner disposed of is not agreement either.
 func unopposed(records []shed.Record, open []shed.Entry, n int) string {
 	if len(open) > 0 && len(shed.Standing(open)) == 0 {
+		if len(shed.ForOwner(open)) < len(open) {
+			return fmt.Sprintf("debate concluded after round %d: every objection that stood was disposed of, by the owner or by the chief of staff on the owner's behalf", n)
+		}
 		return fmt.Sprintf("debate concluded after round %d: the owner disposed of every objection that stood", n)
 	}
 	if len(open) > 0 {
@@ -471,18 +484,29 @@ func unopposed(records []shed.Record, open []shed.Entry, n int) string {
 }
 
 // Dissent returns the workstream's dissent record, computed from the recorded
-// rounds and the owner's rulings: every objection that stands, with its kind,
-// its member, the part it names, what the owner ruled and whether it blocks.
+// rounds, the owner's rulings and the chief of staff's decisions: every
+// objection that stands, with its kind, its member, the part it names, how it
+// was disposed of or escalated and whether it blocks.
 func Dissent(repository *trace.Repository, stream config.WorkstreamID) ([]shed.Entry, error) {
 	records, err := shed.Records(repository, stream)
 	if err != nil {
 		return nil, err
 	}
+	return dissentRecord(repository, stream, records)
+}
+
+// dissentRecord is the dissent record of the given records under the owner's
+// rulings and the chief of staff's decisions on the workstream.
+func dissentRecord(repository *trace.Repository, stream config.WorkstreamID, records []shed.Record) ([]shed.Entry, error) {
 	rulings, err := shed.AllRulings(repository, stream)
 	if err != nil {
 		return nil, err
 	}
-	return shed.DissentRecord(records, rulings), nil
+	chief, err := shed.AllChiefDecisions(repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	return shed.DissentRecord(records, rulings, chief), nil
 }
 
 // standing counts the open dissent and how much of it blocks.
@@ -522,7 +546,7 @@ func (d *debate) conclude(ctx context.Context, stream config.WorkstreamID, state
 		}
 		fmt.Fprintf(&body, "\n- %s (%s, %s, by %s in round %d%s, against %s): %s", e.ID, e.Kind, weight, e.Member, e.Round, about, e.Revision, e.Argument)
 	}
-	body.WriteString("\n" + presentation(shed.Recommend(open)))
+	body.WriteString("\n" + presentation(shed.Recommend(open)) + decideFirst(open))
 	tx := trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: d.header(id, stream, cause, d.s.now()), Subject: shedSubject, From: state.Value, To: fmt.Sprintf("concluded-%d", n), Reason: reason},
 		Events:     []trace.Event{trace.Notice(id, "concluded", body.String())}}

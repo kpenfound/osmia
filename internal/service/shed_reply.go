@@ -739,11 +739,11 @@ func (d *debate) standingAfter(stream config.WorkstreamID, n int) ([]shed.Entry,
 	if err != nil {
 		return nil, err
 	}
-	rulings, err := shed.AllRulings(d.repository, stream)
+	open, err := dissentRecord(d.repository, stream, records)
 	if err != nil {
 		return nil, err
 	}
-	return shed.Standing(shed.DissentRecord(records, rulings)), nil
+	return shed.Standing(open), nil
 }
 
 // enqueueReply accepts the next architect turn of the reply, or of the

@@ -251,6 +251,8 @@ func TestBrowserPageResetsTheRatificationFormAfterEachSuccessfulDecision(t *test
 	ws := f.handIn(t, "design", handedDesign)
 	f.awaitShed(t, ws, "concluded-1")
 	faults.check(t)
+	f.chiefDecides(t, ws, veto, shed.Escalate, "The veto cites the small-changes rule.")
+	f.chiefDecides(t, ws, size, shed.Escalate, "Splitting the unit is a judgement call.")
 	var entries []InboxEntry
 	soon(t, "the ratification entry", func() bool {
 		entries = f.inboxEntries(t, ws, InboxRatification)

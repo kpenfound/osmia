@@ -198,6 +198,9 @@ func (s *Service) ratifyMember(ctx context.Context, o *shedOwner, asked shed.Pin
 	if len(record.Dispositions) > 0 {
 		reason += fmt.Sprintf(", over %s the owner disposed of", shed.Objections(len(record.Dispositions)))
 	}
+	if dismissed := len(entries) - len(shed.ForOwner(entries)); dismissed > 0 {
+		reason += fmt.Sprintf(", with %s the chief of staff dismissed", shed.Objections(dismissed))
+	}
 	if api := o.record(ctx, shed.RatificationDocumentID(o.round), shed.RatificationPath(o.round), string(content), fmt.Sprintf("ratified-%d", o.round), reason); api != nil {
 		return RatifyResponse{}, api
 	}

@@ -28,7 +28,7 @@ func TestOverruledObjectionIsSettledAndBlocksNoLonger(t *testing.T) {
 	advice := shed.ObjectionID(1, alice, 2)
 	records[0].Objections[0].Kind = shed.Charter
 	overruled := rulings(1, one, shed.Ruling{Objection: veto, Disposition: shed.Overruled, Note: "I accept the risk."})
-	entries := shed.DissentRecord(records, []shed.Rulings{overruled})
+	entries := shed.DissentRecord(records, []shed.Rulings{overruled}, nil)
 	if len(entries) != 2 {
 		t.Fatalf("dissent record %+v", entries)
 	}
@@ -47,7 +47,7 @@ func TestOverruledObjectionIsSettledAndBlocksNoLonger(t *testing.T) {
 		t.Fatalf("blocked %+v", blocked)
 	}
 	// A sustained objection blocks, and is neither settled nor ratifiable.
-	sustained := shed.DissentRecord(records, []shed.Rulings{rulings(1, one, shed.Ruling{Objection: veto, Disposition: shed.Sustained})})
+	sustained := shed.DissentRecord(records, []shed.Rulings{rulings(1, one, shed.Ruling{Objection: veto, Disposition: shed.Sustained})}, nil)
 	if blocked := shed.Blocked(sustained); len(blocked) != 1 || blocked[0].ID != veto {
 		t.Fatalf("a sustained veto %+v", blocked)
 	}

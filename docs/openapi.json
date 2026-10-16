@@ -6439,6 +6439,9 @@
           "blocking": {
             "type": "boolean"
           },
+          "by": {
+            "type": "string"
+          },
           "citations": {
             "items": {
               "type": "string"
@@ -6449,6 +6452,12 @@
             ]
           },
           "disposition": {
+            "type": "string"
+          },
+          "escalated": {
+            "type": "boolean"
+          },
+          "escalation": {
             "type": "string"
           },
           "id": {

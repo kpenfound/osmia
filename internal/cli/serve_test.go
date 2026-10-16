@@ -319,7 +319,7 @@ func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream stri
 	if work := turn.Request.Workspace.Directory(); filepath.Dir(work) != turn.Request.SessionDir {
 		t.Fatalf("working directory %s is not the session's own", work)
 	}
-	granted := append([]string{"file_read", "factory_context", "record_discovery", "read_remote_file", status.ToolName, "notify", "capacity", "inspect_code", "prioritise", "pause", "resume", "request_change", "decide_change", "decide_amendment", "decide_charter", "resolve_contested", "move_unit", "move_workstream", "hand_back_drift"}, questions.ChiefTools...)
+	granted := append([]string{"file_read", "factory_context", "record_discovery", "read_remote_file", status.ToolName, "notify", "capacity", "inspect_code", "prioritise", "pause", "resume", "request_change", "decide_change", "decide_amendment", "decide_charter", "resolve_contested", "resolve_objection", "move_unit", "move_workstream", "hand_back_drift"}, questions.ChiefTools...)
 	granted = append(granted, "project_context")
 	var tools []string
 	for _, allowed := range turn.Request.Profile.AllowedTools {

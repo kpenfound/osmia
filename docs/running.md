@@ -165,7 +165,9 @@ The member view is laid out like a chat client:
   latest status's attention note is highlighted; a finished session opens to
   its report or failure. Its inbox entries sit below the feed, above the
   message field: what each asks, what waits on it, its options and the chief
-  of staff's recommendation. A ratification also shows the dissent record; a
+  of staff's recommendation. A ratification also shows the objections the
+  chief of staff escalated and your own, with the ones it dismissed and why
+  folded below them; a
   delivery shows the final report's findings and the units serving each
   criterion.
   The Documents tab reads and edits the draft spec and plan, the dependency,

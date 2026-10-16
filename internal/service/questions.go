@@ -76,7 +76,7 @@ func (s *Service) chiefEventsPrompt(project config.ProjectID, repository *trace.
 		if host != stream {
 			note = fmt.Sprintf(chiefEventsOtherMember, stream, stream)
 		}
-		return fmt.Sprintf(chiefEvents, host) + note + "\n\n" + chiefDocumentsGuidance + "\n\n" + questions.Guidance + "\n\n" + amendmentGuidance + "\n\n" + contestGuidance + "\n\n" + driftHandbackGuidance + "\n\n" + ownerWritingGuidance + "\n\n" + context, nil
+		return fmt.Sprintf(chiefEvents, host) + note + "\n\n" + chiefDocumentsGuidance + "\n\n" + questions.Guidance + "\n\n" + amendmentGuidance + "\n\n" + contestGuidance + "\n\n" + objectionGuidance + "\n\n" + driftHandbackGuidance + "\n\n" + ownerWritingGuidance + "\n\n" + context, nil
 	}
 }
 

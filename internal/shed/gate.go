@@ -298,11 +298,12 @@ func (r Ratification) check() error {
 }
 
 // Ratify returns the record of the owner's approval of the given revisions,
-// with the dissent record it was given over and the dispositions in force.
+// with the dissent record it was given over and the owner's dispositions in
+// force. The chief of staff's dismissals stay in the dissent record.
 func Ratify(round int, revision Pin, entries []Entry) Ratification {
 	r := Ratification{Version: Version, Round: round, Revision: revision, Dissent: slices.Clone(entries)}
 	for _, e := range entries {
-		if e.Disposition != "" {
+		if e.Disposition != "" && e.By == "" {
 			r.Dispositions = append(r.Dispositions, Ruling{Objection: e.ID, Disposition: e.Disposition, Note: e.Note})
 		}
 	}
