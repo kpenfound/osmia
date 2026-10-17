@@ -183,14 +183,9 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 
 	f.rule(t, "1")
 	f.awaitTurn(t, asking, masonAgent("resume"), questions.TurnID("1"))
-	deadline = time.Now().Add(demoTimeout)
-	for th := f.thread(t, asking, masonAgent("resume")); len(th.Turns) != 2 || th.Turns[1].CompletedAt.IsZero(); th = f.thread(t, asking, masonAgent("resume")) {
-		if time.Now().After(deadline) {
-			t.Fatalf("the answer turn never completed: %+v", th.Turns)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	// Further passes find no more work beyond resuming the unit.
+	completedTurn(t, f, asking, masonAgent("resume"), 1)
+	// The answer supplies no done report, so a clarify turn follows. It
+	// leaves the unit implementing, with no further park or resume.
 	awaitPasses(t, passed, 3)
 	p.check(t)
 	want = append(want, resumed("resume", "1"))

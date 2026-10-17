@@ -33,6 +33,7 @@ allowed; they do not execute tests.
 | Boundary | Representative tests | What they establish |
 | --- | --- | --- |
 | Workflow and owner gates | [service](../internal/service) | Ratification, questions, amendments, checks before review, exact-candidate review, landing, final review and approved delivery |
+| Reviewer questions through assembly | `TestReviewerQuestionOwnerRulingReachesFinalReview` | Production ask, chief escalation, owner ruling and answer delivery lead to exact-candidate approval, all unit landings and final review, including delivered-answer and completed-verdict restarts. Unanswered questions keep the unit waiting. |
 | Recovery | [trace](../internal/trace), [reconcile](../internal/reconcile), service restart demonstrations | Atomic records, durable operations and reconciliation after interruptions |
 | Capacity and scheduling | [scheduler](../internal/scheduler), service parallel work tests | Slot accounting, priority, pauses and disjoint unit dispatch |
 | Agent boundary | [isolation](../internal/isolation), [coreadapter](../internal/coreadapter) | Scoped file views, grants, environment allowlist and execution policy checks |

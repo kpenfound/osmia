@@ -171,14 +171,17 @@ func TestReliabilityDemonstration(t *testing.T) {
 	// runtime controls Enforce binds.
 	enforced := Enforce(f.opts, Enforcement{Engine: f.engine, Hosts: f.opts.Committee.Hosts})
 	f.opts.Threads, f.opts.controls = enforced.Threads, enforced.controls
-	f.start(t)
 	const crash = "crash: the feature branch moved"
-	f.s.boundary = func(name string) error {
+	crashed := make(chan struct{})
+	f.opts.boundary = func(lifetime context.Context, name string) error {
 		if name == "land-advanced" {
+			close(crashed)
+			<-lifetime.Done()
 			return errors.New(crash)
 		}
 		return nil
 	}
+	f.start(t)
 
 	problems := &demoProblems{}
 	c := f.c
@@ -471,15 +474,16 @@ func TestReliabilityDemonstration(t *testing.T) {
 	}
 
 	// 6. Crash during landing. The reviewer approves resume; its landing
-	// commits and moves the feature branch, then fails before it records
-	// anything, on every attempt, until the service stops.
+	// commits and moves the feature branch, then waits at the interruption
+	// boundary before recording anything until the service stops.
 	f.awaitUnit(t, stream, "resume", UnitApproved)
 	_, approval := approvedReview(t, f.repository(), stream, "resume")
 	base := approval.Identity.Candidate.BaseRevision
-	eventually(t, "the landing was never interrupted", func() bool {
-		ops := landOperations(t, f.repository(), stream)
-		return len(ops) == 1 && slices.ContainsFunc(ops[0].History, func(a trace.OperationAction) bool { return a.Kind == "retry" })
-	})
+	select {
+	case <-crashed:
+	case <-time.After(demoTimeout):
+		t.Fatal("the landing never reached its interruption boundary")
+	}
 	f.stop(t)
 	moved := f.landedCommits(t, stream, base)
 	if len(moved) != 1 {
@@ -497,6 +501,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 
 	// The restarted service observes the landing commit its interrupted
 	// operation made, records it and merges resume without committing again.
+	f.opts.boundary = nil
 	f.start(t)
 	c = f.c
 	f.awaitMerged(t, stream, "resume")

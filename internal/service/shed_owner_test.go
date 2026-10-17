@@ -333,7 +333,8 @@ func TestDismissingEveryObjectionConcludesTheDebate(t *testing.T) {
 // subject on and does not resume the debate.
 func TestOwnerSkipsDebateAcrossARestart(t *testing.T) {
 	t.Parallel()
-	f := newDebateFixture(t, 1, 1)
+	passed, prepare := countingSchedule()
+	f := newDebateFixtureWith(t, 1, 1, "", prepare)
 	ctx := context.Background()
 	runner := f.opts.Committee
 	f.stop(t)
@@ -379,7 +380,7 @@ func TestOwnerSkipsDebateAcrossARestart(t *testing.T) {
 	f.opts.Committee = runner
 	f.start(t)
 	defer f.stop(t)
-	must(t, (&debate{s: f.s, repository: f.repository()}).Pass(ctx))
+	awaitPasses(t, passed, 3)
 	if moves := f.shedMoves(t, stream); len(moves) != 0 || len(f.roundOperations(t, stream)) != 0 {
 		t.Fatalf("a skipped debate ran %v", moves)
 	}
