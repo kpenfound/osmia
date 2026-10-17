@@ -107,7 +107,7 @@ func TestBrowserControlsEachProjectAndKeepsPriorityOrdersSeparate(t *testing.T) 
 	p.await("removed pause targets", `![...document.querySelector('#pause-form select[name=target]').options].some(o => o.value === `+quote("project:"+string(otherProject))+` || o.value === `+quote("workstream:"+string(otherStream))+`)`)
 	_, err = c.RemoveProject(ctx, project)
 	must(t, err)
-	p.awaitText("#priority-current", "No project is configured.")
+	p.awaitText("#priority-current", "No repo is configured.")
 	p.await("disabled priority controls", `document.querySelector('#priority-form button[type=submit]').disabled && document.querySelector('#priority-clear').disabled && document.querySelector('#priority-list').children.length === 0`)
 	p.await("the same document", `window.notReloaded === true`)
 }
